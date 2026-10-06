@@ -12,6 +12,7 @@ package com.vladimir.messenger.ui.components
 // =============================================================================
 
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenu
@@ -28,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 /** Тип пузыря: подпись под именем и логика меню. */
@@ -65,7 +67,13 @@ fun BubbleOverflowMenu(
             modifier = Modifier.size(20.dp),
         )
     }
-    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = { expanded = false },
+        // A title from a server or a contact must not make an overflow menu
+        // wider than the viewport.
+        modifier = Modifier.widthIn(max = 320.dp),
+    ) {
         actions.forEach { action ->
             DropdownMenuItem(
                 text = {
@@ -76,6 +84,8 @@ fun BubbleOverflowMenu(
                         } else {
                             Color.Unspecified
                         },
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 },
                 leadingIcon = action.icon?.let { icon ->

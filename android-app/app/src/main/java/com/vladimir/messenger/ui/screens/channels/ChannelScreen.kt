@@ -13,6 +13,7 @@ import com.vladimir.messenger.data.local.MessagePinPolicy
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.ButtonDefaults
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
+import com.vladimir.messenger.ui.components.ApuNotificationBadge
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuBubbleCard
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
@@ -1115,7 +1116,7 @@ private fun PostCard(
                     // что на канале и на темах группы.
                     if (post.unreadComments > 0) {
                         Spacer(Modifier.width(6.dp))
-                        UnreadBadge(post.unreadComments)
+                        ApuNotificationBadge(post.unreadComments)
                     }
                 }
                 // Переслать пост: и внутрь APU, и в любой другой мессенджер.
@@ -1485,23 +1486,4 @@ private fun PostEditorDialog(
             TextButton(onClick = onDismiss) { Text("Отмена") }
         },
     )
-}
-
-/** Кружок непрочитанных комментариев поста: тёмная цифра на золоте (как в списках). */
-@Composable
-private fun UnreadBadge(count: Int) {
-    Box(
-        modifier = Modifier
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primary)
-            .padding(horizontal = 6.dp, vertical = 1.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            if (count > 99) "99+" else count.toString(),
-            style = MaterialTheme.typography.labelSmall,
-            color = Color(0xFF1E2430),
-            fontWeight = FontWeight.Bold,
-        )
-    }
 }

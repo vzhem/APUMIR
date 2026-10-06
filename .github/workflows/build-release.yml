@@ -4,6 +4,9 @@ on:
   push:
     tags:
       - 'v*'
+  # Поддерживаемый ручной прогон для диагностики сборки из ветки.
+  # Публикация в нём ниже явно запрещена.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -152,7 +155,32 @@ jobs:
 
       - name: Build Release APK
         working-directory: ./android-app
-        run: ./gradlew :app:assembleRelease --no-daemon
+        run: |
+          set +e
+          ./gradlew :app:assembleRelease --no-daemon > "$RUNNER_TEMP/gradle-build.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/gradle-build.log"
+          exit "$status"
+
+      # Сырые логи Actions иногда недоступны через API/сеть. Оставляем хвост
+      # компилятора как annotations, чтобы причина ошибки не терялась.
+      - name: Expose Gradle failure tail
+        if: failure()
+        run: |
+          test -f "$RUNNER_TEMP/gradle-build.log" || exit 0
+          python3 - "$RUNNER_TEMP/gradle-build.log" <<'PY'
+          from pathlib import Path
+          import sys
+
+          # One sizeable annotation preserves the actual compiler diagnostics;
+          # Actions limits a step to ten annotations, so emitting one per line
+          # drops the useful part of a long Gradle tail.
+          text = "\n".join(
+              Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines()[-200:]
+          )
+          escaped = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error title=Gradle build tail::{escaped}")
+          PY
 
       # ---- подпись релиза -------------------------------------------------
       # Gradle подписывает APK прежним ключом android-app/app/p2p-release.jks.
@@ -209,10 +237,22 @@ jobs:
           rm -f "$RUNNER_TEMP/apu-release.jks" "$RUNNER_TEMP/apu-release-ks.pass" "$RUNNER_TEMP/apu-release-key.pass"
           echo "signed with the rotated key"
 
+      # Контрольная сумма выпускается из того же файла, который затем
+      # загружается в GitHub Release, поэтому пользователь может безопасно
+      # проверить APK до ручной установки.
+      - name: Create APK SHA-256 checksum
+        run: |
+          APK_DIR=android-app/app/build/outputs/apk/release
+          (cd "$APK_DIR" && sha256sum app-release.apk > SHA256SUMS.txt)
+          cat "$APK_DIR/SHA256SUMS.txt"
+
       - name: Create Release
+        if: github.event_name != 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          files: android-app/app/build/outputs/apk/release/app-release.apk
+          files: |
+            android-app/app/build/outputs/apk/release/app-release.apk
+            android-app/app/build/outputs/apk/release/SHA256SUMS.txt
           name: Release ${{ steps.get_version.outputs.VERSION }}
           # Заготовка. Перед публикацией promote-release.ps1 -NotesFile заменяет её
           # текстом по docs/RELEASE_PUBLICATION_POLICY.md.
@@ -237,7 +277,7 @@ jobs:
       # стоит на вершине main - так делает бот. Релиз к этому моменту уже
       # опубликован, поэтому неудача здесь релиз не отменяет.
       - name: Push regenerated bindings and core back to main
-        if: success()
+        if: success() && github.event_name != 'workflow_dispatch'
         continue-on-error: true
         run: |
           BIND=android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt

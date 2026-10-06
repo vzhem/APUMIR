@@ -78,6 +78,7 @@ class ApkSeeder @Inject constructor(
     private val router: FileTransferRouter,
     private val preparation: Provider<OutgoingFilePreparationService>,
     private val updateChecker: UpdateChecker,
+    private val updateNotifier: com.vladimir.messenger.service.UpdateNotifier,
 ) {
     private val appContext: Context = context.applicationContext
     private val seedRoot: File = File(appContext.noBackupFilesDir, ApkUpdate.DIR_NAME)
@@ -640,6 +641,9 @@ class ApkSeeder @Inject constructor(
             .filter { ApkUpdate.isNewer(it.version, currentAppVersion()) && now - it.atMs <= OFFER_TTL_MS }
         store.saveOffers(next)
         publishOffers(next)
+        // Телефон может получить объявление, пока интерфейс закрыт: системное
+        // уведомление приводит человека к выбору способа скачивания.
+        updateNotifier.notifyPeerRelease(packet.version)
         Log.i(TAG, "update offer from ${senderId.takeLast(8)}: v${packet.version} (${packet.sizeBytes} B)")
     }
 
@@ -673,6 +677,7 @@ class ApkSeeder @Inject constructor(
             }
         store.savePatchOffers(kept)
         publishPatchOffers(kept)
+        updateNotifier.notifyPeerRelease(packet.toVersion, compact = true)
         Log.i(TAG, "patch offer from ${senderId.takeLast(8)}: ${packet.fromVersion}->${packet.toVersion} (${packet.sizeBytes} B)")
     }
 

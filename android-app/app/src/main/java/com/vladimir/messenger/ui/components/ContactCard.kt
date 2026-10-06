@@ -58,6 +58,8 @@ fun ContactCard(
     username: String = "",
     /** Подпись под именем: личный чат / группа / канал. */
     kind: BubbleKind = BubbleKind.Personal,
+    /** Статус присутствия для адресной книги, например «Был(а) сегодня в 10:30». */
+    presenceLabel: String? = null,
     /** Пункты меню «⋮» справа в пузыре. Пусто - кнопки нет. */
     menuActions: List<BubbleMenuAction> = emptyList(),
     /** Main-inbox marker; ContactsScreen reuses this card without the marker. */
@@ -147,13 +149,18 @@ fun ContactCard(
                 )
             }
 
-            // Подпись пузыря: личный чат / группа / канал. Владелец просил,
-            // чтобы в списке было сразу видно, что это за пузырь.
+            // В адресной книге важнее статус присутствия, чем техническая
+            // подпись «личный чат». В остальных списках остаётся тип пузыря.
             Text(
-                text     = kind.label,
+                text     = presenceLabel ?: kind.label,
                 style    = MaterialTheme.typography.labelSmall,
-                color    = Color(0xFF8A93A2),
+                color    = if (presenceLabel != null && chat.isContactOnline) {
+                    StatusOnline
+                } else {
+                    Color(0xFF8A93A2)
+                },
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
 
             Spacer(modifier = Modifier.height(2.dp))
@@ -233,25 +240,8 @@ fun ContactCard(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Счётчик непрочитанных
-            if (chat.unreadCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .defaultMinSize(minWidth = 22.dp, minHeight = 22.dp)
-                        .background(
-                            color  = MaterialTheme.colorScheme.primary,
-                            shape  = CircleShape,
-                        )
-                        .padding(horizontal = 6.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text  = if (chat.unreadCount > 99) "99+" else chat.unreadCount.toString(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color(0xFF3A2A05),
-                    )
-                }
-            }
+            // Счётчик непрочитанных общий для всех списков и тем.
+            ApuNotificationBadge(chat.unreadCount)
         }
 
         // Меню «три вертикальные точки» — крайним справа в пузыре.

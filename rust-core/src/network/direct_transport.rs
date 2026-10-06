@@ -37,7 +37,9 @@
 
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::future::Future;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -102,6 +104,13 @@ pub type FrameHandler = Arc<dyn Fn(Vec<u8>) -> Option<String> + Send + Sync + 's
 /// Existing text/file handlers and their wire formats are deliberately unchanged.
 pub type BoundFrameFactory = Arc<dyn Fn([u8; 32], SocketAddr) -> Option<Vec<u8>> + Send + Sync + 'static>;
 pub type BoundFrameHandler = Arc<dyn Fn(&[u8], [u8; 32], SocketAddr) -> BoundFrameResult + Send + Sync + 'static>;
+
+/// Handles a C1 file-session bidirectional stream on a connection already accepted by this shared
+/// endpoint. The handler is optional: older engine setups continue to accept only legacy uni-stream
+/// text/file frames. It must bound its own work and never block the direct transport read loop.
+pub type FileSessionHandler = Arc<
+    dyn Fn(QuicConnection) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync + 'static,
+>;
 
 #[derive(Default)]
 pub struct BoundFrameResult {
@@ -198,6 +207,7 @@ struct Shared {
     /// без азбуки (старые вызовы, тесты).
     on_inbound: Option<InboundHandler>,
     on_bound_frame: Option<BoundFrameHandler>,
+    on_file_session: Option<FileSessionHandler>,
 }
 
 impl Shared {
@@ -260,7 +270,7 @@ impl DirectTransport {
         on_frame: FrameHandler,
         on_inbound: Option<InboundHandler>,
     ) -> Result<(Self, UdpSideChannel), String> {
-        Self::start_with_handlers(bind_addr, on_frame, on_inbound, None)
+        Self::start_with_handlers(bind_addr, on_frame, on_inbound, None, None)
     }
 
     pub fn start_with_handlers(
@@ -268,6 +278,7 @@ impl DirectTransport {
         on_frame: FrameHandler,
         on_inbound: Option<InboundHandler>,
         on_bound_frame: Option<BoundFrameHandler>,
+        on_file_session: Option<FileSessionHandler>,
     ) -> Result<(Self, UdpSideChannel), String> {
         let (client, side) =
             QuicClient::new_with_side_channel(bind_addr).map_err(|e| e.to_string())?;
@@ -280,6 +291,7 @@ impl DirectTransport {
             on_frame,
             on_inbound,
             on_bound_frame,
+            on_file_session,
         });
         let (tx, rx) = mpsc::channel(COMMAND_QUEUE_CAPACITY);
         tokio::spawn(run_accept_loop(Arc::clone(&shared)));
@@ -466,6 +478,12 @@ async fn run_accept_loop(shared: Arc<Shared>) {
 /// Исходящие тоже читаем: собеседник (новой версии) отвечает по этому же
 /// соединению, а непрочитанные стримы копились бы в буфере до лимита 256.
 async fn read_loop(conn: QuicConnection, shared: Arc<Shared>, inbound: bool) {
+    // C1 uses a bidirectional stream while legacy direct frames use uni streams. Quinn exposes
+    // these accepts independently, so the bounded file handler can run alongside this loop without
+    // consuming, reordering, or delaying interactive traffic.
+    if let Some(handler) = &shared.on_file_session {
+        tokio::spawn(handler(conn.clone()));
+    }
     let mut adopted_key: Option<Vec<u8>> = None;
     let mut consecutive_errors = 0u32;
     loop {
@@ -1155,8 +1173,8 @@ mod tests {
                 }
             })
         };
-        let (server, _) = DirectTransport::start_with_handlers(any_port(), noop_handler(), None, Some(b_handler)).unwrap();
-        let (client, _) = DirectTransport::start_with_handlers(any_port(), noop_handler(), None, Some(a_handler)).unwrap();
+        let (server, _) = DirectTransport::start_with_handlers(any_port(), noop_handler(), None, Some(b_handler), None).unwrap();
+        let (client, _) = DirectTransport::start_with_handlers(any_port(), noop_handler(), None, Some(a_handler), None).unwrap();
         let now = crate::storage::models::now_ms();
         // A public candidate is just a hint. The local test deliberately routes it through a
         // different real endpoint, proving that the factory uses the actual selected session.

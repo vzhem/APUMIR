@@ -10,6 +10,7 @@ package com.vladimir.messenger.ui.screens.groups
 // и у каждой — бейдж непрочитанных. Нажатие на тему открывает ленту.
 
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
+import com.vladimir.messenger.ui.components.ApuNotificationBadge
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuBubbleCard
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
@@ -83,7 +84,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -1436,7 +1436,7 @@ private fun GroupRail(
                 )
                 if (group.unreadCount > 0) {
                     Box(modifier = Modifier.align(Alignment.TopEnd)) {
-                        UnreadBadge(group.unreadCount)
+                        ApuNotificationBadge(group.unreadCount)
                     }
                 }
             }
@@ -1517,7 +1517,7 @@ private fun TopicRail(
                 TopicRailIcon(topic = topic, selected = selected)
                 if (topic.unreadCount > 0) {
                     Box(modifier = Modifier.align(Alignment.TopEnd)) {
-                        UnreadBadge(topic.unreadCount)
+                        ApuNotificationBadge(topic.unreadCount)
                     }
                 }
             }
@@ -1546,25 +1546,6 @@ private fun TopicRailIcon(topic: TopicSummary, selected: Boolean) {
         TopicIconView(
             topic.iconEmoji.ifBlank { TopicIconCatalog.DEFAULT },
             30.dp,
-        )
-    }
-}
-
-/** Кружок с числом непрочитанных: тёмная цифра на золоте, как в списках. */
-@Composable
-private fun UnreadBadge(count: Int) {
-    Box(
-        modifier = Modifier
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.primary)
-            .padding(horizontal = 6.dp, vertical = 1.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            count.toString(),
-            style = MaterialTheme.typography.labelSmall,
-            color = Color(0xFF1E2430),
-            fontWeight = FontWeight.Bold,
         )
     }
 }
@@ -1818,7 +1799,7 @@ private fun TopicBubble(topic: TopicSummary, onClick: () -> Unit) {
                 )
                 if (topic.unreadCount > 0) {
                     Spacer(Modifier.height(4.dp))
-                    UnreadBadge(topic.unreadCount)
+                    ApuNotificationBadge(topic.unreadCount)
                 }
             }
         }

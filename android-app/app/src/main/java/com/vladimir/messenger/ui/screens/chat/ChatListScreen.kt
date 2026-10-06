@@ -9,6 +9,7 @@ package com.vladimir.messenger.ui.screens.chat
 // =============================================================================
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Column
@@ -29,10 +30,17 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.vladimir.messenger.ui.components.ApuAction
+import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
+import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleShape
+import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
+import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ApuActionsMenu
 import com.vladimir.messenger.ui.components.ApuTabBar
 import com.vladimir.messenger.ui.components.Avatar
 import com.vladimir.messenger.ui.components.ApuMainTabBar
+import com.vladimir.messenger.ui.components.ApuNotificationBadge
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import com.vladimir.messenger.ui.components.ShareContactChooserDialog
 import com.vladimir.messenger.ui.components.SearchOrb
@@ -86,6 +94,8 @@ import com.vladimir.messenger.util.OwnInvite
 import com.vladimir.messenger.data.link.ShortShare
 import com.vladimir.messenger.ui.components.InviteAttachDialog
 import com.vladimir.messenger.ui.components.NotificationMuteDialog
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 
 private data class NotificationMuteTarget(
     val id: String,
@@ -272,18 +282,9 @@ fun ChatListScreen(
                                     // только запутывали.
                                     // Контакты, Группы, Профиль и Настройки
                                     // живут в нижней панели - под большим
-                                    // пальцем. Дублировать их здесь незачем.
-                                    // «Избранное» больше не в нижней панели -
-                                    // её место занял «Профиль», поэтому пункт
-                                    // вернулся сюда.
-                                    DropdownMenuItem(
-                                        text = { Text("Избранное") },
-                                        leadingIcon = { ShimmerIcon(Icons.Default.Bookmark) },
-                                        onClick = {
-                                            menuOpen = false
-                                            onSavedClick()
-                                        },
-                                    )
+                                    // пальцем. «Избранное» теперь - первым
+                                    // отдельным контактом в списке чатов,
+                                    // поэтому дублировать его в меню не нужно.
                                     DropdownMenuItem(
                                         text = { Text("Подключиться по ссылке") },
                                         leadingIcon = { ShimmerIcon(Icons.Default.Link) },
@@ -403,6 +404,7 @@ fun ChatListScreen(
                         items = uiState.itemsBySection[section].orEmpty(),
                         isSearchActive = uiState.searchQuery.isNotEmpty(),
                         onChatClick = onChatClick,
+                        onSavedClick = onSavedClick,
                         onAddContactClick = onAddContactClick,
                         onCallClick = onCallClick,
                         onGroupClick = onGroupClick,
@@ -839,38 +841,161 @@ fun ChatListScreen(
         )
     }
 
-    // Connect dialog
+    // Диалог подключения — отдельная фирменная карточка, а не стандартное
+    // Material-окно с серо-лиловыми полями поверх обоев.
     if (showConnectDialog) {
-        AlertDialog(
-            onDismissRequest = { showConnectDialog = false },
-            title = { Text("Подключиться по ссылке") },
-            text = {
-                OutlinedTextField(
-                    value = connectLink,
-                    onValueChange = { connectLink = it },
-                    label = { Text("Вставьте ссылку p2pm://...") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    if (connectLink.isNotBlank()) {
-                        // Подключение идёт в ядро по сети: на главном потоке
-                        // это задерживало бы отрисовку, поэтому в фон.
-                        val link = connectLink
-                        pagerScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            RustBridge.connectViaInvite(link)
-                        }
-                        connectLink = ""
-                        showConnectDialog = false
+        ApuConnectByLinkDialog(
+            link = connectLink,
+            onLinkChange = { connectLink = it },
+            onDismiss = { showConnectDialog = false },
+            onConnect = {
+                if (connectLink.isNotBlank()) {
+                    // Подключение идёт в ядро по сети: на главном потоке
+                    // это задерживало бы отрисовку, поэтому в фон.
+                    val link = connectLink
+                    pagerScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        RustBridge.connectViaInvite(link)
                     }
-                }) { Text("Подключиться") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showConnectDialog = false }) { Text("тмена") }
+                    connectLink = ""
+                    showConnectDialog = false
+                }
             },
         )
+    }
+}
+
+/**
+ * Ввод ссылки-приглашения в фирменной APU-карточке.
+ *
+ * Диалог сохраняет затемнение фона, но сам использует те же светлые пузыри,
+ * золотые акценты и хорошо читаемый текст, что список чатов и формы контактов.
+ */
+@Composable
+private fun ApuConnectByLinkDialog(
+    link: String,
+    onLinkChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onConnect: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 480.dp)
+                .padding(horizontal = 20.dp),
+            shape = RoundedCornerShape(28.dp),
+            color = ApuBubbleSurfaceColor,
+            contentColor = ApuBubbleTextColor,
+            tonalElevation = 0.dp,
+            shadowElevation = 16.dp,
+            border = BorderStroke(
+                1.dp,
+                ApuBubbleAccentColor.copy(alpha = 0.42f),
+            ),
+        ) {
+            Column(
+                modifier = Modifier.padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(ApuBubbleAccentColor.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Link,
+                            contentDescription = null,
+                            tint = ApuBubbleAccentColor,
+                            modifier = Modifier.size(25.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Подключиться по ссылке",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = ApuBubbleTextColor,
+                        )
+                        Text(
+                            text = "Добавьте приглашение от собеседника",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                    }
+                }
+
+                ApuFormTextField(
+                    value = link,
+                    onValueChange = onLinkChange,
+                    label = "Ссылка-приглашение",
+                    placeholder = "Вставьте ссылку p2pm://…",
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Link,
+                            contentDescription = null,
+                            tint = ApuBubbleAccentColor,
+                        )
+                    },
+                )
+
+                Text(
+                    text = "Проверьте, что ссылка получена от человека, которому вы доверяете.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ApuBubbleMutedColor,
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        shape = ApuBubbleShape,
+                        border = BorderStroke(
+                            1.dp,
+                            ApuBubbleAccentColor.copy(alpha = 0.48f),
+                        ),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = ApuBubbleAccentColor,
+                        ),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Отмена", fontWeight = FontWeight.SemiBold)
+                    }
+                    Button(
+                        onClick = onConnect,
+                        enabled = link.isNotBlank(),
+                        shape = ApuBubbleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                            disabledContainerColor = ApuBubbleMutedColor.copy(alpha = 0.24f),
+                            disabledContentColor = ApuBubbleMutedColor.copy(alpha = 0.70f),
+                        ),
+                        modifier = Modifier.weight(1.35f),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "Подключиться",
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -922,6 +1047,8 @@ private fun SectionPage(
     items: List<InboxItem>,
     isSearchActive: Boolean,
     onChatClick: (chatId: String, contactName: String, contactId: String) -> Unit,
+    /** «Избранное» - постоянный личный контакт в разделах с личными чатами. */
+    onSavedClick: () -> Unit,
     onAddContactClick: () -> Unit,
     onCallClick: (contactId: String, contactName: String) -> Unit,
     onGroupClick: (groupId: String) -> Unit,
@@ -950,6 +1077,10 @@ private fun SectionPage(
 ) {
     val openAdmin = section == InboxSection.AdminGroups ||
         section == InboxSection.AdminChannels
+    // «Избранное» ведёт на отдельное личное хранилище, поэтому логично живёт
+    // рядом с личными чатами, но не засоряет списки групп, каналов и архив.
+    val showSavedContact = !isSearchActive &&
+        (section == InboxSection.All || section == InboxSection.Chats)
 
     Box(modifier = Modifier.fillMaxSize()) {
         when {
@@ -1043,6 +1174,20 @@ private fun SectionPage(
                 }
             }
 
+            // Даже на новом аккаунте «Избранное» доступно как первый личный
+            // контакт: туда можно сразу складывать заметки и файлы.
+            items.isEmpty() && showSavedContact -> {
+                SavedContactCard(
+                    onClick = onSavedClick,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                )
+                EmptyChatList(
+                    isSearchActive = false,
+                    onAddContact = onAddContactClick,
+                    modifier = Modifier.align(Alignment.Center),
+                )
+            }
+
             items.isEmpty() -> {
                 EmptyChatList(
                     isSearchActive = isSearchActive,
@@ -1072,6 +1217,11 @@ private fun SectionPage(
                     // последний чат (как было в ленте канала и в избранном).
                     contentPadding = PaddingValues(top = 4.dp, bottom = 88.dp),
                 ) {
+                    if (showSavedContact) {
+                        item(key = "saved-contact") {
+                            SavedContactCard(onClick = onSavedClick)
+                        }
+                    }
                     items(
                         items = items,
                         key   = { item ->
@@ -1373,6 +1523,72 @@ private fun EmptyChatList(
 
 }
 
+/**
+ * «Избранное» - не сетевой собеседник, а личное хранилище. В главном списке
+ * выглядит как отдельный контакт, чтобы открыть заметки/файлы можно было тем
+ * же привычным тапом, что и обычную переписку.
+ */
+@Composable
+private fun SavedContactCard(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.52f),
+                shape = RoundedCornerShape(18.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .background(MaterialTheme.colorScheme.primary, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Default.Bookmark,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.size(28.dp),
+            )
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Избранное",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF1E2430),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "Личное хранилище",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 1,
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = "Заметки, файлы и пересланное",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF5A6472),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
 // =============================================================================
 // ПОЛОСКА РАЗДЕЛОВ И СТРОКА ГРУППЫ
 // =============================================================================
@@ -1504,20 +1720,7 @@ private fun GroupCard(
                     )
                 }
             }
-            if (group.unreadCount > 0) {
-                Box(
-                    modifier = Modifier
-                        .background(MaterialTheme.colorScheme.primary, CircleShape)
-                        .padding(horizontal = 6.dp, vertical = 1.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = if (group.unreadCount > 99) "99+" else group.unreadCount.toString(),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                }
-            }
+            ApuNotificationBadge(group.unreadCount)
         }
 
         BubbleOverflowMenu(actions = menuActions)

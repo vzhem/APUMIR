@@ -38,12 +38,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 /** Один пункт меню «три точки»: подпись, значок, опасность, действие. */
 data class ApuAction(
     val title: String,
     val icon: ImageVector,
+    /** Недоступное действие остаётся видимым, но не принимает повторный тап. */
+    val enabled: Boolean = true,
     /** Опасное действие рисуется красным пузырём (удалить). */
     val destructive: Boolean = false,
     val onClick: () -> Unit,
@@ -54,33 +57,38 @@ data class ApuAction(
 fun ApuActionBubble(
     label: String,
     icon: ImageVector,
+    enabled: Boolean = true,
     destructive: Boolean = false,
     onClick: () -> Unit,
 ) {
+    val contentColor = Color.White.copy(alpha = if (enabled) 1f else 0.52f)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(
-                if (destructive) MaterialTheme.colorScheme.error
-                else MaterialTheme.colorScheme.primary
+                (if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+                    .copy(alpha = if (enabled) 1f else 0.5f)
             )
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             icon,
             contentDescription = null,
-            tint = Color.White,
+            tint = contentColor,
             modifier = Modifier.size(18.dp),
         )
         Spacer(Modifier.width(8.dp))
         Text(
             label,
-            color = Color.White,
+            color = contentColor,
             fontWeight = FontWeight.SemiBold,
             style = MaterialTheme.typography.labelLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
         )
     }
     Spacer(Modifier.height(6.dp))
@@ -106,12 +114,15 @@ fun ApuActionsMenu(
         Column(
             modifier = Modifier
                 .padding(8.dp)
-                .widthIn(min = 210.dp),
+                // The menu never grows beyond a phone-friendly width because
+                // labels are deliberately single-line ellipsized bubbles.
+                .widthIn(min = 210.dp, max = 320.dp),
         ) {
             actions.filterNotNull().forEach { action ->
                 ApuActionBubble(
                     label = action.title,
                     icon = action.icon,
+                    enabled = action.enabled,
                     destructive = action.destructive,
                     onClick = {
                         onDismiss()

@@ -1,9 +1,14 @@
 package com.vladimir.messenger.ui.screens.contacts
 
 import com.vladimir.messenger.ui.components.swipeBack
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import com.vladimir.messenger.ui.components.ApuScrollbar
+import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleShape
+import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuSearchField
 import com.vladimir.messenger.ui.components.ShareContactChooserDialog
 import androidx.compose.foundation.layout.*
@@ -13,12 +18,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.GroupAdd
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.SortByAlpha
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -35,7 +41,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.vladimir.messenger.domain.model.Contact
-import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.ui.components.BubbleKind
 import com.vladimir.messenger.ui.components.BubbleMenuAction
 import com.vladimir.messenger.ui.components.ContactCard
@@ -64,6 +69,10 @@ fun ContactsScreen(
     viewModel: ContactsViewModel = hiltViewModel()
 ) {
     val contacts by viewModel.contacts.collectAsState()
+    val sortOrder by viewModel.sortOrder.collectAsState()
+    // In contrast to the address book, a list row also needs the real chat:
+    // message preview, time and unread badge live in the chats table.
+    val contactChatRows by viewModel.sortedContactChatRows.collectAsState()
     val context = LocalContext.current
     // Подтверждение удаления контакта из меню «⋮» в пузыре.
     var confirmDelete by remember { mutableStateOf<Contact?>(null) }
@@ -72,6 +81,8 @@ fun ContactsScreen(
     var showInviteShare by remember { mutableStateOf(false) }
     // Раунд 175: «Поделиться контактом» - сначала выбор пути (в APU / наружу).
     var shareTarget by remember { mutableStateOf<Contact?>(null) }
+    // Сортировка открывается прямо из шапки, как в адресной книге телефона.
+    var sortMenuExpanded by remember { mutableStateOf(false) }
 
     // Подложка на весь экран, в том числе под верхней панелью.
     Box(
@@ -98,6 +109,25 @@ fun ContactsScreen(
                     }
                 },
                 actions = {
+                    // Адресная книга может быть длинной: выбор порядка всегда
+                    // под рукой, а текущий вариант отмечен галочкой в меню.
+                    Box {
+                        IconButton(onClick = { sortMenuExpanded = true }) {
+                            Icon(
+                                Icons.Default.SortByAlpha,
+                                contentDescription = "Сортировка: ${sortOrder.title}",
+                            )
+                        }
+                        ContactSortMenu(
+                            expanded = sortMenuExpanded,
+                            selected = sortOrder,
+                            onDismiss = { sortMenuExpanded = false },
+                            onSelect = { order ->
+                                viewModel.setSortOrder(order)
+                                sortMenuExpanded = false
+                            },
+                        )
+                    }
                     // Пригласить друга — в один тап, прямо из списка контактов.
                     IconButton(
                         onClick = {
@@ -121,16 +151,16 @@ fun ContactsScreen(
                 placeholder = "Поиск: имя или @никнейм",
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
             )
-            val shown = remember(contacts, query) {
+            val shown = remember(contactChatRows, query) {
                 val q = query.trim().lowercase()
                 val qNick = q.removePrefix("@")
-                if (q.isEmpty()) contacts
-                else contacts.filter {
-                    it.displayName.lowercase().contains(q) ||
-                        it.username.lowercase().contains(qNick)
+                if (q.isEmpty()) contactChatRows
+                else contactChatRows.filter { row ->
+                    row.contact.displayName.lowercase().contains(q) ||
+                        row.contact.username.lowercase().contains(qNick)
                 }
             }
-            if (shown.isEmpty() && contacts.isNotEmpty()) {
+            if (shown.isEmpty() && contactChatRows.isNotEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     // Раунд 48: подсказка в пузыре HintBubble - на обоях и в
                     // ночной теме голый текст не читался.
@@ -144,7 +174,7 @@ fun ContactsScreen(
                     }
                 }
             }
-        if (contacts.isEmpty()) {
+        if (contactChatRows.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -191,24 +221,24 @@ fun ContactsScreen(
                 ) {
                     items(
                         items = shown,
-                        key = { it.id }
-                    ) { contact ->
-                        // ContactCard expects Chat, create a minimal Chat from Contact
+                        key = { it.contact.id }
+                    ) { row ->
+                        val contact = row.contact
                         // Пузырь контакта — тот же ContactCard, что на главной:
-                        // владелец просил, чтобы списки выглядели одинаково.
+                        // он получает настоящий чат, поэтому превью, время и
+                        // счётчик непрочитанных совпадают с разделом «Чаты».
                         ContactCard(
-                            chat = Chat(
-                                id = contact.id,
-                                contactId = contact.id,
-                                contactName = contact.displayName,
-                                isContactOnline = contact.isOnline,
-                            ),
+                            chat = row.chat,
                             // Идём через viewModel: он находит настоящий чат.
                             // Прямая передача contact.id открывала «другой»
                             // чат - пустой и с вечными часиками при отправке.
                             onClick = { viewModel.openChatWith(contact) { id -> onContactClick(id, contact) } },
                             username = contact.username,
                             kind = BubbleKind.Personal,
+                            presenceLabel = contactPresenceLabel(
+                                isOnline = contact.isOnline,
+                                lastSeenAtMs = contact.lastSeenAtMs,
+                            ),
                             menuActions = listOf(
                                 BubbleMenuAction(
                                     title = "Написать",
@@ -335,6 +365,61 @@ fun ContactsScreen(
                 android.widget.Toast.LENGTH_SHORT,
             ).show()
             viewModel.consumeToast()
+        }
+    }
+}
+
+/**
+ * Меню сортировки адресной книги. Это тоже светлый APU-пузырь: обычное тёмное
+ * меню Material на обоях выглядело бы отдельным, чужим слоем интерфейса.
+ */
+@Composable
+private fun ContactSortMenu(
+    expanded: Boolean,
+    selected: ContactSortOrder,
+    onDismiss: () -> Unit,
+    onSelect: (ContactSortOrder) -> Unit,
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        modifier = Modifier.widthIn(min = 244.dp),
+        shape = ApuBubbleShape,
+        containerColor = ApuBubbleSurfaceColor,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+        ),
+    ) {
+        ContactSortOrder.entries.forEach { order ->
+            DropdownMenuItem(
+                text = {
+                    Column {
+                        Text(
+                            text = order.title,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = ApuBubbleTextColor,
+                        )
+                        Text(
+                            text = order.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                    }
+                },
+                trailingIcon = {
+                    if (order == selected) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = "Выбрано",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                },
+                onClick = { onSelect(order) },
+            )
         }
     }
 }

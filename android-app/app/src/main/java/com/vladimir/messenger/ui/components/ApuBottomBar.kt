@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -150,9 +149,7 @@ private fun BottomButton(item: ApuBottomItem, labelScale: Float, modifier: Modif
     ) {
         BadgedBox(
             badge = {
-                if (item.badge > 0) {
-                    Badge { Text(if (item.badge > 99) "99+" else item.badge.toString()) }
-                }
+                ApuNotificationBadge(item.badge)
             },
         ) {
             Icon(

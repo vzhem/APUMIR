@@ -1,6 +1,7 @@
 package com.vladimir.messenger.data.file
 
 import android.util.Log
+import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
@@ -55,6 +56,9 @@ class FileTransferReceiver(
      * передачу на бинарный канал с следующего цикла.
      */
     private val onFcap: suspend (transferIdHex: String, from: String, maxFramePayload: Int) -> Unit =
+        { _, _, _ -> },
+    /** FCAP v2 is deliberately separate from [onFcap] so existing JVM callers remain source-compatible. */
+    private val onAuthenticatedDirectFcap: suspend (transferIdHex: String, from: String, maxFramePayload: Int) -> Unit =
         { _, _, _ -> },
 ) {
     /**
@@ -303,21 +307,43 @@ class FileTransferReceiver(
             Log.w(TAG, "File FCAP for unknown/foreign transfer $transferIdHex from ${senderId.takeLast(8)}; dropped")
             return
         }
-        val maxFramePayload = when (payload.size) {
-            0 -> FileTransferWire.BINARY_MAX_FRAME_PAYLOAD
-            4 -> ((payload[0].toInt() and 0xff) shl 24) or
-                ((payload[1].toInt() and 0xff) shl 16) or
-                ((payload[2].toInt() and 0xff) shl 8) or
-                (payload[3].toInt() and 0xff)
+        val (maxFramePayload, features) = when (payload.size) {
+            0 -> FileTransferWire.BINARY_MAX_FRAME_PAYLOAD to 0
+            4 -> readU32(payload, 0) to 0
+            8 -> readU32(payload, 0) to readU32(payload, 4)
             else -> {
                 Log.w(TAG, "Malformed FCAP payload (${payload.size} bytes) from ${senderId.takeLast(8)}; dropped")
                 return
             }
         }
+        if (maxFramePayload !in FileTransferWire.BINARY_CHUNK_PREFIX_BYTES..FileTransferWire.BINARY_MAX_FRAME_PAYLOAD ||
+            features and FileTransferWire.FCAP_FEATURE_AUTHENTICATED_DIRECT_SESSION.inv() != 0
+        ) {
+            Log.w(TAG, "Unsupported FCAP from ${senderId.takeLast(8)}; dropped")
+            return
+        }
         runCatching { onFcap(transferIdHex, senderId, maxFramePayload) }
             .onFailure { Log.w(TAG, "FCAP hook failed for $transferIdHex: ${it.message}") }
-        Log.i(TAG, "File transfer $transferIdHex is binary-capable (max frame ${maxFramePayload})")
+        if (features and FileTransferWire.FCAP_FEATURE_AUTHENTICATED_DIRECT_SESSION != 0) {
+            TransferDiagnostics.record(
+                "F4",
+                "Received FCAP v2 authenticated-direct capability (maxFrame=$maxFramePayload)",
+            )
+            runCatching { onAuthenticatedDirectFcap(transferIdHex, senderId, maxFramePayload) }
+                .onFailure { Log.w(TAG, "F4 FCAP hook failed for $transferIdHex: ${it.message}") }
+        }
+        Log.i(
+            TAG,
+            "File transfer $transferIdHex is binary-capable (max frame $maxFramePayload, " +
+                "authenticatedDirect=${features != 0})",
+        )
     }
+
+    private fun readU32(bytes: ByteArray, offset: Int): Int =
+        ((bytes[offset].toInt() and 0xff) shl 24) or
+            ((bytes[offset + 1].toInt() and 0xff) shl 16) or
+            ((bytes[offset + 2].toInt() and 0xff) shl 8) or
+            (bytes[offset + 3].toInt() and 0xff)
 
     /**
      * K3: сообщить отправителю, что приёмник понимает APUF-кадры. Текстовый
@@ -328,11 +354,19 @@ class FileTransferReceiver(
     private suspend fun sendFcap(transferIdHex: String, to: String, chatId: String) {
         runCatching {
             val maxFrame = FileTransferWire.BINARY_MAX_FRAME_PAYLOAD
+            // FCAP v2 appends feature bits. N-1 senders reject the unknown eight-byte control
+            // payload and continue over the ordinary text path; they never receive a mislabelled
+            // binary capability.
+            val features = FileTransferWire.FCAP_FEATURE_AUTHENTICATED_DIRECT_SESSION
             val payload = byteArrayOf(
                 (maxFrame ushr 24).toByte(),
                 (maxFrame ushr 16).toByte(),
                 (maxFrame ushr 8).toByte(),
                 maxFrame.toByte(),
+                (features ushr 24).toByte(),
+                (features ushr 16).toByte(),
+                (features ushr 8).toByte(),
+                features.toByte(),
             )
             val packet = FileTransferPacketCodec.encode(
                 FileTransferPacketCodec.Packet(

@@ -482,7 +482,7 @@ mod tests {
                     BoundFrameResult { sender: effect.sender, response: None }
                 })
             };
-            let (transport, _) = DirectTransport::start_with_handlers("127.0.0.1:0".parse().unwrap(), Arc::new(|_| None), None, Some(handler)).unwrap();
+            let (transport, _) = DirectTransport::start_with_handlers("127.0.0.1:0".parse().unwrap(), Arc::new(|_| None), None, Some(handler), None).unwrap();
             *slot.lock().unwrap() = Some(transport.clone());
             Node { id, directory, assist, transport }
         }

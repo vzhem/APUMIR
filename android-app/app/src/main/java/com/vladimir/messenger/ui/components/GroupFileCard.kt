@@ -354,7 +354,7 @@ fun GroupFileCard(
                 Column(
                     modifier = Modifier
                         .padding(8.dp)
-                        .widthIn(min = 210.dp),
+                        .widthIn(min = 210.dp, max = 320.dp),
                 ) {
                     val save = state.onSave
                     if (save != null) {

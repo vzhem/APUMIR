@@ -57,6 +57,7 @@ class FileTransferReceiverTest {
         gateway: FakeFileCryptoGateway = crypto(),
         routeOffer: suspend (String, String) -> FileTransferReceiver.OfferRouting = { _, _ -> FileTransferReceiver.OfferRouting.Unknown },
         onFcap: (suspend (String, String, Int) -> Unit)? = null,
+        onAuthenticatedFcap: (suspend (String, String, Int) -> Unit)? = null,
     ) = FileTransferReceiver(
         transferDao = dao,
         chunkStore = chunkStore,
@@ -71,6 +72,7 @@ class FileTransferReceiverTest {
         nowMs = { 500_000L },
         routeOffer = routeOffer,
         onFcap = onFcap ?: { _, _, _ -> },
+        onAuthenticatedDirectFcap = onAuthenticatedFcap ?: { _, _, _ -> },
     )
 
     /** K3: бинарный диапазон куска через то же «окно», что у ядра (событие). */
@@ -427,6 +429,8 @@ class FileTransferReceiverTest {
         val fcaps = sentFcaps()
         assertEquals(1, fcaps.size)
         assertEquals(FileTransferWire.BINARY_MAX_FRAME_PAYLOAD, fcapMaxFrame(fcaps.first()))
+        assertEquals(8, fcaps.first().payload.size)
+        assertEquals(FileTransferWire.FCAP_FEATURE_AUTHENTICATED_DIRECT_SESSION, fcapFeatures(fcaps.first()))
     }
 
     @Test
@@ -524,6 +528,31 @@ class FileTransferReceiverTest {
     }
 
     @Test
+    fun fcapV2SignalsAuthenticatedDirectCapabilitySeparately() = runTest {
+        val normal = mutableListOf<Int>()
+        val authenticated = mutableListOf<Int>()
+        val receiver = receiver(
+            onFcap = { _, _, maxFrame -> normal += maxFrame },
+            onAuthenticatedFcap = { _, _, maxFrame -> authenticated += maxFrame },
+        )
+        insertOutgoingForAck()
+        deliver(
+            receiver,
+            listOf(
+                fcapText(
+                    byteArrayOf(
+                        0, 0, 4, 0,
+                        0, 0, 0, FileTransferWire.FCAP_FEATURE_AUTHENTICATED_DIRECT_SESSION.toByte(),
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals(listOf(1024), normal)
+        assertEquals(listOf(1024), authenticated)
+    }
+
+    @Test
     fun fcapFromStrangerIsDropped() = runTest {
         val seen = mutableListOf<String>()
         val receiver = receiver(onFcap = { tid, _, _ -> seen += tid })
@@ -547,11 +576,15 @@ class FileTransferReceiverTest {
             ),
         )
 
-    private fun fcapMaxFrame(packet: FileTransferPacketCodec.Packet): Int =
-        ((packet.payload[0].toInt() and 0xff) shl 24) or
-            ((packet.payload[1].toInt() and 0xff) shl 16) or
-            ((packet.payload[2].toInt() and 0xff) shl 8) or
-            (packet.payload[3].toInt() and 0xff)
+    private fun fcapMaxFrame(packet: FileTransferPacketCodec.Packet): Int = readFcapU32(packet.payload, 0)
+
+    private fun fcapFeatures(packet: FileTransferPacketCodec.Packet): Int = readFcapU32(packet.payload, 4)
+
+    private fun readFcapU32(bytes: ByteArray, offset: Int): Int =
+        ((bytes[offset].toInt() and 0xff) shl 24) or
+            ((bytes[offset + 1].toInt() and 0xff) shl 16) or
+            ((bytes[offset + 2].toInt() and 0xff) shl 8) or
+            (bytes[offset + 3].toInt() and 0xff)
 
     private fun chunkPlaintext(index: Long): ByteArray {
         val start = (index * chunkSize).toInt()

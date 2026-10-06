@@ -11,6 +11,7 @@ package com.vladimir.messenger.ui.screens.settings
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
@@ -27,11 +28,13 @@ import com.vladimir.messenger.ui.components.ApuSettingsSectionTitle
 import com.vladimir.messenger.ui.components.ApuProfileQuickAction
 import com.vladimir.messenger.ui.components.NotificationMuteDialog
 import com.vladimir.messenger.ui.components.notificationMuteStatus
+import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.notification.NotificationMuteScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
@@ -634,6 +637,19 @@ private fun SettingsTabContent(
     // Диалог «Сеть сообщений» и буфер обмена для «Скопировать» в нём —
     // локальные для этого экрана.
     var showMqttDialog by remember { mutableStateOf(false) }
+    // Бounded, privacy-filtered transfer/network diagnostic report for phone acceptance tests.
+    var showTransferLogsDialog by remember { mutableStateOf(false) }
+    var transferLogsRefresh by remember { mutableIntStateOf(0) }
+    var transferLogsText by remember { mutableStateOf("") }
+    val settingsContext = LocalContext.current
+    LaunchedEffect(showTransferLogsDialog, transferLogsRefresh) {
+        if (showTransferLogsDialog) {
+            transferLogsText = "Собираю безопасный отчёт…"
+            transferLogsText = withContext(Dispatchers.IO) {
+                TransferDiagnostics.buildReport(settingsContext)
+            }
+        }
+    }
     // р240: диагностика синхронизации устройств одной личности.
     // (имя с Mirror: showSyncDialog занят окном переноса профиля)
     var showMirrorDiag by remember { mutableStateOf(false) }
@@ -1170,6 +1186,21 @@ private fun SettingsTabContent(
                 }
             }
 
+            // ----------------------------------------------------------------
+            // ЛОГИ: отчёт для проверки прямой F4-передачи на двух телефонах.
+            // ----------------------------------------------------------------
+            item { SettingsSectionTitle("Поддержка") }
+            item {
+                SettingsCard {
+                    SettingsItem(
+                        icon = Icons.Default.Description,
+                        title = "Логи",
+                        subtitle = "Скопировать безопасный отчёт о сети и передаче файлов",
+                        onClick = { showTransferLogsDialog = true },
+                    )
+                }
+            }
+
             item { SettingsSectionTitle("О приложении") }
             item {
                 SettingsCard {
@@ -1306,6 +1337,53 @@ private fun SettingsTabContent(
             },
             dismissButton = {
                 TextButton(onClick = { showMqttDialog = false }) { Text("Закрыть") }
+            },
+        )
+    }
+
+    if (showTransferLogsDialog) {
+        val reportScroll = rememberScrollState()
+        ApuSettingsDialog(
+            onDismissRequest = { showTransferLogsDialog = false },
+            icon = { Icon(Icons.Default.Description, contentDescription = null) },
+            title = { Text("Логи") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "Отчёт содержит только состояние сети и F4/F3-переходы. " +
+                            "Чаты, имена файлов, ключи, ciphertext, адреса и contact ID не копируются.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    SelectionContainer {
+                        Text(
+                            transferLogsText.ifBlank { "Собираю безопасный отчёт…" },
+                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 300.dp)
+                                .verticalScroll(reportScroll),
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    mqttClipboard.setText(
+                        AnnotatedString(transferLogsText.ifBlank { "Отчёт ещё собирается" }),
+                    )
+                    android.widget.Toast.makeText(
+                        settingsContext,
+                        "Логи скопированы",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }) { Text("Скопировать") }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { transferLogsRefresh++ }) { Text("Обновить") }
+                    TextButton(onClick = { showTransferLogsDialog = false }) { Text("Закрыть") }
+                }
             },
         )
     }

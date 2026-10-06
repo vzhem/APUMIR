@@ -260,6 +260,28 @@ class FileTransferSenderTest {
     }
 
     @Test
+    fun authenticatedFcapMarksOnlyTheRustFfiLengthNotTheCiphertext() = runTest {
+        dao.insertNewTransfer(entity(chunkCount = 1, chunkSize = 1024, totalBytes = 1024))
+        stage(chunkCount = 1, chunkSize = 1024, lastChunkBytes = 1024)
+
+        val s = sender(withBinary = true)
+        s.markBinaryCapable(
+            transferIdHex,
+            FileTransferWire.BINARY_MAX_FRAME_PAYLOAD,
+            authenticatedDirectSession = true,
+        )
+        s.pumpOnce()
+
+        val full = chunkStore.readEncryptedChunk(transferIdHex, 0)!!
+        assertEquals(1, binarySends.size)
+        assertEquals(
+            full.size or FileTransferWire.F4_PREFERRED_CIPHERTEXT_LENGTH_FLAG,
+            binarySends.single().chunkLen,
+        )
+        assertArrayEquals(full, binarySends.single().range)
+    }
+
+    @Test
     fun bigChunkSplitsIntoBoundedApuFrames() = runTest {
         dao.insertNewTransfer(entity(chunkCount = 1, chunkSize = 600_000, totalBytes = 600_000))
         stage(chunkCount = 1, chunkSize = 600_000, lastChunkBytes = 600_000)

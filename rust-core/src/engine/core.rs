@@ -9,7 +9,13 @@ use crate::ffi::storage_ffi::StorageManagerFfi;
 use crate::storage::models::MessageStatus;
 
 use super::events::{CoreEvent, EventBus};
-use crate::network::direct_transport::{DirectTransport, BoundFrameFactory, BoundFrameHandler, BoundFrameResult};
+use crate::network::direct_transport::{
+    BoundFrameFactory, BoundFrameHandler, BoundFrameResult, DirectTransport, FileSessionHandler,
+};
+use crate::network::file_session::{FileSessionPeer};
+use crate::network::file_session_ingress::FileSessionIngressStore;
+use crate::network::file_session_owner::{FileSessionOwner, FileSessionOwnerConfig, FileSessionTarget};
+use crate::network::file_session_receiver::InboundFileSessionServer;
 use crate::network::peer_assistance::{self, PeerAssistance, AssistOperation};
 use crate::network::peer_exchange::{
     Candidate as DiscoveryCandidate, PeerExchange, is_public_endpoint, valid_node_id,
@@ -56,6 +62,12 @@ use crate::network::adaptive_polling::AdaptivePolling;
 use crate::resilience::AddressBook;
 
 const MQTT_OUTBOUND_COMMAND_CAPACITY: usize = 256;
+
+/// `ciphertext_chunk_len` is an existing stable FFI argument. The high bit is not a length; it is
+/// set only after the v2 FCAP exchange confirmed that both apps support the authenticated F4 direct
+/// session. Rust strips it before constructing any APUF frame, so N-1 fallback always sees the real
+/// ciphertext length.
+const FILE_SESSION_V1_PREFERRED_FLAG: u32 = 1 << 31;
 
 /// K5-2: сколько чужого держим по времени. Совпадает с политикой склада по
 /// умолчанию (неделя): дольше держать кусок зашифрованного файла смысла нет -
@@ -472,6 +484,12 @@ pub struct P2PCore {
     /// K1: один QUIC-endpoint на движок (пул соединений, keep-alive, STUN
     /// с порта 7777). `None` до `start()` и после `stop()`.
     direct: Arc<Mutex<Option<DirectTransport>>>,
+    /// F4 sender owns a separate reusable endpoint so legacy direct transport keeps its exact
+    /// listener/pool semantics. It is present only with a real signing sidecar and durable ingress.
+    file_session_owner: Option<Arc<FileSessionOwner>>,
+    /// Receiver durable-before-ACK store, retained so committed ciphertext can be replayed into the
+    /// normal Android file receiver after a process restart.
+    file_session_ingress: Option<Arc<FileSessionIngressStore>>,
     router: Option<Arc<Router>>,
     dht: Option<Arc<Mutex<RoutingTable>>>,
     relay: Option<Arc<RelayManager>>,
@@ -541,6 +559,8 @@ impl P2PCore {
             peer_addrs: Arc::new(Mutex::new(HashMap::new())),
             public_addr: Arc::new(Mutex::new(None)),
             direct: Arc::new(Mutex::new(None)),
+            file_session_owner: None,
+            file_session_ingress: None,
             router: None,
             dht: None,
             relay: None,
@@ -677,6 +697,7 @@ impl P2PCore {
         }
 
         self.start_async_runtime(node_id.clone());
+        self.replay_file_session_ingress();
 
         // K4: отдельный поток личного presence «своим». Поток, а не задача
         // tokio: отправка идёт блокирующим вызовом транспорта (до 10 с на
@@ -806,6 +827,75 @@ impl P2PCore {
                 });
                 let discovery_identity = crate::crypto::signing_identity::installed_signing_identity()
                     .filter(|identity| identity.legacy_routing_node_id() == node_id);
+
+                // F4 is deliberately unavailable when identity or durable storage is unavailable:
+                // an in-memory callback must never answer a C1 durable range ACK. The existing F3
+                // binary/text routes remain the compatibility fallback in that honest state.
+                let mut on_file_session: Option<FileSessionHandler> = None;
+                if let (Some(identity), Some(relay_path)) = (
+                    discovery_identity.as_ref(),
+                    self.config.relay_db_path.as_deref(),
+                ) {
+                    let ingress_path = std::path::Path::new(relay_path)
+                        .with_file_name("apu_f4_file_session_ingress.sqlite");
+                    match FileSessionIngressStore::open(&ingress_path) {
+                        Ok(ingress) => {
+                            let local_identity = Arc::clone(identity);
+                            let handle = runtime.handle().clone();
+                            let owner = std::thread::scope(|scope| {
+                                scope
+                                    .spawn(move || {
+                                        handle.block_on(async move {
+                                            FileSessionOwner::new(
+                                                SocketAddr::from(([0, 0, 0, 0], 0)),
+                                                local_identity,
+                                                FileSessionOwnerConfig::default(),
+                                            )
+                                            .map(Arc::new)
+                                        })
+                                    })
+                                    .join()
+                                    .unwrap_or_else(|_| Err(crate::network::file_session_owner::FileSessionOwnerError::InvalidConfig("F4 owner startup thread panicked")))
+                            });
+                            match owner {
+                                Ok(owner) => {
+                                    let server = Arc::new(InboundFileSessionServer::new(
+                                        Arc::clone(identity),
+                                        Arc::clone(&self.peer_exchange),
+                                        Arc::clone(&ingress),
+                                        Arc::clone(&events_arc),
+                                    ));
+                                    let handler_server = Arc::clone(&server);
+                                    on_file_session = Some(Arc::new(move |connection| {
+                                        let server = Arc::clone(&handler_server);
+                                        Box::pin(async move {
+                                            server.handle_connection(connection).await;
+                                        })
+                                    }));
+                                    self.file_session_owner = Some(owner);
+                                    self.file_session_ingress = Some(ingress);
+                                    tracing::info!(
+                                        "F4: authenticated direct file sessions enabled with durable ingress {}",
+                                        ingress_path.display()
+                                    );
+                                }
+                                Err(error) => tracing::warn!(
+                                    "F4: sender owner unavailable; retaining legacy file path: {}",
+                                    error
+                                ),
+                            }
+                        }
+                        Err(error) => tracing::warn!(
+                            "F4: durable ingress unavailable; retaining legacy file path: {}",
+                            error
+                        ),
+                    }
+                } else {
+                    tracing::info!(
+                        "F4: direct file sessions disabled (missing signing sidecar or durable app-private path)"
+                    );
+                }
+
                 let on_exchange: Option<BoundFrameHandler> = discovery_identity.as_ref().map(|identity| {
                     let identity = Arc::clone(identity);
                     let directory = Arc::clone(&self.peer_exchange);
@@ -901,6 +991,7 @@ impl P2PCore {
                                 on_frame,
                                 Some(on_inbound),
                                 on_exchange,
+                                on_file_session,
                             ))
                         })
                         .join()
@@ -1029,6 +1120,7 @@ impl P2PCore {
         on_frame: crate::network::direct_transport::FrameHandler,
         on_inbound: Option<crate::network::direct_transport::InboundHandler>,
         on_exchange: Option<BoundFrameHandler>,
+        on_file_session: Option<FileSessionHandler>,
     ) -> Option<(DirectTransport, crate::network::quic_client::UdpSideChannel)> {
         let any = std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED);
         let mut last_error = String::new();
@@ -1039,6 +1131,7 @@ impl P2PCore {
                 Arc::clone(&on_frame),
                 on_inbound.clone(),
                 on_exchange.clone(),
+                on_file_session.clone(),
             ) {
                 Ok((transport, side)) => {
                     if port == 0 {
@@ -4148,6 +4241,36 @@ impl P2PCore {
         });
         true
     }
+    fn replay_file_session_ingress(&self) {
+        let Some(ingress) = self.file_session_ingress.as_ref() else {
+            return;
+        };
+        match ingress.pending_ranges(crate::storage::models::now_ms()) {
+            Ok(ranges) => {
+                let count = ranges.len();
+                for chunk in ranges {
+                    self.events.emit(CoreEvent::FileChunkReceived {
+                        transfer_id: bytes_to_hex(&chunk.transfer_id),
+                        chunk_index: chunk.chunk_index,
+                        chunk_offset: chunk.chunk_offset,
+                        ciphertext_chunk_len: chunk.ciphertext_chunk_len,
+                        ciphertext: chunk.ciphertext,
+                    });
+                }
+                if count > 0 {
+                    tracing::info!(
+                        "F4: replayed {} durable ciphertext range(s) into the Android receiver",
+                        count
+                    );
+                }
+            }
+            Err(error) => tracing::warn!(
+                "F4: cannot replay durable file ingress; entries remain retained: {}",
+                error
+            ),
+        }
+    }
+
     pub fn stop(&mut self) {
         self.network.stop();
         self.mqtt_outbound_tx = None;
@@ -4155,6 +4278,19 @@ impl P2PCore {
         // шаг сна и увидит флаг).
         self.presence_task_stop
             .store(true, std::sync::atomic::Ordering::Relaxed);
+        // F4 owns a separate outbound endpoint; close it before stopping the runtime so no file
+        // session can outlive its ingress/replay state across an engine restart.
+        if let Some(owner) = self.file_session_owner.take() {
+            if let Some(runtime) = self.runtime.as_ref() {
+                let handle = runtime.handle().clone();
+                let _ = std::thread::scope(|scope| {
+                    scope
+                        .spawn(|| handle.block_on(owner.shutdown()))
+                        .join()
+                });
+            }
+        }
+        self.file_session_ingress = None;
         // K1: закрываем общий endpoint до остановки runtime, чтобы порт 7777
         // освободился сразу и повторный start() смог его занять.
         if let Some(transport) = self.direct.lock().unwrap().take() {
@@ -4326,24 +4462,20 @@ impl P2PCore {
         if !self.state.is_running() {
             return false;
         }
+        let prefer_authenticated_session =
+            ciphertext_chunk_len & FILE_SESSION_V1_PREFERRED_FLAG != 0;
+        let ciphertext_chunk_len = ciphertext_chunk_len & !FILE_SESSION_V1_PREFERRED_FLAG;
         let Some(transfer_id) = hex_to_transfer_id(&transfer_id_hex) else {
             tracing::warn!("FILE CHUNK: bad transfer id '{}'", transfer_id_hex);
             return false;
         };
-        let chunk = FileChunkDataV1 {
+        let file_frame = FileFrameV1::ChunkData(FileChunkDataV1 {
             transfer_id,
             chunk_index,
             chunk_offset,
             ciphertext_chunk_len,
             ciphertext: ciphertext_range,
-        };
-        let frame = match FileFrameV1::ChunkData(chunk).encode() {
-            Ok(frame) => frame,
-            Err(e) => {
-                tracing::warn!("FILE CHUNK: frame build failed for {}: {}", transfer_id_hex, e);
-                return false;
-            }
-        };
+        });
         let addr_opt = {
             let addrs = self.peer_addrs.lock().unwrap();
             addrs
@@ -4351,8 +4483,25 @@ impl P2PCore {
                 .copied()
                 .or_else(|| addrs.get(&format!("{}_public", recipient_id)).copied())
         };
+
+        // F4 is opt-in only after the recipient's v2 FCAP. Any unavailable identity/pin/ingress or
+        // transport failure returns to the existing N-1-compatible F3 APUF path with the real
+        // length (the preference bit is never placed on the wire).
+        if prefer_authenticated_session
+            && self.send_file_via_authenticated_session(&recipient_id, addr_opt, &file_frame)
+        {
+            return true;
+        }
+
+        let frame = match file_frame.encode() {
+            Ok(frame) => frame,
+            Err(e) => {
+                tracing::warn!("FILE CHUNK: frame build failed for {}: {}", transfer_id_hex, e);
+                return false;
+            }
+        };
         tracing::info!(
-            "FILE CHUNK: APUF frame {} bytes (chunk {} offset {} of {}) to {}",
+            "FILE CHUNK: F3 APUF fallback {} bytes (chunk {} offset {} of {}) to {}",
             frame.len(),
             chunk_index,
             chunk_offset,
@@ -4657,6 +4806,66 @@ impl P2PCore {
         if sent { return true; }
         self.peer_exchange.note_route_failure(peer_id, addr, crate::storage::models::now_ms());
         self.send_with_helper(&transport, peer_id, &bytes)
+    }
+
+    /// F4: an exporter-bound C1 session is used only for a v2-capable contact whose exact
+    /// Ed25519 key is already pinned by direct signed peer exchange. This method deliberately has
+    /// no helper/relay fallback: returning false lets the caller take the established F3 path.
+    fn send_file_via_authenticated_session(
+        &self,
+        peer_id: &str,
+        addr: Option<SocketAddr>,
+        frame: &FileFrameV1,
+    ) -> bool {
+        let (Some(owner), Some(remote_address), Some(runtime)) = (
+            self.file_session_owner.as_ref(),
+            addr,
+            self.runtime.as_ref(),
+        ) else {
+            tracing::info!("F4: sender prerequisites unavailable; using F3 fallback");
+            return false;
+        };
+        let Some(ed25519_public_key) = self.peer_exchange.pinned_key(peer_id) else {
+            tracing::info!("F4: no pinned direct identity for {}; using F3 fallback", peer_id);
+            return false;
+        };
+        let target = match FileSessionTarget::new(
+            FileSessionPeer {
+                node_id: peer_id.to_owned(),
+                ed25519_public_key,
+            },
+            remote_address,
+        ) {
+            Ok(target) => target,
+            Err(error) => {
+                tracing::info!("F4: invalid target for {}; using F3 fallback: {}", peer_id, error);
+                return false;
+            }
+        };
+        let owner = Arc::clone(owner);
+        let handle = runtime.handle().clone();
+        let now_ms = crate::storage::models::now_ms();
+        let result = std::thread::scope(|scope| {
+            scope
+                .spawn(|| handle.block_on(owner.send_chunk(&target, frame, now_ms)))
+                .join()
+        });
+        match result {
+            Ok(Ok(())) => {
+                tracing::info!("F4: durable authenticated range ACKed by {}", peer_id);
+                true
+            }
+            Ok(Err(error)) => {
+                // A refusal can mean N-1 or a stale direct capability. Do not poison address
+                // reachability here: the F3 fallback below remains valid for that same address.
+                tracing::info!("F4: session to {} unavailable; using F3 fallback: {}", peer_id, error);
+                false
+            }
+            Err(_) => {
+                tracing::warn!("F4: sender worker panicked; using F3 fallback");
+                false
+            }
+        }
     }
 
     /// K3: бинарный кадр файла уходит стримом с приоритетом данных.

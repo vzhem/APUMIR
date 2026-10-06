@@ -30,7 +30,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -48,10 +47,8 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 
 /**
  * Полоска вкладок в общем пузыре.
@@ -167,22 +164,7 @@ fun ApuTabBar(
                             )
                             if (badge > 0) {
                                 Spacer(modifier = Modifier.width(6.dp))
-                                val badgeBg = if (nearness > 0.5f) Color.White else MaterialTheme.colorScheme.primary
-                                val badgeTextColor = if (nearness > 0.5f) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onPrimary
-                                Box(
-                                    modifier = Modifier
-                                        .background(badgeBg, CircleShape)
-                                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text(
-                                        text = if (badge > 99) "99+" else badge.toString(),
-                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                        fontWeight = FontWeight.Bold,
-                                        color = badgeTextColor,
-                                        maxLines = 1,
-                                    )
-                                }
+                                ApuNotificationBadge(badge)
                             }
                         }
                     }
