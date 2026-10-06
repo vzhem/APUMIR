@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.contacts
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.local.dao.GroupDao
@@ -7,9 +8,12 @@ import com.vladimir.messenger.data.repository.ContactRepository
 import com.vladimir.messenger.domain.model.Contact
 import com.vladimir.messenger.util.GroupInviteRef
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
@@ -32,6 +36,7 @@ class ContactsViewModel @Inject constructor(
     private val groupDao: GroupDao,
     private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
     private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
+    @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
     /** Короткий отчёт для всплывающей подсказки после отправки. */
@@ -39,6 +44,26 @@ class ContactsViewModel @Inject constructor(
     val toast: kotlinx.coroutines.flow.StateFlow<String?> = _toast
 
     fun consumeToast() { _toast.value = null }
+
+    /**
+     * Выбранная сортировка адресной книги. Сохраняется локально: это настройка
+     * владельца этого телефона, а не данные контакта, поэтому на зеркало её
+     * не рассылаем.
+     */
+    private val sortPreferences = appContext.getSharedPreferences(
+        CONTACTS_PREFERENCES,
+        Context.MODE_PRIVATE,
+    )
+    private val _sortOrder = MutableStateFlow(
+        ContactSortOrder.fromStored(sortPreferences.getString(CONTACTS_SORT_KEY, null)),
+    )
+    val sortOrder: StateFlow<ContactSortOrder> = _sortOrder.asStateFlow()
+
+    fun setSortOrder(order: ContactSortOrder) {
+        if (_sortOrder.value == order) return
+        _sortOrder.value = order
+        sortPreferences.edit().putString(CONTACTS_SORT_KEY, order.name).apply()
+    }
 
     /**
      * Открыть переписку с контактом.
@@ -87,6 +112,20 @@ class ContactsViewModel @Inject constructor(
         chatRepository.observeChats(),
     ) { contacts, chats ->
         buildContactChatRows(contacts, chats)
+    }
+        .flowOn(Dispatchers.Default)
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptyList(),
+        )
+
+    /** Ready, sorted address-book rows; filtering by a search phrase stays in the screen. */
+    val sortedContactChatRows: StateFlow<List<ContactChatRow>> = combine(
+        contactChatRows,
+        sortOrder,
+    ) { rows, order ->
+        sortContactChatRows(rows, order)
     }
         .flowOn(Dispatchers.Default)
         .stateIn(
@@ -190,5 +229,10 @@ class ContactsViewModel @Inject constructor(
         viewModelScope.launch {
             contactRepository.deleteContact(contactId)
         }
+    }
+
+    private companion object {
+        const val CONTACTS_PREFERENCES = "contacts_preferences"
+        const val CONTACTS_SORT_KEY = "sort_order"
     }
 }

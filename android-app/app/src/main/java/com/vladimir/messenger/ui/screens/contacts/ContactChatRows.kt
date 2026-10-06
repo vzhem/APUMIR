@@ -14,6 +14,24 @@ data class ContactChatRow(
     val chat: Chat,
 )
 
+/** Sort orders offered by the Contacts address book. */
+enum class ContactSortOrder(
+    val title: String,
+    val description: String,
+) {
+    /** Most recently observed contacts first; contacts online now always lead. */
+    LAST_ACTIVITY("По последней активности", "Недавно заходившие выше"),
+    /** Localized name order, useful for finding a known person in a long book. */
+    ALPHABETICAL("По алфавиту", "От А до Я"),
+    /** Handy when the next action is to write or call somebody now. */
+    ONLINE_FIRST("Сначала в сети", "Доступные контакты выше");
+
+    companion object {
+        fun fromStored(value: String?): ContactSortOrder =
+            entries.firstOrNull { it.name == value } ?: LAST_ACTIVITY
+    }
+}
+
 /**
  * Joins address-book entries with their personal chats for the Contacts list.
  *
@@ -52,4 +70,58 @@ internal fun buildContactChatRows(
             ),
         )
     }
+}
+
+/**
+ * Sorts a ready contact/chat list without changing the address book itself.
+ *
+ * A contact might not have a recorded presence yet after upgrading. Those
+ * entries stay deterministic (by name) instead of jumping randomly to the
+ * start of a list. Every comparator finishes with the contact id so Compose
+ * receives a stable order even for equal names.
+ */
+internal fun sortContactChatRows(
+    rows: List<ContactChatRow>,
+    order: ContactSortOrder,
+): List<ContactChatRow> = when (order) {
+    ContactSortOrder.LAST_ACTIVITY -> rows.sortedWith { left, right ->
+        compareOnline(left, right)
+            .takeUnless { it == 0 }
+            ?: compareDescending(lastActivity(left), lastActivity(right))
+                .takeUnless { it == 0 }
+            ?: compareByName(left, right)
+    }
+    ContactSortOrder.ALPHABETICAL -> rows.sortedWith(::compareByName)
+    ContactSortOrder.ONLINE_FIRST -> rows.sortedWith { left, right ->
+        compareOnline(left, right)
+            .takeUnless { it == 0 }
+            ?: compareByName(left, right)
+    }
+}
+
+private fun compareOnline(left: ContactChatRow, right: ContactChatRow): Int = when {
+    left.contact.isOnline == right.contact.isOnline -> 0
+    left.contact.isOnline -> -1
+    else -> 1
+}
+
+private fun lastActivity(row: ContactChatRow): Long =
+    row.contact.lastSeenAtMs?.takeIf { it > 0L } ?: Long.MIN_VALUE
+
+private fun compareDescending(left: Long, right: Long): Int = right.compareTo(left)
+
+private val RussianNameCollator = java.text.Collator.getInstance(java.util.Locale("ru")).apply {
+    // «Елена» и «елена» стоят рядом; «Ё» сортируется по русским правилам,
+    // а не по своему Unicode-коду перед «А».
+    strength = java.text.Collator.PRIMARY
+}
+
+private fun compareByName(left: ContactChatRow, right: ContactChatRow): Int {
+    val leftName = left.contact.displayName.trim()
+    val rightName = right.contact.displayName.trim()
+    // Collator mutable, а сортировка выполняется на рабочем dispatcher.
+    val nameOrder = synchronized(RussianNameCollator) {
+        RussianNameCollator.compare(leftName, rightName)
+    }
+    return if (nameOrder != 0) nameOrder else left.contact.id.compareTo(right.contact.id)
 }

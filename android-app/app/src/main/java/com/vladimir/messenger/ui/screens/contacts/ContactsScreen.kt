@@ -1,9 +1,14 @@
 package com.vladimir.messenger.ui.screens.contacts
 
 import com.vladimir.messenger.ui.components.swipeBack
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import com.vladimir.messenger.ui.components.ApuScrollbar
+import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleShape
+import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuSearchField
 import com.vladimir.messenger.ui.components.ShareContactChooserDialog
 import androidx.compose.foundation.layout.*
@@ -13,12 +18,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.GroupAdd
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.SortByAlpha
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -63,9 +69,10 @@ fun ContactsScreen(
     viewModel: ContactsViewModel = hiltViewModel()
 ) {
     val contacts by viewModel.contacts.collectAsState()
+    val sortOrder by viewModel.sortOrder.collectAsState()
     // In contrast to the address book, a list row also needs the real chat:
     // message preview, time and unread badge live in the chats table.
-    val contactChatRows by viewModel.contactChatRows.collectAsState()
+    val contactChatRows by viewModel.sortedContactChatRows.collectAsState()
     val context = LocalContext.current
     // Подтверждение удаления контакта из меню «⋮» в пузыре.
     var confirmDelete by remember { mutableStateOf<Contact?>(null) }
@@ -74,6 +81,8 @@ fun ContactsScreen(
     var showInviteShare by remember { mutableStateOf(false) }
     // Раунд 175: «Поделиться контактом» - сначала выбор пути (в APU / наружу).
     var shareTarget by remember { mutableStateOf<Contact?>(null) }
+    // Сортировка открывается прямо из шапки, как в адресной книге телефона.
+    var sortMenuExpanded by remember { mutableStateOf(false) }
 
     // Подложка на весь экран, в том числе под верхней панелью.
     Box(
@@ -100,6 +109,25 @@ fun ContactsScreen(
                     }
                 },
                 actions = {
+                    // Адресная книга может быть длинной: выбор порядка всегда
+                    // под рукой, а текущий вариант отмечен галочкой в меню.
+                    Box {
+                        IconButton(onClick = { sortMenuExpanded = true }) {
+                            Icon(
+                                Icons.Default.SortByAlpha,
+                                contentDescription = "Сортировка: ${sortOrder.title}",
+                            )
+                        }
+                        ContactSortMenu(
+                            expanded = sortMenuExpanded,
+                            selected = sortOrder,
+                            onDismiss = { sortMenuExpanded = false },
+                            onSelect = { order ->
+                                viewModel.setSortOrder(order)
+                                sortMenuExpanded = false
+                            },
+                        )
+                    }
                     // Пригласить друга — в один тап, прямо из списка контактов.
                     IconButton(
                         onClick = {
@@ -337,6 +365,61 @@ fun ContactsScreen(
                 android.widget.Toast.LENGTH_SHORT,
             ).show()
             viewModel.consumeToast()
+        }
+    }
+}
+
+/**
+ * Меню сортировки адресной книги. Это тоже светлый APU-пузырь: обычное тёмное
+ * меню Material на обоях выглядело бы отдельным, чужим слоем интерфейса.
+ */
+@Composable
+private fun ContactSortMenu(
+    expanded: Boolean,
+    selected: ContactSortOrder,
+    onDismiss: () -> Unit,
+    onSelect: (ContactSortOrder) -> Unit,
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismiss,
+        modifier = Modifier.widthIn(min = 244.dp),
+        shape = ApuBubbleShape,
+        containerColor = ApuBubbleSurfaceColor,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+        ),
+    ) {
+        ContactSortOrder.entries.forEach { order ->
+            DropdownMenuItem(
+                text = {
+                    Column {
+                        Text(
+                            text = order.title,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = ApuBubbleTextColor,
+                        )
+                        Text(
+                            text = order.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                    }
+                },
+                trailingIcon = {
+                    if (order == selected) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = "Выбрано",
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                },
+                onClick = { onSelect(order) },
+            )
         }
     }
 }

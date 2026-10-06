@@ -79,4 +79,61 @@ class ContactChatRowsTest {
         assertNull(row.chat.lastMessageTime)
         assertFalse(row.chat.isContactOnline)
     }
+
+    @Test
+    fun activitySortPutsOnlineThenMostRecentlySeenContactsFirst() {
+        val unknown = row(id = "unknown", name = "Яна")
+        val recent = row(id = "recent", name = "Борис", lastSeenAtMs = 200L)
+        val online = row(id = "online", name = "Анна", online = true, lastSeenAtMs = 100L)
+
+        val sorted = sortContactChatRows(
+            listOf(unknown, recent, online),
+            ContactSortOrder.LAST_ACTIVITY,
+        )
+
+        assertEquals(listOf("online", "recent", "unknown"), sorted.map { it.contact.id })
+    }
+
+    @Test
+    fun alphabeticSortIgnoresCaseAndUsesIdAsAStableTieBreaker() {
+        val lower = row(id = "b", name = "алексей")
+        val upper = row(id = "a", name = "Алексей")
+        val boris = row(id = "c", name = "Борис")
+
+        val sorted = sortContactChatRows(
+            listOf(boris, lower, upper),
+            ContactSortOrder.ALPHABETICAL,
+        )
+
+        assertEquals(listOf("a", "b", "c"), sorted.map { it.contact.id })
+    }
+
+    @Test
+    fun onlineFirstSortUsesAlphabeticalOrderInsideEachPresenceGroup() {
+        val offlineRecent = row(id = "offline", name = "Борис", lastSeenAtMs = 500L)
+        val onlineZoya = row(id = "zoya", name = "Зоя", online = true)
+        val onlineAnna = row(id = "anna", name = "Анна", online = true)
+
+        val sorted = sortContactChatRows(
+            listOf(offlineRecent, onlineZoya, onlineAnna),
+            ContactSortOrder.ONLINE_FIRST,
+        )
+
+        assertEquals(listOf("anna", "zoya", "offline"), sorted.map { it.contact.id })
+    }
+
+    private fun row(
+        id: String,
+        name: String,
+        online: Boolean = false,
+        lastSeenAtMs: Long? = null,
+    ): ContactChatRow = ContactChatRow(
+        contact = Contact(
+            id = id,
+            displayName = name,
+            isOnline = online,
+            lastSeenAtMs = lastSeenAtMs,
+        ),
+        chat = Chat(id = "chat-$id", contactId = id, contactName = name),
+    )
 }
