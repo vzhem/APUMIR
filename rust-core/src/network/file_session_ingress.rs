@@ -278,7 +278,6 @@ impl FileSessionIngressStore {
             validate_range(&range, now_ms)?;
             pending.push(range);
         }
-        drop(rows);
         drop(statement);
         transaction
             .commit()
