@@ -9,6 +9,7 @@ package com.vladimir.messenger.ui.screens.chat
 // =============================================================================
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Column
@@ -29,6 +30,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.vladimir.messenger.ui.components.ApuAction
+import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
+import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleShape
+import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
+import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ApuActionsMenu
 import com.vladimir.messenger.ui.components.ApuTabBar
 import com.vladimir.messenger.ui.components.Avatar
@@ -87,6 +94,8 @@ import com.vladimir.messenger.util.OwnInvite
 import com.vladimir.messenger.data.link.ShortShare
 import com.vladimir.messenger.ui.components.InviteAttachDialog
 import com.vladimir.messenger.ui.components.NotificationMuteDialog
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 
 private data class NotificationMuteTarget(
     val id: String,
@@ -832,38 +841,161 @@ fun ChatListScreen(
         )
     }
 
-    // Connect dialog
+    // Диалог подключения — отдельная фирменная карточка, а не стандартное
+    // Material-окно с серо-лиловыми полями поверх обоев.
     if (showConnectDialog) {
-        AlertDialog(
-            onDismissRequest = { showConnectDialog = false },
-            title = { Text("Подключиться по ссылке") },
-            text = {
-                OutlinedTextField(
-                    value = connectLink,
-                    onValueChange = { connectLink = it },
-                    label = { Text("Вставьте ссылку p2pm://...") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                )
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    if (connectLink.isNotBlank()) {
-                        // Подключение идёт в ядро по сети: на главном потоке
-                        // это задерживало бы отрисовку, поэтому в фон.
-                        val link = connectLink
-                        pagerScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            RustBridge.connectViaInvite(link)
-                        }
-                        connectLink = ""
-                        showConnectDialog = false
+        ApuConnectByLinkDialog(
+            link = connectLink,
+            onLinkChange = { connectLink = it },
+            onDismiss = { showConnectDialog = false },
+            onConnect = {
+                if (connectLink.isNotBlank()) {
+                    // Подключение идёт в ядро по сети: на главном потоке
+                    // это задерживало бы отрисовку, поэтому в фон.
+                    val link = connectLink
+                    pagerScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        RustBridge.connectViaInvite(link)
                     }
-                }) { Text("Подключиться") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showConnectDialog = false }) { Text("тмена") }
+                    connectLink = ""
+                    showConnectDialog = false
+                }
             },
         )
+    }
+}
+
+/**
+ * Ввод ссылки-приглашения в фирменной APU-карточке.
+ *
+ * Диалог сохраняет затемнение фона, но сам использует те же светлые пузыри,
+ * золотые акценты и хорошо читаемый текст, что список чатов и формы контактов.
+ */
+@Composable
+private fun ApuConnectByLinkDialog(
+    link: String,
+    onLinkChange: (String) -> Unit,
+    onDismiss: () -> Unit,
+    onConnect: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .widthIn(max = 480.dp)
+                .padding(horizontal = 20.dp),
+            shape = RoundedCornerShape(28.dp),
+            color = ApuBubbleSurfaceColor,
+            contentColor = ApuBubbleTextColor,
+            tonalElevation = 0.dp,
+            shadowElevation = 16.dp,
+            border = BorderStroke(
+                1.dp,
+                ApuBubbleAccentColor.copy(alpha = 0.42f),
+            ),
+        ) {
+            Column(
+                modifier = Modifier.padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(CircleShape)
+                            .background(ApuBubbleAccentColor.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Link,
+                            contentDescription = null,
+                            tint = ApuBubbleAccentColor,
+                            modifier = Modifier.size(25.dp),
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Подключиться по ссылке",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = ApuBubbleTextColor,
+                        )
+                        Text(
+                            text = "Добавьте приглашение от собеседника",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                    }
+                }
+
+                ApuFormTextField(
+                    value = link,
+                    onValueChange = onLinkChange,
+                    label = "Ссылка-приглашение",
+                    placeholder = "Вставьте ссылку p2pm://…",
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Link,
+                            contentDescription = null,
+                            tint = ApuBubbleAccentColor,
+                        )
+                    },
+                )
+
+                Text(
+                    text = "Проверьте, что ссылка получена от человека, которому вы доверяете.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ApuBubbleMutedColor,
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        shape = ApuBubbleShape,
+                        border = BorderStroke(
+                            1.dp,
+                            ApuBubbleAccentColor.copy(alpha = 0.48f),
+                        ),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = ApuBubbleAccentColor,
+                        ),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Отмена", fontWeight = FontWeight.SemiBold)
+                    }
+                    Button(
+                        onClick = onConnect,
+                        enabled = link.isNotBlank(),
+                        shape = ApuBubbleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            contentColor = MaterialTheme.colorScheme.onPrimary,
+                            disabledContainerColor = ApuBubbleMutedColor.copy(alpha = 0.24f),
+                            disabledContentColor = ApuBubbleMutedColor.copy(alpha = 0.70f),
+                        ),
+                        modifier = Modifier.weight(1.35f),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Check,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "Подключиться",
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
