@@ -52,7 +52,7 @@ import com.vladimir.messenger.data.local.dao.GroupPollDao
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 25
+const val APP_DATABASE_VERSION = 26
 
 @Database(
     entities = [
@@ -556,6 +556,19 @@ abstract class AppDatabase : RoomDatabase() {
                     "CREATE INDEX IF NOT EXISTS `index_group_poll_votes_pollId` " +
                         "ON `group_poll_votes` (`pollId`)"
                 )
+            }
+        }
+
+        /**
+         * Last-presence timestamps for the Contacts screen.
+         *
+         * The existing `lastSeen` column was a never-written text placeholder.
+         * Keep it intact for old installations and add a typed timestamp beside
+         * it; no contact name, chat, or history is touched by this migration.
+         */
+        val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `contacts` ADD COLUMN `lastSeenAtMs` INTEGER")
             }
         }
 

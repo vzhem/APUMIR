@@ -207,6 +207,10 @@ fun ContactsScreen(
                             onClick = { viewModel.openChatWith(contact) { id -> onContactClick(id, contact) } },
                             username = contact.username,
                             kind = BubbleKind.Personal,
+                            presenceLabel = contactPresenceLabel(
+                                isOnline = contact.isOnline,
+                                lastSeenAtMs = contact.lastSeenAtMs,
+                            ),
                             menuActions = listOf(
                                 BubbleMenuAction(
                                     title = "Написать",

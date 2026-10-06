@@ -2331,8 +2331,15 @@ class CoreServerService : Service() {
                     val existing = contactRepository.getContactByFingerprint(peerId)
                     if (existing != null) {
                         // «В сети» — при КАЖДОМ живом пульсе (переходы дёшевы).
-                        if (onlineMarked.add(peerId)) {
-                            contactRepository.updateOnlineStatus(peerId, true)
+                        // Точный момент последнего пульса запоминаем при первом
+                        // появлении и затем не чаще тяжёлого круга (30 с):
+                        // контактам есть что показать после ухода абонента, а
+                        // база не получает запись на каждый MQTT-пульс.
+                        val becameOnline = onlineMarked.add(peerId)
+                        if (becameOnline || !lightTouch) {
+                            contactRepository.updatePresence(peerId, true, now)
+                        }
+                        if (becameOnline) {
                             // И в чаты: шапка лички и точка в списке читают таблицу chats
                             try { chatRepository.updateContactOnlineStatus(peerId, true) } catch (_: Exception) {}
                             Log.i(TAG, "🟢 ONLINE: $peerName")
@@ -2436,9 +2443,12 @@ class CoreServerService : Service() {
                 val peerId = event.peerId ?: return
                 Log.i(TAG, "Peer lost: $peerId")
                 onlineMarked.remove(peerId)
-                knownPeers.remove(peerId)
+                // Берём время последнего живого пульса до очистки памяти, а
+                // не момент, когда транспорт заметил разрыв: так «был(а)»
+                // остаётся временем, когда контакт действительно видели.
+                val lastSeenAtMs = knownPeers.remove(peerId) ?: System.currentTimeMillis()
                 fileTransferRouter.markOffline(peerId)
-                try { contactRepository.updateOnlineStatus(peerId, false) } catch (_: Exception) {}
+                try { contactRepository.updatePresence(peerId, false, lastSeenAtMs) } catch (_: Exception) {}
                 try { chatRepository.updateContactOnlineStatus(peerId, false) } catch (_: Exception) {}
             }
 
@@ -2525,7 +2535,7 @@ class CoreServerService : Service() {
                 }
                 for (pid in staleIds) {
                     onlineMarked.remove(pid)
-                    knownPeers.remove(pid)
+                    val lastSeenAtMs = knownPeers.remove(pid) ?: now
                     fileTransferRouter.markOffline(pid)
                     // Пропущенный круг - минус к доступности в рейтинге.
                     runCatching {
@@ -2533,7 +2543,7 @@ class CoreServerService : Service() {
                             .recordMiss(applicationContext, pid)
                     }
                     Log.i(TAG, "⚫ OFFLINE (TTL): $pid")
-                    try { contactRepository.updateOnlineStatus(pid, false) } catch (_: Exception) {}
+                    try { contactRepository.updatePresence(pid, false, lastSeenAtMs) } catch (_: Exception) {}
                     try { chatRepository.updateContactOnlineStatus(pid, false) } catch (_: Exception) {}
                 }
             }

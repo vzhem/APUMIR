@@ -33,6 +33,20 @@ interface ContactDao {
     @Query("UPDATE contacts SET isOnline = :isOnline WHERE id = :contactId")
     suspend fun updateOnlineStatus(contactId: String, isOnline: Boolean)
 
+    /**
+     * Запомнить, когда этот телефон действительно видел контакт в сети.
+     *
+     * Метка не сбрасывается при уходе из сети: именно она нужна списку
+     * контактов для «Был(а) сегодня в …». Пустой/некорректный `seenAtMs` не
+     * затирает ранее известное время.
+     */
+    @Query(
+        "UPDATE contacts SET isOnline = :isOnline, " +
+            "lastSeenAtMs = CASE WHEN :seenAtMs > 0 THEN :seenAtMs ELSE lastSeenAtMs END " +
+            "WHERE id = :contactId"
+    )
+    suspend fun updatePresence(contactId: String, isOnline: Boolean, seenAtMs: Long)
+
     /** Холодный старт: все статусы гасим, пока peer_discovered не включит живых. */
     @Query("UPDATE contacts SET isOnline = 0")
     suspend fun setAllOffline()

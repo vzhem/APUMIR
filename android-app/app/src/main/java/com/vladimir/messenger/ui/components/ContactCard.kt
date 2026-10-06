@@ -58,6 +58,8 @@ fun ContactCard(
     username: String = "",
     /** Подпись под именем: личный чат / группа / канал. */
     kind: BubbleKind = BubbleKind.Personal,
+    /** Статус присутствия для адресной книги, например «Был(а) сегодня в 10:30». */
+    presenceLabel: String? = null,
     /** Пункты меню «⋮» справа в пузыре. Пусто - кнопки нет. */
     menuActions: List<BubbleMenuAction> = emptyList(),
     /** Main-inbox marker; ContactsScreen reuses this card without the marker. */
@@ -147,13 +149,18 @@ fun ContactCard(
                 )
             }
 
-            // Подпись пузыря: личный чат / группа / канал. Владелец просил,
-            // чтобы в списке было сразу видно, что это за пузырь.
+            // В адресной книге важнее статус присутствия, чем техническая
+            // подпись «личный чат». В остальных списках остаётся тип пузыря.
             Text(
-                text     = kind.label,
+                text     = presenceLabel ?: kind.label,
                 style    = MaterialTheme.typography.labelSmall,
-                color    = Color(0xFF8A93A2),
+                color    = if (presenceLabel != null && chat.isContactOnline) {
+                    StatusOnline
+                } else {
+                    Color(0xFF8A93A2)
+                },
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
 
             Spacer(modifier = Modifier.height(2.dp))

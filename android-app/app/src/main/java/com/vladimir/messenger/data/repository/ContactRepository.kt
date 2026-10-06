@@ -65,6 +65,14 @@ class ContactRepository @Inject constructor(
         contactDao.updateOnlineStatus(contactId, isOnline)
     }
 
+    /**
+     * Наблюдение presence от собственного транспорта. Это не время, которое
+     * собеседник заявил сам, а честная локальная отметка «видели в сети».
+     */
+    suspend fun updatePresence(contactId: String, isOnline: Boolean, seenAtMs: Long) {
+        contactDao.updatePresence(contactId, isOnline, seenAtMs)
+    }
+
     suspend fun setAllOffline() = contactDao.setAllOffline()
 
     /**
@@ -348,6 +356,7 @@ class ContactRepository @Inject constructor(
         fingerprint = fingerprint,
         isOnline = isOnline,
         lastSeen = lastSeen,
+        lastSeenAtMs = lastSeenAtMs,
         username = username,
     )
 
