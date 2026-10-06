@@ -15,21 +15,30 @@
 # Steps:
 #   1) ask for the API token and verify it;
 #   2) find the three KV namespaces (APU_VAULT, REGISTRY, RELAY);
-#   3) download worker.js from the v11.74.14 release tag (content check);
+#   3) download worker.js from -Ref (release tag or branch) + content checks;
 #   4) deploy with migration new_sqlite_classes MqttBridge and the
-#      MQTT_BRIDGE binding (KV bindings preserved).
+#      MQTT_BRIDGE binding (KV bindings preserved);
+#   5) print the /mqtt/health check: open it in the phone browser - it answers
+#      without WebSocket, so a broken deploy is visible immediately.
+#
+# Usage:
+#   powershell -ExecutionPolicy Bypass -File .\deploy-mqtt-bridge.ps1
+#   powershell -ExecutionPolicy Bypass -File .\deploy-mqtt-bridge.ps1 -Ref v11.74.186
 # ============================================================================
 
-param([string]$Token = "")
+param([string]$Token = "", [string]$Ref = "arena/62ecd7b4-apumir")
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $Account   = "caf1ba3a42dc32ef36978d9ca2bce5ad"
 $Script    = "p2p-relay"
-# Раунд 257: воркер с одноключевым хранением копии (в 4 раза меньше записей
-# KV - дневной лимит бесплатного плана больше не выжигается).
-$WorkerUrl = "https://raw.githubusercontent.com/vzhem/APUMIR/v11.74.152/tools/worker/p2p_relay_worker.js"
+# 2026-10-06: воркер с ИСПРАВЛЕННЫМ разбором MQTT-потока (length пакета -
+# varint; из-за прежнего "1 + len" мост молча не отвечал CONNACK, и телефоны
+# уходили на публичные брокеры). Плюс /mqtt/health со счётчиками.
+# $Ref по умолчанию - ветка с правкой; после выпуска релиза поставьте тег
+# (одна строка), тогда скрипт будет качать воркер из релиза.
+$WorkerUrl = "https://raw.githubusercontent.com/vzhem/APUMIR/$Ref/tools/worker/p2p_relay_worker.js"
 
 Write-Host "=== 1/5 Token ===" -ForegroundColor Cyan
 if ([string]::IsNullOrWhiteSpace($Token)) {
@@ -69,13 +78,28 @@ if (-not $VaultId -or -not $RegistryId -or -not $RelayId) {
 }
 
 Write-Host "=== 4/5 Downloading worker.js ===" -ForegroundColor Cyan
+Write-Host ("  ref: " + $Ref)
 Invoke-WebRequest -Uri $WorkerUrl -OutFile "worker.js"
 $lines = (Get-Content "worker.js").Count
-Write-Host ("  worker.js: $lines lines (expected about 902)")
+Write-Host ("  worker.js: $lines lines (expected about 1276)")
 if (Select-String -Path "worker.js" -Pattern "addrbook/put" -Quiet) {
   Write-Host "  OK: /addrbook endpoints present (backup of the address book)"
 } else {
   Write-Host "ERROR: downloaded worker.js has NO /addrbook endpoints - the script URL and the worker tag are out of sync." -ForegroundColor Red
+  Write-Host "Deploy aborted. Fetch the deploy script from the same tag/commit as the worker and retry." -ForegroundColor Red
+  exit 1
+}
+if (Select-String -Path "worker.js" -Pattern "mqtt/health" -Quiet) {
+  Write-Host "  OK: /mqtt/health present (bridge health check from the phone)"
+} else {
+  Write-Host "ERROR: downloaded worker.js has NO /mqtt/health - the URL and the worker ref are out of sync." -ForegroundColor Red
+  Write-Host "Deploy aborted. Fetch the deploy script from the same tag/commit as the worker and retry." -ForegroundColor Red
+  exit 1
+}
+if (Select-String -Path "worker.js" -Pattern "lengthBytes" -Quiet) {
+  Write-Host "  OK: MQTT varint length parsing present (bridge answers ConnAck)"
+} else {
+  Write-Host "ERROR: downloaded worker.js has the OLD broken MQTT length parsing - the bridge will stay silent." -ForegroundColor Red
   Write-Host "Deploy aborted. Fetch the deploy script from the same tag/commit as the worker and retry." -ForegroundColor Red
   exit 1
 }
@@ -160,7 +184,11 @@ if (-not $resp.success -and ($resp.errors | ForEach-Object { $_.code }) -contain
 if ($resp.success) {
     Write-Host ""
     Write-Host "SUCCESS: deployed. Class MqttBridge and binding MQTT_BRIDGE are live." -ForegroundColor Green
-    Write-Host "Test - open browser console (F12) on any page, paste and press Enter:"
+    Write-Host "Test 1 - open this address in the phone browser (no console needed):" -ForegroundColor Green
+    Write-Host "  https://p2p-relay.1985vzhem.workers.dev/mqtt/health"
+    Write-Host '  Expected: {"ok":true,"broker":"apu-mqtt-bridge","bridge_version":2,...}'
+    Write-Host "  bridge_version=2 means the fixed bridge is deployed; 501 / ok:false means the MQTT_BRIDGE binding is missing."
+    Write-Host "Test 2 - browser console (F12) on any page, paste and press Enter:"
     Write-Host '  const w = new WebSocket("wss://p2p-relay.1985vzhem.workers.dev/mqtt","mqtt"); w.onopen=()=>console.log("OPEN",w.protocol); w.onclose=e=>console.log("CLOSE",e.code,e.reason);'
     Write-Host "Expected in 1-2 seconds: OPEN mqtt"
 } else {

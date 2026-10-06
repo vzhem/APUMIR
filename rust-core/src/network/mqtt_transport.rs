@@ -90,12 +90,16 @@ static MQTT_POLL_ERROR_STREAK: AtomicU64 = AtomicU64::new(0);
 /// Когда WSS-сессия стала стабильной (первое Ok после последней ошибки).
 static MQTT_WSS_STABLE_SINCE_MS: AtomicU64 = AtomicU64::new(0);
 /// Когда наш брокер на relay-домене последний раз не ответил на ConnAck
-/// (0 = не отказывал никогда). После отказа час идём на публичных, потом
-/// снова пробуем наш (worker мог обновиться/ожить).
+/// (0 = не отказывал никогда). После отказа идём на публичных, потом снова
+/// пробуем наш (worker мог обновиться/ожить).
 static MQTT_OWN_FAILED_AT_MS: AtomicU64 = AtomicU64::new(0);
 /// Текущая стартовая попытка - на нашего брокера (для отката при таймауте).
 static MQTT_CHOSEN_OWN: AtomicBool = AtomicBool::new(false);
-const MQTT_OWN_RETRY_AFTER_MS: u64 = 60 * 60 * 1000;
+/// Как долго после отказа нашего брокера ждать перед новой попыткой.
+/// Раньше было 60 минут: если владелец передеплоил воркер, телефон ещё час
+/// сидел на публичных брокерах. 15 минут - цена одной неудачной стартовой
+/// попытки (до 20 с), зато мост возвращается в строй быстро.
+const MQTT_OWN_RETRY_AFTER_MS: u64 = 15 * 60 * 1000;
 const MQTT_START_CONNACK_TIMEOUT: Duration = Duration::from_secs(20);
 const MQTT_FAILOVER_TCP_ERRORS: u64 = 4;
 const MQTT_FAILOVER_WSS_ERRORS: u64 = 6;
@@ -161,6 +165,13 @@ const SECONDARY_BROKER_PORT: u16 = 1883;
 // достаёт из него домен и порт (split_url), путь остаётся на мосту.
 const WSS_BRIDGE_URL: &str = "wss://p2p-relay.1985vzhem.workers.dev/mqtt";
 const WSS_BRIDGE_PORT: u16 = 443;
+/// Таймаут рукопожатия с WSS-мостом для rumqttc (`NetworkOptions::
+/// connection_timeout`). По умолчанию там 5 с - это TCP+TLS+WebSocket+CONNECT
+/// +CONNACK через мобильную сеть, и на медленном канале телефон сдавался ровно
+/// перед ответом моста (в отчёте - "MQTT error: Network timeout; retrying in
+/// 1s (streak N)"). 10 с мосту хватает, а молчащий мост всё равно отсекается
+/// раньше 20-секундного окна ядра (MQTT_START_CONNACK_TIMEOUT).
+const WSS_BRIDGE_CONNECT_TIMEOUT_SECS: u64 = 10;
 const MQTT_REQUEST_ENQUEUE_TIMEOUT: Duration = Duration::from_secs(5);
 const MQTT_LIVENESS_WATCHDOG_INTERVAL: Duration = Duration::from_secs(15);
 const MQTT_LIVENESS_STALL_AFTER: Duration = Duration::from_secs(90);
@@ -427,6 +438,41 @@ fn wss_bridge_transport() -> Option<rumqttc::Transport> {
     )))
 }
 
+/// Сетевые настройки для сессии через WSS-мост (см.
+/// WSS_BRIDGE_CONNECT_TIMEOUT_SECS). Для прямого TCP оставляем дефолт rumqttc:
+/// мёртвый брокер там виден за 5 с, и это удобно.
+fn wss_bridge_network_options() -> rumqttc::NetworkOptions {
+    let mut network = rumqttc::NetworkOptions::new();
+    network.set_connection_timeout(WSS_BRIDGE_CONNECT_TIMEOUT_SECS);
+    network
+}
+
+/// Человеческая расшифровка ошибки MQTT для лога: сухая английская строка
+/// rumqttc («Network timeout») ничего не говорит тому, кто читает отчёт.
+/// Пустая строка - ошибка незнакомая, лог остаётся как был.
+fn mqtt_error_hint(error: &rumqttc::ConnectionError) -> &'static str {
+    use rumqttc::ConnectionError as Mqtt;
+    match error {
+        Mqtt::NetworkTimeout => {
+            " - брокер молчит: рукопожатие не уложилось в отведённое время"
+        }
+        Mqtt::FlushTimeout => " - брокер перестал принимать данные (сеть режет поток)",
+        Mqtt::ConnectionRefused(_) => " - брокер отклонил подключение",
+        Mqtt::RequestsDone => " - очередь запросов к брокеру закрыта",
+        Mqtt::NotConnAck(_) => " - брокер ответил не ConnAck",
+        Mqtt::MqttState(_) => " - сбой внутреннего состояния MQTT-сессии",
+        Mqtt::Io(_) => " - сеть оборвала соединение с брокером",
+        Mqtt::Tls(_) => " - TLS-рукопожатие с брокером не прошло",
+        Mqtt::Websocket(_) => " - WebSocket моста закрылся",
+        Mqtt::WsConnect(_) => " - не собрался WebSocket-запрос к мосту",
+        Mqtt::ResponseValidation(_) => {
+            " - мост ответил без субпротокола mqtt (в воркере нет моста)"
+        }
+        Mqtt::InvalidUrl(_) => " - не разобран адрес моста",
+        _ => "",
+    }
+}
+
 /// «Любая сеть»: если через FFI установлен SOCKS5-прокси, поднимаем ЛОКАЛЬНЫЙ мост
 /// (127.0.0.1:0): брокерские подключения движка приходят в мост, а мост качает байты
 /// через SOCKS5-туннель к реальному брокеру. Работает с любой версией rumqttc
@@ -625,7 +671,10 @@ impl MqttTransport {
             true,
         ));
 
-        let (client, eventloop) = AsyncClient::new(opts, MQTT_CLIENT_REQUEST_BUFFER);
+        let (client, mut eventloop) = AsyncClient::new(opts, MQTT_CLIENT_REQUEST_BUFFER);
+        if wss_bridge {
+            eventloop.set_network_options(wss_bridge_network_options());
+        }
         let (event_tx, event_rx) = mpsc::channel(MQTT_EVENT_BUFFER);
         let liveness = Arc::new(MqttLivenessProbe::new());
         liveness.set_loss_intolerant_pending(shared_state.loss_intolerant_inbox.len());
@@ -663,8 +712,11 @@ impl MqttTransport {
                 QoS::AtLeastOnce,
                 true,
             ));
-            let (secondary_client, secondary_eventloop) =
+            let (secondary_client, mut secondary_eventloop) =
                 AsyncClient::new(secondary_options, MQTT_CLIENT_REQUEST_BUFFER);
+            if wss_bridge {
+                secondary_eventloop.set_network_options(wss_bridge_network_options());
+            }
             tracing::info!(
                 "MQTT SECONDARY STATUS: broker=emqx state=starting mode=dual_publish max_fanout=2"
             );
@@ -1255,8 +1307,9 @@ impl MqttTransport {
                             break "WSS bridge path failing (consecutive poll errors); retrying direct TCP".to_string();
                         }
                         tracing::warn!(
-                            "MQTT error: {}; retrying in {}s (streak {})",
+                            "MQTT error: {}{}; retrying in {}s (streak {})",
                             e,
+                            mqtt_error_hint(&e),
                             reconnect_backoff_secs,
                             streak
                         );

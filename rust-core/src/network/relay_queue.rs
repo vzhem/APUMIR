@@ -487,6 +487,51 @@ impl RelayQueue {
         Ok(true)
     }
 
+    /// Поставить сообщение в relay-очередь при восстановлении из durable-стора
+    /// (startup-restore). Отличия от [`enqueue`]:
+    ///
+    /// - при переполнении ОБЩЕЙ очереди сначала освобождаем место, убирая
+    ///   просроченные записи; не истёкшие не трогаем — чужое недоставленное
+    ///   сообщение нельзя терять молча ради места;
+    /// - лимит на получателя остаётся строгим: переполнение у одного
+    ///   получателя не выдавливает сообщения остальных.
+    ///
+    /// Нужен именно восстановлению: довести до очереди каждого получателя,
+    /// а не оборваться на первом переполнении (см. `engine::core::
+    /// restore_relay_custody`). Обычный приём сообщений из сети — [`enqueue`].
+    pub fn enqueue_first(&self, msg: RelayMessage) -> Result<bool, RelayQueueError> {
+        if msg.hops_exceeded() {
+            return Ok(false);
+        }
+
+        let mut entries = self.entries.lock().unwrap();
+
+        if entries.contains_key(&msg.msg_id) {
+            return Ok(false); // дедупликация
+        }
+
+        // Per-recipient лимит — строгий (см. doc выше).
+        let per_recipient = entries.values().filter(|m| m.recipient == msg.recipient).count();
+        if per_recipient >= self.max_per_recipient {
+            return Err(RelayQueueError::RecipientQueueFull {
+                max: self.max_per_recipient,
+            });
+        }
+
+        if entries.len() >= self.max_total {
+            let now_ms = utc_now_ms();
+            entries.retain(|_, m| !m.is_expired_at(now_ms));
+            if entries.len() >= self.max_total {
+                return Err(RelayQueueError::GlobalQueueFull {
+                    max: self.max_total,
+                });
+            }
+        }
+
+        entries.insert(msg.msg_id.clone(), msg);
+        Ok(true)
+    }
+
     // ─── Чтение ─────────────────────────────────────────────────────
 
     /// Есть ли уже сообщение с таким `msg_id` (дедупликация).
@@ -643,6 +688,19 @@ mod tests {
         )
     }
 
+    /// Сообщение, чей TTL уже истёк (для проверки освобождения места).
+    fn expired_msg(msg_id: &str, recipient: &str) -> RelayMessage {
+        RelayMessage::with_ttl_at_ms(
+            utc_now_ms() - 60_000,
+            msg_id.into(),
+            recipient.into(),
+            "pk_origin".into(),
+            "chat-1".into(),
+            vec![0xAA; 50],
+            Duration::from_secs(30),
+        )
+    }
+
     // ── Базовые ─────────────────────────────────────────────────────
 
     #[test]
@@ -790,6 +848,42 @@ mod tests {
         // Третье — общий лимит
         let res = q.enqueue(msg("m3", "pk_d"));
         assert_eq!(res, Err(RelayQueueError::GlobalQueueFull { max: 2 }));
+    }
+
+    #[test]
+    fn test_enqueue_first_frees_only_expired() {
+        // Глобальный лимит занят не-истёкшими: место НЕ освобождаем (чужое
+        // недоставленное сообщение не вытесняем), отдаём Err.
+        let q = RelayQueue::with_limits(100, 2);
+        q.enqueue(msg("m1", "pk_b")).unwrap();
+        q.enqueue(msg("m2", "pk_c")).unwrap();
+        let res = q.enqueue_first(msg("m3", "pk_d"));
+        assert_eq!(res, Err(RelayQueueError::GlobalQueueFull { max: 2 }));
+        assert_eq!(q.total_count(), 2);
+        assert!(q.contains("m1") && q.contains("m2"));
+
+        // Среди занявших место есть просроченная: её и убираем под восстановление.
+        let q = RelayQueue::with_limits(100, 2);
+        q.enqueue(expired_msg("old", "pk_b")).unwrap();
+        q.enqueue(msg("m2", "pk_c")).unwrap();
+        assert!(q.enqueue_first(msg("m3", "pk_d")).unwrap());
+        assert_eq!(q.total_count(), 2);
+        assert!(!q.contains("old"), "просроченную убрали");
+        assert!(q.contains("m3"), "восстановленное в очереди");
+    }
+
+    #[test]
+    fn test_enqueue_first_keeps_per_recipient_strict() {
+        let q = RelayQueue::with_limits(1, 10);
+        q.enqueue(msg("m1", "pk_b")).unwrap();
+        // Переполнение у ОДНОГО получателя не выдавливает его сообщения...
+        let res = q.enqueue_first(msg("m2", "pk_b"));
+        assert_eq!(res, Err(RelayQueueError::RecipientQueueFull { max: 1 }));
+        assert!(q.contains("m1"));
+        // ...и не мешает восстановить сообщения ДРУГОГО получателя
+        // (прежний break в ядре обрывал восстановление на этом месте).
+        assert!(q.enqueue_first(msg("m3", "pk_c")).unwrap());
+        assert_eq!(q.total_count(), 2);
     }
 
     // ── Хопы ────────────────────────────────────────────────────────

@@ -53,7 +53,8 @@ use crate::network::address_lookup::{
 use crate::network::message_queue::MessageQueue;
 use crate::network::offline_send::prepare_offline_relay;
 use crate::network::relay_queue::{
-    RelayMessage, RelayQueue, DEFAULT_RELAY_TTL, MAX_MESH_RELAY_ENVELOPE_BYTES, MAX_TOTAL,
+    RelayMessage, RelayQueue, RelayQueueError, DEFAULT_RELAY_TTL, MAX_MESH_RELAY_ENVELOPE_BYTES,
+    MAX_TOTAL,
 };
 use crate::network::wire::MeshEnvelope;
 use crate::storage::relay_at_rest::{self as at_rest, RelayAtRestKeySource};
@@ -229,14 +230,20 @@ fn restore_relay_custody(
             }
             let total = outcome.records.len();
             let mut restored = 0usize;
+            let mut recipient_full = 0usize;
+            let mut queue_full = 0usize;
             for record in outcome.records {
-                match queue.enqueue(record) {
+                // enqueue_first (а не enqueue): под восстановление освобождает
+                // место, убирая только просроченное, и НЕ обрывается на
+                // переполнении у одного получателя. Раньше здесь стоял break:
+                // один забитый получатель (500 записей) отменял восстановление
+                // всем, кто шёл дальше по списку, — в отчёте это выглядело как
+                // «restore enqueue failed: Relay-очередь получателя переполнена».
+                match queue.enqueue_first(record) {
                     Ok(true) => restored += 1,
                     Ok(false) => {} // дубль/исчерпанный hop — ожидаемо пропускаем
-                    Err(e) => {
-                        tracing::warn!("MESH durable: restore enqueue failed: {}", e);
-                        break; // лимит очереди — дальше восстанавливать бессмысленно
-                    }
+                    Err(RelayQueueError::RecipientQueueFull { .. }) => recipient_full += 1,
+                    Err(RelayQueueError::GlobalQueueFull { .. }) => queue_full += 1,
                 }
             }
             if total > 0 || restored > 0 {
@@ -244,6 +251,14 @@ fn restore_relay_custody(
                     "MESH durable: restored {}/{} relay record(s) after startup",
                     restored,
                     total
+                );
+            }
+            if recipient_full > 0 || queue_full > 0 {
+                tracing::warn!(
+                    "MESH durable: kept {} record(s) in durable store (очередь получателя полна: {}, очередь целиком полна: {}); лежат зашифрованными и вернутся при следующем старте",
+                    recipient_full + queue_full,
+                    recipient_full,
+                    queue_full
                 );
             }
         }
