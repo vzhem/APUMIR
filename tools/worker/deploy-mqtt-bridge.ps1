@@ -23,10 +23,10 @@
 #
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File .\deploy-mqtt-bridge.ps1
-#   powershell -ExecutionPolicy Bypass -File .\deploy-mqtt-bridge.ps1 -Ref v11.74.186
+#   powershell -ExecutionPolicy Bypass -File .\deploy-mqtt-bridge.ps1 -Ref arena/62ecd7b4-apumir
 # ============================================================================
 
-param([string]$Token = "", [string]$Ref = "arena/62ecd7b4-apumir")
+param([string]$Token = "", [string]$Ref = "v11.74.186")
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -36,8 +36,8 @@ $Script    = "p2p-relay"
 # 2026-10-06: воркер с ИСПРАВЛЕННЫМ разбором MQTT-потока (length пакета -
 # varint; из-за прежнего "1 + len" мост молча не отвечал CONNACK, и телефоны
 # уходили на публичные брокеры). Плюс /mqtt/health со счётчиками.
-# $Ref по умолчанию - ветка с правкой; после выпуска релиза поставьте тег
-# (одна строка), тогда скрипт будет качать воркер из релиза.
+# $Ref по умолчанию - тег выпуска v11.74.186 (в нём эта правка воркера). Если
+# правите воркер в ветке - передайте -Ref <ветка>, иначе скачается релизный файл.
 $WorkerUrl = "https://raw.githubusercontent.com/vzhem/APUMIR/$Ref/tools/worker/p2p_relay_worker.js"
 
 Write-Host "=== 1/5 Token ===" -ForegroundColor Cyan
