@@ -103,6 +103,8 @@ fun ApuSettingsSectionTitle(title: String, modifier: Modifier = Modifier) {
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
             color = ApuBubbleAccentColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.apuBubbleSurface(shape = RoundedCornerShape(12.dp))
                 .padding(horizontal = 10.dp, vertical = 5.dp),
         )
@@ -147,9 +149,17 @@ fun ApuSettingsItem(
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Medium,
                 color = ApuBubbleTextColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (!subtitle.isNullOrBlank()) {
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = ApuBubbleMutedColor)
+                Text(
+                    subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ApuBubbleMutedColor,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
         if (trailingContent != null) {
@@ -179,7 +189,14 @@ fun ApuProfileQuickAction(label: String, icon: ImageVector, onClick: () -> Unit,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Icon(icon, contentDescription = null, tint = ApuBubbleAccentColor, modifier = Modifier.size(24.dp))
-        Text(label, style = MaterialTheme.typography.labelLarge, color = ApuBubbleAccentColor, fontWeight = FontWeight.SemiBold)
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            color = ApuBubbleAccentColor,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

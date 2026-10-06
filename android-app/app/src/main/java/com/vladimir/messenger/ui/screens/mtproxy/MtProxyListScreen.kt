@@ -1,7 +1,8 @@
 package com.vladimir.messenger.ui.screens.mtproxy
 
+import com.vladimir.messenger.ui.components.ApuAction
+import com.vladimir.messenger.ui.components.ApuActionsMenu
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
-
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 
 import androidx.compose.foundation.background
@@ -43,6 +44,9 @@ fun MtProxyListScreen(
 
     var showAddDialog by remember { mutableStateOf(false) }
     var showImportDialog by remember { mutableStateOf(false) }
+    // Четыре значка съедали шапку и обрезали «MTProto прокси». Все действия
+    // собраны в одно фирменное меню, как на остальных длинных экранах.
+    var showActionsMenu by remember { mutableStateOf(false) }
 
     LaunchedEffect(uiState.message) {
         uiState.message?.let {
@@ -72,19 +76,38 @@ fun MtProxyListScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        showImportDialog = true
-                    }) {
-                        Icon(Icons.Default.ContentPaste, "Импорт прокси")
-                    }
-                    IconButton(onClick = { viewModel.collectNow() }, enabled = !uiState.isCollecting) {
-                        Icon(Icons.Default.Download, "Собрать прокси из каналов")
-                    }
-                    IconButton(onClick = { viewModel.checkAllAndPickBest() }, enabled = !uiState.isChecking) {
-                        Icon(Icons.Default.Refresh, "Проверить все")
-                    }
-                    IconButton(onClick = { viewModel.cleanupDead() }) {
-                        Icon(Icons.Default.CleaningServices, "Очистить мёртвые")
+                    Box {
+                        IconButton(onClick = { showActionsMenu = true }) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "Действия с прокси")
+                        }
+                        ApuActionsMenu(
+                            expanded = showActionsMenu,
+                            onDismiss = { showActionsMenu = false },
+                            actions = listOf(
+                                ApuAction(
+                                    title = "Импорт прокси",
+                                    icon = Icons.Default.ContentPaste,
+                                    onClick = { showImportDialog = true },
+                                ),
+                                ApuAction(
+                                    title = "Собрать прокси из каналов",
+                                    icon = Icons.Default.Download,
+                                    enabled = !uiState.isCollecting,
+                                    onClick = { viewModel.collectNow() },
+                                ),
+                                ApuAction(
+                                    title = "Проверить все",
+                                    icon = Icons.Default.Refresh,
+                                    enabled = !uiState.isChecking,
+                                    onClick = { viewModel.checkAllAndPickBest() },
+                                ),
+                                ApuAction(
+                                    title = "Очистить мёртвые",
+                                    icon = Icons.Default.CleaningServices,
+                                    onClick = { viewModel.cleanupDead() },
+                                ),
+                            ),
+                        )
                     }
                 }
             )
@@ -228,17 +251,23 @@ private fun MtProxyCard(
                 Text(
                     "${proxy.host}:${proxy.port}",
                     style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
                 Text(
                     statusText,
                     style = MaterialTheme.typography.bodySmall,
-                    color = statusColor
+                    color = statusColor,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
                 Text(
                     "Источник: ${proxy.source} | ${formatDate(proxy.addedAt)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = ApuBubbleMutedColor,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
             }
 
