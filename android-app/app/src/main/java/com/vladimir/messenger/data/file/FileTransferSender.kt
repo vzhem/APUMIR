@@ -1,6 +1,7 @@
 package com.vladimir.messenger.data.file
 
 import android.util.Log
+import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import java.util.concurrent.ConcurrentHashMap
@@ -322,6 +323,15 @@ class FileTransferSender(
                         range,
                     )
                 }.getOrDefault(false)
+                if (capability.authenticatedDirectSession) {
+                    // This is intentionally metadata-only: the diagnostic report must never retain
+                    // ciphertext, names, keys, transfer IDs or contact IDs.
+                    TransferDiagnostics.record(
+                        "F4",
+                        "Direct-session range requested: chunk=$chunkIndex offset=$offset bytes=${range.size}; " +
+                            "native bridge=${if (delivered) "accepted" else "unavailable"}",
+                    )
+                }
                 if (!delivered) {
                     Log.i(TAG, "Recipient not directly reachable (binary) — pausing transfer")
                     throw RecipientOfflineException(transferIdHex)

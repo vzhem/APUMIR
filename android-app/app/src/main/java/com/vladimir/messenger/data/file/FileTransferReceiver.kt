@@ -1,6 +1,7 @@
 package com.vladimir.messenger.data.file
 
 import android.util.Log
+import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
@@ -324,6 +325,10 @@ class FileTransferReceiver(
         runCatching { onFcap(transferIdHex, senderId, maxFramePayload) }
             .onFailure { Log.w(TAG, "FCAP hook failed for $transferIdHex: ${it.message}") }
         if (features and FileTransferWire.FCAP_FEATURE_AUTHENTICATED_DIRECT_SESSION != 0) {
+            TransferDiagnostics.record(
+                "F4",
+                "Received FCAP v2 authenticated-direct capability (maxFrame=$maxFramePayload)",
+            )
             runCatching { onAuthenticatedDirectFcap(transferIdHex, senderId, maxFramePayload) }
                 .onFailure { Log.w(TAG, "F4 FCAP hook failed for $transferIdHex: ${it.message}") }
         }

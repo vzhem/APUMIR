@@ -4822,10 +4822,11 @@ impl P2PCore {
             addr,
             self.runtime.as_ref(),
         ) else {
+            tracing::info!("F4: sender prerequisites unavailable; using F3 fallback");
             return false;
         };
         let Some(ed25519_public_key) = self.peer_exchange.pinned_key(peer_id) else {
-            tracing::debug!("F4: no pinned direct identity for {}; using F3 fallback", peer_id);
+            tracing::info!("F4: no pinned direct identity for {}; using F3 fallback", peer_id);
             return false;
         };
         let target = match FileSessionTarget::new(
@@ -4837,7 +4838,7 @@ impl P2PCore {
         ) {
             Ok(target) => target,
             Err(error) => {
-                tracing::debug!("F4: invalid target for {}; using F3 fallback: {}", peer_id, error);
+                tracing::info!("F4: invalid target for {}; using F3 fallback: {}", peer_id, error);
                 return false;
             }
         };
@@ -4851,13 +4852,13 @@ impl P2PCore {
         });
         match result {
             Ok(Ok(())) => {
-                tracing::debug!("F4: durable authenticated range ACKed by {}", peer_id);
+                tracing::info!("F4: durable authenticated range ACKed by {}", peer_id);
                 true
             }
             Ok(Err(error)) => {
                 // A refusal can mean N-1 or a stale direct capability. Do not poison address
                 // reachability here: the F3 fallback below remains valid for that same address.
-                tracing::debug!("F4: session to {} unavailable; using F3 fallback: {}", peer_id, error);
+                tracing::info!("F4: session to {} unavailable; using F3 fallback: {}", peer_id, error);
                 false
             }
             Err(_) => {

@@ -501,6 +501,11 @@ runtime. Следующий slice не объявляется готовым п�
   filename, plain bytes и whole-file allocation в ingress нет. Exact duplicate is idempotent, changed
   already-ACKed range is rejected.
 
+Для physical acceptance в Settings → «Поддержка» → «Логи» есть копируемый bounded report: версия,
+состояние core/сети, безопасные F4/FCAP app events и только релевантные строки собственного process
+logcat. Он redacts contact IDs и IP addresses и не копирует chat text, filenames, ciphertext или keys;
+после test transfer его можно приложить к bug report. Это diagnostic aid, не доказательство delivery.
+
 Этот slice намеренно пока использует C1 ordered stream one range at a time. D1–D3 parallel/adaptive
 windows, signed `MissingRanges`, path manager E и custody F не помечаются этим source wiring как
 runtime-ready. Нужны Rust/Android compile gates, two-phone clean/upgrade/resume testing, restart after
