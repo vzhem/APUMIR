@@ -168,7 +168,7 @@ jobs:
         if: failure()
         run: |
           test -f "$RUNNER_TEMP/gradle-build.log" || exit 0
-          tail -n 100 "$RUNNER_TEMP/gradle-build.log" | while IFS= read -r line; do
+          tail -n 10 "$RUNNER_TEMP/gradle-build.log" | while IFS= read -r line; do
             clean=$(printf '%s' "$line" | tr '%' '_' | tr '\r\n' ' ')
             [ -n "$clean" ] && echo "::error title=Gradle build tail::$clean"
           done
