@@ -21,6 +21,7 @@ import com.vladimir.messenger.data.link.LinkShortener
 import com.vladimir.messenger.data.link.ShortLinks
 import com.vladimir.messenger.service.CoreServerService
 import com.vladimir.messenger.service.UpdateChecker
+import com.vladimir.messenger.service.UpdateNotifier
 import com.vladimir.messenger.ui.update.UpdateDialog
 import com.vladimir.messenger.MainViewModel
 import com.vladimir.messenger.ui.navigation.Screen
@@ -58,6 +59,7 @@ interface MainActivityEntryPoint {
     fun botApi(): BotApi
     fun contactRepository(): ContactRepository
     fun updateChecker(): UpdateChecker
+    fun updateNotifier(): UpdateNotifier
     fun linkShortener(): LinkShortener
 }
 
@@ -127,6 +129,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleNotificationTap(intent)
+        handleUpdateNotificationTap(intent)
         handleDeepLinkIntent(intent)
     }
 
@@ -162,6 +165,37 @@ class MainActivity : ComponentActivity() {
             intent.removeExtra(com.vladimir.messenger.service.NotificationHelper.EXTRA_CHAT_ID)
             intent.removeExtra(com.vladimir.messenger.service.NotificationHelper.EXTRA_TOPIC_ID)
         }
+    }
+
+    /**
+     * Тап по системному уведомлению об обновлении. Официальная карточка уже
+     * сохранена фоновым worker'ом, поэтому окно скачивания открывается без
+     * повторного ожидания сети. Для предложения соседа остаётся понятный путь
+     * в раздел обновлений, а параллельно запускаем ручную проверку сайта.
+     */
+    private fun handleUpdateNotificationTap(intent: Intent?) {
+        if (intent?.getBooleanExtra(UpdateNotifier.EXTRA_OPEN_UPDATE, false) != true) return
+        runCatching { intent.removeExtra(UpdateNotifier.EXTRA_OPEN_UPDATE) }
+        val entryPoint = EntryPointAccessors.fromApplication(
+            applicationContext,
+            MainActivityEntryPoint::class.java,
+        )
+        val currentVersion = runCatching {
+            packageManager.getPackageInfo(packageName, 0).versionName.orEmpty()
+        }.getOrDefault("")
+        val savedRelease = entryPoint.updateNotifier().pendingOfficialRelease(currentVersion)
+        if (savedRelease != null) {
+            updateRelease = savedRelease
+            return
+        }
+        // Роевое объявление хранит файл у соседа, а не URL. Не обещаем
+        // автоскачивание: подсказываем честный путь и сразу проверяем сайт.
+        android.widget.Toast.makeText(
+            applicationContext,
+            "Обновление доступно. Откройте Настройки → Обновления, чтобы выбрать способ скачивания.",
+            android.widget.Toast.LENGTH_LONG,
+        ).show()
+        checkForUpdates(manual = true)
     }
 
     private fun handleDeepLinkIntent(intent: Intent?) {
@@ -341,6 +375,7 @@ class MainActivity : ComponentActivity() {
             com.vladimir.messenger.data.update.DownloadTrashCleanup.cleanOldApks(applicationContext)
         }
         handleNotificationTap(intent)
+        handleUpdateNotificationTap(intent)
 
         ThemeModeHolder.init(this)
         AppFontSizeHolder.init(this)
@@ -529,7 +564,7 @@ class MainActivity : ComponentActivity() {
     }
 
 
-    private fun checkForUpdates() {
+    private fun checkForUpdates(manual: Boolean = false) {
         lastUpdateCheckAtMs = System.currentTimeMillis()
         lifecycleScope.launch {
             try {
@@ -541,7 +576,7 @@ class MainActivity : ComponentActivity() {
                 val appVersion = try {
                         packageManager.getPackageInfo(packageName, 0).versionName ?: "v0.0.0"
                     } catch (_: Exception) { "v0.0.0" }
-                    val release = updateChecker.checkForUpdate(appVersion)
+                    val release = updateChecker.checkForUpdate(appVersion, manual = manual)
                 if (release != null) {
                     if (release.version == dismissedUpdateVersion) {
                         // Эту версию уже отложили «Позже» в этой сессии —

@@ -8,6 +8,7 @@ import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.referral.ReferralRankStore
 import com.vladimir.messenger.worker.ProxyCollectorWorker
 import com.vladimir.messenger.worker.RelayWakeWorker
+import com.vladimir.messenger.worker.UpdateCheckWorker
 import androidx.work.WorkManager
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.NetworkType
@@ -49,6 +50,8 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory {
         // р236: черновики сообщений (недописанный текст поля ввода).
         com.vladimir.messenger.data.draft.DraftStore.attach(applicationContext)
         createNotificationChannels()
+        com.vladimir.messenger.service.UpdateNotifier(applicationContext).ensureChannel()
+        scheduleUpdateChecks()
         scheduleBoundedRelayWake()
         // Раунд 260: ядро стартует как можно раньше - ещё до отрисовки
         // первого экрана, чтобы к открытию чатов движок уже поднимался.
@@ -86,6 +89,38 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory {
             }
         } catch (e: Exception) {
             Log.e("MessengerApp", "Failed to apply proxy collector entitlement", e)
+        }
+    }
+
+    /**
+     * Проверка релиза в фоне: телефон узнаёт о новой версии и тогда, когда
+     * приложение не открывали. WorkManager соблюдает сеть и сам переживает
+     * перезапуск; повторное уведомление об одной версии отсекает notifier.
+     */
+    private fun scheduleUpdateChecks() {
+        try {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .build()
+            val request = PeriodicWorkRequestBuilder<UpdateCheckWorker>(
+                12L,
+                TimeUnit.HOURS,
+                3L,
+                TimeUnit.HOURS,
+            )
+                .setInitialDelay(15L, TimeUnit.MINUTES)
+                .setConstraints(constraints)
+                .build()
+            WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+                UpdateCheckWorker.WORK_NAME,
+                // Не перестраиваем отсчёт при каждом холодном старте: иначе
+                // телефон, который открывают часто и ненадолго, мог бы вечно
+                // не дойти до фоновой проверки.
+                ExistingPeriodicWorkPolicy.KEEP,
+                request,
+            )
+        } catch (error: Exception) {
+            Log.e("MessengerApp", "Failed to schedule update checks", error)
         }
     }
 
