@@ -18,9 +18,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -176,6 +179,94 @@ fun ApuSettingsItem(
             )
         }
     }
+}
+
+/**
+ * Строка списка возможностей ранга: значок в фирменном квадратике + текст.
+ *
+ * Появилась, чтобы «Ранги и возможности» не выглядели списком с маркерами
+ * «•»: возможность либо уже открыта (золотая галочка), либо ещё заперта
+ * (серый замок) — видно с одного взгляда, без чтения пояснений.
+ */
+@Composable
+fun ApuSettingsFeatureRow(
+    text: String,
+    available: Boolean = true,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier.size(26.dp)
+                .background(
+                    if (available) {
+                        ApuBubbleAccentColor.copy(alpha = 0.12f)
+                    } else {
+                        ApuBubbleMutedColor.copy(alpha = 0.10f)
+                    },
+                    RoundedCornerShape(8.dp),
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                if (available) Icons.Default.Check else Icons.Default.Lock,
+                contentDescription = if (available) "Открыто" else "Ещё закрыто",
+                tint = if (available) ApuBubbleAccentColor else ApuBubbleMutedColor,
+                modifier = Modifier.size(15.dp),
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (available) ApuBubbleTextColor else ApuBubbleMutedColor,
+        )
+    }
+}
+
+/** Короткая плашка-ярлык («ваш ранг», «промокод +10»): тот же тон, что у подписей. */
+@Composable
+fun ApuSettingsChip(
+    text: String,
+    modifier: Modifier = Modifier,
+    highlighted: Boolean = true,
+) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = if (highlighted) ApuBubbleAccentColor else ApuBubbleMutedColor,
+        maxLines = 1,
+        modifier = modifier
+            .clip(RoundedCornerShape(9.dp))
+            .background(
+                if (highlighted) {
+                    ApuBubbleAccentColor.copy(alpha = 0.12f)
+                } else {
+                    ApuBubbleMutedColor.copy(alpha = 0.10f)
+                },
+            )
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    )
+}
+
+/** Полоска «сколько осталось до следующего ранга»: спокойное золото APU. */
+@Composable
+fun ApuSettingsProgress(
+    fraction: Float,
+    modifier: Modifier = Modifier,
+) {
+    LinearProgressIndicator(
+        progress = { fraction.coerceIn(0f, 1f) },
+        modifier = modifier
+            .fillMaxWidth()
+            .height(6.dp)
+            .clip(RoundedCornerShape(3.dp)),
+        color = ApuBubbleAccentColor,
+        trackColor = ApuBubbleAccentColor.copy(alpha = 0.15f),
+    )
 }
 
 @Composable

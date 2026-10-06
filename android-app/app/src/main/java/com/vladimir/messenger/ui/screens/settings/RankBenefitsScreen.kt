@@ -1,11 +1,17 @@
 package com.vladimir.messenger.ui.screens.settings
 
 import com.vladimir.messenger.ui.components.ApuSettingsCard
+import com.vladimir.messenger.ui.components.ApuSettingsChip
+import com.vladimir.messenger.ui.components.ApuSettingsFeatureRow
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
+import com.vladimir.messenger.ui.components.ApuSettingsProgress
+import com.vladimir.messenger.ui.components.ApuFormTextField
+import com.vladimir.messenger.ui.components.HintBubble
+import com.vladimir.messenger.ui.components.HintBubbleMutedColor
+import com.vladimir.messenger.ui.components.HintBubbleTextColor
 
-import androidx.compose.foundation.lazy.rememberLazyListState
-import com.vladimir.messenger.ui.components.ApuScrollbar
-import com.vladimir.messenger.ui.components.swipeBack
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -16,24 +22,28 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Redeem
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -41,17 +51,26 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.referral.PromoCodes
 import com.vladimir.messenger.data.referral.ReferralRankStore
+import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
+import com.vladimir.messenger.ui.components.ApuScrollbar
 import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.RankMedal
+import com.vladimir.messenger.ui.components.swipeBack
 import com.vladimir.messenger.data.link.ShortShare
 import com.vladimir.messenger.util.OwnInvite
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -98,7 +117,12 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
         Box(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
                 state = scrollState,
-                modifier = Modifier.fillMaxSize().padding(padding),
+                // Клавиатура сжимает список, а не накрывает поле промокода:
+                // тот же приём, что на экранах защиты личности и резервных копий.
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .imePadding(),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
@@ -106,15 +130,21 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                     // Ранг растёт только от приглашённых, поэтому кнопка «позвать друга»
                     // стоит прямо здесь, а не спрятана в настройках.
                     ApuSettingsCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("Ранг растёт от приглашённых друзей", fontWeight = FontWeight.Medium)
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            IconTitleRow(
+                                icon = Icons.Default.Share,
+                                title = "Ранг растёт от приглашённых друзей",
+                            )
                             Text(
                                 "Отправьте ссылку другу. Приглашение засчитается, когда он добавит " +
                                     "вас в контакты и вы обменяетесь сообщениями.",
                                 style = MaterialTheme.typography.bodySmall,
+                                color = HintBubbleMutedColor,
                             )
                             Button(
                                 onClick = { showInviteShare = true },
+                                shape = RoundedCornerShape(14.dp),
+                                modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Icon(Icons.Default.Share, contentDescription = null)
                                 Spacer(Modifier.width(8.dp))
@@ -124,54 +154,98 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                     }
                 }
                 item {
-                    ApuSettingsCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ApuSettingsCard(modifier = Modifier.fillMaxWidth(), highlighted = true) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             // Та же медаль, что и на главной: значок ранга должен
                             // узнаваться в обоих местах.
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                com.vladimir.messenger.ui.components.RankMedal(size = 40.dp)
+                                RankMedal(size = 40.dp)
                                 Spacer(Modifier.width(10.dp))
-                                Text(
-                                    current.rankName,
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold,
-                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        current.rankName,
+                                        style = MaterialTheme.typography.titleLarge,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                    Text(
+                                        "Подтверждённых друзей: $earned",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = HintBubbleMutedColor,
+                                    )
+                                }
+                                ApuSettingsChip("ваш ранг")
                             }
-                            Text("Подтверждённых друзей: $earned")
                             if (promoBonus > 0) {
                                 // Видно, что пришло от друзей, а что от промокода -
                                 // иначе число выглядело бы взявшимся из ниоткуда.
-                                Text("Бонус по промокоду: +$promoBonus")
-                                Text("Всего к рангу: $qualified", fontWeight = FontWeight.Medium)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    ApuSettingsChip("промокод +$promoBonus")
+                                    Text(
+                                        "Всего к рангу: $qualified",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                }
+                            }
+                            val ahead = next
+                            if (ahead != null) {
+                                // Полоска вместо сухой строки: видно, сколько уже
+                                // пройдено и сколько осталось.
+                                val taken = qualified - current.minimumQualifiedReferrals
+                                val span = (ahead.minimumQualifiedReferrals -
+                                    current.minimumQualifiedReferrals).coerceAtLeast(1)
+                                val needed = ahead.minimumQualifiedReferrals - qualified
+                                Spacer(Modifier.height(2.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        "До ранга «${ahead.rankName}»",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    ApuSettingsChip("осталось $needed", highlighted = false)
+                                }
+                                ApuSettingsProgress(fraction = taken.toFloat() / span.toFloat())
+                                // Что именно откроет следующий ранг - списком, а не
+                                // строкой через запятую: видно, ради чего звать друзей.
+                                val opensLater = ahead.unlockedFeatureSummary()
+                                    .filterNot { it in current.unlockedFeatureSummary() }
+                                if (opensLater.isNotEmpty()) {
+                                    Text(
+                                        "Откроется на следующем ранге:",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = HintBubbleMutedColor,
+                                    )
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        opensLater.forEach { feature ->
+                                            ApuSettingsFeatureRow(feature, available = false)
+                                        }
+                                    }
+                                }
                             }
                             Spacer(Modifier.height(2.dp))
                             // Описание строится от РЕАЛЬНОГО ранга, а не от нулевого:
                             // ранг, полученный по промокоду, работает так же, как
                             // заработанный приглашениями.
-                            Text("Что вам уже доступно:", fontWeight = FontWeight.Medium)
-                            current.unlockedFeatureSummary().forEach { feature ->
-                                Text("• $feature", style = MaterialTheme.typography.bodySmall)
-                            }
-                            val ahead = next
-                            if (ahead != null) {
-                                Spacer(Modifier.height(2.dp))
-                                val needed = ahead.minimumQualifiedReferrals - qualified
-                                Text(
-                                    "До ранга «${ahead.rankName}» осталось приглашений: $needed",
-                                    fontWeight = FontWeight.Medium,
-                                )
-                                val newFeatures = ahead.unlockedFeatureSummary()
-                                    .filterNot { it in current.unlockedFeatureSummary() }
-                                if (newFeatures.isNotEmpty()) {
-                                    Text(
-                                        "Откроется: " + newFeatures.joinToString(", ").lowercase(),
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
+                            Text(
+                                "Что вам уже доступно:",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                current.unlockedFeatureSummary().forEach { feature ->
+                                    ApuSettingsFeatureRow(feature)
                                 }
-                            } else {
+                            }
+                            if (ahead == null) {
+                                Spacer(Modifier.height(2.dp))
                                 Text(
                                     "Это наивысший ранг: открыты все возможности приложения.",
                                     style = MaterialTheme.typography.bodySmall,
+                                    color = HintBubbleMutedColor,
                                 )
                             }
                             Spacer(Modifier.height(2.dp))
@@ -182,38 +256,67 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                                     "Ранг, полученный по промокоду, действует наравне с " +
                                     "заработанным.",
                                 style = MaterialTheme.typography.bodySmall,
+                                color = HintBubbleMutedColor,
                             )
                         }
                     }
                 }
                 items(FileTransferRankPolicy.tiers, key = { it.minimumQualifiedReferrals }) { tier ->
                     ApuSettingsCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             val isCurrent = tier == current
                             val reached = qualified >= tier.minimumQualifiedReferrals
-                            Text(
-                                buildString {
-                                    append("${tier.minimumQualifiedReferrals} — ${tier.rankName}")
-                                    if (isCurrent) append("  (ваш ранг)")
-                                },
-                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
-                            )
-                            if (!reached) {
-                                Text(
-                                    "Нужно приглашений: ${tier.minimumQualifiedReferrals}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        "${tier.minimumQualifiedReferrals} — ${tier.rankName}",
+                                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
+                                    )
+                                    if (!reached) {
+                                        Text(
+                                            "Нужно приглашений: ${tier.minimumQualifiedReferrals}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = HintBubbleMutedColor,
+                                        )
+                                    }
+                                }
+                                if (isCurrent) {
+                                    ApuSettingsChip("ваш ранг")
+                                } else if (reached) {
+                                    ApuSettingsChip("достигнут", highlighted = false)
+                                }
                             }
-                            tier.unlockedFeatureSummary().forEach { feature -> Text("• $feature") }
+                            // Возможности недостигнутого ранга показаны закрытыми
+                            // (серый замок), достигнутого - золотой галочкой.
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                tier.unlockedFeatureSummary().forEach { feature ->
+                                    ApuSettingsFeatureRow(feature, available = reached)
+                                }
+                            }
                         }
                     }
                 }
                 item {
-                    Text(
-                        "Приложение не задаёт лимит размера файла. Фактическая передача зависит от " +
-                            "свободного места, возможностей устройства и доступной сети.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
+                    // Пояснение про размер файлов - отдельным пузырём-подсказкой,
+                    // как на остальных экранах, а не строкой поверх обоев.
+                    HintBubble {
+                        Column {
+                            Text(
+                                "О размере файлов",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = HintBubbleTextColor,
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                "Приложение не задаёт лимит размера файла. Фактическая передача " +
+                                    "зависит от свободного места, возможностей устройства и " +
+                                    "доступной сети.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = HintBubbleMutedColor,
+                            )
+                        }
+                    }
                 }
                 // Пузырь с промокодом - в самом низу раздела.
                 item {
@@ -244,6 +347,30 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
     }
 }
 
+/** Заголовок карточки: значок в фирменном квадратике и текст рядом. */
+@Composable
+private fun IconTitleRow(
+    icon: ImageVector,
+    title: String,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier.size(36.dp)
+                .background(ApuBubbleAccentColor.copy(alpha = 0.12f), RoundedCornerShape(11.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = ApuBubbleAccentColor,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(title, fontWeight = FontWeight.SemiBold)
+    }
+}
+
 /**
  * Пузырь ввода промокода.
  *
@@ -251,6 +378,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
  * Поэтому промокод - это подарок, а не платная покупка: тот, кто узнал код,
  * применит его у себя. Повторно на одном телефоне код не сработает.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun PromoCodeCard(onRedeemed: () -> Unit) {
     val context = LocalContext.current
@@ -258,31 +386,45 @@ private fun PromoCodeCard(onRedeemed: () -> Unit) {
     var message by remember { mutableStateOf<String?>(null) }
     var isError by remember { mutableStateOf(false) }
 
+    // Клавиатура не должна накрывать поле: когда оно получает фокус, список
+    // подъезжает так, чтобы поле осталось видимым над клавиатурой. Небольшая
+    // пауза нужна, чтобы клавиатура успела подняться и список уже сжался.
+    val bringIntoView = remember { BringIntoViewRequester() }
+    var focused by remember { mutableStateOf(false) }
+    LaunchedEffect(focused) {
+        if (focused) {
+            delay(250)
+            bringIntoView.bringIntoView()
+        }
+    }
+
     ApuSettingsCard(
         modifier = Modifier.fillMaxWidth(),
+        highlighted = true,
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Redeem, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("Промокод", fontWeight = FontWeight.Bold)
-            }
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            IconTitleRow(icon = Icons.Default.Redeem, title = "Промокод")
             Text(
                 "Есть промокод? Введите его - и к рангу прибавится " +
                     "${PromoCodes.BONUS_PER_CODE} подтверждённых друзей.",
                 style = MaterialTheme.typography.bodySmall,
+                color = HintBubbleMutedColor,
             )
-            OutlinedTextField(
+            ApuFormTextField(
                 value = code,
                 onValueChange = {
                     code = it
                     message = null
                 },
-                modifier = Modifier.fillMaxWidth(),
                 // Подсказка НЕ показывает настоящий код: пример выдал бы
                 // рабочий промокод любому, кто просто открыл раздел.
-                placeholder = { Text("Введите промокод") },
-                singleLine = true,
+                label = "Ваш промокод",
+                placeholder = "Введите промокод",
+                isError = isError,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .bringIntoViewRequester(bringIntoView)
+                    .onFocusChanged { state -> focused = state.isFocused },
             )
             Button(
                 onClick = {
@@ -309,6 +451,7 @@ private fun PromoCodeCard(onRedeemed: () -> Unit) {
                     }
                 },
                 enabled = code.isNotBlank(),
+                shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text("Применить")

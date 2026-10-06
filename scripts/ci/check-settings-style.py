@@ -104,6 +104,38 @@ class SettingsStyleTest(unittest.TestCase):
             self.assertIn(".imePadding()", text)
             self.assertIn("PasswordVisualTransformation", text)
 
+    def test_rank_screen_uses_house_rows_and_keeps_promo_field_above_keyboard(self):
+        """Ранги: фирменные строки вместо маркеров и поле промокода над клавиатурой.
+
+        Задача владельца 2026-10-06: экран «Ранги и возможности» - в фирменном
+        стиле, а поле промокода при вводе не должно уезжать под клавиатуру.
+        Проверяем ровно это: stock Material-поле заменено фирменным, возможности
+        рисуются общей строкой, а список сжимается клавиатурой и подводит поле.
+        """
+        text = source("screens/settings/RankBenefitsScreen.kt")
+        self.assertNotRegex(text, r"\bOutlinedTextField\(")
+        for house_part in (
+            "ApuFormTextField(",
+            "ApuSettingsFeatureRow(",
+            "ApuSettingsChip(",
+            "ApuSettingsProgress(",
+            ".imePadding()",
+            "bringIntoViewRequester",
+            "onFocusChanged",
+        ):
+            self.assertIn(house_part, text)
+        # Возможности больше не рисуются текстовыми маркерами «•».
+        self.assertNotIn('"• ', text)
+        shared = source("components/ApuSettingsUi.kt")
+        for house_part in (
+            "fun ApuSettingsFeatureRow(",
+            "fun ApuSettingsChip(",
+            "fun ApuSettingsProgress(",
+            "Icons.Default.Lock",
+            "trackColor = ApuBubbleAccentColor.copy(alpha = 0.15f)",
+        ):
+            self.assertIn(house_part, shared)
+
     def test_large_profile_initials_and_avatar_io_are_preserved(self):
         avatar = source("components/MyAvatar.kt")
         self.assertIn("size: Int = 52", avatar)
