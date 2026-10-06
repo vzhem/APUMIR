@@ -143,9 +143,13 @@ class DiagnosticsContractsTest(unittest.TestCase):
         for marker in (
             "hidePayloadBodies",
             "collapseRepeatedLogLines",
-            "payload=<скрыто>",
+            "payload=[скрыто]",
             "ipv6CompressedRegex",
             "ipv6FullRegex",
+            "TransferErrorText",
+            # Шапку logcat из счётчика строк убираем: иначе он читается как «#-# #:#:#.#».
+            "threadtimePrefixRegex",
+            "pluralLines",
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, report)
@@ -177,6 +181,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
         report = source(DIAG / "DiagnosticsReport.kt")
         self.assertIn("ошибок=${sums.failed} (за всё время работы приложения)", report)
         self.assertIn('appendLine("раздаётся=${sums.seeding}")', report)
+        self.assertIn("TransferErrorText.explain(failure.code)", report)
 
     def test_mqtt_is_explained_by_one_shared_parser(self):
         view_model = source(VIEW_MODEL)

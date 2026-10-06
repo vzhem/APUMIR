@@ -214,7 +214,7 @@ class DiagnosticsReportTest {
             "payload=\"APUSEAL1|AQD5AQsecret\""
         val hidden = DiagnosticsPrivacy.hidePayloadBodies(line)
         assertTrue(hidden.contains("payload_len=880"))
-        assertTrue(hidden.contains("payload=<скрыто>"))
+        assertTrue(hidden.contains("payload=[скрыто]"))
         assertFalse(hidden.contains("APUSEAL1"))
         assertFalse(hidden.contains("AQD5AQsecret"))
     }
@@ -239,7 +239,13 @@ class DiagnosticsReportTest {
         // Оставляем самые свежие строки формы, а не первые попавшиеся.
         assertTrue(real.any { it.contains("brokers=29") })
         assertFalse(real.any { it.contains("brokers=0 ") })
-        assertTrue(collapsed.any { it.startsWith("… ещё") && it.contains("FANOUT QUEUED") })
+        val note = collapsed.first { it.startsWith("… ещё") }
+        assertTrue(note.contains("FANOUT QUEUED"))
+        // Служебная шапка logcat в счётчике не нужна: раньше было
+        // «… ещё 68 строк: #-# #:#:#.# # # I p#p_core: …».
+        assertFalse(note.contains("#-#"))
+        assertFalse(note.contains("I p#p_core"))
+        assertTrue("падеж: $note", note.contains("27 строк"))
         assertEquals(3, real.count { it.contains("connection acknowledged") })
     }
 
@@ -253,6 +259,8 @@ class DiagnosticsReportTest {
         assertTrue(broker.value.contains("на связи"))
         assertTrue(broker.value.contains("была ошибка"))
         assertTrue(broker.value.contains("не дождались ответа"))
+        // В отчёте владельца (v11.74.184) было «1 мин назад назад была ошибка».
+        assertFalse(broker.value.contains("назад назад"))
 
         val calm = DiagnosticsReport.summaryLines(
             facts(mqttLine = "MQTT: tcp broker.example:1883, ConnAck 10 с назад"),
@@ -281,7 +289,7 @@ class DiagnosticsReportTest {
             facts = facts(
                 transferStates = mapOf("FAILED" to 14L),
                 failureCodes = listOf(
-                    TransferErrorLine("VERIFY_FAILED", 12L),
+                    TransferErrorLine("RESTORED_ELSEWHERE", 12L),
                     TransferErrorLine("NO_SPACE", 2L),
                 ),
                 lastFailureAtMs = 1_700_000_000_000L - 3_600_000L,
@@ -290,8 +298,28 @@ class DiagnosticsReportTest {
             logcat = emptyList(),
         )
         assertTrue(report.contains("ошибок=14 (за всё время работы приложения)"))
-        assertTrue(report.contains("ошибка.VERIFY_FAILED=12"))
-        assertTrue(report.contains("ошибка.NO_SPACE=2"))
+        assertTrue(report.contains("ошибка.RESTORED_ELSEWHERE=12 — передача продолжилась на другом устройстве"))
+        assertTrue(report.contains("ошибка.NO_SPACE=2 — на телефоне не хватило места"))
         assertTrue(report.contains("last_failure_ago=1 ч 00 мин"))
+    }
+
+    @Test
+    fun coreAndNetworkStatesAreExplainedInRussian() {
+        val ready = DiagnosticsReport.render(
+            facts = facts(coreReady = true, networkStatus = "connecting"),
+            journal = emptyList(),
+            logcat = emptyList(),
+        )
+        // «Поднимаем ядро и сеть… → готово» выглядело противоречием.
+        assertTrue(ready.contains("stage=готово (ядро поднято)"))
+        assertTrue(ready.contains("network=подключается"))
+        assertFalse(ready.contains("→ ещё поднимается"))
+
+        val starting = DiagnosticsReport.render(
+            facts = facts(coreReady = false, coreStage = "Поднимаем ядро и сеть…"),
+            journal = emptyList(),
+            logcat = emptyList(),
+        )
+        assertTrue(starting.contains("stage=Поднимаем ядро и сеть… → ещё поднимается"))
     }
 }

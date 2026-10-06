@@ -128,6 +128,18 @@ object Counters {
 /** Код ошибки передачи и число таких записей: объясняет «ошибок N» без имён файлов. */
 data class TransferErrorLine(val code: String, val count: Long)
 
+/** Человеческие причины известных кодов ошибок передач (остальное — как есть). */
+object TransferErrorText {
+    fun explain(code: String): String = when (code) {
+        "RESTORED_ELSEWHERE" -> "передача продолжилась на другом устройстве (восстановление профиля)"
+        "VERIFY_FAILED" -> "скачанный файл не сошёлся по контрольной сумме"
+        "NO_SPACE" -> "на телефоне не хватило места"
+        "DECLINED" -> "получатель отказался от файла"
+        "SUPERSEDED" -> "передачу заменила более новая"
+        else -> code
+    }
+}
+
 /**
  * Приватность отчёта и строк системного журнала. Живёт в чистом Kotlin
  * нарочно: правила покрыты JVM-тестами на runner (см. DiagnosticsReportTest),
@@ -178,9 +190,9 @@ object DiagnosticsPrivacy {
      * нет» должно быть правдой.
      */
     fun hidePayloadBodies(line: String): String = line
-        .replace(payloadQuotedRegex, "payload=<скрыто>")
-        .replace(payloadOpenRegex, "payload=<скрыто>")
-        .replace(payloadBareRegex, "payload=<скрыто>")
+        .replace(payloadQuotedRegex, "payload=[скрыто]")
+        .replace(payloadOpenRegex, "payload=[скрыто]")
+        .replace(payloadBareRegex, "payload=[скрыто]")
 
     /**
      * Одинаковые строки журнала («MQTT FANOUT QUEUED…», «MQTT IN…») не должны
@@ -205,14 +217,45 @@ object DiagnosticsPrivacy {
         val notes = hidden.entries
             .sortedByDescending { it.value }
             .take(8)
-            .map { (shape, count) -> "… ещё $count строк: $shape" }
+            .map { (shape, count) -> "… ещё ${pluralLines(count)}: $shape" }
         val kept = lines.filterIndexed { i, _ -> keep[i] }
         return kept.takeLast((limit - notes.size).coerceAtLeast(1)) + notes
     }
 
-    /** Форма строки: числа и тела значений заменены, чтобы похожие строки совпали. */
-    private fun shapeOf(line: String): String =
-        shapeNumbersRegex.replace(shapeQuotesRegex.replace(line, "\"…\""), "#").take(72)
+    /**
+     * Форма строки для строки-счётчика: числа заменены на `#`, кавычки — на
+     * `"…"`, а служебная шапка logcat («10-06 14:56:17.230 20100 20205 I
+     * p2p_core: p2p_core::network::mqtt_transport: ») убрана. Без этого
+     * счётчик выглядел как `#-# #:#:#.# # # I p#p_core: …`.
+     */
+    private fun shapeOf(line: String): String {
+        var rest = threadtimePrefixRegex.replace(line, "")
+        var guard = 0
+        while (guard++ < 4) {
+            val stripped = tagPrefixRegex.replace(rest, "")
+            if (stripped == rest) break
+            rest = stripped
+        }
+        return shapeNumbersRegex.replace(shapeQuotesRegex.replace(rest, "\"…\""), "#").take(96)
+    }
+
+    /** «10-06 14:56:17.230 20100 20205 I » — шапка строки logcat. */
+    private val threadtimePrefixRegex = Regex("^\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d+\\s+\\d+\\s+\\d+\\s+[A-Z]\\s+")
+
+    /** «p2p_core: » и «p2p_core::network::mqtt_transport: » — служебные теги. */
+    private val tagPrefixRegex = Regex("^(?:[A-Za-z0-9_]{2,}(?:::[A-Za-z0-9_]+)*:\\s+)")
+
+    /** «ещё 1 строка», «ещё 31 строка», «ещё 68 строк». */
+    private fun pluralLines(count: Int): String {
+        val mod10 = count % 10
+        val mod100 = count % 100
+        val word = when {
+            mod10 == 1 && mod100 != 11 -> "строка"
+            mod10 in 2..4 && mod100 !in 12..14 -> "строки"
+            else -> "строк"
+        }
+        return "$count $word"
+    }
 }
 
 /** Сборка текста отчёта и строк сводки. Ничего не читает сама — только форматирует. */
@@ -292,7 +335,7 @@ object DiagnosticsReport {
                     DiagnosticsLevel.WARN,
                     "Брокер",
                     "на связи, подтверждена ${MqttLinkText.humanAgo(mqtt.connAckAgoSec ?: 0)} · ${mqtt.path}; " +
-                        "${MqttLinkText.humanAgo(mqtt.errorAgoSec)} назад была ошибка: " +
+                        "${MqttLinkText.humanAgo(mqtt.errorAgoSec)} была ошибка: " +
                         MqttLinkText.humanError(mqtt.errorText),
                 )
             mqtt.connected -> DiagnosticsLine(
@@ -430,10 +473,16 @@ object DiagnosticsReport {
         appendLine("[ядро]")
         appendLine("running=${facts.coreRunning}")
         appendLine("build=${facts.coreBuild}")
-        val stage = facts.coreStage.ifBlank { "нет данных" }
-        appendLine("stage=$stage → ${if (facts.coreReady) "готово" else "ещё поднимается"}")
+        // Ядро рапортует стадию «Поднимаем ядро и сеть…» и одновременно
+        // ready=true — в отчёте это выглядело противоречием. Когда ядро готово,
+        // так и пишем, иначе показываем стадию и что она ещё идёт.
+        if (facts.coreReady) {
+            appendLine("stage=готово (ядро поднято)")
+        } else {
+            appendLine("stage=${facts.coreStage.ifBlank { "нет данных" }} → ещё поднимается")
+        }
         appendLine("ready=${facts.coreReady}")
-        appendLine("network=${facts.networkStatus}")
+        appendLine("network=${networkText(facts.networkStatus)}")
         appendLine("connected_peers=${facts.connectedPeers}")
         appendLine("pending_events=${facts.pendingEvents}")
         appendLine("relay_custody=${facts.relayCustody} · quarantine=${facts.relayQuarantine}")
@@ -471,7 +520,7 @@ object DiagnosticsReport {
         appendLine("ошибок=${sums.failed} (за всё время работы приложения)")
         appendLine("отменено=${sums.cancelled}")
         facts.failureCodes.forEach { failure ->
-            appendLine("ошибка.${failure.code}=${failure.count}")
+            appendLine("ошибка.${failure.code}=${failure.count} — ${TransferErrorText.explain(failure.code)}")
         }
         facts.lastFailureAtMs?.let { at ->
             appendLine("last_failure_at=${stamp(at)}")
@@ -499,7 +548,7 @@ object DiagnosticsReport {
         appendLine("F4-байт принято=${c[Counters.F4_BYTES_RECEIVED] ?: 0L}")
         appendLine("F4-отказов диапазона=${c[Counters.F4_RANGE_FAILURES] ?: 0L}")
         appendLine("F4-по UDP без бинарного канала=${c[Counters.F4_UDP_FALLBACK] ?: 0L}")
-        appendLine("смен сети=${c[Counters.NETWORK_CHANGES] ?: 0L}")
+        appendLine("событий сети (появилась/пропала)=${c[Counters.NETWORK_CHANGES] ?: 0L}")
         appendLine("запусков ядра=${c[Counters.CORE_STARTS] ?: 0L}")
         appendLine("отказов старта ядра=${c[Counters.CORE_FAILURES] ?: 0L}")
         val known = setOf(
@@ -558,6 +607,14 @@ object DiagnosticsReport {
         DiagnosticsLevel.INFO -> "•"
         DiagnosticsLevel.WARN -> "!"
         DiagnosticsLevel.BAD -> "✖"
+    }
+
+    /** Состояние сети ядра по-русски; незнакомое значение остаётся как есть. */
+    private fun networkText(status: String): String = when (status) {
+        "connected" -> "на связи"
+        "connecting" -> "подключается"
+        "disconnected" -> "нет связи"
+        else -> status
     }
 
     /** «2026-10-06 12:41:58 GMT+03:00». */
