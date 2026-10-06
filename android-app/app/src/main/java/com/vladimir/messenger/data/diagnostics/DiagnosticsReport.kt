@@ -119,7 +119,6 @@ object Counters {
     const val NETWORK_CHANGES = "network_changes"
     const val CORE_STARTS = "core_starts"
     const val CORE_FAILURES = "core_failures"
-    const val MIRROR_FRAMES = "mirror_frames"
 }
 
 /** Сборка текста отчёта и строк сводки. Ничего не читает сама — только форматирует. */
@@ -207,7 +206,7 @@ object DiagnosticsReport {
                 "нет ответа ${MqttLinkText.humanAgo(mqtt.errorAgoSec)} " +
                     "(${MqttLinkText.humanError(mqtt.errorText)}) · ${mqtt.path}",
             )
-            else -> DiagnosticsLine(DiagnosticsLevel.INFO, "Брокер", "подключаемся… · ${mqtt.path}"),
+            else -> DiagnosticsLine(DiagnosticsLevel.INFO, "Брокер", "подключаемся… · ${mqtt.path}")
         }
 
         // ── Ядро ────────────────────────────────────────────────────────────

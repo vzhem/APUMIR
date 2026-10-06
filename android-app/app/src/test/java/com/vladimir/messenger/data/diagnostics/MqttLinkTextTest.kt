@@ -15,12 +15,13 @@ class MqttLinkTextTest {
 
     @Test
     fun connectedLineIsReadAsLiveSession() {
-        val state = MqttLinkText.parse(
-            "MQTT: tcp broker.example:1883, ConnAck 5 с назад, ошибка 12 с назад: Network timeout",
+        val state = requireNotNull(
+            MqttLinkText.parse(
+                "MQTT: tcp broker.example:1883, ConnAck 5 с назад, ошибка 12 с назад: Network timeout",
+            ),
         )
 
-        assertTrue(state != null)
-        assertEquals("напрямую", state!!.path)
+        assertEquals("напрямую", state.path)
         assertEquals(5, state.connAckAgoSec)
         assertEquals(12, state.errorAgoSec)
         // Ошибка была РАНЬШЕ подтверждения: текущая сессия жива.
@@ -31,12 +32,13 @@ class MqttLinkTextTest {
 
     @Test
     fun errorAfterConnectIsReadAsOwnReconnect() {
-        val state = MqttLinkText.parse(
-            "MQTT: tcp broker.example:1883, ConnAck 120 с назад, ошибка 12 с назад: Connection refused",
+        val state = requireNotNull(
+            MqttLinkText.parse(
+                "MQTT: tcp broker.example:1883, ConnAck 120 с назад, ошибка 12 с назад: Connection refused",
+            ),
         )
 
-        assertTrue(state != null)
-        assertFalse(state!!.connected)
+        assertFalse(state.connected)
         assertTrue(state.droppedAfterConnect)
         val human = MqttLinkText.humanize(
             "MQTT: tcp broker.example:1883, ConnAck 120 с назад, ошибка 12 с назад: Connection refused",
@@ -48,10 +50,9 @@ class MqttLinkTextTest {
     @Test
     fun bridgeAndFailingLineKeepHumanWords() {
         val raw = "MQTT: wss bridge, ошибка 3 с назад: DNS lookup failed"
-        val state = MqttLinkText.parse(raw)
+        val state = requireNotNull(MqttLinkText.parse(raw))
 
-        assertTrue(state != null)
-        assertEquals("через обходной канал", state!!.path)
+        assertEquals("через обходной канал", state.path)
         assertNull(state.connAckAgoSec)
         assertFalse(state.connected)
         assertEquals("не удалось найти адрес узла", MqttLinkText.humanError(state.errorText))
