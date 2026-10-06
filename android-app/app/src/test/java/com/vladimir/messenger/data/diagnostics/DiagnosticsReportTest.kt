@@ -20,6 +20,8 @@ class DiagnosticsReportTest {
         transferStates: Map<String, Long> = emptyMap(),
         counters: Map<String, Long> = emptyMap(),
         mqttLine: String = "MQTT: tcp broker.example:1883, ConnAck 5 с назад",
+        failureCodes: List<TransferErrorLine> = emptyList(),
+        lastFailureAtMs: Long? = null,
     ) = DiagnosticsFacts(
         createdAtMs = 1_700_000_000_000L,
         sessionStartedAtMs = 1_700_000_000_000L - 168_000L,
@@ -58,6 +60,8 @@ class DiagnosticsReportTest {
         relayQuarantine = 0,
         mqttLine = mqttLine,
         transferStates = transferStates,
+        failureCodes = failureCodes,
+        lastFailureAtMs = lastFailureAtMs,
         custodyBytes = 0,
         counters = counters,
     )
@@ -177,5 +181,117 @@ class DiagnosticsReportTest {
         assertEquals("2 мин 48 с", DiagnosticsReport.formatDuration(168_000L))
         assertEquals("1 ч 05 мин", DiagnosticsReport.formatDuration(3_900_000L))
         assertEquals("3 дн 4 ч", DiagnosticsReport.formatDuration(3L * 86_400_000L + 4L * 3_600_000L))
+    }
+
+    @Test
+    fun logTimestampsSurviveRedaction() {
+        // Первый отчёт владельца (2026-10-06) терял время суток: правило IPv6
+        // «две группы через двоеточие» превращало 13:58:27 в [ipv6].
+        val line = "10-06 13:58:27.154  6993  7082 I p2p_core: MQTT: initializing primary session"
+        val redacted = DiagnosticsPrivacy.redact(line)
+        assertTrue(redacted.contains("13:58:27.154"))
+        assertFalse(redacted.contains("[ipv6]"))
+
+        // Строки модулей ядра тоже не должны пострадать: «p2p_core::engine»
+        // похоже на IPv6 («e::e»), но адресом не является.
+        val moduleLine = DiagnosticsPrivacy.redact(
+            "10-06 13:58:28.170 I p2p_core: p2p_core::engine::core: MESH durable",
+        )
+        assertTrue(moduleLine.contains("p2p_core::engine::core"))
+        assertFalse(moduleLine.contains("[ipv6]"))
+
+        val addresses = DiagnosticsPrivacy.redact(
+            "peer 2001:db8:12::7 and fe80::1 and 2606:4700:3033::6815:2b3b, host 192.168.10.25:7777",
+        )
+        assertEquals(3, Regex("\\[ipv6]").findAll(addresses).count())
+        assertTrue(addresses.contains("[ip]"))
+        assertFalse(addresses.contains("192.168.10.25"))
+    }
+
+    @Test
+    fun mqttPayloadBodiesNeverReachTheReport() {
+        val line = "MQTT IN: broker=hivemq topic=p2pm2/msg/[contact] payload_len=880 " +
+            "payload=\"APUSEAL1|AQD5AQsecret\""
+        val hidden = DiagnosticsPrivacy.hidePayloadBodies(line)
+        assertTrue(hidden.contains("payload_len=880"))
+        assertTrue(hidden.contains("payload=<скрыто>"))
+        assertFalse(hidden.contains("APUSEAL1"))
+        assertFalse(hidden.contains("AQD5AQsecret"))
+    }
+
+    @Test
+    fun repeatedLogLinesCollapseInsteadOfFillingTheReport() {
+        val noisy = List(30) { i ->
+            "10-06 13:58:2${i % 10}.000  6993  7092 I p2p_core: MQTT FANOUT QUEUED: " +
+                "operation=mesh relay publish brokers=$i max_fanout=2"
+        }
+        val useful = List(4) { i ->
+            "10-06 13:59:0$i.000  6993  7092 I p2p_core: MQTT: connection acknowledged by broker"
+        }
+        val collapsed = DiagnosticsPrivacy.collapseRepeatedLogLines(
+            lines = noisy + useful,
+            limit = 12,
+            maxPerShape = 3,
+        )
+        assertTrue("строк больше лимита: ${collapsed.size}", collapsed.size <= 12)
+        val real = collapsed.filterNot { it.startsWith("…") }
+        assertEquals(3, real.count { it.contains("FANOUT QUEUED") })
+        // Оставляем самые свежие строки формы, а не первые попавшиеся.
+        assertTrue(real.any { it.contains("brokers=29") })
+        assertFalse(real.any { it.contains("brokers=0 ") })
+        assertTrue(collapsed.any { it.startsWith("… ещё") && it.contains("FANOUT QUEUED") })
+        assertEquals(3, real.count { it.contains("connection acknowledged") })
+    }
+
+    @Test
+    fun freshBrokerErrorShowsUpInTheSummary() {
+        val lines = DiagnosticsReport.summaryLines(
+            facts(mqttLine = "MQTT: tcp broker.example:1883, ConnAck 10 с назад, ошибка 15 с назад: Network timeout"),
+        )
+        val broker = lines.first { it.title == "Брокер" }
+        assertEquals(DiagnosticsLevel.WARN, broker.level)
+        assertTrue(broker.value.contains("на связи"))
+        assertTrue(broker.value.contains("была ошибка"))
+        assertTrue(broker.value.contains("не дождались ответа"))
+
+        val calm = DiagnosticsReport.summaryLines(
+            facts(mqttLine = "MQTT: tcp broker.example:1883, ConnAck 10 с назад"),
+        )
+        assertEquals(DiagnosticsLevel.OK, calm.first { it.title == "Брокер" }.level)
+    }
+
+    @Test
+    fun seedingIsSharingNotWorkInProgress() {
+        val lines = DiagnosticsReport.summaryLines(
+            facts(transferStates = mapOf("SEEDING" to 1L, "FAILED" to 14L)),
+        )
+        val transfers = lines.first { it.title == "Передачи" }
+        assertTrue(transfers.value.contains("в работе 0"))
+        assertTrue(transfers.value.contains("раздаётся 1"))
+        assertTrue(transfers.value.contains("ошибок 14 за всё время"))
+
+        val sums = DiagnosticsReport.transferSums(mapOf("SEEDING" to 1L))
+        assertEquals(0L, sums.working)
+        assertEquals(1L, sums.seeding)
+    }
+
+    @Test
+    fun failureCodesExplainTheFailureCount() {
+        val report = DiagnosticsReport.render(
+            facts = facts(
+                transferStates = mapOf("FAILED" to 14L),
+                failureCodes = listOf(
+                    TransferErrorLine("VERIFY_FAILED", 12L),
+                    TransferErrorLine("NO_SPACE", 2L),
+                ),
+                lastFailureAtMs = 1_700_000_000_000L - 3_600_000L,
+            ),
+            journal = emptyList(),
+            logcat = emptyList(),
+        )
+        assertTrue(report.contains("ошибок=14 (за всё время работы приложения)"))
+        assertTrue(report.contains("ошибка.VERIFY_FAILED=12"))
+        assertTrue(report.contains("ошибка.NO_SPACE=2"))
+        assertTrue(report.contains("last_failure_ago=1 ч 00 мин"))
     }
 }

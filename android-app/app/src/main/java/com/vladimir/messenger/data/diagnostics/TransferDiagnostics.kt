@@ -206,6 +206,8 @@ object TransferDiagnostics {
             relayQuarantine = safeNative { RustBridge.relayQuarantineCount().toString() }.toLongOrNull() ?: 0L,
             mqttLine = mqttLine,
             transferStates = database.states,
+            failureCodes = database.failureCodes,
+            lastFailureAtMs = database.lastFailureAtMs,
             custodyBytes = database.custodyBytes,
             counters = counters,
         )
@@ -280,7 +282,12 @@ object TransferDiagnostics {
             PackageManager.PERMISSION_GRANTED
     }.getOrDefault(true)
 
-    private data class DatabaseFacts(val states: Map<String, Long>, val custodyBytes: Long)
+    private data class DatabaseFacts(
+        val states: Map<String, Long>,
+        val custodyBytes: Long,
+        val failureCodes: List<TransferErrorLine>,
+        val lastFailureAtMs: Long?,
+    )
 
     /**
      * Очередь передач из базы: сколько в работе, что ждёт получателя, что
@@ -294,8 +301,19 @@ object TransferDiagnostics {
         val states = runBlocking { dao.transferStateCounts() }
             .associate { it.state to it.total }
         val custody = runBlocking { dao.custodyHeldBytes() }
-        DatabaseFacts(states = states, custodyBytes = custody)
-    }.getOrDefault(DatabaseFacts(emptyMap(), 0L))
+        val failures = runBlocking { dao.transferErrorCounts() }
+            .mapNotNull { row ->
+                val code = row.errorCode?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                TransferErrorLine(code = code, count = row.total.toLong())
+            }
+        val lastFailure = runBlocking { dao.lastFailureAtMs() }
+        DatabaseFacts(
+            states = states,
+            custodyBytes = custody,
+            failureCodes = failures,
+            lastFailureAtMs = lastFailure,
+        )
+    }.getOrDefault(DatabaseFacts(emptyMap(), 0L, emptyList(), null))
 
     private fun appVersion(context: Context): String = runCatching {
         val info = context.packageManager.getPackageInfo(context.packageName, 0)
@@ -342,16 +360,16 @@ object TransferDiagnostics {
             "--pid=${Process.myPid()}",
             "*:V",
         ).redirectErrorStream(true).start()
-        val lines = process.inputStream.bufferedReader().useLines { sequence ->
+        val raw = process.inputStream.bufferedReader().useLines { sequence ->
             sequence
                 .filter(::isRelevantProcessLog)
-                .map(::redact)
-                .take(MAX_LOGCAT_LINES)
+                .map { DiagnosticsPrivacy.hidePayloadBodies(redact(it)) }
                 .toList()
         }
         process.waitFor(2, TimeUnit.SECONDS)
         process.destroy()
-        lines
+        // Свежие строки важнее старых: logcat отдаёт их по времени вперёд.
+        DiagnosticsPrivacy.collapseRepeatedLogLines(raw, limit = MAX_LOGCAT_LINES)
     }.getOrDefault(emptyList())
 
     private val knownLogTags = listOf(
@@ -388,20 +406,15 @@ object TransferDiagnostics {
 
     // ── Приватность ────────────────────────────────────────────────────
 
-    private val contactRegex = Regex("pk_[0-9a-f]{32,64}")
-    private val transferHexRegex = Regex("(?i)\\b[0-9a-f]{32}\\b")
-    private val fromHexRegex = Regex("(?i)(\\bfrom\\s+)[0-9a-f]{8}\\b")
-    private val ipv4Regex = Regex("(?<![0-9A-Fa-f])(?:[0-9]{1,3}\\.){3}[0-9]{1,3}(?::[0-9]{1,5})?")
-    private val ipv6Regex = Regex("(?i)(?:[0-9a-f]{1,4}:){2,}[0-9a-f:]*")
     private val AREA_SANITIZER = Regex("[^A-Za-z0-9_-]")
 
-    /** Не копировать в отчёт долговременные contact ID и сетевые адреса. */
-    internal fun redact(text: String): String = text
-        .replace(contactRegex, "[contact]")
-        .replace(transferHexRegex, "[transfer]")
-        .replace(fromHexRegex) { match -> "${match.groupValues[1]}[contact]" }
-        .replace(ipv4Regex, "[ip]")
-        .replace(ipv6Regex, "[ipv6]")
+    /**
+     * Не копировать в отчёт долговременные contact ID и сетевые адреса.
+     * Сами правила — в `DiagnosticsPrivacy` (чистый Kotlin): их проверяют
+     * JVM-тесты на runner, поэтому регрессию видно до выпуска, а не на
+     * телефоне владельца.
+     */
+    internal fun redact(text: String): String = DiagnosticsPrivacy.redact(text)
 
     private const val MEBIBYTE = 1024L * 1024L
 }

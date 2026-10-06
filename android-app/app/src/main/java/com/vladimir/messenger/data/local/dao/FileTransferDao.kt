@@ -15,6 +15,12 @@ data class TransferStateCount(
     val total: Long,
 )
 
+/** Код ошибки передачи и число таких записей: объясняют «ошибок N» без имён файлов. */
+data class TransferErrorCount(
+    val errorCode: String?,
+    val total: Int,
+)
+
 @Dao
 interface FileTransferDao {
     @Query("SELECT * FROM file_transfers WHERE chatId = :chatId ORDER BY createdAtMs ASC")
@@ -27,6 +33,26 @@ interface FileTransferDao {
      */
     @Query("SELECT state, COUNT(*) AS total FROM file_transfers GROUP BY state")
     suspend fun transferStateCounts(): List<TransferStateCount>
+
+    /**
+     * Почему передачи падали: коды ошибок без имён файлов и путей.
+     * Сводка «ошибок 14» без этого выглядит голословно.
+     */
+    @Query(
+        """
+        SELECT errorCode AS errorCode, COUNT(*) AS total
+        FROM file_transfers
+        WHERE state = 'FAILED' AND errorCode IS NOT NULL
+        GROUP BY errorCode
+        ORDER BY total DESC
+        LIMIT 5
+        """
+    )
+    suspend fun transferErrorCounts(): List<TransferErrorCount>
+
+    /** Когда последний раз падала передача (для «последняя ошибка N назад»). */
+    @Query("SELECT MAX(updatedAtMs) FROM file_transfers WHERE state = 'FAILED'")
+    suspend fun lastFailureAtMs(): Long?
 
     @Query("SELECT * FROM file_transfers WHERE transferId = :transferId")
     suspend fun getTransfer(transferId: String): FileTransferEntity?

@@ -96,6 +96,10 @@ data class DiagnosticsFacts(
     val mqttLine: String,
     /** Число передач по состояниям из базы (COMPLETE, FAILED, …). */
     val transferStates: Map<String, Long>,
+    /** Коды ошибок передач (без имён файлов): объясняют «ошибок N». */
+    val failureCodes: List<TransferErrorLine>,
+    /** Когда последняя передача упала (null — не падала); для «N назад». */
+    val lastFailureAtMs: Long?,
     /** Сколько чужих байт держим для получателей не в сети. */
     val custodyBytes: Long,
     /** Счётчики сессии (см. [Counters]). */
@@ -121,12 +125,105 @@ object Counters {
     const val CORE_FAILURES = "core_failures"
 }
 
+/** Код ошибки передачи и число таких записей: объясняет «ошибок N» без имён файлов. */
+data class TransferErrorLine(val code: String, val count: Long)
+
+/**
+ * Приватность отчёта и строк системного журнала. Живёт в чистом Kotlin
+ * нарочно: правила покрыты JVM-тестами на runner (см. DiagnosticsReportTest),
+ * поэтому регрессию видно до выпуска. Так была поймана ошибка первого отчёта
+ * владельца (2026-10-06): правило IPv6 «две группы через двоеточие» съедало
+ * время в строке logcat, и вместо `10-06 13:58:27.154` в отчёте стояло
+ * `10-06 [ipv6].154`.
+ */
+object DiagnosticsPrivacy {
+    private val contactRegex = Regex("pk_[0-9a-f]{32,64}")
+    private val transferHexRegex = Regex("(?i)\\b[0-9a-f]{32}\\b")
+    private val fromHexRegex = Regex("(?i)(\\bfrom\\s+)[0-9a-f]{8}\\b")
+    private val ipv4Regex = Regex("(?<![0-9A-Fa-f])(?:[0-9]{1,3}\\.){3}[0-9]{1,3}(?::[0-9]{1,5})?")
+
+    /**
+     * IPv6 бывает сжатым («fe80::1», «2001:db8:12::7») или полным (8 групп).
+     * Двух двоеточий для правила мало: иначе под него попадает время суток.
+     */
+    // Границы «не внутри слова»: иначе шаблон слова «p2p_core::engine» видит
+    // в «e::e» IPv6-адрес и портит строки лога.
+    private val ipv6CompressedRegex = Regex(
+        "(?i)(?<![0-9A-Za-z_:])(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*)?::" +
+            "(?:[0-9a-f]{1,4}(?::[0-9a-f]{1,4})*)?(?![0-9A-Za-z_])",
+    )
+    private val ipv6FullRegex = Regex(
+        "(?i)(?<![0-9A-Za-z_:])(?:[0-9a-f]{1,4}:){5,7}[0-9a-f]{1,4}(?![0-9A-Za-z_])",
+    )
+    private val payloadQuotedRegex = Regex("\\bpayload=\"[^\"]*\"")
+    // Без якоря конца строки: закрытые payload уже вырезаны шаблоном выше,
+    // поэтому здесь остаётся только оборванное тело до конца строки.
+    private val payloadOpenRegex = Regex("\\bpayload=\"[^\"]*")
+    private val payloadBareRegex = Regex("\\bpayload=[^\"\\s]\\S*")
+    private val shapeNumbersRegex = Regex("[0-9]+")
+    private val shapeQuotesRegex = Regex("\"[^\"]*\"")
+
+    /** Не копировать в отчёт долговременные contact ID и сетевые адреса. */
+    fun redact(text: String): String = text
+        .replace(contactRegex, "[contact]")
+        .replace(transferHexRegex, "[transfer]")
+        .replace(fromHexRegex) { match -> "${match.groupValues[1]}[contact]" }
+        .replace(ipv4Regex, "[ip]")
+        .replace(ipv6CompressedRegex, "[ipv6]")
+        .replace(ipv6FullRegex, "[ipv6]")
+
+    /**
+     * Тело MQTT-сообщения — это шифротекст. В отчёте остаются топик и длина
+     * (`payload_len`), сама нагрузка прячется: обещание «шифротекста в отчёте
+     * нет» должно быть правдой.
+     */
+    fun hidePayloadBodies(line: String): String = line
+        .replace(payloadQuotedRegex, "payload=<скрыто>")
+        .replace(payloadOpenRegex, "payload=<скрыто>")
+        .replace(payloadBareRegex, "payload=<скрыто>")
+
+    /**
+     * Одинаковые строки журнала («MQTT FANOUT QUEUED…», «MQTT IN…») не должны
+     * вытеснять полезные: одной формы оставляем не больше [maxPerShape] самых
+     * свежих строк, а вместо пропущенных пишем одну строку-счётчик.
+     */
+    fun collapseRepeatedLogLines(
+        lines: List<String>,
+        limit: Int,
+        maxPerShape: Int = 5,
+    ): List<String> {
+        if (lines.size <= limit) return lines
+        val seen = HashMap<String, Int>()
+        val keep = BooleanArray(lines.size)
+        val hidden = LinkedHashMap<String, Int>()
+        for (i in lines.indices.reversed()) {
+            val shape = shapeOf(lines[i])
+            val n = (seen[shape] ?: 0) + 1
+            seen[shape] = n
+            if (n <= maxPerShape) keep[i] = true else hidden[shape] = (hidden[shape] ?: 0) + 1
+        }
+        val notes = hidden.entries
+            .sortedByDescending { it.value }
+            .take(8)
+            .map { (shape, count) -> "… ещё $count строк: $shape" }
+        val kept = lines.filterIndexed { i, _ -> keep[i] }
+        return kept.takeLast((limit - notes.size).coerceAtLeast(1)) + notes
+    }
+
+    /** Форма строки: числа и тела значений заменены, чтобы похожие строки совпали. */
+    private fun shapeOf(line: String): String =
+        shapeNumbersRegex.replace(shapeQuotesRegex.replace(line, "\"…\""), "#").take(72)
+}
+
 /** Сборка текста отчёта и строк сводки. Ничего не читает сама — только форматирует. */
 object DiagnosticsReport {
     /** Версия формата отчёта: по ней видно, что файл разобран теми же правилами. */
     const val SCHEMA = "apu-diag/2"
 
     private const val MAX_JOURNAL_LINES = 240
+
+    /** Ошибка брокера свежая — её показываем в сводке, даже если связь уже есть. */
+    private const val FRESH_ERROR_SEC = 300
 
     /** Текст, который владелец копирует и присылает разработчику. */
     fun render(
@@ -190,6 +287,14 @@ object DiagnosticsReport {
                 "Брокер",
                 "ядро ещё не выбирало путь связи",
             )
+            mqtt.connected && mqtt.errorAgoSec != null && mqtt.errorAgoSec <= FRESH_ERROR_SEC ->
+                DiagnosticsLine(
+                    DiagnosticsLevel.WARN,
+                    "Брокер",
+                    "на связи, подтверждена ${MqttLinkText.humanAgo(mqtt.connAckAgoSec ?: 0)} · ${mqtt.path}; " +
+                        "${MqttLinkText.humanAgo(mqtt.errorAgoSec)} назад была ошибка: " +
+                        MqttLinkText.humanError(mqtt.errorText),
+                )
             mqtt.connected -> DiagnosticsLine(
                 DiagnosticsLevel.OK,
                 "Брокер",
@@ -226,9 +331,13 @@ object DiagnosticsReport {
 
         // ── Передачи файлов ─────────────────────────────────────────────────
         val active = transferSums(facts.transferStates)
+        val sessionFailed = facts.counters[Counters.FILE_FAILED] ?: 0L
         val transfersText = buildString {
-            append("в работе ${active.working}, ждут получателя ${active.waiting}")
-            append(", завершено ${active.completed}, ошибок ${active.failed}")
+            append("в работе ${active.working}")
+            if (active.seeding > 0L) append(", раздаётся ${active.seeding}")
+            append(", ждут получателя ${active.waiting}, завершено ${active.completed}")
+            append(", ошибок ${active.failed} за всё время")
+            if (sessionFailed > 0L) append(" (в этой сессии $sessionFailed)")
         }
         lines += DiagnosticsLine(
             level = if (active.failed > 0L) DiagnosticsLevel.WARN else DiagnosticsLevel.INFO,
@@ -293,7 +402,7 @@ object DiagnosticsReport {
         appendLine("device=${facts.device}")
         appendLine("abi=${facts.abis}")
         appendLine("locale=${facts.locale} · tz=${TimeZone.getDefault().id}")
-        appendLine("memory=${facts.memoryUsedMb}/${facts.memoryLimitMb} МиБ")
+        appendLine("memory=${facts.memoryUsedMb}/${facts.memoryLimitMb} МиБ (куча приложения: занято/лимит)")
         appendLine("storage_free=${formatBytes(facts.storageFreeMb * 1024L * 1024L)}")
         appendLine(
             "session_uptime=${formatDuration((facts.createdAtMs - facts.sessionStartedAtMs).coerceAtLeast(0L))}",
@@ -321,7 +430,9 @@ object DiagnosticsReport {
         appendLine("[ядро]")
         appendLine("running=${facts.coreRunning}")
         appendLine("build=${facts.coreBuild}")
-        appendLine("stage=${facts.coreStage} · ready=${facts.coreReady}")
+        val stage = facts.coreStage.ifBlank { "нет данных" }
+        appendLine("stage=$stage → ${if (facts.coreReady) "готово" else "ещё поднимается"}")
+        appendLine("ready=${facts.coreReady}")
         appendLine("network=${facts.networkStatus}")
         appendLine("connected_peers=${facts.connectedPeers}")
         appendLine("pending_events=${facts.pendingEvents}")
@@ -352,12 +463,20 @@ object DiagnosticsReport {
         appendLine("[передачи]")
         val sums = transferSums(facts.transferStates)
         appendLine("в работе=${sums.working}")
+        appendLine("раздаётся=${sums.seeding}")
         appendLine("ждут получателя=${sums.waiting}")
         appendLine("у хранителя=${sums.custodied}")
         appendLine("на моём хранении=${sums.custody}")
         appendLine("завершено=${sums.completed}")
-        appendLine("ошибок=${sums.failed}")
+        appendLine("ошибок=${sums.failed} (за всё время работы приложения)")
         appendLine("отменено=${sums.cancelled}")
+        facts.failureCodes.forEach { failure ->
+            appendLine("ошибка.${failure.code}=${failure.count}")
+        }
+        facts.lastFailureAtMs?.let { at ->
+            appendLine("last_failure_at=${stamp(at)}")
+            appendLine("last_failure_ago=${formatDuration((facts.createdAtMs - at).coerceAtLeast(0L))}")
+        }
         appendLine("held_custody_bytes=${facts.custodyBytes}")
         facts.transferStates.entries
             .sortedBy { it.key }
@@ -480,7 +599,10 @@ object DiagnosticsReport {
         fun sumOf(vararg names: String): Long =
             names.sumOf { states[it] ?: 0L }
         return TransferSums(
-            working = sumOf("PREPARED", "TRANSFERRING", "OFFERED", "SENT", "SEEDING"),
+            working = sumOf("PREPARED", "TRANSFERRING", "OFFERED", "SENT"),
+            // «SEEDING» — файл уже отправлен автором и раздаётся рою: это не
+            // «в работе» (иначе отчёт владельца говорил «в работе 1, завершено 0»).
+            seeding = sumOf("SEEDING"),
             waiting = sumOf("WAITING_RECIPIENT"),
             custodied = sumOf("CUSTODIED"),
             custody = sumOf("HOLDING", "FORWARDING"),
@@ -494,6 +616,8 @@ object DiagnosticsReport {
 /** Суммы состояний передач для сводки и раздела [передачи]. */
 data class TransferSums(
     val working: Long,
+    /** Файл отправлен и раздаётся соседям (SEEDING). */
+    val seeding: Long,
     val waiting: Long,
     val custodied: Long,
     val custody: Long,

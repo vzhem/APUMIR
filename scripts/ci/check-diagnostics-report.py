@@ -89,11 +89,13 @@ class DiagnosticsContractsTest(unittest.TestCase):
         for part in ("Приватность", "текст переписки", "имена файлов", "ключи", "contact ID"):
             with self.subTest(part=part):
                 self.assertIn(part, report)
-        # Скрытие contact ID/адресов живёт ровно в одном месте.
-        collector = source(DIAG / "TransferDiagnostics.kt")
-        for marker in ('"[contact]"', '"[ip]"', '"[ipv6]"', '"[transfer]"', "internal fun redact"):
+        # Скрытие contact ID/адресов живёт ровно в одном месте — в чистом
+        # DiagnosticsPrivacy (его правила покрыты JVM-тестами на runner).
+        for marker in ('"[contact]"', '"[ip]"', '"[ipv6]"', '"[transfer]"', "fun redact"):
             with self.subTest(marker=marker):
-                self.assertIn(marker, collector)
+                self.assertIn(marker, report)
+        collector = source(DIAG / "TransferDiagnostics.kt")
+        self.assertIn("DiagnosticsPrivacy.redact", collector)
 
     def test_report_has_every_section_the_owner_reads(self):
         report = source(DIAG / "DiagnosticsReport.kt")
@@ -134,6 +136,47 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn("ApuSettingsCard(", ui)
         self.assertIn("ApuBubbleMutedColor", ui)
         self.assertIn("SelectionContainer", ui)
+
+    def test_log_lines_lose_payloads_and_keep_the_clock(self):
+        """Ошибки первого отчёта владельца (2026-10-06) не должны вернуться."""
+        report = source(DIAG / "DiagnosticsReport.kt")
+        for marker in (
+            "hidePayloadBodies",
+            "collapseRepeatedLogLines",
+            "payload=<скрыто>",
+            "ipv6CompressedRegex",
+            "ipv6FullRegex",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, report)
+        collector = source(DIAG / "TransferDiagnostics.kt")
+        for marker in (
+            "DiagnosticsPrivacy.hidePayloadBodies(",
+            "DiagnosticsPrivacy.collapseRepeatedLogLines(",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, collector)
+        tests = source(
+            ROOT / "android-app/app/src/test/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReportTest.kt"
+        )
+        for test in (
+            "logTimestampsSurviveRedaction",
+            "mqttPayloadBodiesNeverReachTheReport",
+            "repeatedLogLinesCollapseInsteadOfFillingTheReport",
+            "freshBrokerErrorShowsUpInTheSummary",
+            "seedingIsSharingNotWorkInProgress",
+            "failureCodesExplainTheFailureCount",
+        ):
+            with self.subTest(test=test):
+                self.assertIn(test, tests)
+
+    def test_transfer_failures_are_explained_by_codes(self):
+        dao = source(MAIN / "data/local/dao/FileTransferDao.kt")
+        self.assertIn("transferErrorCounts", dao)
+        self.assertIn("lastFailureAtMs", dao)
+        report = source(DIAG / "DiagnosticsReport.kt")
+        self.assertIn("ошибок=${sums.failed} (за всё время работы приложения)", report)
+        self.assertIn('appendLine("раздаётся=${sums.seeding}")', report)
 
     def test_mqtt_is_explained_by_one_shared_parser(self):
         view_model = source(VIEW_MODEL)
