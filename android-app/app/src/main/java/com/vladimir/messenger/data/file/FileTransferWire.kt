@@ -22,6 +22,12 @@ object FileTransferWire {
     const val BINARY_MAX_FRAME_PAYLOAD = 256 * 1024
     const val BINARY_CHUNK_PREFIX_BYTES = 36
 
+    /** FCAP v2 feature bit: both apps can use the pinned, durable-ACK F4 direct session. */
+    const val FCAP_FEATURE_AUTHENTICATED_DIRECT_SESSION = 1 shl 0
+
+    /** High bit carried only across the existing Rust FFI boundary, never in APUF wire bytes. */
+    const val F4_PREFERRED_CIPHERTEXT_LENGTH_FLAG = Int.MIN_VALUE
+
     fun isFilePacketText(text: String): Boolean =
         text.length <= MAX_WIRE_CHARS && text.startsWith(PREFIX)
 

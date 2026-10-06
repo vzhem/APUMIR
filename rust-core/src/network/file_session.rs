@@ -76,6 +76,40 @@ pub struct FileSessionPeer {
     pub ed25519_public_key: [u8; ED25519_PUBLIC_KEY_SIZE],
 }
 
+/// Resolves the identity asserted by an incoming C1 capability record to an already pinned contact.
+///
+/// The capability record is self-signed, but self-signature alone must never enrol a file peer. A
+/// production resolver compares both the claimed routing ID and exact Ed25519 public key with its
+/// durable contact/directory pin. Resolution happens only after the bounded control record has been
+/// decoded and before its capabilities, scope, or byte stream are accepted.
+pub trait FileSessionPeerResolver {
+    fn resolve_peer(
+        &self,
+        claimed_node_id: &str,
+        claimed_ed25519_public_key: &[u8; ED25519_PUBLIC_KEY_SIZE],
+    ) -> Result<FileSessionPeer, String>;
+}
+
+#[derive(Debug, Clone)]
+struct FixedFileSessionPeerResolver {
+    peer: FileSessionPeer,
+}
+
+impl FileSessionPeerResolver for FixedFileSessionPeerResolver {
+    fn resolve_peer(
+        &self,
+        claimed_node_id: &str,
+        claimed_ed25519_public_key: &[u8; ED25519_PUBLIC_KEY_SIZE],
+    ) -> Result<FileSessionPeer, String> {
+        if self.peer.node_id != claimed_node_id
+            || &self.peer.ed25519_public_key != claimed_ed25519_public_key
+        {
+            return Err("capability identity does not match the pinned peer".into());
+        }
+        Ok(self.peer.clone())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FileSessionLimits {
     pub operation_timeout: Duration,
@@ -481,6 +515,8 @@ pub enum FileSessionError {
     ParallelTask(String),
     #[error("file session replay admission rejected the scope")]
     ReplayedSession,
+    #[error("file session peer could not be resolved to a pinned identity: {0}")]
+    PeerResolution(String),
     #[error("file session admission store failed: {0}")] Admission(String),
     #[error("durable ciphertext sink failed: {0}")] DurableSink(String),
     #[error("chunk ACK does not match the sent ciphertext range")]
@@ -933,6 +969,9 @@ impl FileReceiveSession {
         ).await
     }
 
+    /// Compatibility wrapper for callers that already have one exact pinned peer. New production
+    /// listeners should call [`Self::accept_with_resolver`] so the routing ID and signing key are
+    /// looked up only after the bounded incoming capability has been decoded.
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn accept_with_signer<A, S>(
         connection: &QuicConnection,
@@ -946,6 +985,37 @@ impl FileReceiveSession {
     ) -> Result<Self, FileSessionError>
     where
         A: FileSessionAdmission,
+        S: FileControlSigner + ?Sized,
+    {
+        let resolver = FixedFileSessionPeerResolver { peer };
+        Self::accept_with_resolver(
+            connection,
+            local_node_id,
+            local_identity,
+            &resolver,
+            local_capabilities,
+            now_ms,
+            limits,
+            admission,
+        ).await
+    }
+
+    /// Accept one C1 ordered stream after resolving the self-asserted signer to a pre-existing,
+    /// pinned contact. `resolver` MUST fail closed for unknown contacts and a changed key.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn accept_with_resolver<A, R, S>(
+        connection: &QuicConnection,
+        local_node_id: &str,
+        local_identity: &S,
+        resolver: &R,
+        local_capabilities: FileCapabilitiesV1,
+        now_ms: i64,
+        limits: FileSessionLimits,
+        admission: &mut A
+    ) -> Result<Self, FileSessionError>
+    where
+        A: FileSessionAdmission,
+        R: FileSessionPeerResolver + ?Sized,
         S: FileControlSigner + ?Sized,
     {
         validate_limits(limits)?;
@@ -964,6 +1034,12 @@ impl FileReceiveSession {
                 });
             }
             let peer_auth = SignedFileControlV1::decode(&request.payload)?;
+            let peer = resolver
+                .resolve_peer(
+                    &peer_auth.claims.signer_node_id,
+                    &peer_auth.signer_ed25519_public_key,
+                )
+                .map_err(FileSessionError::PeerResolution)?;
             let channel_binding = connection.file_session_channel_binding(
                 &peer_auth.claims.record_id
             )?;

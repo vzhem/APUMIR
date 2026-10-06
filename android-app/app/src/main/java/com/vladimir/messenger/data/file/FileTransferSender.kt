@@ -55,21 +55,36 @@ class FileTransferSender(
     private val ackedContiguous = ConcurrentHashMap<String, Long>()
     private val lastPumpAt = ConcurrentHashMap<String, Long>()
     private val lastPumpAcked = ConcurrentHashMap<String, Long>()
-    /**
-     * K3: передачи, чей получатель подтвердил FCAP (понимает APUF-кадры).
-     * Значение — максимальная нагрузка кадра получателя (из его FCAP).
-     */
-    private val binaryCapable = ConcurrentHashMap<String, Int>()
+    /** Capability confirmed by the recipient's FCAP. F4 remains opt-in per transfer, while the
+     * ordinary binary APUF route stays available for an older four-byte FCAP. */
+    private data class BinaryCapability(
+        val maxFramePayload: Int,
+        val authenticatedDirectSession: Boolean,
+    )
+
+    private val binaryCapable = ConcurrentHashMap<String, BinaryCapability>()
 
     /**
      * K3: получатель принял наше предложение и ответил FCAP: с следующего
      * цикла куски этой передачи идут бинарными APUF-кадрами по прямому
      * QUIC. Вызывается из FileTransferReceiver (событие FCAP).
      */
-    suspend fun markBinaryCapable(transferIdHex: String, maxFramePayload: Int) {
+    suspend fun markBinaryCapable(
+        transferIdHex: String,
+        maxFramePayload: Int,
+        authenticatedDirectSession: Boolean = false,
+    ) {
         FileTransferWire.requireValidTransferId(transferIdHex)
-        if (maxFramePayload in 1..Int.MAX_VALUE) {
-            binaryCapable.putIfAbsent(transferIdHex, maxFramePayload)
+        if (maxFramePayload in 1..FileTransferWire.BINARY_MAX_FRAME_PAYLOAD) {
+            // A v2 FCAP is delivered after the regular binary hook. Upgrade the same transfer
+            // rather than letting the earlier F3 capability permanently mask F4.
+            binaryCapable.compute(transferIdHex) { _, existing ->
+                when {
+                    existing == null -> BinaryCapability(maxFramePayload, authenticatedDirectSession)
+                    authenticatedDirectSession -> BinaryCapability(maxFramePayload, true)
+                    else -> existing
+                }
+            }
         }
     }
 
@@ -276,10 +291,19 @@ class FileTransferSender(
         ciphertext: ByteArray,
     ): Int {
         val transport = checkNotNull(binaryTransport) { "binary transport unset" }
-        val maxFramePayload = binaryCapable[transferIdHex]
-            ?: FileTransferWire.BINARY_MAX_FRAME_PAYLOAD
+        val capability = binaryCapable[transferIdHex]
+            ?: BinaryCapability(FileTransferWire.BINARY_MAX_FRAME_PAYLOAD, false)
+        val maxFramePayload = capability.maxFramePayload
         val maxRange = (maxFramePayload - FileTransferWire.BINARY_CHUNK_PREFIX_BYTES)
             .coerceIn(1, maxFramePayload)
+        // The high bit is a local FFI preference only. Rust strips it before it ever reaches an
+        // APUF frame, and falls back to the existing direct path if its F4 prerequisites are absent.
+        val ciphertextLengthForTransport = ciphertext.size or
+            if (capability.authenticatedDirectSession) {
+                FileTransferWire.F4_PREFERRED_CIPHERTEXT_LENGTH_FLAG
+            } else {
+                0
+            }
         val startedAt = nowMs()
         var ok = false
         var frames = 0
@@ -294,7 +318,7 @@ class FileTransferSender(
                         transferIdHex,
                         chunkIndex,
                         offset,
-                        ciphertext.size,
+                        ciphertextLengthForTransport,
                         range,
                     )
                 }.getOrDefault(false)

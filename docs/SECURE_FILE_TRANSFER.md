@@ -480,6 +480,33 @@ physical replication transport и production app wiring ещё не доказа
 После каждого slice отдельно отмечаются source/static, host tests, Windows Android compile и phone
 runtime. Следующий slice не объявляется готовым по комментарию или ручному наблюдению.
 
+### Status 2026-10-06 — F4-C production wiring source slice (not yet acceptance-ready)
+
+В ветке source связаны уже проверенные host-only C1/C2 компоненты с существующим Android file path:
+
+- FCAP v2 добавляет явный feature bit `authenticated direct session`; старый 4-byte FCAP остаётся
+  F3-only, а N-1 sender, не понимающий 8-byte FCAP, остаётся на text transport. Feature bit передаётся
+  через уже существующий FFI `ciphertext_chunk_len` high-bit и **всегда** снимается Rust до сборки
+  APUF/F3 bytes.
+- Для v2 transfer sender сначала пробует один persistent exporter-bound C1 QUIC session только при
+  real installed Ed25519 sidecar, durable `PeerExchange` pin exact key+node ID и известном direct
+  endpoint. Любая нехватка prerequisites/ошибка session возвращает ровно в существующий F3 binary
+  path, без helper/relay ложного ACK и без порчи address reachability.
+- Inbound C1 stream обслуживается на уже существующем DirectTransport endpoint параллельно с
+  uni-stream text/K3. До capability response key обязан совпасть с durable contact pin; unknown,
+  changed key, replay scope и переполненный inbound limit fail closed.
+- Новый bounded SQLite ingress сохраняет ciphertext range, SHA-256 identity и session replay state
+  **до** C1 ACK: максимум 256 ranges / 64 MiB / 7 days. После restart он повторно подаёт bounded
+  ranges в прежнее Kotlin `FileChunkReceived → FileTransferReceiver` pipeline; ключей, manifest,
+  filename, plain bytes и whole-file allocation в ingress нет. Exact duplicate is idempotent, changed
+  already-ACKed range is rejected.
+
+Этот slice намеренно пока использует C1 ordered stream one range at a time. D1–D3 parallel/adaptive
+windows, signed `MissingRanges`, path manager E и custody F не помечаются этим source wiring как
+runtime-ready. Нужны Rust/Android compile gates, two-phone clean/upgrade/resume testing, restart after
+transport ACK before Kotlin ingest, quota/disk-full, text-latency under bulk, different network/NAT и
+privacy audit. До этих gates F4 нельзя объявлять release-ready.
+
 ## Status 2026-08-20 (late evening) — F3 Windows gate PASS; File-HELLO handshake added
 
 JVM gate 88/88 PASS and assembleDebug PASS on the new PC (see доп.308). The first-file

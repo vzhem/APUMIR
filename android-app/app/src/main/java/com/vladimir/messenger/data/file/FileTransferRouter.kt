@@ -528,6 +528,17 @@ class FileTransferRouter @Inject constructor(
                     senderLocal.markBinaryCapable(transferIdHex, maxFramePayload)
                 }
             },
+            onAuthenticatedDirectFcap = { transferIdHex, from, maxFramePayload ->
+                if (isPeerViaUdp(from)) {
+                    Log.i(TAG, "F4 FCAP $transferIdHex from ${from.takeLast(8)}: peer via UDP, keeping F3")
+                } else {
+                    senderLocal.markBinaryCapable(
+                        transferIdHex,
+                        maxFramePayload,
+                        authenticatedDirectSession = true,
+                    )
+                }
+            },
         )
         seederLocal.onServed = { transferIdHex, requester ->
             runCatching { groupFiles.get().onServed(transferIdHex, requester) }
