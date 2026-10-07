@@ -438,7 +438,7 @@ class MainActivity : ComponentActivity() {
                 Log.d("MainActivity", "Checking dialog: pendingContact=${pendingContact != null}")
                 
                 if (pendingContact != null) {
-                    androidx.compose.material3.ApuSettingsDialog(
+                    ApuSettingsDialog(
                         onDismissRequest = { pendingContactInfo = null },
                         title = { androidx.compose.material3.Text("Добавить контакт?") },
                         text = {
@@ -484,7 +484,7 @@ class MainActivity : ComponentActivity() {
                     val prompt = remember(pendingGroupLink) {
                         invitePromptFor(GroupInviteLinks.parseTarget(pendingGroupLink))
                     }
-                    androidx.compose.material3.ApuSettingsDialog(
+                    ApuSettingsDialog(
                         onDismissRequest = { pendingGroupInviteLink = null },
                         title = { androidx.compose.material3.Text(prompt.title) },
                         text = { androidx.compose.material3.Text(prompt.body) },

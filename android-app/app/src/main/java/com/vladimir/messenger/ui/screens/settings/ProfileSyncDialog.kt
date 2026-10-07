@@ -87,7 +87,7 @@ fun ProfileSyncDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                androidx.compose.material3.ApuBubbleField(
+                ApuBubbleField(
                     value = ui.password,
                     onValueChange = viewModel::onPasswordChange,
                     modifier = Modifier.fillMaxWidth(),
@@ -232,14 +232,14 @@ fun ProfileSyncDialog(
                         ApuTextAction(label = "Отменить передачу", onClick = viewModel::stopShare)
                     }
                 }
-                androidx.compose.material3.ApuBubbleField(
+                ApuBubbleField(
                     value = ui.pullAddress,
                     onValueChange = viewModel::onPullAddressChange,
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Адрес с экрана телефона (192.168.х.х:48126)") },
                     singleLine = true,
                 )
-                androidx.compose.material3.ApuBubbleField(
+                ApuBubbleField(
                     value = ui.pullToken,
                     onValueChange = viewModel::onPullTokenChange,
                     modifier = Modifier.fillMaxWidth(),

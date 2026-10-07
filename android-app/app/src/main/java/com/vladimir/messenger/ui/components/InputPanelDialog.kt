@@ -371,7 +371,7 @@ private fun StickerSection(
     // Раунд 174: подтверждение удаления стикера из библиотеки и сети.
     var removeCandidate by remember { mutableStateOf<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry?>(null) }
     if (removeCandidate != null) {
-        androidx.compose.material3.ApuSettingsDialog(
+        ApuSettingsDialog(
             onDismissRequest = { removeCandidate = null },
             title = { Text("Удалить стикер?") },
             text = {

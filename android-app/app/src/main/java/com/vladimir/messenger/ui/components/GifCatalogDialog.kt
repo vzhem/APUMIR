@@ -152,7 +152,7 @@ fun GifCatalogBody(
     // Раунд 174: подтверждение удаления своей гифки.
     var removeCandidate by remember { mutableStateOf<com.vladimir.messenger.data.gif.GifLibEntry?>(null) }
     if (removeCandidate != null) {
-        androidx.compose.material3.ApuSettingsDialog(
+        ApuSettingsDialog(
             onDismissRequest = { removeCandidate = null },
             title = { Text("Удалить гифку?") },
             text = {
