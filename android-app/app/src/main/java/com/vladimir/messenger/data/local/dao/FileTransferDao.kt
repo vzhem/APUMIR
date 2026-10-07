@@ -123,8 +123,21 @@ interface FileTransferDao {
     )
     suspend fun getChunks(transferId: String): List<FileTransferChunkEntity>
 
-    @Query("DELETE FROM file_transfers WHERE expiresAtMs < :nowMs AND state != 'COMPLETE'")
-    suspend fun deleteExpiredIncomplete(nowMs: Long): Int
+    /**
+     * Просроченные незавершённые передачи — «потеряшки»: срок прошёл, а строка и
+     * зашифрованные куски остались. Уборка (`FileTransferRouter.purgeExpiredTransfers`)
+     * сначала берёт их списком, чтобы удалить и куски, а не только строку.
+     * Владелец 2026-10-07: «некоторые потеряшки живут в очереди вечно?» — жили.
+     */
+    @Query(
+        """
+        SELECT * FROM file_transfers
+        WHERE expiresAtMs < :nowMs AND state != 'COMPLETE'
+        ORDER BY expiresAtMs ASC
+        LIMIT :limit
+        """
+    )
+    suspend fun getExpiredIncomplete(nowMs: Long, limit: Int): List<FileTransferEntity>
 
     @Query("DELETE FROM file_transfers WHERE transferId = :transferId")
     suspend fun deleteTransfer(transferId: String): Int

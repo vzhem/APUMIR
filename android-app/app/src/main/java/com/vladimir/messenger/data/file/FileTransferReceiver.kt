@@ -1884,7 +1884,15 @@ class FileTransferReceiver(
             fileSha256 = manifest.fileSha256Hex,
             state = "HOLDING",
             createdAtMs = now,
-            expiresAtMs = minOf(manifest.expiresAtMs, Math.addExact(now, FileCustodySender.CUSTODY_TTL_MS)),
+            // Владелец 2026-10-07: чужое тяжёлое (фото, видео, большие файлы)
+            // держим максимум сутки — дальше телефон занят только своим.
+            expiresAtMs = minOf(
+                manifest.expiresAtMs,
+                Math.addExact(
+                    now,
+                    FileTransferRetention.ttlMs(manifest.mediaType, manifest.fileSize.toLong()),
+                ),
+            ),
             updatedAtMs = now,
             originNodeId = senderId,
         )

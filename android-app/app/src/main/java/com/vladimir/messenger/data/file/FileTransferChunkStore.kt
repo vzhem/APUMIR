@@ -204,6 +204,22 @@ class FileTransferChunkStore(
     }
 
     @Synchronized
+    /**
+     * Передачи, чьи зашифрованные куски лежат на диске. Нужно уборке
+     * (`FileTransferRouter.purgeExpiredTransfers`): она сверяет диск со строками
+     * базы и освобождает просроченное и осиротевшее — иначе «потеряшка» живёт
+     * вечно уже не в очереди, а на диске.
+     */
+    fun transferIds(): List<String> {
+        val root = rootDirectory(create = false)
+        if (!root.isDirectory) return emptyList()
+        return root.listFiles()
+            ?.filter { it.isDirectory }
+            ?.mapNotNull { directory -> runCatching { validateTransferId(directory.name); directory.name }.getOrNull() }
+            ?.sorted()
+            ?: emptyList()
+    }
+
     fun currentStoredBytes(): Long {
         cachedStoredBytes?.let { return it }
         val base = rootDirectory(create = false)

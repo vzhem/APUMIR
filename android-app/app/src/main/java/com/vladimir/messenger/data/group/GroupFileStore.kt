@@ -66,6 +66,28 @@ class GroupFileStore(private val root: File) {
         return directory.deleteRecursively()
     }
 
+    /** Копия на диске: группа, хэш файла и время последней записи. */
+    data class Entry(val groupId: String, val sha256: String, val newestMs: Long)
+
+    /**
+     * Что лежит в хранилище копий. Нужно уборке в рое: срок копии берётся не
+     * из её возраста, а из строки передачи (`file_transfers`), потому что у
+     * тяжёлого он сутки, а у мелкого — неделя (владелец 2026-10-07).
+     */
+    fun entries(): List<Entry> {
+        val groups = root.listFiles() ?: return emptyList()
+        val result = ArrayList<Entry>()
+        for (group in groups) {
+            if (!group.isDirectory) continue
+            for (entry in group.listFiles() ?: continue) {
+                if (!entry.isDirectory) continue
+                val newest = entry.listFiles()?.maxOfOrNull { it.lastModified() } ?: 0L
+                result += Entry(group.name, entry.name, newest)
+            }
+        }
+        return result
+    }
+
     /** Убрать копии старше [ttlMs]; возвращает, сколько файлов удалено. */
     fun sweep(nowMs: Long, ttlMs: Long = DEFAULT_TTL_MS): Int {
         val groups = root.listFiles() ?: return 0
@@ -140,7 +162,7 @@ class GroupFileStore(private val root: File) {
     companion object {
         const val MAX_NAME_CHARS = 120
         const val COPY_BUFFER_BYTES = 64 * 1024
-        /** Столько же живёт и сама передача (OutgoingFilePreparationService.TRANSFER_TTL_MS). */
+        /** Верхняя граница: срок передачи считает FileTransferRetention (тяжёлое — сутки). */
         const val DEFAULT_TTL_MS = 7L * 24 * 60 * 60 * 1000
     }
 }

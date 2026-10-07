@@ -544,6 +544,35 @@ class DiagnosticsReportTest {
      * «Логи» подсвечивает разделы, ошибки и предупреждения — цвет выбирает
      * UI, а само правило живёт здесь, чтобы его проверял JVM-тест.
      */
+    /**
+     * Владелец 2026-10-07: «У нас нет такого что некоторые потеряшки живут в
+     * очереди вечно?» — у незавершённых передач строку никто не удалял. Теперь
+     * просроченное убирает FileTransferRouter.purgeExpiredTransfers, а отчёт
+     * показывает и правило сроков, и что именно убрано.
+     */
+    @Test
+    fun expiredTransfersAreSweptAndTheRuleIsVisible() {
+        val quiet = DiagnosticsReport.render(
+            facts = facts(),
+            journal = emptyList(),
+            logcat = emptyList(),
+        )
+        assertTrue(quiet.contains("срок хранения: тяжёлое 24 ч · текст и малое 7 сут"))
+        assertTrue(quiet.contains("убрано просроченного=0 (копий на диске освобождено=0)"))
+
+        val swept = DiagnosticsReport.render(
+            facts = facts(
+                counters = mapOf(
+                    Counters.TRANSFER_EXPIRED_ROWS to 3L,
+                    Counters.TRANSFER_EXPIRED_COPIES to 5L,
+                ),
+            ),
+            journal = emptyList(),
+            logcat = emptyList(),
+        )
+        assertTrue(swept.contains("убрано просроченного=3 (копий на диске освобождено=5)"))
+    }
+
     @Test
     fun reportHighlightMarksSectionsFailuresAndWarnings() {
         assertEquals(DiagnosticsLineTone.SECTION, diagnosticsLineTone("[ядро]"))

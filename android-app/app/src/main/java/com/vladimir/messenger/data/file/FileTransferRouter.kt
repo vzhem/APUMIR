@@ -79,6 +79,8 @@ class FileTransferRouter @Inject constructor(
 
     /** р231: когда последний раз принимали файловый пакет (передача идёт к нам). */
     @Volatile private var lastIncomingActivityAt = 0L
+    /** Когда последний раз убирали просроченные передачи (диск + база). */
+    @Volatile private var lastExpiredSweepAt = 0L
 
     /**
      * р231: идёт ли передача (отдача или приём) прямо сейчас. Передача роли
@@ -787,6 +789,9 @@ class FileTransferRouter @Inject constructor(
             val origin = custodySender.pumpOrigin()
             val forward = custodySender.pumpForwarding()
             val swept = custodySender.sweep()
+            // Потеряшки: просроченное убираем здесь же, чтобы строка, куски и
+            // принятый недокачанный файл уходили вместе.
+            purgeExpiredTransfers(now)
             if (origin.originPumped > 0 || forward.forwarded > 0 || swept > 0) {
                 Log.i(
                     TAG,
@@ -864,6 +869,71 @@ class FileTransferRouter @Inject constructor(
         if (!RustBridge.isRunning()) return
         runCatching { sendHello(recipientNodeId, force = true) }
             .onFailure { Log.w(TAG, "File HELLO announce failed: ${it.message}") }
+    }
+
+    /**
+     * Уборка «потеряшек»: просроченное не живёт вечно.
+     *
+     * Владелец 2026-10-07: «У нас нет такого что некоторые потеряшки живут в
+     * очереди вечно? Текст и малые файлы объёмы можно по дольше хранить. А вот
+     * видио фото и всё тяжёлое максимум нужно хранить 24 часа.»
+     *
+     * Что делает:
+     *  1) незавершённые передачи с истёкшим сроком — строка, зашифрованные куски
+     *     и недокачанный принятый файл удаляются (до этого такая строка могла
+     *     лежать на телефоне бесконечно: удалять её было некому);
+     *  2) на диске не остаётся копий без живой строки (осиротевшие) и копий
+     *     завершённых передач, у которых срок вышел: дальше они никому не
+     *     раздаются, значит место занимают зря. Принятый (расшифрованный) файл
+     *     и строка истории остаются — это уже файл человека, а не «потеряшка».
+     *
+     * Возвращает, сколько строк убрано и сколько копий освобождено.
+     */
+    suspend fun purgeExpiredTransfers(
+        nowMs: Long = System.currentTimeMillis(),
+        force: Boolean = false,
+    ): Pair<Int, Int> {
+        // Диск и база: не чаще раза в 10 минут, иначе уборка дороже пользы.
+        if (!force && nowMs - lastExpiredSweepAt < EXPIRED_SWEEP_INTERVAL_MS) return 0 to 0
+        lastExpiredSweepAt = nowMs
+
+        // 1) Незавершённые просроченные: забираем строками, чтобы убрать и куски.
+        val stale = runCatching { transferDao.getExpiredIncomplete(nowMs, EXPIRED_PURGE_BATCH) }
+            .getOrDefault(emptyList())
+        var removedRows = 0
+        for (row in stale) {
+            runCatching { chunkStore.deleteTransfer(row.transferId) }
+            runCatching { receivedStore.deleteTransfer(row.transferId) }
+            transferDao.deleteTransfer(row.transferId)
+            removedRows++
+        }
+
+        // 2) Диск: осиротевшие копии и копии просроченных завершённых передач.
+        var freedCopies = 0
+        for (transferId in runCatching { chunkStore.transferIds() }.getOrDefault(emptyList())) {
+            val row = runCatching { transferDao.getTransfer(transferId) }.getOrNull()
+            if (row == null) {
+                if (chunkStore.deleteTransfer(transferId)) freedCopies++
+                continue
+            }
+            // Чужое хранение (CUSTODY) убирает свой проход: у него отдельные
+            // состояния и отпускание хранителем, здесь его не трогаем.
+            if (row.direction == "CUSTODY") continue
+            if (row.state != "COMPLETE") continue
+            if (row.expiresAtMs > nowMs) continue
+            if (chunkStore.deleteTransfer(transferId)) freedCopies++
+        }
+
+        if (removedRows > 0 || freedCopies > 0) {
+            Log.i(TAG, "expired sweep: rows=$removedRows copies=$freedCopies")
+            TransferDiagnostics.count(Counters.TRANSFER_EXPIRED_ROWS, removedRows.toLong())
+            TransferDiagnostics.count(Counters.TRANSFER_EXPIRED_COPIES, freedCopies.toLong())
+            TransferDiagnostics.record(
+                "file",
+                FileTransferRetention.describeSweep(removedRows, freedCopies),
+            )
+        }
+        return removedRows to freedCopies
     }
 
     /**
@@ -1071,7 +1141,10 @@ class FileTransferRouter @Inject constructor(
                     completedChunks = chunks,
                     transferredBytes = 0,
                     createdAtMs = timestamp,
-                    expiresAtMs = timestamp + 30L * 24 * 60 * 60 * 1000,
+                    // Владелец 2026-10-07: тяжёлое (фото, видео, большие файлы)
+                    // хранится сутки, текст и малое — неделю.
+                    expiresAtMs = timestamp +
+                        FileTransferRetention.ttlMs(mime, size),
                     updatedAtMs = System.currentTimeMillis(),
                 ),
             )
@@ -1451,6 +1524,10 @@ class FileTransferRouter @Inject constructor(
         /** Пульс присутствия идёт раз в минуту; три пропуска - узел «не в сети» (как в сервисе). */
         const val ONLINE_TTL_MS = 200_000L
         const val MAX_CUSTODY_CANDIDATES = 8
+        /** Сколько потеряшек убираем за один проход: уборка не должна запирать насос. */
+        const val EXPIRED_PURGE_BATCH = 128
+        /** Как часто убираем просроченное (диск + база). */
+        const val EXPIRED_SWEEP_INTERVAL_MS = 10L * 60_000L
 
         /** Как часто сверять, со всеми ли контактами обменялись ключами. */
         const val HELLO_SWEEP_INTERVAL_MS = 5 * 60_000L

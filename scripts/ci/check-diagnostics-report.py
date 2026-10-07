@@ -144,6 +144,97 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn("ApuBubbleMutedColor", ui)
         self.assertIn("SelectionContainer", ui)
 
+    def test_lost_items_do_not_live_forever(self):
+        """Владелец 2026-10-07: тяжёлое — сутки, текст и малое — неделя, и уборка.
+
+        Проверяются ИМЕНА и числа в исходниках: срок задаётся в одном месте,
+        иначе «потеряшка» снова заживёт по старому правилу в другом файле.
+        """
+        retention = source(MAIN / "data/file/FileTransferRetention.kt")
+        for marker in (
+            "object FileTransferRetention",
+            "const val HEAVY_MAX_BYTES: Long = 2L * 1024 * 1024",
+            "const val HEAVY_TTL_MS: Long = 24L * 60L * 60L * 1000L",
+            "const val LIGHT_TTL_MS: Long = 7L * 24L * 60L * 60L * 1000L",
+            "fun isHeavyCategory(mediaType: String)",
+            "fun ttlMs(mediaType: String, totalBytes: Long)",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, retention)
+        self.assertNotIn("import android", retention)
+
+        # Черта «тяжёлого» одна на две задачи: раздача в режиме абонента и срок
+        # хранения. Если значения разъедутся, это должно падать здесь.
+        server_mode = source(MAIN / "data/swarm/ServerMode.kt")
+        heavy = re.search(r"HEAVY_MAX_BYTES: Long = ([0-9L* ]+)", retention)
+        light = re.search(r"LIGHT_SERVE_MAX_BYTES: Long = ([0-9L* ]+)", server_mode)
+        self.assertIsNotNone(heavy, "в FileTransferRetention нет HEAVY_MAX_BYTES")
+        self.assertIsNotNone(light, "в ServerMode нет LIGHT_SERVE_MAX_BYTES")
+        self.assertEqual(heavy.group(1).strip(), light.group(1).strip())
+
+        # Срок берётся из правила: отправка (личная и групповая), хранение чужого
+        # файла и карточка в зеркале.
+        for path, marker in (
+            ("data/file/OutgoingFilePreparationService.kt", "FileTransferRetention.ttlMs(inspected.mediaType, inspected.sizeBytes)"),
+            ("data/file/FileTransferReceiver.kt", "FileTransferRetention.ttlMs(manifest.mediaType, manifest.fileSize.toLong())"),
+            ("data/file/FileTransferRouter.kt", "FileTransferRetention.ttlMs(mime, size)"),
+        ):
+            with self.subTest(path=path):
+                self.assertIn(marker, source(MAIN / path))
+
+        # Уборка: просроченные незавершённые строки уходят вместе с кусками,
+        # копии на диске без живой строки — тоже.
+        router = source(MAIN / "data/file/FileTransferRouter.kt")
+        for marker in (
+            "suspend fun purgeExpiredTransfers(",
+            "transferDao.getExpiredIncomplete(nowMs, EXPIRED_PURGE_BATCH)",
+            "chunkStore.transferIds()",
+            "purgeExpiredTransfers(now)",
+            "TRANSFER_EXPIRED_ROWS",
+            "TRANSFER_EXPIRED_COPIES",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, router)
+        dao = source(MAIN / "data/local/dao/FileTransferDao.kt")
+        self.assertIn("suspend fun getExpiredIncomplete(nowMs: Long, limit: Int)", dao)
+        store = source(MAIN / "data/file/FileTransferChunkStore.kt")
+        self.assertIn("fun transferIds(): List<String>", store)
+        group_store = source(MAIN / "data/group/GroupFileStore.kt")
+        self.assertIn("fun entries(): List<Entry>", group_store)
+        swarm = source(MAIN / "data/group/GroupFileSwarm.kt")
+        self.assertIn("sweepCopies(now)", swarm)
+
+        # Правило и результат уборки видны владельцу в отчёте «Логи».
+        report = source(DIAG / "DiagnosticsReport.kt")
+        self.assertTrue(
+            "appendLine(FileTransferRetention.describe())" in report,
+            "в разделе [передачи] нет строки о сроках хранения",
+        )
+        self.assertTrue(
+            '"убрано просроченного=${expiredRows} "' in report
+            and '"(копий на диске освобождено=${expiredCopies})"' in report,
+            "в отчёте нет числа убранного просроченного (потеряшек)",
+        )
+        self.assertTrue(
+            'const val TRANSFER_EXPIRED_ROWS = "transfer_expired_rows"' in report,
+            "нет счётчика убранных строк",
+        )
+
+        # Тест правила зарегистрирован в прогоне JVM-тестов на runner.
+        script = source(ROOT / "scripts/ci/check-chat-history.sh")
+        for marker in ("FileTransferRetention.kt", "FileTransferRetentionTest.kt",
+                       "com.vladimir.messenger.data.file.FileTransferRetentionTest"):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, script)
+        tests = source(ROOT / "android-app/app/src/test/java/com/vladimir/messenger/data/file/FileTransferRetentionTest.kt")
+        for marker in (
+            "fun heavyIsPhotoVideoOrBigFile()",
+            "fun heavyLivesOneDayAndLightLivesAWeek()",
+            "fun logsSayTheRuleAndTheSweep()",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, tests)
+
     def test_logs_window_keeps_the_house_style(self):
         """Окно «Логи»: итог, легенда, шапка отчёта и подсветка — в стиле APU."""
         ui = source(DIAG_UI)

@@ -4,6 +4,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import com.vladimir.messenger.data.file.FileTransferRetention
 
 // =============================================================================
 // DIAGNOSTICSREPORT.KT — текст отчёта «Логи» без Android
@@ -226,6 +227,16 @@ object Counters {
 
     /** Исходящие в очереди «до сети»: ещё не отправлены, ждут связи. */
     const val MSG_QUEUED_OFFLINE = "msg_queued_offline"
+
+    // ── Потеряшки: просроченное не живёт вечно ─────────────────────────
+    // Владелец 2026-10-07: «У нас нет такого что некоторые потеряшки живут в
+    // очереди вечно?» — у незавершённых передач строку никто не удалял.
+
+    /** Строк просроченных передач убрано уборкой. */
+    const val TRANSFER_EXPIRED_ROWS = "transfer_expired_rows"
+
+    /** Копий на диске освобождено уборкой (осиротевшие и просроченные). */
+    const val TRANSFER_EXPIRED_COPIES = "transfer_expired_copies"
 }
 
 /** Код ошибки передачи и число таких записей: объясняет «ошибок N» без имён файлов. */
@@ -794,6 +805,15 @@ object DiagnosticsReport {
             appendLine("last_failure_ago=${formatDuration((facts.createdAtMs - at).coerceAtLeast(0L))}")
         }
         appendLine("held_custody_bytes=${facts.custodyBytes}")
+        // Владелец 2026-10-07: тяжёлое хранится сутки, текст и малое — неделю.
+        // Правило печатаем рядом с числами: иначе сроки приходится угадывать.
+        appendLine(FileTransferRetention.describe())
+        val expiredRows = facts.counters[Counters.TRANSFER_EXPIRED_ROWS] ?: 0L
+        val expiredCopies = facts.counters[Counters.TRANSFER_EXPIRED_COPIES] ?: 0L
+        appendLine(
+            "убрано просроченного=${expiredRows} " +
+                "(копий на диске освобождено=${expiredCopies})",
+        )
         facts.transferStates.entries
             .sortedBy { it.key }
             .forEach { (state, count) -> appendLine("state.$state=$count") }
@@ -833,6 +853,8 @@ object DiagnosticsReport {
             Counters.MSG_PEER_KEY_CHANGED,
             Counters.MSG_SEND_FAILED,
             Counters.MSG_QUEUED_OFFLINE,
+            Counters.TRANSFER_EXPIRED_ROWS,
+            Counters.TRANSFER_EXPIRED_COPIES,
         )
         c.entries.filter { it.key !in known }.sortedBy { it.key }
             .forEach { (key, value) -> appendLine("$key=$value") }

@@ -102,11 +102,12 @@ class FakeFileTransferDao : FileTransferDao {
     override suspend fun getChunks(transferId: String): List<FileTransferChunkEntity> =
         chunks.filterKeys { it.first == transferId }.values.sortedBy { it.chunkIndex }
 
-    override suspend fun deleteExpiredIncomplete(nowMs: Long): Int {
-        val doomed = transfers.values.filter { it.expiresAtMs < nowMs && it.state != "COMPLETE" }
-        doomed.forEach { transfers.remove(it.transferId) }
-        return doomed.size
-    }
+    /** Просроченные незавершённые — «потеряшки»: их убирает FileTransferRouter. */
+    override suspend fun getExpiredIncomplete(nowMs: Long, limit: Int): List<FileTransferEntity> =
+        transfers.values
+            .filter { it.expiresAtMs < nowMs && it.state != "COMPLETE" }
+            .sortedBy { it.expiresAtMs }
+            .take(limit)
 
     override suspend fun deleteTransfer(transferId: String): Int {
         chunks.keys.filter { it.first == transferId }.forEach(chunks::remove)

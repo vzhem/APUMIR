@@ -187,7 +187,12 @@ class OutgoingFilePreparationService private constructor(
             declaredSize = source.length().takeIf { source.isFile },
         ) { local.open(context) }
         check(inspected.sha256 == expectedSha256) { "Group file copy does not match its card" }
-        val expiresAtMs = Math.addExact(nowMs, TRANSFER_TTL_MS)
+        // Владелец 2026-10-07: тяжёлое (фото, видео, большие файлы) хранится и
+        // предлагается максимум сутки, текст и малое — неделю.
+        val expiresAtMs = Math.addExact(
+            nowMs,
+            FileTransferRetention.ttlMs(inspected.mediaType, inspected.sizeBytes),
+        )
         val manifest = try {
             uniffi.p2p_core.createGroupFileManifest(
                 senderNodeId,
@@ -307,7 +312,10 @@ class OutgoingFilePreparationService private constructor(
                 sizeBytes = inspected.sizeBytes,
             )
         }
-        val expiresAtMs = Math.addExact(nowMs, TRANSFER_TTL_MS)
+        val expiresAtMs = Math.addExact(
+            nowMs,
+            FileTransferRetention.ttlMs(inspected.mediaType, inspected.sizeBytes),
+        )
         val manifest = createFileTransferManifest(
             senderNodeId,
             recipientNodeId,
@@ -533,7 +541,7 @@ class OutgoingFilePreparationService private constructor(
 
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
-    companion object {
-        private const val TRANSFER_TTL_MS = 7L * 24 * 60 * 60 * 1_000
-    }
+    // Срок жизни передачи больше не живёт здесь константой: его считает
+    // FileTransferRetention (тяжёлое — сутки, текст и малое — неделя), чтобы
+    // правило было одно на отправку, хранение у соседей и уборку.
 }
