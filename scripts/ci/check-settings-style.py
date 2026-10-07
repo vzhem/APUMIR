@@ -156,7 +156,13 @@ class SettingsStyleTest(unittest.TestCase):
         shared = source("components/ApuSettingsUi.kt")
         self.assertIn("ApuBubbleCard(", shared)
         self.assertIn("else ApuBubbleSurfaceColor", shared)
-        self.assertIn("tonalElevation = 0.dp", shared)
+        # Владелец 2026-10-07: «Доделывай все разделы с новым стилем».
+        # Общий диалог разделов — уже НЕ stock AlertDialog, а собственный
+        # премиальный слой: своя рамка, золотая капсула заголовка, блеск.
+        self.assertIn("Dialog(onDismissRequest = onDismissRequest", shared)
+        self.assertIn("apuPremiumLift(14.dp, shape, ApuPremiumShadowColor)", shared)
+        self.assertIn("apuGoldBrush()", shared)
+        self.assertNotRegex(shared, r"\bAlertDialog\(")
 
     def test_all_related_headers_use_house_bubbles(self):
         for path in SCREENS:

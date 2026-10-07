@@ -12,6 +12,7 @@ import com.vladimir.messenger.data.local.MessagePinPolicy
 
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.material3.ButtonDefaults
+import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
 import com.vladimir.messenger.ui.components.ApuNotificationBadge
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
@@ -89,7 +90,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -1322,13 +1322,7 @@ private fun PostEditorDialog(
         title = { Text(title) },
         text = {
             Column {
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { text = it },
-                    label = { Text("Текст поста") },
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
-                )
+                ApuBubbleField(value = text, onValueChange = { text = it }, label = { Text("Текст поста") }, modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp))
                 Spacer(Modifier.height(8.dp))
                 if (images.isNotEmpty()) {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

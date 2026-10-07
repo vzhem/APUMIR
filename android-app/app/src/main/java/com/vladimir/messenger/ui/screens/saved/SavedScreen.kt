@@ -11,6 +11,8 @@ package com.vladimir.messenger.ui.screens.saved
 // папки) и «Поделиться».
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.ApuBubbleField
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -55,14 +57,12 @@ import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -333,7 +333,7 @@ fun SavedScreen(
     if (showAddMenu) {
         // Раунд 163: действия - золотыми пузырями друг под другом
         // (владелец: «красивые пузыри горизонтальные в нашем стиле»).
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { showAddMenu = false },
             title = { Text("Добавить в избранное") },
             text = {
@@ -386,7 +386,7 @@ fun SavedScreen(
         LaunchedEffect(stickerTick) {
             viewModel.stickersOnce { stickers = it }
         }
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { showStickerPicker = false },
             title = { Text("Выберите стикер") },
             text = {
@@ -487,7 +487,7 @@ fun SavedScreen(
     }
 
     confirmDelete?.let { item ->
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { confirmDelete = null },
             title = { Text("Убрать из избранного?") },
             text = {
@@ -769,17 +769,11 @@ private fun SavedItemBubble(
 @Composable
 private fun NoteDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
     var text by remember { mutableStateOf("") }
-    AlertDialog(
+    ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text("Заметка себе") },
         text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                label = { Text("Текст") },
-                modifier = Modifier.fillMaxWidth(),
-                minLines = 3,
-            )
+            ApuBubbleField(value = text, onValueChange = { text = it }, label = { Text("Текст") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
         },
         confirmButton = {
             ApuTextAction(

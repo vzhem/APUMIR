@@ -22,6 +22,7 @@ import com.vladimir.messenger.data.link.ShortLinks
 import com.vladimir.messenger.service.CoreServerService
 import com.vladimir.messenger.service.UpdateChecker
 import com.vladimir.messenger.service.UpdateNotifier
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.update.UpdateDialog
 import com.vladimir.messenger.MainViewModel
@@ -437,7 +438,7 @@ class MainActivity : ComponentActivity() {
                 Log.d("MainActivity", "Checking dialog: pendingContact=${pendingContact != null}")
                 
                 if (pendingContact != null) {
-                    androidx.compose.material3.AlertDialog(
+                    androidx.compose.material3.ApuSettingsDialog(
                         onDismissRequest = { pendingContactInfo = null },
                         title = { androidx.compose.material3.Text("Добавить контакт?") },
                         text = {
@@ -483,7 +484,7 @@ class MainActivity : ComponentActivity() {
                     val prompt = remember(pendingGroupLink) {
                         invitePromptFor(GroupInviteLinks.parseTarget(pendingGroupLink))
                     }
-                    androidx.compose.material3.AlertDialog(
+                    androidx.compose.material3.ApuSettingsDialog(
                         onDismissRequest = { pendingGroupInviteLink = null },
                         title = { androidx.compose.material3.Text(prompt.title) },
                         text = { androidx.compose.material3.Text(prompt.body) },

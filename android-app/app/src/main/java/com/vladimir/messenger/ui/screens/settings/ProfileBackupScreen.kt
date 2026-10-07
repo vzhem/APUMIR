@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 
 import com.vladimir.messenger.ui.components.ApuSettingsCard
@@ -42,7 +43,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -310,39 +310,9 @@ fun ProfileBackupScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Spacer(Modifier.height(12.dp))
-                            OutlinedTextField(
-                                value = password,
-                                onValueChange = { password = it },
-                                label = { Text("Пароль файла") },
-                                singleLine = true,
-                                visualTransformation = PasswordVisualTransformation(),
-                                isError = password.isNotEmpty() && password.length < BackupCipher.MIN_PASSWORD_LENGTH,
-                                supportingText = {
-                                    Text(
-                                        if (password.isNotEmpty() && password.length < BackupCipher.MIN_PASSWORD_LENGTH) {
-                                            "Ещё ${BackupCipher.MIN_PASSWORD_LENGTH - password.length} знак(ов)"
-                                        } else {
-                                            "Минимум ${BackupCipher.MIN_PASSWORD_LENGTH} знаков"
-                                        },
-                                    )
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
+                            ApuBubbleField(value = password, onValueChange = { password = it }, label = { Text("Пароль файла") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), isError = password.isNotEmpty() && password.length < BackupCipher.MIN_PASSWORD_LENGTH, supportingText = { Text( if (password.isNotEmpty() && password.length < BackupCipher.MIN_PASSWORD_LENGTH) { "Ещё ${BackupCipher.MIN_PASSWORD_LENGTH - password.length} знак(ов)" } else { "Минимум ${BackupCipher.MIN_PASSWORD_LENGTH} знаков" }) }, modifier = Modifier.fillMaxWidth())
                             Spacer(Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = repeat,
-                                onValueChange = { repeat = it },
-                                label = { Text("Пароль ещё раз") },
-                                singleLine = true,
-                                visualTransformation = PasswordVisualTransformation(),
-                                isError = repeat.isNotEmpty() && repeat != password,
-                                supportingText = {
-                                    if (repeat.isNotEmpty() && repeat != password) {
-                                        Text("Пароли не совпадают", color = MaterialTheme.colorScheme.error)
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
+                            ApuBubbleField(value = repeat, onValueChange = { repeat = it }, label = { Text("Пароль ещё раз") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), isError = repeat.isNotEmpty() && repeat != password, supportingText = { if (repeat.isNotEmpty() && repeat != password) { Text("Пароли не совпадают", color = MaterialTheme.colorScheme.error) } }, modifier = Modifier.fillMaxWidth())
                             Spacer(Modifier.height(8.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
@@ -551,14 +521,7 @@ fun ProfileBackupScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Spacer(Modifier.height(12.dp))
-                            OutlinedTextField(
-                                value = restorePassword,
-                                onValueChange = { restorePassword = it },
-                                label = { Text("Пароль файла") },
-                                singleLine = true,
-                                visualTransformation = PasswordVisualTransformation(),
-                                modifier = Modifier.fillMaxWidth(),
-                            )
+                            ApuBubbleField(value = restorePassword, onValueChange = { restorePassword = it }, label = { Text("Пароль файла") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
                             // Раунд 250: копии, найденные на телефоне сами
                             // (сохранённые разрешения SAF + файл автообновления).
                             // Предлагаем их первыми: пароль уже введён - тап по
@@ -638,14 +601,7 @@ fun ProfileBackupScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = autoAttachPassword,
-                        onValueChange = { autoAttachPassword = it },
-                        label = { Text("Пароль файла") },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    ApuBubbleField(value = autoAttachPassword, onValueChange = { autoAttachPassword = it }, label = { Text("Пароль файла") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
                 }
             },
             confirmButton = {

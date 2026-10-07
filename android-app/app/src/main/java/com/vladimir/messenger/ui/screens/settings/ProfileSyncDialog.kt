@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 
 // =============================================================================
@@ -86,14 +87,7 @@ fun ProfileSyncDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                androidx.compose.material3.OutlinedTextField(
-                    value = ui.password,
-                    onValueChange = viewModel::onPasswordChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Пароль из «Защиты личности» (одинаковый на обоих)") },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                )
+                androidx.compose.material3.ApuBubbleField(value = ui.password, onValueChange = viewModel::onPasswordChange, modifier = Modifier.fillMaxWidth(), label = { Text("Пароль из «Защиты личности» (одинаковый на обоих)") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
                 // Раунд 256: пароль подставлен из входа - вводить ничего не надо.
                 if (ui.passwordAuto) {
                     Text(
@@ -231,20 +225,8 @@ fun ProfileSyncDialog(
                         ApuTextAction(label = "Отменить передачу", onClick = viewModel::stopShare)
                     }
                 }
-                androidx.compose.material3.OutlinedTextField(
-                    value = ui.pullAddress,
-                    onValueChange = viewModel::onPullAddressChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Адрес с экрана телефона (192.168.х.х:48126)") },
-                    singleLine = true,
-                )
-                androidx.compose.material3.OutlinedTextField(
-                    value = ui.pullToken,
-                    onValueChange = viewModel::onPullTokenChange,
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Код (8 знаков)") },
-                    singleLine = true,
-                )
+                androidx.compose.material3.ApuBubbleField(value = ui.pullAddress, onValueChange = viewModel::onPullAddressChange, modifier = Modifier.fillMaxWidth(), label = { Text("Адрес с экрана телефона (192.168.х.х:48126)") }, singleLine = true)
+                androidx.compose.material3.ApuBubbleField(value = ui.pullToken, onValueChange = viewModel::onPullTokenChange, modifier = Modifier.fillMaxWidth(), label = { Text("Код (8 знаков)") }, singleLine = true)
                 ApuActionBubble(
                     label = if (ui.busy) "Забираем копию…" else "Забрать копию с телефона",
                     icon = Icons.Default.CloudDownload,

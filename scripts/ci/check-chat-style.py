@@ -73,6 +73,25 @@ class ChatStyleTest(unittest.TestCase):
         self.assertNotIn("TextButton(", text)
         self.assertNotIn("TextButtonDefaults", text)
 
+    def test_no_stock_dialogs_or_text_fields_left_in_the_ui(self):
+        """Диалоги и поля ввода — тоже фирменные.
+
+        Проверка по всему интерфейсу сразу: стоковый AlertDialog и
+        OutlinedTextField на месте вызова выглядят чужеродно на подложке APU
+        (плоские углы, серые подписи, чужая подсветка фокуса). Разрешено ровно
+        одно место — сам компонент поля, внутри которого стоит Material-поле с
+        нашими цветами.
+        """
+        root = ROOT / "android-app/app/src/main/java/com/vladimir/messenger/ui"
+        offenders = []
+        for path in sorted(root.rglob("*.kt")):
+            text = path.read_text()
+            if re.search(r"\bAlertDialog\(", text):
+                offenders.append("AlertDialog: " + str(path.relative_to(ROOT)))
+            if re.search(r"\bOutlinedTextField\(", text) and path.name != "ApuBubbleField.kt":
+                offenders.append("OutlinedTextField: " + str(path.relative_to(ROOT)))
+        self.assertEqual([], offenders)
+
     def test_no_stock_text_buttons_left_in_the_ui(self):
         """Во всём интерфейсе не осталось плоских Material-кнопок.
 

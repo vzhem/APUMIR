@@ -9,6 +9,7 @@ package com.vladimir.messenger.ui.screens.groups
 // выбранной группы идут вертикальным списком, каждая в своём пузыре,
 // и у каждой — бейдж непрочитанных. Нажатие на тему открывает ленту.
 
+import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
 import com.vladimir.messenger.ui.components.ApuNotificationBadge
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
@@ -91,7 +92,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
@@ -1246,28 +1246,7 @@ fun GroupChatScreen(
                             )
                         }
                     }
-                    OutlinedTextField(
-                        value = uiState.draft,
-                        onValueChange = { viewModel.onDraftChanged(it) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .onFocusChanged { inputFocused = it.isFocused },
-                        placeholder = { Text("Сообщение") },
-                        shape = RoundedCornerShape(18.dp),
-                        minLines = 1,
-                        maxLines = 6,
-                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color(0xFF1E2430),
-                            unfocusedTextColor = Color(0xFF1E2430),
-                            focusedContainerColor = Color.White,
-                            unfocusedContainerColor = Color.White,
-                            focusedBorderColor = ApuBubbleAccentColor.copy(alpha = 0.6f),
-                            unfocusedBorderColor = ApuBubbleAccentColor.copy(alpha = 0.35f),
-                            cursorColor = ApuBubbleAccentColor,
-                            focusedPlaceholderColor = Color(0xFF5A6472),
-                            unfocusedPlaceholderColor = Color(0xFF5A6472),
-                        ),
-                    )
+                    ApuBubbleField(value = uiState.draft, onValueChange = { viewModel.onDraftChanged(it) }, modifier = Modifier.fillMaxWidth().onFocusChanged { inputFocused = it.isFocused }, placeholder = { Text("Сообщение") }, minLines = 1, maxLines = 6)
                 }
                 Spacer(Modifier.height(6.dp))
                 // Раунд 152: активная «Отправить» - золотая заливка и белый
@@ -2246,14 +2225,7 @@ private fun NewTopicDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Название темы") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                ApuBubbleField(value = name, onValueChange = { name = it }, label = { Text("Название темы") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 // Раунд 258: превью значка «подпрыгивает» при смене, как в Telegram.
                 val iconPop = remember { androidx.compose.animation.core.Animatable(1f) }
                 androidx.compose.runtime.LaunchedEffect(icon) {

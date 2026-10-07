@@ -29,7 +29,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -95,7 +94,7 @@ fun GifCatalogDialog(
     onAddOwnGif: (android.net.Uri) -> Unit = {},
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
+    ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text("Гифки") },
         text = {
@@ -153,7 +152,7 @@ fun GifCatalogBody(
     // Раунд 174: подтверждение удаления своей гифки.
     var removeCandidate by remember { mutableStateOf<com.vladimir.messenger.data.gif.GifLibEntry?>(null) }
     if (removeCandidate != null) {
-        androidx.compose.material3.AlertDialog(
+        androidx.compose.material3.ApuSettingsDialog(
             onDismissRequest = { removeCandidate = null },
             title = { Text("Удалить гифку?") },
             text = {

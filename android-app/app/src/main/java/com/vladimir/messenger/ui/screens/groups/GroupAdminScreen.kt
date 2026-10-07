@@ -7,6 +7,7 @@ package com.vladimir.messenger.ui.screens.groups
 // Статистика, Разрешения.
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuTextAction
@@ -46,7 +47,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -375,22 +375,8 @@ private fun OverviewTab(
             // Поля внутри светлого пузыря: цвета ФИКСИРОВАННЫЕ, из темы брать
             // нельзя - в тёмной теме поле красилось в белый и на светлой
             // подложке «Название» и «Описание» пропадали (жалоба владельца).
-            OutlinedTextField(
-                value = titleDraft,
-                onValueChange = { titleDraft = it },
-                label = { Text("Название") },
-                shape = RoundedCornerShape(18.dp),
-                modifier = Modifier.fillMaxWidth(),
-                colors = bubbleFieldColors(),
-            )
-            OutlinedTextField(
-                value = aboutDraft,
-                onValueChange = { aboutDraft = it },
-                label = { Text("Описание") },
-                shape = RoundedCornerShape(18.dp),
-                modifier = Modifier.fillMaxWidth(),
-                colors = bubbleFieldColors(),
-            )
+            ApuBubbleField(value = titleDraft, onValueChange = { titleDraft = it }, label = { Text("Название") }, modifier = Modifier.fillMaxWidth())
+            ApuBubbleField(value = aboutDraft, onValueChange = { aboutDraft = it }, label = { Text("Описание") }, modifier = Modifier.fillMaxWidth())
             ApuTextAction(label = "Сохранить", onClick = { onSave(titleDraft, aboutDraft) })
         } else {
             // Без права менять информацию показываем только текст: поля и
@@ -702,14 +688,7 @@ private fun DeleteGroupDialog(
                     },
                 )
                 Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = typed,
-                    onValueChange = { typed = it },
-                    label = { Text("Введите: $expected") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                ApuBubbleField(value = typed, onValueChange = { typed = it }, label = { Text("Введите: $expected") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             }
         },
         confirmButton = {
@@ -1242,19 +1221,3 @@ private fun PermissionsTab(mask: Long, onToggle: (Long, Boolean) -> Unit) {
     }
 }
 
-/** Цвета поля ввода внутри светлого пузыря: тёмный текст/подпись на светлой
- *  подложке при ЛЮБОЙ теме (в тёмной теме стандартное поле белело). */
-@Composable
-// Раунд 267: поля настроек - в фирменной гамме: золотая рамка (как у
-// пузырей), белая заливка, скругление 18 - никаких серых «канцелярских» линий.
-private fun bubbleFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedTextColor = Color(0xFF1E2430),
-    unfocusedTextColor = Color(0xFF1E2430),
-    cursorColor = MaterialTheme.colorScheme.primary,
-    focusedLabelColor = MaterialTheme.colorScheme.primary,
-    unfocusedLabelColor = Color(0xFF5A6472),
-    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-    unfocusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-    focusedContainerColor = Color.White,
-    unfocusedContainerColor = Color.White,
-)

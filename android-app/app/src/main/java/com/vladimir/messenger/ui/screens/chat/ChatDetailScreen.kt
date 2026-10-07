@@ -4,6 +4,7 @@ import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.ApuVipBadge
 import com.vladimir.messenger.ui.components.PeerAvatar
@@ -818,7 +819,7 @@ fun ChatDetailScreen(
     // сообщение?» и «В избранное» пряталось на месте кнопки «Отмена» - её там
     // никто не искал. Теперь это список действий, а отмена закрывает окно.
     showCopyDialog?.let { message ->
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { showCopyDialog = null },
             title = { Text("Действия с сообщением") },
             text = {
@@ -1013,7 +1014,7 @@ fun ChatDetailScreen(
     // Раунд 135: подтверждение удаления у всех - сообщение пропадёт и у
     // собеседника (он должен быть на связи; иначе - честный отказ).
     deleteForAllTarget?.let { target ->
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { deleteForAllTarget = null },
             title = { Text("Удалить у всех?") },
             text = { Text("Сообщение исчезнет и у вас, и у собеседника. Отменить будет нельзя.") },

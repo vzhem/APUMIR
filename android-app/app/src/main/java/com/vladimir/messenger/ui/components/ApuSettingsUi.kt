@@ -3,6 +3,8 @@ package com.vladimir.messenger.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,11 +22,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,6 +38,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
 // =============================================================================
@@ -386,22 +390,76 @@ fun ApuSettingsDialog(
     text: (@Composable () -> Unit)? = null,
     properties: DialogProperties = DialogProperties(),
 ) {
-    ApuSettingsPalette {
-        AlertDialog(
-            onDismissRequest = onDismissRequest,
-            confirmButton = confirmButton,
-            dismissButton = dismissButton,
-            icon = icon,
-            title = title,
-            text = text,
-            modifier = modifier.border(1.dp, ApuBubbleAccentColor.copy(alpha = 0.30f), ApuBubbleShape),
-            shape = ApuBubbleShape,
-            containerColor = ApuBubbleSurfaceColor,
-            iconContentColor = ApuBubbleAccentColor,
-            titleContentColor = ApuBubbleTextColor,
-            textContentColor = ApuBubbleMutedColor,
-            tonalElevation = 0.dp,
-            properties = properties,
-        )
+    // Владелец 2026-10-07: «Доделывай все разделы с новым стилем».
+    // Раньше это был stock AlertDialog, лишь перекрашенный в цвета пузыря:
+    // плоские углы Material и «рябь» при нажатии оставались чужими. Теперь это
+    // тот же премиальный слой, что у окон «Логи» и настроек: мягкая тень,
+    // единая подложка, золотая капсула заголовка и нить к телу, блеск ПОД
+    // содержимым. Параметры совпадают с AlertDialog, поэтому все вызовы в
+    // разделах переходят сюда без правок.
+    Dialog(onDismissRequest = onDismissRequest, properties = properties) {
+        ApuSettingsPalette {
+            val shape = RoundedCornerShape(22.dp)
+            Column(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .apuPremiumLift(14.dp, shape, ApuPremiumShadowColor)
+                    .clip(shape)
+                    .background(Color(0xFFF7F9FC).copy(alpha = 0.98f))
+                    .border(1.dp, ApuGold.copy(alpha = 0.45f), shape)
+                    .apuPremiumGloss(shape, intensity = 0.5f, topFraction = 0.35f)
+                    .padding(16.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (icon != null) {
+                        Box(modifier = Modifier.padding(end = 8.dp)) { icon() }
+                    }
+                    if (title != null) {
+                        val capsule = RoundedCornerShape(11.dp)
+                        Box(
+                            modifier = Modifier
+                                .clip(capsule)
+                                .background(apuGoldBrush())
+                                .border(1.dp, Color.White.copy(alpha = 0.45f), capsule)
+                                .apuPremiumGloss(capsule, intensity = 0.85f, topFraction = 0.7f)
+                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                        ) {
+                            CompositionLocalProvider(LocalContentColor provides ApuGoldInk) { title() }
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(1.5.dp)
+                                .background(apuGoldBrush()),
+                        )
+                    }
+                }
+                if (text != null) {
+                    Spacer(modifier = Modifier.size(12.dp))
+                    // Длинные тексты (правила, подтверждения) прокручиваются:
+                    // окно не растягивается выше экрана.
+                    Box(
+                        modifier = Modifier
+                            .heightIn(max = 420.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        CompositionLocalProvider(LocalContentColor provides ApuBubbleTextColor) { text() }
+                    }
+                }
+                Spacer(modifier = Modifier.size(16.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (dismissButton != null) {
+                        dismissButton()
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    confirmButton()
+                }
+            }
+        }
     }
 }

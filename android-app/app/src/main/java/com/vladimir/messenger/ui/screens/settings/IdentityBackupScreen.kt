@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuSettingsCard
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
 
@@ -37,7 +38,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -166,61 +166,11 @@ fun IdentityBackupScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Spacer(Modifier.height(12.dp))
-                            OutlinedTextField(
-                                value = nickname,
-                                onValueChange = { nickname = it },
-                                label = { Text("Никнейм") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
+                            ApuBubbleField(value = nickname, onValueChange = { nickname = it }, label = { Text("Никнейм") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                             Spacer(Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = password,
-                                onValueChange = { password = it },
-                                label = { Text("Пароль") },
-                                singleLine = true,
-                                visualTransformation = PasswordVisualTransformation(),
-                                isError = password.isNotEmpty() && password.length < MIN_PASSWORD,
-                                // Раньше кнопка просто оставалась тёмной, и было
-                                // непонятно, чего не хватает. Теперь требование
-                                // написано прямо под полем.
-                                supportingText = {
-                                    Text(
-                                        if (password.isNotEmpty() && password.length < MIN_PASSWORD) {
-                                            "Ещё ${MIN_PASSWORD - password.length} знак(ов)"
-                                        } else {
-                                            "Минимум $MIN_PASSWORD знаков"
-                                        },
-                                        color = if (password.isNotEmpty() && password.length < MIN_PASSWORD) {
-                                            MaterialTheme.colorScheme.error
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
-                                        },
-                                    )
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
+                            ApuBubbleField(value = password, onValueChange = { password = it }, label = { Text("Пароль") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), isError = password.isNotEmpty() && password.length < MIN_PASSWORD, supportingText = { Text( if (password.isNotEmpty() && password.length < MIN_PASSWORD) { "Ещё ${MIN_PASSWORD - password.length} знак(ов)" } else { "Минимум $MIN_PASSWORD знаков" }, color = if (password.isNotEmpty() && password.length < MIN_PASSWORD) { MaterialTheme.colorScheme.error } else { MaterialTheme.colorScheme.onSurfaceVariant }) }, modifier = Modifier.fillMaxWidth())
                             Spacer(Modifier.height(8.dp))
-                            OutlinedTextField(
-                                value = repeat,
-                                onValueChange = { repeat = it },
-                                label = { Text("Пароль ещё раз") },
-                                singleLine = true,
-                                visualTransformation = PasswordVisualTransformation(),
-                                // Повтор обязателен: опечатку в пароле человек
-                                // обнаружил бы только при восстановлении, когда
-                                // исправить уже нечем.
-                                isError = repeat.isNotEmpty() && repeat != password,
-                                supportingText = {
-                                    if (repeat.isNotEmpty() && repeat != password) {
-                                        Text(
-                                            "Пароли не совпадают",
-                                            color = MaterialTheme.colorScheme.error,
-                                        )
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
+                            ApuBubbleField(value = repeat, onValueChange = { repeat = it }, label = { Text("Пароль ещё раз") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), isError = repeat.isNotEmpty() && repeat != password, supportingText = { if (repeat.isNotEmpty() && repeat != password) { Text( "Пароли не совпадают", color = MaterialTheme.colorScheme.error) } }, modifier = Modifier.fillMaxWidth())
                             Spacer(Modifier.height(12.dp))
                             Button(
                                 onClick = { viewModel.save(nickname, password) },

@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.contacts
 
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.BorderStroke
@@ -289,7 +290,7 @@ fun ContactsScreen(
 
     // Подтверждение удаления контакта.
     confirmDelete?.let { contact ->
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { confirmDelete = null },
             title = { Text("Удалить контакт?") },
             text = { Text("«${contact.displayName}» будет удалён из списка контактов.") },
@@ -453,7 +454,7 @@ private fun InviteToGroupsDialog(
     }
     val listState = rememberLazyListState()
 
-    AlertDialog(
+    ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text("Пригласить $contactName") },
         text = {

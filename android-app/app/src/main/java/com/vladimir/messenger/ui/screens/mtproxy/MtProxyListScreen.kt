@@ -2,6 +2,7 @@ package com.vladimir.messenger.ui.screens.mtproxy
 
 import com.vladimir.messenger.ui.components.ApuAction
 import com.vladimir.messenger.ui.components.ApuActionsMenu
+import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 
@@ -314,14 +315,7 @@ private fun AddProxyDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(16.dp))
-                OutlinedTextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    label = { Text("Прокси") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = false,
-                    minLines = 3
-                )
+                ApuBubbleField(value = input, onValueChange = { input = it }, label = { Text("Прокси") }, modifier = Modifier.fillMaxWidth(), singleLine = false, minLines = 3)
             }
         },
         confirmButton = {
@@ -380,17 +374,7 @@ private fun ImportProxyDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    label = { Text("Прокси") },
-                    placeholder = { Text("Вставьте сюда...") },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 150.dp),
-                    singleLine = false,
-                    maxLines = 10
-                )
+                ApuBubbleField(value = input, onValueChange = { input = it }, label = { Text("Прокси") }, placeholder = { Text("Вставьте сюда...") }, modifier = Modifier.fillMaxWidth().heightIn(min = 150.dp), singleLine = false, maxLines = 10)
             }
         },
         confirmButton = {

@@ -12,9 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -31,7 +29,7 @@ fun UsernameConflictDialog() {
     val context = LocalContext.current
     var usernameValue by remember { mutableStateOf("") }
 
-    AlertDialog(
+    ApuSettingsDialog(
         // Диалог обязателен: без имени профиль не участвует в роевом реестре.
         onDismissRequest = { },
         title = { Text("Имя занято") },
@@ -42,17 +40,7 @@ fun UsernameConflictDialog() {
                         "зарегистрировался раньше. Задайте себе новый никнейм."
                 )
                 Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = usernameValue,
-                    // Чистим прямо при наборе: недопустимый знак не появляется
-                    // в поле, а не отвергается после «Сохранить».
-                    onValueChange = { usernameValue = UsernameHolder.sanitize(it) },
-                    label = { Text("никнейм") },
-                    placeholder = { Text("никнейм") },
-                    prefix = { Text("@") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                ApuBubbleField(value = usernameValue, onValueChange = { usernameValue = UsernameHolder.sanitize(it) }, label = { Text("никнейм") }, placeholder = { Text("никнейм") }, prefix = { Text("@") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Spacer(Modifier.height(6.dp))
                 Text(
                     "Латинские буквы, цифры и подчёркивание.",

@@ -6,6 +6,7 @@ package com.vladimir.messenger.ui.screens.groups
 
 import com.vladimir.messenger.ui.components.ApuAction
 import com.vladimir.messenger.ui.components.ApuActionsMenu
+import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuNotificationBadge
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.NotificationMuteDialog
@@ -89,7 +90,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -801,27 +801,8 @@ private fun CreateGroupDialog(
                     onSelectChannel = { isChannel = it },
                 )
 
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { title = it },
-                    label = { Text(if (isChannel) "Название канала" else "Название") },
-                    placeholder = {
-                        Text(if (isChannel) "Например, Новости APU" else "Например, Рабочий чат")
-                    },
-                    singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = about,
-                    onValueChange = { about = it },
-                    label = { Text(if (isChannel) "Описание канала" else "Описание") },
-                    placeholder = { Text("О чём сообщество (необязательно)") },
-                    minLines = 2,
-                    maxLines = 4,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                ApuBubbleField(value = title, onValueChange = { title = it }, label = { Text(if (isChannel) "Название канала" else "Название") }, placeholder = { Text(if (isChannel) "Например, Новости APU" else "Например, Рабочий чат") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                ApuBubbleField(value = about, onValueChange = { about = it }, label = { Text(if (isChannel) "Описание канала" else "Описание") }, placeholder = { Text("О чём сообщество (необязательно)") }, minLines = 2, maxLines = 4, modifier = Modifier.fillMaxWidth())
 
                 // Настройки доступа и тем — в единой карточке с иконками в стиле APU.
                 Column(
@@ -1070,19 +1051,7 @@ private fun JoinByLinkDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = ApuBubbleMutedColor,
                 )
-                OutlinedTextField(
-                    value = link,
-                    onValueChange = {
-                        link = it
-                        error = null
-                    },
-                    label = { Text("Ссылка-приглашение") },
-                    placeholder = { Text("Ссылка") },
-                    // Ссылка длинная (в ней адрес владельца) — даём ей переноситься.
-                    maxLines = 4,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                ApuBubbleField(value = link, onValueChange = { link = it error = null }, label = { Text("Ссылка-приглашение") }, placeholder = { Text("Ссылка") }, maxLines = 4, modifier = Modifier.fillMaxWidth())
                 error?.let {
                     Text(
                         it,

@@ -22,7 +22,6 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -292,25 +291,11 @@ fun PollDraftFields(
     problem: String? = null,
 ) {
     Column(modifier = modifier) {
-        OutlinedTextField(
-            value = state.question,
-            onValueChange = { state.question = it },
-            label = { Text("Вопрос") },
-            shape = RoundedCornerShape(14.dp),
-            modifier = Modifier.fillMaxWidth(),
-            maxLines = 3,
-        )
+        ApuBubbleField(value = state.question, onValueChange = { state.question = it }, label = { Text("Вопрос") }, modifier = Modifier.fillMaxWidth(), maxLines = 3)
         Spacer(Modifier.height(8.dp))
         state.options.forEachIndexed { index, text ->
             Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
-                    value = text,
-                    onValueChange = { state.options[index] = it },
-                    label = { Text("Вариант ${index + 1}") },
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                )
+                ApuBubbleField(value = text, onValueChange = { state.options[index] = it }, label = { Text("Вариант ${index + 1}") }, modifier = Modifier.weight(1f), singleLine = true)
             }
             Spacer(Modifier.height(6.dp))
         }

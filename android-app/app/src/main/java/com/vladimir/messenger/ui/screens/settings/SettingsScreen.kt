@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
@@ -225,15 +226,7 @@ fun SettingsScreen(
             onDismissRequest = { showNameDialog = false },
             title = { Text("Ваше имя") },
             text = {
-                OutlinedTextField(
-                    value = nameValue,
-                    onValueChange = { nameValue = it.take(50) },
-                    label = { Text("Имя") },
-                    placeholder = { Text("Имя Фамилия") },
-                    singleLine = true,
-                    supportingText = { Text("${nameValue.trim().length}/50") },
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                ApuBubbleField(value = nameValue, onValueChange = { nameValue = it.take(50) }, label = { Text("Имя") }, placeholder = { Text("Имя Фамилия") }, singleLine = true, supportingText = { Text("${nameValue.trim().length}/50") }, modifier = Modifier.fillMaxWidth())
             },
             confirmButton = {
                 ApuTextAction(
@@ -261,17 +254,7 @@ fun SettingsScreen(
             title = { Text("Ваш @никнейм") },
             text = {
                 Column {
-                    OutlinedTextField(
-                        value = usernameValue,
-                        // Чистим прямо при наборе: недопустимый знак не
-                        // появляется в поле, а не отвергается после «Сохранить».
-                        onValueChange = { usernameValue = UsernameHolder.sanitize(it) },
-                        label = { Text("никнейм") },
-                        placeholder = { Text("никнейм") },
-                        prefix = { Text("@") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    ApuBubbleField(value = usernameValue, onValueChange = { usernameValue = UsernameHolder.sanitize(it) }, label = { Text("никнейм") }, placeholder = { Text("никнейм") }, prefix = { Text("@") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                     Spacer(Modifier.height(6.dp))
                     Text(
                         "Латинские буквы, цифры и подчёркивание. " +
@@ -2005,13 +1988,7 @@ private fun ApkVersionDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(
-                    value        = version,
-                    onValueChange = { version = it },
-                    singleLine = true,
-                    label      = { Text("Версия") },
-                    modifier   = Modifier.fillMaxWidth(),
-                )
+                ApuBubbleField(value = version, onValueChange = { version = it }, singleLine = true, label = { Text("Версия") }, modifier = Modifier.fillMaxWidth())
             }
         },
         confirmButton = {
