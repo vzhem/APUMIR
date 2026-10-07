@@ -104,6 +104,29 @@ data class DiagnosticsFacts(
     val custodyBytes: Long,
     /** Счётчики сессии (см. [Counters]). */
     val counters: Map<String, Long>,
+    /** Когда последнее входящее легло в переписку (0 — в этой сессии не было). */
+    val lastIncomingAtMs: Long = 0L,
+    /** Когда последнее исходящее ушло с этого телефона (0 — не было). */
+    val lastOutgoingAtMs: Long = 0L,
+    /** Когда пришло последнее подтверждение доставки (0 — не было). */
+    val lastAckAtMs: Long = 0L,
+    /**
+     * Когда собеседник присылал новый ключ шифрования (0 — не было). Это
+     * самая частая причина «от него не приходят»: он переустановил приложение,
+     * мы намеренно не снимаем закреплённый ключ, и переписка молчит.
+     */
+    val peerKeyChangedAtMs: Long = 0L,
+    /**
+     * Сколько сигналов о сообщениях ядро передало приложению — по строкам
+     * журнала процесса. Если это число растёт, а «входящих показано» нет,
+     * потеря происходит у нас, а не в сети.
+     */
+    val coreMessageSignals: Long = 0L,
+    /**
+     * Сколько раз пересылка отбросила пакет: очередь получателя переполнена.
+     * Это пакеты для ДРУГИХ узлов — телефон-хранитель не успевает их раздать.
+     */
+    val relayQueueFull: Long = 0L,
 )
 
 /** Имена счётчиков сессии: один список для записи (хуки) и для отчёта. */
@@ -123,6 +146,38 @@ object Counters {
     const val NETWORK_CHANGES = "network_changes"
     const val CORE_STARTS = "core_starts"
     const val CORE_FAILURES = "core_failures"
+
+    // ── Переписка: направления и потери ─────────────────────────────────
+    // Владелец 2026-10-07: «мои сообщения до него доходят, а от него ко мне
+    // нет». По одним передачам файлов такого не увидеть: нужны числа по
+    // сообщениям и, главное, ПРИЧИНЫ, по которым входящее не дошло.
+
+    /** Входящие сообщения переписки: легли в чат и видны человеку. */
+    const val MSG_IN = "msg_in"
+
+    /** Исходящие сообщения: человек отправил их с этого телефона. */
+    const val MSG_OUT = "msg_out"
+
+    /** Подтверждения доставки наших сообщений — «вторая галочка». */
+    const val MSG_ACK = "msg_ack"
+
+    /**
+     * Входящие конверты, которые не вскрылись: чужая переписка (мы лишь
+     * ретранслятор) либо собеседник запечатал для нашего прежнего ключа.
+     */
+    const val MSG_IN_NOT_OPENED = "msg_in_not_opened"
+
+    /** Пакеты с отправителем не-узлом: обрывок служебной строки, отброшен. */
+    const val MSG_IN_BAD_SENDER = "msg_in_bad_sender"
+
+    /** Собеседник прислал новый ключ шифрования (переустановил приложение). */
+    const val MSG_PEER_KEY_CHANGED = "msg_peer_key_changed"
+
+    /** Исходящие, которые не ушли с этого телефона (узел отказал, нет сети). */
+    const val MSG_SEND_FAILED = "msg_send_failed"
+
+    /** Исходящие в очереди «до сети»: ещё не отправлены, ждут связи. */
+    const val MSG_QUEUED_OFFLINE = "msg_queued_offline"
 }
 
 /** Код ошибки передачи и число таких записей: объясняет «ошибок N» без имён файлов. */
@@ -291,6 +346,7 @@ object DiagnosticsReport {
         appendNetwork(facts)
         appendCore(facts)
         appendMqtt(facts)
+        appendMessages(facts)
         appendTransfers(facts)
         appendSession(facts)
         appendJournal(journal, facts)
@@ -372,6 +428,9 @@ object DiagnosticsReport {
             )
         }
 
+        // ── Переписка ───────────────────────────────────────────────────────
+        lines += messageLine(facts)
+
         // ── Передачи файлов ─────────────────────────────────────────────────
         val active = transferSums(facts.transferStates)
         val sessionFailed = facts.counters[Counters.FILE_FAILED] ?: 0L
@@ -424,6 +483,81 @@ object DiagnosticsReport {
         )
 
         return lines
+    }
+
+    /**
+     * Сообщения по направлениям. Жалоба «мои доходят, а от него нет» должна
+     * читаться в сводке одной строкой, а не выискиваться в журнале. Поэтому у
+     * строки не один благополучный вид, а все различимые исходы: всё идёт,
+     * входящих нет вовсе, часть не вскрылась, сменился ключ, отправка ждёт
+     * сети или не удалась.
+     */
+    private fun messageLine(facts: DiagnosticsFacts): DiagnosticsLine {
+        val c = facts.counters
+        val saved = c[Counters.MSG_IN] ?: 0L
+        val sent = c[Counters.MSG_OUT] ?: 0L
+        val acked = c[Counters.MSG_ACK] ?: 0L
+        val notOpened = c[Counters.MSG_IN_NOT_OPENED] ?: 0L
+        val queued = c[Counters.MSG_QUEUED_OFFLINE] ?: 0L
+        val failed = c[Counters.MSG_SEND_FAILED] ?: 0L
+        // Оговорки к основной строке: «отложено» и «не ушло» нельзя прятать —
+        // иначе «отправлено 0» читается как поломка, хотя сообщение просто ждёт
+        // сети, а сбои, наоборот, выглядят благополучно.
+        val notes = buildString {
+            if (queued > 0L) append(" · отложено до сети $queued")
+            if (failed > 0L) append(" · не ушло $failed")
+        }
+        return when {
+            // Смена ключа перевешивает остальные исходы: пока не отсканируют
+            // QR заново, переписка не восстановится сама, и любой другой текст
+            // в этой строке увёл бы человека не туда.
+            facts.peerKeyChangedAtMs > 0L -> DiagnosticsLine(
+                DiagnosticsLevel.WARN,
+                "Сообщения",
+                "у собеседника новый ключ шифрования (переустановка приложения) — " +
+                    "пока не отсканируете его QR-код заново, переписка не вскроется" +
+                    ageSuffix(facts, facts.peerKeyChangedAtMs, "замечено"),
+            )
+            // Самая дорогая для владельца картина: свои сообщения уходят и
+            // подтверждаются, а входящих нет ни одного.
+            saved == 0L && (sent > 0L || acked > 0L) -> DiagnosticsLine(
+                DiagnosticsLevel.WARN,
+                "Сообщения",
+                ("входящих нет, а отправлено $sent и подтверждено $acked" +
+                    if (notOpened > 0L) " · не вскрылось $notOpened" else
+                        " · смотрите раздел «сообщения»") + notes,
+            )
+            notOpened > 0L -> DiagnosticsLine(
+                DiagnosticsLevel.WARN,
+                "Сообщения",
+                ("принято $saved, отправлено $sent, подтверждено $acked · " +
+                    "не вскрылось $notOpened (чужая переписка или устаревший ключ)") + notes,
+            )
+            saved == 0L && sent == 0L && queued > 0L -> DiagnosticsLine(
+                DiagnosticsLevel.INFO,
+                "Сообщения",
+                "переписки ещё не было · отправлено ничего · отложено до сети $queued " +
+                    "(уйдут сами, когда появится связь)",
+            )
+            saved == 0L && sent == 0L -> DiagnosticsLine(
+                DiagnosticsLevel.INFO,
+                "Сообщения",
+                "переписки в этой сессии ещё не было",
+            )
+            else -> DiagnosticsLine(
+                DiagnosticsLevel.OK,
+                "Сообщения",
+                "принято $saved, отправлено $sent, подтверждено $acked" +
+                    ageSuffix(facts, facts.lastIncomingAtMs, "последнее входящее") + notes,
+            )
+        }
+    }
+
+    /** « · последнее входящее 2 мин назад»; пусто, если события не было. */
+    private fun ageSuffix(facts: DiagnosticsFacts, atMs: Long, label: String): String {
+        if (atMs <= 0L) return ""
+        val sec = ((facts.createdAtMs - atMs).coerceAtLeast(0L) / 1000L).toInt()
+        return " · $label ${MqttLinkText.humanAgo(sec)}"
     }
 
     // ------------------------------------------------------------------
@@ -508,6 +642,72 @@ object DiagnosticsReport {
         appendLine()
     }
 
+    /**
+     * Переписка глазами отчёта: сколько сообщений дошло до человека, сколько
+     * ушло и где теряется встречное направление. Ни текста, ни имён, ни
+     * идентификаторов — только числа, время и причины отбрасывания.
+     */
+    private fun StringBuilder.appendMessages(facts: DiagnosticsFacts) {
+        appendLine("[сообщения]")
+        val c = facts.counters
+        val notOpened = c[Counters.MSG_IN_NOT_OPENED] ?: 0L
+        appendLine("входящих показано=${c[Counters.MSG_IN] ?: 0L}")
+        appendLine("исходящих отправлено=${c[Counters.MSG_OUT] ?: 0L}")
+        appendLine("подтверждений доставки=${c[Counters.MSG_ACK] ?: 0L}")
+        appendLine("отложено до сети (уйдёт само)=${c[Counters.MSG_QUEUED_OFFLINE] ?: 0L}")
+        appendLine("не ушло (узел отказал или нет сети)=${c[Counters.MSG_SEND_FAILED] ?: 0L}")
+        appendLine("последнее входящее=${lastSeenText(facts, facts.lastIncomingAtMs)}")
+        appendLine("последнее исходящее=${lastSeenText(facts, facts.lastOutgoingAtMs)}")
+        appendLine("последнее подтверждение=${lastSeenText(facts, facts.lastAckAtMs)}")
+        appendLine("не вскрылось (чужая переписка или устаревший ключ)=$notOpened")
+        appendLine(
+            "отправитель не узел (обрывок служебной строки)=" +
+                "${c[Counters.MSG_IN_BAD_SENDER] ?: 0L}",
+        )
+        appendLine(
+            "ядро передало сигналов=${facts.coreMessageSignals} " +
+                "(по журналу процесса; включает и служебные)",
+        )
+        appendLine("пересылка: отброшено из-за полной очереди=${facts.relayQueueFull}")
+        appendLine(
+            "смена ключа у собеседника (раз)=" + (c[Counters.MSG_PEER_KEY_CHANGED] ?: 0L),
+        )
+        appendLine(
+            "последняя смена ключа=" +
+                if (facts.peerKeyChangedAtMs > 0L) {
+                    lastSeenText(facts, facts.peerKeyChangedAtMs)
+                } else {
+                    "не было"
+                },
+        )
+        if (facts.peerKeyChangedAtMs > 0L) {
+            appendLine(
+                "  ↳ собеседник прислал новый ключ, а закреплён прежний — так и выглядит " +
+                    "«от него не приходят»: отсканируйте его QR-код заново",
+            )
+        }
+        if (notOpened > 0L) {
+            appendLine(
+                "  ↳ входящие не вскрываются: собеседник запечатал не нашим ключом — " +
+                    "у него устаревшая копия ключа (переустановка, восстановление профиля)",
+            )
+        }
+        if (facts.relayQueueFull > 0L) {
+            appendLine(
+                "  ↳ пересылка: это пакеты для других узлов — получатель давно не в сети, " +
+                    "очередь на 500 записей заполнена",
+            )
+        }
+        appendLine()
+    }
+
+    /** «08:31:06 (2 мин назад)» либо «в этой сессии не было». */
+    private fun lastSeenText(facts: DiagnosticsFacts, atMs: Long): String {
+        if (atMs <= 0L) return "в этой сессии не было"
+        val sec = ((facts.createdAtMs - atMs).coerceAtLeast(0L) / 1000L).toInt()
+        return "${clock(atMs)} (${MqttLinkText.humanAgo(sec)})"
+    }
+
     private fun StringBuilder.appendTransfers(facts: DiagnosticsFacts) {
         appendLine("[передачи]")
         val sums = transferSums(facts.transferStates)
@@ -558,6 +758,14 @@ object DiagnosticsReport {
             Counters.F4_RANGE_FAILURES, Counters.F4_UDP_FALLBACK, Counters.NETWORK_CHANGES,
             Counters.CORE_STARTS,
             Counters.CORE_FAILURES,
+            Counters.MSG_IN,
+            Counters.MSG_OUT,
+            Counters.MSG_ACK,
+            Counters.MSG_IN_NOT_OPENED,
+            Counters.MSG_IN_BAD_SENDER,
+            Counters.MSG_PEER_KEY_CHANGED,
+            Counters.MSG_SEND_FAILED,
+            Counters.MSG_QUEUED_OFFLINE,
         )
         c.entries.filter { it.key !in known }.sortedBy { it.key }
             .forEach { (key, value) -> appendLine("$key=$value") }

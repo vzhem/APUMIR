@@ -83,6 +83,144 @@ object TransferDiagnostics {
         synchronized(lock) { counters[key] = (counters[key] ?: 0L) + delta }
     }
 
+    /** Увеличить счётчик и узнать новое значение — для «первое и каждое N-е». */
+    private fun bump(key: String, delta: Long = 1L): Long {
+        synchronized(lock) {
+            val next = (counters[key] ?: 0L) + delta
+            counters[key] = next
+            return next
+        }
+    }
+
+    // ── Переписка: направления, подтверждения и потери ──────────────────
+    // Отдельно от счётчиков держим «когда это было»: по свежести входящих
+    // видно, идут ли сообщения от собеседника, — владельцу не нужно
+    // сопоставлять числа со временем в журнале.
+    //
+    // Владелец 2026-10-07: «мои сообщения до него доходят, а от него ко мне
+    // нет». Тихую потерю входящего (конверт не вскрылся) раньше в отчёте не
+    // было видно вовсе — теперь это предупреждение в журнале и число в
+    // разделе [сообщения].
+
+    @Volatile private var lastIncomingAtMs = 0L
+    @Volatile private var lastOutgoingAtMs = 0L
+    @Volatile private var lastAckAtMs = 0L
+
+    /** Когда собеседник в последний раз присылал новый ключ (переустановка). */
+    @Volatile private var peerKeyChangedAtMs = 0L
+
+    /** Входящее сообщение легло в переписку. */
+    fun noteMessageIncoming() {
+        lastIncomingAtMs = System.currentTimeMillis()
+        val total = bump(Counters.MSG_IN)
+        // В журнал — первое и каждое двадцатое: иначе долгая переписка
+        // вытеснила бы из журнала всё остальное.
+        if (total == 1L || total % 20L == 0L) {
+            append(DiagnosticsLevel.OK, "msg", "входящие доходят: в переписку легло $total-е сообщение")
+        }
+    }
+
+    /** Исходящее сообщение отправлено с этого телефона. */
+    fun noteMessageOutgoing() {
+        lastOutgoingAtMs = System.currentTimeMillis()
+        val total = bump(Counters.MSG_OUT)
+        if (total == 1L || total % 20L == 0L) {
+            append(DiagnosticsLevel.INFO, "msg", "исходящее отправлено: с этого телефона ушло $total")
+        }
+    }
+
+    /**
+     * Отправка не удалась. Передаём только ВИД ошибки (имя класса исключения),
+     * а не её текст: в тексте бывают идентификаторы узла, а отчёт должен
+     * оставаться без чужих данных. Вид ошибки достаточно, чтобы отличить «нет
+     * сети» от «узел отказал».
+     */
+    fun noteMessageSendFailed(kind: String) {
+        val total = bump(Counters.MSG_SEND_FAILED)
+        if (total == 1L || total % 5L == 0L) {
+            append(
+                DiagnosticsLevel.WARN,
+                "msg",
+                "исходящее не ушло ($total-е): " + kind.take(40),
+            )
+        }
+    }
+
+    /**
+     * Сообщение легло в очередь и уйдёт само, когда появится сеть. Это НЕ
+     * отправка: подтверждения доставки на такое сообщение ещё не было и быть
+     * не может. Отдельный счётчик нужен, чтобы «отправлено» не путалось с
+     * «отложено» — иначе отчёт выглядел бы бодрее, чем переписка.
+     */
+    fun noteMessageQueuedOffline() {
+        val total = bump(Counters.MSG_QUEUED_OFFLINE)
+        if (total == 1L || total % 10L == 0L) {
+            append(
+                DiagnosticsLevel.INFO,
+                "msg",
+                "исходящее отложено до сети ($total-е): уйдёт само",
+            )
+        }
+    }
+
+    /** Подтверждение доставки: «вторая галочка» на своём сообщении. */
+    fun noteDeliveryAck() {
+        lastAckAtMs = System.currentTimeMillis()
+        bump(Counters.MSG_ACK)
+        // В журнал не пишем: подтверждений много, а числа есть в отчёте.
+    }
+
+    /**
+     * Входящий конверт не вскрылся — это потеря НАСТОЯЩЕГО сообщения, а не
+     * служебный шум. Поэтому предупреждение и счётчик, а [senderKeyKnown]
+     * отделяет две разные причины: «не нам» и «у собеседника устаревший наш
+     * ключ» — советы в этих случаях разные.
+     */
+    fun noteSealedNotOpened(senderKeyKnown: Boolean) {
+        val total = bump(Counters.MSG_IN_NOT_OPENED)
+        if (total == 1L || total % 5L == 0L) {
+            append(
+                DiagnosticsLevel.WARN,
+                "msg",
+                if (senderKeyKnown) {
+                    "входящее не вскрылось ($total-е): собеседник запечатал для нашего " +
+                        "прежнего ключа — у него устаревшая копия"
+                } else {
+                    "входящее не вскрылось ($total-е): конверт не нам — ключами с " +
+                        "отправителем не обменивались"
+                },
+            )
+        }
+    }
+
+    /**
+     * Собеседник прислал новый ключ обмена, а у нас закреплён старый (он
+     * переустановил приложение или восстановил профиль). Переписка с ним
+     * ломается в обе стороны — и именно так выглядит жалоба «от него ко мне не
+     * приходят», хотя внешне ничего не сломано. Пишем предупреждением один раз
+     * и каждое пятое: подсказка «отсканируйте QR заново» должна быть на виду.
+     */
+    fun notePeerKeyChanged() {
+        peerKeyChangedAtMs = System.currentTimeMillis()
+        val total = bump(Counters.MSG_PEER_KEY_CHANGED)
+        if (total == 1L || total % 5L == 0L) {
+            append(
+                DiagnosticsLevel.WARN,
+                "msg",
+                "у собеседника сменился ключ шифрования (переустановка приложения?) — " +
+                    "сообщения не вскрываются, пока не отсканируете его QR-код заново",
+            )
+        }
+    }
+
+    /** Пакет без узла-отправителя: обрывок служебной строки, в переписку нельзя. */
+    fun noteBadSender() {
+        val total = bump(Counters.MSG_IN_BAD_SENDER)
+        if (total == 1L || total % 5L == 0L) {
+            append(DiagnosticsLevel.WARN, "msg", "пакет без узла-отправителя отброшен ($total-й)")
+        }
+    }
+
     /**
      * Ход длинного процесса: счётчик растёт всегда, а в журнал попадает лишь
      * каждое [everyN]-е событие (и самое первое) — иначе передача файла
@@ -123,15 +261,18 @@ object TransferDiagnostics {
         val journalSnapshot = synchronized(lock) {
             journal.toList() to counters.toMap()
         }
+        // Журнал процесса читаем ДО сборки фактов: из него берутся числа,
+        // которых в Kotlin не посчитать (сигналы ядра, отказы пересылки).
+        val logcat = scanLogcat()
         val facts = gatherFacts(
             context = context.applicationContext,
             createdAtMs = createdAtMs,
             counters = journalSnapshot.second,
+            logcat = logcat,
         )
-        val logcat = relevantLogcat()
         Snapshot(
             statusLines = DiagnosticsReport.summaryLines(facts),
-            report = DiagnosticsReport.render(facts, journalSnapshot.first, logcat),
+            report = DiagnosticsReport.render(facts, journalSnapshot.first, logcat.lines),
             createdAtMs = createdAtMs,
             journalSize = journalSnapshot.first.size,
             warnCount = journalSnapshot.first.count { it.level == DiagnosticsLevel.WARN },
@@ -146,6 +287,7 @@ object TransferDiagnostics {
         context: Context,
         createdAtMs: Long,
         counters: Map<String, Long>,
+        logcat: LogcatScan,
     ): DiagnosticsFacts {
         val battery = batteryFacts(context)
         val network = networkFacts(context)
@@ -210,8 +352,27 @@ object TransferDiagnostics {
             lastFailureAtMs = database.lastFailureAtMs,
             custodyBytes = database.custodyBytes,
             counters = counters,
+            lastIncomingAtMs = lastIncomingAtMs,
+            lastOutgoingAtMs = lastOutgoingAtMs,
+            lastAckAtMs = lastAckAtMs,
+            peerKeyChangedAtMs = peerKeyChangedAtMs,
+            coreMessageSignals = logcat.coreMessageSignals,
+            relayQueueFull = logcat.relayQueueFull,
         )
     }
+
+    /**
+     * Итог чтения системного журнала: строки для отчёта и два числа, которые
+     * в Kotlin не посчитать. Первое — сколько сигналов о сообщениях ядро
+     * отдало приложению (по нему видно, дошло ли входящее до нас вообще).
+     * Второе — сколько раз пересылка отбросила пакет из-за полной очереди
+     * получателя: это признак перегруженного телефона-хранителя.
+     */
+    private data class LogcatScan(
+        val lines: List<String>,
+        val coreMessageSignals: Long,
+        val relayQueueFull: Long,
+    )
 
     private data class BatteryFacts(
         val percent: Int,
@@ -351,7 +512,7 @@ object TransferDiagnostics {
      * Android такой аргумент не понимает: пустой раздел безопаснее, чем
      * неограниченный logcat со всем телефоном.
      */
-    private fun relevantLogcat(): List<String> = runCatching {
+    private fun scanLogcat(): LogcatScan = runCatching {
         val process = ProcessBuilder(
             "logcat",
             "-d",
@@ -360,17 +521,25 @@ object TransferDiagnostics {
             "--pid=${Process.myPid()}",
             "*:V",
         ).redirectErrorStream(true).start()
-        val raw = process.inputStream.bufferedReader().useLines { sequence ->
-            sequence
-                .filter(::isRelevantProcessLog)
-                .map { DiagnosticsPrivacy.hidePayloadBodies(redact(it)) }
-                .toList()
+        // Читаем ВСЕ строки этого процесса: фильтр ниже решает только, что
+        // показывать, а числа (сигналы ядра, отказы пересылки) считаются по
+        // полному списку — иначе «в отчёте пусто» не отличить от «счёт не
+        // успел попасть в последние строки».
+        val all = process.inputStream.bufferedReader().useLines { sequence ->
+            sequence.map { DiagnosticsPrivacy.hidePayloadBodies(redact(it)) }.toList()
         }
         process.waitFor(2, TimeUnit.SECONDS)
         process.destroy()
-        // Свежие строки важнее старых: logcat отдаёт их по времени вперёд.
-        DiagnosticsPrivacy.collapseRepeatedLogLines(raw, limit = MAX_LOGCAT_LINES)
-    }.getOrDefault(emptyList())
+        LogcatScan(
+            // Свежие строки важнее старых: logcat отдаёт их по времени вперёд.
+            lines = DiagnosticsPrivacy.collapseRepeatedLogLines(
+                all.filter(::isRelevantProcessLog),
+                limit = MAX_LOGCAT_LINES,
+            ),
+            coreMessageSignals = all.count { it.contains(CORE_MESSAGE_SIGNAL) }.toLong(),
+            relayQueueFull = all.count { it.contains(RELAY_QUEUE_FULL) }.toLong(),
+        )
+    }.getOrDefault(LogcatScan(emptyList(), 0L, 0L))
 
     private val knownLogTags = listOf(
         "p2p_core",
@@ -380,9 +549,33 @@ object TransferDiagnostics {
         "NetworkChange",
         "CoreServerService",
         "ProxyAutopilot",
+        // Обмен ключами и отказы по ключу: без этого тега строки «File HELLO …
+        // REJECTED: exchange key changed» в отчёт не попадали бы, а это ровно
+        // та причина, по которой переписка молчит после переустановки.
+        "FileTransferReceiver",
+        "FileTransferRouter",
+        "File HELLO",
     )
 
+    /**
+     * Приметы строк о переписке: их раньше в отчёт не пускал ни один фильтр,
+     * а именно они объясняют «сообщения не доходят».
+     */
     private val relevantLogWords = listOf(
+        "Saved incoming message",
+        "Sealed envelope NOT opened",
+        "CF sealed envelope not opened",
+        "Dropped message with non-node sender",
+        "MessageReceived EMITTED",
+        "Delivery ACK sent",
+        "delivery ACK",
+        "Relay-очередь получателя переполнена",
+        "File HELLO",
+        "exchange key changed",
+        // Присутствие собеседника: если он «выходит в сеть» каждые 10–30 с,
+        // связь с ним рвётся, и это объясняет пропажу встречных сообщений.
+        "peer online",
+        "CROSS-BROKER DUPLICATE DROPPED",
         "F4",
         "FCAP",
         "APUF",
@@ -415,6 +608,12 @@ object TransferDiagnostics {
      * телефоне владельца.
      */
     internal fun redact(text: String): String = DiagnosticsPrivacy.redact(text)
+
+    /** Строка ядра: сообщение дошло до EventBus, то есть передано приложению. */
+    private const val CORE_MESSAGE_SIGNAL = "MessageReceived EMITTED"
+
+    /** Строка ядра: пересылка не смогла сохранить пакет — очередь получателя полна. */
+    private const val RELAY_QUEUE_FULL = "Relay-очередь получателя переполнена"
 
     private const val MEBIBYTE = 1024L * 1024L
 }

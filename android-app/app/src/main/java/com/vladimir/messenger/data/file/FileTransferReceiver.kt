@@ -186,7 +186,15 @@ class FileTransferReceiver(
         return true
     }
 
-    enum class HelloResult { NOT_HELLO, PINNED_NEW, PINNED_ALREADY, REJECTED }
+    /**
+     * [REJECTED_KEY_CHANGED] отделён от общего [REJECTED] нарочно: это самый
+     * частый и самый непонятный для человека случай — собеседник переустановил
+     * приложение (или восстановил профиль), прислал новый ключ, а у нас
+     * закреплён старый. Пин снимается только осознанно, поэтому в отчёте
+     * «Логи» такая ситуация должна звучать словами, а не тонуть в прочих
+     * отказах (жалоба владельца 2026-10-07: «от него ко мне не приходят»).
+     */
+    enum class HelloResult { NOT_HELLO, PINNED_NEW, PINNED_ALREADY, REJECTED, REJECTED_KEY_CHANGED }
 
     /**
      * File-HELLO handshake: a tiny durable message carrying only the sender's signed exchange
@@ -217,6 +225,10 @@ class FileTransferReceiver(
                 // поэтому подсказка пишется прямо здесь.
                 val changed = error.message?.contains("key changed") == true
                 if (changed) {
+                    // Диагностика: в журнале «Логи» появится строка словами, а не
+                    // только в системном журнале — иначе причину не видно.
+                    com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                        .notePeerKeyChanged()
                     Log.w(
                         TAG,
                         "File HELLO from $senderId REJECTED: exchange key changed " +
@@ -226,7 +238,7 @@ class FileTransferReceiver(
                 } else {
                     Log.w(TAG, "File HELLO from $senderId rejected: ${error.message}")
                 }
-                return HelloResult.REJECTED
+                return if (changed) HelloResult.REJECTED_KEY_CHANGED else HelloResult.REJECTED
             }
         }
     }

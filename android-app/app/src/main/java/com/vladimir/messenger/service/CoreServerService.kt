@@ -934,6 +934,11 @@ class CoreServerService : Service() {
                                     }
                                     if (cfContent == null) {
                                         Log.w(TAG, "CF sealed envelope not opened msgId=$messageId; skipped")
+                                        com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                                            .noteSealedNotOpened(
+                                                senderKeyKnown = MessageSealer
+                                                    .canSeal(applicationContext, senderId),
+                                            )
                                     } else {
                                         // Раунд 140: служебные конверты разбираются ДО
                                         // сохранения - тем же стражем, что и основной
@@ -965,6 +970,11 @@ class CoreServerService : Service() {
                                                 channel = MessageChannel.CF,
                                             )
                                             Log.i(TAG, "CF message handled for chat ${chat.id} msgId=$messageId")
+                                            // Диагностика: и этот путь считает входящие
+                                            // - иначе через релей сообщения были бы
+                                            // невидимы в отчёте.
+                                            com.vladimir.messenger.data.diagnostics
+                                                .TransferDiagnostics.noteMessageIncoming()
                                             // Раунд 175: как и в основном пути -
                                             // техническое имя -> адресный whois.
                                             runCatching {
@@ -1008,6 +1018,8 @@ class CoreServerService : Service() {
                                         channel = MessageChannel.CF,
                                     )
                                     Log.i(TAG, "CF plain-text saved to chat ${chat.id}: ${parsed.raw.take(30)}")
+                                    com.vladimir.messenger.data.diagnostics
+                                        .TransferDiagnostics.noteMessageIncoming()
                                 }
                             }
                         }
@@ -1945,6 +1957,10 @@ class CoreServerService : Service() {
                         "Dropped message with non-node sender '" + senderId.take(24) +
                             "' msgId=" + messageId.take(24) + " text=" + rawText.take(24),
                     )
+                    // Диагностика (2026-10-07): такой пакет в переписку не попадёт
+                    // НИКОГДА, и без счётчика он выглядел бы как «сообщение не
+                    // пришло» без причины. Число видно в разделе [сообщения].
+                    com.vladimir.messenger.data.diagnostics.TransferDiagnostics.noteBadSender()
                     return
                 }
 
@@ -1987,6 +2003,12 @@ class CoreServerService : Service() {
                                 "bytes=${rawText.length} - relaying for another node, " +
                                 "or our key does not match",
                         )
+                        // «Сообщение не пришло» чаще всего выглядит именно так:
+                        // конверт не вскрылся, и раньше об этом знал только
+                        // системный журнал. Теперь это предупреждение в журнале
+                        // отчёта и число в разделе [сообщения].
+                        com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                            .noteSealedNotOpened(senderKeyKnown = known)
                         return
                     }
                     opened
@@ -2295,6 +2317,10 @@ class CoreServerService : Service() {
                         recipientId = RustBridge.nodeId() ?: "",
                     )
                     Log.i(TAG, "Saved incoming message to chat ${chat.id}")
+                    // Диагностика (2026-10-07): встречное направление в отчёте.
+                    // Показываем в журнале первое и каждое двадцатое сообщение,
+                    // а в разделе [сообщения] - точные числа и свежесть.
+                    com.vladimir.messenger.data.diagnostics.TransferDiagnostics.noteMessageIncoming()
                     // р242: для диагностики - когда последний раз что-то приходило.
                     com.vladimir.messenger.data.mirror.MirrorHub.noteIncoming()
                     // р226: мгновенно отразить входящее на зеркале-партнёре.
@@ -2321,6 +2347,12 @@ class CoreServerService : Service() {
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error saving incoming message", e)
+                    // Без этой записи сбой сохранения выглядел бы как «молча не
+                    // пришло»: числа подтверждений растут, а переписка пуста.
+                    com.vladimir.messenger.data.diagnostics.TransferDiagnostics.recordFailure(
+                        "msg",
+                        "входящее сообщение не удалось сохранить (подробности в системном журнале)",
+                    )
                 }
             }
 

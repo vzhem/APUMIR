@@ -105,6 +105,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "[сеть]",
             "[ядро]",
             "[mqtt]",
+            "[сообщения]",
             "[передачи]",
             "[сессия]",
             "[журнал]",
@@ -113,7 +114,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             with self.subTest(section=section):
                 self.assertIn(section, report)
         # Сводка отвечает на вопросы, за которыми открывают «Логи».
-        for title in ("Сеть", "Брокер", "Ядро", "Передачи", "Прямой канал", "Батарея"):
+        for title in ("Сеть", "Брокер", "Ядро", "Сообщения", "Передачи", "Прямой канал", "Батарея"):
             with self.subTest(title=title):
                 self.assertIn('"%s"' % title, report)
 
@@ -170,6 +171,16 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "freshBrokerErrorShowsUpInTheSummary",
             "seedingIsSharingNotWorkInProgress",
             "failureCodesExplainTheFailureCount",
+            # 2026-10-07: «мои сообщения доходят, а от него нет» — направление
+            # переписки и причины потери входящих должны быть в отчёте.
+            "summarySpotsOutgoingWithoutIncoming",
+            "messageSectionShowsDirectionsAndReasons",
+            "quietSessionIsNotAWarning",
+            "healthyExchangeReadsAsOk",
+            "relayQueueOverflowIsExplainedNotJustCounted",
+            "peerKeyChangeExplainsSilentChat",
+            "offlineQueueIsNotMistakenForSilence",
+            "refusedSendIsNamedInTheSummary",
         ):
             with self.subTest(test=test):
                 self.assertIn(test, tests)
@@ -182,6 +193,81 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn("ошибок=${sums.failed} (за всё время работы приложения)", report)
         self.assertIn('appendLine("раздаётся=${sums.seeding}")', report)
         self.assertIn("TransferErrorText.explain(failure.code)", report)
+
+    def test_messages_report_both_directions_and_reasons(self):
+        """Жалоба «от него не приходит» должна разбираться по отчёту, а не на слух."""
+        report = source(DIAG / "DiagnosticsReport.kt")
+        for marker in (
+            "const val MSG_IN = ",
+            "const val MSG_OUT = ",
+            "const val MSG_ACK = ",
+            "const val MSG_IN_NOT_OPENED = ",
+            "const val MSG_IN_BAD_SENDER = ",
+            "const val MSG_PEER_KEY_CHANGED = ",
+            "const val MSG_SEND_FAILED = ",
+            "const val MSG_QUEUED_OFFLINE = ",
+            "private fun messageLine(",
+            "private fun StringBuilder.appendMessages(",
+            "входящих показано=",
+            "не вскрылось (чужая переписка или устаревший ключ)=",
+            "ядро передало сигналов=",
+            "пересылка: отброшено из-за полной очереди=",
+            "смена ключа у собеседника (раз)=",
+            "отложено до сети (уйдёт само)=",
+            "не ушло (узел отказал или нет сети)=",
+            "отсканируйте его QR-код заново",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, report)
+        # «Входящих нет, а свои уходят и подтверждаются» — предупреждение, а не
+        # строка «всё хорошо»: ровно это владелец и увидел на телефоне.
+        self.assertIn("входящих нет, а отправлено", report)
+        collector = source(DIAG / "TransferDiagnostics.kt")
+        for marker in (
+            "fun noteMessageIncoming(",
+            "fun noteMessageOutgoing(",
+            "fun noteDeliveryAck(",
+            "fun noteSealedNotOpened(",
+            "fun noteBadSender(",
+            "fun notePeerKeyChanged(",
+            "fun noteMessageSendFailed(",
+            "fun noteMessageQueuedOffline(",
+            "lastIncomingAtMs",
+            "private fun scanLogcat(",
+            "coreMessageSignals = all.count",
+            "relayQueueFull = all.count",
+            "Relay-очередь получателя переполнена",
+            "MessageReceived EMITTED",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, collector)
+        # Хуки обязаны стоять там, где сообщение входит и выходит: счётчик без
+        # вызова — это «голословный» отчёт, за который уже был разбор.
+        service = source(MAIN / "service/CoreServerService.kt")
+        for marker in (
+            "TransferDiagnostics.noteMessageIncoming()",
+            "noteSealedNotOpened(senderKeyKnown = known)",
+            "TransferDiagnostics.noteBadSender()",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, service)
+        receiver = source(MAIN / "data/file/FileTransferReceiver.kt")
+        for marker in (
+            "HelloResult.REJECTED_KEY_CHANGED",
+            "TransferDiagnostics",
+            "notePeerKeyChanged()",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, receiver)
+        chat = source(MAIN / "data/repository/ChatRepository.kt")
+        for marker in (
+            ".noteMessageOutgoing()",
+            "TransferDiagnostics.noteDeliveryAck()",
+            "noteMessageQueuedOffline()",
+            "noteMessageSendFailed(e.javaClass.simpleName)",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, chat)
 
     def test_mqtt_is_explained_by_one_shared_parser(self):
         view_model = source(VIEW_MODEL)

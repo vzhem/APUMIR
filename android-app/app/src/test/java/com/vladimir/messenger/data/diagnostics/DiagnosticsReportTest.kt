@@ -25,6 +25,10 @@ class DiagnosticsReportTest {
         mqttLine: String = "MQTT: tcp broker.example:1883, ConnAck 5 с назад",
         failureCodes: List<TransferErrorLine> = emptyList(),
         lastFailureAtMs: Long? = null,
+        lastIncomingAtMs: Long = 0L,
+        peerKeyChangedAtMs: Long = 0L,
+        coreMessageSignals: Long = 0L,
+        relayQueueFull: Long = 0L,
     ) = DiagnosticsFacts(
         createdAtMs = 1_700_000_000_000L,
         sessionStartedAtMs = 1_700_000_000_000L - 168_000L,
@@ -67,6 +71,10 @@ class DiagnosticsReportTest {
         lastFailureAtMs = lastFailureAtMs,
         custodyBytes = 0,
         counters = counters,
+        lastIncomingAtMs = lastIncomingAtMs,
+        peerKeyChangedAtMs = peerKeyChangedAtMs,
+        coreMessageSignals = coreMessageSignals,
+        relayQueueFull = relayQueueFull,
     )
 
     private fun titles(lines: List<DiagnosticsLine>): List<String> = lines.map { it.title }
@@ -75,10 +83,166 @@ class DiagnosticsReportTest {
     fun summaryCoversEveryPartTheOwnerAsksAbout() {
         val lines = DiagnosticsReport.summaryLines(facts())
         assertEquals(
-            listOf("Сеть", "Брокер", "Ядро", "Передачи", "Прямой канал", "Батарея"),
+            listOf("Сеть", "Брокер", "Ядро", "Сообщения", "Передачи", "Прямой канал", "Батарея"),
             titles(lines),
         )
         assertTrue(lines.all { it.value.isNotBlank() })
+    }
+
+    /**
+     * Главная жалоба владельца 2026-10-07: «мои сообщения до него доходят, а от
+     * него ко мне не приходят». В сводке это должно быть предупреждением, а не
+     * строкой «всё хорошо»: свои уходят и подтверждаются, входящих нет.
+     */
+    @Test
+    fun summarySpotsOutgoingWithoutIncoming() {
+        val lines = DiagnosticsReport.summaryLines(
+            facts(
+                counters = mapOf(
+                    Counters.MSG_OUT to 5L,
+                    Counters.MSG_ACK to 5L,
+                    Counters.MSG_IN_NOT_OPENED to 3L,
+                ),
+            ),
+        )
+        val message = lines.first { it.title == "Сообщения" }
+        assertEquals(DiagnosticsLevel.WARN, message.level)
+        assertTrue(message.value.contains("входящих нет"))
+        assertTrue(message.value.contains("не вскрылось 3"))
+    }
+
+    /** Не вскрывшийся конверт — потеря настоящего сообщения, и её видно. */
+    @Test
+    fun messageSectionShowsDirectionsAndReasons() {
+        val report = DiagnosticsReport.render(
+            facts = facts(
+                counters = mapOf(
+                    Counters.MSG_IN to 4L,
+                    Counters.MSG_OUT to 7L,
+                    Counters.MSG_ACK to 6L,
+                    Counters.MSG_IN_NOT_OPENED to 2L,
+                ),
+                lastIncomingAtMs = 1_700_000_000_000L - 120_000L,
+                coreMessageSignals = 42L,
+                relayQueueFull = 9L,
+            ),
+            journal = emptyList(),
+            logcat = emptyList(),
+        )
+        for (marker in listOf(
+            "[сообщения]",
+            "входящих показано=4",
+            "исходящих отправлено=7",
+            "подтверждений доставки=6",
+            "отложено до сети (уйдёт само)=0",
+            "не ушло (узел отказал или нет сети)=0",
+            "последнее входящее=",
+            "не вскрылось (чужая переписка или устаревший ключ)=2",
+            "ядро передало сигналов=42",
+            "пересылка: отброшено из-за полной очереди=9",
+        )) {
+            assertTrue("в отчёте нет строки: $marker", report.contains(marker))
+        }
+        // Журнал процесса показывал «EMITTED to EventBus», а показано было 4:
+        // разница между этими числами и есть предмет разбора.
+        assertTrue(report.contains("по журналу процесса"))
+        assertTrue(report.contains("устаревшая копия ключа"))
+    }
+
+    /** Тихий вечер без переписки не должен выглядеть поломкой. */
+    @Test
+    fun quietSessionIsNotAWarning() {
+        val message = DiagnosticsReport.summaryLines(facts())
+            .first { it.title == "Сообщения" }
+        assertEquals(DiagnosticsLevel.INFO, message.level)
+        assertTrue(message.value.contains("ещё не было"))
+    }
+
+    /** Обычный живой обмен: принято, отправлено, подтверждено. */
+    @Test
+    fun healthyExchangeReadsAsOk() {
+        val message = DiagnosticsReport.summaryLines(
+            facts(
+                counters = mapOf(
+                    Counters.MSG_IN to 9L,
+                    Counters.MSG_OUT to 9L,
+                    Counters.MSG_ACK to 8L,
+                ),
+                lastIncomingAtMs = 1_700_000_000_000L - 60_000L,
+            ),
+        ).first { it.title == "Сообщения" }
+        assertEquals(DiagnosticsLevel.OK, message.level)
+        assertTrue(message.value.contains("принято 9"))
+        assertTrue(message.value.contains("отправлено 9"))
+        assertTrue(message.value.contains("последнее входящее"))
+    }
+
+    /**
+     * Самая понятная человеку причина «от него не приходят»: собеседник
+     * переустановил приложение, ключ сменился, а закреплён прежний. В сводке
+     * это должно звучать вместе с тем, что делать.
+     */
+    @Test
+    fun peerKeyChangeExplainsSilentChat() {
+        val lines = DiagnosticsReport.summaryLines(
+            facts(
+                counters = mapOf(Counters.MSG_OUT to 3L, Counters.MSG_ACK to 3L),
+                peerKeyChangedAtMs = 1_700_000_000_000L - 300_000L,
+            ),
+        )
+        val message = lines.first { it.title == "Сообщения" }
+        assertEquals(DiagnosticsLevel.WARN, message.level)
+        assertTrue(message.value.contains("новый ключ"))
+        assertTrue(message.value.contains("QR"))
+        val report = DiagnosticsReport.render(
+            facts = facts(
+                counters = mapOf(Counters.MSG_PEER_KEY_CHANGED to 1L),
+                peerKeyChangedAtMs = 1_700_000_000_000L - 300_000L,
+            ),
+            journal = emptyList(),
+            logcat = emptyList(),
+        )
+        assertTrue(report.contains("смена ключа у собеседника (раз)=1"))
+        assertTrue(report.contains("отсканируйте его QR-код заново"))
+    }
+
+    /** «Отложено до сети» — это не молчание и не поломка, так и должно звучать. */
+    @Test
+    fun offlineQueueIsNotMistakenForSilence() {
+        val message = DiagnosticsReport.summaryLines(
+            facts(counters = mapOf(Counters.MSG_QUEUED_OFFLINE to 4L)),
+        ).first { it.title == "Сообщения" }
+        assertEquals(DiagnosticsLevel.INFO, message.level)
+        assertTrue(message.value.contains("отложено до сети 4"))
+    }
+
+    /** Сбой отправки обязан быть назван, а не спрятан в «всё хорошо». */
+    @Test
+    fun refusedSendIsNamedInTheSummary() {
+        val message = DiagnosticsReport.summaryLines(
+            facts(
+                counters = mapOf(
+                    Counters.MSG_IN to 2L,
+                    Counters.MSG_OUT to 5L,
+                    Counters.MSG_ACK to 5L,
+                    Counters.MSG_SEND_FAILED to 3L,
+                ),
+                lastIncomingAtMs = 1_700_000_000_000L - 60_000L,
+            ),
+        ).first { it.title == "Сообщения" }
+        assertTrue(message.value.contains("не ушло 3"))
+    }
+
+    /** Ядро отдало приложению сигналы, а показано ноль — это и есть разбор. */
+    @Test
+    fun relayQueueOverflowIsExplainedNotJustCounted() {
+        val report = DiagnosticsReport.render(
+            facts = facts(relayQueueFull = 14L, coreMessageSignals = 30L),
+            journal = emptyList(),
+            logcat = emptyList(),
+        )
+        assertTrue(report.contains("пересылка: отброшено из-за полной очереди=14"))
+        assertTrue(report.contains("это пакеты для других узлов"))
     }
 
     @Test

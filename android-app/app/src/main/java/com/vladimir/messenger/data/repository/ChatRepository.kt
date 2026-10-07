@@ -189,6 +189,8 @@ class ChatRepository @Inject constructor(
                         )
                         if (offered) {
                             Log.i(TAG, "🪞 sent via mirror partner: $messageId")
+                            com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                                .noteMessageOutgoing()
                             return Result.success(mirrorEntity.toDomain())
                         }
                         // Партнёр мигнул в момент отправки: строка останется
@@ -252,6 +254,10 @@ class ChatRepository @Inject constructor(
             if (sentDirectly) {
                 messageDao.updateMessageStatus(messageId, MessageStatus.SENT.name)
                 messageDao.updateMessageChannel(messageId, MessageChannel.LOCAL.name)
+                // Диагностика (2026-10-07): считаем ЗДЕСЬ, а не в конце функции:
+                // отложенное до сети — это ещё не отправка, и путать их нельзя.
+                com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                    .noteMessageOutgoing()
             } else if (actualRecipientId.isNotBlank()) {
                 // No transport confirmed delivery. Room remains the phone-owned persistent outbox;
                 // Rust may also retain the compatible relay in its bounded mesh queue. Until a
@@ -259,6 +265,8 @@ class ChatRepository @Inject constructor(
                 messageDao.updateMessageStatus(messageId, MessageStatus.QUEUED_OFFLINE.name)
                 messageDao.updateMessageChannel(messageId, MessageChannel.STORE_FORWARD.name)
                 Log.i(TAG, "Message queued offline in phone-owned mesh: $messageId")
+                com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                    .noteMessageQueuedOffline()
             }
 
             // р226: отразить отправленное на зеркале второго устройства.
@@ -304,6 +312,10 @@ class ChatRepository @Inject constructor(
             Result.success(entity.toDomain())
         } catch (e: Exception) {
             Log.e(TAG, "sendMessage error", e)
+            // Только вид ошибки: текст исключения может нести идентификаторы
+            // узла, а отчёт должен оставаться без чужих данных.
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                .noteMessageSendFailed(e.javaClass.simpleName)
             Result.failure(e)
         }
     }
@@ -1057,7 +1069,14 @@ class ChatRepository @Inject constructor(
     /** ACKs only acknowledge our outgoing rows; an old ACK cannot downgrade READ. */
     suspend fun markOutgoingMessageDelivered(messageId: String): Boolean {
         if (messageId.isBlank()) return false
-        return messageDao.markOutgoingMessageDelivered(messageId) > 0
+        val changed = messageDao.markOutgoingMessageDelivered(messageId) > 0
+        // Диагностика: подтверждение — единственное доказательство, что
+        // собеседник ПОЛУЧИЛ сообщение. Считаем только настоящую смену
+        // статуса, иначе повторные кадры надували бы число.
+        if (changed) {
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics.noteDeliveryAck()
+        }
+        return changed
     }
 
     private fun ChatEntity.toDomain() = Chat(
