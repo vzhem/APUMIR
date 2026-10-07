@@ -42,6 +42,42 @@ def contrast(first, second):
 
 
 class SettingsStyleTest(unittest.TestCase):
+    def test_premium_helpers_are_imported_where_used(self):
+        """Kotlin не подтягивает импорты сам — и это уже стоило сборки.
+
+        2026-10-07: в `GroupsScreen.kt` поставили `.apuPremiumLift(...)`, а импорт
+        не добавили. Компиляция упала на «Unresolved reference 'apuPremiumLift'»,
+        причём шаг компиляции в CI неблокирующий, поэтому прогон остался зелёным,
+        а ошибку поймал только комментарий к PR. Проверяем все файлы ui/: если
+        имя из премиального слоя используется, рядом обязан быть импорт (либо
+        файл лежит в самом пакете `ui.components`).
+        """
+        import re
+        ui = ROOT / "android-app/app/src/main/java/com/vladimir/messenger/ui"
+        names = (
+            "apuPremiumLift",
+            "apuPremiumGloss",
+            "apuPremiumThread",
+            "apuBubbleSurface",
+            "apuGoldBrush",
+            "ApuPremiumIconTile",
+            "ApuPremiumButton",
+            "ApuGoldInk",
+        )
+        missing = []
+        for path in sorted(ui.rglob("*.kt")):
+            text = path.read_text()
+            package = re.search(r"^package\s+([\w.]+)", text, re.M)
+            in_components = bool(package) and package.group(1).endswith("ui.components")
+            for name in names:
+                if not re.search(r"\b" + name + r"\b", text):
+                    continue
+                if in_components:
+                    continue
+                if not re.search(r"^import\s+[\w.]*\." + name + r"\b", text, re.M):
+                    missing.append(f"{path.relative_to(ui)}: {name}")
+        self.assertEqual([], missing, "не импортированы: " + "; ".join(missing))
+
     def test_premium_style_is_one_palette_for_the_whole_app(self):
         """2026-10-07: «переделать всё приложение, чтобы был стиль как в логах».
 
