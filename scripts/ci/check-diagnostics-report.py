@@ -124,8 +124,13 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn("ApuSettingsDialog(", screen)
         self.assertNotRegex(screen, r"\bAlertDialog\(")
         for marker in (
-            "TransferDiagnostics.collect(settingsContext)",
-            "ApuDiagnosticsStatusCard(lines = logsSnapshot.statusLines)",
+            "TransferDiagnostics.collect(",
+            "onStage = { stage -> transferLogsStage = stage },",
+            "onPartial = { partial -> transferLogsSnapshot = partial },",
+            # Владелец 2026-10-07: «нет логов списка вообще» — журнал виден
+            # отдельным списком, а не только внутри текста отчёта.
+            "ApuDiagnosticsEventList(events = logsSnapshot?.events.orEmpty())",
+            "ApuDiagnosticsStatusCard(lines = logsSnapshot?.statusLines.orEmpty())",
             "ApuDiagnosticsReportCard(",
             "AppShare.shareText(settingsContext, reportText,",
             "mqttClipboard.setText(",
@@ -154,6 +159,67 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn("ApuSettingsCard(", ui)
         self.assertIn("ApuBubbleMutedColor", ui)
         self.assertIn("SelectionContainer", ui)
+
+    def test_logs_window_is_never_a_dead_end(self):
+        """Владелец 2026-10-07: «кнопки в новом не работают и нет логов списка вообще. Всё на паузе.»
+
+        Три причины пустого окна закрыты контрактом:
+          1) сбор нельзя оставить вечно «в паузе» — он в try/catch/finally и
+             делится на быструю часть (она приходит сразу) и журнал процесса;
+          2) чтение журнала процесса ограничено строками и временем, а процесс
+             убивается в любом случае (раньше читался весь буфер телефона);
+          3) у кнопок нет права молчать: нажатие всегда даёт видимый ответ, а
+             ошибка сбора видна в окне, а не только в системном журнале.
+        """
+        screen = source(SCREEN)
+        diag = source(DIAG / "TransferDiagnostics.kt")
+        ui = source(DIAG_UI)
+        for marker in (
+            # 1) окно и этапы
+            "catch (failure: Throwable)",
+            "} finally {",
+            "transferLogsLoading = false",
+            "transferLogsStage = TransferDiagnostics.STAGE_DEVICE",
+            "onStage = { stage -> transferLogsStage = stage }",
+            "onPartial = { partial -> transferLogsSnapshot = partial }",
+            # 3) кнопки отвечают всегда
+            "apuDiagnosticsNothingYet(settingsContext, transferLogsStage)",
+            # 4) долгий сбор объясняется словами, а не молчанием
+            "transferLogsSlow = true",
+            "сбор идёт дольше обычного",
+        ):
+            with self.subTest(marker=marker, where="SettingsScreen"):
+                self.assertIn(marker, screen)
+        self.assertNotIn(
+            "enabled = reportText.isNotBlank()",
+            screen,
+            "кнопки «Отправить»/«Скопировать» не должны быть мёртвыми при пустом отчёте",
+        )
+        for marker in (
+            # 2) журнал процесса читается ограниченно и не держит окно
+            "LOGCAT_LINE_LIMIT",
+            "LOGCAT_BUDGET_MS",
+            '"*:V",',
+            "reader.join(budgetMs)",
+            "process.destroy()",
+            "LogcatScan.EMPTY",
+            # 1) двухзаходный сбор
+            "onPartial?.invoke(",
+            "snapshotOf(",
+            "STAGE_LOGCAT",
+            # журнал списком
+            "val events: List<DiagnosticsJournalEntry> = emptyList(),",
+        ):
+            with self.subTest(marker=marker, where="TransferDiagnostics"):
+                self.assertIn(marker, diag)
+        self.assertIn('"-t", LOGCAT_LINE_LIMIT.toString()', diag)
+        for marker in (
+            "fun ApuDiagnosticsEventList(",
+            "DiagnosticsReport.clock(event.atMs)",
+            "diagnosticsLevelLabel(event.level)",
+        ):
+            with self.subTest(marker=marker, where="ApuDiagnosticsUi"):
+                self.assertIn(marker, ui)
 
     def test_lost_items_do_not_live_forever(self):
         """Владелец 2026-10-07: тяжёлое — сутки, текст и малое — неделя, и уборка.

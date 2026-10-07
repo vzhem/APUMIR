@@ -23,6 +23,7 @@ import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuSettingsDivider
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
 import com.vladimir.messenger.ui.components.ApuDiagnosticsActionButton
+import com.vladimir.messenger.ui.components.ApuDiagnosticsEventList
 import com.vladimir.messenger.ui.components.ApuDiagnosticsHero
 import com.vladimir.messenger.ui.components.ApuDiagnosticsPrivacyStrip
 import com.vladimir.messenger.ui.components.ApuDiagnosticsReportCard
@@ -94,6 +95,7 @@ import com.vladimir.messenger.data.swarm.SwarmMode
 import com.vladimir.messenger.data.swarm.SwarmPolicy
 import com.vladimir.messenger.data.swarm.SwarmSettings
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 import com.vladimir.messenger.ui.theme.ThemeMode
@@ -652,15 +654,52 @@ private fun SettingsTabContent(
     var transferLogsRefresh by remember { mutableIntStateOf(0) }
     var transferLogsSnapshot by remember { mutableStateOf<TransferDiagnostics.Snapshot?>(null) }
     var transferLogsLoading by remember { mutableStateOf(false) }
+    // Что именно сейчас делает сбор — словами. Владелец 2026-10-07: «кнопки не
+    // работают… всё на паузе»; окно должно объяснять, что происходит, а не
+    // молчать пустым экраном.
+    var transferLogsStage by remember { mutableStateOf<String?>(null) }
+    // Ошибка сбора — отдельно от хода работ: «читаю журнал» это не то же
+    // самое, что «сбор не удался», и красить их одним цветом нельзя.
+    var transferLogsError by remember { mutableStateOf<String?>(null) }
+    // Сторож: сбор идёт дольше обычного — человек узнает об этом словами,
+    // а не догадкой «приложение, похоже, встало».
+    var transferLogsSlow by remember { mutableStateOf(false) }
     val settingsContext = LocalContext.current
     LaunchedEffect(showTransferLogsDialog, transferLogsRefresh) {
         if (showTransferLogsDialog) {
             transferLogsLoading = true
-            // Сбор идёт в фоне: внутри вызовы ядра, база и `logcat -d`.
-            transferLogsSnapshot = withContext(Dispatchers.IO) {
-                TransferDiagnostics.collect(settingsContext)
+            transferLogsError = null
+            transferLogsStage = TransferDiagnostics.STAGE_DEVICE
+            try {
+                // Сбор идёт в фоне: внутри вызовы ядра, база и `logcat`.
+                // Быстрая часть приходит сразу (onPartial) — окно не пустует,
+                // журнал процесса догоняет и уточняет отчёт.
+                val full = withContext(Dispatchers.IO) {
+                    TransferDiagnostics.collect(
+                        context = settingsContext,
+                        onStage = { stage -> transferLogsStage = stage },
+                        onPartial = { partial -> transferLogsSnapshot = partial },
+                    )
+                }
+                transferLogsSnapshot = full
+                transferLogsStage = null
+            } catch (failure: Throwable) {
+                // Сбор не имеет права оставить окно в вечной «паузе»: говорим,
+                // что случилось, и предлагаем повторить. Быстрая часть отчёта
+                // при этом остаётся на экране — она уже собрана.
+                transferLogsStage = null
+                transferLogsError = "сбор отчёта не завершился (" +
+                    failure.javaClass.simpleName + ") — нажмите «Обновить»"
+            } finally {
+                transferLogsLoading = false
             }
-            transferLogsLoading = false
+        }
+    }
+    LaunchedEffect(showTransferLogsDialog, transferLogsRefresh) {
+        transferLogsSlow = false
+        if (showTransferLogsDialog) {
+            delay(5_000)
+            if (transferLogsLoading) transferLogsSlow = true
         }
     }
     // р240: диагностика синхронизации устройств одной личности.
@@ -1386,15 +1425,37 @@ private fun SettingsTabContent(
                         warnCount = logsSnapshot?.warnCount ?: 0,
                         badCount = logsSnapshot?.badCount ?: 0,
                     )
-                    if (logsSnapshot == null || transferLogsLoading) {
-                        Text(
-                            "Собираю безопасный отчёт…",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = ApuBubbleMutedColor,
-                        )
-                    } else {
-                        ApuDiagnosticsStatusCard(lines = logsSnapshot.statusLines)
+                    // Ход работ и ошибка говорятся словами — окно никогда не
+                    // молчит пустым экраном.
+                    val stageLine = when {
+                        transferLogsLoading -> transferLogsStage ?: "Собираю безопасный отчёт…"
+                        transferLogsError != null -> transferLogsError
+                        else -> null
                     }
+                    if (stageLine != null) {
+                        Text(
+                            stageLine,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (transferLogsLoading) {
+                                ApuBubbleMutedColor
+                            } else {
+                                ApuSettingsDangerColor
+                            },
+                        )
+                        if (transferLogsLoading && transferLogsSlow) {
+                            Text(
+                                "сбор идёт дольше обычного — что-то в телефоне занято; " +
+                                    "«Обновить» запустит заново",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = ApuBubbleMutedColor,
+                            )
+                        }
+                    } else {
+                        ApuDiagnosticsStatusCard(lines = logsSnapshot?.statusLines.orEmpty())
+                    }
+                    // Список событий — то, что человек называет «логи»: он виден
+                    // сразу, как только пришла быстрая часть отчёта.
+                    ApuDiagnosticsEventList(events = logsSnapshot?.events.orEmpty())
                     // Обещание приватности — тёмной стеклянной полосой со щитом:
                     // его читают, а не пролистывают.
                     ApuDiagnosticsPrivacyStrip(
@@ -1421,12 +1482,19 @@ private fun SettingsTabContent(
                 // «Отправить» — системное меню Android: отчёт уезжает в
                 // Telegram/почту одной кнопкой, без ручного копирования.
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    // Кнопка всегда живая: если отчёт ещё собирается, она не
+                    // молчит, а говорит, что именно происходит.
                     ApuDiagnosticsActionButton(
                         label = "Отправить",
                         icon = DiagnosticsActionIcons.Send,
                         style = DiagnosticsActionStyle.PRIMARY,
-                        enabled = reportText.isNotBlank(),
-                        onClick = { AppShare.shareText(settingsContext, reportText, "Логи APU") },
+                        onClick = {
+                            if (reportText.isNotBlank()) {
+                                AppShare.shareText(settingsContext, reportText, "Логи APU")
+                            } else {
+                                apuDiagnosticsNothingYet(settingsContext, transferLogsStage)
+                            }
+                        },
                     )
                 }
             },
@@ -1435,23 +1503,28 @@ private fun SettingsTabContent(
                     ApuDiagnosticsActionButton(
                         label = "Скопировать",
                         icon = DiagnosticsActionIcons.Copy,
-                        enabled = reportText.isNotBlank(),
                         onClick = {
-                            mqttClipboard.setText(
-                                AnnotatedString(reportText.ifBlank { "Отчёт ещё собирается" }),
-                            )
-                            android.widget.Toast.makeText(
-                                settingsContext,
-                                "Логи скопированы",
-                                android.widget.Toast.LENGTH_SHORT,
-                            ).show()
+                            if (reportText.isNotBlank()) {
+                                mqttClipboard.setText(AnnotatedString(reportText))
+                                android.widget.Toast.makeText(
+                                    settingsContext,
+                                    "Логи скопированы",
+                                    android.widget.Toast.LENGTH_SHORT,
+                                ).show()
+                            } else {
+                                apuDiagnosticsNothingYet(settingsContext, transferLogsStage)
+                            }
                         },
                     )
                     ApuDiagnosticsActionButton(
                         label = "Обновить",
                         icon = DiagnosticsActionIcons.Refresh,
                         style = DiagnosticsActionStyle.QUIET,
-                        onClick = { transferLogsRefresh++ },
+                        onClick = {
+                            transferLogsStage = TransferDiagnostics.STAGE_DEVICE
+                            transferLogsLoading = true
+                            transferLogsRefresh++
+                        },
                     )
                     ApuDiagnosticsActionButton(
                         label = "Закрыть",
@@ -1921,3 +1994,15 @@ private val com.vladimir.messenger.data.repository.NetworkStatus.displayName: St
         com.vladimir.messenger.data.repository.NetworkStatus.Degraded     -> "Через ретранслятор"
         com.vladimir.messenger.data.repository.NetworkStatus.Disconnected -> "Нет соединения"
     }
+
+/**
+ * Отчёт ещё собирается: кнопка не молчит, а объясняет, где именно идёт сбор.
+ * Владелец 2026-10-07: «кнопки в новом не работают» — мёртвых кнопок быть не
+ * должно: у нажатия всегда есть видимый ответ.
+ */
+private fun apuDiagnosticsNothingYet(context: android.content.Context, stage: String?) {
+    val text = stage?.takeIf { it.isNotBlank() }
+        ?.let { "Отчёт собирается: $it" }
+        ?: "Отчёт ещё собирается — нажмите «Обновить»"
+    android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_SHORT).show()
+}

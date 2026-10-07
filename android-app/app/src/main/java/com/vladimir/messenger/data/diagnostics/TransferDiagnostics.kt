@@ -27,7 +27,6 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.util.ArrayDeque
 import java.util.Locale
-import java.util.concurrent.TimeUnit
 
 /**
  * Безопасный журнал событий и отчёт для проверки на телефоне.
@@ -53,6 +52,27 @@ object TransferDiagnostics {
 
     /** Сколько строк системного журнала добавляем в отчёт. */
     private const val MAX_LOGCAT_LINES = 120
+
+    /** Сколько строк журнала процесса читать (последние, самые свежие). */
+    private const val LOGCAT_LINE_LIMIT = 20_000
+
+    /** Сколько ждать чтение журнала процесса, прежде чем собрать отчёт без него. */
+    private const val LOGCAT_BUDGET_MS = 2_500L
+
+    /**
+     * Строка вместо раздела журнала процесса, пока он читается: в быстрой
+     * части отчёта честнее сказать «читается», чем «строк нет».
+     */
+    private const val LOGCAT_PENDING_LINE =
+        "журнал процесса читается — раздел обновится сам (секунда-две)"
+
+    /** Сколько записей журнала показывать списком в окне «Логи» (свежие сверху). */
+    private const val EVENT_ROWS = 40
+
+    /** Этапы сбора — их словами показывает окно «Логи». */
+    const val STAGE_DEVICE = "читаю состояние телефона…"
+    const val STAGE_LOGCAT = "читаю журнал процесса…"
+    const val STAGE_REPORT = "собираю текст отчёта…"
 
     private val lock = Any()
     private val journal = ArrayDeque<DiagnosticsJournalEntry>(MAX_EVENTS)
@@ -252,37 +272,82 @@ object TransferDiagnostics {
         val uptimeMs: Long,
         /** Версия приложения для шапки окна «Логи» («v11.74.194 (11074194)»). */
         val appVersion: String = "",
+        /**
+         * Последние записи журнала — свежие сверху. Владелец 2026-10-07:
+         * «нет логов списка вообще» — список событий теперь виден в окне
+         * отдельным блоком, а не только внутри текста отчёта.
+         */
+        val events: List<DiagnosticsJournalEntry> = emptyList(),
     )
 
     /**
      * Собирает всё, что нужно для отчёта. Обязательно вне главного потока:
      * здесь вызовы ядра, база и отдельный процесс `logcat -d`.
+     *
+     * Сбор идёт в два захода, и это принципиально (владелец 2026-10-07:
+     * «кнопки не работают и нет логов списка вообще, всё на паузе»):
+     *  * сначала быстрая часть — телефон, сеть, база, ядро; её итог сразу
+     *    отдаётся в окно через [onPartial], поэтому окно никогда не пустует;
+     *  * затем журнал процесса — самая долгая часть; она ограничена по числу
+     *    строк и по времени (см. [scanLogcat]), и её результат уточняет отчёт.
+     *
+     * [onStage] называет текущий шаг словами — по нему видно, что сбор идёт,
+     * а не «всё на паузе».
      */
-    suspend fun collect(context: Context): Snapshot = withContext(Dispatchers.IO) {
+    suspend fun collect(
+        context: Context,
+        onStage: ((String) -> Unit)? = null,
+        onPartial: ((Snapshot) -> Unit)? = null,
+    ): Snapshot = withContext(Dispatchers.IO) {
         val createdAtMs = System.currentTimeMillis()
         val journalSnapshot = synchronized(lock) {
             journal.toList() to counters.toMap()
         }
-        // Журнал процесса читаем ДО сборки фактов: из него берутся числа,
-        // которых в Kotlin не посчитать (сигналы ядра, отказы пересылки).
-        val logcat = scanLogcat()
-        val facts = gatherFacts(
+        onStage?.invoke(STAGE_DEVICE)
+        val quickFacts = gatherFacts(
             context = context.applicationContext,
             createdAtMs = createdAtMs,
             counters = journalSnapshot.second,
-            logcat = logcat,
+            logcat = LogcatScan.EMPTY,
         )
-        Snapshot(
-            statusLines = DiagnosticsReport.summaryLines(facts),
-            report = DiagnosticsReport.render(facts, journalSnapshot.first, logcat.lines),
-            createdAtMs = createdAtMs,
-            journalSize = journalSnapshot.first.size,
-            warnCount = journalSnapshot.first.count { it.level == DiagnosticsLevel.WARN },
-            badCount = journalSnapshot.first.count { it.level == DiagnosticsLevel.BAD },
-            uptimeMs = (createdAtMs - sessionStartedAtMs).coerceAtLeast(0L),
-            appVersion = facts.appVersion,
+        onPartial?.invoke(
+            snapshotOf(quickFacts, journalSnapshot.first, listOf(LOGCAT_PENDING_LINE), createdAtMs),
         )
+        onStage?.invoke(STAGE_LOGCAT)
+        val logcat = scanLogcat()
+        // Из журнала процесса в отчёт идут ровно четыре числа: сигналы ядра,
+        // отказы пересылки и раздельная очередь «свои/чужие». Всё остальное
+        // собрано выше — второй раз телефон не опрашиваем.
+        val facts = if (logcat.isEmpty) {
+            quickFacts
+        } else {
+            quickFacts.copy(
+                coreMessageSignals = logcat.coreMessageSignals,
+                relayQueueFull = logcat.relayQueueFull,
+                relayQueueOwn = logcat.queueOwn,
+                relayQueueForeign = logcat.queueForeign,
+            )
+        }
+        onStage?.invoke(STAGE_REPORT)
+        snapshotOf(facts, journalSnapshot.first, logcat.lines, createdAtMs)
     }
+
+    private fun snapshotOf(
+        facts: DiagnosticsFacts,
+        entries: List<DiagnosticsJournalEntry>,
+        logcatLines: List<String>,
+        createdAtMs: Long,
+    ): Snapshot = Snapshot(
+        statusLines = DiagnosticsReport.summaryLines(facts),
+        report = DiagnosticsReport.render(facts, entries, logcatLines),
+        createdAtMs = createdAtMs,
+        journalSize = entries.size,
+        warnCount = entries.count { it.level == DiagnosticsLevel.WARN },
+        badCount = entries.count { it.level == DiagnosticsLevel.BAD },
+        uptimeMs = (createdAtMs - sessionStartedAtMs).coerceAtLeast(0L),
+        appVersion = facts.appVersion,
+        events = entries.asReversed().take(EVENT_ROWS),
+    )
 
     // ── Факты с телефона ───────────────────────────────────────────────
 
@@ -384,7 +449,16 @@ object TransferDiagnostics {
          */
         val queueOwn: Long?,
         val queueForeign: Long?,
-    )
+    ) {
+        /** Журнал процесса ещё не читали или прочитать не удалось. */
+        val isEmpty: Boolean
+            get() = lines.isEmpty() && coreMessageSignals == 0L && relayQueueFull == 0L &&
+                queueOwn == null && queueForeign == null
+
+        companion object {
+            val EMPTY = LogcatScan(emptyList(), 0L, 0L, null, null)
+        }
+    }
 
     private data class BatteryFacts(
         val percent: Int,
@@ -523,29 +597,56 @@ object TransferDiagnostics {
      * `--pid` делает выборку ограниченной своим процессом. Часть старых
      * Android такой аргумент не понимает: пустой раздел безопаснее, чем
      * неограниченный logcat со всем телефоном.
+     *
+     * Чтение журнала процесса — самая долгая часть сбора, поэтому оно
+     * ограничено с двух сторон (владелец 2026-10-07: «кнопки не работают…
+     * всё на паузе»):
+     *
+     *  * `-t` — берём только последние [LOGCAT_LINE_LIMIT] строк. Прежде
+     *    читался весь буфер телефона (десятки тысяч строк), и разбор каждой
+     *    строки регэкспами занимал минуты: окно «Логи» всё это время стояло
+     *    пустым, а кнопки выглядели мёртвыми;
+     *  * [LOGCAT_BUDGET_MS] — сколько ждём читателя, и `destroy()` в любом
+     *    случае: даже зависший `logcat` больше не держит окно.
+     *
+     * Приватность та же: в отчёт попадают только отобранные строки после
+     * [redact] и [DiagnosticsPrivacy.hidePayloadBodies], а числа (сигналы ядра,
+     * отказы пересылки) считаются по необработанному списку — это быстрее и
+     * ничего лишнего в отчёт не выносит.
      */
-    private fun scanLogcat(): LogcatScan = runCatching {
+    private fun scanLogcat(budgetMs: Long = LOGCAT_BUDGET_MS): LogcatScan = runCatching {
         val process = ProcessBuilder(
             "logcat",
             "-d",
+            "-t", LOGCAT_LINE_LIMIT.toString(),
             "-v",
             "threadtime",
             "--pid=${Process.myPid()}",
             "*:V",
         ).redirectErrorStream(true).start()
-        // Читаем ВСЕ строки этого процесса: фильтр ниже решает только, что
-        // показывать, а числа (сигналы ядра, отказы пересылки) считаются по
-        // полному списку — иначе «в отчёте пусто» не отличить от «счёт не
-        // успел попасть в последние строки».
-        val all = process.inputStream.bufferedReader().useLines { sequence ->
-            sequence.map { DiagnosticsPrivacy.hidePayloadBodies(redact(it)) }.toList()
+        val raw = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val reader = Thread {
+            runCatching {
+                // take(), а не break: break внутри лямбды поддерживают не все
+                // версии Kotlin, а этот файл обязан собираться как есть.
+                process.inputStream.bufferedReader().useLines { sequence ->
+                    sequence.take(LOGCAT_LINE_LIMIT).forEach { line -> raw.add(line) }
+                }
+            }
         }
-        process.waitFor(2, TimeUnit.SECONDS)
+        reader.isDaemon = true
+        reader.start()
+        reader.join(budgetMs)
+        if (reader.isAlive) {
+            Log.w(TAG, "logcat: чтение не уложилось в ${budgetMs}мс, отчёт собран из прочитанного")
+        }
         process.destroy()
+        val all = synchronized(raw) { raw.toList() }
         LogcatScan(
             // Свежие строки важнее старых: logcat отдаёт их по времени вперёд.
             lines = DiagnosticsPrivacy.collapseRepeatedLogLines(
-                all.filter(::isRelevantProcessLog),
+                all.filter(::isRelevantProcessLog)
+                    .map { DiagnosticsPrivacy.hidePayloadBodies(redact(it)) },
                 limit = MAX_LOGCAT_LINES,
             ),
             coreMessageSignals = all.count { it.contains(CORE_MESSAGE_SIGNAL) }.toLong(),
@@ -553,7 +654,7 @@ object TransferDiagnostics {
             queueOwn = queueStat(all, true),
             queueForeign = queueStat(all, false),
         )
-    }.getOrDefault(LogcatScan(emptyList(), 0L, 0L, null, null))
+    }.getOrDefault(LogcatScan.EMPTY)
 
     /**
      * Число из последней строки «Relay-очередь: своих=N чужих=M». Берём именно

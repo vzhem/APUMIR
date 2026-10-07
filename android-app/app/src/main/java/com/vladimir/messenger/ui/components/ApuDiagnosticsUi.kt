@@ -14,7 +14,9 @@ package com.vladimir.messenger.ui.components
 //   * отчёт — тёмная КОНСОЛЬ с «светофором» и подсветкой разделов, как в
 //     премиальных приложениях; текст при копировании не меняется ни на символ;
 //   * кнопки — объёмные: золотая глянцевая основная и стеклянные вторичные, с
-//     мягкой тенью, верхним бликом и откликом на нажатие.
+//     мягкой тенью, верхним бликом и откликом на нажатие;
+//   * журнал событий — отдельным списком (10-07: «нет логов списка вообще»):
+//     время, область, уровень и суть, свежие сверху.
 //
 // Правило прежних замечаний владельца соблюдено: НИЧЕГО stock Material — только
 // наши цвета, наши формы и наши обёртки (ApuSettingsCard/ApuBubble). Читаемость
@@ -79,8 +81,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.vladimir.messenger.data.diagnostics.DiagnosticsJournalEntry
 import com.vladimir.messenger.data.diagnostics.DiagnosticsLevel
 import com.vladimir.messenger.data.diagnostics.DiagnosticsLine
+import com.vladimir.messenger.data.diagnostics.DiagnosticsReport
 import com.vladimir.messenger.data.diagnostics.DiagnosticsLineTone
 import com.vladimir.messenger.data.diagnostics.diagnosticsLineTone
 
@@ -649,6 +653,150 @@ fun ApuDiagnosticsReportCard(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Журнал событий списком — то, что человек и называет «логи» (владелец
+ * 2026-10-07: «нет логов списка вообще»). Записи приходят уже очищенными
+ * (см. TransferDiagnostics.append), показаны свежие сверху: время, область,
+ * уровень и суть. Свой список прокрутки — окно при этом остаётся целым.
+ */
+@Composable
+fun ApuDiagnosticsEventList(
+    events: List<DiagnosticsJournalEntry>,
+    modifier: Modifier = Modifier,
+    maxHeight: Dp = 210.dp,
+) {
+    val scroll = rememberScrollState()
+    val shape = RoundedCornerShape(18.dp)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .diagnosticsLift(10.dp, shape, Color(0xFF0A1018).copy(alpha = 0.35f))
+            .clip(shape)
+            .background(DiagConsoleSurface)
+            .border(
+                1.dp,
+                Brush.linearGradient(
+                    listOf(DiagGold.copy(alpha = 0.45f), DiagGoldDeep.copy(alpha = 0.22f)),
+                ),
+                shape,
+            ),
+    ) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Brush.verticalGradient(listOf(DiagConsoleBar, DiagConsoleSurface)))
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(9.dp)
+                        .clip(CircleShape)
+                        .background(DiagGold),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "Журнал событий",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    if (events.isEmpty()) "пусто" else "записей ${events.size}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = DiagConsoleMuted,
+                    maxLines = 1,
+                )
+            }
+            if (events.isEmpty()) {
+                Text(
+                    "В этой сессии событий ещё не было — журнал наполнится по ходу работы.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = DiagConsoleMuted,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = maxHeight)
+                        .verticalScroll(scroll),
+                ) {
+                    events.forEachIndexed { index, event ->
+                        if (index > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp)
+                                    .height(1.dp)
+                                    .background(DiagConsoleBar),
+                            )
+                        }
+                        ApuDiagnosticsEventRow(event)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Одна запись журнала: метка уровня, время, область и суть. */
+@Composable
+private fun ApuDiagnosticsEventRow(event: DiagnosticsJournalEntry) {
+    val levelColor = diagnosticsLevelColor(event.level)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(top = 5.dp)
+                .size(9.dp)
+                .clip(CircleShape)
+                .background(levelColor),
+        )
+        Spacer(Modifier.width(9.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    DiagnosticsReport.clock(event.atMs),
+                    style = MaterialTheme.typography.labelSmall
+                        .copy(fontFamily = FontFamily.Monospace),
+                    color = DiagConsoleMuted,
+                    maxLines = 1,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    event.area,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = DiagConsoleTitle,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    diagnosticsLevelLabel(event.level),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = levelColor,
+                    maxLines = 1,
+                )
+            }
+            Text(
+                event.detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (event.level == DiagnosticsLevel.BAD) DiagConsoleBad else DiagConsoleText,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
