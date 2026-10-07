@@ -2,6 +2,7 @@ package com.vladimir.messenger.data.diagnostics
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -536,5 +537,58 @@ class DiagnosticsReportTest {
             logcat = emptyList(),
         )
         assertTrue(starting.contains("stage=Поднимаем ядро и сеть… → ещё поднимается"))
+    }
+
+    /**
+     * Владелец 2026-10-07: «нужно сделать в нашем красивом стиле». Окно
+     * «Логи» подсвечивает разделы, ошибки и предупреждения — цвет выбирает
+     * UI, а само правило живёт здесь, чтобы его проверял JVM-тест.
+     */
+    @Test
+    fun reportHighlightMarksSectionsFailuresAndWarnings() {
+        assertEquals(DiagnosticsLineTone.SECTION, diagnosticsLineTone("[ядро]"))
+        assertEquals(
+            DiagnosticsLineTone.SECTION,
+            diagnosticsLineTone("[журнал] (последние события этой сессии)"),
+        )
+        assertEquals(DiagnosticsLineTone.BAD, diagnosticsLineTone("✖ Сеть: нет связи"))
+        assertEquals(DiagnosticsLineTone.WARN, diagnosticsLineTone("! Передачи: 2 ошибки"))
+        assertEquals(
+            DiagnosticsLineTone.BAD,
+            diagnosticsLineTone("12:41:58 ✖ net: MESH origin: cannot retain offline relay"),
+        )
+        assertEquals(
+            DiagnosticsLineTone.WARN,
+            diagnosticsLineTone("12:41:58 ! mqtt: соединение оборвалось"),
+        )
+
+        // Обычный текст остаётся обычным: порядок, значения и метки приватности
+        // не должны превращаться в «ошибку» из-за одной квадратной скобки.
+        assertNull(diagnosticsLineTone("✔ Сеть: на связи"))
+        assertNull(diagnosticsLineTone("running=true"))
+        assertNull(diagnosticsLineTone("  payload=[скрыто]"))
+        assertNull(diagnosticsLineTone("payload=[contact]"))
+        assertNull(diagnosticsLineTone("итого: записей 12, предупреждений 3, ошибок 1"))
+        assertNull(diagnosticsLineTone(""))
+    }
+
+    @Test
+    fun reportHighlightKeepsEveryCharacterOfTheShownText() {
+        // Подсветка — только краски: разбиение на строки и обратная сборка
+        // обязаны вернуть ровно тот же текст, иначе копия разойдётся с экраном.
+        val report = DiagnosticsReport.render(
+            facts = facts(relayQueueOwn = 1L, relayQueueForeign = 2L),
+            journal = listOf(
+                DiagnosticsJournalEntry(1_700_000_001_000L, DiagnosticsLevel.WARN, "net", "сеть пропала"),
+            ),
+            logcat = listOf("10-06 12:40:00.000  1234  1234 I ApuDiagnostics: F4 прямой канал"),
+        )
+        val rebuilt = buildString {
+            report.split('\n').forEachIndexed { index, line ->
+                if (index > 0) append('\n')
+                append(line)
+            }
+        }
+        assertEquals(report, rebuilt)
     }
 }

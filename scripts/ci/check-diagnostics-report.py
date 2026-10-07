@@ -130,6 +130,12 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "mqttClipboard.setText(",
             "transferLogsRefresh++",
             "Что происходит сейчас",
+            # Владелец 2026-10-07: «нужно сделать в нашем красивом стиле».
+            # Шапка сводки — house-капсула, обещание приватности — светлый
+            # пузырь, «когда собрано» переехало подписью в шапку отчёта.
+            'ApuSettingsChip("Что происходит сейчас")',
+            "apuBubbleSurface(shape = RoundedCornerShape(14.dp))",
+            "caption = logsSnapshot?.let { snapshot ->",
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, screen)
@@ -137,6 +143,54 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn("ApuSettingsCard(", ui)
         self.assertIn("ApuBubbleMutedColor", ui)
         self.assertIn("SelectionContainer", ui)
+
+    def test_logs_window_keeps_the_house_style(self):
+        """Окно «Логи»: итог, легенда, шапка отчёта и подсветка — в стиле APU."""
+        ui = source(DIAG_UI)
+        for marker in (
+            "ApuDiagnosticsVerdictRow",
+            "ApuDiagnosticsLegend",
+            "ApuDiagnosticsDivider",
+            "всё в порядке",
+            "есть предупреждения",
+            "есть ошибки",
+            "порядок",
+            "справка",
+            "внимание",
+            "поломка",
+            "Полный отчёт",
+            "fun diagnosticsReportAnnotated(",
+            "withStyle(",
+            "ApuSettingsCard(",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, ui)
+        # Краски берутся у house style, а не выдумываются на месте.
+        self.assertIn("diagnosticsLevelColor(level)", ui)
+        self.assertIn("ApuBubbleAccentColor", ui)
+        self.assertIn("ApuSettingsDangerColor", ui)
+        # Раскраска не меняет ни одного символа: текст остаётся исходным,
+        # поэтому копия разойдётся с экраном только по недосмотру — не сейчас.
+        self.assertIn("if (style == null) append(line) else withStyle(style) { append(line) }", ui)
+        # Правило подсветки — чистая функция в слое отчёта (её гоняют JVM-тесты),
+        # а не набор шаблонов внутри композабла.
+        report = source(DIAG / "DiagnosticsReport.kt")
+        for marker in (
+            "enum class DiagnosticsLineTone",
+            "fun diagnosticsLineTone(",
+            "toneSectionRegex",
+            "toneBadJournalRegex",
+            "toneWarnJournalRegex",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, report)
+        tests = source(ROOT / "android-app/app/src/test/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReportTest.kt")
+        for marker in (
+            "reportHighlightMarksSectionsFailuresAndWarnings",
+            "reportHighlightKeepsEveryCharacterOfTheShownText",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, tests)
 
     def test_log_lines_lose_payloads_and_keep_the_clock(self):
         """Ошибки первого отчёта владельца (2026-10-06) не должны вернуться."""

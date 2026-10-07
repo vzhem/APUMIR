@@ -19,6 +19,8 @@ import com.vladimir.messenger.ui.components.ApuSettingsDangerColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
 import com.vladimir.messenger.ui.components.ApuSettingsCard
+import com.vladimir.messenger.ui.components.ApuSettingsChip
+import com.vladimir.messenger.ui.components.apuBubbleSurface
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuSettingsDivider
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
@@ -1366,12 +1368,9 @@ private fun SettingsTabContent(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Text(
-                        "Что происходит сейчас",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = ApuBubbleTextColor,
-                    )
+                    // «Что происходит сейчас» — та же house-капсула, что
+                    // у секций настроек («Поддержка», «О приложении»).
+                    ApuSettingsChip("Что происходит сейчас")
                     if (logsSnapshot == null || transferLogsLoading) {
                         Text(
                             "Собираю безопасный отчёт…",
@@ -1381,27 +1380,31 @@ private fun SettingsTabContent(
                     } else {
                         ApuDiagnosticsStatusCard(lines = logsSnapshot.statusLines)
                     }
+                    // Обещание приватности — отдельным светлым пузырём,
+                    // чтобы его читали, а не пролистывали серый абзац.
                     Text(
                         "Отчёт содержит состояние сети, ядра, брокера и передач. Чаты, имена " +
                             "файлов, ключи, ciphertext, адреса и contact ID в него не попадают — " +
                             "его можно копировать и присылать целиком.",
                         style = MaterialTheme.typography.bodySmall,
                         color = ApuBubbleMutedColor,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .apuBubbleSurface(shape = RoundedCornerShape(14.dp))
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
                     )
                     ApuDiagnosticsReportCard(
                         text = reportText.ifBlank { "Собираю безопасный отчёт…" },
                         maxHeight = 240.dp,
+                        // Когда и что собрано — подписью в шапке отчёта:
+                        // строка не отрывается от текста, к которому относится.
+                        caption = logsSnapshot?.let { snapshot ->
+                            "Собрано в ${DiagnosticsReport.clock(snapshot.createdAtMs)} · " +
+                                "записей журнала ${snapshot.journalSize} · " +
+                                "предупреждений ${snapshot.warnCount} · " +
+                                "ошибок ${snapshot.badCount}"
+                        },
                     )
-                    if (logsSnapshot != null) {
-                        Text(
-                            "Собрано в ${DiagnosticsReport.clock(logsSnapshot.createdAtMs)} · " +
-                                "записей журнала ${logsSnapshot.journalSize} · " +
-                                "предупреждений ${logsSnapshot.warnCount} · " +
-                                "ошибок ${logsSnapshot.badCount}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = ApuBubbleMutedColor,
-                        )
-                    }
                 }
             },
             confirmButton = {

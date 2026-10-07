@@ -36,6 +36,46 @@ enum class DiagnosticsLevel {
     BAD,
 }
 
+/** Тон строки готового отчёта: что подсветить цветом в окне «Логи». */
+enum class DiagnosticsLineTone {
+    /** Заголовок раздела: «[ядро]», «[журнал] (последние события этой сессии)». */
+    SECTION,
+
+    /** Поломка: строка сводки с «✖» или запись журнала с «✖». */
+    BAD,
+
+    /** Внимание: строка сводки с «!» или запись журнала с «!». */
+    WARN,
+}
+
+// Заголовки разделов перечислены явно: под этот шаблон не попадут ни метки
+// приватности вида [contact], ни скрытые тела сообщений.
+private val toneSectionRegex = Regex(
+    "^\\[(?:сводка|окружение|сеть|ядро|mqtt|сообщения|передачи|сессия|журнал|лог процесса)\\]",
+)
+private val toneBadSummaryRegex = Regex("^✖")
+private val toneWarnSummaryRegex = Regex("^!")
+private val toneBadJournalRegex = Regex("^\\d{2}:\\d{2}:\\d{2} ✖")
+private val toneWarnJournalRegex = Regex("^\\d{2}:\\d{2}:\\d{2} !")
+
+/**
+ * Тон строки отчёта: раздел, ошибка, внимание — или null для обычного текста.
+ * Функция чистая и без Android: цвет выбирает окно «Логи», а само правило
+ * проверяется JVM-тестами. Раскраска при этом не меняет ни одного символа —
+ * текст копируется и уезжает разработчику ровно таким, как собран.
+ */
+fun diagnosticsLineTone(line: String): DiagnosticsLineTone? {
+    val trimmed = line.trimStart()
+    return when {
+        toneSectionRegex.containsMatchIn(trimmed) -> DiagnosticsLineTone.SECTION
+        toneBadSummaryRegex.containsMatchIn(trimmed) ||
+            toneBadJournalRegex.containsMatchIn(trimmed) -> DiagnosticsLineTone.BAD
+        toneWarnSummaryRegex.containsMatchIn(trimmed) ||
+            toneWarnJournalRegex.containsMatchIn(trimmed) -> DiagnosticsLineTone.WARN
+        else -> null
+    }
+}
+
 /** Готовая строка сводки: «Сеть — мобильная, интернет есть». */
 data class DiagnosticsLine(
     val level: DiagnosticsLevel,
