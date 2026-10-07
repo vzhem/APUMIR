@@ -35,9 +35,13 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.TextFieldDecorator
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
@@ -72,10 +76,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -90,6 +97,7 @@ import com.vladimir.messenger.ui.components.ApuActionsMenu
 import com.vladimir.messenger.ui.components.ApuBubble
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.apuBubbleSurface
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -116,6 +124,13 @@ fun SavedScreen(
     var showStickerPicker by remember { mutableStateOf(false) }
     var showGifCatalog by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<SavedItemEntity?>(null) }
+    // Черновик нижней панели ввода: пишем заметку прямо здесь, как сообщение в
+    // чате (просьба владельца от 2026-10-06). Раньше текст можно было ввести
+    // только через «+» → «Заметка» в диалоге.
+    var draft by remember { mutableStateOf("") }
+    // Пока клавиатура открыта, панель разделов уступает место: так в чате и
+    // так остаётся больше строк списка. Фокус вернётся - панель вернётся.
+    var inputFocused by remember { mutableStateOf(false) }
 
     // Раунд 126: «+» добавляет не только заметку - файл и гифку с телефона,
     // гифку из внешнего каталога, любую свою гифку из библиотеки.
@@ -163,9 +178,28 @@ fun SavedScreen(
             .swipeBack(onBack = onBackClick),
     ) {
         ChatWallpaper()
+        // Раунд 266 (как в чате): клавиатура не закрывает поле ввода - список
+        // сжимается над ней, панель ввода остаётся видимой.
         Scaffold(
+            modifier = Modifier.imePadding(),
             containerColor = Color.Transparent,
-            bottomBar = bottomBar,
+            bottomBar = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Пишем в избранное как в чате: поле и кнопка «Отправить».
+                    SavedInputBar(
+                        text = draft,
+                        onTextChange = { draft = it },
+                        onSend = {
+                            viewModel.addNote(draft)
+                            draft = ""
+                        },
+                        onFocusChange = { focused -> inputFocused = focused },
+                    )
+                    // Панель разделов не мешает набору: пока печатаешь, она
+                    // уходит, освобождая место под клавиатурой.
+                    if (!inputFocused) bottomBar()
+                }
+            },
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 TopAppBar(
@@ -841,6 +875,120 @@ private fun SavedPinnedBar(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Нижняя панель ввода «Избранного»: пишем заметку прямо здесь, как сообщение в
+ * чате (просьба владельца от 2026-10-06: «в избранное нужно писать как в чате с
+ * кнопкой отправить; когда пишешь, чтобы клавиатура не перекрывала»).
+ *
+ * Сделана по образцу панели чата, а не как новая форма:
+ * - тот же светлый пузырь с золотой рамкой ([apuBubbleSurface] на поле);
+ * - поле с подсказкой и кнопка «Отправить» ПОД ним во всю ширину — активная
+ *   залита золотом, неактивная светлая с серым текстом;
+ * - `.imePadding()` на панели: клавиатура её не накрывает (в чате этот приём
+ *   проверен на телефоне).
+ *
+ * Текст сохраняется тем же путём, что и «+» → «Заметка» ([SavedViewModel.addNote]
+ * → `SavedItemsRepository.saveText`), поэтому пустое поле ничего не пишет.
+ */
+@Composable
+private fun SavedInputBar(
+    text: String,
+    onTextChange: (String) -> Unit,
+    onSend: () -> Unit,
+    onFocusChange: (Boolean) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    // Тот же приём, что в панели чата: BasicTextField(state) - он же проводит
+    // вставку картинок со стикер-клавиатуры в contentReceiver, а не показывает
+    // системный тост «приложение не поддерживает вставку изображений».
+    val inputState = rememberTextFieldState(text)
+    LaunchedEffect(text) {
+        if (inputState.text.toString() != text) {
+            inputState.edit { replace(0, length, text) }
+        }
+    }
+    LaunchedEffect(Unit) {
+        snapshotFlow { inputState.text.toString() }.collect { onTextChange(it) }
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .imePadding()
+            .padding(horizontal = 8.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(18.dp),
+            )
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+    ) {
+        BasicTextField(
+            state = inputState,
+            textStyle = MaterialTheme.typography.bodyLarge.copy(color = Color(0xFF1E2430)),
+            cursorBrush = SolidColor(Color(0xFF1E2430)),
+            decorator = object : TextFieldDecorator {
+                @Composable
+                override fun Decoration(content: @Composable () -> Unit) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .apuBubbleSurface(color = Color.White)
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                    ) {
+                        if (inputState.text.isEmpty()) {
+                            Text(
+                                "Заметка или сообщение себе...",
+                                color = Color(0xFF5A6472),
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        }
+                        content()
+                    }
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { state -> onFocusChange(state.isFocused) },
+        )
+
+        Spacer(Modifier.height(6.dp))
+
+        // Кнопка читает активность прямо из inputState: как в чате, она
+        // загорается сразу при первом символе, без задержки на рекомпозицию.
+        val canSend = inputState.text.isNotBlank()
+        TextButton(
+            onClick = onSend,
+            enabled = canSend,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(
+                    if (canSend) MaterialTheme.colorScheme.primary
+                    else Color.White.copy(alpha = 0.85f),
+                )
+                .border(
+                    width = 1.dp,
+                    color = if (canSend) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+                    },
+                    shape = RoundedCornerShape(18.dp),
+                )
+                .padding(vertical = 8.dp),
+        ) {
+            Text(
+                "Отправить",
+                fontWeight = FontWeight.Bold,
+                color = if (canSend) Color.White else Color(0xFF9AA3AF),
+            )
         }
     }
 }

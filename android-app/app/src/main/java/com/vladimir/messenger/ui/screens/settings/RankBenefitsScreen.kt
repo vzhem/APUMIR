@@ -5,6 +5,8 @@ import com.vladimir.messenger.ui.components.ApuSettingsChip
 import com.vladimir.messenger.ui.components.ApuSettingsFeatureRow
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
 import com.vladimir.messenger.ui.components.ApuSettingsProgress
+import com.vladimir.messenger.ui.components.ApuSettingsSectionTitle
+import com.vladimir.messenger.ui.components.ApuVipBadge
 import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.ui.components.HintBubbleMutedColor
@@ -159,14 +161,22 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                             // Та же медаль, что и на главной: значок ранга должен
                             // узнаваться в обоих местах.
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                RankMedal(size = 40.dp)
+                                // У VIP медаль особая: лента фиолетово-золотая и
+                                // кольцо элиты вокруг диска.
+                                RankMedal(size = 40.dp, vip = current.isVip)
                                 Spacer(Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        current.rankName,
-                                        style = MaterialTheme.typography.titleLarge,
-                                        fontWeight = FontWeight.Bold,
-                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            current.rankName,
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                        if (current.isVip) {
+                                            Spacer(Modifier.width(8.dp))
+                                            ApuVipBadge()
+                                        }
+                                    }
                                     Text(
                                         "Подтверждённых друзей: $earned",
                                         style = MaterialTheme.typography.bodySmall,
@@ -174,6 +184,31 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                                     )
                                 }
                                 ApuSettingsChip("ваш ранг")
+                            }
+                            // VIP - знак признания, а не новая возможность:
+                            // говорим об этом прямо, чтобы значок не выглядел
+                            // обещанием платных функций.
+                            if (current.isVip) {
+                                Text(
+                                    "VIP - элита APU: вы в числе тех, кто выше 10-го ранга. " +
+                                        "Знак стоит рядом с вашим именем и медалью; " +
+                                        "возможности приложения открываются рангами.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = HintBubbleMutedColor,
+                                )
+                            } else {
+                                val toVip = FileTransferRankPolicy.referralsToVip(qualified)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    ApuVipBadge()
+                                    Text(
+                                        "До VIP осталось приглашений: $toVip",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                }
                             }
                             if (promoBonus > 0) {
                                 // Видно, что пришло от друзей, а что от промокода -
@@ -261,40 +296,22 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                         }
                     }
                 }
-                items(FileTransferRankPolicy.tiers, key = { it.minimumQualifiedReferrals }) { tier ->
-                    ApuSettingsCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            val isCurrent = tier == current
-                            val reached = qualified >= tier.minimumQualifiedReferrals
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        "${tier.minimumQualifiedReferrals} — ${tier.rankName}",
-                                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
-                                    )
-                                    if (!reached) {
-                                        Text(
-                                            "Нужно приглашений: ${tier.minimumQualifiedReferrals}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = HintBubbleMutedColor,
-                                        )
-                                    }
-                                }
-                                if (isCurrent) {
-                                    ApuSettingsChip("ваш ранг")
-                                } else if (reached) {
-                                    ApuSettingsChip("достигнут", highlighted = false)
-                                }
-                            }
-                            // Возможности недостигнутого ранга показаны закрытыми
-                            // (серый замок), достигнутого - золотой галочкой.
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                tier.unlockedFeatureSummary().forEach { feature ->
-                                    ApuSettingsFeatureRow(feature, available = reached)
-                                }
-                            }
-                        }
-                    }
+                // Ранги разделены на две части (решение владельца 2026-10-06):
+                // до «Проводника» включительно - обычные, выше десятого - VIP,
+                // элита приложения.
+                item {
+                    ApuSettingsSectionTitle("Ранги")
+                }
+                items(FileTransferRankPolicy.regularTiers, key = { it.minimumQualifiedReferrals }) { tier ->
+                    RankTierCard(tier = tier, current = current, qualified = qualified)
+                }
+                item {
+                    // Вторая половина списка: VIP. Заголовок обязателен - по нему
+                    // видно, где кончаются обычные ранги и начинается элита.
+                    ApuSettingsSectionTitle("VIP — элита APU")
+                }
+                items(FileTransferRankPolicy.vipTiers, key = { it.minimumQualifiedReferrals }) { tier ->
+                    RankTierCard(tier = tier, current = current, qualified = qualified)
                 }
                 item {
                     // Пояснение про размер файлов - отдельным пузырём-подсказкой,
@@ -344,6 +361,58 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                 }
             },
         )
+    }
+}
+
+/**
+ * Карточка одной ступени ранга. Одна на обе половины списка: обычные ранги и
+ * VIP отличаются только знаком [ApuVipBadge] у названия, поэтому второй такой
+ * же карточки в файле быть не должно.
+ */
+@Composable
+private fun RankTierCard(
+    tier: FileTransferRankPolicy.Entitlement,
+    current: FileTransferRankPolicy.Entitlement,
+    qualified: Int,
+) {
+    val isCurrent = tier == current
+    val reached = qualified >= tier.minimumQualifiedReferrals
+    ApuSettingsCard(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "${tier.minimumQualifiedReferrals} — ${tier.rankName}",
+                            fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
+                        )
+                        if (tier.isVip) {
+                            Spacer(Modifier.width(8.dp))
+                            ApuVipBadge(compact = true)
+                        }
+                    }
+                    if (!reached) {
+                        Text(
+                            "Нужно приглашений: ${tier.minimumQualifiedReferrals}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = HintBubbleMutedColor,
+                        )
+                    }
+                }
+                if (isCurrent) {
+                    ApuSettingsChip("ваш ранг")
+                } else if (reached) {
+                    ApuSettingsChip("достигнут", highlighted = false)
+                }
+            }
+            // Возможности недостигнутого ранга показаны закрытыми
+            // (серый замок), достигнутого - золотой галочкой.
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                tier.unlockedFeatureSummary().forEach { feature ->
+                    ApuSettingsFeatureRow(feature, available = reached)
+                }
+            }
+        }
     }
 }
 

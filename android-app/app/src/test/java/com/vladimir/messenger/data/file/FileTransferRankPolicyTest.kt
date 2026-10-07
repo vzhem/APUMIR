@@ -148,6 +148,49 @@ class FileTransferRankPolicyTest {
         assertTrue("Создание каналов" in navigator)
     }
 
+    @Test
+    fun vipStartsAboveTheTenthRank() {
+        // Решение владельца от 2026-10-06: «все, кто выше 10 ранга, уже VIP».
+        // Десятка - «Проводник»: он ещё не VIP, а «Организатор» (20) - уже да.
+        assertFalse(FileTransferRankPolicy.entitlement(10).isVip)
+        // 19 приглашений - это всё ещё «Проводник» (порог 10), то есть не VIP:
+        // ступень меняется на «Организатора» ровно на 20.
+        assertFalse(FileTransferRankPolicy.entitlement(19).isVip)
+        assertTrue(FileTransferRankPolicy.entitlement(20).isVip)
+        assertTrue(FileTransferRankPolicy.entitlement(1_000).isVip)
+        assertFalse(FileTransferRankPolicy.isVip(0))
+        assertFalse(FileTransferRankPolicy.isVip(10))
+        assertTrue(FileTransferRankPolicy.isVip(FileTransferRankPolicy.vipMinimumReferrals))
+    }
+
+    @Test
+    fun tierSplitKeepsEveryRankExactlyOnce() {
+        val regular = FileTransferRankPolicy.regularTiers
+        val vip = FileTransferRankPolicy.vipTiers
+        // Разделение не должно терять или дублировать ступени: список рангов на
+        // экране строится именно из этих двух половин.
+        assertEquals(FileTransferRankPolicy.tiers.size, regular.size + vip.size)
+        assertEquals(
+            FileTransferRankPolicy.tiers.map { it.minimumQualifiedReferrals },
+            (regular + vip).map { it.minimumQualifiedReferrals }.sorted(),
+        )
+        assertTrue(regular.none { it.isVip })
+        assertTrue(vip.all { it.isVip })
+        assertEquals("Проводник", regular.last().rankName)
+        assertEquals("Организатор", vip.first().rankName)
+        assertEquals("Создатель сети", vip.last().rankName)
+    }
+
+    @Test
+    fun referralsToVipCountsDownAndStopsAtZero() {
+        // Подсказка «осталось N до VIP» не должна показывать отрицательное число.
+        assertEquals(20, FileTransferRankPolicy.referralsToVip(0))
+        assertEquals(10, FileTransferRankPolicy.referralsToVip(10))
+        assertEquals(1, FileTransferRankPolicy.referralsToVip(19))
+        assertEquals(0, FileTransferRankPolicy.referralsToVip(20))
+        assertEquals(0, FileTransferRankPolicy.referralsToVip(500))
+    }
+
     private fun canSend(referrals: Int, mediaType: String, bytes: Long) {
         FileTransferRankPolicy.requireCanSend(referrals, mediaType, bytes)
     }

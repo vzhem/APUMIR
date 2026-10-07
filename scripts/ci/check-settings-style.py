@@ -145,6 +145,47 @@ class SettingsStyleTest(unittest.TestCase):
         ):
             self.assertIn(house_part, shared)
 
+    def test_rank_screen_splits_vip_and_marks_the_elite(self):
+        """VIP-ранги: выше десятого - элита (решение владельца 2026-10-06).
+
+        Проверяем, что список рангов разделён на обычные и VIP, что VIP-ступени
+        помечены знаком, а порог живёт в политике рангов (по нему же решают
+        медаль и знак у имени), а не размазан по экрану числами.
+        """
+        text = source("screens/settings/RankBenefitsScreen.kt")
+        self.assertIn("ApuSettingsSectionTitle(\"Ранги\")", text)
+        self.assertIn('ApuSettingsSectionTitle("VIP — элита APU")', text)
+        self.assertIn("FileTransferRankPolicy.regularTiers", text)
+        self.assertIn("FileTransferRankPolicy.vipTiers", text)
+        self.assertIn("ApuVipBadge(", text)
+        self.assertIn("current.isVip", text)
+        self.assertIn("FileTransferRankPolicy.referralsToVip(qualified)", text)
+
+        policy = (ROOT / "android-app/app/src/main/java/com/vladimir/messenger/data/file/FileTransferRankPolicy.kt").read_text()
+        self.assertIn("const val VIP_MINIMUM_QUALIFIED_REFERRALS = 20", policy)
+        self.assertIn("val isVip: Boolean", policy)
+        self.assertIn("val regularTiers: List<Entitlement>", policy)
+        self.assertIn("val vipTiers: List<Entitlement>", policy)
+        # VIP - именно «выше десятого ранга», а не любой второй ранг.
+        self.assertIn("minimumQualifiedReferrals >= VIP_MINIMUM_QUALIFIED_REFERRALS", policy)
+
+        # Знак VIP один на всё приложение: собственная плашка с градиентом и
+        # звездой, а не текст «VIP» вразнобой по экранам.
+        badge = source("components/ApuVipBadge.kt")
+        self.assertIn("fun ApuVipBadge(", badge)
+        self.assertIn("Icons.Default.Star", badge)
+        self.assertIn("Brush.linearGradient(", badge)
+
+        # Медаль VIP отличается от обычной, но остаётся той же наградой.
+        medal = source("components/RankMedal.kt")
+        self.assertIn("vip: Boolean = false", medal)
+        self.assertIn("drawVipAura(", medal)
+
+        # Рядом с собственным званием знак виден и на главном экране.
+        chat_list = source("screens/chat/ChatListScreen.kt")
+        self.assertIn("RankMedal(size = 26.dp, vip = uiState.rankVip)", chat_list)
+        self.assertIn("ApuVipBadge(compact = true)", chat_list)
+
     def test_large_profile_initials_and_avatar_io_are_preserved(self):
         avatar = source("components/MyAvatar.kt")
         self.assertIn("size: Int = 52", avatar)

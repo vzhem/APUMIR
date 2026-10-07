@@ -101,6 +101,11 @@ data class ChatListUiState(
     val searchQuery: String      = "",
     val filteredChats: List<Chat> = emptyList(),
     val rankBadge: String        = "",
+    /**
+     * Ранг выше десятого: рядом с именем показывается знак VIP (элита APU).
+     * Решение владельца от 2026-10-06.
+     */
+    val rankVip: Boolean         = false,
     /** Группы, в которых телефон состоит (без тех, из которых вышел). */
     val groups: List<InboxGroup> = emptyList(),
     /** Выбранный раздел. */
@@ -599,7 +604,9 @@ class ChatListViewModel @Inject constructor(
                     // Только название: медаль рисует отдельный значок
                     // RankMedal - объёмный и анимированный, эмодзи такого не
                     // умеет и выглядит по-разному на разных прошивках.
-                    state.copy(rankBadge = rank.rankName)
+                    // Флаг VIP едет рядом с названием: он решает, какая медаль
+                    // (обычная или элитная) и есть ли знак VIP у имени.
+                    state.copy(rankBadge = rank.rankName, rankVip = rank.isVip)
                 }
             }
         }

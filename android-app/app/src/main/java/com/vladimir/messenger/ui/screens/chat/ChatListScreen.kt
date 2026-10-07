@@ -48,6 +48,7 @@ import com.vladimir.messenger.ui.components.ApuTab
 import com.vladimir.messenger.ui.components.ApuTabActions
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.CoreWarmBar
+import com.vladimir.messenger.ui.components.ApuVipBadge
 import com.vladimir.messenger.ui.components.RankMedal
 import com.vladimir.messenger.data.group.GroupRole
 import java.text.SimpleDateFormat
@@ -239,7 +240,11 @@ fun ChatListScreen(
                                     modifier = Modifier.clickable(onClick = onRankClick),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    RankMedal(size = 26.dp)
+                                    // У VIP медаль особая (фиолетово-золотая лента
+                                    // и кольцо элиты) и рядом со званием стоит
+                                    // знак VIP - как награда рядом с именем в
+                                    // топовых мессенджерах.
+                                    RankMedal(size = 26.dp, vip = uiState.rankVip)
                                     Spacer(Modifier.width(6.dp))
                                     Text(
                                         uiState.rankBadge,
@@ -247,6 +252,10 @@ fun ChatListScreen(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
+                                    if (uiState.rankVip) {
+                                        Spacer(Modifier.width(6.dp))
+                                        ApuVipBadge(compact = true)
+                                    }
                                 }
                             }
                         }
