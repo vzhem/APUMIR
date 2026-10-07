@@ -237,7 +237,20 @@ fn restore_relay_custody(
             let mut recipient_full = 0usize;
             let mut queue_full = 0usize;
             let mut own_full = 0usize;
+            let mut transient_dropped = 0usize;
             for record in outcome.records {
+                // Владелец 2026-10-07: в хранилище успели накопиться сигналы
+                // прошлых сборок (они там лежали НЕДЕЛЮ). Категория видна по
+                // телу (сигналы идут незапечатанными) — такие записи убираем
+                // сразу, чтобы они не занимали резерв переписки после
+                // перезапуска и не вытесняли настоящие сообщения.
+                if crate::network::relay_queue::payload_kind(&record.e2e_payload).is_transient() {
+                    if let Some(custody) = relay_custody {
+                        let _ = custody.store.remove_encrypted(&record.msg_id);
+                    }
+                    transient_dropped += 1;
+                    continue;
+                }
                 // enqueue_first (а не enqueue): под восстановление освобождает
                 // место, убирая только просроченное, и НЕ обрывается на
                 // переполнении у одного получателя. Раньше здесь стоял break:
@@ -274,6 +287,15 @@ fn restore_relay_custody(
                     total,
                     own_restored,
                     restored - own_restored
+                );
+            }
+            if transient_dropped > 0 {
+                // Отдельной строкой: это не «потеря», а уборка служебного хлама,
+                // накопленного прошлыми сборками (сигналы и пакеты передачи
+                // лежали в хранилище неделю).
+                tracing::info!(
+                    "MESH durable: убрано {} служебных записей (сигналы/пакеты передачи) — их место не занимает переписку",
+                    transient_dropped
                 );
             }
             if recipient_full > 0 || queue_full > 0 || own_full > 0 {
@@ -3965,8 +3987,9 @@ impl P2PCore {
                     let stats = q.stats();
                     if stats.total > 0 {
                         tracing::info!(
-                            "Relay-очередь: своих={} чужих={} всего={} получателей={}",
+                            "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={}",
                             stats.own,
+                            stats.own_transients,
                             stats.foreign,
                             stats.total,
                             stats.recipients
@@ -4686,6 +4709,12 @@ impl P2PCore {
             }
         };
 
+        // Владелец 2026-10-07: сигнал транспорта (NAT-кандидаты, «печатает…»,
+        // пакет файловой передачи) - НЕ переписка. Держать его неделю на диске
+        // незачем: к моменту доставки он уже не значит ничего, а место в
+        // резерве «своих» занимает и вытесняет настоящие сообщения.
+        let payload_kind = crate::network::relay_queue::payload_kind(text.as_bytes());
+
         let relay_inserted = match self.relay_queue.as_ref() {
             Some(queue) if queue.contains(&message_id) => {
                 tracing::info!(
@@ -4700,26 +4729,37 @@ impl P2PCore {
                 // persist-ится ДО enqueue. Если store недоступен/отклоняет —
                 // честно не заявляем локальное retention (Outbox/Room retry при
                 // этом сохраняются).
-                let durable_admitted = match self.relay_custody.as_ref() {
-                    Some(custody) => {
-                        let now_durable = crate::network::relay_queue::utc_now_ms();
-                        match custody.store.store_encrypted(
-                            &*custody.keys,
-                            &prepared.message,
-                            now_durable,
-                        ) {
-                            Ok(_) => true,
-                            Err(e) => {
-                                tracing::warn!(
-                                    "MESH origin: durable store failed for {}: {}",
-                                    message_id,
-                                    e
-                                );
-                                false
+                let durable_admitted = if payload_kind.is_transient() {
+                    // На диск не пишем: сигнал живёт минуты (см. TTL выше), а
+                    // RAM-копии достаточно, чтобы предложить его брокеру.
+                    tracing::debug!(
+                        "MESH origin: {} — служебное ({}), durable-хранилище не занимаем",
+                        message_id,
+                        payload_kind.as_str()
+                    );
+                    true
+                } else {
+                    match self.relay_custody.as_ref() {
+                        Some(custody) => {
+                            let now_durable = crate::network::relay_queue::utc_now_ms();
+                            match custody.store.store_encrypted(
+                                &*custody.keys,
+                                &prepared.message,
+                                now_durable,
+                            ) {
+                                Ok(_) => true,
+                                Err(e) => {
+                                    tracing::warn!(
+                                        "MESH origin: durable store failed for {}: {}",
+                                        message_id,
+                                        e
+                                    );
+                                    false
+                                }
                             }
                         }
+                        None => true, // RAM-only режим: legacy поведение
                     }
-                    None => true, // RAM-only режим: legacy поведение
                 };
 
                 if !durable_admitted {

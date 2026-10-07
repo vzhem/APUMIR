@@ -639,11 +639,66 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "q.enqueue_own(next_hop_message)",
             "let is_own_origin = next_hop_message.origin_sender == node_id;",
             "queue.enqueue_own(record)",
-            "Relay-очередь: своих={} чужих={}",
+            # Сигналы отдельно от переписки: в журнале и в отчёте видно, чем
+            # занят резерв «своих» (владелец 2026-10-07).
+            "Relay-очередь: своих={} сигналов={} чужих={}",
             "MAX_TOTAL + MAX_OWN_TOTAL",
         ):
             with self.subTest(marker=marker):
                 self.assertTrue(marker in core, f"нет маркера {marker} в core.rs")
+
+    def test_service_signals_do_not_take_the_correspondence_reserve(self):
+        """Владелец 2026-10-07: «своё ждёт получателя=1000», а внутри — сигналы.
+
+        Сигналы транспорта и пакеты файловой передачи шли тем же путём, что
+        переписка, жили в очереди НЕДЕЛЮ и вытесняли настоящие сообщения.
+        Теперь у них свой короткий срок и свой маленький запас.
+        """
+        queue = source(ROOT / "rust-core/src/network/relay_queue.rs")
+        for marker in (
+            "pub enum RelayPayloadKind",
+            "pub fn payload_kind(payload: &[u8]) -> RelayPayloadKind",
+            "pub const TRANSIENT_SIGNAL_TTL",
+            "pub const FILE_PACKET_TTL",
+            "pub const MAX_OWN_TRANSIENT",
+            "fn own_transient_count_locked(",
+            "fn oldest_own_transient(",
+            "pub own_transients: usize",
+            "pub fn own_transient_count(",
+        ):
+            with self.subTest(marker=marker):
+                self.assertTrue(marker in queue, f"нет маркера {marker} в relay_queue.rs")
+        # Ранг ходит под видом «печатает…», но остаётся перепиской: это признание
+        # собеседника, его нельзя терять как сигнал.
+        self.assertTrue(
+            'b"APUTYP1|APURANK1|"' in queue,
+            "ранг обязан оставаться перепиской (APUTYP1|APURANK1|)",
+        )
+        # Резерв переписки считается БЕЗ служебного.
+        self.assertTrue(
+            "filter(|e| e.own && !e.kind.is_transient())" in queue,
+            "своя переписка считается отдельно от сигналов",
+        )
+        core = source(ROOT / "rust-core/src/engine/core.rs")
+        offline = source(ROOT / "rust-core/src/network/offline_send.rs")
+        self.assertTrue(
+            "RelayPayloadKind::ServiceSignal => {" in offline,
+            "срок сигнала задаётся при подготовке отправки",
+        )
+        self.assertTrue(
+            "ttl_secs, TRANSIENT_SIGNAL_TTL.as_secs()" in offline
+            or "TRANSIENT_SIGNAL_TTL.as_secs()" in offline,
+            "короткий срок уезжает и в конверт (ttl в секундах)",
+        )
+        # Дублировать сигналы в durable-хранилище незачем, а накопленные — убираем.
+        self.assertTrue(
+            "payload_kind.is_transient()" in core,
+            "сигналы не пишутся в durable-хранилище",
+        )
+        self.assertTrue(
+            "убрано {} служебных записей" in core,
+            "накопленные сигналы убираются при восстановлении",
+        )
 
     def test_mqtt_is_explained_by_one_shared_parser(self):
         view_model = source(VIEW_MODEL)

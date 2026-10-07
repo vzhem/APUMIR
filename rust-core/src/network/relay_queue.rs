@@ -59,6 +59,27 @@ pub const MAX_OWN_PER_RECIPIENT: usize = 500;
 /// Максимум СВОИХ сообщений в очереди всего — неделимый резерв этого узла.
 pub const MAX_OWN_TOTAL: usize = 1_000;
 
+/// Срок жизни СИГНАЛОВ транспорта: NAT-пробивание (`APUUDP1`), локальная сеть
+/// (`APULAN1`/`APULANHS1`), «печатает…» (`APUTYP1`).
+///
+/// Владелец 2026-10-07 прислал отчёт: «своё ждёт получателя=1000», а в журнале
+/// каждые полминуты — «общий запас своих исчерпан, вытеснено самое старое
+/// своё». Виноваты были сигналы: они шли тем же путём, что переписка, и лежали
+/// в очереди НЕДЕЛЮ, вытесняя настоящие сообщения. Сигнал, не доставленный за
+/// минуты, не нужен никому: адрес NAT за это время остыл, «печатает…» - тем
+/// более (враньё через минуту читать нельзя).
+pub const TRANSIENT_SIGNAL_TTL: Duration = Duration::from_secs(300);
+
+/// Срок жизни ПАКЕТОВ файловой передачи (`apu-file1|`): они полезны, пока идёт
+/// передача. Полчаса — с запасом; неделю они в очереди не живут.
+pub const FILE_PACKET_TTL: Duration = Duration::from_secs(1_800);
+
+/// Отдельный (маленький) запас для сигналов и пакетов передачи.
+///
+/// Такая запись не занимает место переписки: у переписки свой резерв
+/// (`MAX_OWN_TOTAL`), у сигналов — этот, и вытесняются они первыми.
+pub const MAX_OWN_TRANSIENT: usize = 200;
+
 // ── Общие bounded-лимиты mesh-метаданных (M8-A) ──────────────────────
 //
 // Это те же лимиты, которые уже использует offline-send/wire путь
@@ -445,17 +466,77 @@ impl RelayMessage {
 // RELAY QUEUE
 // ═══════════════════════════════════════════════════════════════════
 
-/// Запись очереди: само сообщение и признак «своё».
+/// Категория тела сообщения для очереди.
 ///
-/// Признак живёт ТОЛЬКО в RAM: durable-формат (`SensitiveRelayRecordV1`) и wire
+/// Durable-формат и wire НЕ меняются: категория считается из тела при
+/// постановке и при восстановлении, живёт в RAM.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelayPayloadKind {
+    /// Настоящая переписка: текст, группы, ранги, HELLO и всё запечатанное.
+    Correspondence,
+    /// Сигнал транспорта: живёт минуты (см. [`TRANSIENT_SIGNAL_TTL`]).
+    ServiceSignal,
+    /// Пакет файловой передачи: живёт до конца передачи.
+    FilePacket,
+}
+
+impl RelayPayloadKind {
+    /// Короткий ли срок: такие записи не занимают резерв переписки.
+    pub fn is_transient(self) -> bool {
+        !matches!(self, RelayPayloadKind::Correspondence)
+    }
+
+    /// Слово для журнала и отчёта «Логи».
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RelayPayloadKind::Correspondence => "переписка",
+            RelayPayloadKind::ServiceSignal => "сигнал",
+            RelayPayloadKind::FilePacket => "пакет передачи",
+        }
+    }
+}
+
+/// Определить категорию по телу сообщения.
+///
+/// Сигналы и пакеты передачи идут НЕзапечатанными (секрета в них нет), поэтому
+/// их начало читается как текст. Запечатанная переписка начинается со
+/// служебного маркера конверта и всегда остаётся [`RelayPayloadKind::Correspondence`].
+///
+/// `APUTYP1|APURANK1|` — исключение: под видом «печатает…» ходит конверт
+/// ранга/VIP (так его понимают и старые сборки). Это признание собеседника, а
+/// не сигнал на секунду, поэтому живёт как переписка и пережидает офлайн.
+pub fn payload_kind(payload: &[u8]) -> RelayPayloadKind {
+    const SIGNAL_PREFIXES: [&[u8]; 3] = [b"APUUDP1|", b"APULAN1|", b"APULANHS1|"];
+    if payload.starts_with(b"APUTYP1|") {
+        return if payload.starts_with(b"APUTYP1|APURANK1|") {
+            RelayPayloadKind::Correspondence
+        } else {
+            RelayPayloadKind::ServiceSignal
+        };
+    }
+    if SIGNAL_PREFIXES.iter().any(|prefix| payload.starts_with(*prefix)) {
+        return RelayPayloadKind::ServiceSignal;
+    }
+    if payload.starts_with(b"apu-file1|") {
+        return RelayPayloadKind::FilePacket;
+    }
+    RelayPayloadKind::Correspondence
+}
+
+/// Запись очереди: само сообщение, признак «своё» и категория тела.
+///
+/// Признаки живут ТОЛЬКО в RAM: durable-формат (`SensitiveRelayRecordV1`) и wire
 /// не меняются, поэтому старая запись на диске читается как прежде. При
 /// восстановлении после перезапуска «своё» определяется заново — по
-/// `origin_sender == наш узел` (см. `engine::core::restore_relay_custody`).
+/// `origin_sender == наш узел`, а категория — по телу (см.
+/// `engine::core::restore_relay_custody`).
 struct QueueEntry {
     message: RelayMessage,
     /// true = сообщение этого узла (своя переписка). Такие записи
     /// отдаются получателю первыми и никогда не вытесняются чужими.
     own: bool,
+    /// Категория тела: переписка, сигнал транспорта или пакет передачи.
+    kind: RelayPayloadKind,
 }
 
 /// Mesh store-and-forward очередь.
@@ -483,7 +564,10 @@ pub struct RelayQueue {
 /// Сводка очереди для логов и диагностики: свои и чужие по отдельности.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RelayQueueStats {
+    /// Своя переписка (без сигналов и пакетов передачи).
     pub own: usize,
+    /// Своё служебное: сигналы транспорта и пакеты передачи.
+    pub own_transients: usize,
     pub foreign: usize,
     pub total: usize,
     pub recipients: usize,
@@ -561,9 +645,12 @@ impl RelayQueue {
         }
 
         let now_ms = utc_now_ms();
+        let kind = payload_kind(&msg.e2e_payload);
 
         // Сначала — просроченное своё (освобождает запас без потерь).
-        if self.own_count_locked(&entries) >= self.max_own_total {
+        if self.own_count_locked(&entries) >= self.max_own_total
+            || self.own_transient_count_locked(&entries) >= MAX_OWN_TRANSIENT
+        {
             entries.retain(|_, e| !(e.own && e.message.is_expired_at(now_ms)));
         }
 
@@ -574,20 +661,36 @@ impl RelayQueue {
             });
         }
 
-        if self.own_for_locked(&entries, &msg.recipient) >= self.max_own_per_recipient {
-            Self::evict_oldest_own_for(&mut entries, &msg.recipient);
-        }
+        if kind.is_transient() {
+            // Сигнал или пакет передачи: у них свой маленький запас, и место
+            // переписки они не занимают (владелец 2026-10-07: «своя переписка
+            // идёт первой» — и уж точно не вытесняется служебным сигналом).
+            if self.own_transient_count_locked(&entries) >= MAX_OWN_TRANSIENT {
+                Self::evict_oldest_own_transient(&mut entries);
+            }
+        } else {
+            if self.own_for_locked(&entries, &msg.recipient) >= self.max_own_per_recipient {
+                Self::evict_oldest_own_for(&mut entries, &msg.recipient);
+            }
 
-        if self.own_count_locked(&entries) >= self.max_own_total {
-            Self::evict_oldest_own(&mut entries);
-        }
+            if self.own_count_locked(&entries) >= self.max_own_total {
+                // Первым делом уступает место сигнал, а не переписка.
+                if let Some(victim) = Self::oldest_own_transient(&entries) {
+                    entries.remove(&victim);
+                }
+            }
 
-        if self.own_count_locked(&entries) >= self.max_own_total {
-            // Вытеснять нечего (все свои уже самые свежие) — честно отказываем,
-            // чтобы «принято» не оказалось ложью.
-            return Err(RelayQueueError::OwnQueueFull {
-                max: self.max_own_total,
-            });
+            if self.own_count_locked(&entries) >= self.max_own_total {
+                Self::evict_oldest_own(&mut entries);
+            }
+
+            if self.own_count_locked(&entries) >= self.max_own_total {
+                // Вытеснять нечего (вся переписка уже самая свежая) — честно
+                // отказываем, чтобы «принято» не оказалось ложью.
+                return Err(RelayQueueError::OwnQueueFull {
+                    max: self.max_own_total,
+                });
+            }
         }
 
         entries.insert(
@@ -595,6 +698,7 @@ impl RelayQueue {
             QueueEntry {
                 message: msg,
                 own: true,
+                kind,
             },
         );
         Ok(true)
@@ -639,6 +743,7 @@ impl RelayQueue {
             QueueEntry {
                 message: msg,
                 own: false,
+                kind: payload_kind(&msg.e2e_payload),
             },
         );
         Ok(true)
@@ -677,6 +782,32 @@ impl RelayQueue {
         }
     }
 
+    /// Самое старое СВОЁ служебное (сигнал или пакет передачи), если есть.
+    fn oldest_own_transient(entries: &HashMap<String, QueueEntry>) -> Option<String> {
+        entries
+            .iter()
+            .filter(|(_, e)| e.own && e.kind.is_transient())
+            .min_by_key(|(id, e)| (e.message.created_at_ms, (*id).clone()))
+            .map(|(id, _)| id.clone())
+    }
+
+    /// Убрать самое старое служебное своё (сигнал или пакет передачи).
+    fn evict_oldest_own_transient(entries: &mut HashMap<String, QueueEntry>) {
+        let victim = Self::oldest_own_transient(entries);
+        if let Some(id) = victim {
+            let kind = entries
+                .get(&id)
+                .map(|e| e.kind.as_str())
+                .unwrap_or("служебное");
+            entries.remove(&id);
+            tracing::debug!(
+                "Relay-очередь: запас служебного исчерпан, вытеснено самое старое ({}) {}",
+                kind,
+                id
+            );
+        }
+    }
+
     /// Убрать самое старое своё сообщение по всей очереди.
     fn evict_oldest_own(entries: &mut HashMap<String, QueueEntry>) {
         let victim = entries
@@ -695,8 +826,20 @@ impl RelayQueue {
 
     // ─── Подсчёт по запасам (внутри уже взятого лока) ────────────────
 
+    /// Своя ПЕРЕПИСКА (сигналы и пакеты передачи сюда не входят).
     fn own_count_locked(&self, entries: &HashMap<String, QueueEntry>) -> usize {
-        entries.values().filter(|e| e.own).count()
+        entries
+            .values()
+            .filter(|e| e.own && !e.kind.is_transient())
+            .count()
+    }
+
+    /// Своё СЛУЖЕБНОЕ: сигналы транспорта и пакеты передачи.
+    fn own_transient_count_locked(&self, entries: &HashMap<String, QueueEntry>) -> usize {
+        entries
+            .values()
+            .filter(|e| e.own && e.kind.is_transient())
+            .count()
     }
 
     fn foreign_count_locked(&self, entries: &HashMap<String, QueueEntry>) -> usize {
@@ -706,7 +849,7 @@ impl RelayQueue {
     fn own_for_locked(&self, entries: &HashMap<String, QueueEntry>, recipient: &str) -> usize {
         entries
             .values()
-            .filter(|e| e.own && e.message.recipient == recipient)
+            .filter(|e| e.own && !e.kind.is_transient() && e.message.recipient == recipient)
             .count()
     }
 
@@ -847,10 +990,16 @@ impl RelayQueue {
         self.entries.lock().unwrap().len()
     }
 
-    /// Сколько СВОИХ сообщений в очереди.
+    /// Сколько СВОЕЙ ПЕРЕПИСКИ в очереди (сигналы и пакеты передачи не считаются).
     pub fn own_count(&self) -> usize {
         let entries = self.entries.lock().unwrap();
         self.own_count_locked(&entries)
+    }
+
+    /// Сколько СВОЕГО служебного (сигналы транспорта и пакеты передачи).
+    pub fn own_transient_count(&self) -> usize {
+        let entries = self.entries.lock().unwrap();
+        self.own_transient_count_locked(&entries)
     }
 
     /// Сколько ЧУЖИХ сообщений в очереди.
@@ -896,7 +1045,14 @@ impl RelayQueue {
     /// Сводка для логов и диагностики: свои и чужие по отдельности.
     pub fn stats(&self) -> RelayQueueStats {
         let entries = self.entries.lock().unwrap();
-        let own = entries.values().filter(|e| e.own).count();
+        let own = entries
+            .values()
+            .filter(|e| e.own && !e.kind.is_transient())
+            .count();
+        let own_transients = entries
+            .values()
+            .filter(|e| e.own && e.kind.is_transient())
+            .count();
         let total = entries.len();
         let mut seen: Vec<&str> = Vec::new();
         for e in entries.values() {
@@ -906,7 +1062,8 @@ impl RelayQueue {
         }
         RelayQueueStats {
             own,
-            foreign: total - own,
+            own_transients,
+            foreign: total - own - own_transients,
             total,
             recipients: seen.len(),
         }
@@ -953,6 +1110,18 @@ mod tests {
     /// Своё сообщение: свой запас на получателя, независимый от чужого.
     fn own_msg(msg_id: &str, recipient: &str) -> RelayMessage {
         msg(msg_id, recipient)
+    }
+
+    /// Служебный сигнал: тело с префиксом NAT-сигнала (идёт незапечатанным).
+    fn signal_msg(msg_id: &str, recipient: &str) -> RelayMessage {
+        RelayMessage::new_at_ms(
+            utc_now_ms(),
+            msg_id.into(),
+            recipient.into(),
+            "pk_origin".into(),
+            "direct".into(),
+            b"APUUDP1|ufseek|AAAA|body|tag".to_vec(),
+        )
     }
 
     // ── Свои и чужие: раздельные запасы (владелец, 2026-10-07) ──────
@@ -1050,6 +1219,88 @@ mod tests {
         assert_eq!(q.is_own("o_new"), Some(true));
         assert_eq!(q.is_own("f_old"), Some(false));
         assert_eq!(q.is_own("нет-такого"), None);
+    }
+
+    // ── Служебное не занимает место переписки (владелец, 2026-10-07) ──
+
+    #[test]
+    fn payload_kind_separates_signals_packets_and_correspondence() {
+        assert_eq!(
+            payload_kind(b"APUUDP1|ufseek|AAAA|body|tag"),
+            RelayPayloadKind::ServiceSignal
+        );
+        assert_eq!(payload_kind(b"APUTYP1|1"), RelayPayloadKind::ServiceSignal);
+        assert_eq!(
+            payload_kind(b"APULAN1|req|10.0.0.2|5555"),
+            RelayPayloadKind::ServiceSignal
+        );
+        // Ранг ходит под видом «печатает…»: это признание собеседника, а не
+        // сигнал на секунду, поэтому живёт как переписка.
+        assert_eq!(
+            payload_kind(b"APUTYP1|APURANK1|1|pk_aaaa|3|1700000000000"),
+            RelayPayloadKind::Correspondence
+        );
+        assert_eq!(
+            payload_kind(b"apu-file1|chunk|1|0"),
+            RelayPayloadKind::FilePacket
+        );
+        // HELLO обязан пережить офлайн собеседника: это первый обмен ключами.
+        assert_eq!(
+            payload_kind(b"apu-file-hello1|AAAA"),
+            RelayPayloadKind::Correspondence
+        );
+        assert_eq!(
+            payload_kind("обычный текст".as_bytes()),
+            RelayPayloadKind::Correspondence
+        );
+        assert_eq!(payload_kind(&[0x00, 0xFF, 0x10]), RelayPayloadKind::Correspondence);
+    }
+
+    #[test]
+    fn signals_never_take_the_place_of_correspondence() {
+        // Резерв переписки — 2. Раньше сигналы ели именно его, и настоящие
+        // сообщения вытеснялись служебным мусором.
+        let q = RelayQueue::with_all_limits(10, 10, 10, 2);
+        q.enqueue_own(signal_msg("s1", "pk_b")).unwrap();
+        q.enqueue_own(signal_msg("s2", "pk_b")).unwrap();
+        q.enqueue_own(signal_msg("s3", "pk_b")).unwrap();
+
+        assert!(q.enqueue_own(own_msg("o1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(own_msg("o2", "pk_b")).unwrap());
+
+        assert_eq!(q.own_count(), 2, "резерв переписки занят только письмами");
+        assert_eq!(q.own_transient_count(), 3, "сигналы живут отдельно");
+        assert_eq!(q.is_own("o1"), Some(true));
+        assert_eq!(q.is_own("o2"), Some(true));
+        let stats = q.stats();
+        assert_eq!(stats.own, 2);
+        assert_eq!(stats.own_transients, 3);
+        assert_eq!(stats.total, 5);
+        assert_eq!(stats.foreign, 0);
+    }
+
+    #[test]
+    fn signals_have_their_own_small_reserve() {
+        let q = RelayQueue::with_all_limits(10, 10, 10, 10);
+        for i in 0..MAX_OWN_TRANSIENT + 3 {
+            q.enqueue_own(signal_msg(&format!("s{i}"), "pk_b")).unwrap();
+        }
+        assert_eq!(q.own_transient_count(), MAX_OWN_TRANSIENT);
+        assert_eq!(q.own_count(), 0, "переписку сигналы не трогают");
+    }
+
+    #[test]
+    fn correspondence_frees_its_reserve_from_signal_first() {
+        // Резерв переписки занят одним письмом, рядом лежит сигнал.
+        let q = RelayQueue::with_all_limits(10, 10, 10, 1);
+        q.enqueue_own(own_msg("o_old", "pk_b")).unwrap();
+        q.enqueue_own(signal_msg("s1", "pk_b")).unwrap();
+
+        assert!(q.enqueue_own(own_msg("o_new", "pk_b")).unwrap());
+
+        assert_eq!(q.is_own("o_new"), Some(true));
+        assert_eq!(q.own_transient_count(), 0, "первым уступает сигнал");
+        assert_eq!(q.own_count(), 1);
     }
 
     #[test]
