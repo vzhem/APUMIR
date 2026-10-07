@@ -18,7 +18,13 @@ import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuSettingsDangerColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
+import com.vladimir.messenger.ui.components.ApuGold
+import com.vladimir.messenger.ui.components.ApuGoldInk
+import com.vladimir.messenger.ui.components.ApuPremiumButton
 import com.vladimir.messenger.ui.components.ApuSettingsCard
+import com.vladimir.messenger.ui.components.apuGoldBrush
+import com.vladimir.messenger.ui.components.apuPremiumGloss
+import com.vladimir.messenger.ui.components.apuPremiumLift
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuSettingsDivider
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
@@ -829,18 +835,29 @@ private fun SettingsTabContent(
                         subtitle = if (customWallpaper != null) "Своя картинка из галереи" else "Стандартные, в тон теме",
                         onClick = { wallpaperPicker.launch("image/*") },
                     )
-                    TextButton(onClick = { wallpaperPicker.launch("image/*") }) {
-                        Text("Из галереи")
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
+                    ) {
+                        ApuPremiumButton(
+                            label = "Из галереи",
+                            icon = Icons.Default.PhotoLibrary,
+                            onClick = { wallpaperPicker.launch("image/*") },
+                        )
                     }
                     if (customWallpaper != null) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 2.dp),
+                                .padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
                         ) {
-                            TextButton(onClick = { WallpaperHolder.set(context, null) }) {
-                                Text("Вернуть стандартные")
-                            }
+                            ApuPremiumButton(
+                                label = "Вернуть стандартные",
+                                icon = Icons.Default.RestartAlt,
+                                style = DiagnosticsActionStyle.QUIET,
+                                onClick = { WallpaperHolder.set(context, null) },
+                            )
                         }
                     }
                 }
@@ -1626,15 +1643,35 @@ private fun ThemeModeChoices(selected: ThemeMode, onSelect: (ThemeMode) -> Unit)
                             ThemeMode.DARK -> Icons.Default.DarkMode
                         }
                         Column(
-                            modifier = Modifier.weight(1f).clip(shape)
-                                .background(if (checked) ApuBubbleAccentColor else ApuBubbleAccentColor.copy(alpha = 0.06f))
-                                .border(1.dp, ApuBubbleAccentColor.copy(alpha = if (checked) 0.7f else 0.16f), shape)
+                            // Выбранный режим — золотая плитка с глянцем и тенью
+                            // (премиальный слой, как в «Логах»); остальные —
+                            // спокойное стекло, чтобы выбор читался сразу.
+                            modifier = Modifier.weight(1f)
+                                .then(
+                                    if (checked) {
+                                        Modifier.apuPremiumLift(8.dp, shape, ApuGold.copy(alpha = 0.45f))
+                                    } else {
+                                        Modifier
+                                    },
+                                )
+                                .clip(shape)
+                                .background(
+                                    if (checked) apuGoldBrush() else ApuBubbleAccentColor.copy(alpha = 0.06f),
+                                )
+                                .border(
+                                    1.dp,
+                                    if (checked) Color.White.copy(alpha = 0.5f) else ApuBubbleAccentColor.copy(alpha = 0.16f),
+                                    shape,
+                                )
+                                .then(
+                                    if (checked) Modifier.apuPremiumGloss(shape, intensity = 0.85f, topFraction = 0.7f) else Modifier,
+                                )
                                 .selectable(checked, role = androidx.compose.ui.semantics.Role.RadioButton, onClick = { onSelect(mode) })
                                 .heightIn(min = 64.dp).padding(horizontal = 8.dp, vertical = 10.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(5.dp),
                         ) {
-                            val ink = if (checked) Color(0xFFFFF8E6) else ApuBubbleAccentColor
+                            val ink = if (checked) ApuGoldInk else ApuBubbleAccentColor
                             Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(22.dp))
                             Text(label, style = MaterialTheme.typography.labelLarge, color = ink, fontWeight = FontWeight.SemiBold)
                         }

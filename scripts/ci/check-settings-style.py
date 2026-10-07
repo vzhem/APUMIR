@@ -18,7 +18,82 @@ def source(path):
     return (UI / path).read_text()
 
 
+def hex_color(text, name):
+    """Цвет по имени константы: Color(0xFFRRGGBB) → (r, g, b) в 0..1."""
+    match = re.search(r"\b" + name + r"\s*:\s*Color\s*=\s*Color\(0xFF([0-9A-Fa-f]{6})\)", text)
+    if match is None:
+        match = re.search(r"\b" + name + r"\b[^\n]*?Color\(0xFF([0-9A-Fa-f]{6})\)", text)
+    assert match is not None, "не найден цвет " + name
+    value = int(match.group(1), 16)
+    return tuple((value >> shift & 255) / 255 for shift in (16, 8, 0))
+
+
+def luminance(rgb):
+    def channel(value):
+        return value / 12.92 if value <= 0.03928 else ((value + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (channel(part) for part in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast(first, second):
+    dark, light = sorted((luminance(first), luminance(second)))
+    return (light + 0.05) / (dark + 0.05)
+
+
 class SettingsStyleTest(unittest.TestCase):
+    def test_premium_style_is_one_palette_for_the_whole_app(self):
+        """2026-10-07: «переделать всё приложение, чтобы был стиль как в логах».
+
+        Правило владельца выполняется буквально: у приложения ОДНА золотая
+        палитра — та же, что в окне «Логи». Тест сравнивает значения констант
+        в премиальном слое и в окне «Логи»: если кто-то поменяет золото в одном
+        месте, разъехавшийся стиль поймается здесь, а не на телефоне.
+        """
+        premium = source("components/ApuPremium.kt")
+        logs = source("components/ApuDiagnosticsUi.kt")
+        pairs = (
+            ("ApuGold", "DiagGold"),
+            ("ApuGoldLight", "DiagGoldLight"),
+            ("ApuGoldDeep", "DiagGoldDeep"),
+            ("ApuGoldInk", "DiagOnGold"),
+        )
+        for shared_name, logs_name in pairs:
+            with self.subTest(color=shared_name):
+                self.assertEqual(
+                    hex_color(premium, shared_name),
+                    hex_color(logs, logs_name),
+                    "золото премиального слоя и окна «Логи» должно совпадать",
+                )
+
+        # Общие компоненты обязаны пользоваться премиальным слоем, иначе стиль
+        # вернётся к «блёклым квадратикам» — ровно на это была жалоба.
+        settings = source("components/ApuSettingsUi.kt")
+        for marker in (
+            "apuGoldBrush()",
+            "apuPremiumLift(",
+            "apuPremiumGloss(",
+            "apuPremiumThread(",
+            "ApuPremiumIconTile(",
+            "ApuGoldInk",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, settings)
+        # Три «кита» стиля: карточка, секция, строка списка.
+        self.assertIn("apuPremiumThread()", settings)
+        self.assertIn("ApuPremiumIconTile(icon = icon)", settings)
+
+        # Батарея: в списках настроек не должно быть вечно бегущих анимаций
+        # (правило PROFILE_SETTINGS_STYLE.md — без непрерывного shimmer).
+        self.assertNotIn("rememberInfiniteTransition", settings)
+        self.assertNotIn("rememberInfiniteTransition", premium)
+
+        # Читаемость: тёмные чернила обязаны читаться на каждом стопе золота.
+        ink = hex_color(premium, "ApuGoldInk")
+        for name in ("ApuGoldLight", "ApuGold", "ApuGoldDeep"):
+            with self.subTest(ink_on=name):
+                self.assertGreaterEqual(contrast(ink, hex_color(premium, name)), 4.5)
+
     def test_all_related_cards_use_the_shared_surface(self):
         for path in SCREENS:
             with self.subTest(screen=path):
@@ -141,7 +216,12 @@ class SettingsStyleTest(unittest.TestCase):
             "fun ApuSettingsChip(",
             "fun ApuSettingsProgress(",
             "Icons.Default.Lock",
-            "trackColor = ApuBubbleAccentColor.copy(alpha = 0.15f)",
+            # 2026-10-07: полоска прогресса стала золотой с глянцем (премиальный
+            # стиль «как в логах»): трек — спокойный акцент, заполнение —
+            # золотая кисть apuGoldBrush() с бликом. Прежний маркер
+            # trackColor=…LinearProgressIndicator относился к material-полоске.
+            ".background(ApuBubbleAccentColor.copy(alpha = 0.14f))",
+            ".background(apuGoldBrush())",
         ):
             self.assertIn(house_part, shared)
 

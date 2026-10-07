@@ -21,15 +21,14 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -37,6 +36,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
+
+// =============================================================================
+// Владелец 2026-10-07: «Теперь в таком стиле нужно переделать всё приложение…
+// чтобы был стиль как в логах. Начни с вкладки настройки.»
+//
+// Все общие компоненты настроек/профиля переведены на премиальный слой
+// (ui/components/ApuPremium.kt): золотые плитки и капсулы, глянец у кромок,
+// мягкие тени, золотая нить над карточкой. Через эти компоненты стиль
+// автоматически приходит во все разделы, которые их используют (профиль, ранги,
+// группы, каналы), — экраны не переписываются по одному.
+//
+// Неприкосновенно: house-подложка (ApuBubbleCard/поверхность пузыря), читаемость
+// (текст — тёмные чернила, контраст ≥4.5) и правило «в строках списка нет вечно
+// бегущих анимаций» (см. PROFILE_SETTINGS_STYLE.md).
+// =============================================================================
 
 /**
  * Красный акцент для опасных действий и предупреждений (удаление, блокировка,
@@ -76,7 +90,12 @@ fun ApuSettingsCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     ApuBubbleCard(
-        modifier = modifier.fillMaxWidth(),
+        // Объём и золотая нить: карточка «стоит» над обоями, а не нарисована
+        // краской (премиальный слой, как в окне «Логи»).
+        modifier = modifier
+            .fillMaxWidth()
+            .apuPremiumLift(if (highlighted) 10.dp else 7.dp)
+            .apuPremiumThread(),
         backgroundColor = if (highlighted) Color(0xFFFFF7E5).copy(alpha = 0.94f) else ApuBubbleSurfaceColor,
     ) {
         val scope = this
@@ -87,39 +106,89 @@ fun ApuSettingsCard(
 @Composable
 fun ApuSettingsHeader(title: String) {
     ApuHeaderBubble {
-        Text(
-            title,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            color = ApuBubbleTextColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Золотая «искра» перед названием: тот же знак, что у эмблемы в
+            // «Логах», — раздел узнаётся как часть одного приложения.
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(apuGoldBrush()),
+            )
+            Spacer(Modifier.width(9.dp))
+            Text(
+                title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                color = ApuBubbleTextColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
     }
 }
 
 @Composable
 fun ApuSettingsSectionTitle(title: String, modifier: Modifier = Modifier) {
-    Box(modifier = modifier.padding(start = 18.dp, top = 18.dp, bottom = 6.dp)) {
+    // Капсула раздела: золотая заливка, тёмные чернила, глянец и мягкая тень.
+    // Справа — золотая нить, растворяющаяся к краю: секция «открывается» ею.
+    Row(
+        modifier = modifier.padding(start = 18.dp, end = 16.dp, top = 18.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val shape = RoundedCornerShape(11.dp)
         Text(
             title,
             style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.SemiBold,
-            color = ApuBubbleAccentColor,
+            fontWeight = FontWeight.Bold,
+            color = ApuGoldInk,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.apuBubbleSurface(shape = RoundedCornerShape(12.dp))
-                .padding(horizontal = 10.dp, vertical = 5.dp),
+            modifier = Modifier
+                .apuPremiumLift(6.dp, shape, ApuGold.copy(alpha = 0.5f))
+                .clip(shape)
+                .background(apuGoldBrush())
+                .border(1.dp, Color.White.copy(alpha = 0.5f), shape)
+                .apuPremiumGloss(shape, intensity = 0.9f, topFraction = 0.7f)
+                .padding(horizontal = 11.dp, vertical = 5.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(1.5.dp)
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            ApuGold.copy(alpha = 0.55f),
+                            ApuGoldLight.copy(alpha = 0.30f),
+                            Color.Transparent,
+                        ),
+                    ),
+                ),
         )
     }
 }
 
 @Composable
 fun ApuSettingsDivider() {
-    HorizontalDivider(
-        modifier = Modifier.padding(start = 72.dp, end = 16.dp),
-        thickness = 0.5.dp,
-        color = ApuBubbleAccentColor.copy(alpha = 0.15f),
+    // Та же золотая нить, что разделяет блоки в окне «Логи»: тонкая, светится
+    // к середине и растворяется к краям. Отступ от иконки сохранён прежним.
+    Box(
+        modifier = Modifier
+            .padding(start = 72.dp, end = 16.dp)
+            .fillMaxWidth()
+            .height(1.dp)
+            .background(
+                Brush.horizontalGradient(
+                    listOf(
+                        Color.Transparent,
+                        ApuGold.copy(alpha = 0.45f),
+                        ApuGoldLight.copy(alpha = 0.30f),
+                        Color.Transparent,
+                    ),
+                ),
+            ),
     )
 }
 
@@ -138,13 +207,9 @@ fun ApuSettingsItem(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier.size(40.dp)
-                .background(ApuBubbleAccentColor.copy(alpha = 0.09f), RoundedCornerShape(12.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(icon, contentDescription = null, tint = ApuBubbleAccentColor, modifier = Modifier.size(22.dp))
-        }
+        // Плитка со значком — золотая, с глянцем и тенью (как кнопки в «Логах»).
+        // Никаких непрерывных анимаций: строка не тратит батарею на перерисовку.
+        ApuPremiumIconTile(icon = icon)
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(
@@ -174,7 +239,7 @@ fun ApuSettingsItem(
             Icon(
                 Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = null,
-                tint = ApuBubbleMutedColor,
+                tint = ApuBubbleAccentColor.copy(alpha = 0.75f),
                 modifier = Modifier.size(20.dp),
             )
         }
@@ -198,25 +263,25 @@ fun ApuSettingsFeatureRow(
         modifier = modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier.size(26.dp)
-                .background(
-                    if (available) {
-                        ApuBubbleAccentColor.copy(alpha = 0.12f)
-                    } else {
-                        ApuBubbleMutedColor.copy(alpha = 0.10f)
-                    },
-                    RoundedCornerShape(8.dp),
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                if (available) Icons.Default.Check else Icons.Default.Lock,
-                contentDescription = if (available) "Открыто" else "Ещё закрыто",
-                tint = if (available) ApuBubbleAccentColor else ApuBubbleMutedColor,
-                modifier = Modifier.size(15.dp),
-            )
-        }
+        ApuPremiumIconTile(
+            icon = if (available) Icons.Default.Check else Icons.Default.Lock,
+            contentDescription = if (available) "Открыто" else "Ещё закрыто",
+            size = 26.dp,
+            corner = 8.dp,
+            lift = 3.dp,
+            gloss = 0.7f,
+            background = if (available) {
+                apuGoldBrush()
+            } else {
+                Brush.linearGradient(
+                    listOf(
+                        ApuBubbleMutedColor.copy(alpha = 0.22f),
+                        ApuBubbleMutedColor.copy(alpha = 0.12f),
+                    ),
+                )
+            },
+            tint = if (available) ApuGoldInk else ApuBubbleMutedColor,
+        )
         Spacer(Modifier.width(10.dp))
         Text(
             text,
@@ -233,22 +298,29 @@ fun ApuSettingsChip(
     modifier: Modifier = Modifier,
     highlighted: Boolean = true,
 ) {
+    val shape = RoundedCornerShape(9.dp)
     Text(
         text,
         style = MaterialTheme.typography.labelSmall,
-        fontWeight = FontWeight.SemiBold,
-        color = if (highlighted) ApuBubbleAccentColor else ApuBubbleMutedColor,
+        fontWeight = FontWeight.Bold,
+        color = if (highlighted) ApuGoldInk else ApuBubbleMutedColor,
         maxLines = 1,
         modifier = modifier
-            .clip(RoundedCornerShape(9.dp))
-            .background(
+            .then(
                 if (highlighted) {
-                    ApuBubbleAccentColor.copy(alpha = 0.12f)
+                    Modifier
+                        .apuPremiumLift(4.dp, shape, ApuGold.copy(alpha = 0.45f))
+                        .clip(shape)
+                        .background(apuGoldBrush())
+                        .border(1.dp, Color.White.copy(alpha = 0.45f), shape)
+                        .apuPremiumGloss(shape, intensity = 0.8f, topFraction = 0.7f)
                 } else {
-                    ApuBubbleMutedColor.copy(alpha = 0.10f)
+                    Modifier
+                        .clip(shape)
+                        .background(ApuBubbleMutedColor.copy(alpha = 0.10f))
                 },
             )
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(horizontal = 9.dp, vertical = 4.dp),
     )
 }
 
@@ -258,15 +330,26 @@ fun ApuSettingsProgress(
     fraction: Float,
     modifier: Modifier = Modifier,
 ) {
-    LinearProgressIndicator(
-        progress = { fraction.coerceIn(0f, 1f) },
+    val shape = RoundedCornerShape(4.dp)
+    // Заполнение — золотой градиент с глянцем: «сколько осталось до ранга»
+    // читается как награда, а не как серая полоска загрузки.
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(6.dp)
-            .clip(RoundedCornerShape(3.dp)),
-        color = ApuBubbleAccentColor,
-        trackColor = ApuBubbleAccentColor.copy(alpha = 0.15f),
-    )
+            .height(8.dp)
+            .clip(shape)
+            .background(ApuBubbleAccentColor.copy(alpha = 0.14f))
+            .border(1.dp, ApuBubbleAccentColor.copy(alpha = 0.18f), shape),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(fraction.coerceIn(0f, 1f))
+                .height(8.dp)
+                .clip(shape)
+                .background(apuGoldBrush())
+                .apuPremiumGloss(shape, intensity = 0.8f, topFraction = 0.75f),
+        )
+    }
 }
 
 @Composable
@@ -279,7 +362,7 @@ fun ApuProfileQuickAction(label: String, icon: ImageVector, onClick: () -> Unit,
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Icon(icon, contentDescription = null, tint = ApuBubbleAccentColor, modifier = Modifier.size(24.dp))
+        ApuPremiumIconTile(icon = icon, size = 34.dp, corner = 11.dp, lift = 5.dp)
         Text(
             label,
             style = MaterialTheme.typography.labelLarge,
