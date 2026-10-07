@@ -72,13 +72,18 @@ fun ApuBottomBar(
             .fillMaxWidth()
             .navigationBarsPadding()
             .padding(horizontal = 10.dp, vertical = 6.dp)
+            .apuPremiumLift(10.dp, RoundedCornerShape(22.dp))
             .clip(RoundedCornerShape(22.dp))
             .background(Color(0xFFF5F7FA).copy(alpha = 0.94f))
             .border(
                 width = 1.dp,
                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
                 shape = RoundedCornerShape(22.dp),
-            ),
+            )
+            // Золотая нить по верхней кромке и мягкий глянец: панель выглядит
+            // частью того же премиального набора, что окно «Логи».
+            .apuPremiumThread(shape = RoundedCornerShape(22.dp), inset = 22.dp)
+            .apuPremiumGloss(RoundedCornerShape(22.dp), intensity = 0.35f, topFraction = 0.5f),
     ) {
         // Кнопкам достаётся поровну, а подписи - один кегль на всех, такой,
         // чтобы самая длинная уместилась целиком. Раньше ширина шла по
@@ -128,16 +133,31 @@ private fun BottomButton(item: ApuBottomItem, labelScale: Float, modifier: Modif
         label = "apu-bottom-press",
     )
 
-    // Открытый раздел подсвечен заливкой: без неё в пузыре не видно, где ты.
-    val highlight = if (item.selected) {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
-    } else {
-        Color.Transparent
-    }
+    // Открытый раздел — золотая плитка с блеском: видно, где ты, и сразу
+    // понятно, что это «своя» кнопка того же стиля, что в «Логах».
+    val shape = RoundedCornerShape(16.dp)
+    val selectedInk = ApuGoldInk
+    val selectedIcon = ApuGoldDeep
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
-            .background(highlight)
+            .then(
+                if (item.selected) {
+                    Modifier.apuPremiumLift(6.dp, shape, ApuGold.copy(alpha = 0.45f))
+                } else {
+                    Modifier
+                },
+            )
+            .clip(shape)
+            .then(
+                if (item.selected) {
+                    Modifier
+                        .background(apuGoldBrush(), shape)
+                        .border(1.dp, Color.White.copy(alpha = 0.45f), shape)
+                        .apuPremiumGloss(shape, intensity = 0.85f, topFraction = 0.7f)
+                } else {
+                    Modifier
+                },
+            )
             .clickable(
                 interactionSource = interaction,
                 indication = null,
@@ -156,7 +176,7 @@ private fun BottomButton(item: ApuBottomItem, labelScale: Float, modifier: Modif
                 item.icon,
                 contentDescription = item.title,
                 tint = if (item.selected) {
-                    MaterialTheme.colorScheme.primary
+                    selectedIcon
                 } else {
                     MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
                 },
@@ -171,8 +191,8 @@ private fun BottomButton(item: ApuBottomItem, labelScale: Float, modifier: Modif
                 fontSize = base.fontSize * labelScale,
                 letterSpacing = if (base.letterSpacing.isSpecified) base.letterSpacing * labelScale else base.letterSpacing,
             ),
-            fontWeight = FontWeight.Medium,
-            color = Color(0xFF1E2430),
+            fontWeight = if (item.selected) FontWeight.Bold else FontWeight.Medium,
+            color = if (item.selected) selectedInk else Color(0xFF1E2430),
             maxLines = 1,
             softWrap = false,
             overflow = TextOverflow.Ellipsis,

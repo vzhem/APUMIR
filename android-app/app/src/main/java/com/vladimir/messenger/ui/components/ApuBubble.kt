@@ -89,9 +89,17 @@ fun ApuHeaderBubble(
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    // Шапка — тот же премиальный стиль, что у окна «Логи»: поверхность чуть
+    // приподнята (мягкая тень), по верхней кромке идёт золотая нить, а глянец
+    // ложится ПОД содержимым, поэтому название раздела остаётся чётким.
+    // Через этот общий компонент новый вид получают шапки ВСЕХ разделов:
+    // чатов, групп, каналов, настроек и остальных экранов.
     Box(
         modifier = modifier
+            .apuPremiumLift(8.dp)
             .apuBubbleSurface()
+            .apuPremiumThread(inset = 12.dp)
+            .apuPremiumGloss(intensity = 0.5f, topFraction = 0.6f)
             .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
             .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
