@@ -17,11 +17,9 @@ package com.vladimir.messenger.ui.components
 // =============================================================================
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -82,13 +80,14 @@ fun ContactCard(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(18.dp),
-            )
+            // Владелец 2026-10-07: «в таком стиле нужно переделать всё приложение».
+            // Строка списка — та же поверхность, что шапки и пузыри: подъём,
+            // единая подложка house style, золотая нить по верхней кромке и
+            // глянец ПОД содержимым (имя и превью остаются чёрными и чёткими).
+            .apuPremiumLift(5.dp)
+            .apuBubbleSurface()
+            .apuPremiumThread(inset = 16.dp)
+            .apuPremiumGloss(intensity = 0.45f, topFraction = 0.55f)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,

@@ -150,6 +150,39 @@ class ChatStyleTest(unittest.TestCase):
         self.assertTrue("Сообщения от собеседника не открываются" in screen, "нет объяснения словами")
         self.assertTrue("Отправить мой ключ ещё раз" in screen, "нет кнопки действия")
 
+    def test_list_rows_and_search_use_the_premium_surface(self):
+        """Владелец 2026-10-07: «в таком стиле нужно переделать всё приложение».
+
+        Строки списка чатов и строка поиска должны быть той же поверхностью, что
+        шапки, пузыри и диалоги: подъём, единая подложка house style, золотая нить
+        по верхней кромке и блеск ПОД содержимым. Старая плоская заливка
+        (Color(0xFFF5F7FA) вручную + border) в этих строках не остаётся: она
+        выглядела как чужая программа рядом с премиальными шапками.
+        """
+        card = source("components/ContactCard.kt")
+        for marker in (
+            ".apuPremiumLift(",
+            ".apuBubbleSurface()",
+            ".apuPremiumThread(",
+            ".apuPremiumGloss(",
+        ):
+            self.assertIn(marker, card, "карточка списка чатов без премиального слоя: " + marker)
+
+        chat_list = source("screens/chat/ChatListScreen.kt")
+        for marker in (
+            "import com.vladimir.messenger.ui.components.apuPremiumLift",
+            "import com.vladimir.messenger.ui.components.apuPremiumThread",
+            "import com.vladimir.messenger.ui.components.apuPremiumGloss",
+        ):
+            self.assertIn(marker, chat_list, "импорт не подтянется сам: " + marker)
+        # Три поверхности этого экрана: избранное, строка группы и поиск.
+        self.assertGreaterEqual(chat_list.count(".apuBubbleSurface()"), 2)
+        self.assertGreaterEqual(chat_list.count(".apuPremiumLift("), 3)
+        self.assertGreaterEqual(chat_list.count(".apuPremiumThread("), 3)
+        # Приглушённый серый 8A93A2 давал контраст ниже 4.5 на подложке house
+        # style — заменён на читаемый HintBubbleMutedColor (5A6472).
+        self.assertNotIn("Color(0xFF8A93A2)", chat_list)
+
     def test_text_and_actions_contrast_on_any_wallpaper(self):
         helper = source("components/ApuBubble.kt")
         hints = source("components/HintBubble.kt")

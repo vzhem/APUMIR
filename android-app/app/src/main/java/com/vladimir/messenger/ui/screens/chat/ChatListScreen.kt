@@ -37,6 +37,10 @@ import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ApuPremiumDialog
+import com.vladimir.messenger.ui.components.apuBubbleSurface
+import com.vladimir.messenger.ui.components.apuPremiumGloss
+import com.vladimir.messenger.ui.components.apuPremiumLift
+import com.vladimir.messenger.ui.components.apuPremiumThread
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 import com.vladimir.messenger.ui.components.ApuActionsMenu
@@ -567,7 +571,7 @@ fun ChatListScreen(
                             Text(
                                 "Выбрано: ${selected.size} из $maxPick",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF8A93A2),
+                                color = Color(0xFF5A6472),
                             )
                             androidx.compose.foundation.lazy.LazyColumn(
                                 modifier = Modifier
@@ -1467,6 +1471,11 @@ private fun SearchTextField(
         },
         modifier = Modifier
             .fillMaxWidth()
+            // Владелец 2026-10-07: поиск — тот же премиальный слой, что строки
+            // списка: подъём, золотая нить по верхней кромке, блеск под текстом.
+            .apuPremiumLift(4.dp)
+            .apuPremiumThread(inset = 16.dp)
+            .apuPremiumGloss(intensity = 0.35f, topFraction = 0.6f)
             .clip(RoundedCornerShape(18.dp))
             .border(
                 width = 1.dp,
@@ -1547,13 +1556,13 @@ private fun SavedContactCard(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.52f),
-                shape = RoundedCornerShape(18.dp),
-            )
+            // Владелец 2026-10-07: строки списка — в том же премиальном стиле,
+            // что шапки, пузыри и диалоги: подъём, единая подложка, золотая
+            // нить по кромке и глянец ПОД содержимым.
+            .apuPremiumLift(5.dp)
+            .apuBubbleSurface()
+            .apuPremiumThread(inset = 16.dp)
+            .apuPremiumGloss(intensity = 0.45f, topFraction = 0.55f)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1627,13 +1636,12 @@ private fun GroupCard(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(18.dp),
-            )
+            // Владелец 2026-10-07: строки списка — в том же премиальном стиле,
+            // что шапки, пузыри и диалоги.
+            .apuPremiumLift(5.dp)
+            .apuBubbleSurface()
+            .apuPremiumThread(inset = 16.dp)
+            .apuPremiumGloss(intensity = 0.45f, topFraction = 0.55f)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1677,7 +1685,7 @@ private fun GroupCard(
             Text(
                 text = if (group.isChannel) BubbleKind.Channel.label else BubbleKind.Group.label,
                 style = MaterialTheme.typography.labelSmall,
-                color = Color(0xFF8A93A2),
+                color = Color(0xFF5A6472),
                 maxLines = 1,
             )
             if (draftText.isNotEmpty()) {
