@@ -326,6 +326,7 @@ object TransferDiagnostics {
                 relayQueueFull = logcat.relayQueueFull,
                 relayQueueOwn = logcat.queueOwn,
                 relayQueueForeign = logcat.queueForeign,
+                relayQueueOwnSignals = logcat.queueOwnSignals,
             )
         }
         onStage?.invoke(STAGE_REPORT)
@@ -428,6 +429,7 @@ object TransferDiagnostics {
             relayQueueFull = logcat.relayQueueFull,
             relayQueueOwn = logcat.queueOwn,
             relayQueueForeign = logcat.queueForeign,
+            relayQueueOwnSignals = logcat.queueOwnSignals,
         )
     }
 
@@ -449,14 +451,21 @@ object TransferDiagnostics {
          */
         val queueOwn: Long?,
         val queueForeign: Long?,
+        /**
+         * Сколько из «своих» — служебное: сигналы транспорта (NAT-пробивание,
+         * «печатает…») и пакеты файловой передачи. Владелец 2026-10-07: в отчёте
+         * было «своё ждёт получателя=1000», и по нему нельзя было понять, что
+         * внутри сплошь сигналы, вытеснявшие переписку. Теперь это видно.
+         */
+        val queueOwnSignals: Long?,
     ) {
         /** Журнал процесса ещё не читали или прочитать не удалось. */
         val isEmpty: Boolean
             get() = lines.isEmpty() && coreMessageSignals == 0L && relayQueueFull == 0L &&
-                queueOwn == null && queueForeign == null
+                queueOwn == null && queueForeign == null && queueOwnSignals == null
 
         companion object {
-            val EMPTY = LogcatScan(emptyList(), 0L, 0L, null, null)
+            val EMPTY = LogcatScan(emptyList(), 0L, 0L, null, null, null)
         }
     }
 
@@ -653,6 +662,7 @@ object TransferDiagnostics {
             relayQueueFull = all.count { it.contains(RELAY_QUEUE_FULL) }.toLong(),
             queueOwn = queueStat(all, true),
             queueForeign = queueStat(all, false),
+            queueOwnSignals = queueStat(all, true, marker = "сигналов="),
         )
     }.getOrDefault(LogcatScan.EMPTY)
 
@@ -661,8 +671,11 @@ object TransferDiagnostics {
      * последнюю: она самая свежая, а старые строки остаются в журнале после
      * того, как очередь уже разошлась.
      */
-    private fun queueStat(lines: List<String>, own: Boolean): Long? {
-        val marker = if (own) "своих=" else "чужих="
+    private fun queueStat(
+        lines: List<String>,
+        own: Boolean,
+        marker: String = if (own) "своих=" else "чужих=",
+    ): Long? {
         for (line in lines.asReversed()) {
             val at = line.indexOf(RELAY_QUEUE_STATS)
             if (at < 0) continue

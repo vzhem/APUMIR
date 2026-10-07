@@ -51,6 +51,13 @@ data class ChatDetailUiState(
      */
     val peerVip: Boolean = false,
     /**
+     * От собеседника приходят конверты, которые не вскрываются: у него осталась
+     * прежняя копия нашего ключа (переустановка/восстановление профиля). Пока
+     * это так, в переписке висит золотая плашка с объяснением и кнопкой
+     * «Отправить мой ключ» — раньше об этом знал только отчёт «Логи».
+     */
+    val keyDesync: Boolean = false,
+    /**
      * Переписка с САМИМ СОБОЙ и мой ранг — VIP: тогда кольцо и знак показываем
      * у своего узла (в такой переписке собеседника нет).
      */
@@ -139,6 +146,14 @@ class ChatDetailViewModel @Inject constructor(
 
     /** р236: когда последний раз отправляли черновик партнёрскому устройству. */
     @Volatile private var lastDraftSentAt = 0L
+
+    /** р244-подобное: собеседник личного чата, за пометкой ключа которого следим. */
+    @Volatile private var keyDesyncPeer: String = ""
+
+    /** Наблюдение за пометкой ключа заведено (один раз на экран). */
+    @Volatile private var keyDesyncWatched = false
+
+    private var keyDesyncJob: kotlinx.coroutines.Job? = null
 
     private val _uiState = MutableStateFlow(ChatDetailUiState())
     val uiState: StateFlow<ChatDetailUiState> = _uiState.asStateFlow()
@@ -359,8 +374,51 @@ class ChatDetailViewModel @Inject constructor(
                         heartsWatched = true
                         observeHearts(chat.contactId)
                     }
+                    // «Сообщения от него не открываются»: пока экран открыт,
+                    // спрашиваем пометку раз в 5 секунд. Это одно чтение
+                    // настроек — дешевле любого нового потока событий.
+                    if (!keyDesyncWatched && chat.contactId.startsWith("pk_")) {
+                        keyDesyncWatched = true
+                        observeKeyDesync(chat.contactId)
+                    }
                 }
             }
+        }
+    }
+
+    /**
+     * Пометка «от собеседника не открывается». Опрос: пометку ставит служба
+     * ядра (при нерасшифрованном конверте), а экран лишь показывает её словами.
+     * Гасим сразу, как только что-то от него открылось, — состояние видно и так.
+     */
+    private fun observeKeyDesync(peer: String) {
+        keyDesyncPeer = peer
+        keyDesyncJob = viewModelScope.launch {
+            while (true) {
+                val pending = com.vladimir.messenger.data.security.KeyDesyncNotice
+                    .isPending(appContext, peer)
+                _uiState.update { if (it.keyDesync == pending) it else it.copy(keyDesync = pending) }
+                kotlinx.coroutines.delay(KEY_DESYNC_POLL_MS)
+            }
+        }
+    }
+
+    /**
+     * Кнопка плашки: отдать собеседнику свой ключ ещё раз.
+     *
+     * Само по себе это его приложение не «починит» (пин сбрасывает только
+     * человек, отсканировав QR заново), но оно покажет ЕМУ нашу настоящую
+     * привязку и подсказку — так переписка восстанавливается быстрее, чем при
+     * ожидании фоновой рассылки. Пометку у себя снимаем: сигнал отправлен.
+     */
+    fun onKeyDesyncAction() {
+        val peer = keyDesyncPeer
+        if (peer.isBlank()) return
+        viewModelScope.launch {
+            runCatching { fileTransferRouter.announceMyKeyTo(peer) }
+                .onFailure { error -> android.util.Log.w("ChatDetailVM", "key announce failed", error) }
+            com.vladimir.messenger.data.security.KeyDesyncNotice.clear(appContext, peer)
+            _uiState.update { it.copy(keyDesync = false) }
         }
     }
 
@@ -1587,5 +1645,19 @@ class ChatDetailViewModel @Inject constructor(
 
         /** р236: черновик уходит партнёру не чаще раза в 1.5 с. */
         const val DRAFT_REFRESH_MS = 1_500L
+
+        /**
+         * Как часто экран перечитывает пометку «от собеседника не открывается».
+         * Пять секунд: человек всё равно вернётся к чату не мгновенно, а чтение
+         * настроек стоит дешевле одного кадра отрисовки.
+         */
+        const val KEY_DESYNC_POLL_MS = 5_000L
+
+        /**
+         * Как часто экран перечитывает пометку «от собеседника не открывается».
+         * Пять секунд: человек всё равно вернётся к чату не мгновенно, а чтение
+         * настроек стоит дешевле одного кадра отрисовки.
+         */
+        const val KEY_DESYNC_POLL_MS = 5_000L
     }
 }

@@ -176,6 +176,13 @@ data class DiagnosticsFacts(
     val relayQueueOwn: Long? = null,
     /** Сколько ЧУЖИХ сообщений (пересылка для других узлов) лежит в очереди. */
     val relayQueueForeign: Long? = null,
+    /**
+     * Сколько из «своих» — служебное: сигналы транспорта (NAT-пробивание,
+     * «печатает…») и пакеты файловой передачи. Владелец 2026-10-07 прислал
+     * отчёт со строкой «своё ждёт получателя=1000»: по такому числу нельзя
+     * было понять, что очередь занята служебным, а не перепиской.
+     */
+    val relayQueueOwnSignals: Long? = null,
 )
 
 /** Имена счётчиков сессии: один список для записи (хуки) и для отчёта. */
@@ -569,6 +576,10 @@ object DiagnosticsReport {
             // потеря, но человек должен видеть, что сообщение ещё не дошло.
             val waiting = facts.relayQueueOwn ?: 0L
             if (waiting > 0L) append(" · своё ждёт получателя $waiting")
+            // Служебное (сигналы и пакеты передачи) — не переписка: без этой
+            // оговорки «своё ждёт получателя 1000» пугает зря.
+            val waitingSignals = facts.relayQueueOwnSignals ?: 0L
+            if (waitingSignals > 0L) append(" (из них сигналов и пакетов $waitingSignals)"
         }
         return when {
             // Смена ключа перевешивает остальные исходы: пока не отсканируют
@@ -734,7 +745,8 @@ object DiagnosticsReport {
         appendLine("пересылка: отброшено из-за полной очереди=${facts.relayQueueFull}")
         appendLine(
             "очередь ядра: своё ждёт получателя=" +
-                (facts.relayQueueOwn?.toString() ?: "нет (пусто)"),
+                (facts.relayQueueOwn?.toString() ?: "нет (пусто)") +
+                (facts.relayQueueOwnSignals?.let { " (из них сигналов и пакетов=$it)" } ?: ""),
         )
         appendLine(
             "очередь ядра: чужая пересылка=" +
@@ -774,6 +786,13 @@ object DiagnosticsReport {
             appendLine(
                 "  ↳ своё ждёт получателя: он не в сети; своя переписка идёт первой и не " +
                     "делит лимит с чужой пересылкой",
+            )
+        }
+        val ownWaitingSignals = facts.relayQueueOwnSignals ?: 0L
+        if (ownWaitingSignals > 0L) {
+            appendLine(
+                "  ↳ сигналы и пакеты передачи — служебное: живут минуты, места переписки " +
+                    "не занимают с v11.74.198",
             )
         }
         appendLine()

@@ -94,6 +94,62 @@ class ChatStyleTest(unittest.TestCase):
             self.assertIn("Column(modifier = Modifier.fillMaxSize())", text)
             self.assertIn("Закреплённые", text)
 
+    def test_key_desync_notice_tells_the_person_what_to_do(self):
+        """«От него не открывается» — плашка в переписке, а не только в «Логах».
+
+        Владелец 2026-10-07 прислал отчёт, где 12 входящих не вскрылось:
+        собеседник запечатал для прежней копии нашего ключа. Понять это можно
+        было только в отчёте, а человек видел «сообщения не приходят». Теперь у
+        такой переписки висит золотая плашка с объяснением и кнопкой.
+        """
+        notice = (ROOT / "android-app/app/src/main/java/com/vladimir/messenger/"
+                  "data/security/KeyDesyncNotice.kt").read_text()
+        for marker in (
+            "object KeyDesyncNotice",
+            "fun note(context: Context, nodeId: String",
+            "fun isPending(context: Context, nodeId: String",
+            "fun clear(context: Context, nodeId: String",
+            "TTL_MS",
+        ):
+            with self.subTest(marker=marker):
+                self.assertTrue(marker in notice, f"нет маркера {marker} в KeyDesyncNotice.kt")
+
+        service = (ROOT / "android-app/app/src/main/java/com/vladimir/messenger/"
+                   "service/CoreServerService.kt").read_text()
+        # Пометка ставится, только когда ключ собеседника нам известен: иначе
+        # «не вскрылось» — это чужой конверт, и пугать человека нечем.
+        self.assertTrue(
+            "KeyDesyncNotice\n                                .note(applicationContext, senderId)"
+            in service,
+            "служба ядра не отмечает рассинхрон ключа",
+        )
+        self.assertTrue(
+            "fileTransferRouter.requestExchangeBinding(senderId)" in service,
+            "собеседнику не отправляется наш ключ ещё раз",
+        )
+        self.assertTrue(
+            "KeyDesyncNotice\n                        .clear(applicationContext, senderId)" in service,
+            "пометка не снимается, когда переписка снова открывается",
+        )
+
+        view_model = source("screens/chat/ChatDetailViewModel.kt")
+        self.assertTrue("val keyDesync: Boolean = false" in view_model, "нет поля в состоянии чата")
+        self.assertTrue("observeKeyDesync(chat.contactId)" in view_model, "нет наблюдения за пометкой")
+        self.assertTrue("fun onKeyDesyncAction()" in view_model, "нет действия «отдать ключ»")
+
+        screen = source("screens/chat/ChatDetailScreen.kt")
+        self.assertTrue("keyDesync    = uiState.keyDesync" in screen, "плашка не подключена к экрану")
+        self.assertTrue("onKeyDesyncAction = viewModel::onKeyDesyncAction" in screen, "кнопка не подключена")
+        # Плашка — в премиальном стиле «Логов»: золото, нить, блеск ПОД текстом,
+        # тёмные чернила (контраст проверяет test_premium_palette_keeps_contrast
+        # в контракте отчёта).
+        self.assertTrue(".background(apuGoldBrush(), noticeShape)" in screen, "нет золотой подложки")
+        self.assertTrue("apuPremiumThread(shape = noticeShape, inset = 18.dp)" in screen, "нет золотой нити")
+        self.assertTrue("apuPremiumGloss(noticeShape, intensity = 0.8f" in screen, "нет блеска")
+        self.assertTrue("color = ApuGoldInk," in screen, "текст плашки не тёмными чернилами")
+        self.assertTrue("Сообщения от собеседника не открываются" in screen, "нет объяснения словами")
+        self.assertTrue("Отправить мой ключ ещё раз" in screen, "нет кнопки действия")
+
     def test_text_and_actions_contrast_on_any_wallpaper(self):
         helper = source("components/ApuBubble.kt")
         hints = source("components/HintBubble.kt")

@@ -2009,8 +2009,28 @@ class CoreServerService : Service() {
                         // отчёта и число в разделе [сообщения].
                         com.vladimir.messenger.data.diagnostics.TransferDiagnostics
                             .noteSealedNotOpened(senderKeyKnown = known)
+                        if (known) {
+                            // Ключ собеседника нам известен — значит, проблема на
+                            // его стороне: он запечатал для нашей ПРЕЖНЕЙ копии
+                            // ключа. Две вещи для человека, а не для отчёта:
+                            // 1) пометка у этого чата («не открывается, что
+                            //    делать») — её читает экран переписки;
+                            // 2) мягкий сигнал собеседнику: отдать ему свой ключ
+                            //    ещё раз (не чаще раза в минуту на узел). Если у
+                            //    него закреплена старая копия, его приложение
+                            //    скажет ему то же самое, и пересканирование QR
+                            //    починит переписку.
+                            com.vladimir.messenger.data.security.KeyDesyncNotice
+                                .note(applicationContext, senderId)
+                            runCatching { fileTransferRouter.requestExchangeBinding(senderId) }
+                                .onFailure { Log.w(TAG, "key re-announce failed: ${it.message}") }
+                        }
                         return
                     }
+                    // Переписка с ним снова открывается — подсказка «не
+                    // открывается» больше не нужна и не должна висеть сутками.
+                    com.vladimir.messenger.data.security.KeyDesyncNotice
+                        .clear(applicationContext, senderId)
                     opened
                 } else {
                     rawText

@@ -37,6 +37,13 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import com.vladimir.messenger.ui.components.PeerProfileSheet
 import com.vladimir.messenger.ui.components.NotificationMuteDialog
+import com.vladimir.messenger.ui.components.ApuGold
+import com.vladimir.messenger.ui.components.ApuGoldDeep
+import com.vladimir.messenger.ui.components.ApuGoldInk
+import com.vladimir.messenger.ui.components.apuGoldBrush
+import com.vladimir.messenger.ui.components.apuPremiumGloss
+import com.vladimir.messenger.ui.components.apuPremiumLift
+import com.vladimir.messenger.ui.components.apuPremiumThread
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
@@ -405,6 +412,10 @@ fun ChatDetailScreen(
                 onClearReply = viewModel::clearReply,
                 isSending    = uiState.isSending,
                 isSelfChat   = uiState.isSelfChat,
+                // «От него не открывается»: показываем плашку и кнопку «отдать
+                // свой ключ» — раньше про это знал только отчёт «Логи».
+                keyDesync    = uiState.keyDesync,
+                onKeyDesyncAction = viewModel::onKeyDesyncAction,
                 canAttach    = uiState.canSendAttachments,
                 onAttach     = {
                     if (uiState.canSendAttachments) {
@@ -1075,6 +1086,12 @@ private fun MessageInputBar(
     isSending: Boolean,
     /** р241: переписка с собственным узлом - отправлять здесь нечего. */
     isSelfChat: Boolean = false,
+    /**
+     * От собеседника приходят невскрываемые конверты (у него прежняя копия
+     * нашего ключа). Плашка объясняет это словами и даёт кнопку «отдать ключ».
+     */
+    keyDesync: Boolean = false,
+    onKeyDesyncAction: () -> Unit = {},
     onAttach: () -> Unit = {},
     isPreparingFile: Boolean = false,
     canAttach: Boolean = true,
@@ -1238,6 +1255,47 @@ private fun MessageInputBar(
             )
 
             Spacer(modifier = Modifier.height(6.dp))
+
+            // «Сообщения от него не открываются». Это премиальный стиль из
+            // «Логов»: золотая плашка с нитью и блеском под текстом, чёрные
+            // чернила (контраст проверен контрактом »4.5), кнопка справа.
+            if (keyDesync && !isSelfChat) {
+                val noticeShape = RoundedCornerShape(16.dp)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .apuPremiumLift(8.dp, noticeShape, ApuGold.copy(alpha = 0.45f))
+                        .clip(noticeShape)
+                        .background(apuGoldBrush(), noticeShape)
+                        .border(1.dp, Color.White.copy(alpha = 0.45f), noticeShape)
+                        .apuPremiumThread(shape = noticeShape, inset = 18.dp)
+                        .apuPremiumGloss(noticeShape, intensity = 0.8f, topFraction = 0.55f)
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                ) {
+                    Text(
+                        text = "Сообщения от собеседника не открываются: у него осталась прежняя " +
+                            "копия вашего ключа (переустановка или восстановление профиля). " +
+                            "Пусть он заново отсканирует ваш QR-код — «Мой QR» в профиле.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ApuGoldInk,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(ApuGoldDeep)
+                            .clickable(onClick = onKeyDesyncAction)
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                    ) {
+                        Text(
+                            "Отправить мой ключ ещё раз",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color.White,
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+            }
 
             // р241: переписка с собственным узлом. Такое случается, если в
             // контакты попал свой же адрес (в профиле есть «Мой QR» - его
