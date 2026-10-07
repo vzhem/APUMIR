@@ -48,12 +48,19 @@ class RankWireTest {
 
     @Test
     fun absurdCountsAndDatesAreRejected() {
+        // Опорное время задаём явно: «год вперёд» - это год вперёд от него, а не
+        // от часов того, кто запускает тест (иначе проверка была бы плавающей).
         // Выше потолка: не ранг, а попытка нарисовать себе ступень.
-        assertNull(RankWire.parse("APURANK1|1|$nodeId|${RankWire.MAX_COUNT + 1}|$now"))
+        assertNull(RankWire.parse("APURANK1|1|$nodeId|${RankWire.MAX_COUNT + 1}|$now", nowMs = now))
         // Сбитые часы на год вперёд.
-        assertNull(RankWire.parse("APURANK1|1|$nodeId|20|${now + 365L * 24 * 60 * 60 * 1000}"))
+        assertNull(
+            RankWire.parse(
+                "APURANK1|1|$nodeId|20|${now + 365L * 24 * 60 * 60 * 1000}",
+                nowMs = now,
+            ),
+        )
         // Не дата вовсе.
-        assertNull(RankWire.parse("APURANK1|1|$nodeId|20|0"))
+        assertNull(RankWire.parse("APURANK1|1|$nodeId|20|0", nowMs = now))
         // Небольшой запас на разъезд часов допускается.
         assertEquals(
             RankWire.PeerRank(nodeId, 20, now + 60_000),
