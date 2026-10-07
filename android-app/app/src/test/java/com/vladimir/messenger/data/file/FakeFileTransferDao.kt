@@ -1,6 +1,8 @@
 package com.vladimir.messenger.data.file
 
 import com.vladimir.messenger.data.local.dao.FileTransferDao
+import com.vladimir.messenger.data.local.dao.TransferErrorCount
+import com.vladimir.messenger.data.local.dao.TransferStateCount
 import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import kotlinx.coroutines.flow.Flow
@@ -17,6 +19,23 @@ class FakeFileTransferDao : FileTransferDao {
         observe.map { transfers.values.filter { entity -> entity.chatId == chatId } }
 
     override suspend fun getTransfer(transferId: String): FileTransferEntity? = transfers[transferId]
+
+    // Сводка для отчёта «Логи»: те же три запроса, что и в Room, но по памяти.
+    override suspend fun transferStateCounts(): List<TransferStateCount> =
+        transfers.values
+            .groupBy { it.state }
+            .map { (state, rows) -> TransferStateCount(state, rows.size.toLong()) }
+            .sortedBy { it.state }
+
+    override suspend fun transferErrorCounts(): List<TransferErrorCount> =
+        transfers.values
+            .filter { it.state == "FAILED" && it.errorCode != null }
+            .groupBy { it.errorCode }
+            .map { (code, rows) -> TransferErrorCount(code, rows.size) }
+            .sortedBy { it.errorCode.orEmpty() }
+
+    override suspend fun lastFailureAtMs(): Long? =
+        transfers.values.filter { it.state == "FAILED" }.maxOfOrNull { it.updatedAtMs }
 
     override suspend fun getActiveOutgoing(nowMs: Long): List<FileTransferEntity> =
         transfers.values
