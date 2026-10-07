@@ -40,7 +40,15 @@ fun UsernameConflictDialog() {
                         "зарегистрировался раньше. Задайте себе новый никнейм."
                 )
                 Spacer(Modifier.height(12.dp))
-                ApuBubbleField(value = usernameValue, onValueChange = { usernameValue = UsernameHolder.sanitize(it) }, label = { Text("никнейм") }, placeholder = { Text("никнейм") }, prefix = { Text("@") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                ApuBubbleField(
+                    value = usernameValue,
+                    onValueChange = { usernameValue = UsernameHolder.sanitize(it) },
+                    label = { Text("никнейм") },
+                    placeholder = { Text("никнейм") },
+                    prefix = { Text("@") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Spacer(Modifier.height(6.dp))
                 Text(
                     "Латинские буквы, цифры и подчёркивание.",

@@ -773,7 +773,13 @@ private fun NoteDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text("Заметка себе") },
         text = {
-            ApuBubbleField(value = text, onValueChange = { text = it }, label = { Text("Текст") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
+            ApuBubbleField(
+                value = text,
+                onValueChange = { text = it },
+                label = { Text("Текст") },
+                modifier = Modifier.fillMaxWidth(),
+                minLines = 3,
+            )
         },
         confirmButton = {
             ApuTextAction(

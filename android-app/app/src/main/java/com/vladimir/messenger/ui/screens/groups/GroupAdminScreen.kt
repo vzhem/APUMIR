@@ -375,8 +375,18 @@ private fun OverviewTab(
             // Поля внутри светлого пузыря: цвета ФИКСИРОВАННЫЕ, из темы брать
             // нельзя - в тёмной теме поле красилось в белый и на светлой
             // подложке «Название» и «Описание» пропадали (жалоба владельца).
-            ApuBubbleField(value = titleDraft, onValueChange = { titleDraft = it }, label = { Text("Название") }, modifier = Modifier.fillMaxWidth())
-            ApuBubbleField(value = aboutDraft, onValueChange = { aboutDraft = it }, label = { Text("Описание") }, modifier = Modifier.fillMaxWidth())
+            ApuBubbleField(
+                value = titleDraft,
+                onValueChange = { titleDraft = it },
+                label = { Text("Название") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            ApuBubbleField(
+                value = aboutDraft,
+                onValueChange = { aboutDraft = it },
+                label = { Text("Описание") },
+                modifier = Modifier.fillMaxWidth(),
+            )
             ApuTextAction(label = "Сохранить", onClick = { onSave(titleDraft, aboutDraft) })
         } else {
             // Без права менять информацию показываем только текст: поля и
@@ -688,7 +698,13 @@ private fun DeleteGroupDialog(
                     },
                 )
                 Spacer(Modifier.height(12.dp))
-                ApuBubbleField(value = typed, onValueChange = { typed = it }, label = { Text("Введите: $expected") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                ApuBubbleField(
+                    value = typed,
+                    onValueChange = { typed = it },
+                    label = { Text("Введите: $expected") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         },
         confirmButton = {

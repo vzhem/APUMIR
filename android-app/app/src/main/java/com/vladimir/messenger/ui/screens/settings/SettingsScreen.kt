@@ -226,7 +226,15 @@ fun SettingsScreen(
             onDismissRequest = { showNameDialog = false },
             title = { Text("Ваше имя") },
             text = {
-                ApuBubbleField(value = nameValue, onValueChange = { nameValue = it.take(50) }, label = { Text("Имя") }, placeholder = { Text("Имя Фамилия") }, singleLine = true, supportingText = { Text("${nameValue.trim().length}/50") }, modifier = Modifier.fillMaxWidth())
+                ApuBubbleField(
+                    value = nameValue,
+                    onValueChange = { nameValue = it.take(50) },
+                    label = { Text("Имя") },
+                    placeholder = { Text("Имя Фамилия") },
+                    singleLine = true,
+                    supportingText = { Text("${nameValue.trim().length}/50") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
             },
             confirmButton = {
                 ApuTextAction(
@@ -254,7 +262,15 @@ fun SettingsScreen(
             title = { Text("Ваш @никнейм") },
             text = {
                 Column {
-                    ApuBubbleField(value = usernameValue, onValueChange = { usernameValue = UsernameHolder.sanitize(it) }, label = { Text("никнейм") }, placeholder = { Text("никнейм") }, prefix = { Text("@") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                    ApuBubbleField(
+                        value = usernameValue,
+                        onValueChange = { usernameValue = UsernameHolder.sanitize(it) },
+                        label = { Text("никнейм") },
+                        placeholder = { Text("никнейм") },
+                        prefix = { Text("@") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                     Spacer(Modifier.height(6.dp))
                     Text(
                         "Латинские буквы, цифры и подчёркивание. " +
@@ -1988,7 +2004,13 @@ private fun ApkVersionDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(10.dp))
-                ApuBubbleField(value = version, onValueChange = { version = it }, singleLine = true, label = { Text("Версия") }, modifier = Modifier.fillMaxWidth())
+                ApuBubbleField(
+                    value        = version,
+                    onValueChange = { version = it },
+                    singleLine = true,
+                    label      = { Text("Версия") },
+                    modifier   = Modifier.fillMaxWidth(),
+                )
             }
         },
         confirmButton = {

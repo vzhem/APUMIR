@@ -1246,7 +1246,16 @@ fun GroupChatScreen(
                             )
                         }
                     }
-                    ApuBubbleField(value = uiState.draft, onValueChange = { viewModel.onDraftChanged(it) }, modifier = Modifier.fillMaxWidth().onFocusChanged { inputFocused = it.isFocused }, placeholder = { Text("Сообщение") }, minLines = 1, maxLines = 6)
+                    ApuBubbleField(
+                        value = uiState.draft,
+                        onValueChange = { viewModel.onDraftChanged(it) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onFocusChanged { inputFocused = it.isFocused },
+                        placeholder = { Text("Сообщение") },
+                        minLines = 1,
+                        maxLines = 6,
+                    )
                 }
                 Spacer(Modifier.height(6.dp))
                 // Раунд 152: активная «Отправить» - золотая заливка и белый
@@ -2225,7 +2234,13 @@ private fun NewTopicDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                ApuBubbleField(value = name, onValueChange = { name = it }, label = { Text("Название темы") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                ApuBubbleField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("Название темы") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 // Раунд 258: превью значка «подпрыгивает» при смене, как в Telegram.
                 val iconPop = remember { androidx.compose.animation.core.Animatable(1f) }
                 androidx.compose.runtime.LaunchedEffect(icon) {

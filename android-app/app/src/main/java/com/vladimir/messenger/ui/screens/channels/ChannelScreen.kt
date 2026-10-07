@@ -1323,7 +1323,12 @@ private fun PostEditorDialog(
         title = { Text(title) },
         text = {
             Column {
-                ApuBubbleField(value = text, onValueChange = { text = it }, label = { Text("Текст поста") }, modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp))
+                ApuBubbleField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text("Текст поста") },
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
+                )
                 Spacer(Modifier.height(8.dp))
                 if (images.isNotEmpty()) {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

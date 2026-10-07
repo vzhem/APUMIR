@@ -291,11 +291,23 @@ fun PollDraftFields(
     problem: String? = null,
 ) {
     Column(modifier = modifier) {
-        ApuBubbleField(value = state.question, onValueChange = { state.question = it }, label = { Text("Вопрос") }, modifier = Modifier.fillMaxWidth(), maxLines = 3)
+        ApuBubbleField(
+            value = state.question,
+            onValueChange = { state.question = it },
+            label = { Text("Вопрос") },
+            modifier = Modifier.fillMaxWidth(),
+            maxLines = 3,
+        )
         Spacer(Modifier.height(8.dp))
         state.options.forEachIndexed { index, text ->
             Row(verticalAlignment = Alignment.CenterVertically) {
-                ApuBubbleField(value = text, onValueChange = { state.options[index] = it }, label = { Text("Вариант ${index + 1}") }, modifier = Modifier.weight(1f), singleLine = true)
+                ApuBubbleField(
+                    value = text,
+                    onValueChange = { state.options[index] = it },
+                    label = { Text("Вариант ${index + 1}") },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                )
             }
             Spacer(Modifier.height(6.dp))
         }

@@ -184,22 +184,111 @@ private fun EnterNameStep(
 
         // Имя нужно только новичку: при восстановлении оно придёт из профиля.
         if (!state.restoreMode) {
-            ApuBubbleField(value = state.displayName, onValueChange = onNameChanged, label = { Text("Ваше имя") }, placeholder = { Text("Имя Фамилия") }, singleLine = true, isError = state.nameError != null, supportingText = { if (state.nameError != null) { Text(state.nameError, color = MaterialTheme.colorScheme.error) } else { Text("${state.displayName.length}/50", color = MaterialTheme.colorScheme.onSurfaceVariant) } }, leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) }, keyboardOptions = KeyboardOptions( capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next), modifier = Modifier.fillMaxWidth())
+            ApuBubbleField(
+                value    = state.displayName,
+                onValueChange = onNameChanged,
+                label    = { Text("Ваше имя") },
+                placeholder = { Text("Имя Фамилия") },
+                singleLine = true,
+                isError  = state.nameError != null,
+                supportingText = {
+                    if (state.nameError != null) {
+                        Text(state.nameError, color = MaterialTheme.colorScheme.error)
+                    } else {
+                        Text("${state.displayName.length}/50", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Words,
+                    imeAction      = ImeAction.Next,
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
             Spacer(modifier = Modifier.height(12.dp))
         }
 
-        ApuBubbleField(value = state.nickname, onValueChange = onNicknameChanged, label = { Text("Никнейм") }, placeholder = { Text("ваш_никнейм") }, singleLine = true, isError = state.nicknameError != null, supportingText = { Text( state.nicknameError ?: "Латиница, цифры и подчёркивание, минимум 3 знака", color = if (state.nicknameError != null) { MaterialTheme.colorScheme.error } else { MaterialTheme.colorScheme.onSurfaceVariant }) }, leadingIcon = { Icon(Icons.Default.AlternateEmail, contentDescription = null) }, keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next), modifier = Modifier.fillMaxWidth())
+        ApuBubbleField(
+            value    = state.nickname,
+            onValueChange = onNicknameChanged,
+            label    = { Text("Никнейм") },
+            placeholder = { Text("ваш_никнейм") },
+            singleLine = true,
+            isError  = state.nicknameError != null,
+            supportingText = {
+                Text(
+                    state.nicknameError ?: "Латиница, цифры и подчёркивание, минимум 3 знака",
+                    color = if (state.nicknameError != null) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            },
+            leadingIcon = { Icon(Icons.Default.AlternateEmail, contentDescription = null) },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+            modifier = Modifier.fillMaxWidth(),
+        )
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        ApuBubbleField(value = state.password, onValueChange = onPasswordChanged, label = { Text("Пароль") }, singleLine = true, isError = state.passwordError != null, visualTransformation = PasswordVisualTransformation(), supportingText = { Text( state.passwordError ?: if (state.restoreMode) "Тот, что задавали раньше" else "Минимум $MIN_PASSWORD_LENGTH знаков", color = if (state.passwordError != null) { MaterialTheme.colorScheme.error } else { MaterialTheme.colorScheme.onSurfaceVariant }) }, leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) }, keyboardOptions = KeyboardOptions( keyboardType = KeyboardType.Password, imeAction = if (state.restoreMode) ImeAction.Done else ImeAction.Next), keyboardActions = KeyboardActions( onDone = { if (state.restoreMode && state.canSubmit) onRestoreClick() }), modifier = Modifier.fillMaxWidth())
+        ApuBubbleField(
+            value    = state.password,
+            onValueChange = onPasswordChanged,
+            label    = { Text("Пароль") },
+            singleLine = true,
+            isError  = state.passwordError != null,
+            visualTransformation = PasswordVisualTransformation(),
+            supportingText = {
+                Text(
+                    state.passwordError
+                        ?: if (state.restoreMode) "Тот, что задавали раньше"
+                        else "Минимум $MIN_PASSWORD_LENGTH знаков",
+                    color = if (state.passwordError != null) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            },
+            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password,
+                imeAction    = if (state.restoreMode) ImeAction.Done else ImeAction.Next,
+            ),
+            keyboardActions = KeyboardActions(
+                onDone = { if (state.restoreMode && state.canSubmit) onRestoreClick() },
+            ),
+            modifier = Modifier.fillMaxWidth(),
+        )
 
         // Повтор только при регистрации: опечатку в пароле человек обнаружил
         // бы лишь при восстановлении, когда исправить уже нечем.
         if (!state.restoreMode) {
             Spacer(modifier = Modifier.height(12.dp))
             val mismatch = state.passwordRepeat.isNotEmpty() && state.passwordRepeat != state.password
-            ApuBubbleField(value = state.passwordRepeat, onValueChange = onPasswordRepeatChanged, label = { Text("Подтвердите пароль") }, singleLine = true, isError = mismatch, visualTransformation = PasswordVisualTransformation(), supportingText = { if (mismatch) { Text("Пароли не совпадают", color = MaterialTheme.colorScheme.error) } }, leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) }, keyboardOptions = KeyboardOptions( keyboardType = KeyboardType.Password, imeAction = ImeAction.Done), keyboardActions = KeyboardActions( onDone = { if (state.canSubmit) onCreateClick() }), modifier = Modifier.fillMaxWidth())
+            ApuBubbleField(
+                value    = state.passwordRepeat,
+                onValueChange = onPasswordRepeatChanged,
+                label    = { Text("Подтвердите пароль") },
+                singleLine = true,
+                isError  = mismatch,
+                visualTransformation = PasswordVisualTransformation(),
+                supportingText = {
+                    if (mismatch) {
+                        Text("Пароли не совпадают", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Password,
+                    imeAction    = ImeAction.Done,
+                ),
+                keyboardActions = KeyboardActions(
+                    onDone = { if (state.canSubmit) onCreateClick() },
+                ),
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -482,7 +571,13 @@ private fun ShowInviteStep(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(10.dp))
-                ApuBubbleField(value = joinText, onValueChange = { joinText = it }, label = { Text("Ссылка или сообщение от друга") }, minLines = 2, modifier = Modifier.fillMaxWidth())
+                ApuBubbleField(
+                    value = joinText,
+                    onValueChange = { joinText = it },
+                    label = { Text("Ссылка или сообщение от друга") },
+                    minLines = 2,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Spacer(modifier = Modifier.height(10.dp))
                 Button(
                     onClick = { onJoinByInvite(joinText) },

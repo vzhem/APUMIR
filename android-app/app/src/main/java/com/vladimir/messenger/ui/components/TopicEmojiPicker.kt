@@ -224,7 +224,16 @@ fun TopicEmojiPicker(
     val items = remember(query) { TopicEmojiCatalog.search(query) }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        ApuBubbleField(value = query, onValueChange = { query = it }, label = { Text("Поиск") }, leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        ApuBubbleField(
+            value = query,
+            onValueChange = { query = it },
+            label = { Text("Поиск") },
+            leadingIcon = {
+                Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+            },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
         // Раунд 259: ленты «недавних» между поиском и сеткой больше нет -
         // владелец попросил убрать, сетка начинается сразу.
         LazyVerticalGrid(

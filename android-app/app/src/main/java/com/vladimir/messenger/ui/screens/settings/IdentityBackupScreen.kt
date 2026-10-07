@@ -166,11 +166,55 @@ fun IdentityBackupScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Spacer(Modifier.height(12.dp))
-                            ApuBubbleField(value = nickname, onValueChange = { nickname = it }, label = { Text("Никнейм") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                            ApuBubbleField(
+                                value = nickname,
+                                onValueChange = { nickname = it },
+                                label = { Text("Никнейм") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
                             Spacer(Modifier.height(8.dp))
-                            ApuBubbleField(value = password, onValueChange = { password = it }, label = { Text("Пароль") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), isError = password.isNotEmpty() && password.length < MIN_PASSWORD, supportingText = { Text( if (password.isNotEmpty() && password.length < MIN_PASSWORD) { "Ещё ${MIN_PASSWORD - password.length} знак(ов)" } else { "Минимум $MIN_PASSWORD знаков" }, color = if (password.isNotEmpty() && password.length < MIN_PASSWORD) { MaterialTheme.colorScheme.error } else { MaterialTheme.colorScheme.onSurfaceVariant }) }, modifier = Modifier.fillMaxWidth())
+                            ApuBubbleField(
+                                value = password,
+                                onValueChange = { password = it },
+                                label = { Text("Пароль") },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                isError = password.isNotEmpty() && password.length < MIN_PASSWORD,
+                                supportingText = {
+                                    Text(
+                                        if (password.isNotEmpty() && password.length < MIN_PASSWORD) {
+                                            "Ещё ${MIN_PASSWORD - password.length} знак(ов)"
+                                        } else {
+                                            "Минимум $MIN_PASSWORD знаков"
+                                        },
+                                        color = if (password.isNotEmpty() && password.length < MIN_PASSWORD) {
+                                            MaterialTheme.colorScheme.error
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                    )
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
                             Spacer(Modifier.height(8.dp))
-                            ApuBubbleField(value = repeat, onValueChange = { repeat = it }, label = { Text("Пароль ещё раз") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), isError = repeat.isNotEmpty() && repeat != password, supportingText = { if (repeat.isNotEmpty() && repeat != password) { Text( "Пароли не совпадают", color = MaterialTheme.colorScheme.error) } }, modifier = Modifier.fillMaxWidth())
+                            ApuBubbleField(
+                                value = repeat,
+                                onValueChange = { repeat = it },
+                                label = { Text("Пароль ещё раз") },
+                                singleLine = true,
+                                visualTransformation = PasswordVisualTransformation(),
+                                isError = repeat.isNotEmpty() && repeat != password,
+                                supportingText = {
+                                    if (repeat.isNotEmpty() && repeat != password) {
+                                        Text(
+                                            "Пароли не совпадают",
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
                             Spacer(Modifier.height(12.dp))
                             Button(
                                 onClick = { viewModel.save(nickname, password) },

@@ -801,8 +801,25 @@ private fun CreateGroupDialog(
                     onSelectChannel = { isChannel = it },
                 )
 
-                ApuBubbleField(value = title, onValueChange = { title = it }, label = { Text(if (isChannel) "Название канала" else "Название") }, placeholder = { Text(if (isChannel) "Например, Новости APU" else "Например, Рабочий чат") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                ApuBubbleField(value = about, onValueChange = { about = it }, label = { Text(if (isChannel) "Описание канала" else "Описание") }, placeholder = { Text("О чём сообщество (необязательно)") }, minLines = 2, maxLines = 4, modifier = Modifier.fillMaxWidth())
+                ApuBubbleField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text(if (isChannel) "Название канала" else "Название") },
+                    placeholder = {
+                        Text(if (isChannel) "Например, Новости APU" else "Например, Рабочий чат")
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                ApuBubbleField(
+                    value = about,
+                    onValueChange = { about = it },
+                    label = { Text(if (isChannel) "Описание канала" else "Описание") },
+                    placeholder = { Text("О чём сообщество (необязательно)") },
+                    minLines = 2,
+                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth(),
+                )
 
                 // Настройки доступа и тем — в единой карточке с иконками в стиле APU.
                 Column(
@@ -1051,7 +1068,17 @@ private fun JoinByLinkDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = ApuBubbleMutedColor,
                 )
-                ApuBubbleField(value = link, onValueChange = { link = it error = null }, label = { Text("Ссылка-приглашение") }, placeholder = { Text("Ссылка") }, maxLines = 4, modifier = Modifier.fillMaxWidth())
+                ApuBubbleField(
+                    value = link,
+                    onValueChange = {
+                        link = it
+                        error = null
+                    },
+                    label = { Text("Ссылка-приглашение") },
+                    placeholder = { Text("Ссылка") },
+                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 error?.let {
                     Text(
                         it,
