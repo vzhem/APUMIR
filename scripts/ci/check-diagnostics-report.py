@@ -643,6 +643,12 @@ class DiagnosticsContractsTest(unittest.TestCase):
             # занят резерв «своих» (владелец 2026-10-07).
             "Relay-очередь: своих={} сигналов={} чужих={}",
             "MAX_TOTAL + MAX_OWN_TOTAL",
+            # Владелец 2026-10-07 (отчёт v11.74.199): «своё ждёт получателя=1000»
+            # при «сигналов=0» и постоянных «delivery ACK received». Прямое
+            # подтверждение доставки обязано снимать запись с удержания — иначе
+            # резерв «своих» не разгружается никогда (снимал только receipt).
+            "remove_delivered_own(mid)",
+            "MQTT: delivery ACK снял",
         ):
             with self.subTest(marker=marker):
                 self.assertTrue(marker in core, f"нет маркера {marker} в core.rs")

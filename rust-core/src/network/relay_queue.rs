@@ -22,6 +22,7 @@
 //! См. `docs/MESH_DELIVERY.md`.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -555,6 +556,9 @@ struct QueueEntry {
 /// (очередь небольшая; для больших объёмов позже добавим индекс).
 pub struct RelayQueue {
     entries: Mutex<HashMap<String, QueueEntry>>,
+    /// Сколько СВОИХ записей освободил прямой ACK доставки. Нужно журналу: «своих=1000» само по себе не показывает,
+    /// работает ли разгрузка (владелец, 2026-10-07).
+    delivered_removed: AtomicUsize,
     max_per_recipient: usize,
     max_total: usize,
     max_own_per_recipient: usize,
@@ -578,6 +582,7 @@ impl RelayQueue {
     pub fn new() -> Self {
         RelayQueue {
             entries: Mutex::new(HashMap::new()),
+            delivered_removed: AtomicUsize::new(0),
             max_per_recipient: MAX_PER_RECIPIENT,
             max_total: MAX_TOTAL,
             max_own_per_recipient: MAX_OWN_PER_RECIPIENT,
@@ -601,6 +606,7 @@ impl RelayQueue {
     ) -> Self {
         RelayQueue {
             entries: Mutex::new(HashMap::new()),
+            delivered_removed: AtomicUsize::new(0),
             max_per_recipient,
             max_total,
             max_own_per_recipient,
@@ -960,6 +966,42 @@ impl RelayQueue {
     /// Возвращает `true` если найдено и удалено.
     pub fn remove(&self, msg_id: &str) -> bool {
         self.entries.lock().unwrap().remove(msg_id).is_some()
+    }
+
+    /// Снять с удержания ПОДТВЕРЖДЁННОЕ сообщение: получатель ответил
+    /// «ack|<id>» — прямое подтверждение доставки.
+    ///
+    /// Удаляем только своё. Чужой ретранслируемый конверт подтверждают не
+    /// нам, и снимать его по чужому идентификатору нельзя — сосед потеряет
+    /// пересылку. Возвращает `true`, если запись была своя и удалена.
+    ///
+    /// Владелец 2026-10-07 (отчёт v11.74.199): раньше снимал только receipt,
+    /// а прямой MQTT-ACK лишь зажигал галочку. Каждая доставленная строка
+    /// оставалась в резерве «своих» навсегда — в журнале это выглядело как
+    /// «своё ждёт получателя=1000» при непрерывных «delivery ACK received».
+    pub fn remove_delivered_own(&self, msg_id: &str) -> bool {
+        let mut entries = self.entries.lock().unwrap();
+        // «Своё?» читаем отдельным шагом: держать ссылку из `get` во время
+        // `remove` нельзя — borrow checker не пропустит.
+        let is_own = match entries.get(msg_id) {
+            Some(entry) => entry.own,
+            None => return false,
+        };
+        if !is_own {
+            return false;
+        }
+        let removed = entries.remove(msg_id).is_some();
+        if removed {
+            self.delivered_removed.fetch_add(1, Ordering::Relaxed);
+        }
+        removed
+    }
+
+    /// Сколько СВОИХ записей снято с удержания прямым подтверждением
+    /// доставки («ack|<id>») за время работы очереди. Mesh receipt идёт
+    /// своим путём (он только наш — там снятие всегда по адресату).
+    pub fn delivered_removed(&self) -> usize {
+        self.delivered_removed.load(Ordering::Relaxed)
     }
 
     /// Удалить все сообщения для получателя (например, после прямой доставки).
@@ -1424,6 +1466,29 @@ mod tests {
         assert!(q.remove("m1"));
         assert!(!q.contains("m1"));
         assert!(!q.remove("m1")); // повторно — false
+    }
+
+    #[test]
+    fn test_remove_delivered_own_only_touches_own() {
+        let q = RelayQueue::new();
+        assert!(q.enqueue_own(msg("m1", "pk_b")).unwrap());
+        assert!(q.enqueue(msg("m2", "pk_b")).unwrap());
+
+        // Подтверждение доставки снимает СВОЮ переписку с удержания...
+        assert!(q.remove_delivered_own("m1"));
+        assert!(!q.contains("m1"));
+        assert_eq!(q.own_count(), 0);
+
+        // ...но НЕ чужую ретрансляцию: её подтверждают не нам.
+        assert!(!q.remove_delivered_own("m2"));
+        assert!(q.contains("m2"));
+
+        // Повтор и незнакомый id — безопасный false, без паники.
+        assert!(!q.remove_delivered_own("m1"));
+        assert!(!q.remove_delivered_own("unknown"));
+
+        // Счётчик для журнала: считает только реальные снятия «своих».
+        assert_eq!(q.delivered_removed(), 1);
     }
 
     #[test]

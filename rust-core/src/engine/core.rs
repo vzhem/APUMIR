@@ -3301,6 +3301,53 @@ impl P2PCore {
                             events.emit(CoreEvent::MessageDelivered {
                                 message_id: mid.to_string(),
                             });
+
+                            // Владелец 2026-10-07 (отчёт v11.74.199: «своё ждёт
+                            // получателя=1000» при «сигналов=0» и постоянных
+                            // «delivery ACK received»). Подтверждение доставки
+                            // ОБЯЗАНО снимать запись с удержания — иначе каждая
+                            // доставленная строка навсегда остаётся в резерве
+                            // «своих» и однажды вытеснит недоставленное.
+                            // Раньше это делал только mesh receipt; прямой
+                            // MQTT-ACK лишь зажигал галочку.
+                            // Чужую ретрансляцию подтверждают не нам: её не
+                            // трогаем ни в RAM, ни в durable.
+                            let ack_is_foreign = relay_queue
+                                .as_ref()
+                                .and_then(|q| q.is_own(mid))
+                                == Some(false);
+                            if let Some(ref q) = relay_queue {
+                                if q.remove_delivered_own(mid) {
+                                    tracing::info!(
+                                        "MQTT: delivery ACK снял {} с удержания (своё доставлено)",
+                                        mid
+                                    );
+                                }
+                            }
+                            // Durable-копия — по образцу receipt: снимаем и
+                            // ставим tombstone, чтобы после перезапуска запись
+                            // не «ожила» и снова не заняла резерв.
+                            if !ack_is_foreign {
+                                if let Some(ref custody) = relay_custody {
+                                    let now_durable =
+                                        crate::network::relay_queue::utc_now_ms();
+                                    match custody
+                                        .store
+                                        .remove_encrypted_and_tombstone(mid, now_durable)
+                                    {
+                                        Ok(true) => tracing::info!(
+                                            "MQTT: delivery ACK removed durable custody for {}",
+                                            mid
+                                        ),
+                                        Ok(false) => {}
+                                        Err(e) => tracing::warn!(
+                                            "MQTT: durable cleanup failed for {}: {}",
+                                            mid,
+                                            e
+                                        ),
+                                    }
+                                }
+                            }
                         }
                     } else if evt.payload.starts_with("relay|") {
                         // M3(a): relay-конверт. Gossip будет добавлен отдельным шагом
@@ -3987,12 +4034,13 @@ impl P2PCore {
                     let stats = q.stats();
                     if stats.total > 0 {
                         tracing::info!(
-                            "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={}",
+                            "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={} снято-по-ACK={}",
                             stats.own,
                             stats.own_transients,
                             stats.foreign,
                             stats.total,
-                            stats.recipients
+                            stats.recipients,
+                            q.delivered_removed()
                         );
                     }
                 }
