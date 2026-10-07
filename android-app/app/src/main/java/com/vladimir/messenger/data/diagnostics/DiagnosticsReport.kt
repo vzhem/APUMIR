@@ -127,6 +127,14 @@ data class DiagnosticsFacts(
      * Это пакеты для ДРУГИХ узлов — телефон-хранитель не успевает их раздать.
      */
     val relayQueueFull: Long = 0L,
+    /**
+     * Сколько СВОИХ сообщений ждёт получателя в очереди ядра (null — ядро
+     * ещё не писало сводку, значит очередь пуста). Своя переписка живёт
+     * отдельно от чужой пересылки и никогда ею не вытесняется.
+     */
+    val relayQueueOwn: Long? = null,
+    /** Сколько ЧУЖИХ сообщений (пересылка для других узлов) лежит в очереди. */
+    val relayQueueForeign: Long? = null,
 )
 
 /** Имена счётчиков сессии: один список для записи (хуки) и для отчёта. */
@@ -506,6 +514,10 @@ object DiagnosticsReport {
         val notes = buildString {
             if (queued > 0L) append(" · отложено до сети $queued")
             if (failed > 0L) append(" · не ушло $failed")
+            // Своя переписка ждёт получателя в очереди ядра: это не отказ и не
+            // потеря, но человек должен видеть, что сообщение ещё не дошло.
+            val waiting = facts.relayQueueOwn ?: 0L
+            if (waiting > 0L) append(" · своё ждёт получателя $waiting")
         }
         return when {
             // Смена ключа перевешивает остальные исходы: пока не отсканируют
@@ -670,6 +682,14 @@ object DiagnosticsReport {
         )
         appendLine("пересылка: отброшено из-за полной очереди=${facts.relayQueueFull}")
         appendLine(
+            "очередь ядра: своё ждёт получателя=" +
+                (facts.relayQueueOwn?.toString() ?: "нет (пусто)"),
+        )
+        appendLine(
+            "очередь ядра: чужая пересылка=" +
+                (facts.relayQueueForeign?.toString() ?: "нет (пусто)"),
+        )
+        appendLine(
             "смена ключа у собеседника (раз)=" + (c[Counters.MSG_PEER_KEY_CHANGED] ?: 0L),
         )
         appendLine(
@@ -694,8 +714,15 @@ object DiagnosticsReport {
         }
         if (facts.relayQueueFull > 0L) {
             appendLine(
-                "  ↳ пересылка: это пакеты для других узлов — получатель давно не в сети, " +
-                    "очередь на 500 записей заполнена",
+                "  ↳ пересылка: это пакеты для ДРУГИХ узлов — получатель давно не в сети, " +
+                    "чужой лимит на получателя исчерпан",
+            )
+        }
+        val ownWaiting = facts.relayQueueOwn ?: 0L
+        if (ownWaiting > 0L) {
+            appendLine(
+                "  ↳ своё ждёт получателя: он не в сети; своя переписка идёт первой и не " +
+                    "делит лимит с чужой пересылкой",
             )
         }
         appendLine()

@@ -180,6 +180,8 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "relayQueueOverflowIsExplainedNotJustCounted",
             "peerKeyChangeExplainsSilentChat",
             "offlineQueueIsNotMistakenForSilence",
+            "queueIsSplitBetweenOwnAndForeign",
+            "foreignQueueAloneIsNotAWarning",
             "refusedSendIsNamedInTheSummary",
         ):
             with self.subTest(test=test):
@@ -212,6 +214,8 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "не вскрылось (чужая переписка или устаревший ключ)=",
             "ядро передало сигналов=",
             "пересылка: отброшено из-за полной очереди=",
+            "очередь ядра: своё ждёт получателя=",
+            "очередь ядра: чужая пересылка=",
             "смена ключа у собеседника (раз)=",
             "отложено до сети (уйдёт само)=",
             "не ушло (узел отказал или нет сети)=",
@@ -238,6 +242,8 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "relayQueueFull = all.count",
             "Relay-очередь получателя переполнена",
             "MessageReceived EMITTED",
+            "Relay-очередь: своих=",
+            "private fun queueStat(",
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, collector)
@@ -268,6 +274,46 @@ class DiagnosticsContractsTest(unittest.TestCase):
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, chat)
+
+    def test_core_queue_separates_own_from_foreign(self):
+        """Своя переписка не может быть отказана или вытеснена чужой пересылкой."""
+        queue = source(ROOT / "rust-core/src/network/relay_queue.rs")
+        for marker in (
+            "MAX_OWN_PER_RECIPIENT",
+            "MAX_OWN_TOTAL",
+            "pub fn enqueue_own(",
+            "fn evict_oldest_own_for(",
+            "fn evict_oldest_own(",
+            "pub fn own_count(",
+            "pub fn foreign_count(",
+            "pub struct RelayQueueStats",
+            "pub fn stats(",
+        ):
+            with self.subTest(marker=marker):
+                # Короткое сообщение: упавший assertIn печатает весь файл, а
+                # этот текст уходит в комментарий к PR (2026-10-06).
+                self.assertTrue(marker in queue, f"нет маркера {marker} в relay_queue.rs")
+        # Лимиты получателя/очереди считают ТОЛЬКО чужое.
+        for marker in (
+            "fn enqueue_foreign(",
+            "self.foreign_for_locked(&entries, &msg.recipient)",
+            "self.foreign_count_locked(&entries) >= self.max_total",
+            # Своё идёт первым и в выдаче получателю, и в gossip-раунде.
+            "b.own",
+        ):
+            with self.subTest(marker=marker):
+                self.assertTrue(marker in queue, f"нет маркера {marker} в relay_queue.rs")
+        core = source(ROOT / "rust-core/src/engine/core.rs")
+        for marker in (
+            "enqueue_own(prepared.message)",
+            "q.enqueue_own(next_hop_message)",
+            "let is_own_origin = origin == node_id;",
+            "queue.enqueue_own(record)",
+            "Relay-очередь: своих={} чужих={}",
+            "MAX_TOTAL + MAX_OWN_TOTAL",
+        ):
+            with self.subTest(marker=marker):
+                self.assertTrue(marker in core, f"нет маркера {marker} в core.rs")
 
     def test_mqtt_is_explained_by_one_shared_parser(self):
         view_model = source(VIEW_MODEL)

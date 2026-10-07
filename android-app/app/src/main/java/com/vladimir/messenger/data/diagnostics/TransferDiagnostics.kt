@@ -358,6 +358,8 @@ object TransferDiagnostics {
             peerKeyChangedAtMs = peerKeyChangedAtMs,
             coreMessageSignals = logcat.coreMessageSignals,
             relayQueueFull = logcat.relayQueueFull,
+            relayQueueOwn = logcat.queueOwn,
+            relayQueueForeign = logcat.queueForeign,
         )
     }
 
@@ -372,6 +374,13 @@ object TransferDiagnostics {
         val lines: List<String>,
         val coreMessageSignals: Long,
         val relayQueueFull: Long,
+        /**
+         * Последняя сводка очереди из журнала ядра: «Relay-очередь: своих=N
+         * чужих=M». null — ядро такой строки ещё не писало (очередь пуста).
+         * Владелец 2026-10-07: «нужно разделить свои и чужие».
+         */
+        val queueOwn: Long?,
+        val queueForeign: Long?,
     )
 
     private data class BatteryFacts(
@@ -538,8 +547,29 @@ object TransferDiagnostics {
             ),
             coreMessageSignals = all.count { it.contains(CORE_MESSAGE_SIGNAL) }.toLong(),
             relayQueueFull = all.count { it.contains(RELAY_QUEUE_FULL) }.toLong(),
+            queueOwn = queueStat(all, true),
+            queueForeign = queueStat(all, false),
         )
-    }.getOrDefault(LogcatScan(emptyList(), 0L, 0L))
+    }.getOrDefault(LogcatScan(emptyList(), 0L, 0L, null, null))
+
+    /**
+     * Число из последней строки «Relay-очередь: своих=N чужих=M». Берём именно
+     * последнюю: она самая свежая, а старые строки остаются в журнале после
+     * того, как очередь уже разошлась.
+     */
+    private fun queueStat(lines: List<String>, own: Boolean): Long? {
+        val marker = if (own) "своих=" else "чужих="
+        for (line in lines.asReversed()) {
+            val at = line.indexOf(RELAY_QUEUE_STATS)
+            if (at < 0) continue
+            val start = line.indexOf(marker, at)
+            if (start < 0) continue
+            val digits = line.substring(start + marker.length)
+                .takeWhile { it.isDigit() }
+            if (digits.isNotEmpty()) return digits.toLongOrNull()
+        }
+        return null
+    }
 
     private val knownLogTags = listOf(
         "p2p_core",
@@ -570,6 +600,9 @@ object TransferDiagnostics {
         "Delivery ACK sent",
         "delivery ACK",
         "Relay-очередь получателя переполнена",
+        "Relay-очередь: своих=",
+        "запас своих",
+        "СВОЁ сообщение не удержано",
         "File HELLO",
         "exchange key changed",
         // Присутствие собеседника: если он «выходит в сеть» каждые 10–30 с,
@@ -614,6 +647,9 @@ object TransferDiagnostics {
 
     /** Строка ядра: пересылка не смогла сохранить пакет — очередь получателя полна. */
     private const val RELAY_QUEUE_FULL = "Relay-очередь получателя переполнена"
+
+    /** Минутная сводка ядра: «Relay-очередь: своих=N чужих=M всего=T». */
+    private const val RELAY_QUEUE_STATS = "Relay-очередь: своих="
 
     private const val MEBIBYTE = 1024L * 1024L
 }

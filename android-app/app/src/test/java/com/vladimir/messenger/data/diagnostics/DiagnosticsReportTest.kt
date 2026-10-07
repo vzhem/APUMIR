@@ -29,6 +29,8 @@ class DiagnosticsReportTest {
         peerKeyChangedAtMs: Long = 0L,
         coreMessageSignals: Long = 0L,
         relayQueueFull: Long = 0L,
+        relayQueueOwn: Long? = null,
+        relayQueueForeign: Long? = null,
     ) = DiagnosticsFacts(
         createdAtMs = 1_700_000_000_000L,
         sessionStartedAtMs = 1_700_000_000_000L - 168_000L,
@@ -75,6 +77,8 @@ class DiagnosticsReportTest {
         peerKeyChangedAtMs = peerKeyChangedAtMs,
         coreMessageSignals = coreMessageSignals,
         relayQueueFull = relayQueueFull,
+        relayQueueOwn = relayQueueOwn,
+        relayQueueForeign = relayQueueForeign,
     )
 
     private fun titles(lines: List<DiagnosticsLine>): List<String> = lines.map { it.title }
@@ -140,6 +144,8 @@ class DiagnosticsReportTest {
             "не вскрылось (чужая переписка или устаревший ключ)=2",
             "ядро передало сигналов=42",
             "пересылка: отброшено из-за полной очереди=9",
+            "очередь ядра: своё ждёт получателя=нет (пусто)",
+            "очередь ядра: чужая пересылка=нет (пусто)",
         )) {
             assertTrue("в отчёте нет строки: $marker", report.contains(marker))
         }
@@ -204,6 +210,46 @@ class DiagnosticsReportTest {
         )
         assertTrue(report.contains("смена ключа у собеседника (раз)=1"))
         assertTrue(report.contains("отсканируйте его QR-код заново"))
+    }
+
+    /**
+     * Владелец 2026-10-07: «нужно разделить свои и чужие, свои всегда
+     * первостепенны». В отчёте своя переписка и чужая пересылка — разные
+     * строки, и «своё ждёт получателя» не прячется за общим числом.
+     */
+    @Test
+    fun queueIsSplitBetweenOwnAndForeign() {
+        val report = DiagnosticsReport.render(
+            facts = facts(relayQueueOwn = 2L, relayQueueForeign = 340L),
+            journal = emptyList(),
+            logcat = emptyList(),
+        )
+        assertTrue(report.contains("очередь ядра: своё ждёт получателя=2"))
+        assertTrue(report.contains("очередь ядра: чужая пересылка=340"))
+        assertTrue(report.contains("не делит лимит с чужой пересылкой"))
+
+        // И в сводке: своё ждёт получателя — это оговорка, а не «всё хорошо».
+        val message = DiagnosticsReport.summaryLines(
+            facts(
+                counters = mapOf(Counters.MSG_IN to 3L, Counters.MSG_OUT to 4L),
+                lastIncomingAtMs = 1_700_000_000_000L - 60_000L,
+                relayQueueOwn = 2L,
+            ),
+        ).first { it.title == "Сообщения" }
+        assertTrue(message.value.contains("своё ждёт получателя 2"))
+    }
+
+    /** Чужая очередь сама по себе — не повод пугать: она для других узлов. */
+    @Test
+    fun foreignQueueAloneIsNotAWarning() {
+        val message = DiagnosticsReport.summaryLines(
+            facts(
+                counters = mapOf(Counters.MSG_IN to 1L),
+                relayQueueForeign = 480L,
+            ),
+        ).first { it.title == "Сообщения" }
+        assertEquals(DiagnosticsLevel.OK, message.level)
+        assertFalse(message.value.contains("ждёт получателя"))
     }
 
     /** «Отложено до сети» — это не молчание и не поломка, так и должно звучать. */

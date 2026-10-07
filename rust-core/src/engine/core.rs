@@ -54,7 +54,7 @@ use crate::network::message_queue::MessageQueue;
 use crate::network::offline_send::prepare_offline_relay;
 use crate::network::relay_queue::{
     RelayMessage, RelayQueue, RelayQueueError, DEFAULT_RELAY_TTL, MAX_MESH_RELAY_ENVELOPE_BYTES,
-    MAX_TOTAL,
+    MAX_OWN_TOTAL, MAX_TOTAL,
 };
 use crate::network::wire::MeshEnvelope;
 use crate::storage::relay_at_rest::{self as at_rest, RelayAtRestKeySource};
@@ -196,6 +196,7 @@ fn open_relay_custody(db_path: Option<&str>) -> RelayCustody {
 fn restore_relay_custody(
     relay_queue: Option<&Arc<RelayQueue>>,
     relay_custody: Option<&Arc<RelayCustody>>,
+    own_origin: &str,
 ) {
     let (queue, custody) = match (relay_queue, relay_custody) {
         (Some(q), Some(s)) => (q, s),
@@ -214,9 +215,11 @@ fn restore_relay_custody(
         Err(e) => tracing::warn!("MESH durable: purge_expired failed at startup: {}", e),
     }
 
+    // Лимит загрузки = чужой предел + свой резерв: своя переписка не должна
+    // упираться в чужой лимит и при восстановлении тоже (владелец, 2026-10-07).
     match custody
         .store
-        .load_unexpired_encrypted(&*custody.keys, now_ms, MAX_TOTAL)
+        .load_unexpired_encrypted(&*custody.keys, now_ms, MAX_TOTAL + MAX_OWN_TOTAL)
     {
         Ok(outcome) => {
             if outcome.quarantined > 0 {
@@ -230,8 +233,10 @@ fn restore_relay_custody(
             }
             let total = outcome.records.len();
             let mut restored = 0usize;
+            let mut own_restored = 0usize;
             let mut recipient_full = 0usize;
             let mut queue_full = 0usize;
+            let mut own_full = 0usize;
             for record in outcome.records {
                 // enqueue_first (а не enqueue): под восстановление освобождает
                 // место, убирая только просроченное, и НЕ обрывается на
@@ -239,26 +244,45 @@ fn restore_relay_custody(
                 // один забитый получатель (500 записей) отменял восстановление
                 // всем, кто шёл дальше по списку, — в отчёте это выглядело как
                 // «restore enqueue failed: Relay-очередь получателя переполнена».
-                match queue.enqueue_first(record) {
-                    Ok(true) => restored += 1,
+                // Владелец 2026-10-07: свои и чужие живут в разных запасах.
+                // Своя переписка (origin — наш узел) восстанавливается через
+                // enqueue_own: чужой лимит ей не указ. Чужая — как раньше,
+                // строго и без вытеснения недоставленного.
+                let is_own = !own_origin.is_empty() && record.origin_sender == own_origin;
+                let outcome = if is_own {
+                    queue.enqueue_own(record)
+                } else {
+                    queue.enqueue_first(record)
+                };
+                match outcome {
+                    Ok(true) => {
+                        restored += 1;
+                        if is_own {
+                            own_restored += 1;
+                        }
+                    }
                     Ok(false) => {} // дубль/исчерпанный hop — ожидаемо пропускаем
                     Err(RelayQueueError::RecipientQueueFull { .. }) => recipient_full += 1,
                     Err(RelayQueueError::GlobalQueueFull { .. }) => queue_full += 1,
+                    Err(RelayQueueError::OwnQueueFull { .. }) => own_full += 1,
                 }
             }
             if total > 0 || restored > 0 {
                 tracing::info!(
-                    "MESH durable: restored {}/{} relay record(s) after startup",
+                    "MESH durable: restored {}/{} relay record(s) after startup (своих {}, чужих {})",
                     restored,
-                    total
+                    total,
+                    own_restored,
+                    restored - own_restored
                 );
             }
-            if recipient_full > 0 || queue_full > 0 {
+            if recipient_full > 0 || queue_full > 0 || own_full > 0 {
                 tracing::warn!(
-                    "MESH durable: kept {} record(s) in durable store (очередь получателя полна: {}, очередь целиком полна: {}); лежат зашифрованными и вернутся при следующем старте",
-                    recipient_full + queue_full,
+                    "MESH durable: kept {} record(s) in durable store (чужая очередь получателя полна: {}, чужая очередь целиком полна: {}, свой запас полон: {}); лежат зашифрованными и вернутся при следующем старте",
+                    recipient_full + queue_full + own_full,
                     recipient_full,
-                    queue_full
+                    queue_full,
+                    own_full
                 );
             }
         }
@@ -696,7 +720,11 @@ impl P2PCore {
         // не-истёкшие расшифрованные записи (bounded), истёкшие удаляем БЕЗ
         // доставки в UI, нерасшифровываемые — в quarantine. Абсолютный
         // expires_at_ms при этом НЕ продлевается — дедлайн сохраняется как был.
-        restore_relay_custody(self.relay_queue.as_ref(), self.relay_custody.as_ref());
+        restore_relay_custody(
+            self.relay_queue.as_ref(),
+            self.relay_custody.as_ref(),
+            &node_id,
+        );
 
         let _ = self
             .storage
@@ -3433,6 +3461,14 @@ impl P2PCore {
                                         match message.next_hop() {
                                             Some(next_hop_message) => {
                                                 let stored_hop = next_hop_message.hop_count;
+                                                // Владелец 2026-10-07: своя переписка и чужая
+                                                // пересылка — разные запасы. Своё (origin — наш
+                                                // узел: наше сообщение вернулось из меша) занимает
+                                                // свой запас и не может быть отказано чужой
+                                                // очередью. Сравниваем с `node_id` по копии внутри
+                                                // сообщения: `origin` к этому месту уже перемещён в
+                                                // RelayMessage выше.
+                                                let is_own_origin = next_hop_message.origin_sender == node_id;
                                                 // Tombstone ставим до enqueue attempt: переполненный
                                                 // телефон не должен бесконечно разбирать один spam ID.
                                                 remember_bounded_id(
@@ -3482,12 +3518,18 @@ impl P2PCore {
                                                 };
 
                                                 if durable_admitted {
-                                                    match q.enqueue(next_hop_message) {
+                                                    let stored = if is_own_origin {
+                                                        q.enqueue_own(next_hop_message)
+                                                    } else {
+                                                        q.enqueue(next_hop_message)
+                                                    };
+                                                    match stored {
                                                         Ok(true) => tracing::info!(
-                                                            "MESH relay: stored {} for {} at hop {}",
+                                                            "MESH relay: stored {} for {} at hop {} ({})",
                                                             msg_id,
                                                             recipient,
-                                                            stored_hop
+                                                            stored_hop,
+                                                            if is_own_origin { "своё" } else { "чужое" }
                                                         ),
                                                         Ok(false) => tracing::trace!(
                                                             "MESH relay: {} not stored (duplicate/hop limit)",
@@ -3915,6 +3957,19 @@ impl P2PCore {
                             "MESH queue: removed {} expired relay(s) on the minute tick, {} left",
                             expired,
                             q.total_count()
+                        );
+                    }
+                    // Владелец 2026-10-07: «нужно разделить свои и чужие». Одно
+                    // общее число ничего не говорило о своей переписке — теперь
+                    // это видно и в журнале процесса, и в отчёте «Логи».
+                    let stats = q.stats();
+                    if stats.total > 0 {
+                        tracing::info!(
+                            "Relay-очередь: своих={} чужих={} всего={} получателей={}",
+                            stats.own,
+                            stats.foreign,
+                            stats.total,
+                            stats.recipients
                         );
                     }
                 }
@@ -4670,10 +4725,13 @@ impl P2PCore {
                 if !durable_admitted {
                     false
                 } else {
-                    match queue.enqueue(prepared.message) {
+                    // Владелец 2026-10-07: это СВОЁ сообщение — своя переписка.
+                    // enqueue_own не подчиняется чужим лимитам: переполненная
+                    // пересылка для других узлов не может отказать абоненту.
+                    match queue.enqueue_own(prepared.message) {
                         Ok(true) => {
                             tracing::info!(
-                                "MESH origin: retained offline relay {} for {} at hop 0",
+                                "MESH origin: retained offline relay {} for {} at hop 0 (своё)",
                                 message_id,
                                 recipient_id
                             );
@@ -4701,8 +4759,12 @@ impl P2PCore {
                             false
                         }
                         Err(error) => {
+                            // Отказ здесь означал бы «своё сообщение не удержано»
+                            // — противоречие правилу «свои всегда первостепенны».
+                            // Практически недостижимо (свой запас 1000 на узел),
+                            // поэтому пишем отдельно и заметно.
                             tracing::warn!(
-                                "MESH origin: cannot retain offline relay {} for {}: {}",
+                                "MESH origin: СВОЁ сообщение не удержано {} для {}: {}",
                                 message_id,
                                 recipient_id,
                                 error
