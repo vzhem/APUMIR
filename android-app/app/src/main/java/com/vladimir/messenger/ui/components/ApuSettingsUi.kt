@@ -91,12 +91,12 @@ fun ApuSettingsCard(
 ) {
     ApuBubbleCard(
         // Объём и золотая нить: карточка «стоит» над обоями, а не нарисована
-        // краской (премиальный слой, как в окне «Логи»).
-        modifier = modifier
-            .fillMaxWidth()
-            .apuPremiumLift(if (highlighted) 10.dp else 7.dp)
-            .apuPremiumThread(),
+        // краской (премиальный слой, как в окне «Логи»). Слои рисует сама
+        // карточка: переданные в modifier они легли бы ПОД её фоном и были бы
+        // не видны.
+        modifier = modifier.fillMaxWidth(),
         backgroundColor = if (highlighted) Color(0xFFFFF7E5).copy(alpha = 0.94f) else ApuBubbleSurfaceColor,
+        premium = if (highlighted) 10.dp else 7.dp,
     ) {
         val scope = this
         ApuSettingsPalette { scope.content() }

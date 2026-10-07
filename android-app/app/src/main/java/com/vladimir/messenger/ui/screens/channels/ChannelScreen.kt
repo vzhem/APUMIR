@@ -455,6 +455,7 @@ fun ChannelScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 4.dp),
+                        premium = 6.dp,
                     ) {
                         Row(
                             modifier = Modifier
@@ -518,7 +519,10 @@ fun ChannelScreen(
                 // к самому посту.
                 if (uiState.pinnedPostIds.isNotEmpty()) {
                     val feedScope = androidx.compose.runtime.rememberCoroutineScope()
-                    ApuBubbleCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+                    ApuBubbleCard(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                        premium = 6.dp,
+                    ) {
                         Column(modifier = Modifier.padding(8.dp)) {
                             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                 Icon(

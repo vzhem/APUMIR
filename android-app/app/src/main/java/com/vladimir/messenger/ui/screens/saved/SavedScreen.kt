@@ -98,6 +98,9 @@ import com.vladimir.messenger.ui.components.ApuBubble
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.apuBubbleSurface
+import com.vladimir.messenger.ui.components.apuPremiumGloss
+import com.vladimir.messenger.ui.components.apuPremiumLift
+import com.vladimir.messenger.ui.components.apuPremiumThread
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -920,13 +923,14 @@ private fun SavedInputBar(
             .fillMaxWidth()
             .imePadding()
             .padding(horizontal = 8.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(18.dp),
-            )
+            // Владелец 2026-10-07: «в таком стиле нужно переделать всё приложение».
+            // Панель ввода избранного — та же премиальная поверхность, что строки
+            // списка и пузыри: подъём, единая подложка, золотая нить, блеск под
+            // текстом (сам текст остаётся тёмными чернилами).
+            .apuPremiumLift(6.dp)
+            .apuBubbleSurface()
+            .apuPremiumThread(inset = 16.dp)
+            .apuPremiumGloss(intensity = 0.45f, topFraction = 0.55f)
             .padding(horizontal = 8.dp, vertical = 8.dp),
     ) {
         BasicTextField(

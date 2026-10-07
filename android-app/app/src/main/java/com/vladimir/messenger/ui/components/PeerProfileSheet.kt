@@ -326,13 +326,12 @@ fun PeerProfileSheet(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-                                .border(
-                                    width = 1.dp,
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
-                                    shape = RoundedCornerShape(14.dp),
-                                )
+                                // Владелец 2026-10-07: карточка профиля — та же
+                                // премиальная поверхность, что и остальные разделы.
+                                .apuPremiumLift(5.dp, RoundedCornerShape(14.dp))
+                                .apuBubbleSurface(shape = RoundedCornerShape(14.dp))
+                                .apuPremiumThread(shape = RoundedCornerShape(14.dp), inset = 14.dp)
+                                .apuPremiumGloss(RoundedCornerShape(14.dp), intensity = 0.4f, topFraction = 0.55f)
                                 .then(
                                     if (onCopyId != null) {
                                         Modifier.clickable(onClick = onCopyId)

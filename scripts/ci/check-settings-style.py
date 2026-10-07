@@ -73,15 +73,30 @@ class SettingsStyleTest(unittest.TestCase):
             "apuGoldBrush()",
             "apuPremiumLift(",
             "apuPremiumGloss(",
-            "apuPremiumThread(",
+            # Нить теперь рисует общая карточка (проверяется ниже по ApuBubble.kt):
+            # переданная снаружи, она легла бы под фоном Card.
             "ApuPremiumIconTile(",
             "ApuGoldInk",
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, settings)
         # Три «кита» стиля: карточка, секция, строка списка.
-        self.assertIn("apuPremiumThread()", settings)
+        #
+        # Карточка настроек больше не навешивает слои снаружи через modifier:
+        # слои, переданные в modifier, легли бы ПОД фоном Card и не были видны.
+        # Теперь карточка просит премиальную поверхность у общей `ApuBubbleCard`
+        # (premium = высота подъёма), а та рисует подъём, нить и блеск сама.
+        self.assertIn("premium = if (highlighted) 10.dp else 7.dp", settings)
         self.assertIn("ApuPremiumIconTile(icon = icon)", settings)
+        shared_card = source("components/ApuBubble.kt")
+        for marker in (
+            "premium: Dp? = null",
+            ".apuPremiumLift(premium, shape)",
+            ".apuPremiumThread(shape = shape)",
+            ".apuPremiumGloss(shape, intensity = 0.5f, topFraction = 0.55f)",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, shared_card)
 
         # Батарея: в списках настроек не должно быть вечно бегущих анимаций
         # (правило PROFILE_SETTINGS_STYLE.md — без непрерывного shimmer).

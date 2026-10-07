@@ -780,6 +780,7 @@ fun GroupChatScreen(
                                     .fillMaxWidth()
                                     .clickable { showNewTopic = true },
                                 shape = RoundedCornerShape(18.dp),
+                                premium = 6.dp,
                             ) {
                                 Row(
                                     modifier = Modifier.padding(12.dp),
@@ -805,7 +806,10 @@ fun GroupChatScreen(
                 val pinnedTopicName = uiState.topics
                     .firstOrNull { it.id == uiState.selectedTopicId }
                     ?.name
-                ApuBubbleCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                ApuBubbleCard(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                    premium = 6.dp,
+                ) {
                     Column(modifier = Modifier.padding(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Filled.PushPin, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -895,6 +899,7 @@ fun GroupChatScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 8.dp, vertical = 4.dp),
+                    premium = 6.dp,
                 ) {
                     Row(
                         modifier = Modifier
@@ -1732,6 +1737,7 @@ private fun TopicBubble(topic: TopicSummary, onClick: () -> Unit) {
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(18.dp),
+        premium = 6.dp,
     ) {
         Row(
             modifier = Modifier.padding(10.dp),

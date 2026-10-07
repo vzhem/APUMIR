@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /** Цвет обычного текста в пузыре настроек. */
@@ -111,6 +112,16 @@ fun ApuHeaderBubble(
  * Card без стандартной серо-сиреневой заливки и тени Material. Не меняет
  * размеры и внутренние отступы существующих карточек ленты/закрепов.
  * Для парящих стикеров transparent отключает и фон, и рамку.
+ *
+ * `premium` — высота подъёма для самостоятельных карточек (панель выбора,
+ * закрепы, карточка темы, блок настроек). Тогда поверхность рисуется тем же
+ * слоем, что у шапок и диалогов: подъём, единая подложка, золотая нить по
+ * верхней кромке и блеск ПОД содержимым. Для строк ленты (облачко сообщения)
+ * оставляем `null`: тень на каждой строке ленты превращается в шум.
+ *
+ * Важно: премиальная ветка рисует поверхность сама (Box + `apuBubbleSurface`),
+ * а не через `Card`. Переданные в `modifier` слои легли бы ПОД фоном Card —
+ * нить и блеск просто не были бы видны.
  */
 @Composable
 fun ApuBubbleCard(
@@ -119,8 +130,26 @@ fun ApuBubbleCard(
     contentColor: Color = ApuBubbleTextColor,
     shape: Shape = ApuBubbleShape,
     transparent: Boolean = false,
+    premium: Dp? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    if (premium != null && !transparent) {
+        Box(
+            modifier = modifier
+                .apuPremiumLift(premium, shape)
+                .apuBubbleSurface(color = backgroundColor, shape = shape)
+                .apuPremiumThread(shape = shape)
+                .apuPremiumGloss(shape, intensity = 0.5f, topFraction = 0.55f),
+        ) {
+            Column {
+                val scope = this
+                CompositionLocalProvider(LocalContentColor provides contentColor) {
+                    scope.content()
+                }
+            }
+        }
+        return
+    }
     Card(
         modifier = modifier,
         shape = if (transparent) RectangleShape else shape,
