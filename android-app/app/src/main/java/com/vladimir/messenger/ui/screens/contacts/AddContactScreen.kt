@@ -44,7 +44,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -70,6 +69,7 @@ import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleShape
 import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ApuSearchField
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.ChatWallpaper
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -275,15 +275,11 @@ fun AddContactScreen(
                                     color = ApuBubbleMutedColor,
                                 )
                             }
-                            TextButton(
+                            ApuTextAction(
+                                label = "Добавить",
                                 onClick = { viewModel.onAddByNicknameClicked(entry) },
                                 enabled = !uiState.isLoading,
-                                colors = ButtonDefaults.textButtonColors(
-                                    contentColor = ApuBubbleAccentColor,
-                                ),
-                            ) {
-                                Text("Добавить", fontWeight = FontWeight.SemiBold)
-                            }
+                            )
                         }
                     }
                     if (!uiState.nickSearching &&

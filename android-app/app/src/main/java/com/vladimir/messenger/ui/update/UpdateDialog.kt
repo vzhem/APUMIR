@@ -25,7 +25,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,6 +32,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.ChatWallpaper
 
 @Composable
@@ -121,12 +121,11 @@ fun UpdateDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
                 ) {
-                    TextButton(
+                    ApuTextAction(
+                        label = "Позже",
                         onClick = onDismissClick,
                         enabled = !isDownloading,
-                    ) {
-                        Text("Позже")
-                    }
+                    )
                     Spacer(modifier = Modifier.height(0.dp))
                     Button(
                         onClick = onDownloadClick,

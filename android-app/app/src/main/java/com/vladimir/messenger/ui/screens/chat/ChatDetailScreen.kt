@@ -4,6 +4,7 @@ import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.ApuVipBadge
 import com.vladimir.messenger.ui.components.PeerAvatar
 import com.vladimir.messenger.ui.theme.AvatarStore
@@ -935,7 +936,7 @@ fun ChatDetailScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showCopyDialog = null }) { Text("Закрыть") }
+                ApuTextAction(label = "Закрыть", onClick = { showCopyDialog = null })
             },
         )
     }
@@ -1017,13 +1018,17 @@ fun ChatDetailScreen(
             title = { Text("Удалить у всех?") },
             text = { Text("Сообщение исчезнет и у вас, и у собеседника. Отменить будет нельзя.") },
             confirmButton = {
-                TextButton(onClick = {
+                ApuTextAction(
+                    label = "Удалить",
+                    onClick = {
                     deleteForAllTarget = null
                     viewModel.deleteMessageForAll(target.id)
-                }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+                },
+                    danger = true,
+                )
             },
             dismissButton = {
-                TextButton(onClick = { deleteForAllTarget = null }) { Text("Отмена") }
+                ApuTextAction(label = "Отмена", onClick = { deleteForAllTarget = null })
             },
         )
     }
@@ -1188,16 +1193,11 @@ private fun MessageInputBar(
             // Каталог GIF (v11.74.15): ОТДЕЛЬНАЯ кнопка рядом со скрепкой,
             // те же права, что у вложений. Раньше кнопка была вложена внутрь
             // IconButton скрепки и накладывалась на неё.
-                TextButton(
+                ApuTextAction(
+                    label = "GIF",
                     onClick = onGifClick,
                     enabled = !isPreparingFile && !isSending && canAttach,
-                ) {
-                    Text(
-                        "GIF",
-                        fontWeight = FontWeight.Bold,
-                        color = if (canAttach) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
-                    )
-                }
+                )
                 }
             }
 
@@ -1326,30 +1326,12 @@ private fun MessageInputBar(
             // recomposition), и кнопка активировалась с задержкой; плюс
             // золотая заливка и белый текст (как в темах) - видно сразу.
             val canSend = inputState.text.isNotBlank() && !isSending && !isSelfChat
-            TextButton(
+            ApuTextAction(
+                label = "Отправить",
                 onClick = onSend,
                 enabled = canSend,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(
-                        if (canSend) MaterialTheme.colorScheme.primary
-                        else Color.White.copy(alpha = 0.85f)
-                    )
-                    .border(
-                        1.dp,
-                        if (canSend) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                        RoundedCornerShape(18.dp),
-                    )
-                    .padding(vertical = 8.dp),
-            ) {
-                Text(
-                    "Отправить",
-                    fontWeight = FontWeight.Bold,
-                    color = if (canSend) Color.White else Color(0xFF9AA3AF),
-                )
-            }
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
@@ -1368,10 +1350,7 @@ private fun ChatHistoryError(message: String, onRetry: () -> Unit, modifier: Mod
                 color = ApuBubbleMutedColor,
                 style = MaterialTheme.typography.bodySmall,
             )
-            TextButton(
-                onClick = onRetry,
-                colors = ButtonDefaults.textButtonColors(contentColor = ApuBubbleLinkColor),
-            ) { Text("Повторить") }
+            ApuTextAction(label = "Повторить", onClick = onRetry)
         }
     }
 }

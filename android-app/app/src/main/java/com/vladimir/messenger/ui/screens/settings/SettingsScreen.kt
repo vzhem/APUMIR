@@ -22,6 +22,7 @@ import com.vladimir.messenger.ui.components.ApuGold
 import com.vladimir.messenger.ui.components.ApuGoldInk
 import com.vladimir.messenger.ui.components.ApuPremiumButton
 import com.vladimir.messenger.ui.components.ApuSettingsCard
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.apuGoldBrush
 import com.vladimir.messenger.ui.components.apuPremiumGloss
 import com.vladimir.messenger.ui.components.apuPremiumLift
@@ -235,16 +236,17 @@ fun SettingsScreen(
                 )
             },
             confirmButton = {
-                TextButton(
-                    enabled = nameValue.trim().length >= 2,
+                ApuTextAction(
+                    label = "Сохранить",
                     onClick = {
                         viewModel.onDisplayNameChanged(nameValue)
                         showNameDialog = false
                     },
-                ) { Text("Сохранить") }
+                    enabled = nameValue.trim().length >= 2,
+                )
             },
             dismissButton = {
-                TextButton(onClick = { showNameDialog = false }) { Text("Отмена") }
+                ApuTextAction(label = "Отмена", onClick = { showNameDialog = false })
             },
         )
     }
@@ -279,15 +281,19 @@ fun SettingsScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    // Собака - неснимаемый префикс; храним имя без неё.
+                ApuTextAction(
+                    label = "Сохранить",
+                    onClick = {
+
                     UsernameHolder.set(usernameContext, usernameValue)
                     UsernameHolder.clearConflict(usernameContext)
                     showUsernameDialog = false
-                }, enabled = UsernameHolder.isValid(usernameValue)) { Text("Сохранить") }
+                },
+                    enabled = UsernameHolder.isValid(usernameValue),
+                )
             },
             dismissButton = {
-                TextButton(onClick = { showUsernameDialog = false }) { Text("Отмена") }
+                ApuTextAction(label = "Отмена", onClick = { showUsernameDialog = false })
             },
         )
     }
@@ -326,9 +332,7 @@ fun SettingsScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showMyQrDialog = false }) {
-                    Text("Закрыть")
-                }
+                ApuTextAction(label = "Закрыть", onClick = { showMyQrDialog = false })
             },
         )
     }
@@ -557,7 +561,10 @@ private fun ProfileTabContent(
                         }
                         if (avatarUri != null) {
                             Spacer(Modifier.height(6.dp))
-                            TextButton(onClick = { AvatarHolder.set(context, null) }) { Text("Убрать аватар") }
+                            ApuTextAction(
+                                label = "Убрать аватар",
+                                onClick = { AvatarHolder.set(context, null) },
+                            )
                         }
                     }
                 }
@@ -1339,12 +1346,10 @@ private fun SettingsTabContent(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { viewModel.logout() }) {
-                    Text("Выйти", color = MaterialTheme.colorScheme.error)
-                }
+                ApuTextAction(label = "Выйти", onClick = { viewModel.logout() }, danger = true)
             },
             dismissButton = {
-                TextButton(onClick = { showLogoutDialog = false }) { Text("Отмена") }
+                ApuTextAction(label = "Отмена", onClick = { showLogoutDialog = false })
             },
         )
     }
@@ -1363,10 +1368,16 @@ private fun SettingsTabContent(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { viewModel.backupAddressBookNow() }) { Text("Создать копию") }
+                ApuTextAction(
+                    label = "Создать копию",
+                    onClick = { viewModel.backupAddressBookNow() },
+                )
             },
             dismissButton = {
-                TextButton(onClick = { viewModel.restoreAddressBookNow() }) { Text("Восстановить") }
+                ApuTextAction(
+                    label = "Восстановить",
+                    onClick = { viewModel.restoreAddressBookNow() },
+                )
             },
         )
     }
@@ -1396,16 +1407,19 @@ private fun SettingsTabContent(
             title = { Text("Сеть сообщений") },
             text = { Text(mqttHumanText) },
             confirmButton = {
-                TextButton(onClick = {
+                ApuTextAction(
+                    label = "Скопировать",
+                    onClick = {
                     val forDiagnostics = listOf(uiState.mqttHuman, uiState.mqttLink)
                         .filter { it.isNotBlank() }
                         .joinToString("\n\n")
                     mqttClipboard.setText(androidx.compose.ui.text.AnnotatedString(forDiagnostics))
                     showMqttDialog = false
-                }) { Text("Скопировать") }
+                },
+                )
             },
             dismissButton = {
-                TextButton(onClick = { showMqttDialog = false }) { Text("Закрыть") }
+                ApuTextAction(label = "Закрыть", onClick = { showMqttDialog = false })
             },
         )
     }
@@ -1591,19 +1605,19 @@ private fun SettingsTabContent(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    // Буфер обмена берём тот же, что у соседнего диалога
-                    // (mqttClipboard объявлен в этой же функции экрана).
-                    // р243: копируем уже собранный текст - повторный вызов
-                    // диагностики (JNI) на главном потоке снова подвесил бы окно.
+                ApuTextAction(
+                    label = "Скопировать",
+                    onClick = {
+
                     mqttClipboard.setText(
                         androidx.compose.ui.text.AnnotatedString(syncText),
                     )
                     showMirrorDiag = false
-                }) { Text("Скопировать") }
+                },
+                )
             },
             dismissButton = {
-                TextButton(onClick = { showMirrorDiag = false }) { Text("Закрыть") }
+                ApuTextAction(label = "Закрыть", onClick = { showMirrorDiag = false })
             },
         )
     }
@@ -2001,13 +2015,14 @@ private fun ApkVersionDialog(
             }
         },
         confirmButton = {
-            TextButton(
+            ApuTextAction(
+                label = "Раздавать",
                 onClick = { onConfirm(version) },
                 enabled = !reading && version.isNotBlank(),
-            ) { Text("Раздавать") }
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         },
     )
 }

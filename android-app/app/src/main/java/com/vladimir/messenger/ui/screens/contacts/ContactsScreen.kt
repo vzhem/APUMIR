@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.contacts
 
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.fillMaxSize
@@ -293,13 +294,16 @@ fun ContactsScreen(
             title = { Text("Удалить контакт?") },
             text = { Text("«${contact.displayName}» будет удалён из списка контактов.") },
             confirmButton = {
-                TextButton(onClick = {
+                ApuTextAction(
+                    label = "Удалить",
+                    onClick = {
                     viewModel.deleteContact(contact.id)
                     confirmDelete = null
-                }) { Text("Удалить") }
+                },
+                )
             },
             dismissButton = {
-                TextButton(onClick = { confirmDelete = null }) { Text("Отмена") }
+                ApuTextAction(label = "Отмена", onClick = { confirmDelete = null })
             },
         )
     }
@@ -537,18 +541,16 @@ private fun InviteToGroupsDialog(
                     Spacer(Modifier.width(8.dp))
                     Text("Отправить в APU")
                 }
-                TextButton(
+                ApuTextAction(
+                    label = "Другим приложением",
                     onClick = { onShare(selected.toList(), attachApk) },
                     enabled = selected.isNotEmpty(),
-                ) {
-                    Icon(Icons.Default.Share, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Другим приложением")
-                }
+                    icon = Icons.Default.Share,
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         },
     )
 }

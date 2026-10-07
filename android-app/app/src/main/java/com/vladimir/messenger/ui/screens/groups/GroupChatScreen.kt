@@ -17,6 +17,7 @@ import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuAntiRatingInlineBadge
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.PeerAvatar
 import com.vladimir.messenger.ui.components.ApuCircleCheckIndicator
 import com.vladimir.messenger.ui.components.ApuMessageModerationDialog
@@ -101,7 +102,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.Image
@@ -670,11 +670,13 @@ fun GroupChatScreen(
                     }
                 },
                 navigationIcon = {
-                    TextButton(onClick = {
-                        // Из ленты темы «Назад» возвращает к списку тем,
-                        // а не сразу из группы.
+                    ApuTextAction(
+                        label = "Назад",
+                        onClick = {
+
                         if (hasTopics && showFeed) showFeed = false else onBackClick()
-                    }) { Text("Назад") }
+                    },
+                    )
                 },
                 actions = {
                     IconButton(onClick = { onOpenAdmin(uiState.groupId) }) {
@@ -975,12 +977,11 @@ fun GroupChatScreen(
                 // и здесь может быть не вся ветка. Кнопка тянет более ранние.
                 if (isChannel && uiState.moreComments > 0) {
                     item(key = "more-comments") {
-                        TextButton(
+                        ApuTextAction(
+                            label = "Показать ещё " + uiState.moreComments,
                             onClick = { viewModel.loadOlderComments() },
                             modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text("Показать ещё " + uiState.moreComments)
-                        }
+                        )
                     }
                 }
                 items(uiState.messages, key = { it.id }) { message ->
@@ -1228,7 +1229,8 @@ fun GroupChatScreen(
                                     )
                                 }
                             }
-                            TextButton(
+                            ApuTextAction(
+                                label = "GIF",
                                 onClick = {
                                     if (uiState.canAttach) {
                                         showGifCatalog = true
@@ -1241,13 +1243,7 @@ fun GroupChatScreen(
                                     }
                                 },
                                 enabled = !uiState.isPreparingFile && !uiState.sending,
-                            ) {
-                                Text(
-                                    "GIF",
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (uiState.canAttach) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
-                                )
-                            }
+                            )
                         }
                     }
                     OutlinedTextField(
@@ -1283,34 +1279,15 @@ fun GroupChatScreen(
                 val slowWaitSeconds = (uiState.slowModeWaitMs + 999L) / 1000L
                 val canSend = (uiState.draft.isNotBlank() || uiState.stagedFile != null) &&
                     !uiState.sending && !uiState.isPreparingFile && slowWaitSeconds <= 0L
-                TextButton(
-                    enabled = canSend,
+                ApuTextAction(
+                    label = if (slowWaitSeconds > 0L) "Подождите $slowWaitSeconds с" else "Отправить",
                     onClick = {
-                        // р237: черновик чистит сама модель после успешной отправки.
+
                         viewModel.send(uiState.draft)
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(
-                            if (canSend) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
-                        )
-                        .border(
-                            1.dp,
-                            if (canSend) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                            RoundedCornerShape(18.dp),
-                        )
-                        .padding(vertical = 8.dp),
-                ) {
-                    Text(
-                        // р250: вместо «Отправить» - обратный отсчёт паузы.
-                        if (slowWaitSeconds > 0L) "Подождите $slowWaitSeconds с" else "Отправить",
-                        fontWeight = FontWeight.Bold,
-                        color = if (canSend) Color.White else Color(0xFF9AA3AF),
-                    )
-                }
+                    enabled = canSend,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 // р250: включённый режим объясняем словами - иначе кажется,
                 // что приложение «не пускает» без причины.
                 if (uiState.slowModeSeconds > 0) {
@@ -1327,7 +1304,6 @@ fun GroupChatScreen(
 
     }
     }
-
 
     // Раунд 143: список заявок поверх экрана (как в привычном мессенджере):
     // поиск-пузырь, прокрутка, «Принять в группу» / «Отклонить».
@@ -1708,9 +1684,7 @@ private fun JoinRequestRow(
             Button(onClick = { onDecide(request.nodeId, true) }) {
                 Text("Принять в группу")
             }
-            TextButton(onClick = { onDecide(request.nodeId, false) }) {
-                Text("Отклонить", color = MaterialTheme.colorScheme.primary)
-            }
+            ApuTextAction(label = "Отклонить", onClick = { onDecide(request.nodeId, false) })
         }
     }
 }
@@ -2379,12 +2353,13 @@ private fun NewTopicDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                enabled = name.isNotBlank(),
+            ApuTextAction(
+                label = confirmLabel,
                 onClick = { onCreate(name, icon) },
-            ) { Text(confirmLabel) }
+                enabled = name.isNotBlank(),
+            )
         },
-        dismissButton = { TextButton(onDismiss) { Text("Отмена") } },
+        dismissButton = { ApuTextAction(label = "Отмена", onClick = onDismiss) },
     )
 }
 

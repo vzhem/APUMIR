@@ -22,6 +22,7 @@ import com.vladimir.messenger.data.link.ShortLinks
 import com.vladimir.messenger.service.CoreServerService
 import com.vladimir.messenger.service.UpdateChecker
 import com.vladimir.messenger.service.UpdateNotifier
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.update.UpdateDialog
 import com.vladimir.messenger.MainViewModel
 import com.vladimir.messenger.ui.navigation.Screen
@@ -445,7 +446,9 @@ class MainActivity : ComponentActivity() {
                             )
                         },
                         confirmButton = {
-                            androidx.compose.material3.TextButton(onClick = {
+                            ApuTextAction(
+                                label = "Добавить",
+                                onClick = {
                                 val (nodeId, publicKey, displayName) = pendingContact
                                 pendingContactInfo = null
 
@@ -463,14 +466,11 @@ class MainActivity : ComponentActivity() {
                                         Log.e("MainActivity", "Failed to add contact: ${result.exceptionOrNull()?.message}")
                                     }
                                 }
-                            }) {
-                                androidx.compose.material3.Text("Добавить")
-                            }
+                            },
+                            )
                         },
                         dismissButton = {
-                            androidx.compose.material3.TextButton(onClick = { pendingContactInfo = null }) {
-                                androidx.compose.material3.Text("Отмена")
-                            }
+                            ApuTextAction(label = "Отмена", onClick = { pendingContactInfo = null })
                         }
                     )
                 }
@@ -488,17 +488,19 @@ class MainActivity : ComponentActivity() {
                         title = { androidx.compose.material3.Text(prompt.title) },
                         text = { androidx.compose.material3.Text(prompt.body) },
                         confirmButton = {
-                            androidx.compose.material3.TextButton(onClick = {
+                            ApuTextAction(
+                                label = prompt.confirm,
+                                onClick = {
                                 pendingGroupInviteLink = null
                                 pendingGroupInvite = pendingGroupLink
-                            }) {
-                                androidx.compose.material3.Text(prompt.confirm)
-                            }
+                            },
+                            )
                         },
                         dismissButton = {
-                            androidx.compose.material3.TextButton(onClick = { pendingGroupInviteLink = null }) {
-                                androidx.compose.material3.Text("Отмена")
-                            }
+                            ApuTextAction(
+                                label = "Отмена",
+                                onClick = { pendingGroupInviteLink = null },
+                            )
                         }
                     )
                 }
@@ -590,7 +592,6 @@ class MainActivity : ComponentActivity() {
             Log.w("MainActivity", "Failed to request battery optimization exemption", e)
         }
     }
-
 
     private fun checkForUpdates(manual: Boolean = false) {
         lastUpdateCheckAtMs = System.currentTimeMillis()

@@ -25,7 +25,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -127,9 +126,7 @@ fun ApuPollCard(
                 modifier = Modifier.weight(1f),
             )
             if (canClose && !poll.closed) {
-                TextButton(onClick = onClose) {
-                    Text("Закрыть опрос", color = ApuSettingsDangerColor)
-                }
+                ApuTextAction(label = "Закрыть опрос", onClick = onClose)
             }
         }
         // Кто как проголосовал: только в открытом опросе, и только тех, чей
@@ -318,12 +315,11 @@ fun PollDraftFields(
             Spacer(Modifier.height(6.dp))
         }
         if (state.options.size < GroupWire.MAX_POLL_OPTIONS) {
-            TextButton(
+            ApuTextAction(
+                label = "+ Добавить вариант",
                 onClick = { state.options.add("") },
                 modifier = Modifier.align(Alignment.Start),
-            ) {
-                Text("+ Добавить вариант")
-            }
+            )
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -371,7 +367,8 @@ fun CreatePollDialog(
             PollDraftFields(state = state, problem = problem)
         },
         confirmButton = {
-            TextButton(
+            ApuTextAction(
+                label = "Создать",
                 onClick = {
                     val issue = state.problem()
                     if (issue != null) {
@@ -380,10 +377,10 @@ fun CreatePollDialog(
                     }
                     state.draft()?.let(onCreate)
                 },
-            ) { Text("Создать") }
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         },
     )
 }

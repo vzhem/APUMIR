@@ -13,7 +13,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -98,19 +97,17 @@ fun NotificationMuteDialog(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    TextButton(
+                    ApuTextAction(
+                        label = "Включить уведомления",
                         onClick = onTurnOn,
                         modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Включить уведомления")
-                    }
+                    )
                 }
-                TextButton(
+                ApuTextAction(
+                    label = "Отменить",
                     onClick = onDismiss,
                     modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Отменить")
-                }
+                )
             }
         }
     }

@@ -380,20 +380,18 @@ private fun StickerSection(
                 )
             },
             confirmButton = {
-                androidx.compose.material3.TextButton(
+                ApuTextAction(
+                    label = "Удалить",
                     onClick = {
                         val entry = removeCandidate
                         removeCandidate = null
                         if (entry != null) onRemoveSticker?.invoke(entry)
                     },
-                ) {
-                    Text("Удалить", color = MaterialTheme.colorScheme.error)
-                }
+                    danger = true,
+                )
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { removeCandidate = null }) {
-                    Text("Отмена")
-                }
+                ApuTextAction(label = "Отмена", onClick = { removeCandidate = null })
             },
         )
     }

@@ -29,7 +29,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -353,28 +352,12 @@ fun FileTransferBubble(
             if (!(previewBitmap != null && isImage) &&
                 transfer.state == "COMPLETE" && transfer.direction == "INCOMING" && onSaveClick != null
             ) {
-                TextButton(
-                    onClick = onSaveClick,
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        horizontal = 0.dp,
-                        vertical = 0.dp,
-                    ),
-                ) {
-                    Text("Сохранить в папку", style = MaterialTheme.typography.labelMedium)
-                }
+                ApuTextAction(label = "Сохранить в папку", onClick = onSaveClick)
             }
             // У документов и видео превью нет, меню картинки тоже - поэтому
             // «В избранное» выносим отдельной кнопкой.
             if (!(previewBitmap != null && isImage) && onSaveToFavorites != null) {
-                TextButton(
-                    onClick = onSaveToFavorites,
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        horizontal = 0.dp,
-                        vertical = 0.dp,
-                    ),
-                ) {
-                    Text("В избранное", style = MaterialTheme.typography.labelMedium)
-                }
+                ApuTextAction(label = "В избранное", onClick = onSaveToFavorites)
             }
         }
     }

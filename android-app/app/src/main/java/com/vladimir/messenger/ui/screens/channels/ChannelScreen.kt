@@ -23,6 +23,7 @@ import com.vladimir.messenger.ui.components.ApuAntiRatingInlineBadge
 import com.vladimir.messenger.ui.components.ApuCircleCheckIndicator
 import com.vladimir.messenger.ui.components.ApuMessageModerationDialog
 import com.vladimir.messenger.ui.components.ApuSettingsDangerColor
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.PeerAvatar
 import com.vladimir.messenger.ui.components.PeerProfileSheet
 import com.vladimir.messenger.ui.components.apuBubbleSurface
@@ -63,7 +64,6 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BookmarkBorder
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MoreVert
@@ -92,7 +92,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -1115,31 +1114,16 @@ private fun PostCard(
             }
             HorizontalDivider(modifier = Modifier.padding(top = 10.dp), color = ApuBubbleAccentColor.copy(alpha = 0.2f))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(
-                    onClick = { showReactions = true },
-                    colors = ButtonDefaults.textButtonColors(contentColor = ApuBubbleAccentColor),
-                ) {
-                    Text("Реакция")
-                }
-                TextButton(
-                    onClick = onOpenComments,
-                    colors = ButtonDefaults.textButtonColors(contentColor = ApuBubbleAccentColor),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(
-                        if (post.comments > 0) {
+                ApuTextAction(label = "Реакция", onClick = { showReactions = true })
+                ApuTextAction(
+                    label = if (post.comments > 0) {
                             "Комментарии (${post.comments})"
                         } else {
                             "Оставить комментарий"
                         },
-                    )
-                    // Непрочитанные комментарии поста: тот же золотой кружок,
-                    // что на канале и на темах группы.
-                    if (post.unreadComments > 0) {
-                        Spacer(Modifier.width(6.dp))
-                        ApuNotificationBadge(post.unreadComments)
-                    }
-                }
+                    onClick = onOpenComments,
+                    modifier = Modifier.weight(1f),
+                )
                 // Переслать пост: и внутрь APU, и в любой другой мессенджер.
                 IconButton(onClick = onSharePost) {
                     Icon(
@@ -1390,14 +1374,11 @@ private fun PostEditorDialog(
                 }
                 if (imagesEditable) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(
+                        ApuTextAction(
+                            label = if (images.isEmpty()) "Прикрепить фото" else "Ещё фото (${images.size}/${InlineImage.MAX_PHOTOS})",
                             onClick = { picker.launch("image/*") },
                             enabled = !preparing && !creating && images.size < InlineImage.MAX_PHOTOS,
-                        ) {
-                            Text(
-                                if (images.isEmpty()) "Прикрепить фото" else "Ещё фото (${images.size}/${InlineImage.MAX_PHOTOS})",
-                            )
-                        }
+                        )
                         if (preparing) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                         }
@@ -1450,9 +1431,11 @@ private fun PostEditorDialog(
                         }
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = onPickFile, enabled = !preparingFile && !creating) {
-                                Text("Прикрепить файл")
-                            }
+                            ApuTextAction(
+                                label = "Прикрепить файл",
+                                onClick = onPickFile,
+                                enabled = !preparingFile && !creating,
+                            )
                             if (preparingFile) {
                                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                             }
@@ -1472,27 +1455,28 @@ private fun PostEditorDialog(
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.weight(1f),
                             )
-                            TextButton(onClick = { withPoll = false }) { Text("Убрать") }
+                            ApuTextAction(label = "Убрать", onClick = { withPoll = false })
                         }
                         com.vladimir.messenger.ui.components.PollDraftFields(
                             state = pollState,
                             problem = pollProblem,
                         )
                     } else {
-                        TextButton(
+                        ApuTextAction(
+                            label = "Прикрепить опрос",
                             onClick = { withPoll = true },
                             enabled = !creating,
-                        ) { Text("Прикрепить опрос") }
+                        )
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(
+            ApuTextAction(
+                label = confirmLabel,
                 onClick = {
                     val draft = if (withPoll) pollState.draft() else null
-                    // Опрос выбран, но заполнен не до конца - не публикуем молча:
-                    // написать, чего не хватает, полезнее, чем потерять пост.
+
                     if (withPoll && draft == null) {
                         pollProblem = pollState.problem()
                         return@TextButton
@@ -1501,10 +1485,10 @@ private fun PostEditorDialog(
                 },
                 enabled = (text.isNotBlank() || images.isNotEmpty() || stagedFile != null || withPoll) &&
                     !creating && !preparing && !preparingFile,
-            ) { Text(confirmLabel) }
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         },
     )
 }

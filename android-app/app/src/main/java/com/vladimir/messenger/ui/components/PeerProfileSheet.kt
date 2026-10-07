@@ -25,7 +25,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -97,7 +96,7 @@ fun PeerProfileSheet(
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Закрыть", color = ApuBubbleMutedColor) }
+            ApuTextAction(label = "Закрыть", onClick = onDismiss)
         },
         title = null,
         text = {
@@ -316,12 +315,7 @@ fun PeerProfileSheet(
                 if (contactId.isNotBlank()) {
                     var idShown by remember { mutableStateOf(false) }
                     if (!idShown) {
-                        TextButton(onClick = { idShown = true }) {
-                            Text(
-                                "Показать адрес узла",
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                        }
+                        ApuTextAction(label = "Показать адрес узла", onClick = { idShown = true })
                     } else {
                         Box(
                             modifier = Modifier
@@ -376,18 +370,18 @@ fun PeerProfileSheet(
                         horizontalArrangement = Arrangement.SpaceEvenly,
                     ) {
                         if (onCall != null) {
-                            TextButton(onClick = onCall) {
-                                Icon(Icons.Default.Call, contentDescription = null)
-                                Spacer(Modifier.width(6.dp))
-                                Text("Позвонить")
-                            }
+                            ApuTextAction(
+                                label = "Позвонить",
+                                onClick = onCall,
+                                icon = Icons.Default.Call,
+                            )
                         }
                         if (onRename != null) {
-                            TextButton(onClick = onRename) {
-                                Icon(Icons.Default.Edit, contentDescription = null)
-                                Spacer(Modifier.width(6.dp))
-                                Text("Переименовать")
-                            }
+                            ApuTextAction(
+                                label = "Переименовать",
+                                onClick = onRename,
+                                icon = Icons.Default.Edit,
+                            )
                         }
                     }
                 }

@@ -11,6 +11,7 @@ package com.vladimir.messenger.ui.screens.saved
 // папки) и «Поделиться».
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.rememberCoroutineScope
@@ -66,7 +67,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -374,7 +374,7 @@ fun SavedScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showAddMenu = false }) { Text("Закрыть") }
+                ApuTextAction(label = "Закрыть", onClick = { showAddMenu = false })
             },
         )
     }
@@ -450,7 +450,7 @@ fun SavedScreen(
             },
             confirmButton = {},
             dismissButton = {
-                TextButton(onClick = { showStickerPicker = false }) { Text("Закрыть") }
+                ApuTextAction(label = "Закрыть", onClick = { showStickerPicker = false })
             },
         )
     }
@@ -501,13 +501,16 @@ fun SavedScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                ApuTextAction(
+                    label = "Убрать",
+                    onClick = {
                     viewModel.delete(item.id)
                     confirmDelete = null
-                }) { Text("Убрать") }
+                },
+                )
             },
             dismissButton = {
-                TextButton(onClick = { confirmDelete = null }) { Text("Отмена") }
+                ApuTextAction(label = "Отмена", onClick = { confirmDelete = null })
             },
         )
     }
@@ -779,13 +782,14 @@ private fun NoteDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
             )
         },
         confirmButton = {
-            TextButton(
+            ApuTextAction(
+                label = "Сохранить",
                 onClick = { onSave(text) },
                 enabled = text.isNotBlank(),
-            ) { Text("Сохранить") }
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         },
     )
 }
@@ -796,7 +800,6 @@ private fun formatSize(bytes: Long): String = when {
     bytes >= 1024L -> String.format(Locale.getDefault(), "%.0f КБ", bytes / 1024.0)
     else -> "$bytes Б"
 }
-
 
 /**
  * Раунд 163: пузырь-кнопка меню «Добавить в избранное» в гамме APU -
@@ -967,32 +970,11 @@ private fun SavedInputBar(
         // Кнопка читает активность прямо из inputState: как в чате, она
         // загорается сразу при первом символе, без задержки на рекомпозицию.
         val canSend = inputState.text.isNotBlank()
-        TextButton(
+        ApuTextAction(
+            label = "Отправить",
             onClick = onSend,
             enabled = canSend,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(
-                    if (canSend) MaterialTheme.colorScheme.primary
-                    else Color.White.copy(alpha = 0.85f),
-                )
-                .border(
-                    width = 1.dp,
-                    color = if (canSend) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
-                    },
-                    shape = RoundedCornerShape(18.dp),
-                )
-                .padding(vertical = 8.dp),
-        ) {
-            Text(
-                "Отправить",
-                fontWeight = FontWeight.Bold,
-                color = if (canSend) Color.White else Color(0xFF9AA3AF),
-            )
-        }
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }

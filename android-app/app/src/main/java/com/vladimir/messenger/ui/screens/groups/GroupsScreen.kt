@@ -7,6 +7,7 @@ package com.vladimir.messenger.ui.screens.groups
 import com.vladimir.messenger.ui.components.ApuAction
 import com.vladimir.messenger.ui.components.ApuActionsMenu
 import com.vladimir.messenger.ui.components.ApuNotificationBadge
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.NotificationMuteDialog
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
@@ -92,7 +93,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -310,9 +310,7 @@ fun GroupsScreen(
                                 color = HintBubbleMutedColor,
                             )
                             Spacer(Modifier.height(12.dp))
-                            TextButton(onClick = { showJoin = true }) {
-                                Text("Войти по ссылке")
-                            }
+                            ApuTextAction(label = "Войти по ссылке", onClick = { showJoin = true })
                         }
                     }
                 }
@@ -419,13 +417,16 @@ fun GroupsScreen(
             confirmButton = {
                 val target = uiState.joinedGroupId
                 val postTopic = uiState.joinedPostTopicId
-                TextButton(
-                    enabled = !uiState.joining,
+                ApuTextAction(
+                    label = when {
+                            target == null -> "Готово"
+                            postTopic != null -> "Открыть пост"
+                            else -> "Открыть чат"
+                        },
                     onClick = {
                         viewModel.consumeJoinResult()
                         if (target != null) {
-                            // Ссылка на пост открывает сам пост, а не начало
-                            // ленты: человек перешёл ради конкретной записи.
+
                             if (postTopic != null) {
                                 onOpenPost(target, postTopic)
                             } else {
@@ -433,15 +434,8 @@ fun GroupsScreen(
                             }
                         }
                     },
-                ) {
-                    Text(
-                        when {
-                            target == null -> "Готово"
-                            postTopic != null -> "Открыть пост"
-                            else -> "Открыть чат"
-                        }
-                    )
-                }
+                    enabled = !uiState.joining,
+                )
             },
         )
     }
@@ -513,23 +507,29 @@ fun GroupsScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
+                ApuTextAction(
+                    label = "Показать QR-код",
+                    onClick = {
                     val chosen = group
                     inviteChoice = null
                     viewModel.prepareQrInvite(chosen.id) { title, link ->
                         qrInvite = title to link
                     }
-                }) { Text("Показать QR-код") }
+                },
+                )
             },
             dismissButton = {
-                TextButton(onClick = {
+                ApuTextAction(
+                    label = "Отправить ссылку",
+                    onClick = {
                     val chosen = group
                     inviteChoice = null
                     viewModel.shareInvite(chosen.id) { title, link ->
-                        // Раунд 162: каналу - «канал».
+
                         AppShare.shareGroupInvite(context, title, link, chosen.isChannel, attachApk)
                     }
-                }) { Text("Отправить ссылку") }
+                },
+                )
             },
         )
     }
@@ -551,7 +551,7 @@ fun GroupsScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { qrInvite = null }) { Text("Готово") }
+                ApuTextAction(label = "Готово", onClick = { qrInvite = null })
             },
         )
     }
@@ -586,22 +586,21 @@ fun GroupsScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    viewModel.leaveOrDelete(group)
-                    confirmLeave = null
-                }) {
-                    Text(
-                        when {
+                ApuTextAction(
+                    label = when {
                             owner -> "Удалить"
                             group.isChannel -> "Отписаться"
                             else -> "Выйти"
                         },
-                        color = if (owner) MaterialTheme.colorScheme.error else ApuBubbleAccentColor,
-                    )
-                }
+                    onClick = {
+                    viewModel.leaveOrDelete(group)
+                    confirmLeave = null
+                },
+                    danger = true,
+                )
             },
             dismissButton = {
-                TextButton(onClick = { confirmLeave = null }) { Text("Отмена") }
+                ApuTextAction(label = "Отмена", onClick = { confirmLeave = null })
             },
         )
     }
@@ -616,7 +615,7 @@ fun GroupsScreen(
                         "приглашённых. Вступать в группы по ссылке можно уже сейчас."
                 )
             },
-            confirmButton = { TextButton(onClick = { showRankHint = false }) { Text("Понятно") } },
+            confirmButton = { ApuTextAction(label = "Понятно", onClick = { showRankHint = false }) },
         )
     }
 
@@ -964,7 +963,7 @@ private fun CreateGroupDialog(
                 Text(if (creating) "Создаём…" else "Создать")
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+        dismissButton = { ApuTextAction(label = "Отмена", onClick = onDismiss) },
     )
 }
 
@@ -1111,7 +1110,7 @@ private fun JoinByLinkDialog(
             ) { Text("Войти") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         },
     )
 }
@@ -1167,7 +1166,9 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
                 color = ApuBubbleMutedColor,
             )
         }
-        TextButton(onClick = {
+        ApuTextAction(
+            label = if (entry.isChannel) "Подписаться" else "Вступить",
+            onClick = {
             onJoin(
                 GroupInviteLinks.build(
                     slug = entry.slug,
@@ -1177,13 +1178,8 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
                     requestApproval = entry.needsApproval,
                 )
             )
-        }) {
-            Text(
-                if (entry.isChannel) "Подписаться" else "Вступить",
-                color = ApuBubbleAccentColor,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
+        },
+        )
     }
 }
 

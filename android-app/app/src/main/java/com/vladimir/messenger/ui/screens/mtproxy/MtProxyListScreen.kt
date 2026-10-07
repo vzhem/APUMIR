@@ -28,6 +28,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.domain.model.MtProtoProxy
 import com.vladimir.messenger.ui.components.ApuBubble
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import java.text.SimpleDateFormat
 import java.util.*
@@ -324,22 +325,17 @@ private fun AddProxyDialog(
             }
         },
         confirmButton = {
-            TextButton(
+            ApuTextAction(
+                label = "Добавить",
                 onClick = { onConfirm(input) },
-                enabled = input.isNotBlank()
-            ) {
-                Text("Добавить")
-            }
+                enabled = input.isNotBlank(),
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Отмена")
-            }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         }
     )
 }
-
-
 
 @Composable
 private fun ImportProxyDialog(
@@ -398,17 +394,14 @@ private fun ImportProxyDialog(
             }
         },
         confirmButton = {
-            TextButton(
+            ApuTextAction(
+                label = "Импортировать",
                 onClick = { onConfirm(input) },
-                enabled = input.isNotBlank()
-            ) {
-                Text("Импортировать")
-            }
+                enabled = input.isNotBlank(),
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Отмена")
-            }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         }
     )
 }

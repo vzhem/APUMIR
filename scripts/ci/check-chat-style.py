@@ -61,11 +61,31 @@ class ChatStyleTest(unittest.TestCase):
                 self.assertNotRegex(text, r"\bCard\(")
                 self.assertIn("ApuBubbleCard", text)
 
-    def test_channel_actions_use_available_material3_button_defaults(self):
+    def test_channel_actions_use_the_house_action_button(self):
+        """Действия канала — фирменные кнопки, а не стоковый TextButton.
+
+        2026-10-07: владелец попросил доделать новой стиль во всех разделах,
+        поэтому внутри карточек и диалогов тоже стоят наши объёмные кнопки
+        (ApuTextAction) — плоских Material-кнопок в разделах больше нет.
+        """
         text = source("screens/channels/ChannelScreen.kt")
+        self.assertIn("ApuTextAction(", text)
+        self.assertNotIn("TextButton(", text)
         self.assertNotIn("TextButtonDefaults", text)
-        self.assertIn("import androidx.compose.material3.ButtonDefaults", text)
-        self.assertEqual(text.count("ButtonDefaults.textButtonColors"), 2)
+
+    def test_no_stock_text_buttons_left_in_the_ui(self):
+        """Во всём интерфейсе не осталось плоских Material-кнопок.
+
+        Проверка по всем разделам сразу: один пропущенный TextButton — уже
+        чужая кнопка на фирменной подложке. Ловим и класс, и его «чернила».
+        """
+        root = ROOT / "android-app/app/src/main/java/com/vladimir/messenger/ui"
+        offenders = []
+        for path in sorted(root.rglob("*.kt")):
+            text = path.read_text()
+            if "TextButton(" in text or "ButtonDefaults.textButtonColors" in text:
+                offenders.append(str(path.relative_to(ROOT)))
+        self.assertEqual([], offenders)
 
     def test_channel_header_uses_cached_avatar_and_keeps_admin_gate(self):
         text = source("screens/channels/ChannelScreen.kt")

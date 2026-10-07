@@ -20,7 +20,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +45,7 @@ import com.vladimir.messenger.data.group.TopicSummary
 import com.vladimir.messenger.ui.components.ApuBubble
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.TopicIconCatalog
 import com.vladimir.messenger.ui.components.TopicIconView
 import java.text.NumberFormat
@@ -72,7 +72,7 @@ internal fun GroupStatisticsTab(
             ApuBubble {
                 if (isRefreshing) CircularProgressIndicator(Modifier.size(24.dp))
                 Text(if (isRefreshing) "Загружаем статистику…" else "Статистику пока не удалось загрузить")
-                if (!isRefreshing) TextButton(onClick = onRefresh) { Text("Попробовать ещё раз") }
+                if (!isRefreshing) ApuTextAction(label = "Попробовать ещё раз", onClick = onRefresh)
             }
         }
         return
@@ -303,9 +303,10 @@ private fun StatisticsRanking(stats: GroupStats, topics: List<TopicSummary>, isC
                 )
             }
             if (sorted.size > 5) {
-                TextButton(onClick = { expanded = !expanded }) {
-                    Text(if (expanded) "Свернуть" else "Все публикации · ${count(sorted.size)}")
-                }
+                ApuTextAction(
+                    label = if (expanded) "Свернуть" else "Все публикации · ${count(sorted.size)}",
+                    onClick = { expanded = !expanded },
+                )
             }
         } else {
             val sorted = stats.perTopic.entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }
@@ -325,9 +326,10 @@ private fun StatisticsRanking(stats: GroupStats, topics: List<TopicSummary>, isC
                 )
             }
             if (sorted.size > 5) {
-                TextButton(onClick = { expanded = !expanded }) {
-                    Text(if (expanded) "Свернуть" else "Все темы · ${count(sorted.size)}")
-                }
+                ApuTextAction(
+                    label = if (expanded) "Свернуть" else "Все темы · ${count(sorted.size)}",
+                    onClick = { expanded = !expanded },
+                )
             }
         }
     }

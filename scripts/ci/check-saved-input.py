@@ -37,7 +37,8 @@ class SavedInputContractTest(unittest.TestCase):
         self.assertIn("onSend = {", text)
         # Кнопка подписана «Отправить» - как в чате.
         self.assertIn('"Отправить"', text)
-        self.assertIn("TextButton(", text)
+        # Владелец 2026-10-07: кнопка отправки — фирменная ApuTextAction.
+        self.assertIn("ApuTextAction(", text)
         # Поле с подсказкой и пузырём APU, а не серый прямоугольник поверх обоев.
         self.assertIn("Заметка или сообщение себе...", text)
         self.assertIn("apuBubbleSurface(color = Color.White)", text)

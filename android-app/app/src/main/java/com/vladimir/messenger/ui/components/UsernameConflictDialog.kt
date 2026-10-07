@@ -16,7 +16,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,15 +61,14 @@ fun UsernameConflictDialog() {
             }
         },
         confirmButton = {
-            TextButton(
+            ApuTextAction(
+                label = "Сохранить",
                 onClick = {
                     UsernameHolder.set(context, usernameValue)
                     UsernameHolder.clearConflict(context)
                 },
-                // Диалог обязателен, поэтому пустое или негодное имя не
-                // должно закрывать его молча.
                 enabled = UsernameHolder.isValid(usernameValue),
-            ) { Text("Сохранить") }
+            )
         },
     )
 }

@@ -35,7 +35,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -51,6 +50,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.backup.ProfileSyncNet
 import com.vladimir.messenger.ui.components.ApuActionBubble
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.util.QrCodeGenerator
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -139,9 +139,10 @@ fun ProfileSyncDialog(
                     )
                     val mine = ProfileSyncNet.isOwnDevice(meta, ui.myDeviceId, ui.myAccountNodeId)
                     if (!mine) {
-                        TextButton(onClick = viewModel::netFetchAndStage) {
-                            Text("Забрать копию по паролю")
-                        }
+                        ApuTextAction(
+                            label = "Забрать копию по паролю",
+                            onClick = viewModel::netFetchAndStage,
+                        )
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -227,9 +228,7 @@ fun ProfileSyncDialog(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        TextButton(onClick = viewModel::stopShare) {
-                            Text("Отменить передачу")
-                        }
+                        ApuTextAction(label = "Отменить передачу", onClick = viewModel::stopShare)
                     }
                 }
                 androidx.compose.material3.OutlinedTextField(
@@ -275,9 +274,7 @@ fun ProfileSyncDialog(
                             }
                         },
                     )
-                    TextButton(onClick = viewModel::discardStaged) {
-                        Text("Не применять")
-                    }
+                    ApuTextAction(label = "Не применять", onClick = viewModel::discardStaged)
                 }
 
                 ui.message?.let { message ->
@@ -292,13 +289,14 @@ fun ProfileSyncDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                enabled = !ui.busy && !ui.restarting,
+            ApuTextAction(
+                label = "Закрыть",
                 onClick = {
                     viewModel.stopShare()
                     onDismiss()
                 },
-            ) { Text("Закрыть") }
+                enabled = !ui.busy && !ui.restarting,
+            )
         },
     )
 }

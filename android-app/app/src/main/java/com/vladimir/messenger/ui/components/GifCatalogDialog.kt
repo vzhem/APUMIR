@@ -36,7 +36,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -119,7 +118,7 @@ fun GifCatalogDialog(
             )
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Закрыть") }
+            ApuTextAction(label = "Закрыть", onClick = onDismiss)
         },
     )
 }
@@ -163,20 +162,18 @@ fun GifCatalogBody(
                 )
             },
             confirmButton = {
-                androidx.compose.material3.TextButton(
+                ApuTextAction(
+                    label = "Удалить",
                     onClick = {
                         val entry = removeCandidate
                         removeCandidate = null
                         if (entry != null) onRemoveOwnGif?.invoke(entry)
                     },
-                ) {
-                    Text("Удалить", color = MaterialTheme.colorScheme.error)
-                }
+                    danger = true,
+                )
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { removeCandidate = null }) {
-                    Text("Отмена")
-                }
+                ApuTextAction(label = "Отмена", onClick = { removeCandidate = null })
             },
         )
     }
@@ -212,9 +209,7 @@ fun GifCatalogBody(
             val pickOwnGif = androidx.activity.compose.rememberLauncherForActivityResult(
                 androidx.activity.result.contract.ActivityResultContracts.GetContent(),
             ) { uri -> if (uri != null) onAddOwnGif(uri) }
-            TextButton(onClick = { pickOwnGif.launch("image/gif") }) {
-                Text("+ Своя", color = MaterialTheme.colorScheme.primary)
-            }
+            ApuTextAction(label = "+ Своя", onClick = { pickOwnGif.launch("image/gif") })
         }
         Spacer(Modifier.height(8.dp))
 
@@ -397,10 +392,11 @@ fun GifCatalogBody(
                 }
             } else if (next.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))
-                TextButton(
+                ApuTextAction(
+                    label = "Ещё",
                     onClick = onMore,
                     modifier = Modifier.align(Alignment.CenterHorizontally),
-                ) { Text("Ещё") }
+                )
             }
         }
 

@@ -175,8 +175,39 @@ fun ApuBubble(
     verticalArrangement: Arrangement.Vertical = Arrangement.spacedBy(6.dp),
     /** Раунд 169: стикеры в «Избранном» - без рамки и подложки. */
     transparent: Boolean = false,
+    /**
+     * Владелец 2026-10-07: «Теперь в таком стиле нужно переделать всё приложение».
+     * Блок в премиальном слое — как шапки, диалоги и строки списков: подъём,
+     * единая подложка, золотая нить по кромке и блеск ПОД содержимым, поэтому
+     * цифры статистики и подписи остаются чёткими.
+     *
+     * `null` — плоская поверхность: внутри другой карточки, где вторая тень
+     * превратилась бы в грязь.
+     */
+    premium: Dp? = 5.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    if (premium != null && !transparent) {
+        val shape = ApuBubbleShape
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .apuPremiumLift(premium, shape)
+                .apuBubbleSurface(shape = shape)
+                .apuPremiumThread(shape = shape, inset = 16.dp)
+                .apuPremiumGloss(shape, intensity = 0.45f, topFraction = 0.55f),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = verticalArrangement,
+            ) {
+                CompositionLocalProvider(LocalContentColor provides ApuBubbleTextColor) {
+                    content()
+                }
+            }
+        }
+        return
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()

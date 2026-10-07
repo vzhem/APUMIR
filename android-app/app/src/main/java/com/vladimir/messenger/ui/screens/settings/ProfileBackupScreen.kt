@@ -49,7 +49,6 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -70,6 +69,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.vladimir.messenger.data.backup.BackupCipher
 import com.vladimir.messenger.data.backup.BackupSchedule
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.ui.components.HintBubbleMutedColor
@@ -283,7 +283,11 @@ fun ProfileBackupScreen(
                                             modifier = Modifier.weight(1f),
                                         ) { Text("Восстановить и закрыть") }
                                         Spacer(Modifier.width(8.dp))
-                                        TextButton(onClick = viewModel::discardStaged, enabled = !state.busy) { Text("Отмена") }
+                                        ApuTextAction(
+                                            label = "Отмена",
+                                            onClick = viewModel::discardStaged,
+                                            enabled = !state.busy,
+                                        )
                                     }
                                 }
                             }
@@ -435,7 +439,11 @@ fun ProfileBackupScreen(
                                         modifier = Modifier.weight(1f),
                                     ) { Text("Обновить сейчас") }
                                     Spacer(Modifier.width(8.dp))
-                                    TextButton(onClick = viewModel::disableAutoUpdate, enabled = !state.busy) { Text("Выключить") }
+                                    ApuTextAction(
+                                        label = "Выключить",
+                                        onClick = viewModel::disableAutoUpdate,
+                                        enabled = !state.busy,
+                                    )
                                 }
                             } else {
                                 if (scheduleError != null) {
@@ -641,17 +649,18 @@ fun ProfileBackupScreen(
                 }
             },
             confirmButton = {
-                TextButton(
-                    enabled = autoAttachPassword.length >= BackupCipher.MIN_PASSWORD_LENGTH && !state.busy,
+                ApuTextAction(
+                    label = "Включить",
                     onClick = {
                         val t = target
                         autoAttachTarget = null
                         viewModel.enableAutoUpdateFor(t.uri, autoAttachPassword, includeReceived, autoPeriod)
                     },
-                ) { Text("Включить") }
+                    enabled = autoAttachPassword.length >= BackupCipher.MIN_PASSWORD_LENGTH && !state.busy,
+                )
             },
             dismissButton = {
-                TextButton(onClick = { autoAttachTarget = null }) { Text("Отмена") }
+                ApuTextAction(label = "Отмена", onClick = { autoAttachTarget = null })
             },
         )
     }

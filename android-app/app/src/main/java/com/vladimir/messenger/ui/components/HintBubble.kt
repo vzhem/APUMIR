@@ -37,15 +37,16 @@ fun HintBubble(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
+    // Владелец 2026-10-07: «Теперь в таком стиле нужно переделать всё приложение».
+    // Подсказка — та же премиальная поверхность, что шапки и диалоги: подъём,
+    // единая подложка, золотая нить по кромке и блеск ПОД текстом.
+    val shape = RoundedCornerShape(14.dp)
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(14.dp),
-            )
+            .apuPremiumLift(4.dp, shape)
+            .apuBubbleSurface(color = Color(0xFFF5F7FA).copy(alpha = 0.92f), shape = shape)
+            .apuPremiumThread(shape = shape, inset = 18.dp)
+            .apuPremiumGloss(shape, intensity = 0.4f, topFraction = 0.6f)
             .padding(horizontal = 18.dp, vertical = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
