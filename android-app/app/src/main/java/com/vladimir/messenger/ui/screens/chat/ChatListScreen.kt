@@ -36,6 +36,9 @@ import com.vladimir.messenger.ui.components.ApuBubbleShape
 import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuFormTextField
+import com.vladimir.messenger.ui.components.ApuPremiumDialog
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 import com.vladimir.messenger.ui.components.ApuActionsMenu
 import com.vladimir.messenger.ui.components.ApuTabBar
 import com.vladimir.messenger.ui.components.Avatar
@@ -678,108 +681,102 @@ fun ChatListScreen(
     }
 
     qrInvite?.let { (title, link) ->
-        AlertDialog(
-            onDismissRequest = { qrInvite = null },
-            title = { Text(title) },
-            text = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        "Пусть собеседник откроет сканер QR на главном экране " +
-                            "и наведёт камеру. Он войдёт без подтверждения.",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    com.vladimir.messenger.ui.components.InviteShareCard(
-                        link = link,
-                        displayName = title,
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { qrInvite = null }) { Text("Готово") }
-            },
-        )
+        // Премиальный общий вид диалога (стиль «Логов»): золотая капсула
+        // заголовка, светлая подложка house style, наши кнопки.
+        ApuPremiumDialog(
+            title = title,
+            onDismiss = { qrInvite = null },
+            confirmLabel = "Готово",
+            onConfirm = { qrInvite = null },
+            confirmStyle = DiagnosticsActionStyle.GLASS,
+            dismissLabel = null,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "Пусть собеседник откроет сканер QR на главном экране " +
+                        "и наведёт камеру. Он войдёт без подтверждения.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = ApuBubbleTextColor,
+                )
+                Spacer(Modifier.height(12.dp))
+                com.vladimir.messenger.ui.components.InviteShareCard(
+                    link = link,
+                    displayName = title,
+                )
+            }
+        }
     }
 
     // Подтверждение удаления чата.
     confirmDeleteChat?.let { chat ->
-        AlertDialog(
-            onDismissRequest = { confirmDeleteChat = null },
-            title = { Text("Удалить чат?") },
-            text = { Text("Чат с «${chat.contactName}» и вся переписка будут удалены на этом телефоне.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.deleteChat(chat.id)
-                    confirmDeleteChat = null
-                }) { Text("Удалить") }
+        ApuPremiumDialog(
+            title = "Удалить чат?",
+            onDismiss = { confirmDeleteChat = null },
+            confirmLabel = "Удалить",
+            onConfirm = {
+                viewModel.deleteChat(chat.id)
+                confirmDeleteChat = null
             },
-            dismissButton = {
-                TextButton(onClick = { confirmDeleteChat = null }) { Text("Отмена") }
-            },
-        )
+        ) {
+            Text(
+                "Чат с «${chat.contactName}» и вся переписка будут удалены на этом телефоне.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = ApuBubbleTextColor,
+            )
+        }
     }
 
     // Подтверждение очистки переписки.
     confirmClearChat?.let { chat ->
-        AlertDialog(
-            onDismissRequest = { confirmClearChat = null },
-            title = { Text("Очистить переписку?") },
-            text = { Text("Сообщения чата с «${chat.contactName}» будут удалены, сам чат останется.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.clearChatHistory(chat.id)
-                    confirmClearChat = null
-                }) { Text("Очистить") }
+        ApuPremiumDialog(
+            title = "Очистить переписку?",
+            onDismiss = { confirmClearChat = null },
+            confirmLabel = "Очистить",
+            onConfirm = {
+                viewModel.clearChatHistory(chat.id)
+                confirmClearChat = null
             },
-            dismissButton = {
-                TextButton(onClick = { confirmClearChat = null }) { Text("Отмена") }
-            },
-        )
+        ) {
+            Text(
+                "Сообщения чата с «${chat.contactName}» будут удалены, сам чат останется.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = ApuBubbleTextColor,
+            )
+        }
     }
 
     // Подтверждение выхода/удаления группы или канала.
     confirmGroup?.let { group ->
         val owner = group.myRole == GroupRole.OWNER
         val what = if (group.isChannel) "канал" else "группу"
-        AlertDialog(
-            onDismissRequest = { confirmGroup = null },
-            title = {
-                Text(
-                    when {
-                        owner -> "Удалить $what?"
-                        group.isChannel -> "Отписаться от канала?"
-                        else -> "Выйти из группы?"
-                    }
-                )
+        ApuPremiumDialog(
+            title = when {
+                owner -> "Удалить $what?"
+                group.isChannel -> "Отписаться от канала?"
+                else -> "Выйти из группы?"
             },
-            text = {
-                Text(
-                    when {
-                        owner && group.isChannel -> "«${group.title}» будет удалён у всех подписчиков."
-                        owner -> "«${group.title}» будет удалён у всех участников."
-                        group.isChannel -> "Вы перестанете получать посты канала «${group.title}»."
-                        else -> "Вы перестанете получать сообщения «${group.title}»."
-                    }
-                )
+            onDismiss = { confirmGroup = null },
+            confirmLabel = when {
+                owner -> "Удалить"
+                group.isChannel -> "Отписаться"
+                else -> "Выйти"
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    if (owner) viewModel.deleteGroup(group.id) else viewModel.leaveGroup(group.id)
-                    confirmGroup = null
-                }) {
-                    Text(
-                        when {
-                            owner -> "Удалить"
-                            group.isChannel -> "Отписаться"
-                            else -> "Выйти"
-                        }
-                    )
-                }
+            onConfirm = {
+                if (owner) viewModel.deleteGroup(group.id) else viewModel.leaveGroup(group.id)
+                confirmGroup = null
             },
-            dismissButton = {
-                TextButton(onClick = { confirmGroup = null }) { Text("Отмена") }
-            },
-        )
+        ) {
+            Text(
+                when {
+                    owner && group.isChannel -> "«${group.title}» будет удалён у всех подписчиков."
+                    owner -> "«${group.title}» будет удалён у всех участников."
+                    group.isChannel -> "Вы перестанете получать посты канала «${group.title}»."
+                    else -> "Вы перестанете получать сообщения «${group.title}»."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = ApuBubbleTextColor,
+            )
+        }
     }
 
     // Диалог «Мой адрес для подключения» убран вместе с пунктом меню:
