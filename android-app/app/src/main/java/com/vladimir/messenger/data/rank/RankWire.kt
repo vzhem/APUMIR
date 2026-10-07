@@ -92,13 +92,22 @@ object RankWire {
         return PeerRank(nodeId, qualified, updatedAtMs)
     }
 
-    /** Канонический вид узла: нижний регистр и проверка формы, как в транспорте. */
+    /**
+     * Канонический вид узла: нижний регистр и проверка формы, как в транспорте.
+     *
+     * Проверяем ТОЛЬКО хвост после `pk_`: сам префикс содержит подчёркивание,
+     * которого в наборе «буквы и цифры» нет, и проверка целой строки отбраковала
+     * бы каждый настоящий узел (эту ошибку поймал RankWireTest на CI).
+     */
     fun canonicalNodeId(value: String?): String? {
         val text = value?.trim()?.lowercase() ?: return null
         if (!text.startsWith(NODE_PREFIX)) return null
         val body = text.length - NODE_PREFIX.length
         if (body < NODE_MIN_BODY || body > NODE_MAX_BODY) return null
-        if (!text.all { it in 'a'..'z' || it in '0'..'9' }) return null
+        for (i in NODE_PREFIX.length until text.length) {
+            val c = text[i]
+            if (c !in 'a'..'z' && c !in '0'..'9') return null
+        }
         return text
     }
 }

@@ -61,6 +61,10 @@ class PeerRankContractTest(unittest.TestCase):
         self.assertIn("private const val MAX_BODY = 128", NODE_IDS)
         self.assertIn("private const val NODE_MIN_BODY = 7", WIRE)
         self.assertIn("private const val NODE_MAX_BODY = 128", WIRE)
+        # Хвост проверяем ПОСЛЕ префикса: подчёркивание в `pk_` не буква и не
+        # цифра, и проверка целой строки отбраковала бы каждый живой узел
+        # (эту ошибку поймал RankWireTest на CI).
+        self.assertIn("for (i in NODE_PREFIX.length until text.length)", WIRE)
         # Свои часы вперёд не принимаем без предела: иначе подделка «свежее».
         self.assertIn("FUTURE_TOLERANCE_MS", WIRE)
 
