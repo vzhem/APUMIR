@@ -445,6 +445,7 @@ fun ApuSettingsDialog(
                     // окно не растягивается выше экрана.
                     Box(
                         modifier = Modifier
+                            .fillMaxWidth()
                             .heightIn(max = 420.dp)
                             .verticalScroll(rememberScrollState()),
                     ) {
