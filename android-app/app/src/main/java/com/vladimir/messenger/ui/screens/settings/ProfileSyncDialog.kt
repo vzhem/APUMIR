@@ -32,7 +32,6 @@ import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Wifi
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -51,6 +50,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.backup.ProfileSyncNet
 import com.vladimir.messenger.ui.components.ApuActionBubble
+import com.vladimir.messenger.ui.components.ApuSettingsDivider
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.util.QrCodeGenerator
 import java.text.SimpleDateFormat
@@ -168,7 +168,7 @@ fun ProfileSyncDialog(
                     )
                 }
 
-                HorizontalDivider()
+                ApuSettingsDivider(startPadding = 16.dp)
 
                 // ── Wi-Fi напрямую: без интернета ────────────────────────
                 Text(
@@ -236,7 +236,7 @@ fun ProfileSyncDialog(
                 // ── Подготовленная копия: подтверждение ─────────────────
                 ui.staged?.let { manifest ->
                     Spacer(Modifier.height(4.dp))
-                    HorizontalDivider()
+                    ApuSettingsDivider(startPadding = 16.dp)
                     Spacer(Modifier.height(4.dp))
                     val created = SimpleDateFormat("d.MM.yyyy HH:mm", Locale.getDefault())
                         .format(Date(manifest.createdAtMs))

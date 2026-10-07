@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.channels
 
+import androidx.compose.material3.HorizontalDivider
 import com.vladimir.messenger.data.local.MessagePinPolicy
 
 // =============================================================================
@@ -24,6 +25,7 @@ import com.vladimir.messenger.ui.components.ApuAntiRatingInlineBadge
 import com.vladimir.messenger.ui.components.ApuCircleCheckIndicator
 import com.vladimir.messenger.ui.components.ApuMessageModerationDialog
 import com.vladimir.messenger.ui.components.ApuSettingsDangerColor
+import com.vladimir.messenger.ui.components.ApuSettingsDivider
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.PeerAvatar
 import com.vladimir.messenger.ui.components.PeerProfileSheet
@@ -86,7 +88,6 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -1440,7 +1441,7 @@ private fun PostEditorDialog(
                 // загромождать окно, когда опрос не нужен.
                 if (pollEditable) {
                     if (withPoll) {
-                        HorizontalDivider()
+                        ApuSettingsDivider(startPadding = 16.dp)
                         Spacer(Modifier.height(6.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(

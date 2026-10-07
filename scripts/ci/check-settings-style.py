@@ -213,7 +213,10 @@ class SettingsStyleTest(unittest.TestCase):
         self.assertIn("heightIn(min = 72.dp)", shared)
         self.assertIn("Role.Button", shared)
         self.assertIn("ApuSettingsDivider", shared)
-        self.assertIn("start = 72.dp, end = 16.dp", shared)
+        # Разделитель — золотая нить APU. Отступ задаётся параметром: в
+        # настройках 72dp (под иконкой строки), в карточках разделов 16dp.
+        self.assertIn("startPadding: Dp = 72.dp", shared)
+        self.assertIn("padding(start = startPadding, end = 16.dp)", shared)
         text = source("screens/settings/SettingsScreen.kt")
         self.assertIn("ApuSettingsLayout.profileActionColumns(maxWidth.value, fontScale)", text)
         self.assertIn("ApuSettingsLayout.horizontalThemeChoices(maxWidth.value, fontScale)", text)

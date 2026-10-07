@@ -10,6 +10,7 @@ package com.vladimir.messenger.ui.screens.groups
 import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
+import com.vladimir.messenger.ui.components.ApuSettingsDivider
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.ApuVipBadge
 import com.vladimir.messenger.ui.components.PeerAvatar
@@ -43,7 +44,6 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -535,7 +535,7 @@ private fun OverviewTab(
             )
 
             if (isOwner) {
-                HorizontalDivider()
+                ApuSettingsDivider(startPadding = 16.dp)
                 Text(
                     if (isChannel) {
                         "Удаление стирает канал, его посты и комментарии у всех подписчиков."
@@ -771,7 +771,7 @@ private fun AdminsTab(
                         // Разрешения занимают пол-экрана, поэтому список сворачивается:
                         // нажал на строку - развернулось, нажал ещё раз - свернулось.
                         var expanded by remember(admin.nodeId) { mutableStateOf(false) }
-                        HorizontalDivider()
+                        ApuSettingsDivider(startPadding = 16.dp)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
@@ -816,7 +816,7 @@ private fun AdminsTab(
                         // администратору (наследование после удаления владельца
                         // работает и без этой кнопки).
                         if (isOwner && !admin.isMe) {
-                            HorizontalDivider()
+                            ApuSettingsDivider(startPadding = 16.dp)
                             ApuTextAction(
                                 label = "Передать владение",
                                 onClick = { transferTarget = admin },
@@ -893,7 +893,7 @@ private fun MembersTab(
                     onTogglePermission = { flag, enabled -> onTogglePermission(member.nodeId, flag, enabled) },
                     onBlock = { onBlock(member.nodeId) },
                 )
-                HorizontalDivider()
+                ApuSettingsDivider(startPadding = 16.dp)
             }
         }
     }
@@ -954,7 +954,7 @@ private fun MemberRow(
             }
 
             if (expanded && member.role == GroupRole.ADMIN) {
-                HorizontalDivider()
+                ApuSettingsDivider(startPadding = 16.dp)
                 Text("Разрешения администратора", style = MaterialTheme.typography.labelLarge)
                 GroupPermissions.Admin.entries.forEach { entry ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -973,7 +973,7 @@ private fun MemberRow(
                     }
                 }
             } else if (expanded) {
-                HorizontalDivider()
+                ApuSettingsDivider(startPadding = 16.dp)
                 ApuTextAction(
                     label = if (member.role == GroupRole.ADMIN) "Снять администратора" else "Назначить администратором",
                     onClick = onToggleAdmin,

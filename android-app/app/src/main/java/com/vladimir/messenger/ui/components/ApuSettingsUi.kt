@@ -37,6 +37,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -175,12 +176,15 @@ fun ApuSettingsSectionTitle(title: String, modifier: Modifier = Modifier) {
 }
 
 @Composable
-fun ApuSettingsDivider() {
+fun ApuSettingsDivider(
+    /** Отступ слева: в настройках 72dp (под иконкой строки), в карточках 16dp. */
+    startPadding: Dp = 72.dp,
+) {
     // Та же золотая нить, что разделяет блоки в окне «Логи»: тонкая, светится
     // к середине и растворяется к краям. Отступ от иконки сохранён прежним.
     Box(
         modifier = Modifier
-            .padding(start = 72.dp, end = 16.dp)
+            .padding(start = startPadding, end = 16.dp)
             .fillMaxWidth()
             .height(1.dp)
             .background(
