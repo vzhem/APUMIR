@@ -221,6 +221,32 @@ class DiagnosticsContractsTest(unittest.TestCase):
             with self.subTest(marker=marker, where="ApuDiagnosticsUi"):
                 self.assertIn(marker, ui)
 
+    def test_premium_polish_is_alive_and_cheap(self):
+        """Полировка 2026-10-07: блеск должен ДВИГАТЬСЯ, а не быть картинкой.
+
+        Владелец: «можешь ещё лучше сделать если сможешь». Взято ровно то, что
+        читается премиально и не стоит перерисовок: бегущая световая полоса
+        (одна анимация на элемент), золотая нить со светом, кольцо-эмблема со
+        «сварочной» волной и глубина нажатия у кнопок (тень живёт с масштабом).
+        """
+        ui = source(DIAG_UI)
+        for marker in (
+            "fun rememberSweep(",
+            "infiniteRepeatable(",
+            "Brush.sweepGradient(",
+            "Brush.radialGradient(",
+            "animateDpAsState(",
+            "sweep = rememberSweep(",
+            "rotationZ = spin",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, ui)
+        # Движение не должно превратиться в поток перерисовок: бегущий блик
+        # живёт в drawWithCache, а кадры меняет только animation-core.
+        gloss_start = ui.index("private fun Modifier.diagnosticsGloss(")
+        gloss_block = ui[gloss_start:ui.index("fun rememberSweep(", gloss_start)]
+        self.assertIn("drawWithCache", gloss_block)
+
     def test_lost_items_do_not_live_forever(self):
         """Владелец 2026-10-07: тяжёлое — сутки, текст и малое — неделя, и уборка.
 

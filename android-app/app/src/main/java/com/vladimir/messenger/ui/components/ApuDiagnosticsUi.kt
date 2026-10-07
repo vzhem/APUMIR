@@ -25,7 +25,13 @@ package com.vladimir.messenger.ui.components
 // (scripts/ci/check-diagnostics-report.py, test_premium_palette_keeps_contrast).
 // =============================================================================
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -37,6 +43,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -63,6 +70,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipRect
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -177,7 +185,11 @@ private fun diagnosticsVerdictText(level: DiagnosticsLevel): String = when (leve
 private fun Modifier.diagnosticsGloss(
     shape: Shape = RoundedCornerShape(16.dp),
     intensity: Float = 1f,
+    /** 0..1 — где стоит «бегущая» световая полоса; null — блик на месте. */
+    sweep: Float? = null,
 ): Modifier = clip(shape).drawWithCache {
+    // Верхнее свечение: узкая светлая полоса у кромки — «полированный
+    // пластик» премиальных приложений. Стоит ноль перерисовок (drawWithCache).
     val topSheen = Brush.linearGradient(
         colors = listOf(
             Color.White.copy(alpha = 0.34f * intensity),
@@ -187,7 +199,7 @@ private fun Modifier.diagnosticsGloss(
         start = Offset(0f, 0f),
         end = Offset(0f, size.height * 0.55f),
     )
-    val lightBand = Brush.linearGradient(
+    val staticBand = Brush.linearGradient(
         colors = listOf(
             Color.White.copy(alpha = 0.42f * intensity),
             Color.White.copy(alpha = 0.06f * intensity),
@@ -196,15 +208,61 @@ private fun Modifier.diagnosticsGloss(
         start = Offset(0f, 0f),
         end = Offset(size.width * 0.85f, 0f),
     )
+    // Бегущая полоса мягче статичной: она проходит поверх содержимого, и
+    // засвечивать текст ей нельзя — только «скользнуть» по стеклу.
+    val movingBandWidth = size.width * 0.30f
+    val movingBandLeft = -movingBandWidth + (size.width + movingBandWidth) * (sweep ?: 0f)
+    val movingBand = Brush.linearGradient(
+        colors = listOf(
+            Color.Transparent,
+            Color.White.copy(alpha = 0.20f * intensity),
+            Color.Transparent,
+        ),
+        startX = movingBandLeft,
+        endX = movingBandLeft + movingBandWidth,
+    )
     onDrawWithContent {
         drawContent()
         drawRect(topSheen)
-        drawRect(
-            brush = lightBand,
-            topLeft = Offset(size.width * 0.04f, size.height * 0.06f),
-            size = Size(size.width * 0.92f, size.height * 0.10f),
-        )
+        if (sweep == null) {
+            drawRect(
+                brush = staticBand,
+                topLeft = Offset(size.width * 0.04f, size.height * 0.06f),
+                size = Size(size.width * 0.92f, size.height * 0.10f),
+            )
+        } else {
+            // Верхние три четверти высоты: низ карточки остаётся спокойным.
+            val height = size.height * 0.75f
+            clipRect(
+                left = movingBandLeft.coerceIn(0f, size.width),
+                top = 0f,
+                right = (movingBandLeft + movingBandWidth).coerceIn(0f, size.width),
+                bottom = height,
+            ) {
+                drawRect(
+                    brush = movingBand,
+                    topLeft = Offset(movingBandLeft, 0f),
+                    size = Size(movingBandWidth, height),
+                )
+            }
+        }
     }
+}
+
+/** Бегущий блик по элементу: одна общая скорость у всего окна. */
+@Composable
+private fun rememberSweep(periodMs: Int = 2400): Float {
+    val transition = rememberInfiniteTransition(label = "diag-sweep")
+    val sweep by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = periodMs, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "diag-sweep-value",
+    )
+    return sweep
 }
 
 /** Мягкая тень под элементом: объём, а не плоская заливка. */
@@ -234,20 +292,48 @@ fun ApuDiagnosticsHero(
     val collecting = lines.isEmpty()
     val level = if (collecting) DiagnosticsLevel.INFO else diagnosticsWorstLevel(lines)
     val shape = RoundedCornerShape(22.dp)
+    val sweep = rememberSweep(periodMs = 3200)
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .diagnosticsLift(14.dp, shape, Color(0xFF0A1018).copy(alpha = 0.55f))
+            .diagnosticsLift(16.dp, shape, Color(0xFF0A1018).copy(alpha = 0.6f))
             .clip(shape)
             .background(
                 Brush.linearGradient(
-                    colors = listOf(DiagNightTop, Color(0xFF24344E), DiagNightBottom),
+                    colors = listOf(DiagNightTop, Color(0xFF2A3C5A), DiagNightBottom),
                     start = Offset(0f, 0f),
                     end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
                 ),
             )
-            .border(1.dp, Brush.linearGradient(listOf(DiagGold.copy(alpha = 0.75f), DiagGoldDeep.copy(alpha = 0.35f))), shape)
-            .diagnosticsGloss(shape, intensity = 0.8f),
+            // «Аврора»: золотое свечение в углу. Далёкий отблеск металла —
+            // то, что отличает премиальную вещь от плоской карточки.
+            .drawWithCache {
+                val aurora = Brush.radialGradient(
+                    colors = listOf(
+                        DiagGold.copy(alpha = 0.30f),
+                        DiagGold.copy(alpha = 0.10f),
+                        Color.Transparent,
+                    ),
+                    center = Offset(size.width * 0.86f, -size.height * 0.08f),
+                    radius = size.width * 0.75f,
+                )
+                onDrawWithContent {
+                    drawContent()
+                    drawRect(aurora)
+                }
+            }
+            .border(
+                1.dp,
+                Brush.linearGradient(
+                    listOf(
+                        DiagGold.copy(alpha = 0.85f),
+                        DiagGoldLight.copy(alpha = 0.45f),
+                        DiagGoldDeep.copy(alpha = 0.35f),
+                    ),
+                ),
+                shape,
+            )
+            .diagnosticsGloss(shape, intensity = 0.85f, sweep = sweep),
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
@@ -290,40 +376,88 @@ fun ApuDiagnosticsHero(
     }
 }
 
-/** Эмблема: золотое кольцо с тёмным стеклом внутри — знак APU. */
+/**
+ * Эмблема: золотое кольцо с тёмным стеклом внутри — знак APU.
+ *
+ * Кольцо «блестит»: по нему медленно идёт светлая волна (sweep-градиент), а
+ * вокруг дышит мягкое свечение. Это тот самый премиальный блеск, который
+ * владелец просил 2026-10-07, и он ничего не стоит по перерисовкам: меняется
+ * только поворот кисти и альфа одной подсветки.
+ */
 @Composable
 private fun ApuDiagnosticsEmblem() {
-    Box(
-        modifier = Modifier
-            .size(52.dp)
-            .diagnosticsLift(8.dp, CircleShape, DiagGold.copy(alpha = 0.45f))
-            .clip(CircleShape)
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(DiagGoldLight, DiagGold, DiagGoldDeep),
-                    start = Offset(0f, 0f),
-                    end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
-                ),
-            )
-            .diagnosticsGloss(CircleShape, intensity = 0.9f),
-        contentAlignment = Alignment.Center,
-    ) {
+    val spinTransition = rememberInfiniteTransition(label = "diag-emblem")
+    val spin by spinTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 4200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "diag-emblem-spin",
+    )
+    val halo by spinTransition.animateFloat(
+        initialValue = 0.16f,
+        targetValue = 0.42f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1500, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "diag-emblem-halo",
+    )
+    Box(modifier = Modifier.size(58.dp), contentAlignment = Alignment.Center) {
+        // Дышащее свечение вокруг кольца.
         Box(
             modifier = Modifier
-                .size(38.dp)
+                .fillMaxSize()
+                .graphicsLayer { alpha = halo }
                 .clip(CircleShape)
                 .background(
-                    Brush.verticalGradient(listOf(Color(0xFF22334C), Color(0xFF0B1220))),
-                )
-                .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape),
+                    Brush.radialGradient(
+                        colors = listOf(DiagGold.copy(alpha = 0.55f), Color.Transparent),
+                    ),
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .size(56.dp)
+                .graphicsLayer { rotationZ = spin }
+                .diagnosticsLift(10.dp, CircleShape, DiagGold.copy(alpha = 0.50f))
+                .clip(CircleShape)
+                .background(
+                    // Светлая волна поверх золота: кольцо читается как металл.
+                    Brush.sweepGradient(
+                        listOf(
+                            DiagGoldDeep,
+                            DiagGold,
+                            DiagGoldLight,
+                            DiagGold,
+                            DiagGoldDeep,
+                            DiagGold,
+                            DiagGoldLight,
+                            DiagGoldDeep,
+                        ),
+                    ),
+                ),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                Icons.Default.Terminal,
-                contentDescription = null,
-                tint = DiagGold,
-                modifier = Modifier.size(20.dp),
-            )
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.verticalGradient(listOf(Color(0xFF22334C), Color(0xFF0B1220))),
+                    )
+                    .border(1.dp, Color.White.copy(alpha = 0.20f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.Terminal,
+                    contentDescription = null,
+                    tint = DiagGold,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
         }
     }
 }
@@ -340,7 +474,7 @@ private fun ApuDiagnosticsVerdictPill(text: String, level: DiagnosticsLevel, che
         Box(
             modifier = Modifier
                 .weight(1f)
-                .diagnosticsLift(10.dp, shape, diagnosticsLevelColor(level).copy(alpha = 0.5f))
+                .diagnosticsLift(12.dp, shape, diagnosticsLevelColor(level).copy(alpha = 0.55f))
                 .clip(shape)
                 .background(
                     Brush.linearGradient(
@@ -349,8 +483,18 @@ private fun ApuDiagnosticsVerdictPill(text: String, level: DiagnosticsLevel, che
                         end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
                     ),
                 )
-                .diagnosticsGloss(shape, intensity = 1f)
-                .padding(horizontal = 14.dp, vertical = 9.dp),
+                .border(
+                    1.dp,
+                    Brush.linearGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.75f),
+                            Color.White.copy(alpha = 0.10f),
+                        ),
+                    ),
+                    shape,
+                )
+                .diagnosticsGloss(shape, intensity = 1f, sweep = rememberSweep(periodMs = 2600))
+                .padding(horizontal = 16.dp, vertical = 11.dp),
             contentAlignment = Alignment.CenterStart,
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -371,14 +515,16 @@ private fun ApuDiagnosticsVerdictPill(text: String, level: DiagnosticsLevel, che
                 )
             }
         }
-        Spacer(Modifier.width(8.dp))
-        Text(
-            if (checks > 0) "проверок $checks" else "собираю…",
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = Color.White.copy(alpha = 0.85f),
-            maxLines = 1,
-        )
+        if (checks > 0) {
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "проверок $checks",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White.copy(alpha = 0.88f),
+                maxLines = 1,
+            )
+        }
     }
 }
 
@@ -390,9 +536,10 @@ private fun ApuDiagnosticsGlassChip(label: String, value: String, alarm: Boolean
     Column(
         modifier = Modifier
             .clip(shape)
-            .background(Color.White.copy(alpha = 0.10f))
-            .border(1.dp, Color.White.copy(alpha = 0.16f), shape)
-            .padding(horizontal = 10.dp, vertical = 7.dp),
+            .background(Color.White.copy(alpha = 0.12f))
+            .border(1.dp, Color.White.copy(alpha = 0.20f), shape)
+            .diagnosticsGloss(shape, intensity = 0.45f)
+            .padding(horizontal = 11.dp, vertical = 8.dp),
     ) {
         Text(
             label,
@@ -459,12 +606,19 @@ fun ApuDiagnosticsStatusRow(line: DiagnosticsLine, modifier: Modifier = Modifier
                     end = Offset(Float.POSITIVE_INFINITY, 0f),
                 ),
             )
-            .border(1.dp, bright.copy(alpha = 0.28f), shape)
-            .padding(horizontal = 10.dp, vertical = 9.dp),
+            .border(
+                1.dp,
+                Brush.linearGradient(
+                    listOf(bright.copy(alpha = 0.55f), bright.copy(alpha = 0.18f)),
+                ),
+                shape,
+            )
+            .diagnosticsGloss(shape, intensity = 0.35f)
+            .padding(horizontal = 11.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         ApuDiagnosticsLevelWell(line.level)
-        Spacer(Modifier.width(10.dp))
+        Spacer(Modifier.width(11.dp))
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 line.title,
@@ -562,6 +716,8 @@ private fun ApuDiagnosticsLegendItem(level: DiagnosticsLevel, modifier: Modifier
 /** Разделитель: золотая нить, растворяющаяся к краю. */
 @Composable
 private fun ApuDiagnosticsDivider() {
+    // Нить золота, по которой пробегает свет: та же «аврора», но строкой.
+    val sweep = rememberSweep(periodMs = 3000)
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -570,11 +726,24 @@ private fun ApuDiagnosticsDivider() {
                 Brush.horizontalGradient(
                     listOf(
                         Color.Transparent,
-                        DiagGold.copy(alpha = 0.55f),
+                        DiagGold.copy(alpha = 0.45f),
                         Color.Transparent,
                     ),
                 ),
-            ),
+            )
+            .drawWithCache {
+                val band = size.width * 0.30f
+                val left = -band + (size.width + band) * sweep
+                val light = Brush.horizontalGradient(
+                    listOf(Color.Transparent, DiagGoldLight, Color.Transparent),
+                    startX = left,
+                    endX = left + band,
+                )
+                onDrawWithContent {
+                    drawContent()
+                    drawRect(light)
+                }
+            },
     )
 }
 
@@ -600,17 +769,31 @@ fun ApuDiagnosticsReportCard(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .diagnosticsLift(12.dp, shape, Color(0xFF0A1018).copy(alpha = 0.45f))
+            .diagnosticsLift(14.dp, shape, Color(0xFF0A1018).copy(alpha = 0.5f))
             .clip(shape)
             .background(DiagConsoleSurface)
-            .border(1.dp, Brush.linearGradient(listOf(DiagGold.copy(alpha = 0.55f), DiagGoldDeep.copy(alpha = 0.25f))), shape),
+            .border(
+                1.dp,
+                Brush.linearGradient(
+                    listOf(
+                        DiagGold.copy(alpha = 0.65f),
+                        DiagGoldLight.copy(alpha = 0.30f),
+                        DiagGoldDeep.copy(alpha = 0.25f),
+                    ),
+                ),
+                shape,
+            ),
     ) {
         Column {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Brush.verticalGradient(listOf(DiagConsoleBar, DiagConsoleSurface)))
-                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(DiagGold.copy(alpha = 0.12f), DiagConsoleBar, DiagConsoleSurface),
+                        ),
+                    )
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 ApuDiagnosticsTrafficLights()
@@ -674,13 +857,17 @@ fun ApuDiagnosticsEventList(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .diagnosticsLift(10.dp, shape, Color(0xFF0A1018).copy(alpha = 0.35f))
+            .diagnosticsLift(12.dp, shape, Color(0xFF0A1018).copy(alpha = 0.42f))
             .clip(shape)
             .background(DiagConsoleSurface)
             .border(
                 1.dp,
                 Brush.linearGradient(
-                    listOf(DiagGold.copy(alpha = 0.45f), DiagGoldDeep.copy(alpha = 0.22f)),
+                    listOf(
+                        DiagGold.copy(alpha = 0.55f),
+                        DiagGoldLight.copy(alpha = 0.25f),
+                        DiagGoldDeep.copy(alpha = 0.22f),
+                    ),
                 ),
                 shape,
             ),
@@ -689,15 +876,20 @@ fun ApuDiagnosticsEventList(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Brush.verticalGradient(listOf(DiagConsoleBar, DiagConsoleSurface)))
-                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(DiagGold.copy(alpha = 0.12f), DiagConsoleBar, DiagConsoleSurface),
+                        ),
+                    )
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(
                     modifier = Modifier
                         .size(9.dp)
                         .clip(CircleShape)
-                        .background(DiagGold),
+                        .background(DiagGold)
+                        .diagnosticsGloss(CircleShape, intensity = 0.8f),
                 )
                 Spacer(Modifier.width(10.dp))
                 Text(
@@ -865,6 +1057,14 @@ fun ApuDiagnosticsActionButton(
         animationSpec = tween(durationMillis = 110),
         label = "diag-button-press",
     )
+    // Тень живёт вместе с масштабом: нажатая кнопка «садится», отпущенная
+    // «поднимается». Это и есть выразительный объём, о котором просил владелец.
+    val baseLift = if (style == DiagnosticsActionStyle.PRIMARY) 13.dp else 6.dp
+    val lift by animateDpAsState(
+        targetValue = if (pressed && enabled) baseLift - 5.dp else baseLift,
+        animationSpec = tween(durationMillis = 110),
+        label = "diag-button-lift",
+    )
     val shape = RoundedCornerShape(if (style == DiagnosticsActionStyle.PRIMARY) 16.dp else 14.dp)
     val fill = when (style) {
         DiagnosticsActionStyle.PRIMARY -> Brush.linearGradient(
@@ -895,7 +1095,7 @@ fun ApuDiagnosticsActionButton(
     Row(
         modifier = modifier
             .graphicsLayer { scaleX = scale; scaleY = scale }
-            .diagnosticsLift(if (style == DiagnosticsActionStyle.PRIMARY) 12.dp else 5.dp, shape, glow)
+            .diagnosticsLift(lift, shape, glow)
             .clip(shape)
             .background(fill)
             .border(
