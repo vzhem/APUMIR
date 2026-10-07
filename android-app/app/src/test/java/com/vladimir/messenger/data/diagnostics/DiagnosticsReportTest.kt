@@ -288,7 +288,9 @@ class DiagnosticsReportTest {
             logcat = emptyList(),
         )
         assertTrue(report.contains("пересылка: отброшено из-за полной очереди=14"))
-        assertTrue(report.contains("это пакеты для других узлов"))
+        // 2026-10-07: текст уточнён — отказано ЧУЖОМУ, чужая очередь на получателя.
+        assertTrue(report.contains("это пакеты для ДРУГИХ узлов"))
+        assertTrue(report.contains("чужой лимит на получателя"))
     }
 
     @Test
