@@ -75,3 +75,20 @@ cd android-app || exit 1
 # секунды. Фильтр узкий нарочно - полный прогон тестов приложения сюда не
 # входит (в песочнице владельца его нет, и трогать чужие тесты не наша задача).
 ./gradlew :app:testDebugUnitTest --no-daemon --console=plain --tests '*RankWireTest*'
+TESTS_STATUS=$?
+
+# ---- почему тесты упали: словами в лог, а не «красный шаг без причины» -------
+# Сырые логи прогонов из песочницы бота не скачиваются, а комментарий к PR
+# собирается из ЭТОГО вывода. Поэтому печатаем сводку JUnit-XML и текст падений.
+RESULTS="$REPO_ROOT/android-app/app/build/test-results/testDebugUnitTest"
+if [ -d "$RESULTS" ]; then
+    echo "---- test results (testDebugUnitTest) ----"
+    for f in "$RESULTS"/*.xml; do
+        [ -f "$f" ] || continue
+        echo "$(basename "$f"): $(head -2 "$f" | tail -1 | cut -c1-240)"
+    done
+    grep -h -A 10 "<failure" "$RESULTS"/*.xml | head -100
+else
+    echo "---- test results (testDebugUnitTest): отчётов нет ----"
+fi
+exit "$TESTS_STATUS"
