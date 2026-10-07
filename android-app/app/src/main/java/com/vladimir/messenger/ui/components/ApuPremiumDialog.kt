@@ -47,7 +47,6 @@ import androidx.compose.ui.window.DialogProperties
 fun ApuPremiumDialog(
     title: String,
     onDismiss: () -> Unit,
-    content: @Composable ColumnScope.() -> Unit,
     confirmLabel: String? = null,
     onConfirm: (() -> Unit)? = null,
     confirmEnabled: Boolean = true,
@@ -56,6 +55,12 @@ fun ApuPremiumDialog(
     onDismissClick: (() -> Unit)? = null,
     dismissEnabled: Boolean = true,
     properties: DialogProperties = DialogProperties(),
+    // Содержимое — ПОСЛЕДНИМ: trailing lambda в Kotlin привязывается только к
+    // последнему параметру. Когда `content` стоял третьим, а последним был
+    // `properties`, вызов `ApuPremiumDialog(...) { … }` отдавал лямбду именно
+    // properties — и компилятор падал «No value passed for parameter 'content'»
+    // (прогон 37638467086, 2026-10-07).
+    content: @Composable ColumnScope.() -> Unit,
 ) {
     Dialog(onDismissRequest = onDismiss, properties = properties) {
         val shape = RoundedCornerShape(22.dp)
