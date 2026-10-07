@@ -645,6 +645,7 @@ impl RelayQueue {
         }
 
         let now_ms = utc_now_ms();
+        // До перемещения сообщения в запись (см. комментарий в enqueue_foreign).
         let kind = payload_kind(&msg.e2e_payload);
 
         // Сначала — просроченное своё (освобождает запас без потерь).
@@ -738,12 +739,15 @@ impl RelayQueue {
             }
         }
 
+        // Категорию считаем ДО перемещения сообщения в запись: обращение к
+        // `msg` после `message: msg` — ошибка компиляции (borrow of moved value).
+        let kind = payload_kind(&msg.e2e_payload);
         entries.insert(
             msg.msg_id.clone(),
             QueueEntry {
                 message: msg,
                 own: false,
-                kind: payload_kind(&msg.e2e_payload),
+                kind,
             },
         );
         Ok(true)

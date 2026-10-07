@@ -12,8 +12,7 @@ use std::time::Duration;
 pub use crate::network::relay_queue::MAX_MESH_RELAY_ENVELOPE_BYTES;
 
 use crate::network::relay_queue::{
-    ttl_to_ms, valid_metadata_atom, RelayMessage, DEFAULT_RELAY_TTL, FILE_PACKET_TTL,
-    TRANSIENT_SIGNAL_TTL, MAX_CHAT_SCOPE_BYTES,
+    valid_metadata_atom, RelayMessage, DEFAULT_RELAY_TTL, MAX_CHAT_SCOPE_BYTES,
     MAX_MESSAGE_ID_BYTES, MAX_NODE_ID_BYTES,
 };
 use crate::network::wire;
@@ -112,6 +111,7 @@ pub fn prepare_offline_relay(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::network::relay_queue::{ttl_to_ms, FILE_PACKET_TTL, TRANSIENT_SIGNAL_TTL};
     use crate::network::wire::MeshEnvelope;
 
     #[test]
