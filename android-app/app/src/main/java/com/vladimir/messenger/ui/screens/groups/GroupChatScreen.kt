@@ -33,6 +33,9 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import com.vladimir.messenger.ui.components.apuPremiumGloss
+import com.vladimir.messenger.ui.components.apuPremiumLift
+import com.vladimir.messenger.ui.components.apuPremiumThread
 import com.vladimir.messenger.ui.components.swipeBack
 import com.vladimir.messenger.ui.components.swipeToReply
 import androidx.compose.foundation.layout.Box
@@ -1143,13 +1146,11 @@ fun GroupChatScreen(
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xFFF5F7FA).copy(alpha = 0.96f))
-                        .border(
-                            1.dp,
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
-                            RoundedCornerShape(16.dp),
-                        )
+                        // Владелец 2026-10-07: фирменная поверхность и у
+                        // «служебных» пилюль ленты — подъём, золотая нить.
+                        .apuPremiumLift(5.dp, RoundedCornerShape(16.dp))
+                        .apuBubbleSurface(shape = RoundedCornerShape(16.dp))
+                        .apuPremiumThread(shape = RoundedCornerShape(16.dp), inset = 14.dp)
                         .clickable {
                             feedScope.launch {
                                 feedListState.animateScrollToItem(lastIndex.coerceAtLeast(0))
@@ -1171,14 +1172,11 @@ fun GroupChatScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(18.dp))
-                        // Раунд 266: фирменная светлая подложка вместо серой.
-                        .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-                        .border(
-                            1.dp,
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                            RoundedCornerShape(18.dp),
-                        )
+                        // Раунд 266 + 2026-10-07: фирменный премиальный пузырь.
+                        .apuPremiumLift(4.dp)
+                        .apuBubbleSurface()
+                        .apuPremiumThread(inset = 16.dp)
+                        .apuPremiumGloss(intensity = 0.4f, topFraction = 0.55f)
                         .padding(6.dp),
                 ) {
                     // р249: «печатает…» в группе - та же строка, что и в личке,
@@ -1384,10 +1382,13 @@ private fun GroupRail(
     val storeAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
         .collectAsState()
     LazyColumn(
+        // Владелец 2026-10-07: колонка значков — тоже часть общего набора:
+        // та же подложка, что у строк и панелей, с золотой нитью по кромке.
         modifier = Modifier
             .width(76.dp)
             .fillMaxHeight()
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.55f)),
+            .apuBubbleSurface(color = Color(0xFFF5F7FA).copy(alpha = 0.72f))
+            .apuPremiumThread(inset = 10.dp),
         contentPadding = PaddingValues(vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1472,10 +1473,12 @@ private fun TopicRail(
     onTopicClick: (String) -> Unit,
 ) {
     LazyColumn(
+        // Та же колонка-подложка, что у значков групп: один стиль на обе.
         modifier = Modifier
             .width(76.dp)
             .fillMaxHeight()
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.55f)),
+            .apuBubbleSurface(color = Color(0xFFF5F7FA).copy(alpha = 0.72f))
+            .apuPremiumThread(inset = 10.dp),
         contentPadding = PaddingValues(vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1539,13 +1542,11 @@ private fun JoinRequestsBanner(count: Int, expanded: Boolean, onClick: () -> Uni
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.94f))
-            .border(
-                1.dp,
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                RoundedCornerShape(18.dp),
-            )
+            // Владелец 2026-10-07: баннер заявок — в том же премиальном слое.
+            .apuPremiumLift(5.dp)
+            .apuBubbleSurface(color = Color(0xFFF5F7FA).copy(alpha = 0.94f))
+            .apuPremiumThread(inset = 16.dp)
+            .apuPremiumGloss(intensity = 0.45f, topFraction = 0.55f)
             .clickable { onClick() }
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {

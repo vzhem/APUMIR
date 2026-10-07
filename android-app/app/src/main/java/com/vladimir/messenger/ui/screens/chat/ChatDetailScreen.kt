@@ -1124,19 +1124,21 @@ private fun MessageInputBar(
     // Раунд 266: фирменный пузырь панели ввода - светлая полупрозрачная
     // подложка с золотой рамкой вместо серого «квадрата» на обоях.
     // Раунд 149: imePadding - панель поднимается над клавиатурой.
+    // Владелец 2026-10-07: «Доделывай все разделы с новым стилем».
+    // Панель ввода — та же премиальная поверхность, что строки списков,
+    // «Избранное» и диалоги: подъём, единая подложка, золотая нить по кромке,
+    // блеск ПОД текстом (поле и подписи остаются чёткими). Облачка самих
+    // сообщений не трогаем — так решил владелец, у них свой фирменный пузырь.
     Column(
         modifier = modifier
             .fillMaxWidth()
             .imePadding()
             .navigationBarsPadding()
             .padding(horizontal = 8.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(18.dp),
-            )
+            .apuPremiumLift(6.dp)
+            .apuBubbleSurface()
+            .apuPremiumThread(inset = 16.dp)
+            .apuPremiumGloss(intensity = 0.45f, topFraction = 0.55f)
             .padding(horizontal = 8.dp, vertical = 8.dp),
     ) {
         if (!replyAuthor.isNullOrBlank()) {
