@@ -9,6 +9,8 @@ package com.vladimir.messenger.ui.screens.groups
 
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
+import com.vladimir.messenger.ui.components.ApuVipBadge
+import com.vladimir.messenger.ui.components.PeerAvatar
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -249,6 +251,7 @@ fun GroupAdminScreen(
                 AdminTab.Members -> MembersTab(
                     isAdmin = uiState.isAdmin,
                     members = uiState.searchResults,
+                    vipNodeIds = uiState.vipNodeIds,
                     query = uiState.searchQuery,
                     onQueryChange = viewModel::onSearchQueryChanged,
                     onToggleAdmin = viewModel::toggleAdmin,
@@ -873,6 +876,8 @@ private fun AdminsTab(
 private fun MembersTab(
     isAdmin: Boolean,
     members: List<MemberSummary>,
+    /** Узлы-элита: кольцо и знак VIP у участников. */
+    vipNodeIds: Set<String>,
     query: String,
     onQueryChange: (String) -> Unit,
     onToggleAdmin: (String, Boolean) -> Unit,
@@ -902,6 +907,7 @@ private fun MembersTab(
                 MemberRow(
                     isAdmin = isAdmin,
                     member = member,
+                    vip = member.nodeId.lowercase() in vipNodeIds,
                     onToggleAdmin = { onToggleAdmin(member.nodeId, member.role != GroupRole.ADMIN) },
                     onTogglePermission = { flag, enabled -> onTogglePermission(member.nodeId, flag, enabled) },
                     onBlock = { onBlock(member.nodeId) },
@@ -916,6 +922,8 @@ private fun MembersTab(
 private fun MemberRow(
     isAdmin: Boolean,
     member: MemberSummary,
+    /** Участник из элиты: кольцо вокруг аватарки и знак VIP у имени. */
+    vip: Boolean = false,
     onToggleAdmin: () -> Unit,
     onTogglePermission: (Long, Boolean) -> Unit,
     onBlock: () -> Unit,
@@ -925,8 +933,27 @@ private fun MemberRow(
     ApuBubble(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // Аватарка участника: у элиты — в объёмном золотом кольце.
+                val memberAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
+                    .collectAsState()
+                PeerAvatar(
+                    name = member.displayName.ifBlank { member.nodeId },
+                    avatarB64 = memberAvatars[member.nodeId],
+                    vip = vip,
+                    size = 40.dp,
+                )
+                Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(member.displayName.ifBlank { member.nodeId }, fontWeight = FontWeight.Medium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            member.displayName.ifBlank { member.nodeId },
+                            fontWeight = FontWeight.Medium,
+                        )
+                        if (vip) {
+                            Spacer(Modifier.width(6.dp))
+                            ApuVipBadge(compact = true)
+                        }
+                    }
                     Text(
                         when (member.role) {
                             GroupRole.OWNER -> "Владелец"

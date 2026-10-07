@@ -11,6 +11,9 @@ package com.vladimir.messenger.ui.components
 import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -19,11 +22,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import com.vladimir.messenger.ui.theme.AvatarHolder
 
 @Composable
@@ -49,14 +54,31 @@ fun MyAvatar(
     // Локальная копия: у делегата (var ... by) умного приведения к non-null
     // не бывает, поэтому обращение к .asImageBitmap() без неё не собирается.
     val shown = bitmap
-    if (shown != null) {
-        Image(
-            bitmap = shown.asImageBitmap(),
-            contentDescription = "Аватар",
-            modifier = modifier.clip(CircleShape),
-            contentScale = ContentScale.Crop,
-        )
-    } else {
-        Avatar(name = displayName, modifier = modifier, size = size)
+    // Мой аккаунт в элите: вокруг аватарки — то же объёмное золотое кольцо, что
+    // у собеседников в списке чатов, в группах и каналах. Владелец 2026-10-07:
+    // «чтобы аккаунт VIP должно быть видно везде».
+    val selfVip = rememberSelfVip()
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(if (selfVip) VipRingWidth else 0.dp)
+                .clip(CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (shown != null) {
+                Image(
+                    bitmap = shown.asImageBitmap(),
+                    contentDescription = "Аватар",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                Avatar(name = displayName, modifier = Modifier.fillMaxSize(), size = size)
+            }
+        }
+        if (selfVip) {
+            VipRing(Modifier.matchParentSize())
+        }
     }
 }

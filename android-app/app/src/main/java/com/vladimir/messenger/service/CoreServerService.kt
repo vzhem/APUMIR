@@ -1444,6 +1444,13 @@ class CoreServerService : Service() {
             return true
         }
         if (!com.vladimir.messenger.data.mirror.MirrorEnvelopes.isSafe(text)) return false
+        // Ранг собеседника едет в обёртке «печатает…» (см. RankWire.WRAPPER).
+        // Разбираем его РАНЬШЕ индикатора набора: иначе конверт был бы прочитан
+        // как «партнёр перестал печатать» и молча пропал бы вместе с рангом.
+        if (runCatching { peerRankRouter.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            Log.i(TAG, "Mirror envelope: ранг собеседника применён")
+            return true
+        }
         // р239: «печатает…» от партнёра - показать индикатор и не сохранять.
         val mirrorTyping = com.vladimir.messenger.data.typing.TypingWire.parse(text)
         if (mirrorTyping != null) {
@@ -1534,6 +1541,14 @@ class CoreServerService : Service() {
      * отправок здесь нет: конверт в сеть уйдёт отдельно.
      */
     private suspend fun mirrorApplyActionLocally(peerId: String, groupId: String, text: String) {
+        // Разосланный с тени ранг («печатает…» с полезной нагрузкой APURANK1):
+        // это наше собственное звание, локально записывать нечего - пакет просто
+        // уходит собеседникам. Проверяем ДО «печатает…»: иначе он попал бы в
+        // чужую ветку и в журнале значился бы не тем, чем является.
+        if (com.vladimir.messenger.data.rank.RankWire.isRankPacket(text)) {
+            Log.i(TAG, "Mirror action: ранг собеседникам, локально применять нечего")
+            return
+        }
         // р235: «печатает…» с тени - локально показывать нечего (это наше
         // собственное состояние), пакет просто уходит собеседнику.
         if (com.vladimir.messenger.data.typing.TypingWire.isTypingPacket(text)) return

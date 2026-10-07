@@ -5,6 +5,8 @@ import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
 import com.vladimir.messenger.ui.components.ApuVipBadge
+import com.vladimir.messenger.ui.components.PeerAvatar
+import com.vladimir.messenger.ui.theme.AvatarStore
 import com.vladimir.messenger.ui.components.ApuBubbleCard
 import com.vladimir.messenger.ui.components.ApuBubbleLinkColor
 import com.vladimir.messenger.ui.components.apuBubbleSurface
@@ -235,6 +237,8 @@ fun ChatDetailScreen(
             name = contactName,
             contactId = contactId,
             isOnline = uiState.isContactOnline,
+            // Знак и кольцо у профиля элиты: ранг собеседник сообщил сам.
+            vip = uiState.peerVip || uiState.selfVip,
             username = uiState.contactUsername,
             heartCount = uiState.heartCount,
             heartMine = uiState.heartMine,
@@ -307,6 +311,19 @@ fun ChatDetailScreen(
                             // десятого (конверт APURANK1) — это признание, а не
                             // платная функция, поэтому знак просто рядом с именем.
                             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                // Аватарка собеседника: у элиты — в объёмном
+                                // золотом кольце. Маленькая, чтобы шапка не
+                                // разъезжалась: строка имени остаётся главной.
+                                if (contactId.isNotBlank()) {
+                                    val headerAvatars by AvatarStore.avatars.collectAsStateWithLifecycle()
+                                    PeerAvatar(
+                                        name = contactName,
+                                        avatarB64 = headerAvatars[contactId],
+                                        vip = uiState.peerVip || uiState.selfVip,
+                                        size = 30.dp,
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                }
                                 Text(
                                     contactName,
                                     fontWeight = FontWeight.SemiBold,

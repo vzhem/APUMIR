@@ -2,7 +2,6 @@ package com.vladimir.messenger.data.rank
 
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
-import com.vladimir.messenger.data.local.dao.ContactDao
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -24,10 +23,14 @@ import kotlinx.coroutines.withContext
  * 3. пакет не о себе самом (переписка с собственным узлом);
  * 4. запись «свежее» той, что уже лежит: опоздавший старый пакет не откатывает
  *    знак VIP назад.
+ *
+ * Ранг ложится в общую таблицу `peer_ranks` (см. [PeerRankStore]): так знак VIP
+ * и золотое кольцо видно и у тех, кого нет в адресной книге, — участников групп
+ * и авторов постов каналов.
  */
 @Singleton
 class PeerRankRouter @Inject constructor(
-    private val contactDao: ContactDao,
+    private val store: PeerRankStore,
 ) {
 
     suspend fun routeIncoming(
@@ -57,15 +60,15 @@ class PeerRankRouter @Inject constructor(
             return@withContext true
         }
 
-        runCatching {
-            contactDao.updatePeerRank(packet.nodeId, packet.qualified, packet.updatedAtMs)
+        val stored = runCatching {
+            store.remember(packet.nodeId, packet.qualified, packet.updatedAtMs)
         }.onFailure { e ->
             Log.w(TAG, "rank packet from $senderId not stored: ${e.message}")
-            return@withContext true
-        }
+        }.getOrDefault(false)
 
-        PeerRankStore.notifyChanged()
-        Log.i(TAG, "peer rank from ${packet.nodeId}: ${packet.qualified}")
+        // Пишем в журнал и «не изменилось»: по копипасте должно быть видно, что
+        // пакеты доходят, даже когда ранг тот же и обновлять нечего.
+        Log.i(TAG, "peer rank from ${packet.nodeId}: ${packet.qualified}, stored=$stored")
         true
     }
 

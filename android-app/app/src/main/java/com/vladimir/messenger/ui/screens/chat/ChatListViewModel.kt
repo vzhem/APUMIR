@@ -102,7 +102,7 @@ data class ChatListUiState(
     val filteredChats: List<Chat> = emptyList(),
     val rankBadge: String        = "",
     /**
-     * Ранг выше десятого: рядом с именем показывается знак VIP (элита APU).
+     * Ранг VIP («Проводник», 10-й, и выше): знак у имени и кольцо у аватарки.
      * Решение владельца от 2026-10-06.
      */
     val rankVip: Boolean         = false,
@@ -155,7 +155,12 @@ class ChatListViewModel @Inject constructor(
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
     /** Рассылка своего ранга собеседникам (знак VIP у имени): нужна, когда ранг вырос. */
     private val peerRankBroadcaster: com.vladimir.messenger.data.rank.PeerRankBroadcaster,
-    private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
+    /**
+     * Ранги собеседников: поток узлов-элиты, по нему рисуется знак VIP у имени.
+     * Источник — общая таблица `peer_ranks`, а не адресная книга, поэтому знак
+     * виден и у тех, кого в контактах нет.
+     */
+    private val peerRankStore: com.vladimir.messenger.data.rank.PeerRankStore,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatListUiState())
@@ -211,6 +216,7 @@ class ChatListViewModel @Inject constructor(
         }
         observeInbox()
         observeNetworkStatus()
+        observePeerVip()
         refreshRankBadge()
     }
 
@@ -592,6 +598,19 @@ class ChatListViewModel @Inject constructor(
     fun itemsOf(state: ChatListUiState, target: InboxSection): List<InboxItem> =
         state.itemsBySection[target].orEmpty()
 
+    /**
+     * Знак VIP у имён собеседников. Подписка на поток узлов-элиты: экран сам не
+     * опрашивает базу — таблица `peer_ranks` сообщает об изменении, как только
+     * придёт конверт APURANK1.
+     */
+    private fun observePeerVip() {
+        viewModelScope.launch {
+            peerRankStore.vipNodeIds.collect { ids ->
+                _uiState.update { state -> state.copy(vipPeerIds = ids) }
+            }
+        }
+    }
+
     /** Видный бейдж ранга на главном экране: имя ранга + число квалифицированных друзей. */
     private fun refreshRankBadge() {
         // Ранг лежит в SharedPreferences: первое чтение открывает файл с диска,
@@ -601,15 +620,6 @@ class ChatListViewModel @Inject constructor(
         // Подписка вместо разового чтения: промокод поднимает ранг, пока экран
         // уже открыт, и раньше на главной так и висел прежний ранг до
         // перезапуска приложения.
-        // Знак VIP у имён собеседников: перечитываем множество, когда приезжает
-        // конверт ранга (PeerRankStore) или меняется редко меняющийся порог.
-        viewModelScope.launch {
-            com.vladimir.messenger.data.rank.PeerRankStore.changes.collect {
-                refreshVipPeers()
-            }
-        }
-        refreshVipPeers()
-
         viewModelScope.launch {
             com.vladimir.messenger.data.referral.ReferralRankStore.changes.collect {
                 val rank = withContext(Dispatchers.IO) {
@@ -630,24 +640,6 @@ class ChatListViewModel @Inject constructor(
                 // имени, не дожидаясь следующей недели. Рассылка сама решает,
                 // нужна ли она (внутри — отметка о последней отправке).
                 runCatching { peerRankBroadcaster.broadcastIfNeeded() }
-            }
-        }
-    }
-
-    /**
-     * Перечитать множество VIP-собеседников. Порог берётся у политики рангов,
-     * чтобы правило «выше десятого — VIP» жило в одном месте.
-     */
-    private fun refreshVipPeers() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val threshold = com.vladimir.messenger.data.file.FileTransferRankPolicy
-                .vipMinimumReferrals
-            val ids = runCatching { contactDao.vipPeerContactIds(threshold) }
-                .getOrDefault(emptyList())
-            // Идентификаторы узлов в списке чатов сравниваем в нижнем регистре:
-            // канонизируем здесь, а не в запросе, — так индекс по id не страдает.
-            _uiState.update { state ->
-                state.copy(vipPeerIds = ids.map { it.lowercase() }.toSet())
             }
         }
     }

@@ -149,18 +149,19 @@ class FileTransferRankPolicyTest {
     }
 
     @Test
-    fun vipStartsAboveTheTenthRank() {
-        // Решение владельца от 2026-10-06: «все, кто выше 10 ранга, уже VIP».
-        // Десятка - «Проводник»: он ещё не VIP, а «Организатор» (20) - уже да.
-        assertFalse(FileTransferRankPolicy.entitlement(10).isVip)
-        // 19 приглашений - это всё ещё «Проводник» (порог 10), то есть не VIP:
-        // ступень меняется на «Организатора» ровно на 20.
-        assertFalse(FileTransferRankPolicy.entitlement(19).isVip)
+    fun vipStartsAtTheTenthRank() {
+        // Решение владельца от 2026-10-07: «Нужно чтобы ранг 10 Проводник уже
+        // был VIP». Десятка - «Проводник»: он уже VIP, а девятка - ещё нет.
+        assertFalse(FileTransferRankPolicy.entitlement(9).isVip)
+        assertTrue(FileTransferRankPolicy.entitlement(10).isVip)
         assertTrue(FileTransferRankPolicy.entitlement(20).isVip)
         assertTrue(FileTransferRankPolicy.entitlement(1_000).isVip)
         assertFalse(FileTransferRankPolicy.isVip(0))
-        assertFalse(FileTransferRankPolicy.isVip(10))
+        assertTrue(FileTransferRankPolicy.isVip(10))
         assertTrue(FileTransferRankPolicy.isVip(FileTransferRankPolicy.vipMinimumReferrals))
+        // Порог и ступень элиты совпадают: VIP начинается ровно с «Проводника».
+        assertEquals(10, FileTransferRankPolicy.vipMinimumReferrals)
+        assertTrue(FileTransferRankPolicy.tiers.first { it.isVip }.rankName == "Проводник")
     }
 
     @Test

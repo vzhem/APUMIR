@@ -71,6 +71,10 @@ object ChatPreviews {
     fun isServicePacket(raw: String?): Boolean {
         if (raw == null) return false
         val t = raw.trim()
+        // Ранг собеседника проверяем ДО общего списка: конверт едет в обёртке
+        // «печатает…», а это чужой префикс - если обёртка когда-нибудь сменится,
+        // служебная строка всё равно не останется в переписке.
+        if (com.vladimir.messenger.data.rank.RankWire.isRankPacket(t)) return true
         // В v140+ ACK идёт по прямому каналу в формате обычного сообщения;
         // этот общий страж закрывает путь, который пропустил транспортный разборщик.
         return SERVICE_PACKETS.any { t.startsWith(it) }
@@ -89,6 +93,9 @@ object ChatPreviews {
             ForwardMarker.parseRef(t)?.let { return "↩ Переслано из «" + it.label + "»" }
         }
         if (t.startsWith("APUGIFREF1|")) return GIF_LABEL
+        // Ранг собеседника (р246): едет в обёртке «печатает…», поэтому проверяем
+        // его раньше - иначе в предпросмотре стояло бы чужое «печатает…».
+        if (com.vladimir.messenger.data.rank.RankWire.isRankPacket(t)) return "знак VIP"
         // «Печатает…» (р235/р239): строка мимолётная, в списке чатов её быть
         // не должно - показываем человеческое слово.
         if (t.startsWith("APUTYP1|")) return "печатает…"

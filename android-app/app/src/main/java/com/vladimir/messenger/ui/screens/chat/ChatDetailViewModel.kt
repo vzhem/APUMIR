@@ -46,10 +46,15 @@ data class ChatDetailUiState(
      */
     val isSelfChat: Boolean = false,
     /**
-     * Собеседник сообщил ранг выше десятого (APURANK1) — у имени в шапке чата
-     * появляется знак VIP, как у элиты приложения.
+     * Собеседник сообщил ранг VIP (APURANK1) — у имени в шапке чата появляется
+     * знак, а вокруг аватарки — объёмное золотое кольцо с блеском.
      */
     val peerVip: Boolean = false,
+    /**
+     * Переписка с САМИМ СОБОЙ и мой ранг — VIP: тогда кольцо и знак показываем
+     * у своего узла (в такой переписке собеседника нет).
+     */
+    val selfVip: Boolean = false,
     val transfers: List<FileTransferEntity> = emptyList(),
     val inputText: String       = "",
     val isLoading: Boolean      = true,
@@ -113,6 +118,8 @@ class ChatDetailViewModel @Inject constructor(
     private val messageDeletion: com.vladimir.messenger.data.repository.MessageDeletionRepository,
     private val stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary,
     @ApplicationContext private val appContext: Context,
+    /** Ранги собеседников: поток узлов-элиты для знака и кольца у аватарки. */
+    private val peerRankStore: com.vladimir.messenger.data.rank.PeerRankStore,
 ) : ViewModel() {
 
     // chatId передаётся через навигацию (SavedStateHandle)
@@ -288,18 +295,23 @@ class ChatDetailViewModel @Inject constructor(
      * Слушаем строку чата в БД — peer_discovered/peer_lost её же и обновляют.
      */
     private fun observeContactPresence() {
-        // Знак VIP у имени собеседника обновляем на лету: ранг может приехать
-        // в любой момент конвертом APURANK1, а экран уже открыт.
-        viewModelScope.launch(Dispatchers.IO) {
-            com.vladimir.messenger.data.rank.PeerRankStore.changes.collect {
-                val id = peerId
-                if (id.isBlank()) return@collect
-                val vip = runCatching {
-                    // -1 = «ещё не сообщал»: знака нет.
-                    (contactDao.peerRankQualified(id) ?: -1) >=
-                        com.vladimir.messenger.data.file.FileTransferRankPolicy.vipMinimumReferrals
-                }.getOrDefault(false)
-                _uiState.update { it.copy(peerVip = vip) }
+        // Знак VIP и золотое кольцо у имени собеседника обновляем на лету: ранг
+        // может приехать в любой момент конвертом APURANK1, а экран уже открыт.
+        viewModelScope.launch {
+            peerRankStore.vipNodeIds.collect { vipIds ->
+                val peer = peerId.lowercase()
+                // В переписке с собственным узлом собеседника нет: кольцо решает
+                // МОЙ ранг (он же виден в профиле и на главной). Свой ранг лежит
+                // в настройках, поэтому читаем его в фоне, а не на главном потоке.
+                val selfVip = withContext(Dispatchers.IO) {
+                    isSelfChat(_uiState.value.messages, peerId) && ownVip()
+                }
+                _uiState.update {
+                    it.copy(
+                        peerVip = peer.isNotBlank() && peer in vipIds,
+                        selfVip = selfVip,
+                    )
+                }
             }
         }
 
@@ -315,12 +327,6 @@ class ChatDetailViewModel @Inject constructor(
                     val nick = runCatching {
                         contactDao.getContactById(chat.contactId)?.username.orEmpty()
                     }.getOrDefault("")
-                    // Знак VIP у имени в шапке: ранг собеседник сообщает сам
-                    // (конверт APURANK1), порог берём у политики рангов.
-                    val peerVip = runCatching {
-                        (contactDao.peerRankQualified(chat.contactId) ?: -1) >=
-                            com.vladimir.messenger.data.file.FileTransferRankPolicy.vipMinimumReferrals
-                    }.getOrDefault(false)
                     // р235: адрес собеседника нужен для «печатает…».
                     if (chat.contactId.isNotBlank()) peerId = chat.contactId
                     // р241/р243: свой ли это узел, решает загрузка переписки:
@@ -345,7 +351,6 @@ class ChatDetailViewModel @Inject constructor(
                             contactUsername = nick,
                             isPeerTyping = com.vladimir.messenger.data.typing.TypingPeer
                                 .isTyping(chat.contactId),
-                            peerVip = peerVip,
                         )
                     }
                     // Сердечки заводим здесь: только тут точно известен адрес
@@ -494,6 +499,11 @@ class ChatDetailViewModel @Inject constructor(
             )
         }
     }
+
+    /** Мой ранг дотягивает до VIP: кольцо и знак в переписке с собственным узлом. */
+    private fun ownVip(): Boolean = com.vladimir.messenger.data.rank.PeerRankStore.isVipRank(
+        com.vladimir.messenger.data.referral.ReferralRankStore.qualifiedDirectCount(appContext),
+    )
 
     /** Peer metadata arrives independently; history must not wait for a second DB query. */
     private fun isSelfChat(messages: List<Message>, peer: String): Boolean {

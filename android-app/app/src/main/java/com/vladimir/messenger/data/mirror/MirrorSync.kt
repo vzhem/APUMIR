@@ -472,6 +472,10 @@ object MirrorEnvelopes {
 
     fun isSafe(text: String): Boolean =
         isServiceAck(text) ||
+            // Ранг собеседника (р246): второй телефон той же личности своего
+            // движка не имеет, поэтому о чужом ранге он узнаёт только отсюда -
+            // без этого знак VIP стоял бы лишь на активном устройстве.
+            com.vladimir.messenger.data.rank.RankWire.isRankPacket(text) ||
         com.vladimir.messenger.data.group.GroupWire.isGroupPacket(text) ||
             ReactionWire.isReactionPacket(text) ||
             text.startsWith(MessageDeletionRepository.PREFIX + "|") ||

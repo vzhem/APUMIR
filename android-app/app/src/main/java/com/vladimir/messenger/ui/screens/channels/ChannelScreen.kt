@@ -23,6 +23,7 @@ import com.vladimir.messenger.ui.components.ApuAntiRatingInlineBadge
 import com.vladimir.messenger.ui.components.ApuCircleCheckIndicator
 import com.vladimir.messenger.ui.components.ApuMessageModerationDialog
 import com.vladimir.messenger.ui.components.ApuSettingsDangerColor
+import com.vladimir.messenger.ui.components.PeerAvatar
 import com.vladimir.messenger.ui.components.PeerProfileSheet
 import com.vladimir.messenger.ui.components.apuBubbleSurface
 import com.vladimir.messenger.ui.components.swipeBack
@@ -419,6 +420,8 @@ fun ChannelScreen(
                         name = uiState.inspectedPeerName.ifBlank { "Участник " + inspectedPeerId.takeLast(4) },
                         contactId = inspectedPeerId,
                         isOnline = true,
+                        // Элита: знак и кольцо в карточке автора.
+                        vip = inspectedPeerId.lowercase() in uiState.vipNodeIds,
                         heartCount = uiState.inspectedPeerHearts,
                         heartMine = uiState.inspectedPeerHeartMine,
                         onHeartClick = if (!isSelfPeer) {
@@ -596,6 +599,7 @@ fun ChannelScreen(
                                 (post.authorId == myId || uiState.channel?.ownerId == myId)
                             PostCard(
                                 post = post,
+                                authorVip = post.authorId.lowercase() in uiState.vipNodeIds,
                                 authorAntiCount = uiState.antiRatings[post.authorId] ?: 0,
                                 authorAntiWarning = uiState.antiWarnings.containsKey(post.authorId),
                                 canEdit = canEditPost,
@@ -822,6 +826,8 @@ fun ChannelScreen(
 @OptIn(ExperimentalFoundationApi::class)
 private fun PostCard(
     post: ChannelPost,
+    /** Автор поста — элита: у аватарки объёмное золотое кольцо. */
+    authorVip: Boolean = false,
     authorAntiCount: Int = 0,
     authorAntiWarning: Boolean = false,
     /** Правка доступна автору поста и владельцу канала. */
@@ -905,6 +911,17 @@ private fun PostCard(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.clickable { onOpenAuthorProfile() },
                     ) {
+                        // Аватарка автора поста: у элиты — в объёмном золотом
+                        // кольце. В канале лицо автора появляется только здесь,
+                        // поэтому знак элиты стоит именно тут.
+                        val authorAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
+                            .collectAsStateWithLifecycle()
+                        PeerAvatar(
+                            name = post.authorName,
+                            avatarB64 = authorAvatars[post.authorId],
+                            vip = authorVip,
+                            size = 24.dp,
+                        )
                         Text(
                             "${post.authorName} - $time",
                             style = MaterialTheme.typography.labelSmall,

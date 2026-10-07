@@ -16,7 +16,6 @@ package com.vladimir.messenger.ui.components
 //   - Индикатор онлайн-статуса
 // =============================================================================
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -31,8 +30,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.runtime.remember
 import com.vladimir.messenger.ui.theme.AvatarStore
 import androidx.compose.ui.text.font.FontWeight
@@ -65,16 +62,16 @@ fun ContactCard(
     /** Main-inbox marker; ContactsScreen reuses this card without the marker. */
     showPinnedIndicator: Boolean = false,
     /**
-     * Собеседник сообщил ранг выше десятого (конверт APURANK1): рядом с именем
+     * Собеседник сообщил ранг VIP (конверт APURANK1): рядом с именем
      * ставим знак VIP — как знак элиты в топовых мессенджерах. По умолчанию нет:
      * контакты без сообщённого ранга выглядят как раньше, без ложных знаков.
      */
     peerVip: Boolean = false,
 ) {
     // Присланный аватар из роевого реестра (если есть) - иначе инициалы.
+    // Разбор картинки - в фоне и один раз на строку base64 (AvatarBitmaps);
+    // рисует её PeerAvatar, поэтому отдельная копия битмапа тут не нужна.
     val avatars by AvatarStore.avatars.collectAsState()
-    // Разбор картинки - в фоне и один раз на строку base64 (AvatarBitmaps).
-    val avatarBitmap = AvatarBitmaps.rememberAvatar(avatars[chat.contactId])
     // Раунд 255: недописанный текст поля ввода виден прямо в пузыре списка.
     val drafts by com.vladimir.messenger.data.draft.DraftStore.drafts.collectAsState()
     val draftText = drafts[
@@ -99,22 +96,14 @@ fun ContactCard(
         // ------------------------------------------------------------------
         // АВАТАР с индикатором онлайн
         // ------------------------------------------------------------------
-        Box {
-            // Аватар - картинка из сети либо круг с инициалами.
-            if (avatarBitmap != null) {
-                Image(
-                    bitmap = avatarBitmap.asImageBitmap(),
-                    contentDescription = null,
-                    modifier = Modifier.size(52.dp).clip(CircleShape),
-                    contentScale = ContentScale.Crop,
-                )
-            } else {
-                Avatar(
-                    name     = chat.contactName,
-                    modifier = Modifier.size(52.dp),
-                )
-            }
-
+        // Аватар - картинка из сети либо круг с инициалами; у элиты вокруг него
+        // объёмное золотое кольцо с редким блеском (см. ApuVipRing.kt).
+        PeerAvatar(
+            name = chat.contactName,
+            avatarB64 = avatars[chat.contactId],
+            vip = peerVip,
+            size = 52.dp,
+        ) {
             // Точка онлайн-статуса
             if (chat.isContactOnline) {
                 Box(

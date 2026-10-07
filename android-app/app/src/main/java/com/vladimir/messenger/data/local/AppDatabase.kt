@@ -9,6 +9,7 @@ import com.vladimir.messenger.data.local.dao.ContactDao
 import com.vladimir.messenger.data.local.dao.DirectoryDao
 import com.vladimir.messenger.data.local.dao.AvatarDao
 import com.vladimir.messenger.data.local.dao.NicknameDao
+import com.vladimir.messenger.data.local.dao.PeerRankDao
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.dao.FileExchangePeerDao
 import com.vladimir.messenger.data.local.dao.GroupDao
@@ -36,6 +37,7 @@ import com.vladimir.messenger.data.local.entity.GroupMessageStatEntity
 import com.vladimir.messenger.data.local.entity.GroupTopicEntity
 import com.vladimir.messenger.data.local.entity.AvatarEntity
 import com.vladimir.messenger.data.local.entity.MtProtoProxyEntity
+import com.vladimir.messenger.data.local.entity.PeerRankEntity
 import com.vladimir.messenger.data.local.entity.PostViewEntity
 import com.vladimir.messenger.data.local.entity.ProfileHeartEntity
 import com.vladimir.messenger.data.local.entity.SavedItemEntity
@@ -52,7 +54,7 @@ import com.vladimir.messenger.data.local.dao.GroupPollDao
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 27
+const val APP_DATABASE_VERSION = 28
 
 @Database(
     entities = [
@@ -61,6 +63,7 @@ const val APP_DATABASE_VERSION = 27
         MessageEntity::class,
         MessageReactionEntity::class,
         ContactEntity::class,
+        PeerRankEntity::class,
         FileTransferEntity::class,
         FileTransferChunkEntity::class,
         FileExchangePeerEntity::class,
@@ -93,6 +96,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun fileTransferDao(): FileTransferDao
     abstract fun fileExchangePeerDao(): FileExchangePeerDao
     abstract fun groupDao(): GroupDao
+    abstract fun peerRankDao(): PeerRankDao
     abstract fun inboxPinDao(): InboxPinDao
     abstract fun directoryDao(): DirectoryDao
     abstract fun nicknameDao(): NicknameDao
@@ -569,6 +573,34 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_25_26 = object : Migration(25, 26) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `contacts` ADD COLUMN `lastSeenAtMs` INTEGER")
+            }
+        }
+
+        /**
+         * Ранги собеседников: одна таблица на все узлы (решение владельца
+         * 2026-10-07 — «VIP должно быть видно везде, и в группах, и в каналах»).
+         *
+         * Раньше ранг лежал колонкой в `contacts`, и у человека не из адресной
+         * книги знака не было. Здесь уже принятые ранги переносятся в новую
+         * таблицу: данные, пришедшие до обновления, не теряются. Колонки в
+         * `contacts` остаются в схеме (обратная совместимость), но больше не
+         * пишутся — источник истины один.
+         */
+        val MIGRATION_27_28 = object : Migration(27, 28) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `peer_ranks` (" +
+                        "`nodeId` TEXT NOT NULL, " +
+                        "`qualified` INTEGER NOT NULL, " +
+                        "`updatedAtMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`nodeId`))"
+                )
+                db.execSQL(
+                    "INSERT OR IGNORE INTO `peer_ranks` (`nodeId`, `qualified`, `updatedAtMs`) " +
+                        "SELECT lower(`id`), `peerRankQualified`, `peerRankUpdatedAtMs` " +
+                        "FROM `contacts` WHERE `peerRankQualified` >= 0 " +
+                        "AND `peerRankUpdatedAtMs` > 0"
+                )
             }
         }
 

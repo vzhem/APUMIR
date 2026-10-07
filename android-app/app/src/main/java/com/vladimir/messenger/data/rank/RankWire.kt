@@ -36,6 +36,23 @@ object RankWire {
     const val SEPARATOR = "|"
 
     /**
+     * Обёртка конверта: «печатает…» (`APUTYP1`), который старые сборки уже умеют
+     * молча проглатывать.
+     *
+     * Зачем. Телефоны обновляются вручную и не одновременно. Сборка до v11.74.190
+     * про `APURANK1` ничего не знает: она показала бы в переписке строку вида
+     * «APURANK1|1|pk_…|20|…» и добавила бы уведомление о «новом сообщении».
+     * Пакет «печатает…» старые сборки разбирают как «перестал печатать» —
+     * ни строки, ни уведомления; смысла в этом нуле, а мусора тоже нет.
+     * Наши сборки разбирают ранг РАНЬШЕ «печатает» (см. порядок роутеров в
+     * `CoreServerService`), поэтому новая сборка видит именно ранг.
+     *
+     * Разбор принимает и голый конверт: так его присылают сборки v11.74.190,
+     * и отказываться от их данных незачем.
+     */
+    const val WRAPPER = "APUTYP1|"
+
+    /**
      * Верхняя граница, которую принимаем от собеседника. Совпадает с потолком
      * счётчика в приложении (ReferralRankStore.MAX_SUPPORTED_COUNT): конверт с
      * числом выше — не ранг, а попытка нарисовать себе несуществующую ступень.
@@ -65,7 +82,7 @@ object RankWire {
     )
 
     fun isRankPacket(text: String): Boolean =
-        text.startsWith("$PREFIX$SEPARATOR")
+        payload(text).startsWith("$PREFIX$SEPARATOR")
 
     /**
      * Собрать конверт о своём ранге. null — если узел или число не годятся:
@@ -75,13 +92,13 @@ object RankWire {
         val canonical = canonicalNodeId(nodeId) ?: return null
         if (qualified < 0 || updatedAtMs <= 0) return null
         val count = qualified.coerceAtMost(MAX_COUNT)
-        return listOf(PREFIX, VERSION, canonical, count.toString(), updatedAtMs.toString())
+        return WRAPPER + listOf(PREFIX, VERSION, canonical, count.toString(), updatedAtMs.toString())
             .joinToString(SEPARATOR)
     }
 
     /** Разобрать конверт собеседника. Строго; при любом сомнении — null. */
     fun parse(text: String, nowMs: Long = System.currentTimeMillis()): PeerRank? {
-        val parts = text.split(SEPARATOR)
+        val parts = payload(text).split(SEPARATOR)
         if (parts.size != 5) return null
         if (parts[0] != PREFIX || parts[1] != VERSION) return null
         val nodeId = canonicalNodeId(parts[2]) ?: return null
@@ -91,6 +108,9 @@ object RankWire {
         if (updatedAtMs <= 0 || updatedAtMs > nowMs + FUTURE_TOLERANCE_MS) return null
         return PeerRank(nodeId, qualified, updatedAtMs)
     }
+
+    /** Конверт без обёртки: `APUTYP1|APURANK1|…` → `APURANK1|…`. */
+    private fun payload(text: String): String = text.removePrefix(WRAPPER)
 
     /**
      * Канонический вид узла: нижний регистр и проверка формы, как в транспорте.

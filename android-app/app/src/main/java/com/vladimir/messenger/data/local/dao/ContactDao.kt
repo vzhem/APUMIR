@@ -77,26 +77,4 @@ interface ContactDao {
      */
     @Query("SELECT * FROM contacts WHERE displayName != '' AND displayName = :name COLLATE NOCASE")
     suspend fun getContactsByDisplayName(name: String): List<ContactEntity>
-
-    /**
-     * Ранг собеседника из конверта APURANK1. Пишем только «свежее»: старое
-     * сообщение, пришедшее с опозданием после нового, не должно откатывать
-     * знак VIP назад.
-     */
-    @Query(
-        "UPDATE contacts SET peerRankQualified = :qualified, peerRankUpdatedAtMs = :updatedAtMs " +
-            "WHERE id = :contactId AND peerRankUpdatedAtMs < :updatedAtMs"
-    )
-    suspend fun updatePeerRank(contactId: String, qualified: Int, updatedAtMs: Long)
-
-    /**
-     * Собеседники, у которых сообщённый ранг дотягивает до VIP, — по ним
-     * рисуется знак у имени в списке чатов. Порог приходит снаружи от политики
-     * рангов, чтобы здесь не жила вторая копия правила.
-     */
-    @Query("SELECT id FROM contacts WHERE peerRankQualified >= :vipThreshold")
-    suspend fun vipPeerContactIds(vipThreshold: Int): List<String>
-
-    @Query("SELECT peerRankQualified FROM contacts WHERE id = :contactId")
-    suspend fun peerRankQualified(contactId: String): Int?
 }

@@ -5,6 +5,7 @@ import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.local.dao.ChatDao
 import com.vladimir.messenger.data.local.dao.ContactDao
+import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.referral.ReferralRankStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.UUID
@@ -27,6 +28,12 @@ import kotlinx.coroutines.withContext
  * Офлайн-доставку берёт на себя ядро (durable-очередь), поэтому «отправить всем»
  * не требует, чтобы все были в сети.
  *
+ * Кому уходит ранг: контактам и участникам своих групп и каналов. В группе и
+ * канале ранг берётся не из переписки — там собеседник может быть незнакомым
+ * узлом, и единственный источник сведений о нём — его собственный конверт.
+ * Ранг уходит в обёртке «печатает…» (см. [RankWire.WRAPPER]), поэтому телефоны
+ * на старых сборках не покажут служебную строку и не разбудят уведомление.
+ *
  * Частоту ограничивает [RankBroadcastPrefs]: без этого каждая перерисовка
  * главного экрана слала бы пакет каждому контакту.
  */
@@ -35,6 +42,8 @@ class PeerRankBroadcaster @Inject constructor(
     @ApplicationContext private val context: Context,
     private val contactDao: ContactDao,
     private val chatDao: ChatDao,
+    /** Участники групп и каналов: им ранг нужен не меньше, чем контактам. */
+    private val groupDao: GroupDao,
 ) {
 
     /**
@@ -63,20 +72,45 @@ class PeerRankBroadcaster @Inject constructor(
                 return@withContext 0
             }
 
+            // Кому уходит ранг: контакты (у них есть личная переписка, и знак
+            // виден в списке чатов) и участники моих групп и каналов (владелец
+            // 2026-10-07: «VIP должно быть видно везде, и в группах, и в
+            // каналах»). Один человек получает один пакет: узлы в наборе.
+            val targets = linkedMapOf<String, String>() // узел -> адрес переписки
+
             val contactIds = runCatching { contactDao.allIds() }.getOrDefault(emptyList())
-            var sent = 0
             for (contactId in contactIds) {
                 val canonical = RankWire.canonicalNodeId(contactId) ?: continue
                 if (canonical == own) continue
-                // Чат нужен ядру как адрес переписки: без него адресовать сообщение
-                // нечем, и ранг этому человеку показать будет негде.
+                // Чат нужен ядру как адрес переписки: без него адресовать
+                // сообщение нечем.
                 val chatId = runCatching { chatDao.getChatByContactId(contactId)?.id }
                     .getOrNull() ?: continue
+                targets[canonical] = chatId
+            }
+
+            val groups = runCatching {
+                groupDao.getGroups() + groupDao.getChannels()
+            }.getOrDefault(emptyList())
+            for (group in groups) {
+                val members = runCatching { groupDao.getMembers(group.id) }
+                    .getOrDefault(emptyList())
+                for (member in members) {
+                    if (member.isBanned) continue
+                    val canonical = RankWire.canonicalNodeId(member.nodeId) ?: continue
+                    if (canonical == own) continue
+                    // Контакт уже получил адрес личного чата: не переписываем.
+                    targets.putIfAbsent(canonical, group.id)
+                }
+            }
+
+            var sent = 0
+            for ((target, chatId) in targets) {
                 val ok = runCatching {
                     RustBridge.sendMessage(
                         UUID.randomUUID().toString(),
                         chatId,
-                        canonical,
+                        target,
                         envelope,
                     )
                 }.getOrDefault(false)
@@ -87,7 +121,11 @@ class PeerRankBroadcaster @Inject constructor(
             // офлайн-очередь, поэтому «сейчас никого нет в сети» не повод
             // долбить рассылкой на каждой перерисовке экрана.
             RankBroadcastPrefs.markBroadcast(app, qualified, nowMs)
-            Log.i(TAG, "rank broadcast: $sent of ${contactIds.size} contacts, rank=$qualified")
+            Log.i(
+                TAG,
+                "rank broadcast: $sent of ${targets.size} peers " +
+                    "(${contactIds.size} contacts, ${groups.size} groups), rank=$qualified",
+            )
             sent
         }
 

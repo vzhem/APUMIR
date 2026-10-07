@@ -1,6 +1,5 @@
 package com.vladimir.messenger.ui.components
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -37,8 +36,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -87,6 +84,8 @@ fun PeerProfileSheet(
     antiRatingUntilMs: Long = 0,
     /** Стоит ли МОЙ анти-рейтинг этому профилю. */
     antiRatingMine: Boolean = false,
+    /** Собеседник из элиты: знак VIP у имени и золотое кольцо у аватарки. */
+    vip: Boolean = false,
     /** Нажатие на кнопку анти-рейтинга; null - показываем только счётчик. */
     onAntiRatingClick: (() -> Unit)? = null,
     onRename: (() -> Unit)? = null,
@@ -94,7 +93,6 @@ fun PeerProfileSheet(
     onCopyId: (() -> Unit)? = null,
 ) {
     val avatars by AvatarStore.avatars.collectAsState()
-    val bitmap = AvatarBitmaps.rememberAvatar(avatars[contactId])
 
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
@@ -108,35 +106,42 @@ fun PeerProfileSheet(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 // Аватар: присланная картинка, иначе буквы имени на круге.
-                val shown = bitmap
-                if (shown != null) {
-                    Image(
-                        bitmap = shown.asImageBitmap(),
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(88.dp)
-                            .clip(CircleShape)
-                            .border(
+                // У элиты вокруг него объёмное золотое кольцо — то же, что в
+                // списке чатов и в сообщениях групп.
+                PeerAvatar(
+                    name = name,
+                    avatarB64 = avatars[contactId],
+                    vip = vip,
+                    size = 88.dp,
+                    modifier = Modifier.then(
+                        if (vip) {
+                            Modifier
+                        } else {
+                            Modifier.border(
                                 width = 2.dp,
                                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
                                 shape = CircleShape,
-                            ),
-                    )
-                } else {
-                    Avatar(name = name, size = 88)
-                }
+                            )
+                        },
+                    ),
+                )
 
                 Spacer(Modifier.height(12.dp))
-                Text(
-                    name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = ApuBubbleTextColor,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = ApuBubbleTextColor,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (vip) {
+                        Spacer(Modifier.width(6.dp))
+                        ApuVipBadge()
+                    }
+                }
                 if (username.isNotBlank()) {
                     Text(
                         "@" + username.removePrefix("@"),

@@ -16,16 +16,18 @@ object FileTransferRankPolicy {
     enum class Category { PHOTO, FILE, VIDEO }
 
     /**
-     * VIP — «элита» приложения. Решение владельца от 2026-10-06: «все, кто выше
-     * 10 ранга, уже VIP, выделить их как элиту мессенджера».
+     * VIP — «элита» приложения. Решение владельца от 2026-10-07: «Нужно чтобы
+     * ранг 10 Проводник уже был VIP. Также чтобы аккаунт VIP должно быть видно
+     * везде и в группах и в каналах».
      *
-     * Десятка — это «Проводник» (10 подтверждённых приглашений). Всё, что выше,
-     * начиная с «Организатора» (20), считается VIP. Порог лежит здесь, а не в
-     * интерфейсе: по нему решают и список рангов, и бейдж рядом с именем.
+     * Десятка — это «Проводник» (10 подтверждённых приглашений), и он уже VIP:
+     * элита начинается с него, а не со следующей ступени. Порог лежит здесь, а
+     * не в интерфейсе: по нему решают и список рангов, и знак рядом с именем, и
+     * золотое кольцо вокруг аватарки.
      * Ещё раз: VIP — это знак признания, а не дополнительная возможность.
      * Возможности по-прежнему открываются рангами (см. [Entitlement]).
      */
-    const val VIP_MINIMUM_QUALIFIED_REFERRALS = 20
+    const val VIP_MINIMUM_QUALIFIED_REFERRALS = 10
 
     data class Entitlement(
         val minimumQualifiedReferrals: Int,
@@ -36,7 +38,7 @@ object FileTransferRankPolicy {
         val canUseManualProxy: Boolean get() = minimumQualifiedReferrals >= 1
         val canCreateChannel: Boolean get() = minimumQualifiedReferrals >= 30
 
-        /** Ранг выше десятого: «Организатор» и дальше - это VIP. */
+        /** Десятый ранг («Проводник») и выше - это VIP. */
         val isVip: Boolean
             get() = minimumQualifiedReferrals >= VIP_MINIMUM_QUALIFIED_REFERRALS
 
@@ -75,16 +77,16 @@ object FileTransferRankPolicy {
         Entitlement(1000, "Создатель сети"),
     )
 
-    /** Обычные ранги: до «Проводника» включительно. */
+    /** Обычные ранги: всё, что ниже «Проводника». */
     val regularTiers: List<Entitlement> get() = tiers.filterNot { it.isVip }
 
-    /** VIP-ранги: «Организатор» и выше - элита приложения. */
+    /** VIP-ранги: «Проводник» и выше - элита приложения. */
     val vipTiers: List<Entitlement> get() = tiers.filter { it.isVip }
 
     /** Сколько приглашений нужно, чтобы войти в VIP. Для подсказок в интерфейсе. */
     val vipMinimumReferrals: Int get() = VIP_MINIMUM_QUALIFIED_REFERRALS
 
-    /** VIP ли этот ранг: выше десятого, то есть от «Организатора» и дальше. */
+    /** VIP ли этот ранг: с десятого, то есть «Проводник» и дальше. */
     fun isVip(qualifiedDirectReferrals: Int): Boolean =
         qualifiedDirectReferrals >= VIP_MINIMUM_QUALIFIED_REFERRALS
 

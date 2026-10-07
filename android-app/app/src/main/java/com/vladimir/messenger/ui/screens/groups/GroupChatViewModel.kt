@@ -48,6 +48,12 @@ data class GroupChatUiState(
     val antiWarnings: Map<String, Long> = emptyMap(),
     /** Узлы, которым этот телефон поставил анти-рейтинг. */
     val myAntiRatings: Set<String> = emptySet(),
+    /**
+     * Узлы-элита: участники, чей ранг VIP. У их имени в сообщении и у аватарки —
+     * золотой знак и объёмное кольцо (решение владельца 2026-10-07: «VIP должно
+     * быть видно везде, и в группах, и в каналах»).
+     */
+    val vipNodeIds: Set<String> = emptySet(),
     /** Выбранные сообщения в режиме множественного выбора. */
     val selectedMessageIds: Set<String> = emptySet(),
     /** р249: имена участников, которые сейчас печатают в этой теме. */
@@ -130,10 +136,25 @@ class GroupChatViewModel @Inject constructor(
     private val stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary,
     private val hearts: com.vladimir.messenger.data.heart.HeartRepository,
     private val groupTyping: com.vladimir.messenger.data.typing.GroupTypingRouter,
+    /** Ранги собеседников: поток узлов-элиты для знака и кольца. */
+    private val peerRankStore: com.vladimir.messenger.data.rank.PeerRankStore,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
     private val groupId: String = savedStateHandle.get<String>("groupId").orEmpty()
+
+    /**
+     * Знак VIP и золотое кольцо у участников: подписка на поток узлов-элиты.
+     * Ранг приходит конвертом APURANK1 от самого участника — из базы его взять
+     * неоткуда, он растёт от ЕГО приглашённых.
+     */
+    private fun observePeerVip() {
+        viewModelScope.launch {
+            peerRankStore.vipNodeIds.collect { ids ->
+                _uiState.update { it.copy(vipNodeIds = ids) }
+            }
+        }
+    }
 
     /** р237: черновик группы лежит под ключом группы (он общий у устройств). */
     @Volatile private var draftKey: String = ""
@@ -166,6 +187,7 @@ class GroupChatViewModel @Inject constructor(
     val notificationMuteRevision: StateFlow<Long> = notificationMuteStore.revision
 
     init {
+        observePeerVip()
         observeGroup()
         observeAllGroups()
         observeMembers()

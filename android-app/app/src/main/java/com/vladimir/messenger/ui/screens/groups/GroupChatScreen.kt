@@ -17,6 +17,7 @@ import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuAntiRatingInlineBadge
+import com.vladimir.messenger.ui.components.PeerAvatar
 import com.vladimir.messenger.ui.components.ApuCircleCheckIndicator
 import com.vladimir.messenger.ui.components.ApuMessageModerationDialog
 import com.vladimir.messenger.ui.components.ApuPollCard
@@ -321,6 +322,8 @@ fun GroupChatScreen(
             name = uiState.inspectedPeerName.ifBlank { "Участник " + inspectedPeerId.takeLast(4) },
             contactId = inspectedPeerId,
             isOnline = true,
+            // Элита в группе: знак и кольцо в карточке участника тоже.
+            vip = inspectedPeerId.lowercase() in uiState.vipNodeIds,
             heartCount = uiState.inspectedPeerHearts,
             heartMine = uiState.inspectedPeerHeartMine,
             onHeartClick = if (!isSelfPeer) {
@@ -1013,6 +1016,7 @@ fun GroupChatScreen(
                     MessageBubble(
                         message = message,
                         senderName = resolvedSenderName,
+                        senderVip = message.senderId.lowercase() in uiState.vipNodeIds,
                         senderAntiCount = uiState.antiRatings[message.senderId] ?: 0,
                         senderAntiWarning = uiState.antiWarnings.containsKey(message.senderId),
                         canModerate = uiState.canModerate,
@@ -1830,6 +1834,11 @@ private fun MessageBubble(
     // Картинки и гифки в темах показываем так же, как в личном чате.
     message: MessageEntity,
     senderName: String,
+    /**
+     * Автор сообщения — элита: у аватарки объёмное золотое кольцо. Ранг он
+     * сообщил сам конвертом APURANK1, из базы его взять неоткуда.
+     */
+    senderVip: Boolean = false,
     senderAntiCount: Int = 0,
     senderAntiWarning: Boolean = false,
     canModerate: Boolean = false,
@@ -1935,6 +1944,17 @@ private fun MessageBubble(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.clickable { onOpenAuthorProfile() },
                     ) {
+                        // Аватарка автора: у элиты — в объёмном золотом кольце.
+                        // В группе это единственное место, где видно лицо
+                        // человека, поэтому знак элиты стоит именно здесь.
+                        val senderAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
+                            .collectAsState()
+                        PeerAvatar(
+                            name = senderName,
+                            avatarB64 = senderAvatars[message.senderId],
+                            vip = senderVip,
+                            size = 24.dp,
+                        )
                         Text(
                             senderName,
                             style = MaterialTheme.typography.labelMedium,

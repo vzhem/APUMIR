@@ -83,6 +83,12 @@ data class ChannelUiState(
     val inspectedPeerAntiMine: Boolean = false,
     val inspectedPeerAntiWarning: Boolean = false,
     val inspectedPeerAntiUntilMs: Long = 0,
+    /**
+     * Узлы-элита: авторы, чей ранг VIP. У имени автора и у его аватарки —
+     * золотой знак и объёмное кольцо (решение владельца 2026-10-07: «VIP должно
+     * быть видно везде, и в группах, и в каналах»).
+     */
+    val vipNodeIds: Set<String> = emptySet(),
     /** Мой идентификатор узла: по нему решается, можно ли править пост. */
     val myId: String = "",
     val isLoading: Boolean = true,
@@ -120,10 +126,24 @@ class ChannelViewModel @Inject constructor(
     private val fileTransferDao: com.vladimir.messenger.data.local.dao.FileTransferDao,
     private val fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter,
     private val hearts: com.vladimir.messenger.data.heart.HeartRepository,
+    /** Ранги собеседников: поток узлов-элиты для знака и кольца. */
+    private val peerRankStore: com.vladimir.messenger.data.rank.PeerRankStore,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
     private val channelId: String = savedStateHandle.get<String>("channelId").orEmpty()
+
+    /**
+     * Знак VIP и золотое кольцо у авторов постов: подписка на поток узлов-элиты.
+     * Ранг автор сообщает сам конвертом APURANK1 — иначе канал о нём не узнает.
+     */
+    private fun observePeerVip() {
+        viewModelScope.launch {
+            peerRankStore.vipNodeIds.collect { ids ->
+                _uiState.update { it.copy(vipNodeIds = ids) }
+            }
+        }
+    }
 
     private val _uiState = MutableStateFlow(ChannelUiState(channelId = channelId))
     val uiState: StateFlow<ChannelUiState> = _uiState.asStateFlow()
@@ -132,6 +152,7 @@ class ChannelViewModel @Inject constructor(
     private var postsAskedAfterJoin = false
 
     init {
+        observePeerVip()
         observe()
         observeReactions()
         observeTransfers()

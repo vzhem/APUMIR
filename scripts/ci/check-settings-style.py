@@ -146,7 +146,7 @@ class SettingsStyleTest(unittest.TestCase):
             self.assertIn(house_part, shared)
 
     def test_rank_screen_splits_vip_and_marks_the_elite(self):
-        """VIP-ранги: выше десятого - элита (решение владельца 2026-10-06).
+        """VIP-ранги: с десятого («Проводник») - элита (решение владельца 2026-10-07).
 
         Проверяем, что список рангов разделён на обычные и VIP, что VIP-ступени
         помечены знаком, а порог живёт в политике рангов (по нему же решают
@@ -162,11 +162,11 @@ class SettingsStyleTest(unittest.TestCase):
         self.assertIn("FileTransferRankPolicy.referralsToVip(qualified)", text)
 
         policy = (ROOT / "android-app/app/src/main/java/com/vladimir/messenger/data/file/FileTransferRankPolicy.kt").read_text()
-        self.assertIn("const val VIP_MINIMUM_QUALIFIED_REFERRALS = 20", policy)
+        self.assertIn("const val VIP_MINIMUM_QUALIFIED_REFERRALS = 10", policy)
         self.assertIn("val isVip: Boolean", policy)
         self.assertIn("val regularTiers: List<Entitlement>", policy)
         self.assertIn("val vipTiers: List<Entitlement>", policy)
-        # VIP - именно «выше десятого ранга», а не любой второй ранг.
+        # VIP - ровно с десятого ранга («Проводник»), а не любой второй ранг.
         self.assertIn("minimumQualifiedReferrals >= VIP_MINIMUM_QUALIFIED_REFERRALS", policy)
 
         # Знак VIP один на всё приложение: собственная плашка с градиентом и
@@ -189,9 +189,15 @@ class SettingsStyleTest(unittest.TestCase):
     def test_large_profile_initials_and_avatar_io_are_preserved(self):
         avatar = source("components/MyAvatar.kt")
         self.assertIn("size: Int = 52", avatar)
-        self.assertIn("Avatar(name = displayName, modifier = modifier, size = size)", avatar)
+        # Инициалы остаются запасным вариантом, когда картинки нет: их рисует
+        # тот же компонент, что и раньше, - просто круг вписан в размер экрана.
+        self.assertIn("Avatar(name = displayName, modifier = Modifier.fillMaxSize(), size = size)", avatar)
         self.assertIn("AvatarBitmaps.loadUri(context, avatarUri)", avatar)
         self.assertIn("AvatarBitmaps.cachedUri(avatarUri)", avatar)
+        # Знак элиты виден и на своём аватаре: кольцо то же, что у собеседников
+        # (владелец 2026-10-07: «чтобы аккаунт VIP должно быть видно везде»).
+        self.assertIn("VipRing(Modifier.matchParentSize())", avatar)
+        self.assertIn("rememberSelfVip()", avatar)
         self.assertIn("size = 88", source("screens/settings/SettingsScreen.kt"))
         self.assertIn("size = 96", source("screens/share/ShareProfileScreen.kt"))
 
