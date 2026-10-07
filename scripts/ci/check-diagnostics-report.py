@@ -307,7 +307,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
         for marker in (
             "enqueue_own(prepared.message)",
             "q.enqueue_own(next_hop_message)",
-            "let is_own_origin = origin == node_id;",
+            "let is_own_origin = next_hop_message.origin_sender == node_id;",
             "queue.enqueue_own(record)",
             "Relay-очередь: своих={} чужих={}",
             "MAX_TOTAL + MAX_OWN_TOTAL",
