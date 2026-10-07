@@ -482,10 +482,11 @@ fun ChatListScreen(
 
     inviteChoice?.let { group ->
         val what = if (group.isChannel) "канал" else "группу"
-        AlertDialog(
-            onDismissRequest = { inviteChoice = null },
-            title = { Text("Пригласить в $what") },
-            text = {
+        ApuPremiumDialog(
+            title = "Пригласить в $what",
+            onDismiss = { inviteChoice = null },
+            dismissLabel = null,
+        ) {
                 // Раунд 160: действия - тремя пузырями друг под другом
                 // (владелец: «три горизонтальных пузыря ... с нашей
                 // цветовой гаммой») вместо сжатых текстовых кнопок.
@@ -515,10 +516,7 @@ fun ChatListScreen(
                         inviteApu = chosen
                     }
                 }
-            },
-            confirmButton = {},
-            dismissButton = {},
-        )
+        }
     }
 
     // Раунд 158: «Отправить в APU» - выбираем адресатов галочками (до
@@ -536,10 +534,30 @@ fun ChatListScreen(
             viewModel.personalChatsOnce { contacts = it }
             viewModel.groupMemberIdsOnce(grp.id) { memberIds = it }
         }
-        AlertDialog(
-            onDismissRequest = { if (!sending) inviteApu = null },
-            title = { Text("Кому отправить") },
-            text = {
+        ApuPremiumDialog(
+            title = "Кому отправить",
+            onDismiss = { if (!sending) inviteApu = null },
+            confirmLabel = if (selected.isNotEmpty()) {
+                if (sending) "Отправляем…" else "Отправить"
+            } else {
+                null
+            },
+            confirmEnabled = !sending,
+            onConfirm = {
+                sending = true
+                val ids = selected.toList()
+                viewModel.sendGroupInviteToChats(grp.id, what, ids) { sent, failed ->
+                    sending = false
+                    inviteApu = null
+                    android.widget.Toast.makeText(
+                        context,
+                        if (failed == 0) "Отправлено: $sent" else "Отправлено: $sent, не удалось: $failed",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            },
+            dismissEnabled = !sending,
+        ) {
                 Column {
                     val list = contacts
                     when {
@@ -653,31 +671,7 @@ fun ChatListScreen(
                         }
                     }
                 }
-            },
-            confirmButton = {
-                if (selected.isNotEmpty()) {
-                    TextButton(
-                        enabled = !sending,
-                        onClick = {
-                            sending = true
-                            val ids = selected.toList()
-                            viewModel.sendGroupInviteToChats(grp.id, what, ids) { sent, failed ->
-                                sending = false
-                                inviteApu = null
-                                android.widget.Toast.makeText(
-                                    context,
-                                    if (failed == 0) "Отправлено: $sent" else "Отправлено: $sent, не удалось: $failed",
-                                    android.widget.Toast.LENGTH_SHORT,
-                                ).show()
-                            }
-                        },
-                    ) { Text(if (sending) "Отправляем…" else "Отправить") }
-                }
-            },
-            dismissButton = {
-                TextButton(enabled = !sending, onClick = { inviteApu = null }) { Text("Отмена") }
-            },
-        )
+        }
     }
 
     qrInvite?.let { (title, link) ->
