@@ -933,13 +933,30 @@ class CoreServerService : Service() {
                                         parsed.content
                                     }
                                     if (cfContent == null) {
-                                        Log.w(TAG, "CF sealed envelope not opened msgId=$messageId; skipped")
+                                        val knownHere = MessageSealer
+                                            .canSeal(applicationContext, senderId)
+                                        // Тот же различитель, что в основном пути:
+                                        // недавно что-то открылось — ключ рабочий,
+                                        // значит это старая копия в пути.
+                                        val leftoverHere = knownHere &&
+                                            com.vladimir.messenger.data.security.KeyDesyncNotice
+                                                .isWorkingRecently(applicationContext, senderId)
+                                        Log.w(
+                                            TAG,
+                                            "CF sealed envelope not opened msgId=$messageId " +
+                                                "leftover=$leftoverHere; skipped",
+                                        )
                                         com.vladimir.messenger.data.diagnostics.TransferDiagnostics
                                             .noteSealedNotOpened(
-                                                senderKeyKnown = MessageSealer
-                                                    .canSeal(applicationContext, senderId),
+                                                senderKeyKnown = knownHere,
+                                                staleKeyCopy = leftoverHere,
                                             )
                                     } else {
+                                        // Ключ рабочий: гасим плашку и запоминаем
+                                        // время успеха — по нему отличаются старые
+                                        // копии в пути от настоящего рассинхрона.
+                                        com.vladimir.messenger.data.security.KeyDesyncNotice
+                                            .opened(applicationContext, senderId)
                                         // Раунд 140: служебные конверты разбираются ДО
                                         // сохранения - тем же стражем, что и основной
                                         // путь. У неизвестного отправителя чат ради
@@ -1996,20 +2013,32 @@ class CoreServerService : Service() {
                     val opened = MessageSealer.open(applicationContext, rawText)
                     if (opened == null) {
                         val known = MessageSealer.canSeal(applicationContext, senderId)
+                        // Владелец 2026-10-07: после обмена QR переписка
+                        // работает, но в сети ещё летят СТАРЫЕ копии, запечатанные
+                        // прежним ключом. Если от собеседника только что ЧТО-ТО
+                        // открылось — ключ рабочий, а этот конверт остаток в пути:
+                        // человека не тревожим и сигнал «отдай ключ ещё раз» ему
+                        // не шлём.
+                        val leftover = known &&
+                            com.vladimir.messenger.data.security.KeyDesyncNotice
+                                .isWorkingRecently(applicationContext, senderId)
                         Log.w(
                             TAG,
                             "Sealed envelope NOT opened msgId=$messageId " +
                                 "sender=${senderId.takeLast(8)} senderKeyKnown=$known " +
-                                "bytes=${rawText.length} - relaying for another node, " +
-                                "or our key does not match",
+                                "leftover=$leftover bytes=${rawText.length} - relaying " +
+                                "for another node, or our key does not match",
                         )
                         // «Сообщение не пришло» чаще всего выглядит именно так:
                         // конверт не вскрылся, и раньше об этом знал только
                         // системный журнал. Теперь это предупреждение в журнале
                         // отчёта и число в разделе [сообщения].
                         com.vladimir.messenger.data.diagnostics.TransferDiagnostics
-                            .noteSealedNotOpened(senderKeyKnown = known)
-                        if (known) {
+                            .noteSealedNotOpened(
+                                senderKeyKnown = known,
+                                staleKeyCopy = leftover,
+                            )
+                        if (known && !leftover) {
                             // Ключ собеседника нам известен — значит, проблема на
                             // его стороне: он запечатал для нашей ПРЕЖНЕЙ копии
                             // ключа. Две вещи для человека, а не для отчёта:
@@ -2030,7 +2059,7 @@ class CoreServerService : Service() {
                     // Переписка с ним снова открывается — подсказка «не
                     // открывается» больше не нужна и не должна висеть сутками.
                     com.vladimir.messenger.data.security.KeyDesyncNotice
-                        .clear(applicationContext, senderId)
+                        .opened(applicationContext, senderId)
                     opened
                 } else {
                     rawText

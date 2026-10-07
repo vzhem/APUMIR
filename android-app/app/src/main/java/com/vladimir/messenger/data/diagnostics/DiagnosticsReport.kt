@@ -223,6 +223,14 @@ object Counters {
      */
     const val MSG_IN_NOT_OPENED = "msg_in_not_opened"
 
+    /**
+     * Из них — старые копии, отправленные до обмена ключами: ключ уже
+     * доказанно рабочий (что-то открылось), а эти конверты просто застряли в
+     * пути. Владелец 2026-10-07: после обмена QR переписка работает, а такие
+     * хвосты продолжают лететь и раньше выглядели как «опять не вскрылось».
+     */
+    const val MSG_IN_NOT_OPENED_STALE = "msg_in_not_opened_stale"
+
     /** Пакеты с отправителем не-узлом: обрывок служебной строки, отброшен. */
     const val MSG_IN_BAD_SENDER = "msg_in_bad_sender"
 
@@ -735,6 +743,10 @@ object DiagnosticsReport {
         appendLine("последнее подтверждение=${lastSeenText(facts, facts.lastAckAtMs)}")
         appendLine("не вскрылось (чужая переписка или устаревший ключ)=$notOpened")
         appendLine(
+            "не вскрылось: старые копии в пути (ключ уже рабочий)=" +
+                "${c[Counters.MSG_IN_NOT_OPENED_STALE] ?: 0L}",
+        )
+        appendLine(
             "отправитель не узел (обрывок служебной строки)=" +
                 "${c[Counters.MSG_IN_BAD_SENDER] ?: 0L}",
         )
@@ -773,6 +785,11 @@ object DiagnosticsReport {
             appendLine(
                 "  ↳ входящие не вскрываются: собеседник запечатал не нашим ключом — " +
                     "у него устаревшая копия ключа (переустановка, восстановление профиля)",
+            )
+        } else if ((c[Counters.MSG_IN_NOT_OPENED_STALE] ?: 0L) > 0L) {
+            appendLine(
+                "  ↳ не вскрылись только старые копии: они отправлены до обмена ключами, " +
+                    "текущая переписка открывается — делать ничего не нужно",
             )
         }
         if (facts.relayQueueFull > 0L) {
@@ -868,6 +885,7 @@ object DiagnosticsReport {
             Counters.MSG_OUT,
             Counters.MSG_ACK,
             Counters.MSG_IN_NOT_OPENED,
+            Counters.MSG_IN_NOT_OPENED_STALE,
             Counters.MSG_IN_BAD_SENDER,
             Counters.MSG_PEER_KEY_CHANGED,
             Counters.MSG_SEND_FAILED,

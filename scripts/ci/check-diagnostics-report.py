@@ -533,6 +533,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "const val MSG_OUT = ",
             "const val MSG_ACK = ",
             "const val MSG_IN_NOT_OPENED = ",
+            "const val MSG_IN_NOT_OPENED_STALE = ",
             "const val MSG_IN_BAD_SENDER = ",
             "const val MSG_PEER_KEY_CHANGED = ",
             "const val MSG_SEND_FAILED = ",
@@ -541,6 +542,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "private fun StringBuilder.appendMessages(",
             "входящих показано=",
             "не вскрылось (чужая переписка или устаревший ключ)=",
+            "не вскрылось: старые копии в пути (ключ уже рабочий)=",
             "ядро передало сигналов=",
             "пересылка: отброшено из-за полной очереди=",
             "очередь ядра: своё ждёт получателя=",
@@ -582,7 +584,12 @@ class DiagnosticsContractsTest(unittest.TestCase):
         service = source(MAIN / "service/CoreServerService.kt")
         for marker in (
             "TransferDiagnostics.noteMessageIncoming()",
-            "noteSealedNotOpened(senderKeyKnown = known)",
+            # Различитель «старая копия в пути / рассинхрон ключа» на приёме:
+            # ключ доказанно рабочий, если от собеседника недавно что-то открылось.
+            "noteSealedNotOpened(",
+            "senderKeyKnown = known,",
+            "staleKeyCopy = leftover,",
+            "isWorkingRecently(applicationContext, senderId)",
             "TransferDiagnostics.noteBadSender()",
         ):
             with self.subTest(marker=marker):

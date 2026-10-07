@@ -108,8 +108,15 @@ class ChatStyleTest(unittest.TestCase):
             "object KeyDesyncNotice",
             "fun note(context: Context, nodeId: String",
             "fun isPending(context: Context, nodeId: String",
+            "fun isWorkingRecently(",
+            "fun opened(context: Context, nodeId: String",
             "fun clear(context: Context, nodeId: String",
             "TTL_MS",
+            # Владелец 2026-10-07: после обмена QR переписка пошла, а плашка
+            # вернулась — её зажигала одна застрявшая в пути старая копия.
+            "MIN_FAILS",
+            "WORKING_QUIET_MS",
+            "LEFTOVER_MS",
         ):
             with self.subTest(marker=marker):
                 self.assertTrue(marker in notice, f"нет маркера {marker} в KeyDesyncNotice.kt")
@@ -128,9 +135,14 @@ class ChatStyleTest(unittest.TestCase):
             "собеседнику не отправляется наш ключ ещё раз",
         )
         self.assertTrue(
-            "KeyDesyncNotice\n                        .clear(applicationContext, senderId)" in service,
+            "KeyDesyncNotice\n                        .opened(applicationContext, senderId)" in service,
             "пометка не снимается, когда переписка снова открывается",
         )
+        # Старая копия в пути не должна ни пугать человека, ни гонять сигнал
+        # собеседнику: ключ доказанно рабочий.
+        self.assertIn("staleKeyCopy = leftover", service)
+        self.assertIn("if (known && !leftover)", service)
+        self.assertIn("leftover=$leftover", service)
 
         view_model = source("screens/chat/ChatDetailViewModel.kt")
         self.assertTrue("val keyDesync: Boolean = false" in view_model, "нет поля в состоянии чата")

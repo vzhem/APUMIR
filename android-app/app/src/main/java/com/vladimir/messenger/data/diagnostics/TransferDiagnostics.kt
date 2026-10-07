@@ -196,7 +196,16 @@ object TransferDiagnostics {
      * отделяет две разные причины: «не нам» и «у собеседника устаревший наш
      * ключ» — советы в этих случаях разные.
      */
-    fun noteSealedNotOpened(senderKeyKnown: Boolean) {
+    fun noteSealedNotOpened(senderKeyKnown: Boolean, staleKeyCopy: Boolean = false) {
+        if (staleKeyCopy) {
+            // Копия, отправленная до обмена ключами: ключ уже рабочий, новая
+            // переписка открывается. Это НЕ потеря и не повод для тревоги —
+            // считаем отдельным числом, чтобы «не вскрылось» не росло из-за
+            // хвостов, и в журнал не пишем (владелец 2026-10-07: «плашка
+            // появилась опять, хотя переписка работает»).
+            bump(Counters.MSG_IN_NOT_OPENED_STALE)
+            return
+        }
         val total = bump(Counters.MSG_IN_NOT_OPENED)
         if (total == 1L || total % 5L == 0L) {
             append(
