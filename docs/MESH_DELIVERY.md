@@ -70,7 +70,7 @@ Process death/reboot между любыми шагами не должен те
 - **E2E везде.** Relay-узел видит только `msg_id`, `recipient`, `TTL`, ciphertext.
   Расшифровать может только получатель.
 - **Дедупликация по `msg_id`** на каждом узле и у получателя.
-- **Cleanup по receipt.** Доставленное сообщение удаляется из всех relay-узлов после того,
+- **Cleanup по receipt и по прямому ACK.** Доставленное сообщение удаляется из всех relay-узлов после того,
   как получатель подтвердил получение.
 - **Self-healing.** Потерянный receipt → сообщение живёт до TTL, потом удаляется.
 - **Ограничения ресурсов.** Per-recipient и global лимиты на relay-очередь; relay можно
@@ -151,7 +151,15 @@ epoch-миллисекунды, а не process-local `Instant`, поэтому 
   определяется заново по `origin_sender == наш узел`.
 - API: `enqueue` / `enqueue_own`, `for_recipient(B)` (выдать всё для B, когда B появился, свои
   первыми), `remove(msg_id)` (cleanup), `digest()` (сводка `{msg_id, recipient}` для gossip),
-  `cleanup_expired()`, `stats()` (свои/чужие/всего/получателей).
+  `cleanup_expired()`, `stats()` (свои/чужие/всего/получателей), `remove_delivered_own(msg_id)`
+  (снятие по подтверждению доставки), `delivered_removed()` (счётчик снятых ACK'ом — идёт в
+  минутную строку журнала как `снято-по-ACK=N`).
+- **Снятие по прямому подтверждению (2026-10-07, отчёт владельца по v11.74.199).** «Своё ждёт
+  получателя=1000» при «сигналов=0» и постоянных «MQTT: delivery ACK received» — резерв «своих»
+  упирался в предел и не разгружался: ветка `ack|<msg_id>` только поднимала `MessageDelivered`
+  (вторая галочка), а с удержания запись снимала ЛИШЬ ветка mesh receipt. Теперь `ack` снимает
+  свою запись и в RAM (`remove_delivered_own` — только своё; чужую ретрансляцию подтверждают не
+  нам), и в durable-сторе (`remove_encrypted_and_tombstone`, как в receipt).
 - **Персистентность (M8-B, source 2026-08-15):** `storage/relay_store.rs` — отдельный SQLite
   store (`RelayStore`) с собственной миграцией: `relay_messages` (PK `msg_id`, индексы по
   `recipient` и абсолютному `expires_at_ms`) и `relay_tombstones` (PK `msg_id`, индекс по
