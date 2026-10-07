@@ -412,6 +412,7 @@ fun ChatListScreen(
                         // сотнях чатов это подвешивало жест листания.
                         items = uiState.itemsBySection[section].orEmpty(),
                         isSearchActive = uiState.searchQuery.isNotEmpty(),
+                        vipPeerIds = uiState.vipPeerIds,
                         onChatClick = onChatClick,
                         onSavedClick = onSavedClick,
                         onAddContactClick = onAddContactClick,
@@ -1055,6 +1056,12 @@ private fun SectionPage(
     section: InboxSection,
     items: List<InboxItem>,
     isSearchActive: Boolean,
+    /**
+     * Узлы собеседников, сообщивших ранг выше десятого: у их имён — знак VIP.
+     * Множество приходит сверху, потому что решение живёт в базе и модели, а
+     * страница лишь рисует строки.
+     */
+    vipPeerIds: Set<String>,
     onChatClick: (chatId: String, contactName: String, contactId: String) -> Unit,
     /** «Избранное» - постоянный личный контакт в разделах с личными чатами. */
     onSavedClick: () -> Unit,
@@ -1247,7 +1254,7 @@ private fun SectionPage(
                                 showPinnedIndicator = true,
                                 // Знак VIP у имени собеседника: он сам сообщил
                                 // ранг конвертом APURANK1 (см. PeerRankRouter).
-                                peerVip = item.chat.contactId.lowercase() in uiState.vipPeerIds,
+                                peerVip = item.chat.contactId.lowercase() in vipPeerIds,
                                 onClick = {
                                     onChatClick(
                                         item.chat.id,

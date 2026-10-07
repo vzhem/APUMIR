@@ -99,7 +99,8 @@ class PeerRankContractTest(unittest.TestCase):
         self.assertIn("peerVip: Boolean = false", CONTACT_CARD)
         self.assertIn("ApuVipBadge(compact = true)", CONTACT_CARD)
         # Знак передаётся из списка чатов и из шапки переписки.
-        self.assertIn("peerVip = item.chat.contactId.lowercase() in uiState.vipPeerIds", CHAT_LIST)
+        self.assertIn("peerVip = item.chat.contactId.lowercase() in vipPeerIds", CHAT_LIST)
+        self.assertIn("vipPeerIds = uiState.vipPeerIds", CHAT_LIST)
         self.assertIn("vipPeerIds", CHAT_LIST_VM)
         self.assertIn("ApuVipBadge(compact = true)", CHAT_DETAIL)
         self.assertIn("peerVip = peerVip", CHAT_DETAIL_VM)
