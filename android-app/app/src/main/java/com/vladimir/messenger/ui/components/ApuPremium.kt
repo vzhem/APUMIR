@@ -103,6 +103,10 @@ fun Modifier.apuPremiumLift(
  * Глянец: светлое свечение у верхней кромки плюс узкая световая полоса.
  * Именно это читается как «полированный пластик», и стоит ноль перерисовок —
  * один раз считается в drawWithCache.
+ *
+ * Блик рисуется ПОД содержимым (сначала блик, потом drawContent): значок и
+ * текст остаются чёткими, а свет ложится на саму поверхность — так выглядит
+ * настоящее стекло, а не запылённая картинка.
  */
 fun Modifier.apuPremiumGloss(
     shape: Shape = ApuBubbleShape,
@@ -129,13 +133,13 @@ fun Modifier.apuPremiumGloss(
         end = Offset(size.width * 0.85f, 0f),
     )
     onDrawWithContent {
-        drawContent()
         drawRect(topSheen)
         drawRect(
             brush = lightBand,
             topLeft = Offset(size.width * 0.05f, size.height * 0.06f),
             size = Size(size.width * 0.90f, size.height * 0.08f),
         )
+        drawContent()
     }
 }
 

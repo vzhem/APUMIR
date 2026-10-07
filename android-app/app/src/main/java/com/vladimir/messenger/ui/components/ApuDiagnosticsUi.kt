@@ -221,8 +221,9 @@ private fun Modifier.diagnosticsGloss(
         startX = movingBandLeft,
         endX = movingBandLeft + movingBandWidth,
     )
+    // Блик ложится ПОД содержимым: значки и текст остаются чёткими, а свет
+    // будто скользит по стеклу изнутри.
     onDrawWithContent {
-        drawContent()
         drawRect(topSheen)
         if (sweep == null) {
             drawRect(
@@ -246,6 +247,7 @@ private fun Modifier.diagnosticsGloss(
                 )
             }
         }
+        drawContent()
     }
 }
 

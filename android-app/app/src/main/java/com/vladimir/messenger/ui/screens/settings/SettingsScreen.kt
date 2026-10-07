@@ -1655,8 +1655,12 @@ private fun ThemeModeChoices(selected: ThemeMode, onSelect: (ThemeMode) -> Unit)
                                     },
                                 )
                                 .clip(shape)
-                                .background(
-                                    if (checked) apuGoldBrush() else ApuBubbleAccentColor.copy(alpha = 0.06f),
+                                .then(
+                                    if (checked) {
+                                        Modifier.background(apuGoldBrush(), shape)
+                                    } else {
+                                        Modifier.background(ApuBubbleAccentColor.copy(alpha = 0.06f), shape)
+                                    },
                                 )
                                 .border(
                                     1.dp,
