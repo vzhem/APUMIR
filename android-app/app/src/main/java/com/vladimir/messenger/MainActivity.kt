@@ -61,6 +61,8 @@ interface MainActivityEntryPoint {
     fun updateChecker(): UpdateChecker
     fun updateNotifier(): UpdateNotifier
     fun linkShortener(): LinkShortener
+    /** Рассылка своего ранга собеседникам (знак VIP у имени). */
+    fun peerRankBroadcaster(): com.vladimir.messenger.data.rank.PeerRankBroadcaster
 }
 
 @AndroidEntryPoint
@@ -130,6 +132,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         handleNotificationTap(intent)
         handleUpdateNotificationTap(intent)
+        broadcastPeerRankIfNeeded()
         handleDeepLinkIntent(intent)
     }
 
@@ -165,6 +168,31 @@ class MainActivity : ComponentActivity() {
             intent.removeExtra(com.vladimir.messenger.service.NotificationHelper.EXTRA_CHAT_ID)
             intent.removeExtra(com.vladimir.messenger.service.NotificationHelper.EXTRA_TOPIC_ID)
         }
+    }
+
+    /**
+     * Свой ранг - собеседникам (знак VIP у имени на их стороне).
+     *
+     * Рассылка сама решает, нужна ли она сейчас: ранг изменился с прошлого раза
+     * или прошла неделя (см. `RankBroadcastPrefs`). Вызов на старте, а не в
+     * `Application`: у приложения нет Hilt-инъекции, а этот вход уже есть.
+     * Владелец ждёт появления знака у собеседников, поэтому рассылка не должна
+     * зависеть от того, открывал ли он уведомление об обновлении.
+     */
+    private fun broadcastPeerRankIfNeeded() {
+        runCatching {
+            val entryPoint = EntryPointAccessors.fromApplication(
+                applicationContext,
+                MainActivityEntryPoint::class.java,
+            )
+            val broadcaster = entryPoint.peerRankBroadcaster()
+            kotlinx.coroutines.CoroutineScope(
+                kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO,
+            ).launch {
+                runCatching { broadcaster.broadcastIfNeeded() }
+                    .onFailure { Log.w(TAG_RANK, "peer rank broadcast failed: ${it.message}") }
+            }
+        }.onFailure { Log.w(TAG_RANK, "peer rank broadcast unavailable: ${it.message}") }
     }
 
     /**
@@ -599,5 +627,10 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requestNotificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
+    }
+
+    private companion object {
+        /** Тег журнала передачи ранга: ищем по нему при разборе на телефоне. */
+        const val TAG_RANK = "PeerRank"
     }
 }

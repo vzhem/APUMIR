@@ -74,6 +74,7 @@ class CoreServerService : Service() {
     @Inject lateinit var swarmPeerDirectory: com.vladimir.messenger.data.swarm.SwarmPeerDirectory
     @Inject lateinit var apkSeeder: com.vladimir.messenger.data.update.ApkSeeder
     @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
+    @Inject lateinit var peerRankRouter: com.vladimir.messenger.data.rank.PeerRankRouter
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
     @Inject lateinit var groupDao: com.vladimir.messenger.data.local.dao.GroupDao
@@ -358,6 +359,9 @@ class CoreServerService : Service() {
         if (runCatching { addressBookSwarm.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { readReceipts.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { referralAttributionRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        // Ранг собеседника (APURANK1): знак VIP у имени. Поглощается здесь же,
+        // чтобы служебная строка не стала текстом в переписке.
+        if (runCatching { peerRankRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { callManager.routeIncoming(senderId, chatId, messageId, text) }
             .getOrDefault(false)
         ) {
@@ -2210,6 +2214,19 @@ class CoreServerService : Service() {
                             Log.i(TAG, "Referral packet ACK sent for msgId=$messageId")
                         } catch (e: Exception) {
                             Log.w(TAG, "Referral packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
+                    // Ранг собеседника: APURANK1-конверт «у меня такой ранг».
+                    // Разбирается ДО авто-создания контакта: иначе служебная
+                    // строка создала бы чат с мусорным текстом у того, кто ещё
+                    // не добавил этого человека.
+                    if (peerRankRouter.routeIncoming(senderId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Rank packet ACK failed: " + e.message)
                         }
                         return
                     }

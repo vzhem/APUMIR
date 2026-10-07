@@ -68,3 +68,10 @@ yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || t
 chmod +x android-app/gradlew
 cd android-app || exit 1
 ./gradlew :app:compileReleaseKotlin --no-daemon --console=plain
+
+# ---- JVM-тесты конверта ранга (чистая логика, без Android) -------------------
+# Разбор APURANK1 - единственное место передачи ранга, которое можно проверить
+# без телефона: тест гоняется тем же gradle, что уже поднят выше, и стоит
+# секунды. Фильтр узкий нарочно - полный прогон тестов приложения сюда не
+# входит (в песочнице владельца его нет, и трогать чужие тесты не наша задача).
+./gradlew :app:testDebugUnitTest --no-daemon --console=plain --tests '*RankWireTest*'

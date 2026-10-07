@@ -1245,6 +1245,9 @@ private fun SectionPage(
                                 chat    = item.chat,
                                 kind    = BubbleKind.Personal,
                                 showPinnedIndicator = true,
+                                // Знак VIP у имени собеседника: он сам сообщил
+                                // ранг конвертом APURANK1 (см. PeerRankRouter).
+                                peerVip = item.chat.contactId.lowercase() in uiState.vipPeerIds,
                                 onClick = {
                                     onChatClick(
                                         item.chat.id,

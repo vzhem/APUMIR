@@ -106,6 +106,12 @@ data class ChatListUiState(
      * Решение владельца от 2026-10-06.
      */
     val rankVip: Boolean         = false,
+    /**
+     * Собеседники, чей сообщённый ранг дотягивает до VIP (конверт APURANK1):
+     * у их имён в списке стоит знак VIP. Пустое множество — никто ещё не
+     * сообщал ранг, и знаков нет.
+     */
+    val vipPeerIds: Set<String>  = emptySet(),
     /** Группы, в которых телефон состоит (без тех, из которых вышел). */
     val groups: List<InboxGroup> = emptyList(),
     /** Выбранный раздел. */
@@ -147,6 +153,9 @@ class ChatListViewModel @Inject constructor(
     private val contactRepository: com.vladimir.messenger.data.repository.ContactRepository,
     private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
+    /** Рассылка своего ранга собеседникам (знак VIP у имени): нужна, когда ранг вырос. */
+    private val peerRankBroadcaster: com.vladimir.messenger.data.rank.PeerRankBroadcaster,
+    private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatListUiState())
@@ -592,6 +601,15 @@ class ChatListViewModel @Inject constructor(
         // Подписка вместо разового чтения: промокод поднимает ранг, пока экран
         // уже открыт, и раньше на главной так и висел прежний ранг до
         // перезапуска приложения.
+        // Знак VIP у имён собеседников: перечитываем множество, когда приезжает
+        // конверт ранга (PeerRankStore) или меняется редко меняющийся порог.
+        viewModelScope.launch {
+            com.vladimir.messenger.data.rank.PeerRankStore.changes.collect {
+                refreshVipPeers()
+            }
+        }
+        refreshVipPeers()
+
         viewModelScope.launch {
             com.vladimir.messenger.data.referral.ReferralRankStore.changes.collect {
                 val rank = withContext(Dispatchers.IO) {
@@ -608,6 +626,28 @@ class ChatListViewModel @Inject constructor(
                     // (обычная или элитная) и есть ли знак VIP у имени.
                     state.copy(rankBadge = rank.rankName, rankVip = rank.isVip)
                 }
+                // Ранг мог дойти до VIP: собеседники должны увидеть знак у
+                // имени, не дожидаясь следующей недели. Рассылка сама решает,
+                // нужна ли она (внутри — отметка о последней отправке).
+                runCatching { peerRankBroadcaster.broadcastIfNeeded() }
+            }
+        }
+    }
+
+    /**
+     * Перечитать множество VIP-собеседников. Порог берётся у политики рангов,
+     * чтобы правило «выше десятого — VIP» жило в одном месте.
+     */
+    private fun refreshVipPeers() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val threshold = com.vladimir.messenger.data.file.FileTransferRankPolicy
+                .vipMinimumReferrals
+            val ids = runCatching { contactDao.vipPeerContactIds(threshold) }
+                .getOrDefault(emptyList())
+            // Идентификаторы узлов в списке чатов сравниваем в нижнем регистре:
+            // канонизируем здесь, а не в запросе, — так индекс по id не страдает.
+            _uiState.update { state ->
+                state.copy(vipPeerIds = ids.map { it.lowercase() }.toSet())
             }
         }
     }

@@ -45,6 +45,11 @@ data class ChatDetailUiState(
      * вместо того чтобы молча копить строки «в ожидании».
      */
     val isSelfChat: Boolean = false,
+    /**
+     * Собеседник сообщил ранг выше десятого (APURANK1) — у имени в шапке чата
+     * появляется знак VIP, как у элиты приложения.
+     */
+    val peerVip: Boolean = false,
     val transfers: List<FileTransferEntity> = emptyList(),
     val inputText: String       = "",
     val isLoading: Boolean      = true,
@@ -283,6 +288,21 @@ class ChatDetailViewModel @Inject constructor(
      * Слушаем строку чата в БД — peer_discovered/peer_lost её же и обновляют.
      */
     private fun observeContactPresence() {
+        // Знак VIP у имени собеседника обновляем на лету: ранг может приехать
+        // в любой момент конвертом APURANK1, а экран уже открыт.
+        viewModelScope.launch(Dispatchers.IO) {
+            com.vladimir.messenger.data.rank.PeerRankStore.changes.collect {
+                val id = peerId
+                if (id.isBlank()) return@collect
+                val vip = runCatching {
+                    // -1 = «ещё не сообщал»: знака нет.
+                    (contactDao.peerRankQualified(id) ?: -1) >=
+                        com.vladimir.messenger.data.file.FileTransferRankPolicy.vipMinimumReferrals
+                }.getOrDefault(false)
+                _uiState.update { it.copy(peerVip = vip) }
+            }
+        }
+
         viewModelScope.launch {
             // р243: пока чат не опознан, считаем его обычным: плашка «это ваш
             // узел» появляется после загрузки переписки (р241), а не после
@@ -295,6 +315,12 @@ class ChatDetailViewModel @Inject constructor(
                     val nick = runCatching {
                         contactDao.getContactById(chat.contactId)?.username.orEmpty()
                     }.getOrDefault("")
+                    // Знак VIP у имени в шапке: ранг собеседник сообщает сам
+                    // (конверт APURANK1), порог берём у политики рангов.
+                    val peerVip = runCatching {
+                        (contactDao.peerRankQualified(chat.contactId) ?: -1) >=
+                            com.vladimir.messenger.data.file.FileTransferRankPolicy.vipMinimumReferrals
+                    }.getOrDefault(false)
                     // р235: адрес собеседника нужен для «печатает…».
                     if (chat.contactId.isNotBlank()) peerId = chat.contactId
                     // р241/р243: свой ли это узел, решает загрузка переписки:
@@ -319,6 +345,7 @@ class ChatDetailViewModel @Inject constructor(
                             contactUsername = nick,
                             isPeerTyping = com.vladimir.messenger.data.typing.TypingPeer
                                 .isTyping(chat.contactId),
+                            peerVip = peerVip,
                         )
                     }
                     // Сердечки заводим здесь: только тут точно известен адрес

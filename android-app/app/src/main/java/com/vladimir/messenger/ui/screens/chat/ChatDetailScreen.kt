@@ -4,6 +4,7 @@ import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
+import com.vladimir.messenger.ui.components.ApuVipBadge
 import com.vladimir.messenger.ui.components.ApuBubbleCard
 import com.vladimir.messenger.ui.components.ApuBubbleLinkColor
 import com.vladimir.messenger.ui.components.apuBubbleSurface
@@ -302,13 +303,23 @@ fun ChatDetailScreen(
                     // Общий пузырь шапки, как в группах и каналах.
                     ApuHeaderBubble(onClick = { showPeerProfile = true }) {
                         Column {
-                            Text(
-                                contactName,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFF1E2430),
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            )
+                            // Знак VIP у имени: собеседник сам сообщил ранг выше
+                            // десятого (конверт APURANK1) — это признание, а не
+                            // платная функция, поэтому знак просто рядом с именем.
+                            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                Text(
+                                    contactName,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFF1E2430),
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                                if (uiState.peerVip) {
+                                    Spacer(Modifier.width(6.dp))
+                                    ApuVipBadge(compact = true)
+                                }
+                            }
                             // р235: «печатает…» важнее статуса сети и гаснет само.
                             val peerTyping = uiState.isPeerTyping
                             Text(

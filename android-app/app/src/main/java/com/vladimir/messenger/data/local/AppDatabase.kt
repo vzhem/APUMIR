@@ -52,7 +52,7 @@ import com.vladimir.messenger.data.local.dao.GroupPollDao
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 26
+const val APP_DATABASE_VERSION = 27
 
 @Database(
     entities = [
@@ -569,6 +569,24 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_25_26 = object : Migration(25, 26) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `contacts` ADD COLUMN `lastSeenAtMs` INTEGER")
+            }
+        }
+
+        /**
+         * Ранг собеседника для знака VIP у имени (решение владельца 2026-10-06/07).
+         *
+         * Аддитивная миграция: ни одна строка не переписывается. `-1` значит
+         * «собеседник ещё не сообщал свой ранг» — у таких контактов знак не
+         * рисуется, пока не придёт первый конверт APURANK1.
+         */
+        val MIGRATION_26_27 = object : Migration(26, 27) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `contacts` ADD COLUMN `peerRankQualified` INTEGER NOT NULL DEFAULT -1"
+                )
+                db.execSQL(
+                    "ALTER TABLE `contacts` ADD COLUMN `peerRankUpdatedAtMs` INTEGER NOT NULL DEFAULT 0"
+                )
             }
         }
 

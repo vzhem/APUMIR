@@ -64,6 +64,12 @@ fun ContactCard(
     menuActions: List<BubbleMenuAction> = emptyList(),
     /** Main-inbox marker; ContactsScreen reuses this card without the marker. */
     showPinnedIndicator: Boolean = false,
+    /**
+     * Собеседник сообщил ранг выше десятого (конверт APURANK1): рядом с именем
+     * ставим знак VIP — как знак элиты в топовых мессенджерах. По умолчанию нет:
+     * контакты без сообщённого ранга выглядят как раньше, без ложных знаков.
+     */
+    peerVip: Boolean = false,
 ) {
     // Присланный аватар из роевого реестра (если есть) - иначе инициалы.
     val avatars by AvatarStore.avatars.collectAsState()
@@ -128,15 +134,23 @@ fun ContactCard(
         // ТЕКСТОВАЯ ИНФОРМАЦИЯ
         // ------------------------------------------------------------------
         Column(modifier = Modifier.weight(1f)) {
-            // Имя контакта
-            Text(
-                text      = chat.contactName,
-                style     = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color     = Color(0xFF1E2430),
-                maxLines  = 1,
-                overflow  = TextOverflow.Ellipsis,
-            )
+            // Имя контакта. Знак VIP стоит рядом с именем, а не вместо него:
+            // имя должно читаться в первую очередь.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text      = chat.contactName,
+                    style     = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color     = Color(0xFF1E2430),
+                    maxLines  = 1,
+                    overflow  = TextOverflow.Ellipsis,
+                    modifier  = Modifier.weight(1f, fill = false),
+                )
+                if (peerVip) {
+                    Spacer(Modifier.width(6.dp))
+                    ApuVipBadge(compact = true)
+                }
+            }
 
             // Оригинальное имя через собаку - золотом, как акценты темы.
             if (username.isNotEmpty()) {
