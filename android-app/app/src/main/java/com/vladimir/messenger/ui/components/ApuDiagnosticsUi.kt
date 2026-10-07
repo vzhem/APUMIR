@@ -70,7 +70,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.clipRect
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -79,6 +78,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -212,7 +212,7 @@ private fun Modifier.diagnosticsGloss(
     // засвечивать текст ей нельзя — только «скользнуть» по стеклу.
     val movingBandWidth = size.width * 0.30f
     val movingBandLeft = -movingBandWidth + (size.width + movingBandWidth) * (sweep ?: 0f)
-    val movingBand = Brush.linearGradient(
+    val movingBand = Brush.horizontalGradient(
         colors = listOf(
             Color.Transparent,
             Color.White.copy(alpha = 0.20f * intensity),
