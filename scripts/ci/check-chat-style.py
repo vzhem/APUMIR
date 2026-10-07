@@ -92,6 +92,33 @@ class ChatStyleTest(unittest.TestCase):
                 offenders.append("OutlinedTextField: " + str(path.relative_to(ROOT)))
         self.assertEqual([], offenders)
 
+    def test_new_style_components_are_actually_used(self):
+        """Новые общие компоненты стиля обязаны быть в деле, а не лежать рядом.
+
+        Владелец 2026-10-07: «Доделывай все разделы с новым стилем». Проверка
+        страхует от откатов: если кто-то снова начнёт рисовать кнопку, поле или
+        диалог «своими руками», стиль снова разъедется по разделам.
+        """
+        root = ROOT / "android-app/app/src/main/java/com/vladimir/messenger/ui"
+        used = {"ApuTextAction": 0, "ApuBubbleField": 0, "ApuSettingsDialog": 0}
+        for path in root.rglob("*.kt"):
+            text = path.read_text()
+            if path.stem == "ApuTextAction":
+                continue
+            for name in used:
+                if name + "(" in text:
+                    used[name] += 1
+        for name, files in used.items():
+            with self.subTest(component=name):
+                self.assertGreaterEqual(files, 5, name + " почти нигде не используется")
+        # Звонок — золотое кольцо и кнопки в общем слое.
+        call = source("screens/call/CallScreen.kt")
+        self.assertIn("apuGoldBrush()", call)
+        self.assertIn("apuPremiumGloss(CircleShape", call)
+        # Левая колонка группового чата и панель ввода — премиальные.
+        group_chat = source("screens/groups/GroupChatScreen.kt")
+        self.assertGreaterEqual(group_chat.count(".apuPremiumThread("), 3)
+
     def test_no_stock_text_buttons_left_in_the_ui(self):
         """Во всём интерфейсе не осталось плоских Material-кнопок.
 
