@@ -1479,7 +1479,7 @@ private fun PostEditorDialog(
 
                     if (withPoll && draft == null) {
                         pollProblem = pollState.problem()
-                        return@TextButton
+                        return@ApuTextAction
                     }
                     onConfirm(text, images, draft)
                 },

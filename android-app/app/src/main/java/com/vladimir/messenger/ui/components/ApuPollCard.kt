@@ -370,7 +370,7 @@ fun CreatePollDialog(
                     val issue = state.problem()
                     if (issue != null) {
                         problem = issue
-                        return@TextButton
+                        return@ApuTextAction
                     }
                     state.draft()?.let(onCreate)
                 },
