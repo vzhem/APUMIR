@@ -42,6 +42,10 @@
 `test_lost_items_do_not_live_forever` в `check-diagnostics-report.py` (12 тестов) — включая сверку,
 что черта «тяжёлого» в `FileTransferRetention` и `ServerMode` одна и та же.
 
+**CI прогон `37590316169` (коммит `3562c1d`) — success:** контракты и JVM-тесты (включая
+`FileTransferRetentionTest`), `cargo check`/`cargo test --lib`, `android compileReleaseKotlin` —
+зелёные, комментариев-разборов к PR нет.
+
 **Не сделано нарочно:** принятые (расшифрованные) фото и видео не удаляются — это файлы человека, а
 не «потеряшка»; после срока по ним просто прекращается раздача. Раздача обновлений APK живёт по
 своему сроку (3 суток, `data/update/ApkSeeder.kt`).
