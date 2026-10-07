@@ -65,7 +65,12 @@
 **Проверено:** JVM-тесты `reportHighlightMarksSectionsFailuresAndWarnings` и
 `reportHighlightKeepsEveryCharacterOfTheShownText`; контракт `check-diagnostics-report.py` — 11 тестов,
 включая новый `test_logs_window_keeps_the_house_style`; остальные девять `check-*.py` — OK;
-`check_unresolved_symbols.py` — 0 подозрительных имён. Компиляция Android — в CI.
+`check_unresolved_symbols.py` — 0 подозрительных имён.
+
+**CI прогон `37585633328` (коммит `f0f21f8`) — success:** блокирующий шаг «local-first chat
+history» (контракты + JVM-тесты `DiagnosticsReportTest`) зелёный, `cargo check`/`cargo test --lib`
+зелёные, комментариев-разборов к PR нет — то есть `android compileReleaseKotlin` собрался
+(в этом прогоне были только посторонние аннотации: Node 20 и метка ubuntu-latest).
 
 **Выпуск:** ждёт разрешения владельца вместе с разделением своих и чужих (см. выше).
 
