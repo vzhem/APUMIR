@@ -19,13 +19,16 @@ import com.vladimir.messenger.ui.components.ApuSettingsDangerColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
 import com.vladimir.messenger.ui.components.ApuSettingsCard
-import com.vladimir.messenger.ui.components.ApuSettingsChip
-import com.vladimir.messenger.ui.components.apuBubbleSurface
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuSettingsDivider
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
+import com.vladimir.messenger.ui.components.ApuDiagnosticsActionButton
+import com.vladimir.messenger.ui.components.ApuDiagnosticsHero
+import com.vladimir.messenger.ui.components.ApuDiagnosticsPrivacyStrip
 import com.vladimir.messenger.ui.components.ApuDiagnosticsReportCard
 import com.vladimir.messenger.ui.components.ApuDiagnosticsStatusCard
+import com.vladimir.messenger.ui.components.DiagnosticsActionIcons
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 import com.vladimir.messenger.ui.components.ApuSettingsItem
 import com.vladimir.messenger.ui.components.ApuSettingsLayout
 import com.vladimir.messenger.ui.components.ApuSettingsSectionTitle
@@ -1354,9 +1357,15 @@ private fun SettingsTabContent(
     if (showTransferLogsDialog) {
         val logsSnapshot = transferLogsSnapshot
         val reportText = logsSnapshot?.report.orEmpty()
+        // Владелец 2026-10-07: «как то всё по пенсионерски и по деревенски…
+        // цвета яркие и чёткие, объём кнопок выразителен, блеск премиальный».
+        // Шапка окна — тёмный градиентный баннер со статусом, строки проверок —
+        // яркие «well»-метки, отчёт — тёмная консоль, кнопки — золотая
+        // глянцевая и стеклянные. Подложка остаётся house-стиля
+        // (ApuSettingsDialog/ApuSettingsCard), ничего stock Material.
         ApuSettingsDialog(
             onDismissRequest = { showTransferLogsDialog = false },
-            icon = { Icon(Icons.Default.Description, contentDescription = null) },
+            icon = { Icon(Icons.Default.Terminal, contentDescription = null) },
             title = { Text("Логи") },
             text = {
                 // Вся область прокручивается: на узком экране или крупном
@@ -1364,13 +1373,19 @@ private fun SettingsTabContent(
                 // прокрутка у отчёта остаётся удобной для длинного текста.
                 Column(
                     modifier = Modifier
-                        .heightIn(max = 420.dp)
+                        .heightIn(max = 460.dp)
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    // «Что происходит сейчас» — та же house-капсула, что
-                    // у секций настроек («Поддержка», «О приложении»).
-                    ApuSettingsChip("Что происходит сейчас")
+                    val statusLines = logsSnapshot?.statusLines.orEmpty()
+                    ApuDiagnosticsHero(
+                        lines = statusLines,
+                        appVersion = logsSnapshot?.appVersion,
+                        collectedAt = logsSnapshot?.let { DiagnosticsReport.clock(it.createdAtMs) },
+                        journalSize = logsSnapshot?.journalSize ?: 0,
+                        warnCount = logsSnapshot?.warnCount ?: 0,
+                        badCount = logsSnapshot?.badCount ?: 0,
+                    )
                     if (logsSnapshot == null || transferLogsLoading) {
                         Text(
                             "Собираю безопасный отчёт…",
@@ -1380,26 +1395,21 @@ private fun SettingsTabContent(
                     } else {
                         ApuDiagnosticsStatusCard(lines = logsSnapshot.statusLines)
                     }
-                    // Обещание приватности — отдельным светлым пузырём,
-                    // чтобы его читали, а не пролистывали серый абзац.
-                    Text(
+                    // Обещание приватности — тёмной стеклянной полосой со щитом:
+                    // его читают, а не пролистывают.
+                    ApuDiagnosticsPrivacyStrip(
                         "Отчёт содержит состояние сети, ядра, брокера и передач. Чаты, имена " +
                             "файлов, ключи, ciphertext, адреса и contact ID в него не попадают — " +
                             "его можно копировать и присылать целиком.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = ApuBubbleMutedColor,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .apuBubbleSurface(shape = RoundedCornerShape(14.dp))
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
                     )
                     ApuDiagnosticsReportCard(
                         text = reportText.ifBlank { "Собираю безопасный отчёт…" },
-                        maxHeight = 240.dp,
+                        maxHeight = 260.dp,
                         // Когда и что собрано — подписью в шапке отчёта:
                         // строка не отрывается от текста, к которому относится.
                         caption = logsSnapshot?.let { snapshot ->
                             "Собрано в ${DiagnosticsReport.clock(snapshot.createdAtMs)} · " +
+                                "версия ${snapshot.appVersion} · " +
                                 "записей журнала ${snapshot.journalSize} · " +
                                 "предупреждений ${snapshot.warnCount} · " +
                                 "ошибок ${snapshot.badCount}"
@@ -1408,14 +1418,23 @@ private fun SettingsTabContent(
                 }
             },
             confirmButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    // «Отправить» — системное меню Android: отчёт уезжает в
-                    // Telegram/почту одной кнопкой, без ручного копирования.
-                    TextButton(
+                // «Отправить» — системное меню Android: отчёт уезжает в
+                // Telegram/почту одной кнопкой, без ручного копирования.
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ApuDiagnosticsActionButton(
+                        label = "Отправить",
+                        icon = DiagnosticsActionIcons.Send,
+                        style = DiagnosticsActionStyle.PRIMARY,
                         enabled = reportText.isNotBlank(),
                         onClick = { AppShare.shareText(settingsContext, reportText, "Логи APU") },
-                    ) { Text("Отправить") }
-                    TextButton(
+                    )
+                }
+            },
+            dismissButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ApuDiagnosticsActionButton(
+                        label = "Скопировать",
+                        icon = DiagnosticsActionIcons.Copy,
                         enabled = reportText.isNotBlank(),
                         onClick = {
                             mqttClipboard.setText(
@@ -1427,13 +1446,18 @@ private fun SettingsTabContent(
                                 android.widget.Toast.LENGTH_SHORT,
                             ).show()
                         },
-                    ) { Text("Скопировать") }
-                }
-            },
-            dismissButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(onClick = { transferLogsRefresh++ }) { Text("Обновить") }
-                    TextButton(onClick = { showTransferLogsDialog = false }) { Text("Закрыть") }
+                    )
+                    ApuDiagnosticsActionButton(
+                        label = "Обновить",
+                        icon = DiagnosticsActionIcons.Refresh,
+                        style = DiagnosticsActionStyle.QUIET,
+                        onClick = { transferLogsRefresh++ },
+                    )
+                    ApuDiagnosticsActionButton(
+                        label = "Закрыть",
+                        style = DiagnosticsActionStyle.QUIET,
+                        onClick = { showTransferLogsDialog = false },
+                    )
                 }
             },
         )

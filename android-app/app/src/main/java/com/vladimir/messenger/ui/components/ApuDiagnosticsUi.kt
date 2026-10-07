@@ -1,45 +1,75 @@
 package com.vladimir.messenger.ui.components
 
 // =============================================================================
-// APUDIAGNOSTICSUI.KT — окно «Логи» в фирменном стиле APU
+// APUDIAGNOSTICSUI.KT — окно «Логи»: премиальный вид в стиле современных
+// мессенджеров (переработка 2026-10-07 по замечанию владельца: «как то всё по
+// пенсионерски и по деревенски… чтобы и цвета были яркие и чёткие, и объём
+// кнопок чтобы был выразителен, и блеск передавался премиальный»).
 // =============================================================================
-// Раньше «Логи» были одной простыней моноширинного текста: человек не видел,
-// что происходит, пока не прочитает всё. Теперь сверху — короткая сводка
-// (сеть, брокер, ядро, передачи, прямой F4-канал, батарея) с цветными
-// метками, итогом и легендой цветов, ниже — отчёт в отдельной карточке
-// с шапкой; разделы [сводка]/[ядро]/… подсвечены бронзовым, а строки
-// с «!» и «✖» сразу видны своим цветом.
+// Что изменилось против прежней версии:
+//   * шапка — тёмный градиентный баннер (полуночный синий → бронза) с глянцевым
+//     блеском, эмблемой, статус-плашкой и стеклянными чипами;
+//   * строки проверок — крупные пиктограммы-«well» с яркими градиентами и
+//     свечением, а не точки с серым текстом;
+//   * отчёт — тёмная КОНСОЛЬ с «светофором» и подсветкой разделов, как в
+//     премиальных приложениях; текст при копировании не меняется ни на символ;
+//   * кнопки — объёмные: золотая глянцевая основная и стеклянные вторичные, с
+//     мягкой тенью, верхним бликом и откликом на нажатие.
 //
-// Палитра и формы — из ApuBubble/ApuSettingsUi: светлый пузырь, бронзовый
-// акцент, рамка 18dp. Ничего нового не изобретаем.
+// Правило прежних замечаний владельца соблюдено: НИЧЕГО stock Material — только
+// наши цвета, наши формы и наши обёртки (ApuSettingsCard/ApuBubble). Читаемость
+// не принесена в жертву яркости: насыщенные цвета живут в заливках, полосах и
+// градиентах, а текстом остаются тёмные чернила, прошедшие проверку контраста
+// (scripts/ci/check-diagnostics-report.py, test_premium_palette_keeps_contrast).
 // =============================================================================
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -54,15 +84,59 @@ import com.vladimir.messenger.data.diagnostics.DiagnosticsLine
 import com.vladimir.messenger.data.diagnostics.DiagnosticsLineTone
 import com.vladimir.messenger.data.diagnostics.diagnosticsLineTone
 
-/** Единый оттенок «внимания»: им же подсвечиваются строки журнала в отчёте. */
-private val DiagnosticsWarnColor = Color(0xFF8F4A00)
+// ─────────────────────────────────────────────────────────────────────────────
+// Палитра окна «Логи»
+// ─────────────────────────────────────────────────────────────────────────────
 
-/** Цвет метки уровня: зелёный — порядок, бронзовый — справка, оранжевый — внимание, красный — поломка. */
+/** Полированное золото: блик → металл → глубина. */
+private val DiagGoldLight = Color(0xFFFFE9A8)
+private val DiagGold = Color(0xFFF2B836)
+private val DiagGoldDeep = Color(0xFFB87E08)
+
+/** Тёмная основа шапки и консоли: полуночный синий. */
+private val DiagNightTop = Color(0xFF16233A)
+private val DiagNightBottom = Color(0xFF0A1018)
+private val DiagConsoleSurface = Color(0xFF0D1520)
+private val DiagConsoleBar = Color(0xFF182636)
+
+/** Чернила на золоте и светлом: контраст ≥ 4.5 на всех стопах градиента. */
+private val DiagOnGold = Color(0xFF241703)
+
+/** Текст консоли: светлый и спокойный, ошибки и предупреждения — ярче. */
+private val DiagConsoleText = Color(0xFFE6EEF8)
+private val DiagConsoleMuted = Color(0xFF9FB3CB)
+private val DiagConsoleTitle = Color(0xFFFFC24B)
+private val DiagConsoleWarn = Color(0xFFFFB74D)
+private val DiagConsoleBad = Color(0xFFFF8A80)
+
+/**
+ * Насыщенный цвет уровня: заливки, полосы, точки и градиенты. Именно он даёт
+ * «яркие и чёткие» цвета; текстом он не используется — для текста есть
+ * [diagnosticsLevelInkColor].
+ */
 fun diagnosticsLevelColor(level: DiagnosticsLevel): Color = when (level) {
-    DiagnosticsLevel.OK -> Color(0xFF2E7D32)
-    DiagnosticsLevel.INFO -> ApuBubbleAccentColor
-    DiagnosticsLevel.WARN -> DiagnosticsWarnColor
+    DiagnosticsLevel.OK -> Color(0xFF10B981)
+    DiagnosticsLevel.INFO -> Color(0xFFF0A81E)
+    DiagnosticsLevel.WARN -> Color(0xFFF97316)
+    DiagnosticsLevel.BAD -> Color(0xFFEF4444)
+}
+
+/** Тёмные чернила уровня: ими подписаны плашки и легенда (контраст ≥ 4.5). */
+fun diagnosticsLevelInkColor(level: DiagnosticsLevel): Color = when (level) {
+    DiagnosticsLevel.OK -> Color(0xFF047857)
+    DiagnosticsLevel.INFO -> Color(0xFF8A5A00)
+    DiagnosticsLevel.WARN -> Color(0xFF9A3412)
+    // Самая громкая краска дома: тот же «опасный» тон, что у остальных
+    // предупреждений приложения, только применённый к тексту уровня.
     DiagnosticsLevel.BAD -> ApuSettingsDangerColor
+}
+
+/** Пара «заливка → глубина» для градиентов уровня: объём без грязи. */
+private fun diagnosticsLevelGradient(level: DiagnosticsLevel): List<Color> = when (level) {
+    DiagnosticsLevel.OK -> listOf(Color(0xFF34D399), Color(0xFF059669))
+    DiagnosticsLevel.INFO -> listOf(Color(0xFFFFD257), Color(0xFFD99B1C))
+    DiagnosticsLevel.WARN -> listOf(Color(0xFFFBBF24), Color(0xFFEA580C))
+    DiagnosticsLevel.BAD -> listOf(Color(0xFFFB7185), Color(0xFFDC2626))
 }
 
 /** Слова для легенды: у каждого цвета на сводке есть понятное название. */
@@ -73,7 +147,270 @@ private fun diagnosticsLevelLabel(level: DiagnosticsLevel): String = when (level
     DiagnosticsLevel.BAD -> "поломка"
 }
 
-/** Сводка «что происходит сейчас»: итог, строки проверок с метками уровней и легенда. */
+/** Общий уровень по строкам: сначала поломки, потом внимание, иначе порядок. */
+private fun diagnosticsWorstLevel(lines: List<DiagnosticsLine>): DiagnosticsLevel = when {
+    lines.any { it.level == DiagnosticsLevel.BAD } -> DiagnosticsLevel.BAD
+    lines.any { it.level == DiagnosticsLevel.WARN } -> DiagnosticsLevel.WARN
+    else -> DiagnosticsLevel.OK
+}
+
+private fun diagnosticsVerdictText(level: DiagnosticsLevel): String = when (level) {
+    DiagnosticsLevel.BAD -> "ЕСТЬ ОШИБКИ"
+    DiagnosticsLevel.WARN -> "ЕСТЬ ПРЕДУПРЕЖДЕНИЯ"
+    DiagnosticsLevel.INFO -> "ВСЁ В ПОРЯДКЕ"
+    DiagnosticsLevel.OK -> "ВСЁ В ПОРЯДКЕ"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Глянец и объём: одни и те же приёмы во всех элементах окна
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Верхний блик: узкая светлая полоса у верхней кромки плюс мягкое свечение
+ * сверху. Именно это читается как «полированный пластик» у современных
+ * мессенджеров, и стоит ноль лишних перерисовок (drawWithCache).
+ */
+private fun Modifier.diagnosticsGloss(
+    shape: Shape = RoundedCornerShape(16.dp),
+    intensity: Float = 1f,
+): Modifier = clip(shape).drawWithCache {
+    val topSheen = Brush.linearGradient(
+        colors = listOf(
+            Color.White.copy(alpha = 0.34f * intensity),
+            Color.White.copy(alpha = 0.10f * intensity),
+            Color.Transparent,
+        ),
+        start = Offset(0f, 0f),
+        end = Offset(0f, size.height * 0.55f),
+    )
+    val lightBand = Brush.linearGradient(
+        colors = listOf(
+            Color.White.copy(alpha = 0.42f * intensity),
+            Color.White.copy(alpha = 0.06f * intensity),
+            Color.Transparent,
+        ),
+        start = Offset(0f, 0f),
+        end = Offset(size.width * 0.85f, 0f),
+    )
+    onDrawWithContent {
+        drawContent()
+        drawRect(topSheen)
+        drawRect(
+            brush = lightBand,
+            topLeft = Offset(size.width * 0.04f, size.height * 0.06f),
+            size = Size(size.width * 0.92f, size.height * 0.10f),
+        )
+    }
+}
+
+/** Мягкая тень под элементом: объём, а не плоская заливка. */
+private fun Modifier.diagnosticsLift(elevation: Dp, shape: Shape, color: Color): Modifier =
+    shadow(elevation = elevation, shape = shape, clip = false, ambientColor = color, spotColor = color)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Шапка окна: баннер со статусом и чипами
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Верх окна «Логи»: тёмный градиентный баннер с эмблемой, названием, статусом
+ * и стеклянными чипами (проверок / записей / тревог). Это первое, что видит
+ * человек, — и по нему сразу понятно, всё ли хорошо.
+ */
+@Composable
+fun ApuDiagnosticsHero(
+    lines: List<DiagnosticsLine>,
+    modifier: Modifier = Modifier,
+    appVersion: String? = null,
+    collectedAt: String? = null,
+    journalSize: Int = 0,
+    warnCount: Int = 0,
+    badCount: Int = 0,
+) {
+    // Пока проверок нет, «ВСЁ В ПОРЯДКЕ» было бы враньём: показываем сбор.
+    val collecting = lines.isEmpty()
+    val level = if (collecting) DiagnosticsLevel.INFO else diagnosticsWorstLevel(lines)
+    val shape = RoundedCornerShape(22.dp)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .diagnosticsLift(14.dp, shape, Color(0xFF0A1018).copy(alpha = 0.55f))
+            .clip(shape)
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(DiagNightTop, Color(0xFF24344E), DiagNightBottom),
+                    start = Offset(0f, 0f),
+                    end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
+                ),
+            )
+            .border(1.dp, Brush.linearGradient(listOf(DiagGold.copy(alpha = 0.75f), DiagGoldDeep.copy(alpha = 0.35f))), shape)
+            .diagnosticsGloss(shape, intensity = 0.8f),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ApuDiagnosticsEmblem()
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Логи",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Black,
+                        color = Color.White,
+                    )
+                    val subtitle = listOfNotNull(
+                        collectedAt?.takeIf { it.isNotBlank() },
+                        appVersion?.takeIf { it.isNotBlank() },
+                    ).joinToString(" · ")
+                    Text(
+                        subtitle.ifBlank { "Отчёт о состоянии сети и передач" },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color.White.copy(alpha = 0.72f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            ApuDiagnosticsVerdictPill(
+                text = if (collecting) "СОБИРАЮ ОТЧЁТ…" else diagnosticsVerdictText(level),
+                level = level,
+                checks = lines.size,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ApuDiagnosticsGlassChip("записей", journalSize.toString())
+                ApuDiagnosticsGlassChip("предупреждений", warnCount.toString())
+                ApuDiagnosticsGlassChip("ошибок", badCount.toString(), alarm = badCount > 0)
+            }
+        }
+    }
+}
+
+/** Эмблема: золотое кольцо с тёмным стеклом внутри — знак APU. */
+@Composable
+private fun ApuDiagnosticsEmblem() {
+    Box(
+        modifier = Modifier
+            .size(52.dp)
+            .diagnosticsLift(8.dp, CircleShape, DiagGold.copy(alpha = 0.45f))
+            .clip(CircleShape)
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(DiagGoldLight, DiagGold, DiagGoldDeep),
+                    start = Offset(0f, 0f),
+                    end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
+                ),
+            )
+            .diagnosticsGloss(CircleShape, intensity = 0.9f),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.verticalGradient(listOf(Color(0xFF22334C), Color(0xFF0B1220))),
+                )
+                .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Default.Terminal,
+                contentDescription = null,
+                tint = DiagGold,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+/** Статус-плашка: яркий градиент по уровню, тёмные чернила, глянец. */
+@Composable
+private fun ApuDiagnosticsVerdictPill(text: String, level: DiagnosticsLevel, checks: Int) {
+    val shape = RoundedCornerShape(14.dp)
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .diagnosticsLift(10.dp, shape, diagnosticsLevelColor(level).copy(alpha = 0.5f))
+                .clip(shape)
+                .background(
+                    Brush.linearGradient(
+                        diagnosticsLevelGradient(level),
+                        start = Offset(0f, 0f),
+                        end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
+                    ),
+                )
+                .diagnosticsGloss(shape, intensity = 1f)
+                .padding(horizontal = 14.dp, vertical = 9.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(9.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.92f)),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Black,
+                    color = DiagOnGold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(
+            if (checks > 0) "проверок $checks" else "собираю…",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = Color.White.copy(alpha = 0.85f),
+            maxLines = 1,
+        )
+    }
+}
+
+/** Стеклянный чип на тёмной шапке: подпись сверху, число крупно. */
+@Composable
+private fun ApuDiagnosticsGlassChip(label: String, value: String, alarm: Boolean = false) {
+    val shape = RoundedCornerShape(12.dp)
+    val accent = if (alarm) diagnosticsLevelColor(DiagnosticsLevel.BAD) else DiagGold
+    Column(
+        modifier = Modifier
+            .clip(shape)
+            .background(Color.White.copy(alpha = 0.10f))
+            .border(1.dp, Color.White.copy(alpha = 0.16f), shape)
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White.copy(alpha = 0.66f),
+            maxLines = 1,
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.Black,
+            color = accent,
+            maxLines = 1,
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Сводка: строки проверок и легенда
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Сводка «что происходит сейчас»: строки проверок с яркими метками и легенда. */
 @Composable
 fun ApuDiagnosticsStatusCard(
     lines: List<DiagnosticsLine>,
@@ -84,8 +421,8 @@ fun ApuDiagnosticsStatusCard(
     // теме) — та же карточка, что у остальных блоков настроек.
     ApuSettingsCard(modifier = modifier) {
         Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (lines.isEmpty()) {
                 Text(
@@ -94,12 +431,7 @@ fun ApuDiagnosticsStatusCard(
                     color = ApuBubbleMutedColor,
                 )
             } else {
-                ApuDiagnosticsVerdictRow(lines)
-                ApuDiagnosticsDivider()
-                lines.forEachIndexed { index, line ->
-                    if (index > 0) ApuDiagnosticsDivider()
-                    ApuDiagnosticsStatusRow(line)
-                }
+                lines.forEach { line -> ApuDiagnosticsStatusRow(line) }
                 ApuDiagnosticsDivider()
                 ApuDiagnosticsLegend()
             }
@@ -107,122 +439,33 @@ fun ApuDiagnosticsStatusCard(
     }
 }
 
-/** Общий итог одной строкой: сразу видно, есть ли ошибки, не читая все проверки. */
-@Composable
-private fun ApuDiagnosticsVerdictRow(lines: List<DiagnosticsLine>) {
-    val bads = lines.count { it.level == DiagnosticsLevel.BAD }
-    val warns = lines.count { it.level == DiagnosticsLevel.WARN }
-    val level = when {
-        bads > 0 -> DiagnosticsLevel.BAD
-        warns > 0 -> DiagnosticsLevel.WARN
-        else -> DiagnosticsLevel.OK
-    }
-    val color = diagnosticsLevelColor(level)
-    val label = when {
-        bads > 0 -> "есть ошибки: $bads"
-        warns > 0 -> "есть предупреждения: $warns"
-        else -> "всё в порядке"
-    }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Row(
-            modifier = Modifier
-                .weight(1f, fill = false)
-                .clip(RoundedCornerShape(9.dp))
-                .background(color.copy(alpha = 0.12f))
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Box(Modifier.size(7.dp).clip(CircleShape).background(color))
-            Text(
-                label,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = color,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Text(
-            "проверок ${lines.size}",
-            style = MaterialTheme.typography.bodySmall,
-            color = ApuBubbleMutedColor,
-            maxLines = 1,
-            modifier = Modifier.padding(start = 8.dp),
-        )
-    }
-}
-
-/** Легенда цветов: четыре точки теми же красками, что и метки в сводке. */
-@Composable
-private fun ApuDiagnosticsLegend() {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(modifier = Modifier.fillMaxWidth()) {
-            ApuDiagnosticsLegendItem(DiagnosticsLevel.OK, Modifier.weight(1f))
-            ApuDiagnosticsLegendItem(DiagnosticsLevel.INFO, Modifier.weight(1f))
-        }
-        Row(modifier = Modifier.fillMaxWidth()) {
-            ApuDiagnosticsLegendItem(DiagnosticsLevel.WARN, Modifier.weight(1f))
-            ApuDiagnosticsLegendItem(DiagnosticsLevel.BAD, Modifier.weight(1f))
-        }
-    }
-}
-
-@Composable
-private fun ApuDiagnosticsLegendItem(level: DiagnosticsLevel, modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Box(
-            modifier = Modifier
-                .size(7.dp)
-                .clip(CircleShape)
-                .background(diagnosticsLevelColor(level)),
-        )
-        Text(
-            diagnosticsLevelLabel(level),
-            style = MaterialTheme.typography.labelSmall,
-            color = ApuBubbleMutedColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-    }
-}
-
-@Composable
-private fun ApuDiagnosticsDivider() {
-    HorizontalDivider(
-        thickness = 0.5.dp,
-        color = ApuBubbleAccentColor.copy(alpha = 0.15f),
-    )
-}
-
-/** Одна строка сводки: метка уровня, название (Сеть/Брокер/…) и состояние словами. */
+/** Одна строка сводки: яркая пиктограмма-«well», название и состояние словами. */
 @Composable
 fun ApuDiagnosticsStatusRow(line: DiagnosticsLine, modifier: Modifier = Modifier) {
+    val bright = diagnosticsLevelColor(line.level)
+    val shape = RoundedCornerShape(14.dp)
     Row(
-        modifier = modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(bright.copy(alpha = 0.16f), bright.copy(alpha = 0.04f)),
+                    start = Offset(0f, 0f),
+                    end = Offset(Float.POSITIVE_INFINITY, 0f),
+                ),
+            )
+            .border(1.dp, bright.copy(alpha = 0.28f), shape)
+            .padding(horizontal = 10.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .padding(top = 5.dp)
-                .size(9.dp)
-                .clip(CircleShape)
-                .background(diagnosticsLevelColor(line.level)),
-        )
+        ApuDiagnosticsLevelWell(line.level)
+        Spacer(Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
                 line.title,
                 style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Bold,
                 color = ApuBubbleTextColor,
             )
             Text(
@@ -234,10 +477,112 @@ fun ApuDiagnosticsStatusRow(line: DiagnosticsLine, modifier: Modifier = Modifier
     }
 }
 
+/** Метка уровня: объёмный шар с бликом — читается и в 9dp, и в 40dp. */
+@Composable
+private fun ApuDiagnosticsLevelWell(level: DiagnosticsLevel) {
+    val shape = RoundedCornerShape(11.dp)
+    Box(
+        modifier = Modifier
+            .size(34.dp)
+            .clip(shape)
+            .background(
+                Brush.linearGradient(
+                    diagnosticsLevelGradient(level),
+                    start = Offset(0f, 0f),
+                    end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
+                ),
+            )
+            .diagnosticsGloss(shape, intensity = 0.75f),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(11.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.94f)),
+        )
+    }
+}
+
+/** Легенда: четыре яркие пилюли теми же красками, что и метки в сводке. */
+@Composable
+private fun ApuDiagnosticsLegend() {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            ApuDiagnosticsLegendItem(DiagnosticsLevel.OK, Modifier.weight(1f))
+            ApuDiagnosticsLegendItem(DiagnosticsLevel.INFO, Modifier.weight(1f))
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            ApuDiagnosticsLegendItem(DiagnosticsLevel.WARN, Modifier.weight(1f))
+            ApuDiagnosticsLegendItem(DiagnosticsLevel.BAD, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun ApuDiagnosticsLegendItem(level: DiagnosticsLevel, modifier: Modifier = Modifier) {
+    val bright = diagnosticsLevelColor(level)
+    val shape = RoundedCornerShape(10.dp)
+    Row(
+        modifier = modifier
+            .clip(shape)
+            .background(bright.copy(alpha = 0.14f))
+            .border(1.dp, bright.copy(alpha = 0.30f), shape)
+            .padding(horizontal = 8.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(9.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.linearGradient(
+                        diagnosticsLevelGradient(level),
+                        start = Offset(0f, 0f),
+                        end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
+                    ),
+                ),
+        )
+        Text(
+            diagnosticsLevelLabel(level),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = diagnosticsLevelInkColor(level),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** Разделитель: золотая нить, растворяющаяся к краю. */
+@Composable
+private fun ApuDiagnosticsDivider() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(1.dp)
+            .background(
+                Brush.horizontalGradient(
+                    listOf(
+                        Color.Transparent,
+                        DiagGold.copy(alpha = 0.55f),
+                        Color.Transparent,
+                    ),
+                ),
+            ),
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Отчёт: тёмная консоль с подсветкой
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
- * Отчёт: шапка «Полный отчёт», необязательная подпись (когда и что собрано),
- * число строк и моноширинный текст в своей рамке — с выделением и прокруткой,
- * чтобы его копировали целиком или выделяли нужный кусок руками.
+ * Отчёт: шапка-консоль («светофор», название, число строк), необязательная
+ * подпись (когда и что собрано) и сам текст — моноширинный, с выделением и
+ * своей прокруткой. Светлые чернила на тёмном фоне дают «яркие и чёткие»
+ * цвета, а текст при копировании уходит разработчику символ в символ.
  */
 @Composable
 fun ApuDiagnosticsReportCard(
@@ -247,45 +592,45 @@ fun ApuDiagnosticsReportCard(
     caption: String? = null,
 ) {
     val scroll = rememberScrollState()
-    ApuSettingsCard(modifier = modifier) {
-        Column(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+    val shape = RoundedCornerShape(18.dp)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .diagnosticsLift(12.dp, shape, Color(0xFF0A1018).copy(alpha = 0.45f))
+            .clip(shape)
+            .background(DiagConsoleSurface)
+            .border(1.dp, Brush.linearGradient(listOf(DiagGold.copy(alpha = 0.55f), DiagGoldDeep.copy(alpha = 0.25f))), shape),
+    ) {
+        Column {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Brush.verticalGradient(listOf(DiagConsoleBar, DiagConsoleSurface)))
+                    .padding(horizontal = 12.dp, vertical = 9.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Description,
-                        contentDescription = null,
-                        tint = ApuBubbleAccentColor,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Text(
-                        "Полный отчёт",
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = ApuBubbleTextColor,
-                    )
-                }
+                ApuDiagnosticsTrafficLights()
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    "Полный отчёт",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    modifier = Modifier.weight(1f),
+                )
                 Text(
                     "строк ${text.count { it == '\n' } + 1}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ApuBubbleMutedColor,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = DiagConsoleMuted,
                     maxLines = 1,
                 )
             }
             caption?.takeIf { it.isNotBlank() }?.let { line ->
                 Text(
                     line,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ApuBubbleMutedColor,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = DiagConsoleMuted,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                 )
             }
             SelectionContainer {
@@ -293,20 +638,14 @@ fun ApuDiagnosticsReportCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = maxHeight)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFFF0EFEA))
-                        .border(
-                            1.dp,
-                            ApuBubbleAccentColor.copy(alpha = 0.22f),
-                            RoundedCornerShape(14.dp),
-                        )
+                        .background(DiagConsoleSurface)
                         .verticalScroll(scroll)
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
                 ) {
                     Text(
                         diagnosticsReportAnnotated(text),
                         style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                        color = ApuBubbleTextColor,
+                        color = DiagConsoleText,
                     )
                 }
             }
@@ -314,23 +653,183 @@ fun ApuDiagnosticsReportCard(
     }
 }
 
+/** «Светофор» консоли: три цвета уровней — узнаваемый премиальный штрих. */
+@Composable
+private fun ApuDiagnosticsTrafficLights() {
+    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        listOf(DiagnosticsLevel.OK, DiagnosticsLevel.WARN, DiagnosticsLevel.BAD).forEach { level ->
+            Box(
+                modifier = Modifier
+                    .size(9.dp)
+                    .clip(CircleShape)
+                    .background(diagnosticsLevelGradient(level)[0]),
+            )
+        }
+    }
+}
+
 /**
- * Раскрашивает отчёт, не меняя ни одного символа: разделы — бронзовым,
+ * Раскрашивает отчёт, не меняя ни одного символа: разделы — золотом консоли,
  * ошибки — красным, предупреждения — оранжевым. Решение о тоне строки
- * принимает чистая [diagnosticsLineTone] (её проверяют JVM-тесты), здесь
- * только краски house style. Текст остаётся тем же, поэтому копируется
- * и уезжает разработчику ровно так, как выглядит.
+ * принимает чистая [diagnosticsLineTone] (её проверяют JVM-тесты), здесь только
+ * краски. Текст остаётся тем же, поэтому копируется и уезжает разработчику
+ * ровно так, как выглядит.
  */
 fun diagnosticsReportAnnotated(text: String): AnnotatedString = buildAnnotatedString {
     text.split('\n').forEachIndexed { index, line ->
         if (index > 0) append('\n')
         val style = when (diagnosticsLineTone(line)) {
             DiagnosticsLineTone.SECTION ->
-                SpanStyle(color = ApuBubbleAccentColor, fontWeight = FontWeight.Bold)
-            DiagnosticsLineTone.BAD -> SpanStyle(color = ApuSettingsDangerColor)
-            DiagnosticsLineTone.WARN -> SpanStyle(color = DiagnosticsWarnColor)
+                SpanStyle(color = DiagConsoleTitle, fontWeight = FontWeight.Bold)
+            DiagnosticsLineTone.BAD -> SpanStyle(color = DiagConsoleBad)
+            DiagnosticsLineTone.WARN -> SpanStyle(color = DiagConsoleWarn)
             null -> null
         }
         if (style == null) append(line) else withStyle(style) { append(line) }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Кнопки: объёмные, с блеском и откликом
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Назначение кнопки: золотая основная, стеклянная вторичная, тихая третья. */
+enum class DiagnosticsActionStyle { PRIMARY, GLASS, QUIET }
+
+/**
+ * Кнопка окна «Логи»: золотая глянцевая (PRIMARY), стеклянная (GLASS) или
+ * тихая (QUIET). Объём даёт мягкая тень, блеск — верхний блик, живость —
+ * лёгкое сжатие при нажатии. Никакого stock Material: фон, рамка и блик наши.
+ */
+@Composable
+fun ApuDiagnosticsActionButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    style: DiagnosticsActionStyle = DiagnosticsActionStyle.GLASS,
+    enabled: Boolean = true,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && enabled) 0.965f else 1f,
+        animationSpec = tween(durationMillis = 110),
+        label = "diag-button-press",
+    )
+    val shape = RoundedCornerShape(if (style == DiagnosticsActionStyle.PRIMARY) 16.dp else 14.dp)
+    val fill = when (style) {
+        DiagnosticsActionStyle.PRIMARY -> Brush.linearGradient(
+            colors = listOf(DiagGoldLight, DiagGold, DiagGoldDeep),
+            start = Offset(0f, 0f),
+            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
+        )
+        DiagnosticsActionStyle.GLASS -> Brush.linearGradient(
+            colors = listOf(Color.White, Color(0xFFF1F3F7)),
+            start = Offset(0f, 0f),
+            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
+        )
+        DiagnosticsActionStyle.QUIET -> Brush.linearGradient(
+            colors = listOf(Color(0xFFF7F8FA), Color(0xFFECEEF2)),
+            start = Offset(0f, 0f),
+            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
+        )
+    }
+    val ink = when (style) {
+        DiagnosticsActionStyle.PRIMARY -> DiagOnGold
+        DiagnosticsActionStyle.GLASS -> ApuBubbleAccentColor
+        DiagnosticsActionStyle.QUIET -> ApuBubbleMutedColor
+    }
+    val glow = when (style) {
+        DiagnosticsActionStyle.PRIMARY -> DiagGold.copy(alpha = 0.55f)
+        else -> Color(0xFF0A1018).copy(alpha = 0.28f)
+    }
+    Row(
+        modifier = modifier
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .diagnosticsLift(if (style == DiagnosticsActionStyle.PRIMARY) 12.dp else 5.dp, shape, glow)
+            .clip(shape)
+            .background(fill)
+            .border(
+                width = 1.dp,
+                brush = Brush.linearGradient(
+                    listOf(
+                        if (style == DiagnosticsActionStyle.PRIMARY) Color.White.copy(alpha = 0.85f) else DiagGold.copy(alpha = 0.55f),
+                        DiagGoldDeep.copy(alpha = 0.35f),
+                    ),
+                ),
+                shape = shape,
+            )
+            .diagnosticsGloss(shape, intensity = if (style == DiagnosticsActionStyle.PRIMARY) 1f else 0.7f)
+            .clickableDiag(interaction, enabled, onClick)
+            .padding(horizontal = 16.dp, vertical = if (style == DiagnosticsActionStyle.PRIMARY) 12.dp else 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        icon?.let {
+            Icon(it, contentDescription = null, tint = ink, modifier = Modifier.size(18.dp))
+        }
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = ink.copy(alpha = if (enabled) 1f else 0.45f),
+            maxLines = 1,
+        )
+    }
+}
+
+/** Нажатие без «ряби» Material: кнопка отвечает сжатием и тенью. */
+private fun Modifier.clickableDiag(
+    interaction: MutableInteractionSource,
+    enabled: Boolean,
+    onClick: () -> Unit,
+): Modifier = clickable(
+    interactionSource = interaction,
+    indication = null,
+    enabled = enabled,
+    onClick = onClick,
+)
+
+/** Иконки для кнопок окна: одни на все места, чтобы стиль не разъезжался. */
+object DiagnosticsActionIcons {
+    val Send: ImageVector get() = Icons.Default.Send
+    val Copy: ImageVector get() = Icons.Default.ContentCopy
+    val Refresh: ImageVector get() = Icons.Default.Refresh
+    val Shield: ImageVector get() = Icons.Default.Shield
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Мелкие общие детали
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Полоса приватности: тёмное стекло с золотой кромкой и щитом. Тем же
+ * обещанием, что и раньше, но так, чтобы его читали, а не пролистывали.
+ */
+@Composable
+fun ApuDiagnosticsPrivacyStrip(text: String, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape(14.dp)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Brush.horizontalGradient(listOf(Color(0xFF17253A), Color(0xFF0E1725))))
+            .border(1.dp, DiagGold.copy(alpha = 0.35f), shape)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Icon(
+            Icons.Default.Shield,
+            contentDescription = null,
+            tint = DiagGold,
+            modifier = Modifier.size(18.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White.copy(alpha = 0.82f),
+        )
     }
 }

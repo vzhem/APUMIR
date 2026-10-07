@@ -250,6 +250,8 @@ object TransferDiagnostics {
         val warnCount: Int,
         val badCount: Int,
         val uptimeMs: Long,
+        /** Версия приложения для шапки окна «Логи» («v11.74.194 (11074194)»). */
+        val appVersion: String = "",
     )
 
     /**
@@ -278,6 +280,7 @@ object TransferDiagnostics {
             warnCount = journalSnapshot.first.count { it.level == DiagnosticsLevel.WARN },
             badCount = journalSnapshot.first.count { it.level == DiagnosticsLevel.BAD },
             uptimeMs = (createdAtMs - sessionStartedAtMs).coerceAtLeast(0L),
+            appVersion = facts.appVersion,
         )
     }
 
