@@ -579,7 +579,7 @@ object DiagnosticsReport {
             // Служебное (сигналы и пакеты передачи) — не переписка: без этой
             // оговорки «своё ждёт получателя 1000» пугает зря.
             val waitingSignals = facts.relayQueueOwnSignals ?: 0L
-            if (waitingSignals > 0L) append(" (из них сигналов и пакетов $waitingSignals)"
+            if (waitingSignals > 0L) append(" (из них сигналов и пакетов $waitingSignals)")
         }
         return when {
             // Смена ключа перевешивает остальные исходы: пока не отсканируют
