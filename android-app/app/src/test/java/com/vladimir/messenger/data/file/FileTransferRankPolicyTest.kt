@@ -177,18 +177,18 @@ class FileTransferRankPolicyTest {
         )
         assertTrue(regular.none { it.isVip })
         assertTrue(vip.all { it.isVip })
-        assertEquals("Проводник", regular.last().rankName)
-        assertEquals("Организатор", vip.first().rankName)
+        assertEquals("Круг друзей", regular.last().rankName)
+        assertEquals("Проводник", vip.first().rankName)
         assertEquals("Создатель сети", vip.last().rankName)
     }
 
     @Test
     fun referralsToVipCountsDownAndStopsAtZero() {
         // Подсказка «осталось N до VIP» не должна показывать отрицательное число.
-        assertEquals(20, FileTransferRankPolicy.referralsToVip(0))
-        assertEquals(10, FileTransferRankPolicy.referralsToVip(10))
-        assertEquals(1, FileTransferRankPolicy.referralsToVip(19))
-        assertEquals(0, FileTransferRankPolicy.referralsToVip(20))
+        assertEquals(10, FileTransferRankPolicy.referralsToVip(0))
+        assertEquals(9, FileTransferRankPolicy.referralsToVip(1))
+        assertEquals(1, FileTransferRankPolicy.referralsToVip(9))
+        assertEquals(0, FileTransferRankPolicy.referralsToVip(10))
         assertEquals(0, FileTransferRankPolicy.referralsToVip(500))
     }
 
