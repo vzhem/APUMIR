@@ -44,4 +44,34 @@
     <string name="language_section">Язык</string>
     <string name="language_app">Язык приложения</string>
     <string name="action_cancel">Отмена</string>
+    <!-- Список чатов -->
+    <string name="chat_scan_qr">Сканировать QR</string>
+    <string name="chat_more">Ещё</string>
+    <string name="chat_connect_by_link">Подключиться по ссылке</string>
+    <string name="chat_invite_apu">Пригласить в APU</string>
+    <string name="chat_create">Создать</string>
+    <string name="chat_new_chat">Новый чат</string>
+    <string name="chat_new_group">Новая группа</string>
+    <string name="chat_new_channel">Новый канал</string>
+    <string name="chat_connect_hint">Добавьте приглашение от собеседника</string>
+    <string name="chat_invite_link_label">Ссылка-приглашение</string>
+    <string name="chat_invite_link_placeholder">Вставьте ссылку p2pm://…</string>
+    <string name="chat_connect_trust_hint">Проверьте, что ссылка получена от человека, которому вы доверяете.</string>
+    <string name="chat_connect">Подключиться</string>
+    <string name="chat_no_unread">Нет непрочитанных</string>
+    <string name="chat_unread_empty_hint">Здесь появятся чаты, группы и каналы с новыми сообщениями. Когда всё прочитаете — они исчезнут отсюда.</string>
+    <string name="chat_no_groups_created">Вы пока не создали ни одной группы</string>
+    <string name="chat_no_groups">Групп пока нет</string>
+    <string name="chat_search_placeholder">Поиск: чаты, группы, каналы</string>
+    <string name="chat_close_search">Закрыть поиск</string>
+    <string name="chat_nothing_found">Ничего не найдено</string>
+    <string name="chat_no_chats">Нет чатов</string>
+    <string name="chat_add_contact_hint">Добавьте контакт через QR-код или пригласительную ссылку</string>
+    <string name="chat_add_contact">Добавить контакт</string>
+    <string name="chat_saved">Избранное</string>
+    <string name="chat_saved_subtitle">Личное хранилище</string>
+    <string name="chat_saved_hint">Заметки, файлы и пересланное</string>
+    <string name="chat_role_owner">владелец</string>
+    <string name="chat_role_admin">админ</string>
+    <string name="chat_pinned_desc">Закреплено в главном списке</string>
 </resources>

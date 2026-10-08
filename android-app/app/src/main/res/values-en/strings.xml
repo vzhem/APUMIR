@@ -35,4 +35,34 @@
     <string name="language_section">Language</string>
     <string name="language_app">App language</string>
     <string name="action_cancel">Cancel</string>
+    <!-- Список чатов -->
+    <string name="chat_scan_qr">Scan QR</string>
+    <string name="chat_more">More</string>
+    <string name="chat_connect_by_link">Connect by link</string>
+    <string name="chat_invite_apu">Invite to APU</string>
+    <string name="chat_create">Create</string>
+    <string name="chat_new_chat">New chat</string>
+    <string name="chat_new_group">New group</string>
+    <string name="chat_new_channel">New channel</string>
+    <string name="chat_connect_hint">Add an invitation from your contact</string>
+    <string name="chat_invite_link_label">Invitation link</string>
+    <string name="chat_invite_link_placeholder">Paste the p2pm://… link</string>
+    <string name="chat_connect_trust_hint">Make sure the link came from someone you trust.</string>
+    <string name="chat_connect">Connect</string>
+    <string name="chat_no_unread">No unread items</string>
+    <string name="chat_unread_empty_hint">Chats, groups and channels with new messages will appear here. Once you have read everything, they disappear from this list.</string>
+    <string name="chat_no_groups_created">You haven\'t created any groups yet</string>
+    <string name="chat_no_groups">No groups yet</string>
+    <string name="chat_search_placeholder">Search: chats, groups, channels</string>
+    <string name="chat_close_search">Close search</string>
+    <string name="chat_nothing_found">Nothing found</string>
+    <string name="chat_no_chats">No chats</string>
+    <string name="chat_add_contact_hint">Add a contact with a QR code or an invitation link</string>
+    <string name="chat_add_contact">Add contact</string>
+    <string name="chat_saved">Favorites</string>
+    <string name="chat_saved_subtitle">Personal storage</string>
+    <string name="chat_saved_hint">Notes, files and forwarded messages</string>
+    <string name="chat_role_owner">owner</string>
+    <string name="chat_role_admin">admin</string>
+    <string name="chat_pinned_desc">Pinned to the main list</string>
 </resources>
