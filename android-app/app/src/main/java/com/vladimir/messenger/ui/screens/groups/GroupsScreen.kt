@@ -4,6 +4,7 @@ package com.vladimir.messenger.ui.screens.groups
 // GROUPSSCREEN.KT — раздел «Сообщества»: группы и каналы, создание новых
 // =============================================================================
 
+import android.content.Context
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuAction
@@ -340,6 +341,7 @@ fun GroupsScreen(
                                     group = group,
                                     onClick = { onGroupClick(group.id) },
                                     menuActions = groupMenuActions(
+                                        context = context,
                                         group = group,
                                         onOpen = { onGroupClick(group.id) },
                                         onAdmin = { onGroupAdminClick(group.id) },
@@ -359,6 +361,7 @@ fun GroupsScreen(
                                     group = group,
                                     onClick = { onChannelClick(group.id) },
                                     menuActions = groupMenuActions(
+                                        context = context,
                                         group = group,
                                         onOpen = { onChannelClick(group.id) },
                                         onAdmin = { onGroupAdminClick(group.id) },
@@ -1192,6 +1195,7 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
  * иначе владелец ищет привычное действие и не находит.
  */
 private fun groupMenuActions(
+    context: Context,
     group: GroupSummary,
     onOpen: () -> Unit,
     onAdmin: () -> Unit,
@@ -1202,14 +1206,14 @@ private fun groupMenuActions(
 ): List<BubbleMenuAction> = buildList {
     add(
         BubbleMenuAction(
-            title = if (group.isChannel) stringResource(R.string.menu_open_channel) else stringResource(R.string.menu_open_group),
+            title = if (group.isChannel) context.getString(R.string.menu_open_channel) else context.getString(R.string.menu_open_group),
             icon = Icons.Filled.Forum,
             onClick = onOpen,
         )
     )
     add(
         BubbleMenuAction(
-            title = if (group.isChannel) stringResource(R.string.menu_invite_channel) else stringResource(R.string.menu_invite_community),
+            title = if (group.isChannel) context.getString(R.string.menu_invite_channel) else context.getString(R.string.menu_invite_community),
             icon = Icons.Filled.PersonAdd,
             onClick = onInvite,
         )
@@ -1217,7 +1221,7 @@ private fun groupMenuActions(
     val muted = group.mutedUntilMs > System.currentTimeMillis()
     add(
         BubbleMenuAction(
-            title = if (muted) stringResource(R.string.menu_unmute) else stringResource(R.string.menu_mute),
+            title = if (muted) context.getString(R.string.menu_unmute) else context.getString(R.string.menu_mute),
             icon = if (muted) Icons.Filled.NotificationsActive else Icons.Filled.NotificationsOff,
             onClick = onMute,
         )
@@ -1225,7 +1229,7 @@ private fun groupMenuActions(
     if (GroupRole.isAdminOrOwner(group.myRole)) {
         add(
             BubbleMenuAction(
-                title = stringResource(R.string.menu_manage),
+                title = context.getString(R.string.menu_manage),
                 icon = Icons.Filled.Settings,
                 onClick = onAdmin,
             )
@@ -1233,7 +1237,7 @@ private fun groupMenuActions(
     }
     add(
         BubbleMenuAction(
-            title = stringResource(R.string.menu_mark_read),
+            title = context.getString(R.string.menu_mark_read),
             icon = Icons.Filled.DoneAll,
             onClick = onMarkRead,
         )
@@ -1242,9 +1246,9 @@ private fun groupMenuActions(
         BubbleMenuAction(
             title = when {
                 group.myRole == GroupRole.OWNER ->
-                    if (group.isChannel) stringResource(R.string.menu_delete_channel) else stringResource(R.string.menu_delete_group)
-                group.isChannel -> stringResource(R.string.menu_unsubscribe)
-                else -> stringResource(R.string.action_logout)
+                    if (group.isChannel) context.getString(R.string.menu_delete_channel) else context.getString(R.string.menu_delete_group)
+                group.isChannel -> context.getString(R.string.menu_unsubscribe)
+                else -> context.getString(R.string.action_logout)
             },
             icon = Icons.Filled.Delete,
             destructive = true,
