@@ -1,3 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Основные строки интерфейса (русский — язык по умолчанию).
+  Чтобы добавить язык: создать values-<код>/strings.xml с теми же именами строк
+  и добавить язык в enum AppLanguage (ui/i18n/AppLanguage.kt).
+-->
 <resources>
     <string name="app_name">APU</string>
+
+    <!-- Нижнее меню -->
+    <string name="nav_chats">Чаты</string>
+    <string name="nav_contacts">Контакты</string>
+    <string name="nav_communities">Сообщества</string>
+    <string name="nav_profile">Профиль</string>
+    <string name="nav_settings">Настройки</string>
+
+    <!-- Вкладки списка чатов -->
+    <string name="inbox_all">Все</string>
+    <string name="inbox_unread">Не прочитано</string>
+    <string name="inbox_chats">Чаты</string>
+    <string name="inbox_groups">Группы</string>
+    <string name="inbox_channels">Каналы</string>
+    <string name="inbox_admin_groups">Админ группы</string>
+    <string name="inbox_admin_channels">Админ каналы</string>
+    <string name="inbox_archive">Архив</string>
+
+    <!-- Заголовки экрана настроек -->
+    <string name="settings_header_profile">Профиль</string>
+    <string name="settings_header_settings">Настройки</string>
+    <string name="section_my_profile">Мой профиль</string>
+    <string name="section_appearance">Оформление</string>
+    <string name="section_notifications">Уведомления</string>
+    <string name="section_security">Безопасность</string>
+    <string name="section_network">Сеть</string>
+    <string name="section_file_transfer">Передача файлов</string>
+    <string name="section_seeding">Раздача</string>
+    <string name="section_updates">Обновления</string>
+    <string name="section_server">Сервер</string>
+    <string name="section_devices">Устройства</string>
+    <string name="section_support">Поддержка</string>
+    <string name="section_about">О приложении</string>
+
+    <!-- Язык интерфейса -->
+    <string name="language_section">Язык</string>
+    <string name="language_app">Язык приложения</string>
+    <string name="action_cancel">Отмена</string>
 </resources>

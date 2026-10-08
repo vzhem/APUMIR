@@ -1,6 +1,7 @@
 package com.vladimir.messenger.ui.components
 
-import com.vladimir.messenger.ui.i18n.tr
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Groups
@@ -48,14 +49,14 @@ fun ApuMainTabBar(
         modifier = modifier,
         items = listOf(
             ApuBottomItem(
-                title = tr("Чаты", "Chats"),
+                title = stringResource(R.string.nav_chats),
                 icon = Icons.Filled.Forum,
                 badge = chatsBadge,
                 selected = current == ApuTab.Chats,
                 onClick = { if (current != ApuTab.Chats) actions.onChats() },
             ),
             ApuBottomItem(
-                title = tr("Контакты", "Contacts"),
+                title = stringResource(R.string.nav_contacts),
                 icon = Icons.Filled.People,
                 selected = current == ApuTab.Contacts,
                 onClick = { if (current != ApuTab.Contacts) actions.onContacts() },
@@ -64,19 +65,19 @@ fun ApuMainTabBar(
             // «Группы» заставляла искать каналы где-то ещё (владелец,
             // 2026-09-08). Внутри их различают шапки «Мои группы» / «Мои каналы».
             ApuBottomItem(
-                title = tr("Сообщества", "Communities"),
+                title = stringResource(R.string.nav_communities),
                 icon = Icons.Filled.Groups,
                 selected = current == ApuTab.Groups,
                 onClick = { if (current != ApuTab.Groups) actions.onGroups() },
             ),
             ApuBottomItem(
-                title = tr("Профиль", "Profile"),
+                title = stringResource(R.string.nav_profile),
                 icon = Icons.Filled.Person,
                 selected = current == ApuTab.Profile,
                 onClick = { if (current != ApuTab.Profile) actions.onProfile() },
             ),
             ApuBottomItem(
-                title = tr("Настройки", "Settings"),
+                title = stringResource(R.string.nav_settings),
                 icon = Icons.Filled.Settings,
                 selected = current == ApuTab.Settings,
                 onClick = { if (current != ApuTab.Settings) actions.onSettings() },

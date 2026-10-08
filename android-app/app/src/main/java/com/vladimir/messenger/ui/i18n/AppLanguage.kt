@@ -1,15 +1,20 @@
 package com.vladimir.messenger.ui.i18n
 
 // =============================================================================
-// APPLANGUAGE.KT — выбор языка интерфейса (русский / English)
+// APPLANGUAGE.KT — выбор языка интерфейса
 // =============================================================================
-// Язык хранится в тех же p2p_prefs, что и тема. Локаль применяется в
-// MainActivity.attachBaseContext, поэтому действует с первого кадра и не
-// зависит от AppCompat (minSdk 26, лишних зависимостей не добавляем).
+// Тексты живут в ресурсах Android: res/values (русский, по умолчанию) и
+// res/values-<код>/strings.xml для остальных языков. Здесь только выбор языка.
 //
-// Строки: большая часть интерфейса по-прежнему написана по-русски прямо в
-// коде. Переведённые места оборачиваются в `tr(ru, en)`; остальное пока
-// остаётся на русском.
+// Чтобы добавить язык:
+//   1. создать res/values-<код>/strings.xml с теми же именами строк, что в
+//      res/values/strings.xml (недостающие строки откатываются на русский);
+//   2. добавить запись в enum [AppLanguage] ниже.
+// Больше ничего менять не нужно: список в настройках строится из enum.
+//
+// Язык хранится в p2p_prefs. Локаль применяется в MainActivity.attachBaseContext
+// до создания интерфейса, поэтому stringResource сразу отдаёт нужный язык.
+// Не используем AppCompat: minSdk 26, лишних зависимостей не добавляем.
 // =============================================================================
 
 import android.content.Context
@@ -19,13 +24,19 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Locale
 
+/**
+ * Поддерживаемые языки. [code] — BCP-47 код, по нему выбирается папка
+ * values-<code>; [nativeName] — название на самом языке для списка в настройках.
+ */
 enum class AppLanguage(val code: String, val nativeName: String) {
     RU("ru", "Русский"),
     EN("en", "English");
 
     companion object {
+        val DEFAULT: AppLanguage = RU
+
         fun fromStored(value: String?): AppLanguage =
-            entries.firstOrNull { it.code == value } ?: RU
+            entries.firstOrNull { it.code == value } ?: DEFAULT
     }
 }
 
@@ -33,20 +44,14 @@ object AppLanguageHolder {
     private const val PREFS = "p2p_prefs"
     private const val KEY = "app_language"
 
-    private val _language = MutableStateFlow(AppLanguage.RU)
+    private val _language = MutableStateFlow(AppLanguage.DEFAULT)
     val language: StateFlow<AppLanguage> = _language.asStateFlow()
 
-    /** Текущий язык для [tr]; обновляется при [wrap] и [set]. */
-    @Volatile
-    var current: AppLanguage = AppLanguage.RU
-        private set
-
-    /** Вызывается из MainActivity.attachBaseContext: читает язык и возвращает контекст с ним. */
+    /** Вызывается из MainActivity.attachBaseContext: возвращает контекст с выбранной локалью. */
     fun wrap(base: Context): Context {
         val stored = base.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY, null)
         val lang = AppLanguage.fromStored(stored)
-        current = lang
         _language.value = lang
         val locale = Locale.forLanguageTag(lang.code)
         Locale.setDefault(locale)
@@ -59,11 +64,6 @@ object AppLanguageHolder {
     fun set(context: Context, value: AppLanguage) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY, value.code).apply()
-        current = value
         _language.value = value
     }
 }
-
-/** Строка на текущем языке интерфейса. */
-fun tr(ru: String, en: String): String =
-    if (AppLanguageHolder.current == AppLanguage.EN) en else ru

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">APU</string>
+
+    <string name="nav_chats">Chats</string>
+    <string name="nav_contacts">Contacts</string>
+    <string name="nav_communities">Communities</string>
+    <string name="nav_profile">Profile</string>
+    <string name="nav_settings">Settings</string>
+
+    <string name="inbox_all">All</string>
+    <string name="inbox_unread">Unread</string>
+    <string name="inbox_chats">Chats</string>
+    <string name="inbox_groups">Groups</string>
+    <string name="inbox_channels">Channels</string>
+    <string name="inbox_admin_groups">Admin groups</string>
+    <string name="inbox_admin_channels">Admin channels</string>
+    <string name="inbox_archive">Archive</string>
+
+    <string name="settings_header_profile">Profile</string>
+    <string name="settings_header_settings">Settings</string>
+    <string name="section_my_profile">My profile</string>
+    <string name="section_appearance">Appearance</string>
+    <string name="section_notifications">Notifications</string>
+    <string name="section_security">Security</string>
+    <string name="section_network">Network</string>
+    <string name="section_file_transfer">File transfer</string>
+    <string name="section_seeding">Seeding</string>
+    <string name="section_updates">Updates</string>
+    <string name="section_server">Server</string>
+    <string name="section_devices">Devices</string>
+    <string name="section_support">Support</string>
+    <string name="section_about">About</string>
+
+    <string name="language_section">Language</string>
+    <string name="language_app">App language</string>
+    <string name="action_cancel">Cancel</string>
+</resources>

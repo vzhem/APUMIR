@@ -86,7 +86,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
-import com.vladimir.messenger.ui.i18n.tr
+import com.vladimir.messenger.R
+import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.ChatWallpaper
@@ -179,7 +180,7 @@ fun SettingsScreen(
                     scrolledContainerColor = Color.Transparent,
                         ),
                         title = {
-                            ApuSettingsHeader(if (showProfile) tr("Профиль", "Profile") else tr("Настройки", "Settings"))
+                            ApuSettingsHeader(if (showProfile) stringResource(R.string.settings_header_profile) else stringResource(R.string.settings_header_settings))
                         },
                         navigationIcon = {
                             IconButton(onClick = onBackClick) {
@@ -742,7 +743,7 @@ private fun SettingsTabContent(
         ) {
             // Профиль первым пунктом: имя, @никнейм и свой QR нужны чаще
             // остального, а раньше они прятались за вкладкой сверху.
-            item { SettingsSectionTitle(tr("Мой профиль", "My profile")) }
+            item { SettingsSectionTitle(stringResource(R.string.section_my_profile)) }
             item {
                 SettingsCard {
                     SettingsItem(
@@ -757,7 +758,7 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // ОФОРМЛЕНИЕ: день / ночь / авто + обои
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle(tr("Оформление", "Appearance")) }
+            item { SettingsSectionTitle(stringResource(R.string.section_appearance)) }
             item {
                 SettingsCard {
                     val context = LocalContext.current
@@ -876,7 +877,7 @@ private fun SettingsTabContent(
             // ЯЗЫК интерфейса: русский / English. Применяется после перезапуска
             // экрана; выбор хранится в p2p_prefs (см. AppLanguageHolder).
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle(tr("Язык", "Language")) }
+            item { SettingsSectionTitle(stringResource(R.string.language_section)) }
             item {
                 SettingsCard {
                     val context = LocalContext.current
@@ -885,14 +886,14 @@ private fun SettingsTabContent(
                     var showLanguageDialog by remember { mutableStateOf(false) }
                     SettingsItem(
                         icon = Icons.Default.Language,
-                        title = tr("Язык приложения", "App language"),
+                        title = stringResource(R.string.language_app),
                         subtitle = appLanguage.nativeName,
                         onClick = { showLanguageDialog = true },
                     )
                     if (showLanguageDialog) {
                         AlertDialog(
                             onDismissRequest = { showLanguageDialog = false },
-                            title = { Text(tr("Язык приложения", "App language")) },
+                            title = { Text(stringResource(R.string.language_app)) },
                             text = {
                                 Column {
                                     com.vladimir.messenger.ui.i18n.AppLanguage.entries.forEach { lang ->
@@ -921,7 +922,7 @@ private fun SettingsTabContent(
                             },
                             confirmButton = {
                                 TextButton(onClick = { showLanguageDialog = false }) {
-                                    Text(tr("Отмена", "Cancel"))
+                                    Text(stringResource(R.string.action_cancel))
                                 }
                             },
                         )
@@ -932,7 +933,7 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // Пауза новых сообщений: приложение целиком или нужный раздел.
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle(tr("Уведомления", "Notifications")) }
+            item { SettingsSectionTitle(stringResource(R.string.section_notifications)) }
             item {
                 SettingsCard {
                     val muteScopes = listOf(
@@ -959,7 +960,7 @@ private fun SettingsTabContent(
                 }
             }
 
-            item { SettingsSectionTitle(tr("Безопасность", "Security")) }
+            item { SettingsSectionTitle(stringResource(R.string.section_security)) }
             item {
                 SettingsCard {
                     SettingsItem(
@@ -992,7 +993,7 @@ private fun SettingsTabContent(
                 }
             }
 
-            item { SettingsSectionTitle(tr("Сеть", "Network")) }
+            item { SettingsSectionTitle(stringResource(R.string.section_network)) }
             item {
                 SettingsCard {
                     SettingsItem(
@@ -1070,7 +1071,7 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // ПЕРЕДАЧА ФАЙЛОВ
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle(tr("Передача файлов", "File transfer")) }
+            item { SettingsSectionTitle(stringResource(R.string.section_file_transfer)) }
             item {
                 SettingsCard {
                     SettingsItem(
@@ -1092,7 +1093,7 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // РАЗДАЧА: темп, в котором телефон рассылает и раздаёт дальше
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle(tr("Раздача", "Seeding")) }
+            item { SettingsSectionTitle(stringResource(R.string.section_seeding)) }
             item {
                 SettingsCard {
                     val context = LocalContext.current
@@ -1265,13 +1266,13 @@ private fun SettingsTabContent(
             // (docs/UPDATE_SEEDING.md) — без сервера, по кусочкам, как файлы
             // групп. Новая версия видна тем, у кого версия ниже.
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle(tr("Обновления", "Updates")) }
+            item { SettingsSectionTitle(stringResource(R.string.section_updates)) }
             item { ApkUpdatesCard(viewModel) }
 
             // ----------------------------------------------------------------
             // О ПРИЛОЖЕНИИ
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle(tr("Сервер", "Server")) }
+            item { SettingsSectionTitle(stringResource(R.string.section_server)) }
             item {
                 SettingsCard {
                     // Наш relay-сервер: реестр, приглашения, обновления и
@@ -1309,7 +1310,7 @@ private fun SettingsTabContent(
 
             // Обычная синхронизация уже настроенных телефонов идёт в фоне
             // через живое зеркало. Это окно - только разовый перенос профиля.
-            item { SettingsSectionTitle(tr("Устройства", "Devices")) }
+            item { SettingsSectionTitle(stringResource(R.string.section_devices)) }
             item {
                 SettingsCard {
                     SettingsItem(
@@ -1324,7 +1325,7 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // ЛОГИ: отчёт для проверки прямой F4-передачи на двух телефонах.
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle(tr("Поддержка", "Support")) }
+            item { SettingsSectionTitle(stringResource(R.string.section_support)) }
             item {
                 SettingsCard {
                     SettingsItem(
@@ -1336,7 +1337,7 @@ private fun SettingsTabContent(
                 }
             }
 
-            item { SettingsSectionTitle(tr("О приложении", "About")) }
+            item { SettingsSectionTitle(stringResource(R.string.section_about)) }
             item {
                 SettingsCard {
                     // Раунд 219: «Поддержать разработчика». Реквизитов в коде

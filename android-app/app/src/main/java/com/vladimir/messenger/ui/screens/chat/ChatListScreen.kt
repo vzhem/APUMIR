@@ -8,6 +8,8 @@ package com.vladimir.messenger.ui.screens.chat
 // FAB для добавления нового контакта.
 // =============================================================================
 
+import com.vladimir.messenger.R
+import androidx.compose.ui.res.stringResource
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.height
@@ -334,7 +336,7 @@ fun ChatListScreen(
                 // пальцем вбок - разделов может стать больше, чем влезает.
                 // Вкладка «Не прочитано» показывает бейдж с числом чатов с непрочитано >0.
                 ApuTabBar(
-                    titles = uiState.sections.map { it.title },
+                    titles = uiState.sections.map { stringResource(it.labelRes) },
                     selectedIndex = pagerState.currentPage,
                     offsetFraction = pagerState.currentPageOffsetFraction,
                     onSelect = { index ->
