@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.R
+import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 
@@ -182,10 +184,10 @@ fun ProfileBackupScreen(
                         containerColor = Color.Transparent,
                         scrolledContainerColor = Color.Transparent,
                     ),
-                    title = { ApuSettingsHeader("Резервная копия") },
+                    title = { ApuSettingsHeader(stringResource(R.string.backup_title)) },
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                         }
                     },
                 )
@@ -206,26 +208,20 @@ fun ProfileBackupScreen(
                     HintBubble {
                         Column {
                             Text(
-                                "Что это",
+                                stringResource(R.string.backup_what),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = HintBubbleTextColor,
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                "Один файл со всем профилем: чаты, контакты, сообщества и каналы, " +
-                                    "ключи шифрования, ранг, настройки, аватар. После переустановки или " +
-                                    "на новом телефоне вы вернётесь из него таким, каким были — " +
-                                    "собеседники ничего не заметят.",
+                                stringResource(R.string.backup_what_body),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = HintBubbleMutedColor,
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                "Файл заперт паролем и хранится там, куда вы его положите: в «Файлах» " +
-                                    "телефона, на флешке или в облаке. Без пароля он никому не читается. " +
-                                    "«Защита личности» возвращает только адрес и имя — это отдельная, " +
-                                    "полная копия.",
+                                stringResource(R.string.backup_password_body),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = HintBubbleMutedColor,
                             )
@@ -241,7 +237,7 @@ fun ProfileBackupScreen(
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
                                 Text(
-                                    "Копия готова к восстановлению",
+                                    stringResource(R.string.backup_ready),
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.SemiBold,
                                 )
@@ -281,10 +277,10 @@ fun ProfileBackupScreen(
                                             style = DiagnosticsActionStyle.PRIMARY,
                                             enabled = !state.busy,
                                             modifier = Modifier.weight(1f),
-                                        ) { Text("Восстановить и закрыть") }
+                                        ) { Text(stringResource(R.string.backup_restore_close)) }
                                         Spacer(Modifier.width(8.dp))
                                         ApuTextAction(
-                                            label = "Отмена",
+                                            label = stringResource(R.string.action_cancel),
                                             onClick = viewModel::discardStaged,
                                             enabled = !state.busy,
                                         )
@@ -299,13 +295,13 @@ fun ProfileBackupScreen(
                     ApuSettingsCard {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                "Сделать резервную копию",
+                                stringResource(R.string.backup_make),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                "Придумайте пароль для файла. Он может отличаться от пароля «Защиты личности».",
+                                stringResource(R.string.backup_password_hint),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -313,7 +309,7 @@ fun ProfileBackupScreen(
                             ApuBubbleField(
                                 value = password,
                                 onValueChange = { password = it },
-                                label = { Text("Пароль файла") },
+                                label = { Text(stringResource(R.string.backup_file_password)) },
                                 singleLine = true,
                                 visualTransformation = PasswordVisualTransformation(),
                                 isError = password.isNotEmpty() && password.length < BackupCipher.MIN_PASSWORD_LENGTH,
@@ -332,13 +328,13 @@ fun ProfileBackupScreen(
                             ApuBubbleField(
                                 value = repeat,
                                 onValueChange = { repeat = it },
-                                label = { Text("Пароль ещё раз") },
+                                label = { Text(stringResource(R.string.backup_repeat_password)) },
                                 singleLine = true,
                                 visualTransformation = PasswordVisualTransformation(),
                                 isError = repeat.isNotEmpty() && repeat != password,
                                 supportingText = {
                                     if (repeat.isNotEmpty() && repeat != password) {
-                                        Text("Пароли не совпадают", color = MaterialTheme.colorScheme.error)
+                                        Text(stringResource(R.string.backup_passwords_mismatch), color = MaterialTheme.colorScheme.error)
                                     }
                                 },
                                 modifier = Modifier.fillMaxWidth(),
@@ -346,7 +342,7 @@ fun ProfileBackupScreen(
                             Spacer(Modifier.height(8.dp))
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Приложить полученные файлы", style = MaterialTheme.typography.bodyMedium)
+                                    Text(stringResource(R.string.backup_attach_received), style = MaterialTheme.typography.bodyMedium)
                                     Text(
                                         if (state.receivedBytes > 0) {
                                             "Сейчас это ${ProfileBackupViewModel.humanBytes(state.receivedBytes)}; без них копия меньше"
@@ -374,7 +370,7 @@ fun ProfileBackupScreen(
                                     Spacer(Modifier.width(8.dp))
                                     Text(state.busyText)
                                 } else {
-                                    Text("Сохранить в файл…")
+                                    Text(stringResource(R.string.backup_save_file))
                                 }
                             }
                             val blocker = when {
@@ -402,7 +398,7 @@ fun ProfileBackupScreen(
                     ApuSettingsCard {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                "Обновлять копию автоматически",
+                                stringResource(R.string.backup_auto_title),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                             )
@@ -437,10 +433,10 @@ fun ProfileBackupScreen(
                                         style = DiagnosticsActionStyle.QUIET,
                                         enabled = !state.busy,
                                         modifier = Modifier.weight(1f),
-                                    ) { Text("Обновить сейчас") }
+                                    ) { Text(stringResource(R.string.backup_update_now)) }
                                     Spacer(Modifier.width(8.dp))
                                     ApuTextAction(
-                                        label = "Выключить",
+                                        label = stringResource(R.string.backup_turn_off),
                                         onClick = viewModel::disableAutoUpdate,
                                         enabled = !state.busy,
                                     )
@@ -456,9 +452,7 @@ fun ProfileBackupScreen(
                                 }
                                 if (state.lastSaved != null) {
                                     Text(
-                                        "Телефон сам будет перезаписывать только что сохранённый файл тем же " +
-                                            "паролем. Момент выбирает система: не при низком заряде, обычно ночью. " +
-                                            "Никуда, кроме этого файла, копия не уходит.",
+                                        stringResource(R.string.backup_auto_body),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -503,7 +497,7 @@ fun ProfileBackupScreen(
                                     if (state.foundBackups.isNotEmpty()) {
                                         Spacer(Modifier.height(10.dp))
                                         Text(
-                                            "Найдено на этом телефоне:",
+                                            stringResource(R.string.backup_found_here),
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -528,7 +522,7 @@ fun ProfileBackupScreen(
                                         style = DiagnosticsActionStyle.QUIET,
                                         enabled = !state.busy,
                                         modifier = Modifier.fillMaxWidth(),
-                                    ) { Text("Выбрать другой файл…") }
+                                    ) { Text(stringResource(R.string.backup_pick_other)) }
                                 }
                             }
                         }
@@ -539,14 +533,13 @@ fun ProfileBackupScreen(
                     ApuSettingsCard {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                "Восстановить из файла",
+                                stringResource(R.string.backup_restore_title),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                "Введите пароль файла и выберите его. Копия сначала проверится, " +
-                                    "и только после вашего подтверждения заменит текущий профиль.",
+                                stringResource(R.string.backup_restore_body),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -554,7 +547,7 @@ fun ProfileBackupScreen(
                             ApuBubbleField(
                                 value = restorePassword,
                                 onValueChange = { restorePassword = it },
-                                label = { Text("Пароль файла") },
+                                label = { Text(stringResource(R.string.backup_file_password)) },
                                 singleLine = true,
                                 visualTransformation = PasswordVisualTransformation(),
                                 modifier = Modifier.fillMaxWidth(),
@@ -566,7 +559,7 @@ fun ProfileBackupScreen(
                             if (state.foundBackups.isNotEmpty()) {
                                 Spacer(Modifier.height(12.dp))
                                 Text(
-                                    "Найдено на этом телефоне - начните с этого:",
+                                    stringResource(R.string.backup_found_hint),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -598,7 +591,7 @@ fun ProfileBackupScreen(
                                     Spacer(Modifier.width(8.dp))
                                     Text(state.busyText)
                                 } else {
-                                    Text("Выбрать файл копии…")
+                                    Text(stringResource(R.string.backup_pick_file))
                                 }
                             }
                         }
@@ -627,7 +620,7 @@ fun ProfileBackupScreen(
     autoAttachTarget?.let { target ->
         ApuSettingsDialog(
             onDismissRequest = { autoAttachTarget = null },
-            title = { ApuSettingsHeader("Автообновление файла") },
+            title = { ApuSettingsHeader(stringResource(R.string.backup_auto_file_title)) },
             text = {
                 Column {
                     Text(target.name, style = MaterialTheme.typography.bodyMedium)
@@ -641,7 +634,7 @@ fun ProfileBackupScreen(
                     ApuBubbleField(
                         value = autoAttachPassword,
                         onValueChange = { autoAttachPassword = it },
-                        label = { Text("Пароль файла") },
+                        label = { Text(stringResource(R.string.backup_file_password)) },
                         singleLine = true,
                         visualTransformation = PasswordVisualTransformation(),
                         modifier = Modifier.fillMaxWidth(),
@@ -650,7 +643,7 @@ fun ProfileBackupScreen(
             },
             confirmButton = {
                 ApuTextAction(
-                    label = "Включить",
+                    label = stringResource(R.string.backup_enable),
                     onClick = {
                         val t = target
                         autoAttachTarget = null
@@ -660,7 +653,7 @@ fun ProfileBackupScreen(
                 )
             },
             dismissButton = {
-                ApuTextAction(label = "Отмена", onClick = { autoAttachTarget = null })
+                ApuTextAction(label = stringResource(R.string.action_cancel), onClick = { autoAttachTarget = null })
             },
         )
     }

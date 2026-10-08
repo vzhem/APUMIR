@@ -314,4 +314,30 @@
     <string name="translate_consent_title">Download language pack?</string>
     <string name="translate_consent_body">Translation needs Google language packs (about 30 MB per language). They download once, when text in a new language appears. Message text is not sent to any server.</string>
     <string name="translate_consent_ok">Turn on and download</string>
+    <!-- Backups -->
+    <string name="backup_enable">Turn on</string>
+    <string name="backup_auto_file_title">Automatic file update</string>
+    <string name="backup_pick_file">Choose a backup file…</string>
+    <string name="backup_found_hint">Found on this phone — start with this:</string>
+    <string name="backup_restore_body">Enter the file password and choose the file. The copy is checked first, and only after your confirmation does it replace the current profile.</string>
+    <string name="backup_restore_title">Restore from file</string>
+    <string name="backup_pick_other">Choose another file…</string>
+    <string name="backup_found_here">Found on this phone:</string>
+    <string name="backup_auto_body">The phone will overwrite only the file that was just saved, with the same password. The system chooses the moment: not when the battery is low, usually at night. No copy goes anywhere except this file.</string>
+    <string name="backup_turn_off">Turn off</string>
+    <string name="backup_update_now">Update now</string>
+    <string name="backup_auto_title">Update the backup automatically</string>
+    <string name="backup_save_file">Save to file…</string>
+    <string name="backup_attach_received">Attach received files</string>
+    <string name="backup_passwords_mismatch">Passwords do not match</string>
+    <string name="backup_repeat_password">Repeat password</string>
+    <string name="backup_file_password">File password</string>
+    <string name="backup_password_hint">Create a password for the file. It can differ from the “Identity protection” password.</string>
+    <string name="backup_make">Make a backup</string>
+    <string name="backup_restore_close">Restore and close</string>
+    <string name="backup_ready">Backup is ready to restore</string>
+    <string name="backup_password_body">The file is locked with a password and is stored wherever you put it: in the phone’s Files, on a flash drive, or in the cloud. Without the password, no one can read it. “Identity protection” restores only the address and name; this is a separate, full backup.</string>
+    <string name="backup_what_body">One file with the whole profile: chats, contacts, communities and channels, encryption keys, rank, settings, and avatar. After reinstalling or on a new phone, you will return from it as you were; your contacts will notice nothing.</string>
+    <string name="backup_what">What is this</string>
+    <string name="backup_title">Backup</string>
 </resources>

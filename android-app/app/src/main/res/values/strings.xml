@@ -323,4 +323,30 @@
     <string name="translate_consent_title">Скачать языковой пакет?</string>
     <string name="translate_consent_body">Для перевода нужны языковые пакеты Google (около 30 МБ на каждый язык). Они скачиваются один раз, когда встречается текст на новом языке. Текст сообщений при этом не отправляется на сервер.</string>
     <string name="translate_consent_ok">Включить и скачать</string>
+    <!-- Резервные копии -->
+    <string name="backup_enable">Включить</string>
+    <string name="backup_auto_file_title">Автообновление файла</string>
+    <string name="backup_pick_file">Выбрать файл копии…</string>
+    <string name="backup_found_hint">Найдено на этом телефоне - начните с этого:</string>
+    <string name="backup_restore_body">Введите пароль файла и выберите его. Копия сначала проверится, и только после вашего подтверждения заменит текущий профиль.</string>
+    <string name="backup_restore_title">Восстановить из файла</string>
+    <string name="backup_pick_other">Выбрать другой файл…</string>
+    <string name="backup_found_here">Найдено на этом телефоне:</string>
+    <string name="backup_auto_body">Телефон сам будет перезаписывать только что сохранённый файл тем же паролем. Момент выбирает система: не при низком заряде, обычно ночью. Никуда, кроме этого файла, копия не уходит.</string>
+    <string name="backup_turn_off">Выключить</string>
+    <string name="backup_update_now">Обновить сейчас</string>
+    <string name="backup_auto_title">Обновлять копию автоматически</string>
+    <string name="backup_save_file">Сохранить в файл…</string>
+    <string name="backup_attach_received">Приложить полученные файлы</string>
+    <string name="backup_passwords_mismatch">Пароли не совпадают</string>
+    <string name="backup_repeat_password">Пароль ещё раз</string>
+    <string name="backup_file_password">Пароль файла</string>
+    <string name="backup_password_hint">Придумайте пароль для файла. Он может отличаться от пароля «Защиты личности».</string>
+    <string name="backup_make">Сделать резервную копию</string>
+    <string name="backup_restore_close">Восстановить и закрыть</string>
+    <string name="backup_ready">Копия готова к восстановлению</string>
+    <string name="backup_password_body">Файл заперт паролем и хранится там, куда вы его положите: в «Файлах» телефона, на флешке или в облаке. Без пароля он никому не читается. «Защита личности» возвращает только адрес и имя — это отдельная, полная копия.</string>
+    <string name="backup_what_body">Один файл со всем профилем: чаты, контакты, сообщества и каналы, ключи шифрования, ранг, настройки, аватар. После переустановки или на новом телефоне вы вернётесь из него таким, каким были — собеседники ничего не заметят.</string>
+    <string name="backup_what">Что это</string>
+    <string name="backup_title">Резервная копия</string>
 </resources>
