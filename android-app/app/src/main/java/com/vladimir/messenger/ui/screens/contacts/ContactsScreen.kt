@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.contacts
 
+import com.vladimir.messenger.R
+import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.swipeBack
@@ -107,10 +109,10 @@ fun ContactsScreen(
                     // Прокрутка НЕ должна красить панель: под ней обои APU.
                     scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                 ),
-                title = { Text("Контакты") },
+                title = { Text(stringResource(R.string.contacts_title)) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
+                        Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.action_back))
                     }
                 },
                 actions = {
@@ -139,10 +141,10 @@ fun ContactsScreen(
                             showInviteShare = true
                         },
                     ) {
-                        Icon(Icons.Default.Share, contentDescription = "Пригласить друга")
+                        Icon(Icons.Default.Share, contentDescription = stringResource(R.string.contacts_invite_friend))
                     }
                     IconButton(onClick = onAddContactClick) {
-                        Icon(Icons.Default.Add, contentDescription = "Добавить контакт")
+                        Icon(Icons.Default.Add, contentDescription = stringResource(R.string.chat_add_contact))
                     }
                 }
             )
@@ -153,7 +155,7 @@ fun ContactsScreen(
             ApuSearchField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = "Поиск: имя или @никнейм",
+                placeholder = stringResource(R.string.contacts_search_placeholder),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
             )
             val shown = remember(contactChatRows, query) {
@@ -191,7 +193,7 @@ fun ContactsScreen(
                         verticalArrangement = Arrangement.Center
                     ) {
                     Text(
-                        text = "Пока нет контактов",
+                        text = stringResource(R.string.contacts_empty),
                         style = MaterialTheme.typography.titleMedium,
                         color = HintBubbleTextColor
                     )
@@ -202,7 +204,7 @@ fun ContactsScreen(
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Добавить контакт")
+                        Text(stringResource(R.string.chat_add_contact))
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     // Пустой список - самое место, чтобы позвать первого друга.
@@ -214,7 +216,7 @@ fun ContactsScreen(
                     ) {
                         Icon(Icons.Default.Share, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Пригласить друга")
+                        Text(stringResource(R.string.contacts_invite_friend))
                     }
                     }
                 }
@@ -250,36 +252,36 @@ fun ContactsScreen(
                             ),
                             menuActions = listOf(
                                 BubbleMenuAction(
-                                    title = "Написать",
+                                    title = stringResource(R.string.contacts_write),
                                     icon = Icons.Default.Forum,
                                     onClick = { viewModel.openChatWith(contact) { id -> onContactClick(id, contact) } },
                                 ),
                                 BubbleMenuAction(
-                                    title = "Позвонить",
+                                    title = stringResource(R.string.menu_call),
                                     icon = Icons.Default.Call,
                                     onClick = {
                                         onCallContactClick(contact.id, contact.displayName)
                                     },
                                 ),
                                 BubbleMenuAction(
-                                    title = "Переименовать",
+                                    title = stringResource(R.string.chat_rename),
                                     icon = Icons.Default.Edit,
                                     onClick = {
                                         onRenameContactClick(contact.id, contact.displayName)
                                     },
                                 ),
                                 BubbleMenuAction(
-                                    title = "Пригласить в сообщество",
+                                    title = stringResource(R.string.menu_invite_community),
                                     icon = Icons.Default.GroupAdd,
                                     onClick = { inviteFor = contact },
                                 ),
                                 BubbleMenuAction(
-                                    title = "Поделиться контактом",
+                                    title = stringResource(R.string.menu_share_contact),
                                     icon = Icons.Default.Share,
                                     onClick = { shareTarget = contact },
                                 ),
                                 BubbleMenuAction(
-                                    title = "Удалить контакт",
+                                    title = stringResource(R.string.contacts_delete),
                                     icon = Icons.Default.Delete,
                                     destructive = true,
                                     onClick = { confirmDelete = contact },
@@ -299,11 +301,11 @@ fun ContactsScreen(
     confirmDelete?.let { contact ->
         ApuSettingsDialog(
             onDismissRequest = { confirmDelete = null },
-            title = { Text("Удалить контакт?") },
+            title = { Text(stringResource(R.string.contacts_delete_title)) },
             text = { Text("«${contact.displayName}» будет удалён из списка контактов.") },
             confirmButton = {
                 ApuTextAction(
-                    label = "Удалить",
+                    label = stringResource(R.string.action_delete),
                     onClick = {
                     viewModel.deleteContact(contact.id)
                     confirmDelete = null
@@ -311,7 +313,7 @@ fun ContactsScreen(
                 )
             },
             dismissButton = {
-                ApuTextAction(label = "Отмена", onClick = { confirmDelete = null })
+                ApuTextAction(label = stringResource(R.string.action_cancel), onClick = { confirmDelete = null })
             },
         )
     }
@@ -319,7 +321,7 @@ fun ContactsScreen(
     // Раунд 200: перед отправкой приглашения спрашиваем про APK.
     if (showInviteShare) {
         com.vladimir.messenger.ui.components.InviteAttachDialog(
-            title = "Пригласить в APU",
+            title = stringResource(R.string.chat_invite_apu),
             onDismiss = { showInviteShare = false },
             onShare = { attach ->
                 showInviteShare = false
@@ -425,7 +427,7 @@ private fun ContactSortMenu(
                     if (order == selected) {
                         Icon(
                             Icons.Default.Check,
-                            contentDescription = "Выбрано",
+                            contentDescription = stringResource(R.string.contacts_selected),
                             tint = MaterialTheme.colorScheme.primary,
                         )
                     }
@@ -469,7 +471,7 @@ private fun InviteToGroupsDialog(
                 ApuSearchField(
                     value = query,
                     onValueChange = { query = it },
-                    placeholder = "Поиск группы или канала",
+                    placeholder = stringResource(R.string.contacts_search_group),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(4.dp))
@@ -482,14 +484,14 @@ private fun InviteToGroupsDialog(
                 ) {
                     ApuPremiumCheckbox(checked = attachApk, onCheckedChange = { attachApk = it })
                     Text(
-                        "Приложить установочный файл (APK)",
+                        stringResource(R.string.contacts_attach_apk),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
                 Spacer(Modifier.height(4.dp))
                 if (groups.isEmpty()) {
                     Text(
-                        "Пока нет групп со ссылкой-приглашением",
+                        stringResource(R.string.contacts_no_invite_groups),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 } else if (shown.isEmpty()) {
@@ -523,12 +525,12 @@ private fun InviteToGroupsDialog(
                                 Column(Modifier.weight(1f)) {
                                     Text(
                                         group.title.ifBlank {
-                                            if (group.isChannel) "Канал" else "Группа"
+                                            if (group.isChannel) stringResource(R.string.contacts_channel) else stringResource(R.string.contacts_group)
                                         },
                                         style = MaterialTheme.typography.bodyLarge,
                                     )
                                     Text(
-                                        (if (group.isChannel) "Канал" else "Группа") +
+                                        (if (group.isChannel) stringResource(R.string.contacts_channel) else stringResource(R.string.contacts_group)) +
                                             " • участников: ${group.memberCount}",
                                         style = MaterialTheme.typography.bodySmall,
                                     )
@@ -548,10 +550,10 @@ private fun InviteToGroupsDialog(
                 ) {
                     Icon(Icons.Default.Send, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Отправить в APU")
+                    Text(stringResource(R.string.contacts_send_in_apu))
                 }
                 ApuTextAction(
-                    label = "Другим приложением",
+                    label = stringResource(R.string.contacts_other_app),
                     onClick = { onShare(selected.toList(), attachApk) },
                     enabled = selected.isNotEmpty(),
                     icon = Icons.Default.Share,
@@ -559,7 +561,7 @@ private fun InviteToGroupsDialog(
             }
         },
         dismissButton = {
-            ApuTextAction(label = "Отмена", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
         },
     )
 }

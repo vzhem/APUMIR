@@ -192,4 +192,20 @@
     <string name="chat_resend_key">Отправить мой ключ ещё раз</string>
     <string name="chat_history_retry_hint">Попробуйте открыть историю ещё раз</string>
     <string name="action_retry">Повторить</string>
+    <!-- Контакты -->
+    <string name="contacts_title">Контакты</string>
+    <string name="contacts_invite_friend">Пригласить друга</string>
+    <string name="contacts_search_placeholder">Поиск: имя или @никнейм</string>
+    <string name="contacts_empty">Пока нет контактов</string>
+    <string name="contacts_write">Написать</string>
+    <string name="contacts_delete">Удалить контакт</string>
+    <string name="contacts_delete_title">Удалить контакт?</string>
+    <string name="contacts_selected">Выбрано</string>
+    <string name="contacts_search_group">Поиск группы или канала</string>
+    <string name="contacts_attach_apk">Приложить установочный файл (APK)</string>
+    <string name="contacts_no_invite_groups">Пока нет групп со ссылкой-приглашением</string>
+    <string name="contacts_channel">Канал</string>
+    <string name="contacts_group">Группа</string>
+    <string name="contacts_send_in_apu">Отправить в APU</string>
+    <string name="contacts_other_app">Другим приложением</string>
 </resources>

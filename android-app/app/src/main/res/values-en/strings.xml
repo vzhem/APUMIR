@@ -183,4 +183,20 @@
     <string name="chat_resend_key">Send my key again</string>
     <string name="chat_history_retry_hint">Try opening the history again</string>
     <string name="action_retry">Retry</string>
+    <!-- Контакты -->
+    <string name="contacts_title">Contacts</string>
+    <string name="contacts_invite_friend">Invite a friend</string>
+    <string name="contacts_search_placeholder">Search: name or @username</string>
+    <string name="contacts_empty">No contacts yet</string>
+    <string name="contacts_write">Message</string>
+    <string name="contacts_delete">Delete contact</string>
+    <string name="contacts_delete_title">Delete contact?</string>
+    <string name="contacts_selected">Selected</string>
+    <string name="contacts_search_group">Search groups or channels</string>
+    <string name="contacts_attach_apk">Attach install file (APK)</string>
+    <string name="contacts_no_invite_groups">No groups with an invitation link yet</string>
+    <string name="contacts_channel">Channel</string>
+    <string name="contacts_group">Group</string>
+    <string name="contacts_send_in_apu">Send in APU</string>
+    <string name="contacts_other_app">Another app</string>
 </resources>
