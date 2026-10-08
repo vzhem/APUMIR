@@ -87,12 +87,15 @@ class DiagnosticsContractsTest(unittest.TestCase):
     def test_report_keeps_the_privacy_promise(self):
         report = source(DIAG / "DiagnosticsReport.kt")
         self.assertIn('const val SCHEMA = "apu-diag/2"', report)
-        for part in ("Приватность", "текст переписки", "имена файлов", "ключи", "contact ID"):
+        for part in (
+            "Приватность", "текст переписки", "имена файлов", "ключи", "contact ID", "UUID сообщений",
+        ):
             with self.subTest(part=part):
                 self.assertIn(part, report)
-        # Скрытие contact ID/адресов живёт ровно в одном месте — в чистом
-        # DiagnosticsPrivacy (его правила покрыты JVM-тестами на runner).
-        for marker in ('"[contact]"', '"[ip]"', '"[ipv6]"', '"[transfer]"', "fun redact"):
+        # Скрытие contact/message IDs и адресов живёт в чистом DiagnosticsPrivacy.
+        for marker in (
+            '"[contact]"', '"[id]"', '"[ip]"', '"[ipv6]"', '"[transfer]"', "fun redact",
+        ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, report)
         collector = source(DIAG / "TransferDiagnostics.kt")
@@ -499,6 +502,9 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "payload=[скрыто]",
             "ipv6CompressedRegex",
             "ipv6FullRegex",
+            "uuidRegex",
+            "countLogcatSeverities",
+            "clipLogcatLine",
             "TransferErrorText",
             # Шапку logcat из счётчика строк убираем: иначе он читается как «#-# #:#:#.#».
             "threadtimePrefixRegex",
@@ -510,6 +516,11 @@ class DiagnosticsContractsTest(unittest.TestCase):
         for marker in (
             "DiagnosticsPrivacy.hidePayloadBodies(",
             "DiagnosticsPrivacy.collapseRepeatedLogLines(",
+            "queueOwnEvictions = all.count",
+            "queueRecipients = queueStat(all, \"получателей=\")",
+            "stunFailedCycles = all.count",
+            "stunSuccessfulBindings = all.count",
+            "severities = DiagnosticsPrivacy.countLogcatSeverities(all)",
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, collector)
@@ -533,6 +544,10 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "peerKeyChangeExplainsSilentChat",
             "offlineQueueIsNotMistakenForSilence",
             "queueIsSplitBetweenOwnAndForeign",
+            "ownQueueEvictionsAreReportedAsHistoricalSample",
+            "seedingWaitsForAReceiverAndHistoricalStunFailureIsExplained",
+            "messageUuidsAreRedactedFromJournalAndLogcat",
+            "logcatCountsWarningsAndErrorsAndKeepsHeartbeatTail",
             "foreignQueueAloneIsNotAWarning",
             "refusedSendIsNamedInTheSummary",
         ):
@@ -570,7 +585,11 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "пересылка: отброшено из-за полной очереди=",
             "очередь ядра: своё ждёт получателя=",
             "очередь ядра: чужая пересылка=",
-            "чужой лимит на получателя",
+            "очередь ядра: получателей=",
+            "вытеснений своих из RAM в выборке=",
+            "STUN в выборке:",
+            "уровни в ограниченной выборке logcat:",
+            "лимит на получателя был исчерпан",
             "смена ключа у собеседника (раз)=",
             "отложено до сети (уйдёт само)=",
             "не ушло (узел отказал или нет сети)=",

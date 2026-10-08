@@ -220,12 +220,13 @@ fun ApuSettingsItem(
         ApuPremiumIconTile(icon = icon)
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            // Длинные названия настроек переносятся, а не обрезаются одной строкой.
             Text(
                 title,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.Medium,
                 color = ApuBubbleTextColor,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             if (!subtitle.isNullOrBlank()) {

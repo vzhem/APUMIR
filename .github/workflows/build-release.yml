@@ -254,18 +254,11 @@ jobs:
             android-app/app/build/outputs/apk/release/app-release.apk
             android-app/app/build/outputs/apk/release/SHA256SUMS.txt
           name: Release ${{ steps.get_version.outputs.VERSION }}
-          # Заготовка. Перед публикацией promote-release.ps1 -NotesFile заменяет её
-          # текстом по docs/RELEASE_PUBLICATION_POLICY.md.
-          body: |
-            ## APU ${{ steps.get_version.outputs.VERSION }}
-
-            Автоматическая сборка из тега.
-
-            ### Установка
-            1. Скачайте app-release.apk.
-            2. Разрешите установку из неизвестных источников.
-            3. Установите поверх прежней версии — переписка сохранится.
-          draft: false
+          # Вариант заметок уже одобрен владельцем по RELEASE_PUBLICATION_POLICY.md.
+          # Сначала создаём скрытый prerelease-draft; после проверки APK и суммы
+          # его отдельно промотируют в stable Latest.
+          body_path: docs/RELEASE_NOTES_${{ steps.get_version.outputs.VERSION }}.md
+          draft: true
           prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

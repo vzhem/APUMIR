@@ -1569,11 +1569,13 @@ r248-лимиты закрепов уже входят в stable v11.74.167/168.
 1. `scripts/make-release.ps1 -Version vX.Y.Z -ExpectedCommit <sha>` —
    проверяет чистоту дерева, гоняет гейт, ставит тег и пушит.
 2. GitHub Actions (`.github/workflows/build-release.yml`) собирает подписанный
-   `app-release.apk` (~12–20 мин) и публикует **PRERELEASE** с body-заглушкой.
-3. `scripts/promote-release.ps1 -Version vX.Y.Z` — ждёт релиз с APK, снимает
-   prerelease, делает draft → publish, сверяет `/releases/latest`.
-4. `gh release edit vX.Y.Z -R vzhem/APUMIR --notes-file docs\RELEASE_NOTES_<версия>.md`
-   — краткие заметки (их видит окно обновления в приложении).
+   `app-release.apk` (~12–20 мин) и создаёт скрытый draft-prerelease с APK,
+   checksum и версионными заметками из `docs/RELEASE_NOTES_<версия>.md`.
+3. После проверки успешной сборки, APK и checksum `scripts/promote-release.ps1
+   -Version vX.Y.Z -NotesFile docs\RELEASE_NOTES_<версия>.md` публикует его как
+   stable и сверяет `/releases/latest`.
+4. Перед публикацией ещё раз проверь точный текст по
+   `docs/RELEASE_PUBLICATION_POLICY.md`; не публикуй заглушку или непроверенный draft.
 5. **Догнать `main`** (см. раздел 9): рабочий кончик должен попасть в `main`
    в тот же день, иначе `main` снова превращается в мёртвую ветку.
 

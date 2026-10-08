@@ -1,7 +1,11 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuSettingsCard
+import com.vladimir.messenger.ui.components.ApuSettingsChip
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
+import com.vladimir.messenger.ui.components.ApuSettingsProgress
 
 // =============================================================================
 // PEERRATINGSCREEN.KT — «Узлы сети»: кто из собеседников надёжный ретранслятор
@@ -38,7 +42,6 @@ import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -164,9 +167,7 @@ fun PeerRatingScreen(onBackClick: () -> Unit) {
 @Composable
 private fun PeerRatingCard(peer: PeerStats, nowMs: Long) {
     val score = peer.score(nowMs)
-    ApuSettingsCard(
-        modifier = Modifier.fillMaxWidth(),
-        ) {
+    ApuSettingsCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
@@ -174,29 +175,33 @@ private fun PeerRatingCard(peer: PeerStats, nowMs: Long) {
                         peer.peerId,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF1E2430),
+                        color = ApuBubbleTextColor,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Text(
-                        peer.tier(nowMs) + " узел",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                    ApuSettingsChip(
+                        text = peer.tier(nowMs) + " узел",
+                        highlighted = false,
+                        modifier = Modifier.padding(top = 4.dp),
                     )
                 }
-                Text(
-                    score.toString(),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF1E2430),
-                )
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        score.toString(),
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = ApuBubbleTextColor,
+                    )
+                    Text(
+                        "из 100",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ApuBubbleMutedColor,
+                    )
+                }
             }
 
             Spacer(Modifier.height(10.dp))
-            LinearProgressIndicator(
-                progress = { score / 100f },
-                modifier = Modifier.fillMaxWidth(),
-            )
+            ApuSettingsProgress(fraction = score / 100f)
             Spacer(Modifier.height(12.dp))
 
             Metric(
@@ -251,20 +256,20 @@ private fun Metric(
             icon,
             contentDescription = null,
             modifier = Modifier.size(16.dp),
-            tint = Color(0xFF5A6472),
+            tint = ApuBubbleMutedColor,
         )
         Spacer(Modifier.width(8.dp))
         Text(
             label,
             style = MaterialTheme.typography.bodySmall,
-            color = Color(0xFF5A6472),
+            color = ApuBubbleMutedColor,
             modifier = Modifier.weight(1f),
         )
         Text(
             value,
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.Medium,
-            color = Color(0xFF1E2430),
+            color = ApuBubbleTextColor,
         )
     }
 }

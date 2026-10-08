@@ -19,7 +19,7 @@ import com.vladimir.messenger.data.file.FileTransferRetention
 // Правило отчёта: всё, что видит человек, — по-русски; служебные ключи внутри
 // разделов оставлены латиницей, чтобы отчёт можно было разобрать машиной.
 // В отчёт НИКОГДА не попадают: текст переписки, имена файлов, ключи,
-// шифротекст, contact ID и адреса (см. TransferDiagnostics.redact).
+// шифротекст, contact ID, UUID сообщений и сетевые адреса (см. TransferDiagnostics.redact).
 // =============================================================================
 
 /** Уровень строки сводки или записи журнала. */
@@ -183,6 +183,20 @@ data class DiagnosticsFacts(
      * было понять, что очередь занята служебным, а не перепиской.
      */
     val relayQueueOwnSignals: Long? = null,
+    /** Сколько получателей занято в последней сводке очереди ядра. */
+    val relayQueueRecipients: Long? = null,
+    /** Вытеснения своего запаса в текущей выборке системного журнала. */
+    val relayQueueOwnEvictions: Long = 0L,
+    /** Полные циклы STUN, в которых ни один сервер не ответил. */
+    val stunFailedCycles: Long = 0L,
+    /** Успешные ответы STUN в выборке системного журнала. */
+    val stunSuccessfulBindings: Long = 0L,
+    /** Результат последнего цикла STUN в выборке; null — цикла не было. */
+    val stunLastAttemptFailed: Boolean? = null,
+    /** Предупреждения W из последних строк logcat процесса приложения. */
+    val logcatWarnings: Long = 0L,
+    /** Ошибки E/F из последних строк logcat процесса приложения. */
+    val logcatErrors: Long = 0L,
 )
 
 /** Имена счётчиков сессии: один список для записи (хуки) и для отчёта. */
@@ -269,6 +283,9 @@ object TransferErrorText {
     }
 }
 
+/** Счётчики уровней Android logcat для ограниченной выборки процесса. */
+data class DiagnosticsLogcatLevels(val warnings: Long, val errors: Long)
+
 /**
  * Приватность отчёта и строк системного журнала. Живёт в чистом Kotlin
  * нарочно: правила покрыты JVM-тестами на runner (см. DiagnosticsReportTest),
@@ -279,7 +296,11 @@ object TransferErrorText {
  */
 object DiagnosticsPrivacy {
     private val contactRegex = Regex("pk_[0-9a-f]{32,64}")
+    private val uuidRegex = Regex("(?i)\\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\\b")
     private val transferHexRegex = Regex("(?i)\\b[0-9a-f]{32}\\b")
+    private val threadtimeSeverityRegex = Regex(
+        "^\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d+\\s+\\d+\\s+\\d+\\s+([A-Z])\\s",
+    )
     private val fromHexRegex = Regex("(?i)(\\bfrom\\s+)[0-9a-f]{8}\\b")
     private val ipv4Regex = Regex("(?<![0-9A-Fa-f])(?:[0-9]{1,3}\\.){3}[0-9]{1,3}(?::[0-9]{1,5})?")
 
@@ -304,14 +325,44 @@ object DiagnosticsPrivacy {
     private val shapeNumbersRegex = Regex("[0-9]+")
     private val shapeQuotesRegex = Regex("\"[^\"]*\"")
 
-    /** Не копировать в отчёт долговременные contact ID и сетевые адреса. */
+    /** Не копировать в отчёт идентификаторы контактов/сообщений и сетевые адреса. */
     fun redact(text: String): String = text
         .replace(contactRegex, "[contact]")
+        .replace(uuidRegex, "[id]")
         .replace(transferHexRegex, "[transfer]")
         .replace(fromHexRegex) { match -> "${match.groupValues[1]}[contact]" }
         .replace(ipv4Regex, "[ip]")
         .replace(ipv6CompressedRegex, "[ipv6]")
         .replace(ipv6FullRegex, "[ipv6]")
+
+    /** Подсчитать Android logcat W и E/F в уже ограниченной выборке процесса. */
+    fun countLogcatSeverities(lines: List<String>): DiagnosticsLogcatLevels {
+        var warnings = 0L
+        var errors = 0L
+        lines.forEach { line ->
+            when (threadtimeSeverityRegex.find(line)?.groupValues?.get(1)) {
+                "W" -> warnings++
+                "E", "F" -> errors++
+            }
+        }
+        return DiagnosticsLogcatLevels(warnings, errors)
+    }
+
+    /**
+     * Обрезать очень длинную строку, сохранив и начало, и хвост с итоговыми
+     * счётчиками. Прежний `take(220)` скрывал конец MQTT heartbeat — как раз
+     * там находятся poll errors, таймауты и backpressure.
+     */
+    fun clipLogcatLine(line: String, maxChars: Int = 420): String {
+        val limit = maxChars.coerceAtLeast(0)
+        if (line.length <= limit) return line
+        val marker = " …[середина строки скрыта]… "
+        val available = limit - marker.length
+        if (available <= 0) return line.take(limit)
+        val prefix = available / 2
+        val suffix = available - prefix
+        return line.take(prefix) + marker + line.takeLast(suffix)
+    }
 
     /**
      * Тело MQTT-сообщения — это шифротекст. В отчёте остаются топик и длина
@@ -411,7 +462,7 @@ object DiagnosticsReport {
         )
         appendLine(
             "Приватность: в отчёт не попадают текст переписки, имена файлов, ключи, " +
-                "шифротекст, contact ID и адреса.",
+                "шифротекст, contact ID, UUID сообщений и сетевые адреса.",
         )
         appendLine()
 
@@ -424,7 +475,7 @@ object DiagnosticsReport {
         appendTransfers(facts)
         appendSession(facts)
         appendJournal(journal, facts)
-        appendLogcat(logcat)
+        appendLogcat(facts, logcat)
     }
 
     /** Строки «что происходит сейчас» для окна «Логи» и для раздела [сводка]. */
@@ -526,11 +577,29 @@ object DiagnosticsReport {
         val sentRanges = facts.counters[Counters.F4_RANGES_SENT] ?: 0L
         val receivedRanges = facts.counters[Counters.F4_RANGES_RECEIVED] ?: 0L
         lines += if (negotiated == 0L && sentRanges == 0L && receivedRanges == 0L) {
-            DiagnosticsLine(
-                DiagnosticsLevel.INFO,
-                "Прямой канал",
-                "ещё не согласовывался — запустите передачу файла",
-            )
+            when {
+                facts.stunLastAttemptFailed == true -> DiagnosticsLine(
+                    DiagnosticsLevel.INFO,
+                    "Прямой канал",
+                    "последний STUN в выборке не ответил; безуспешных циклов ${facts.stunFailedCycles}; " +
+                        "${if (facts.networkVpn) "VPN может блокировать UDP" else "сеть может блокировать UDP"}" +
+                        (if (active.seeding > 0L) {
+                            " · файл раздаётся и ждёт запроса получателя"
+                        } else {
+                            " · прямой путь пока не подтверждён"
+                        }),
+                )
+                active.seeding > 0L -> DiagnosticsLine(
+                    DiagnosticsLevel.INFO,
+                    "Прямой канал",
+                    "файл раздаётся; канал согласуется, когда получатель запросит данные",
+                )
+                else -> DiagnosticsLine(
+                    DiagnosticsLevel.INFO,
+                    "Прямой канал",
+                    "не проверялся в этой сессии — согласуется при запросе передачи",
+                )
+            }
         } else {
             DiagnosticsLine(
                 DiagnosticsLevel.OK,
@@ -574,20 +643,31 @@ object DiagnosticsReport {
         val notOpened = c[Counters.MSG_IN_NOT_OPENED] ?: 0L
         val queued = c[Counters.MSG_QUEUED_OFFLINE] ?: 0L
         val failed = c[Counters.MSG_SEND_FAILED] ?: 0L
+        val ownEvictions = facts.relayQueueOwnEvictions
         // Оговорки к основной строке: «отложено» и «не ушло» нельзя прятать —
         // иначе «отправлено 0» читается как поломка, хотя сообщение просто ждёт
-        // сети, а сбои, наоборот, выглядят благополучно.
+        // сети. Исторические logcat-события в подсказках явно помечены как выборка,
+        // чтобы не выдавать их за текущий отказ.
+        val queueNotes = buildString {
+            // Своя переписка ждёт получателя в последней сводке очереди; это не
+            // отказ и не потеря, но человек должен видеть, что сообщение ещё не дошло.
+            val waiting = facts.relayQueueOwn ?: 0L
+            if (waiting > 0L) append(" · своё ждёт получателя $waiting (по последней сводке)")
+            // Служебное (сигналы и пакеты передачи) — не переписка.
+            val waitingSignals = facts.relayQueueOwnSignals ?: 0L
+            if (waitingSignals > 0L) append(" (из них сигналов и пакетов $waitingSignals)")
+            if (ownEvictions > 0L) {
+                append(" · в выборке logcat было вытеснений своего запаса: $ownEvictions; " +
+                    "копии остаются в durable-сторе и очереди досылки")
+            }
+            if (facts.relayQueueFull > 0L) {
+                append(" · в выборке logcat было отказов чужой пересылки из-за лимита: ${facts.relayQueueFull}")
+            }
+        }
         val notes = buildString {
             if (queued > 0L) append(" · отложено до сети $queued")
             if (failed > 0L) append(" · не ушло $failed")
-            // Своя переписка ждёт получателя в очереди ядра: это не отказ и не
-            // потеря, но человек должен видеть, что сообщение ещё не дошло.
-            val waiting = facts.relayQueueOwn ?: 0L
-            if (waiting > 0L) append(" · своё ждёт получателя $waiting")
-            // Служебное (сигналы и пакеты передачи) — не переписка: без этой
-            // оговорки «своё ждёт получателя 1000» пугает зря.
-            val waitingSignals = facts.relayQueueOwnSignals ?: 0L
-            if (waitingSignals > 0L) append(" (из них сигналов и пакетов $waitingSignals)")
+            append(queueNotes)
         }
         return when {
             // Смена ключа перевешивает остальные исходы: пока не отсканируют
@@ -619,12 +699,12 @@ object DiagnosticsReport {
                 DiagnosticsLevel.INFO,
                 "Сообщения",
                 "переписки ещё не было · отправлено ничего · отложено до сети $queued " +
-                    "(уйдут сами, когда появится связь)",
+                    "(уйдут сами, когда появится связь)" + queueNotes,
             )
             saved == 0L && sent == 0L -> DiagnosticsLine(
                 DiagnosticsLevel.INFO,
                 "Сообщения",
-                "переписки в этой сессии ещё не было",
+                "переписки в этой сессии ещё не было" + queueNotes,
             )
             else -> DiagnosticsLine(
                 DiagnosticsLevel.OK,
@@ -754,16 +834,27 @@ object DiagnosticsReport {
             "ядро передало сигналов=${facts.coreMessageSignals} " +
                 "(по журналу процесса; включает и служебные)",
         )
-        appendLine("пересылка: отброшено из-за полной очереди=${facts.relayQueueFull}")
+        appendLine("пересылка: отброшено из-за полной очереди=${facts.relayQueueFull} (в ограниченной выборке logcat)")
         appendLine(
             "очередь ядра: своё ждёт получателя=" +
                 (facts.relayQueueOwn?.toString() ?: "нет (пусто)") +
-                (facts.relayQueueOwnSignals?.let { " (из них сигналов и пакетов=$it)" } ?: ""),
+                (facts.relayQueueOwnSignals?.let { " (из них сигналов и пакетов=$it)" } ?: "") +
+                (if (facts.relayQueueOwn != null) " (последняя сводка logcat)" else ""),
         )
         appendLine(
             "очередь ядра: чужая пересылка=" +
-                (facts.relayQueueForeign?.toString() ?: "нет (пусто)"),
+                (facts.relayQueueForeign?.toString() ?: "нет (пусто)") +
+                (if (facts.relayQueueForeign != null) " (последняя сводка logcat)" else ""),
         )
+        appendLine(
+            "очередь ядра: получателей=" +
+                (facts.relayQueueRecipients?.toString() ?: "нет данных") +
+                (if (facts.relayQueueRecipients != null) " (последняя сводка logcat)" else ""),
+        )
+        appendLine("вытеснений своих из RAM в выборке=${facts.relayQueueOwnEvictions} (logcat)")
+        if (facts.relayQueueOwnEvictions > 0L) {
+            appendLine("  ↳ долговременная копия остаётся в зашифрованном хранилище и очереди досылки")
+        }
         appendLine(
             "смена ключа у собеседника (раз)=" + (c[Counters.MSG_PEER_KEY_CHANGED] ?: 0L),
         )
@@ -794,15 +885,15 @@ object DiagnosticsReport {
         }
         if (facts.relayQueueFull > 0L) {
             appendLine(
-                "  ↳ пересылка: это пакеты для ДРУГИХ узлов — получатель давно не в сети, " +
-                    "чужой лимит на получателя исчерпан",
+                "  ↳ в выборке logcat это пакеты для ДРУГИХ узлов — на момент записи чужой " +
+                    "лимит на получателя был исчерпан; это не текущий статус",
             )
         }
         val ownWaiting = facts.relayQueueOwn ?: 0L
         if (ownWaiting > 0L) {
             appendLine(
-                "  ↳ своё ждёт получателя: он не в сети; своя переписка идёт первой и не " +
-                    "делит лимит с чужой пересылкой",
+                "  ↳ последняя сводка logcat показывала своё в ожидании получателя; " +
+                    "своя переписка идёт первой и не делит лимит с чужой пересылкой",
             )
         }
         val ownWaitingSignals = facts.relayQueueOwnSignals ?: 0L
@@ -918,17 +1009,32 @@ object DiagnosticsReport {
         }
         val warns = journal.count { it.level == DiagnosticsLevel.WARN }
         val bads = journal.count { it.level == DiagnosticsLevel.BAD }
-        appendLine("итого: записей ${journal.size}, предупреждений $warns, ошибок $bads")
+        appendLine("итого журнала событий: записей ${journal.size}, предупреждений $warns, ошибок $bads")
         appendLine("сессия началась ${clock(facts.sessionStartedAtMs)}")
         appendLine()
     }
 
-    private fun StringBuilder.appendLogcat(logcat: List<String>) {
+    private fun StringBuilder.appendLogcat(facts: DiagnosticsFacts, logcat: List<String>) {
         appendLine("[лог процесса]")
+        appendLine(
+            "уровни в ограниченной выборке logcat: предупреждений W=${facts.logcatWarnings}, " +
+                "ошибок/фатальных E/F=${facts.logcatErrors}",
+        )
+        if (facts.stunFailedCycles > 0L || facts.stunSuccessfulBindings > 0L) {
+            val lastStun = when (facts.stunLastAttemptFailed) {
+                true -> "неудача"
+                false -> "ответ получен"
+                null -> "неизвестно"
+            }
+            appendLine(
+                "STUN в выборке: ответов=${facts.stunSuccessfulBindings}, " +
+                    "циклов без ответа=${facts.stunFailedCycles}, последний результат=$lastStun",
+            )
+        }
         if (logcat.isEmpty()) {
             appendLine("Строк системного журнала нет — журнал событий выше по-прежнему годен.")
         } else {
-            logcat.forEach { appendLine(it.take(220)) }
+            logcat.forEach { appendLine(DiagnosticsPrivacy.clipLogcatLine(it)) }
         }
     }
 

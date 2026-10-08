@@ -274,16 +274,62 @@ class SettingsStyleTest(unittest.TestCase):
         main = source("screens/settings/SettingsScreen.kt")
         self.assertNotRegex(main, r"\bAlertDialog\(")
         self.assertIn("ApuSettingsDialog", main)
+        self.assertIn("Подключённые телефоны синхронизируются сами", main)
         sync = source("screens/settings/ProfileSyncDialog.kt")
         self.assertIn("ApuSettingsDialog", sync)
+        # The dialog owns the single scroll container; nesting another one in
+        # its content can be measured with infinite height and crash Compose.
+        self.assertNotIn(".verticalScroll(", sync)
+        settings_ui = source("components/ApuSettingsUi.kt")
+        self.assertIn(".heightIn(max = 420.dp)", settings_ui)
+        self.assertIn(".verticalScroll(rememberScrollState())", settings_ui)
+        settings_item = settings_ui.split("fun ApuSettingsItem(", 1)[1].split("\n}", 1)[0]
+        self.assertIn("maxLines = 2", settings_item)
         self.assertIn("ui.passwordAuto", sync)
         self.assertIn("value = ui.password", sync)
         self.assertIn("viewModel.stopShare()", sync)
         self.assertIn("!ui.busy && !ui.restarting", sync)
+        actions = source("components/ApuActionMenu.kt")
+        self.assertIn("maxLines: Int = 2", actions)
+        self.assertIn("maxLines = maxLines", actions)
+        self.assertIn("maxLines = 1", actions)
         for file in ("ProfileBackupScreen.kt", "IdentityBackupScreen.kt"):
             text = source("screens/settings/" + file)
             self.assertIn(".imePadding()", text)
             self.assertIn("PasswordVisualTransformation", text)
+
+        # Диалог отключения уведомлений вызывается из настроек, чатов, групп,
+        # каналов и тем: не допускаем возврат к отдельной Material-поверхности.
+        mute_dialog = source("components/NotificationMuteDialog.kt")
+        self.assertIn("ApuSettingsDialog(", mute_dialog)
+        self.assertIn("ApuPremiumChoiceRow(", mute_dialog)
+        self.assertIn("ApuTextAction(", mute_dialog)
+        self.assertNotRegex(mute_dialog, r"\bSurface\(")
+
+        # Карточки узлов сети используют ту же золотую шкалу и палитру, что и
+        # другие настройки, а не стандартный Material-индикатор прогресса.
+        peer_rating = source("screens/settings/PeerRatingScreen.kt")
+        for house_part in ("ApuSettingsCard(", "ApuSettingsChip(", "ApuSettingsProgress("):
+            self.assertIn(house_part, peer_rating)
+        self.assertNotIn("LinearProgressIndicator", peer_rating)
+        self.assertIn("ApuBubbleMutedColor", peer_rating)
+
+        # Окно обновления тоже общее, без отдельной старой рамки/Material-полосы.
+        update_dialog = (ROOT / "android-app/app/src/main/java/com/vladimir/messenger/ui/update/UpdateDialog.kt").read_text()
+        self.assertIn("ApuSettingsDialog(", update_dialog)
+        self.assertIn("ApuPremiumButton(", update_dialog)
+        self.assertNotIn("LinearProgressIndicator", update_dialog)
+        self.assertNotRegex(update_dialog, r"\bDialog\(")
+
+        # Первый запуск также использует общие табы/карточки, а не отдельную
+        # Material-оболочку поверх уже фирменных полей и кнопок.
+        onboarding = source("screens/onboarding/OnboardingScreen.kt")
+        for house_part in ("ApuTabBar(", "HintBubble(", "ApuBubbleCard(", "ApuPremiumIconTile("):
+            self.assertIn(house_part, onboarding)
+        self.assertNotIn("TabRow(", onboarding)
+        self.assertNotIn("OutlinedCard(", onboarding)
+        self.assertNotIn("CardDefaults.cardColors", onboarding)
+        self.assertNotRegex(onboarding, r"(?<![A-Za-z])(?:Outlined)?Card" + re.escape("("))
 
     def test_rank_screen_uses_house_rows_and_keeps_promo_field_above_keyboard(self):
         """Ранги: фирменные строки вместо маркеров и поле промокода над клавиатурой.

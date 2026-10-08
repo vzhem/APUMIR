@@ -1256,7 +1256,7 @@ private fun SettingsTabContent(
                     SettingsItem(
                         icon     = Icons.Default.Sync,
                         title    = "Перенос профиля на новое устройство",
-                        subtitle = "Уже подключённые телефоны синхронизируются сами — без этого окна",
+                        subtitle = "Подключённые телефоны синхронизируются сами",
                         onClick  = { showSyncDialog = true },
                     )
                 }

@@ -16,6 +16,7 @@ class DiagnosticsReportTest {
     private fun facts(
         networkAvailable: Boolean = true,
         networkInternet: Boolean = true,
+        networkVpn: Boolean = false,
         coreRunning: Boolean = true,
         coreReady: Boolean = true,
         coreStage: String = "Ядро поднято",
@@ -32,6 +33,14 @@ class DiagnosticsReportTest {
         relayQueueFull: Long = 0L,
         relayQueueOwn: Long? = null,
         relayQueueForeign: Long? = null,
+        relayQueueOwnSignals: Long? = null,
+        relayQueueRecipients: Long? = null,
+        relayQueueOwnEvictions: Long = 0L,
+        stunFailedCycles: Long = 0L,
+        stunSuccessfulBindings: Long = 0L,
+        stunLastAttemptFailed: Boolean? = null,
+        logcatWarnings: Long = 0L,
+        logcatErrors: Long = 0L,
     ) = DiagnosticsFacts(
         createdAtMs = 1_700_000_000_000L,
         sessionStartedAtMs = 1_700_000_000_000L - 168_000L,
@@ -48,7 +57,7 @@ class DiagnosticsReportTest {
         networkTransport = "мобильная сеть",
         networkInternet = networkInternet,
         networkMetered = true,
-        networkVpn = false,
+        networkVpn = networkVpn,
         notificationsAllowed = true,
         proxyTunnel = true,
         swarmMode = "Обычный",
@@ -80,6 +89,14 @@ class DiagnosticsReportTest {
         relayQueueFull = relayQueueFull,
         relayQueueOwn = relayQueueOwn,
         relayQueueForeign = relayQueueForeign,
+        relayQueueOwnSignals = relayQueueOwnSignals,
+        relayQueueRecipients = relayQueueRecipients,
+        relayQueueOwnEvictions = relayQueueOwnEvictions,
+        stunFailedCycles = stunFailedCycles,
+        stunSuccessfulBindings = stunSuccessfulBindings,
+        stunLastAttemptFailed = stunLastAttemptFailed,
+        logcatWarnings = logcatWarnings,
+        logcatErrors = logcatErrors,
     )
 
     private fun titles(lines: List<DiagnosticsLine>): List<String> = lines.map { it.title }
@@ -240,6 +257,25 @@ class DiagnosticsReportTest {
         assertTrue(message.value.contains("своё ждёт получателя 2"))
     }
 
+    @Test
+    fun ownQueueEvictionsAreReportedAsHistoricalSample() {
+        val facts = facts(
+            relayQueueOwn = 1_000L,
+            relayQueueForeign = 3_292L,
+            relayQueueRecipients = 18L,
+            relayQueueOwnEvictions = 3L,
+        )
+        val message = DiagnosticsReport.summaryLines(facts).first { it.title == "Сообщения" }
+        assertEquals(DiagnosticsLevel.INFO, message.level)
+        assertTrue(message.value.contains("своё ждёт получателя 1000"))
+        assertTrue(message.value.contains("в выборке logcat было вытеснений своего запаса: 3"))
+
+        val report = DiagnosticsReport.render(facts, emptyList(), emptyList())
+        assertTrue(report.contains("очередь ядра: получателей=18"))
+        assertTrue(report.contains("вытеснений своих из RAM в выборке=3"))
+        assertTrue(report.contains("зашифрованном хранилище и очереди досылки"))
+    }
+
     /** Чужая очередь сама по себе — не повод пугать: она для других узлов. */
     @Test
     fun foreignQueueAloneIsNotAWarning() {
@@ -333,6 +369,50 @@ class DiagnosticsReportTest {
     }
 
     @Test
+    fun seedingWaitsForAReceiverAndHistoricalStunFailureIsExplained() {
+        val waiting = DiagnosticsReport.summaryLines(
+            facts(transferStates = mapOf("SEEDING" to 1L)),
+        ).first { it.title == "Прямой канал" }
+        assertEquals(DiagnosticsLevel.INFO, waiting.level)
+        assertTrue(waiting.value.contains("файл раздаётся"))
+        assertTrue(waiting.value.contains("когда получатель запросит данные"))
+        assertFalse(waiting.value.contains("запустите передачу файла"))
+
+        val blockedUdp = DiagnosticsReport.summaryLines(
+            facts(
+                networkVpn = true,
+                transferStates = mapOf("SEEDING" to 1L),
+                stunFailedCycles = 2L,
+                stunLastAttemptFailed = true,
+            ),
+        ).first { it.title == "Прямой канал" }
+        assertEquals(DiagnosticsLevel.INFO, blockedUdp.level)
+        assertTrue(blockedUdp.value.contains("последний STUN в выборке не ответил; безуспешных циклов 2"))
+        assertTrue(blockedUdp.value.contains("VPN может блокировать UDP"))
+        assertTrue(blockedUdp.value.contains("ждёт запроса получателя"))
+
+        // Исторические W/E в выборке logcat не должны маскироваться под ошибку текущего состояния.
+        val historicalOnly = DiagnosticsReport.summaryLines(
+            facts(logcatWarnings = 5L, logcatErrors = 1L),
+        )
+        assertFalse(historicalOnly.any { it.level == DiagnosticsLevel.WARN || it.level == DiagnosticsLevel.BAD })
+
+        val report = DiagnosticsReport.render(
+            facts = facts(
+                stunFailedCycles = 2L,
+                stunLastAttemptFailed = true,
+                logcatWarnings = 5L,
+                logcatErrors = 1L,
+            ),
+            journal = emptyList(),
+            logcat = emptyList(),
+        )
+        assertTrue(report.contains("уровни в ограниченной выборке logcat: предупреждений W=5"))
+        assertTrue(report.contains("ошибок/фатальных E/F=1"))
+        assertTrue(report.contains("STUN в выборке: ответов=0, циклов без ответа=2, последний результат=неудача"))
+    }
+
+    @Test
     fun reportHasStableSectionsForMachinesAndRussianForHumans() {
         val report = DiagnosticsReport.render(
             facts = facts(transferStates = mapOf("COMPLETE" to 4L, "FAILED" to 1L)),
@@ -422,6 +502,43 @@ class DiagnosticsReportTest {
         assertEquals(3, Regex("\\[ipv6]").findAll(addresses).count())
         assertTrue(addresses.contains("[ip]"))
         assertFalse(addresses.contains("192.168.10.25"))
+    }
+
+    @Test
+    fun messageUuidsAreRedactedFromJournalAndLogcat() {
+        val id = "11111111-2222-4333-8444-555555555555"
+        val safe = DiagnosticsPrivacy.redact("direct delivery ACK: msgId=$id")
+        assertTrue(safe.contains("msgId=[id]"))
+        assertFalse(safe.contains(id))
+
+        val report = DiagnosticsReport.render(
+            facts = facts(),
+            journal = listOf(
+                DiagnosticsJournalEntry(1_700_000_000_000L, DiagnosticsLevel.INFO, "msg", safe),
+            ),
+            logcat = listOf(safe),
+        )
+        assertFalse(report.contains(id))
+        assertTrue(report.contains("UUID сообщений"))
+    }
+
+    @Test
+    fun logcatCountsWarningsAndErrorsAndKeepsHeartbeatTail() {
+        val levels = DiagnosticsPrivacy.countLogcatSeverities(
+            listOf(
+                "10-08 08:32:14.915 17568 23168 W p2p_core: STUN failed",
+                "10-08 08:32:15.915 17568 23168 E p2p_core: request failed",
+                "10-08 08:32:16.915 17568 23168 I p2p_core: connected",
+            ),
+        )
+        assertEquals(DiagnosticsLogcatLevels(warnings = 1L, errors = 1L), levels)
+
+        val longLine = "MQTT LIVENESS HEARTBEAT: " + "prefix-field ".repeat(30) + "request_errors=7"
+        val clipped = DiagnosticsPrivacy.clipLogcatLine(longLine, maxChars = 100)
+        assertEquals(100, clipped.length)
+        assertTrue(clipped.startsWith("MQTT LIVENESS HEARTBEAT:"))
+        assertTrue(clipped.endsWith("request_errors=7"))
+        assertTrue(clipped.contains("середина строки скрыта"))
     }
 
     @Test

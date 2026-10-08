@@ -38,7 +38,7 @@ import java.util.Locale
  * сети/ядра/брокера/очереди передач + журнал + строки системного журнала.
  *
  * Чего в отчёте НЕТ и не будет: текста переписки, имён файлов, ключей,
- * шифротекста, contact ID и адресов — всё прогоняется через [redact], а
+ * шифротекста, contact ID, UUID сообщений и сетевых адресов — всё проходит через [redact], а
  * вызывающие обязаны передавать только служебные факты.
  *
  * Текст отчёта собирает [DiagnosticsReport] (чистый Kotlin, проверяется
@@ -276,7 +276,9 @@ object TransferDiagnostics {
         val report: String,
         val createdAtMs: Long,
         val journalSize: Int,
+        /** WARN-записи журнала текущего процесса, не исторические строки logcat. */
         val warnCount: Int,
+        /** BAD-записи журнала текущего процесса, не исторические строки logcat. */
         val badCount: Int,
         val uptimeMs: Long,
         /** Версия приложения для шапки окна «Логи» («v11.74.194 (11074194)»). */
@@ -324,9 +326,9 @@ object TransferDiagnostics {
         )
         onStage?.invoke(STAGE_LOGCAT)
         val logcat = scanLogcat()
-        // Из журнала процесса в отчёт идут ровно четыре числа: сигналы ядра,
-        // отказы пересылки и раздельная очередь «свои/чужие». Всё остальное
-        // собрано выше — второй раз телефон не опрашиваем.
+        // Из журнала процесса в факты попадают только агрегаты: уровни W/E,
+        // исходы STUN, состояние очереди и сигналы ядра. Сырые строки отдельно
+        // фильтруются/редактируются; телефон второй раз не опрашиваем.
         val facts = if (logcat.isEmpty) {
             quickFacts
         } else {
@@ -336,6 +338,13 @@ object TransferDiagnostics {
                 relayQueueOwn = logcat.queueOwn,
                 relayQueueForeign = logcat.queueForeign,
                 relayQueueOwnSignals = logcat.queueOwnSignals,
+                relayQueueRecipients = logcat.queueRecipients,
+                relayQueueOwnEvictions = logcat.queueOwnEvictions,
+                stunFailedCycles = logcat.stunFailedCycles,
+                stunSuccessfulBindings = logcat.stunSuccessfulBindings,
+                stunLastAttemptFailed = logcat.stunLastAttemptFailed,
+                logcatWarnings = logcat.severities.warnings,
+                logcatErrors = logcat.severities.errors,
             )
         }
         onStage?.invoke(STAGE_REPORT)
@@ -352,6 +361,7 @@ object TransferDiagnostics {
         report = DiagnosticsReport.render(facts, entries, logcatLines),
         createdAtMs = createdAtMs,
         journalSize = entries.size,
+        // Эти индикаторы — события текущей сессии; выборка logcat показана отдельно.
         warnCount = entries.count { it.level == DiagnosticsLevel.WARN },
         badCount = entries.count { it.level == DiagnosticsLevel.BAD },
         uptimeMs = (createdAtMs - sessionStartedAtMs).coerceAtLeast(0L),
@@ -443,11 +453,9 @@ object TransferDiagnostics {
     }
 
     /**
-     * Итог чтения системного журнала: строки для отчёта и два числа, которые
-     * в Kotlin не посчитать. Первое — сколько сигналов о сообщениях ядро
-     * отдало приложению (по нему видно, дошло ли входящее до нас вообще).
-     * Второе — сколько раз пересылка отбросила пакет из-за полной очереди
-     * получателя: это признак перегруженного телефона-хранителя.
+     * Итог чтения системного журнала: отфильтрованные строки и безопасные
+     * агрегаты (уровни, STUN, очередь, сигналы). Сырые ID не переносятся в
+     * агрегаты, а сами строки перед показом проходят редактирование.
      */
     private data class LogcatScan(
         val lines: List<String>,
@@ -467,14 +475,26 @@ object TransferDiagnostics {
          * внутри сплошь сигналы, вытеснявшие переписку. Теперь это видно.
          */
         val queueOwnSignals: Long?,
+        val queueRecipients: Long?,
+        val queueOwnEvictions: Long,
+        val stunFailedCycles: Long,
+        val stunSuccessfulBindings: Long,
+        val stunLastAttemptFailed: Boolean?,
+        val severities: DiagnosticsLogcatLevels,
     ) {
         /** Журнал процесса ещё не читали или прочитать не удалось. */
         val isEmpty: Boolean
             get() = lines.isEmpty() && coreMessageSignals == 0L && relayQueueFull == 0L &&
-                queueOwn == null && queueForeign == null && queueOwnSignals == null
+                queueOwn == null && queueForeign == null && queueOwnSignals == null &&
+                queueRecipients == null && queueOwnEvictions == 0L && stunFailedCycles == 0L &&
+                stunSuccessfulBindings == 0L && stunLastAttemptFailed == null &&
+                severities.warnings == 0L && severities.errors == 0L
 
         companion object {
-            val EMPTY = LogcatScan(emptyList(), 0L, 0L, null, null, null)
+            val EMPTY = LogcatScan(
+                emptyList(), 0L, 0L, null, null, null, null, 0L, 0L, 0L, null,
+                DiagnosticsLogcatLevels(0L, 0L),
+            )
         }
     }
 
@@ -669,9 +689,15 @@ object TransferDiagnostics {
             ),
             coreMessageSignals = all.count { it.contains(CORE_MESSAGE_SIGNAL) }.toLong(),
             relayQueueFull = all.count { it.contains(RELAY_QUEUE_FULL) }.toLong(),
-            queueOwn = queueStat(all, true),
-            queueForeign = queueStat(all, false),
-            queueOwnSignals = queueStat(all, true, marker = "сигналов="),
+            queueOwn = queueStat(all, "своих="),
+            queueForeign = queueStat(all, "чужих="),
+            queueOwnSignals = queueStat(all, "сигналов="),
+            queueRecipients = queueStat(all, "получателей="),
+            queueOwnEvictions = all.count { it.contains("вытеснено самое старое своё") }.toLong(),
+            stunFailedCycles = all.count { it.contains(STUN_ALL_SERVERS_FAILED) }.toLong(),
+            stunSuccessfulBindings = all.count(::isStunSuccess).toLong(),
+            stunLastAttemptFailed = all.lastOrNull(::isStunOutcome)?.contains(STUN_ALL_SERVERS_FAILED),
+            severities = DiagnosticsPrivacy.countLogcatSeverities(all),
         )
     }.getOrDefault(LogcatScan.EMPTY)
 
@@ -680,11 +706,7 @@ object TransferDiagnostics {
      * последнюю: она самая свежая, а старые строки остаются в журнале после
      * того, как очередь уже разошлась.
      */
-    private fun queueStat(
-        lines: List<String>,
-        own: Boolean,
-        marker: String = if (own) "своих=" else "чужих=",
-    ): Long? {
+    private fun queueStat(lines: List<String>, marker: String): Long? {
         for (line in lines.asReversed()) {
             val at = line.indexOf(RELAY_QUEUE_STATS)
             if (at < 0) continue
@@ -736,6 +758,7 @@ object TransferDiagnostics {
         "peer online",
         "CROSS-BROKER DUPLICATE DROPPED",
         "F4",
+        "STUN",
         "FCAP",
         "APUF",
         "file_chunk_received",
@@ -756,17 +779,26 @@ object TransferDiagnostics {
         return relevantLogWords.any { line.contains(it) }
     }
 
+    private fun isStunSuccess(line: String): Boolean =
+        line.contains(STUN_SUCCESS) ||
+            (line.contains("STUN(7777):") && line.contains(" sees us as "))
+
+    private fun isStunOutcome(line: String): Boolean =
+        line.contains(STUN_ALL_SERVERS_FAILED) || isStunSuccess(line)
+
     // ── Приватность ────────────────────────────────────────────────────
 
     private val AREA_SANITIZER = Regex("[^A-Za-z0-9_-]")
 
     /**
-     * Не копировать в отчёт долговременные contact ID и сетевые адреса.
-     * Сами правила — в `DiagnosticsPrivacy` (чистый Kotlin): их проверяют
-     * JVM-тесты на runner, поэтому регрессию видно до выпуска, а не на
-     * телефоне владельца.
+     * Редактор обязан скрывать contact/message IDs и адреса до копирования
+     * отчёта. Сами правила — в `DiagnosticsPrivacy` (чистый Kotlin): их
+     * проверяют JVM-тесты на runner.
      */
     internal fun redact(text: String): String = DiagnosticsPrivacy.redact(text)
+
+    private const val STUN_ALL_SERVERS_FAILED = "STUN: all servers failed"
+    private const val STUN_SUCCESS = "STUN: получен внешний адрес"
 
     /** Строка ядра: сообщение дошло до EventBus, то есть передано приложению. */
     private const val CORE_MESSAGE_SIGNAL = "MessageReceived EMITTED"
