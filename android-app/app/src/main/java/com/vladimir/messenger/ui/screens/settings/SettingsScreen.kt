@@ -890,6 +890,33 @@ private fun SettingsTabContent(
                         subtitle = appLanguage.nativeName,
                         onClick = { showLanguageDialog = true },
                     )
+                    // Перевод входящих сообщений на язык приложения (на устройстве).
+                    val translateOn by com.vladimir.messenger.data.translate.TranslationSettings.enabled
+                        .collectAsStateWithLifecycle()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.translate_title),
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                            Text(
+                                stringResource(R.string.translate_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = translateOn,
+                            onCheckedChange = {
+                                com.vladimir.messenger.data.translate.TranslationSettings.set(context, it)
+                            },
+                        )
+                    }
                     if (showLanguageDialog) {
                         AlertDialog(
                             onDismissRequest = { showLanguageDialog = false },

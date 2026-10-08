@@ -413,6 +413,7 @@ class MainActivity : ComponentActivity() {
         handleUpdateNotificationTap(intent)
 
         ThemeModeHolder.init(this)
+        com.vladimir.messenger.data.translate.TranslationSettings.init(this)
         AppFontSizeHolder.init(this)
         WallpaperHolder.init(this)
         com.vladimir.messenger.data.swarm.SwarmSettings.init(this)

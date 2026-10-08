@@ -1,5 +1,9 @@
 package com.vladimir.messenger.ui.components
 
+import com.vladimir.messenger.R
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.res.stringResource
+import androidx.compose.runtime.produceState
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -144,8 +148,29 @@ fun MessageBubble(
                         )
                     }
                 }
-                val annotatedText = remember(displayContent, linkColor) {
-                    buildAnnotatedMessageText(displayContent, linkColor)
+                // Перевод входящего текста на язык приложения (если включён в настройках).
+                // Свои сообщения, карточки и картинки не переводим.
+                val translateOn by com.vladimir.messenger.data.translate.TranslationSettings.enabled
+                    .collectAsStateWithLifecycle()
+                val appLang by com.vladimir.messenger.ui.i18n.AppLanguageHolder.language
+                    .collectAsStateWithLifecycle()
+                var showOriginal by remember(message.id) { mutableStateOf(false) }
+                val translation by produceState<com.vladimir.messenger.data.translate.MessageTranslation?>(
+                    initialValue = null,
+                    message.id, displayContent, translateOn, appLang,
+                ) {
+                    value = null
+                    if (translateOn && !message.isFromMe &&
+                        com.vladimir.messenger.data.translate.MessageTranslator.isTranslatableText(displayContent)
+                    ) {
+                        value = com.vladimir.messenger.data.translate.MessageTranslator
+                            .translateForeign(displayContent, appLang.code)
+                    }
+                }
+                val shownTranslation = translation
+                val shownContent = if (shownTranslation != null && !showOriginal) shownTranslation.text else displayContent
+                val annotatedText = remember(shownContent, linkColor) {
+                    buildAnnotatedMessageText(shownContent, linkColor)
                 }
                 // Сообщение из одной ссылки на картинку или гифку показываем
                 // картинкой: клавиатура вставляет гифки именно ссылкой, и в чате
@@ -258,6 +283,18 @@ fun MessageBubble(
                                 },
                             )
                         },
+                    )
+                }
+                // Переключатель оригинала: виден только когда перевод есть.
+                if (translation != null) {
+                    Text(
+                        text = if (showOriginal) stringResource(R.string.chat_show_translation)
+                               else stringResource(R.string.chat_show_original),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = textColor.copy(alpha = 0.7f),
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .clickable { showOriginal = !showOriginal },
                     )
                 }
 

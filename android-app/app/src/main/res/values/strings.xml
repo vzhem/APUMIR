@@ -208,4 +208,9 @@
     <string name="contacts_group">Группа</string>
     <string name="contacts_send_in_apu">Отправить в APU</string>
     <string name="contacts_other_app">Другим приложением</string>
+    <!-- Перевод входящих сообщений -->
+    <string name="translate_title">Переводить входящие сообщения</string>
+    <string name="translate_hint">Текст на другом языке переводится на язык приложения прямо на этом телефоне. Текст не отправляется на сервер. При первом переводе загружается языковой пакет (около 30 МБ).</string>
+    <string name="chat_show_original">Показать оригинал</string>
+    <string name="chat_show_translation">Показать перевод</string>
 </resources>

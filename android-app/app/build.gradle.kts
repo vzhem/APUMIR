@@ -212,6 +212,10 @@ dependencies {
     implementation("net.java.dev.jna:jna:5.14.0@aar")
     implementation(libs.eddsa)
 
+    // Перевод входящих сообщений на устройстве (см. data/translate/MessageTranslator.kt).
+    implementation("com.google.mlkit:translate:17.0.3")
+    implementation("com.google.mlkit:language-id:17.0.6")
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.junit)

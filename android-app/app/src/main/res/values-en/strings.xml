@@ -199,4 +199,9 @@
     <string name="contacts_group">Group</string>
     <string name="contacts_send_in_apu">Send in APU</string>
     <string name="contacts_other_app">Another app</string>
+    <!-- Incoming message translation -->
+    <string name="translate_title">Translate incoming messages</string>
+    <string name="translate_hint">Text in another language is translated into the app language on this phone. The text is not sent to any server. The first translation downloads a language pack (about 30 MB).</string>
+    <string name="chat_show_original">Show original</string>
+    <string name="chat_show_translation">Show translation</string>
 </resources>
