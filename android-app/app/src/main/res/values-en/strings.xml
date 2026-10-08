@@ -135,4 +135,25 @@
     <string name="action_copy">Copy</string>
     <string name="action_send">Send</string>
     <string name="action_refresh">Refresh</string>
+    <!-- Меню чатов и групп -->
+    <string name="menu_pin">Pin</string>
+    <string name="menu_unpin">Unpin</string>
+    <string name="menu_open_chat">Open chat</string>
+    <string name="menu_call">Call</string>
+    <string name="menu_share_contact">Share contact</string>
+    <string name="menu_unarchive">Restore from archive</string>
+    <string name="menu_archive">Archive</string>
+    <string name="menu_unmute">Turn on notifications</string>
+    <string name="menu_mute">Turn off notifications</string>
+    <string name="menu_mark_read">Mark as read</string>
+    <string name="menu_clear_chat">Clear chat</string>
+    <string name="menu_delete_chat">Delete chat</string>
+    <string name="menu_open_channel">Open channel</string>
+    <string name="menu_open_group">Open group</string>
+    <string name="menu_invite_channel">Invite to channel</string>
+    <string name="menu_invite_community">Invite to community</string>
+    <string name="menu_manage">Manage</string>
+    <string name="menu_delete_channel">Delete channel</string>
+    <string name="menu_delete_group">Delete group</string>
+    <string name="menu_unsubscribe">Unsubscribe</string>
 </resources>

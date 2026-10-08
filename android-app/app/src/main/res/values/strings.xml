@@ -144,4 +144,25 @@
     <string name="action_copy">Скопировать</string>
     <string name="action_send">Отправить</string>
     <string name="action_refresh">Обновить</string>
+    <!-- Меню чатов и групп -->
+    <string name="menu_pin">Закрепить</string>
+    <string name="menu_unpin">Открепить</string>
+    <string name="menu_open_chat">Открыть чат</string>
+    <string name="menu_call">Позвонить</string>
+    <string name="menu_share_contact">Поделиться контактом</string>
+    <string name="menu_unarchive">Вернуть из архива</string>
+    <string name="menu_archive">В архив</string>
+    <string name="menu_unmute">Включить уведомления</string>
+    <string name="menu_mute">Отключить уведомления</string>
+    <string name="menu_mark_read">Отметить прочитанным</string>
+    <string name="menu_clear_chat">Очистить переписку</string>
+    <string name="menu_delete_chat">Удалить чат</string>
+    <string name="menu_open_channel">Открыть канал</string>
+    <string name="menu_open_group">Открыть группу</string>
+    <string name="menu_invite_channel">Пригласить в канал</string>
+    <string name="menu_invite_community">Пригласить в сообщество</string>
+    <string name="menu_manage">Управление</string>
+    <string name="menu_delete_channel">Удалить канал</string>
+    <string name="menu_delete_group">Удалить группу</string>
+    <string name="menu_unsubscribe">Отписаться</string>
 </resources>

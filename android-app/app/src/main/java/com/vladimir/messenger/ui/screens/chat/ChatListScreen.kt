@@ -1246,12 +1246,12 @@ private fun SectionPage(
                                 },
                                 menuActions = listOf(
                                     BubbleMenuAction(
-                                        title = if (item.chat.isPinned) "Открепить" else "Закрепить",
+                                        title = if (item.chat.isPinned) stringResource(R.string.menu_unpin) else stringResource(R.string.menu_pin),
                                         icon = Icons.Filled.PushPin,
                                         onClick = { onTogglePersonalPin(item.chat) },
                                     ),
                                     BubbleMenuAction(
-                                        title = "Открыть чат",
+                                        title = stringResource(R.string.menu_open_chat),
                                         icon = Icons.Default.Forum,
                                         onClick = {
                                             onChatClick(
@@ -1262,7 +1262,7 @@ private fun SectionPage(
                                         },
                                     ),
                                     BubbleMenuAction(
-                                        title = "Позвонить",
+                                        title = stringResource(R.string.menu_call),
                                         icon = Icons.Default.Call,
                                         onClick = {
                                             onCallClick(
@@ -1272,7 +1272,7 @@ private fun SectionPage(
                                         },
                                     ),
                                     BubbleMenuAction(
-                                        title = "Поделиться контактом",
+                                        title = stringResource(R.string.menu_share_contact),
                                         icon = Icons.Default.Share,
                                         onClick = { onShareCard(item.chat) },
                                     ),
@@ -1281,12 +1281,12 @@ private fun SectionPage(
                                     // зеркала, поэтому пункт показывает то,
                                     // что будет после нажатия.
                                     BubbleMenuAction(
-                                        title = if (item.chat.isArchived) "Вернуть из архива" else "В архив",
+                                        title = if (item.chat.isArchived) stringResource(R.string.menu_unarchive) else stringResource(R.string.menu_archive),
                                         icon = Icons.Default.Archive,
                                         onClick = { onTogglePersonalArchive(item.chat) },
                                     ),
                                     BubbleMenuAction(
-                                        title = if (item.chat.isMuted()) "Включить уведомления" else "Отключить уведомления",
+                                        title = if (item.chat.isMuted()) stringResource(R.string.menu_unmute) else stringResource(R.string.menu_mute),
                                         icon = if (item.chat.isMuted()) {
                                             Icons.Default.NotificationsActive
                                         } else {
@@ -1295,17 +1295,17 @@ private fun SectionPage(
                                         onClick = { onTogglePersonalMute(item.chat) },
                                     ),
                                     BubbleMenuAction(
-                                        title = "Отметить прочитанным",
+                                        title = stringResource(R.string.menu_mark_read),
                                         icon = Icons.Default.DoneAll,
                                         onClick = { onMarkChatRead(item.chat.id) },
                                     ),
                                     BubbleMenuAction(
-                                        title = "Очистить переписку",
+                                        title = stringResource(R.string.menu_clear_chat),
                                         icon = Icons.Default.CleaningServices,
                                         onClick = { onClearChat(item.chat) },
                                     ),
                                     BubbleMenuAction(
-                                        title = "Удалить чат",
+                                        title = stringResource(R.string.menu_delete_chat),
                                         icon = Icons.Default.Delete,
                                         destructive = true,
                                         onClick = { onDeleteChat(item.chat) },
@@ -1319,7 +1319,7 @@ private fun SectionPage(
                                 menuActions = buildList {
                                     add(
                                         BubbleMenuAction(
-                                            title = if (item.group.isPinned) "Открепить" else "Закрепить",
+                                            title = if (item.group.isPinned) stringResource(R.string.menu_unpin) else stringResource(R.string.menu_pin),
                                             icon = Icons.Filled.PushPin,
                                             onClick = { onToggleGroupPin(item.group) },
                                         )
@@ -1328,14 +1328,14 @@ private fun SectionPage(
                                     // личное, участникам не рассылается.
                                     add(
                                         BubbleMenuAction(
-                                            title = if (item.group.isArchived) "Вернуть из архива" else "В архив",
+                                            title = if (item.group.isArchived) stringResource(R.string.menu_unarchive) else stringResource(R.string.menu_archive),
                                             icon = Icons.Default.Archive,
                                             onClick = { onToggleGroupArchive(item.group) },
                                         )
                                     )
                                     add(
                                         BubbleMenuAction(
-                                            title = if (item.group.isMuted()) "Включить уведомления" else "Отключить уведомления",
+                                            title = if (item.group.isMuted()) stringResource(R.string.menu_unmute) else stringResource(R.string.menu_mute),
                                             icon = if (item.group.isMuted()) {
                                                 Icons.Default.NotificationsActive
                                             } else {
@@ -1346,7 +1346,7 @@ private fun SectionPage(
                                     )
                                     add(
                                         BubbleMenuAction(
-                                            title = if (item.group.isChannel) "Открыть канал" else "Открыть группу",
+                                            title = if (item.group.isChannel) stringResource(R.string.menu_open_channel) else stringResource(R.string.menu_open_group),
                                             icon = Icons.Default.Forum,
                                             onClick = {
                                                 if (item.group.isChannel) {
@@ -1360,9 +1360,9 @@ private fun SectionPage(
                                     add(
                                         BubbleMenuAction(
                                             title = if (item.group.isChannel) {
-                                                "Пригласить в канал"
+                                                stringResource(R.string.menu_invite_channel)
                                             } else {
-                                                "Пригласить в сообщество"
+                                                stringResource(R.string.menu_invite_community)
                                             },
                                             icon = Icons.Default.PersonAdd,
                                             onClick = { onInviteToGroup(item.group) },
@@ -1373,7 +1373,7 @@ private fun SectionPage(
                                     ) {
                                         add(
                                             BubbleMenuAction(
-                                                title = "Управление",
+                                                title = stringResource(R.string.menu_manage),
                                                 icon = Icons.Default.Settings,
                                                 onClick = { onGroupAdminClick(item.group.id) },
                                             )
@@ -1381,7 +1381,7 @@ private fun SectionPage(
                                     }
                                     add(
                                         BubbleMenuAction(
-                                            title = "Отметить прочитанным",
+                                            title = stringResource(R.string.menu_mark_read),
                                             icon = Icons.Default.DoneAll,
                                             onClick = { onMarkGroupRead(item.group.id) },
                                         )
@@ -1390,9 +1390,9 @@ private fun SectionPage(
                                         BubbleMenuAction(
                                             title = when {
                                                 item.group.myRole == GroupRole.OWNER ->
-                                                    if (item.group.isChannel) "Удалить канал" else "Удалить группу"
-                                                item.group.isChannel -> "Отписаться"
-                                                else -> "Выйти"
+                                                    if (item.group.isChannel) stringResource(R.string.menu_delete_channel) else stringResource(R.string.menu_delete_group)
+                                                item.group.isChannel -> stringResource(R.string.menu_unsubscribe)
+                                                else -> stringResource(R.string.action_logout)
                                             },
                                             icon = Icons.Default.Delete,
                                             destructive = true,
