@@ -387,6 +387,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Язык интерфейса выбирается в настройках и применяется до создания UI.
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(com.vladimir.messenger.ui.i18n.AppLanguageHolder.wrap(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

@@ -84,7 +84,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import com.vladimir.messenger.ui.i18n.tr
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.ChatWallpaper
@@ -866,6 +868,63 @@ private fun SettingsTabContent(
                                 onClick = { WallpaperHolder.set(context, null) },
                             )
                         }
+                    }
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // ЯЗЫК интерфейса: русский / English. Применяется после перезапуска
+            // экрана; выбор хранится в p2p_prefs (см. AppLanguageHolder).
+            // ----------------------------------------------------------------
+            item { SettingsSectionTitle(tr("Язык", "Language")) }
+            item {
+                SettingsCard {
+                    val context = LocalContext.current
+                    val appLanguage by com.vladimir.messenger.ui.i18n.AppLanguageHolder.language
+                        .collectAsStateWithLifecycle()
+                    var showLanguageDialog by remember { mutableStateOf(false) }
+                    SettingsItem(
+                        icon = Icons.Default.Language,
+                        title = tr("Язык приложения", "App language"),
+                        subtitle = appLanguage.nativeName,
+                        onClick = { showLanguageDialog = true },
+                    )
+                    if (showLanguageDialog) {
+                        AlertDialog(
+                            onDismissRequest = { showLanguageDialog = false },
+                            title = { Text(tr("Язык приложения", "App language")) },
+                            text = {
+                                Column {
+                                    com.vladimir.messenger.ui.i18n.AppLanguage.entries.forEach { lang ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable(role = Role.RadioButton) {
+                                                    showLanguageDialog = false
+                                                    if (lang != appLanguage) {
+                                                        com.vladimir.messenger.ui.i18n.AppLanguageHolder.set(context, lang)
+                                                        (context as? android.app.Activity)?.recreate()
+                                                    }
+                                                }
+                                                .padding(vertical = 10.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            RadioButton(
+                                                selected = lang == appLanguage,
+                                                onClick = null,
+                                            )
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(lang.nativeName)
+                                        }
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { showLanguageDialog = false }) {
+                                    Text(tr("Отмена", "Cancel"))
+                                }
+                            },
+                        )
                     }
                 }
             }

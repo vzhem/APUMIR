@@ -4,6 +4,7 @@ import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
+import com.vladimir.messenger.ui.components.ApuHeaderIconBubble
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.ApuVipBadge
@@ -373,28 +374,36 @@ fun ChatDetailScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBackClick) {
-                        Icon(Icons.Default.ArrowBack, "Назад")
+                    // Каждая кнопка шапки — в своём пузыре, как и заголовок.
+                    ApuHeaderIconBubble(
+                        onClick = onBackClick,
+                        contentDescription = "Назад",
+                    ) {
+                        Icon(Icons.Default.ArrowBack, null)
                     }
                 },
                 actions = {
                     if (contactId.isNotBlank()) {
-                        IconButton(onClick = { onRenameClick(contactId, contactName) }) {
+                        ApuHeaderIconBubble(
+                            onClick = { onRenameClick(contactId, contactName) },
+                            contentDescription = "Переименовать",
+                        ) {
                             Icon(
                                 Icons.Default.Edit,
-                                contentDescription = "Переименовать",
+                                contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
                     // Аудиозвонок: активен только у контакта с node id (pk_…).
-                    IconButton(
+                    ApuHeaderIconBubble(
                         onClick = { onCallClick(contactId, contactName) },
+                        contentDescription = "Позвонить",
                         enabled = contactId.startsWith("pk_"),
                     ) {
                         Icon(
                             Icons.Default.Call,
-                            contentDescription = "Позвонить",
+                            contentDescription = null,
                             tint = if (contactId.startsWith("pk_")) {
                                 MaterialTheme.colorScheme.primary
                             } else {
@@ -403,10 +412,13 @@ fun ChatDetailScreen(
                         )
                     }
                     val notificationsMuted = uiState.mutedUntilMs > System.currentTimeMillis()
-                    IconButton(onClick = { showNotificationMuteDialog = true }) {
+                    ApuHeaderIconBubble(
+                        onClick = { showNotificationMuteDialog = true },
+                        contentDescription = if (notificationsMuted) "Изменить паузу уведомлений" else "Отключить уведомления",
+                    ) {
                         Icon(
                             if (notificationsMuted) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
-                            contentDescription = if (notificationsMuted) "Изменить паузу уведомлений" else "Отключить уведомления",
+                            contentDescription = null,
                             tint = if (notificationsMuted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }

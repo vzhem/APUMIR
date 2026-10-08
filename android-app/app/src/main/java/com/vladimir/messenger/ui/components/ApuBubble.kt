@@ -20,11 +20,16 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
@@ -103,6 +108,33 @@ fun ApuHeaderBubble(
             .apuPremiumGloss(intensity = 0.5f, topFraction = 0.6f)
             .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
             .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        CompositionLocalProvider(LocalContentColor provides ApuBubbleTextColor) { content() }
+    }
+}
+
+/**
+ * Круглая кнопка шапки в своём пузыре: иконка действия внутри той же подложки,
+ * что и заголовок. Размер фиксированный и компактный, чтобы все кнопки шапки
+ * помещались в одну строку рядом с названием.
+ */
+@Composable
+fun ApuHeaderIconBubble(
+    onClick: () -> Unit,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .size(40.dp)
+            .apuPremiumLift(6.dp)
+            .apuBubbleSurface(shape = CircleShape)
+            .apuPremiumGloss(intensity = 0.5f, topFraction = 0.6f)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .semantics { if (contentDescription != null) this.contentDescription = contentDescription },
+        contentAlignment = Alignment.Center,
     ) {
         CompositionLocalProvider(LocalContentColor provides ApuBubbleTextColor) { content() }
     }
