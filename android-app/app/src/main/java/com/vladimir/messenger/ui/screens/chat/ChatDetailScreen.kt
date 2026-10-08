@@ -360,9 +360,9 @@ fun ChatDetailScreen(
                             val peerTyping = uiState.isPeerTyping
                             Text(
                                 text = when {
-                                    peerTyping -> "печатает…"
-                                    uiState.isContactOnline -> "в сети"
-                                    else -> "не в сети"
+                                    peerTyping -> stringResource(R.string.chat_typing)
+                                    uiState.isContactOnline -> stringResource(R.string.chat_online)
+                                    else -> stringResource(R.string.chat_offline)
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (peerTyping || uiState.isContactOnline)
@@ -377,7 +377,7 @@ fun ChatDetailScreen(
                     // Каждая кнопка шапки — в своём пузыре, как и заголовок.
                     ApuHeaderIconBubble(
                         onClick = onBackClick,
-                        contentDescription = "Назад",
+                        contentDescription = stringResource(R.string.action_back),
                     ) {
                         Icon(Icons.Default.ArrowBack, null)
                     }
@@ -386,7 +386,7 @@ fun ChatDetailScreen(
                     if (contactId.isNotBlank()) {
                         ApuHeaderIconBubble(
                             onClick = { onRenameClick(contactId, contactName) },
-                            contentDescription = "Переименовать",
+                            contentDescription = stringResource(R.string.chat_rename),
                         ) {
                             Icon(
                                 Icons.Default.Edit,
@@ -398,7 +398,7 @@ fun ChatDetailScreen(
                     // Аудиозвонок: активен только у контакта с node id (pk_…).
                     ApuHeaderIconBubble(
                         onClick = { onCallClick(contactId, contactName) },
-                        contentDescription = "Позвонить",
+                        contentDescription = stringResource(R.string.menu_call),
                         enabled = contactId.startsWith("pk_"),
                     ) {
                         Icon(
@@ -414,7 +414,7 @@ fun ChatDetailScreen(
                     val notificationsMuted = uiState.mutedUntilMs > System.currentTimeMillis()
                     ApuHeaderIconBubble(
                         onClick = { showNotificationMuteDialog = true },
-                        contentDescription = if (notificationsMuted) "Изменить паузу уведомлений" else "Отключить уведомления",
+                        contentDescription = if (notificationsMuted) stringResource(R.string.chat_change_mute) else stringResource(R.string.menu_mute),
                     ) {
                         Icon(
                             if (notificationsMuted) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
@@ -501,12 +501,12 @@ fun ChatDetailScreen(
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            "Сообщения зашифрованы E2E",
+                            stringResource(R.string.chat_e2e_notice),
                             style = MaterialTheme.typography.bodyMedium,
                             color = ApuBubbleMutedColor,
                         )
                         Text(
-                            "Напишите первое сообщение",
+                            stringResource(R.string.chat_write_first),
                             style = MaterialTheme.typography.bodySmall,
                             color = ApuBubbleMutedColor,
                         )
@@ -613,7 +613,7 @@ fun ChatDetailScreen(
                                         IconButton(onClick = { viewModel.togglePin(m.id, false) }) {
                                             Icon(
                                                 androidx.compose.material.icons.Icons.Filled.Close,
-                                                contentDescription = "Открепить",
+                                                contentDescription = stringResource(R.string.menu_unpin),
                                                 modifier = Modifier.size(16.dp),
                                             )
                                         }
@@ -858,7 +858,7 @@ fun ChatDetailScreen(
     showCopyDialog?.let { message ->
         ApuSettingsDialog(
             onDismissRequest = { showCopyDialog = null },
-            title = { Text("Действия с сообщением") },
+            title = { Text(stringResource(R.string.chat_message_actions)) },
             text = {
                 Column {
                     // Раунд 203: превью без служебных строк пересылки.
@@ -884,14 +884,14 @@ fun ChatDetailScreen(
                     // групп и каналов (владелец: единый стиль). Опасное -
                     // красным. Состав действий прежний.
                     com.vladimir.messenger.ui.components.ApuActionBubble(
-                        "Поделиться в APU",
+                        stringResource(R.string.chat_share_in_apu),
                         androidx.compose.material.icons.Icons.Filled.Send,
                     ) {
                         showCopyDialog = null
                         forwardMessage = message
                     }
                     com.vladimir.messenger.ui.components.ApuActionBubble(
-                        "Копировать всё",
+                        stringResource(R.string.chat_copy_all),
                         androidx.compose.material.icons.Icons.Filled.ContentCopy,
                     ) {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
@@ -904,14 +904,14 @@ fun ChatDetailScreen(
                     }
                     // Раунд 173: закрепить/открепить сообщение личного чата.
                     com.vladimir.messenger.ui.components.ApuActionBubble(
-                        if (message.isPinned) "Открепить" else "Закрепить",
+                        if (message.isPinned) stringResource(R.string.menu_unpin) else stringResource(R.string.menu_pin),
                         androidx.compose.material.icons.Icons.Filled.PushPin,
                     ) {
                         showCopyDialog = null
                         viewModel.togglePin(message.id, !message.isPinned)
                     }
                     com.vladimir.messenger.ui.components.ApuActionBubble(
-                        "Выделить часть текста",
+                        stringResource(R.string.chat_select_text),
                         androidx.compose.material.icons.Icons.Filled.Edit,
                     ) {
                         showCopyDialog = null
@@ -926,7 +926,7 @@ fun ChatDetailScreen(
                     }
                     if (savedMessageFile != null) {
                         com.vladimir.messenger.ui.components.ApuActionBubble(
-                            "Файл в избранное",
+                            stringResource(R.string.chat_file_to_saved),
                             androidx.compose.material.icons.Icons.Filled.Star,
                         ) {
                             viewModel.saveToFavorites(savedMessageFile, contactName)
@@ -936,7 +936,7 @@ fun ChatDetailScreen(
                     }
                     if (message.content.isNotBlank()) {
                         com.vladimir.messenger.ui.components.ApuActionBubble(
-                            "В избранное",
+                            stringResource(R.string.chat_to_saved),
                             androidx.compose.material.icons.Icons.Filled.Star,
                         ) {
                             // Раунд 203: в избранное - без служебных строк.
@@ -946,7 +946,7 @@ fun ChatDetailScreen(
                         }
                     }
                     com.vladimir.messenger.ui.components.ApuActionBubble(
-                        "Поставить реакцию",
+                        stringResource(R.string.chat_add_reaction),
                         androidx.compose.material.icons.Icons.Filled.EmojiEmotions,
                     ) {
                         showCopyDialog = null
@@ -955,7 +955,7 @@ fun ChatDetailScreen(
                     // Раунд 135: удаление своего сообщения - у себя и у всех.
                     if (message.isFromMe) {
                         com.vladimir.messenger.ui.components.ApuActionBubble(
-                            "Удалить у себя",
+                            stringResource(R.string.chat_delete_for_me),
                             androidx.compose.material.icons.Icons.Filled.Delete,
                             destructive = true,
                         ) {
@@ -963,7 +963,7 @@ fun ChatDetailScreen(
                             viewModel.deleteMessageForMe(message.id)
                         }
                         com.vladimir.messenger.ui.components.ApuActionBubble(
-                            "Удалить у всех",
+                            stringResource(R.string.chat_delete_for_all),
                             androidx.compose.material.icons.Icons.Filled.Delete,
                             destructive = true,
                         ) {
@@ -974,7 +974,7 @@ fun ChatDetailScreen(
                 }
             },
             confirmButton = {
-                ApuTextAction(label = "Закрыть", onClick = { showCopyDialog = null })
+                ApuTextAction(label = stringResource(R.string.action_close), onClick = { showCopyDialog = null })
             },
         )
     }
@@ -1053,11 +1053,11 @@ fun ChatDetailScreen(
     deleteForAllTarget?.let { target ->
         ApuSettingsDialog(
             onDismissRequest = { deleteForAllTarget = null },
-            title = { Text("Удалить у всех?") },
-            text = { Text("Сообщение исчезнет и у вас, и у собеседника. Отменить будет нельзя.") },
+            title = { Text(stringResource(R.string.chat_delete_for_all_title)) },
+            text = { Text(stringResource(R.string.chat_delete_for_all_text)) },
             confirmButton = {
                 ApuTextAction(
-                    label = "Удалить",
+                    label = stringResource(R.string.action_delete),
                     onClick = {
                     deleteForAllTarget = null
                     viewModel.deleteMessageForAll(target.id)
@@ -1066,7 +1066,7 @@ fun ChatDetailScreen(
                 )
             },
             dismissButton = {
-                ApuTextAction(label = "Отмена", onClick = { deleteForAllTarget = null })
+                ApuTextAction(label = stringResource(R.string.action_cancel), onClick = { deleteForAllTarget = null })
             },
         )
     }
@@ -1216,9 +1216,9 @@ private fun MessageInputBar(
                     Icon(
                         Icons.Default.AttachFile,
                         contentDescription = if (canAttach) {
-                            "Прикрепить файл"
+                            stringResource(R.string.chat_attach_file)
                         } else {
-                            "Вложения откроются с ранга «Круг друзей»"
+                            stringResource(R.string.chat_attach_rank_hint)
                         },
                         tint = if (canAttach) {
                             Color(0xFF5A6472)
@@ -1257,7 +1257,7 @@ private fun MessageInputBar(
                         ) {
                             if (inputState.text.isEmpty()) {
                                 Text(
-                                    "Сообщение...",
+                                    stringResource(R.string.chat_input_placeholder),
                                     color = Color(0xFF5A6472),
                                     style = MaterialTheme.typography.bodyLarge,
                                 )
@@ -1328,7 +1328,7 @@ private fun MessageInputBar(
                             .padding(horizontal = 14.dp, vertical = 8.dp),
                     ) {
                         Text(
-                            "Отправить мой ключ ещё раз",
+                            stringResource(R.string.chat_resend_key),
                             style = MaterialTheme.typography.labelLarge,
                             color = Color.White,
                         )
@@ -1367,7 +1367,7 @@ private fun MessageInputBar(
             // золотая заливка и белый текст (как в темах) - видно сразу.
             val canSend = inputState.text.isNotBlank() && !isSending && !isSelfChat
             ApuTextAction(
-                label = "Отправить",
+                label = stringResource(R.string.action_send),
                 onClick = onSend,
                 enabled = canSend,
                 modifier = Modifier.fillMaxWidth(),
@@ -1386,11 +1386,11 @@ private fun ChatHistoryError(message: String, onRetry: () -> Unit, modifier: Mod
             Text(message, color = ApuBubbleTextColor, style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(8.dp))
             Text(
-                "Попробуйте открыть историю ещё раз",
+                stringResource(R.string.chat_history_retry_hint),
                 color = ApuBubbleMutedColor,
                 style = MaterialTheme.typography.bodySmall,
             )
-            ApuTextAction(label = "Повторить", onClick = onRetry)
+            ApuTextAction(label = stringResource(R.string.action_retry), onClick = onRetry)
         }
     }
 }

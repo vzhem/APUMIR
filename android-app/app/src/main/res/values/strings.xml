@@ -165,4 +165,31 @@
     <string name="menu_delete_channel">Удалить канал</string>
     <string name="menu_delete_group">Удалить группу</string>
     <string name="menu_unsubscribe">Отписаться</string>
+    <!-- Экран чата -->
+    <string name="chat_typing">печатает…</string>
+    <string name="chat_online">в сети</string>
+    <string name="chat_offline">не в сети</string>
+    <string name="action_back">Назад</string>
+    <string name="chat_rename">Переименовать</string>
+    <string name="chat_change_mute">Изменить паузу уведомлений</string>
+    <string name="chat_e2e_notice">Сообщения зашифрованы E2E</string>
+    <string name="chat_write_first">Напишите первое сообщение</string>
+    <string name="chat_message_actions">Действия с сообщением</string>
+    <string name="chat_share_in_apu">Поделиться в APU</string>
+    <string name="chat_copy_all">Копировать всё</string>
+    <string name="chat_select_text">Выделить часть текста</string>
+    <string name="chat_file_to_saved">Файл в избранное</string>
+    <string name="chat_to_saved">В избранное</string>
+    <string name="chat_add_reaction">Поставить реакцию</string>
+    <string name="chat_delete_for_me">Удалить у себя</string>
+    <string name="chat_delete_for_all">Удалить у всех</string>
+    <string name="chat_delete_for_all_title">Удалить у всех?</string>
+    <string name="chat_delete_for_all_text">Сообщение исчезнет и у вас, и у собеседника. Отменить будет нельзя.</string>
+    <string name="action_delete">Удалить</string>
+    <string name="chat_attach_file">Прикрепить файл</string>
+    <string name="chat_attach_rank_hint">Вложения откроются с ранга «Круг друзей»</string>
+    <string name="chat_input_placeholder">Сообщение...</string>
+    <string name="chat_resend_key">Отправить мой ключ ещё раз</string>
+    <string name="chat_history_retry_hint">Попробуйте открыть историю ещё раз</string>
+    <string name="action_retry">Повторить</string>
 </resources>

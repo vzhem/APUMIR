@@ -156,4 +156,31 @@
     <string name="menu_delete_channel">Delete channel</string>
     <string name="menu_delete_group">Delete group</string>
     <string name="menu_unsubscribe">Unsubscribe</string>
+    <!-- Экран чата -->
+    <string name="chat_typing">typing…</string>
+    <string name="chat_online">online</string>
+    <string name="chat_offline">offline</string>
+    <string name="action_back">Back</string>
+    <string name="chat_rename">Rename</string>
+    <string name="chat_change_mute">Change notification pause</string>
+    <string name="chat_e2e_notice">Messages are end-to-end encrypted</string>
+    <string name="chat_write_first">Send the first message</string>
+    <string name="chat_message_actions">Message actions</string>
+    <string name="chat_share_in_apu">Share in APU</string>
+    <string name="chat_copy_all">Copy all</string>
+    <string name="chat_select_text">Select part of the text</string>
+    <string name="chat_file_to_saved">File to favorites</string>
+    <string name="chat_to_saved">To favorites</string>
+    <string name="chat_add_reaction">Add reaction</string>
+    <string name="chat_delete_for_me">Delete for me</string>
+    <string name="chat_delete_for_all">Delete for everyone</string>
+    <string name="chat_delete_for_all_title">Delete for everyone?</string>
+    <string name="chat_delete_for_all_text">The message will disappear for you and your contact. This cannot be undone.</string>
+    <string name="action_delete">Delete</string>
+    <string name="chat_attach_file">Attach file</string>
+    <string name="chat_attach_rank_hint">Attachments open from the “Circle of friends” rank</string>
+    <string name="chat_input_placeholder">Message...</string>
+    <string name="chat_resend_key">Send my key again</string>
+    <string name="chat_history_retry_hint">Try opening the history again</string>
+    <string name="action_retry">Retry</string>
 </resources>
