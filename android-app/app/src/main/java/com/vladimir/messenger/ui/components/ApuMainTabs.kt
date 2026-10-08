@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.components
 
+import com.vladimir.messenger.ui.i18n.tr
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Groups
@@ -47,14 +48,14 @@ fun ApuMainTabBar(
         modifier = modifier,
         items = listOf(
             ApuBottomItem(
-                title = "Чаты",
+                title = tr("Чаты", "Chats"),
                 icon = Icons.Filled.Forum,
                 badge = chatsBadge,
                 selected = current == ApuTab.Chats,
                 onClick = { if (current != ApuTab.Chats) actions.onChats() },
             ),
             ApuBottomItem(
-                title = "Контакты",
+                title = tr("Контакты", "Contacts"),
                 icon = Icons.Filled.People,
                 selected = current == ApuTab.Contacts,
                 onClick = { if (current != ApuTab.Contacts) actions.onContacts() },
@@ -63,19 +64,19 @@ fun ApuMainTabBar(
             // «Группы» заставляла искать каналы где-то ещё (владелец,
             // 2026-09-08). Внутри их различают шапки «Мои группы» / «Мои каналы».
             ApuBottomItem(
-                title = "Сообщества",
+                title = tr("Сообщества", "Communities"),
                 icon = Icons.Filled.Groups,
                 selected = current == ApuTab.Groups,
                 onClick = { if (current != ApuTab.Groups) actions.onGroups() },
             ),
             ApuBottomItem(
-                title = "Профиль",
+                title = tr("Профиль", "Profile"),
                 icon = Icons.Filled.Person,
                 selected = current == ApuTab.Profile,
                 onClick = { if (current != ApuTab.Profile) actions.onProfile() },
             ),
             ApuBottomItem(
-                title = "Настройки",
+                title = tr("Настройки", "Settings"),
                 icon = Icons.Filled.Settings,
                 selected = current == ApuTab.Settings,
                 onClick = { if (current != ApuTab.Settings) actions.onSettings() },

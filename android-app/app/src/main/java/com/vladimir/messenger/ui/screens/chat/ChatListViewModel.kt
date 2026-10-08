@@ -1,6 +1,7 @@
 package com.vladimir.messenger.ui.screens.chat
 
 import android.util.Log
+import com.vladimir.messenger.ui.i18n.tr
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.domain.model.Chat
@@ -38,16 +39,19 @@ import javax.inject.Inject
  * Вкладка «Не прочитано» — как в Viber: только чаты/группы/каналы с
  * unreadCount>0, с бейджем количества чатов.
  */
-enum class InboxSection(val title: String) {
-    All("Все"),
-    Unread("Не прочитано"),
-    Chats("Чаты"),
-    Groups("Группы"),
-    Channels("Каналы"),
-    AdminGroups("Админ группы"),
-    AdminChannels("Админ каналы"),
+enum class InboxSection(private val ru: String, private val en: String) {
+    All("Все", "All"),
+    Unread("Не прочитано", "Unread"),
+    Chats("Чаты", "Chats"),
+    Groups("Группы", "Groups"),
+    Channels("Каналы", "Channels"),
+    AdminGroups("Админ группы", "Admin groups"),
+    AdminChannels("Админ каналы", "Admin channels"),
     /** р249: убранное из общего списка - чаты, группы и каналы в архиве. */
-    Archive("Архив"),
+    Archive("Архив", "Archive");
+
+    /** Подпись вкладки на текущем языке интерфейса. */
+    val title: String get() = tr(ru, en)
 }
 
 /** Группа в общем списке главного экрана. */

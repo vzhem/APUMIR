@@ -179,7 +179,7 @@ fun SettingsScreen(
                     scrolledContainerColor = Color.Transparent,
                         ),
                         title = {
-                            ApuSettingsHeader(if (showProfile) "Профиль" else "Настройки")
+                            ApuSettingsHeader(if (showProfile) tr("Профиль", "Profile") else tr("Настройки", "Settings"))
                         },
                         navigationIcon = {
                             IconButton(onClick = onBackClick) {
@@ -742,7 +742,7 @@ private fun SettingsTabContent(
         ) {
             // Профиль первым пунктом: имя, @никнейм и свой QR нужны чаще
             // остального, а раньше они прятались за вкладкой сверху.
-            item { SettingsSectionTitle("Мой профиль") }
+            item { SettingsSectionTitle(tr("Мой профиль", "My profile")) }
             item {
                 SettingsCard {
                     SettingsItem(
@@ -757,7 +757,7 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // ОФОРМЛЕНИЕ: день / ночь / авто + обои
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle("Оформление") }
+            item { SettingsSectionTitle(tr("Оформление", "Appearance")) }
             item {
                 SettingsCard {
                     val context = LocalContext.current
@@ -932,7 +932,7 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // Пауза новых сообщений: приложение целиком или нужный раздел.
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle("Уведомления") }
+            item { SettingsSectionTitle(tr("Уведомления", "Notifications")) }
             item {
                 SettingsCard {
                     val muteScopes = listOf(
@@ -959,7 +959,7 @@ private fun SettingsTabContent(
                 }
             }
 
-            item { SettingsSectionTitle("Безопасность") }
+            item { SettingsSectionTitle(tr("Безопасность", "Security")) }
             item {
                 SettingsCard {
                     SettingsItem(
@@ -992,7 +992,7 @@ private fun SettingsTabContent(
                 }
             }
 
-            item { SettingsSectionTitle("Сеть") }
+            item { SettingsSectionTitle(tr("Сеть", "Network")) }
             item {
                 SettingsCard {
                     SettingsItem(
@@ -1070,7 +1070,7 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // ПЕРЕДАЧА ФАЙЛОВ
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle("Передача файлов") }
+            item { SettingsSectionTitle(tr("Передача файлов", "File transfer")) }
             item {
                 SettingsCard {
                     SettingsItem(
@@ -1092,7 +1092,7 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // РАЗДАЧА: темп, в котором телефон рассылает и раздаёт дальше
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle("Раздача") }
+            item { SettingsSectionTitle(tr("Раздача", "Seeding")) }
             item {
                 SettingsCard {
                     val context = LocalContext.current
@@ -1265,13 +1265,13 @@ private fun SettingsTabContent(
             // (docs/UPDATE_SEEDING.md) — без сервера, по кусочкам, как файлы
             // групп. Новая версия видна тем, у кого версия ниже.
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle("Обновления") }
+            item { SettingsSectionTitle(tr("Обновления", "Updates")) }
             item { ApkUpdatesCard(viewModel) }
 
             // ----------------------------------------------------------------
             // О ПРИЛОЖЕНИИ
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle("Сервер") }
+            item { SettingsSectionTitle(tr("Сервер", "Server")) }
             item {
                 SettingsCard {
                     // Наш relay-сервер: реестр, приглашения, обновления и
@@ -1309,7 +1309,7 @@ private fun SettingsTabContent(
 
             // Обычная синхронизация уже настроенных телефонов идёт в фоне
             // через живое зеркало. Это окно - только разовый перенос профиля.
-            item { SettingsSectionTitle("Устройства") }
+            item { SettingsSectionTitle(tr("Устройства", "Devices")) }
             item {
                 SettingsCard {
                     SettingsItem(
@@ -1324,7 +1324,7 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // ЛОГИ: отчёт для проверки прямой F4-передачи на двух телефонах.
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle("Поддержка") }
+            item { SettingsSectionTitle(tr("Поддержка", "Support")) }
             item {
                 SettingsCard {
                     SettingsItem(
@@ -1336,7 +1336,7 @@ private fun SettingsTabContent(
                 }
             }
 
-            item { SettingsSectionTitle("О приложении") }
+            item { SettingsSectionTitle(tr("О приложении", "About")) }
             item {
                 SettingsCard {
                     // Раунд 219: «Поддержать разработчика». Реквизитов в коде
