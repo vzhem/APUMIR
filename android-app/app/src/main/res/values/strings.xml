@@ -298,4 +298,25 @@
     <string name="support_free_title">APU бесплатный и без рекламы</string>
     <string name="support_why_title">Зачем нужны самостоятельные переводы</string>
     <string name="support_title">Поддержать разработчика</string>
+    <!-- Ранги -->
+    <string name="rank_apply">Применить</string>
+    <string name="rank_enter_promo">Введите промокод</string>
+    <string name="rank_your_promo">Ваш промокод</string>
+    <string name="rank_promo">Промокод</string>
+    <string name="rank_reached">достигнут</string>
+    <string name="rank_invite_in_apu">Пригласить в APU</string>
+    <string name="rank_file_size_body">Приложение не задаёт лимит размера файла. Фактическая передача зависит от свободного места, возможностей устройства и доступной сети.</string>
+    <string name="rank_file_size_title">О размере файлов</string>
+    <string name="rank_section_vip">VIP — элита APU</string>
+    <string name="rank_section_ranks">Ранги</string>
+    <string name="rank_referral_rules">Приглашение засчитывается, когда друг установил приложение по вашей ссылке, добавил вас в контакты и ваши сообщения дошли друг до друга. Засчитываются только те, кого вы позвали сами. Ранг, полученный по промокоду, действует наравне с заработанным.</string>
+    <string name="rank_top">Это наивысший ранг: открыты все возможности приложения.</string>
+    <string name="rank_available_now">Что вам уже доступно:</string>
+    <string name="rank_unlocks_next">Откроется на следующем ранге:</string>
+    <string name="rank_vip_body">VIP - элита APU: ваш ранг не ниже «Проводника» (10-й). Знак и золотое кольцо стоят рядом с вашим именем и аватаркой — в чатах, группах и каналах; возможности приложения открываются рангами.</string>
+    <string name="rank_your_rank">ваш ранг</string>
+    <string name="rank_invite_friend">Пригласить друга</string>
+    <string name="rank_invite_body">Отправьте ссылку другу. Приглашение засчитается, когда он добавит вас в контакты и вы обменяетесь сообщениями.</string>
+    <string name="rank_grows_title">Ранг растёт от приглашённых друзей</string>
+    <string name="rank_benefits_title">Ранги и возможности</string>
 </resources>

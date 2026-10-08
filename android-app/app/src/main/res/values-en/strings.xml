@@ -289,4 +289,25 @@
     <string name="support_free_title">APU is free and ad-free</string>
     <string name="support_why_title">Why voluntary donations matter</string>
     <string name="support_title">Support the developer</string>
+    <!-- Ranks -->
+    <string name="rank_apply">Apply</string>
+    <string name="rank_enter_promo">Enter a promo code</string>
+    <string name="rank_your_promo">Your promo code</string>
+    <string name="rank_promo">Promo code</string>
+    <string name="rank_reached">reached</string>
+    <string name="rank_invite_in_apu">Invite to APU</string>
+    <string name="rank_file_size_body">The app sets no file size limit. Actual transfer depends on free space, device capabilities, and the available network.</string>
+    <string name="rank_file_size_title">About file sizes</string>
+    <string name="rank_section_vip">VIP — APU elite</string>
+    <string name="rank_section_ranks">Ranks</string>
+    <string name="rank_referral_rules">An invitation counts when your friend has installed the app via your link, added you to their contacts, and your messages have reached each other. Only people you invited yourself count. A rank received with a promo code counts the same as an earned one.</string>
+    <string name="rank_top">This is the highest rank: all app features are unlocked.</string>
+    <string name="rank_available_now">Already available to you:</string>
+    <string name="rank_unlocks_next">Unlocks at the next rank:</string>
+    <string name="rank_vip_body">VIP is APU’s elite: your rank is no lower than “Pathfinder” (10th). The badge and the gold ring appear next to your name and avatar in chats, groups, and channels. The app’s features unlock with ranks.</string>
+    <string name="rank_your_rank">your rank</string>
+    <string name="rank_invite_friend">Invite a friend</string>
+    <string name="rank_invite_body">Send a link to a friend. The invitation counts when they add you to their contacts and you exchange messages.</string>
+    <string name="rank_grows_title">Your rank grows with invited friends</string>
+    <string name="rank_benefits_title">Ranks and perks</string>
 </resources>

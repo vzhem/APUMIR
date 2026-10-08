@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.R
+import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuSettingsCard
 import com.vladimir.messenger.ui.components.ApuSettingsChip
 import com.vladimir.messenger.ui.components.ApuSettingsFeatureRow
@@ -106,10 +108,10 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                     // Прокрутка НЕ должна красить панель: под ней обои APU.
                     scrolledContainerColor = Color.Transparent,
                 ),
-                title = { ApuSettingsHeader("Ранги и возможности") },
+                title = { ApuSettingsHeader(stringResource(R.string.rank_benefits_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                     }
                 },
             )
@@ -136,11 +138,10 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             IconTitleRow(
                                 icon = Icons.Default.Share,
-                                title = "Ранг растёт от приглашённых друзей",
+                                title = stringResource(R.string.rank_grows_title),
                             )
                             Text(
-                                "Отправьте ссылку другу. Приглашение засчитается, когда он добавит " +
-                                    "вас в контакты и вы обменяетесь сообщениями.",
+                                stringResource(R.string.rank_invite_body),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = HintBubbleMutedColor,
                             )
@@ -151,7 +152,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                             ) {
                                 Icon(Icons.Default.Share, contentDescription = null)
                                 Spacer(Modifier.width(8.dp))
-                                Text("Пригласить друга")
+                                Text(stringResource(R.string.rank_invite_friend))
                             }
                         }
                     }
@@ -184,17 +185,14 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                                         color = HintBubbleMutedColor,
                                     )
                                 }
-                                ApuSettingsChip("ваш ранг")
+                                ApuSettingsChip(stringResource(R.string.rank_your_rank))
                             }
                             // VIP - знак признания, а не новая возможность:
                             // говорим об этом прямо, чтобы значок не выглядел
                             // обещанием платных функций.
                             if (current.isVip) {
                                 Text(
-                                    "VIP - элита APU: ваш ранг не ниже «Проводника» (10-й). " +
-                                        "Знак и золотое кольцо стоят рядом с вашим именем и " +
-                                        "аватаркой — в чатах, группах и каналах; " +
-                                        "возможности приложения открываются рангами.",
+                                    stringResource(R.string.rank_vip_body),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = HintBubbleMutedColor,
                                 )
@@ -252,7 +250,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                                     .filterNot { it in current.unlockedFeatureSummary() }
                                 if (opensLater.isNotEmpty()) {
                                     Text(
-                                        "Откроется на следующем ранге:",
+                                        stringResource(R.string.rank_unlocks_next),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = HintBubbleMutedColor,
                                     )
@@ -268,7 +266,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                             // ранг, полученный по промокоду, работает так же, как
                             // заработанный приглашениями.
                             Text(
-                                "Что вам уже доступно:",
+                                stringResource(R.string.rank_available_now),
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Medium,
                             )
@@ -280,18 +278,14 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                             if (ahead == null) {
                                 Spacer(Modifier.height(2.dp))
                                 Text(
-                                    "Это наивысший ранг: открыты все возможности приложения.",
+                                    stringResource(R.string.rank_top),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = HintBubbleMutedColor,
                                 )
                             }
                             Spacer(Modifier.height(2.dp))
                             Text(
-                                "Приглашение засчитывается, когда друг установил приложение по " +
-                                    "вашей ссылке, добавил вас в контакты и ваши сообщения дошли " +
-                                    "друг до друга. Засчитываются только те, кого вы позвали сами. " +
-                                    "Ранг, полученный по промокоду, действует наравне с " +
-                                    "заработанным.",
+                                stringResource(R.string.rank_referral_rules),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = HintBubbleMutedColor,
                             )
@@ -302,7 +296,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                 // «Проводник» (10-й) и выше - VIP, элита приложения; ниже -
                 // обычные ранги.
                 item {
-                    ApuSettingsSectionTitle("Ранги")
+                    ApuSettingsSectionTitle(stringResource(R.string.rank_section_ranks))
                 }
                 items(FileTransferRankPolicy.regularTiers, key = { it.minimumQualifiedReferrals }) { tier ->
                     RankTierCard(tier = tier, current = current, qualified = qualified)
@@ -310,7 +304,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                 item {
                     // Вторая половина списка: VIP. Заголовок обязателен - по нему
                     // видно, где кончаются обычные ранги и начинается элита.
-                    ApuSettingsSectionTitle("VIP — элита APU")
+                    ApuSettingsSectionTitle(stringResource(R.string.rank_section_vip))
                 }
                 items(FileTransferRankPolicy.vipTiers, key = { it.minimumQualifiedReferrals }) { tier ->
                     RankTierCard(tier = tier, current = current, qualified = qualified)
@@ -321,16 +315,14 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                     HintBubble {
                         Column {
                             Text(
-                                "О размере файлов",
+                                stringResource(R.string.rank_file_size_title),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = HintBubbleTextColor,
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                "Приложение не задаёт лимит размера файла. Фактическая передача " +
-                                    "зависит от свободного места, возможностей устройства и " +
-                                    "доступной сети.",
+                                stringResource(R.string.rank_file_size_body),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = HintBubbleMutedColor,
                             )
@@ -352,7 +344,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
     // Раунд 200: перед отправкой приглашения спрашиваем про APK.
     if (showInviteShare) {
         com.vladimir.messenger.ui.components.InviteAttachDialog(
-            title = "Пригласить в APU",
+            title = stringResource(R.string.rank_invite_in_apu),
             onDismiss = { showInviteShare = false },
             onShare = { attach ->
                 showInviteShare = false
@@ -402,9 +394,9 @@ private fun RankTierCard(
                     }
                 }
                 if (isCurrent) {
-                    ApuSettingsChip("ваш ранг")
+                    ApuSettingsChip(stringResource(R.string.rank_your_rank))
                 } else if (reached) {
-                    ApuSettingsChip("достигнут", highlighted = false)
+                    ApuSettingsChip(stringResource(R.string.rank_reached), highlighted = false)
                 }
             }
             // Возможности недостигнутого ранга показаны закрытыми
@@ -480,7 +472,7 @@ private fun PromoCodeCard(onRedeemed: () -> Unit) {
         highlighted = true,
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            IconTitleRow(icon = Icons.Default.Redeem, title = "Промокод")
+            IconTitleRow(icon = Icons.Default.Redeem, title = stringResource(R.string.rank_promo))
             Text(
                 "Есть промокод? Введите его - и к рангу прибавится " +
                     "${PromoCodes.BONUS_PER_CODE} подтверждённых друзей.",
@@ -504,8 +496,8 @@ private fun PromoCodeCard(onRedeemed: () -> Unit) {
                     },
                     // Подсказка НЕ показывает настоящий код: пример выдал бы
                     // рабочий промокод любому, кто просто открыл раздел.
-                    label = "Ваш промокод",
-                    placeholder = "Введите промокод",
+                    label = stringResource(R.string.rank_your_promo),
+                    placeholder = stringResource(R.string.rank_enter_promo),
                     isError = isError,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -539,7 +531,7 @@ private fun PromoCodeCard(onRedeemed: () -> Unit) {
                     enabled = code.isNotBlank(),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Применить")
+                    Text(stringResource(R.string.rank_apply))
                 }
             }
             message?.let { text ->
