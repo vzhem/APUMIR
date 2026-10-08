@@ -630,6 +630,45 @@ impl RelayQueue {
         self.enqueue_foreign(msg, false)
     }
 
+    /// Явно повторно поставить СВОЁ сообщение в очередь, обновив его абсолютный TTL.
+    ///
+    /// В отличие от обычного `enqueue_own`, повтор с тем же ID заменяет старую
+    /// RAM-копию, если она ещё есть, и добавляет запись заново, если её уже
+    /// очистил expiry sweeper. Чужие записи с тем же ID не трогаем.
+    pub fn refresh_own(&self, msg: RelayMessage) -> Result<bool, RelayQueueError> {
+        if msg.hops_exceeded() {
+            return Ok(false);
+        }
+
+        let msg_id = msg.msg_id.clone();
+        let kind = payload_kind(&msg.e2e_payload);
+        let mut entries = self.entries.lock().unwrap();
+        if let Some(existing) = entries.get(&msg_id) {
+            if !existing.own
+                || existing.message.recipient != msg.recipient
+                || existing.message.origin_sender != msg.origin_sender
+                || existing.message.chat_scope != msg.chat_scope
+            {
+                return Ok(false);
+            }
+            entries.insert(
+                msg_id,
+                QueueEntry {
+                    message: msg,
+                    own: true,
+                    kind,
+                },
+            );
+            return Ok(true);
+        }
+        drop(entries);
+
+        // The missing-ID path keeps the same own-reserve and eviction policy as
+        // a first send. A concurrent enqueue is safely handled by the normal
+        // deduplication in `enqueue_own`.
+        self.enqueue_own(msg)
+    }
+
     /// Поставить СВОЁ сообщение (переписка этого узла).
     ///
     /// Отличие от [`RelayQueue::enqueue`]: свой запас (`max_own_total` /
@@ -882,6 +921,22 @@ impl RelayQueue {
     /// «отброшено пересылкой» нельзя понять, чью переписку задело.
     pub fn is_own(&self, msg_id: &str) -> Option<bool> {
         self.entries.lock().unwrap().get(msg_id).map(|e| e.own)
+    }
+
+    /// Можно ли заменить существующую запись этой новой копией собственного
+    /// сообщения, не затронув чужой relay или другой маршрут с тем же ID.
+    pub fn can_refresh_own(&self, msg: &RelayMessage) -> bool {
+        self.entries
+            .lock()
+            .unwrap()
+            .get(&msg.msg_id)
+            .map(|existing| {
+                existing.own
+                    && existing.message.recipient == msg.recipient
+                    && existing.message.origin_sender == msg.origin_sender
+                    && existing.message.chat_scope == msg.chat_scope
+            })
+            .unwrap_or(true)
     }
 
     /// Все сообщения для указанного получателя (клонированные, не удаляются).
@@ -1171,6 +1226,47 @@ mod tests {
     }
 
     // ── Свои и чужие: раздельные запасы (владелец, 2026-10-07) ──────
+
+    #[test]
+    fn explicit_retry_refreshes_existing_ttl_and_reinserts_missing_message() {
+        let q = RelayQueue::with_all_limits(10, 10, 10, 10);
+        let mut original = own_msg("retry-me", "pk_b");
+        original.created_at_ms = 1_000;
+        original.expires_at_ms = 2_000;
+        assert!(q.enqueue_own(original).unwrap());
+
+        let mut automatic_duplicate = own_msg("retry-me", "pk_b");
+        automatic_duplicate.created_at_ms = 2_500;
+        automatic_duplicate.expires_at_ms = 9_500;
+        assert!(!q.enqueue_own(automatic_duplicate).unwrap());
+        assert_eq!(q.for_recipient("pk_b")[0].expires_at_ms, 2_000);
+
+        let mut refreshed = own_msg("retry-me", "pk_b");
+        refreshed.created_at_ms = 3_000;
+        refreshed.expires_at_ms = 4_000;
+        refreshed.e2e_payload = b"fresh sealed payload".to_vec();
+        assert!(q.refresh_own(refreshed.clone()).unwrap());
+        let held = q.for_recipient("pk_b");
+        assert_eq!(held.len(), 1);
+        assert_eq!(held[0].created_at_ms, 3_000);
+        assert_eq!(held[0].expires_at_ms, 4_000);
+        assert_eq!(held[0].e2e_payload, b"fresh sealed payload");
+
+        // Receipt/expiry cleanup may already have removed the queue row. A
+        // manual retry still admits the same ID as a fresh own relay.
+        assert!(q.remove("retry-me"));
+        assert!(q.refresh_own(refreshed).unwrap());
+        assert!(q.contains("retry-me"));
+        assert_eq!(q.own_count(), 1);
+    }
+
+    #[test]
+    fn explicit_retry_never_replaces_a_foreign_message() {
+        let q = RelayQueue::with_all_limits(10, 10, 10, 10);
+        assert!(q.enqueue(msg("same-id", "pk_b")).unwrap());
+        assert!(!q.refresh_own(own_msg("same-id", "pk_b")).unwrap());
+        assert_eq!(q.is_own("same-id"), Some(false));
+    }
 
     #[test]
     fn own_messages_never_share_the_foreign_per_recipient_limit() {

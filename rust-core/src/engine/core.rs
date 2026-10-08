@@ -4678,6 +4678,29 @@ impl P2PCore {
         recipient_id: String,
         text: String,
     ) -> bool {
+        self.send_message_inner(message_id, chat_id, recipient_id, text, false)
+    }
+
+    /// Пользовательский повтор исходящего сообщения. В отличие от фоновой
+    /// идемпотентной досылки, обновляет абсолютный срок relay-хранения.
+    pub fn retry_message(
+        &self,
+        message_id: String,
+        chat_id: String,
+        recipient_id: String,
+        text: String,
+    ) -> bool {
+        self.send_message_inner(message_id, chat_id, recipient_id, text, true)
+    }
+
+    fn send_message_inner(
+        &self,
+        message_id: String,
+        chat_id: String,
+        recipient_id: String,
+        text: String,
+        refresh_retention: bool,
+    ) -> bool {
         if !self.state.is_running() {
             return false;
         }
@@ -4717,7 +4740,7 @@ impl P2PCore {
             self.send_via_quic(&recipient_id, addr_opt, payload)
         };
 
-        if direct_send_ok {
+        if direct_send_ok && !refresh_retention {
             let _ = self
                 .storage
                 .update_message_status(&message_id, MessageStatus::Sent);
@@ -4728,7 +4751,8 @@ impl P2PCore {
             return true;
         }
 
-        // M3(d): no direct address (or direct send failed). Keep the existing N-1-compatible
+        // M3(d): no direct address (or a user explicitly requested fresh
+        // retention after a successful direct attempt). Keep the existing N-1-compatible
         // relay encoding, own the origin copy in RelayQueue first, and only then offer one bounded
         // command to the persistent MQTT session. This is QUEUED_OFFLINE, never a SENT claim.
         let prepared = match prepare_offline_relay(
@@ -4764,7 +4788,14 @@ impl P2PCore {
         let payload_kind = crate::network::relay_queue::payload_kind(text.as_bytes());
 
         let relay_inserted = match self.relay_queue.as_ref() {
-            Some(queue) if queue.contains(&message_id) => {
+            Some(queue) if refresh_retention && !queue.can_refresh_own(&prepared.message) => {
+                tracing::warn!(
+                    "MESH origin: explicit retry refused because {} is held as a foreign relay",
+                    message_id
+                );
+                false
+            }
+            Some(queue) if queue.contains(&message_id) && !refresh_retention => {
                 tracing::info!(
                     "MESH origin: offline relay {} already retained for {}",
                     message_id,
@@ -4790,11 +4821,20 @@ impl P2PCore {
                     match self.relay_custody.as_ref() {
                         Some(custody) => {
                             let now_durable = crate::network::relay_queue::utc_now_ms();
-                            match custody.store.store_encrypted(
-                                &*custody.keys,
-                                &prepared.message,
-                                now_durable,
-                            ) {
+                            let stored = if refresh_retention {
+                                custody.store.refresh_encrypted(
+                                    &*custody.keys,
+                                    &prepared.message,
+                                    now_durable,
+                                )
+                            } else {
+                                custody.store.store_encrypted(
+                                    &*custody.keys,
+                                    &prepared.message,
+                                    now_durable,
+                                )
+                            };
+                            match stored {
                                 Ok(_) => true,
                                 Err(e) => {
                                     tracing::warn!(
@@ -4816,7 +4856,12 @@ impl P2PCore {
                     // Владелец 2026-10-07: это СВОЁ сообщение — своя переписка.
                     // enqueue_own не подчиняется чужим лимитам: переполненная
                     // пересылка для других узлов не может отказать абоненту.
-                    match queue.enqueue_own(prepared.message) {
+                    let enqueued = if refresh_retention {
+                        queue.refresh_own(prepared.message)
+                    } else {
+                        queue.enqueue_own(prepared.message)
+                    };
+                    match enqueued {
                         Ok(true) => {
                             tracing::info!(
                                 "MESH origin: retained offline relay {} for {} at hop 0 (своё)",
@@ -4896,7 +4941,13 @@ impl P2PCore {
                     legacy_payload.into_bytes(),
                 );
                 let queue = Arc::clone(queue);
-                if let Err(error) = rt.block_on(async move { queue.enqueue(queued).await }) {
+                let enqueue_result = rt.block_on(async move {
+                    if refresh_retention {
+                        while queue.remove_message(&recipient_key, &message_key).await {}
+                    }
+                    queue.enqueue(queued).await
+                });
+                if let Err(error) = enqueue_result {
                     tracing::warn!(
                         "MESH origin: legacy retry queue rejected {}: {}",
                         message_id,
@@ -4958,14 +5009,19 @@ impl P2PCore {
             );
         }
 
+        let final_status = if direct_send_ok {
+            MessageStatus::Sent
+        } else {
+            MessageStatus::Pending
+        };
         let _ = self
             .storage
-            .update_message_status(&message_id, MessageStatus::Pending);
+            .update_message_status(&message_id, final_status);
         self.events.emit(CoreEvent::MessageStatusChanged {
             message_id,
-            status: "queued_offline".into(),
+            status: if direct_send_ok { "sent" } else { "queued_offline" }.into(),
         });
-        false
+        direct_send_ok
     }
     /// Прямая отправка через общий QUIC-endpoint (K1).
     ///

@@ -20,6 +20,11 @@ class FakeFileTransferDao : FileTransferDao {
 
     override suspend fun getTransfer(transferId: String): FileTransferEntity? = transfers[transferId]
 
+    override suspend fun getOutgoingForMessage(messageId: String): List<FileTransferEntity> =
+        transfers.values
+            .filter { it.messageId == messageId && it.direction == "OUTGOING" }
+            .sortedByDescending { it.createdAtMs }
+
     // Сводка для отчёта «Логи»: те же три запроса, что и в Room, но по памяти.
     override suspend fun transferStateCounts(): List<TransferStateCount> =
         transfers.values

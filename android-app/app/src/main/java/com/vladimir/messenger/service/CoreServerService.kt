@@ -1311,20 +1311,27 @@ class CoreServerService : Service() {
                     row.recipientId,
                     NodeIds.autoName(row.recipientId),
                 )
-            chatRepository.sendMessage(
-                chatId = chat.id,
-                recipientId = row.recipientId,
-                content = row.content,
-                fixedMessageId = row.id,
-                fromMirror = true,
-                reply = row.replyToId.takeIf { it.isNotBlank() }?.let {
-                    com.vladimir.messenger.data.reply.DirectReplyWire.Target(
-                        messageId = it,
-                        author = row.replyAuthor,
-                        text = row.replyText,
-                    )
-                },
-            )
+            if (row.manualRetry) {
+                chatRepository.retryOutgoingFromMirror(
+                    row = row,
+                    localChatId = chat.id,
+                )
+            } else {
+                chatRepository.sendMessage(
+                    chatId = chat.id,
+                    recipientId = row.recipientId,
+                    content = row.content,
+                    fixedMessageId = row.id,
+                    fromMirror = true,
+                    reply = row.replyToId.takeIf { it.isNotBlank() }?.let {
+                        com.vladimir.messenger.data.reply.DirectReplyWire.Target(
+                            messageId = it,
+                            author = row.replyAuthor,
+                            text = row.replyText,
+                        )
+                    },
+                )
+            }
         }
 
         override fun onPromote() {

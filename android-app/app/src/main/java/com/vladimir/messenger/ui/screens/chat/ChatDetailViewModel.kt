@@ -85,6 +85,8 @@ data class ChatDetailUiState(
     val antiRatingUntilMs: Long = 0,
     val scrollToBottom: Boolean = false,
     val pendingSave: FileTransferEntity? = null,
+    /** Non-null asks the screen to open Android's system picker for an explicit file retry. */
+    val pendingRetryFilePickerId: String? = null,
     /** Ранг ещё не открыл вложения: кнопка объяснит это сразу, а не после выбора файла. */
     val canSendAttachments: Boolean = true,
     val attachmentsLockedHint: String = "",
@@ -131,6 +133,8 @@ class ChatDetailViewModel @Inject constructor(
 
     // chatId передаётся через навигацию (SavedStateHandle)
     private val chatId: String = checkNotNull(savedStateHandle["chatId"])
+    /** Picker result is bound to the original outgoing file message ID. */
+    @Volatile private var awaitingFileRetryMessageId: String? = null
 
     /** р235: собеседник личного чата - ему уходит «печатает…». */
     @Volatile private var peerId: String = ""
@@ -777,6 +781,84 @@ class ChatDetailViewModel @Inject constructor(
         }
         if (!RustBridge.isRunning()) {
             android.util.Log.i("ChatDetailVM", "р245: движок не поднялся, пробуем как есть")
+        }
+    }
+
+    /** Manual resend for an undelivered text message or file placeholder. */
+    fun retryMessage(message: Message) {
+        if (!message.isFromMe || _uiState.value.isPreparingFile) return
+        if (message.status == com.vladimir.messenger.domain.model.MessageStatus.LOCAL_FILE ||
+            message.status == com.vladimir.messenger.domain.model.MessageStatus.FILE_EXPIRED
+        ) {
+            requestFileRetryPicker(message.id)
+            return
+        }
+        viewModelScope.launch {
+            chatRepository.retryOutgoingMessage(message.id)
+                .onFailure { error ->
+                    _uiState.update { it.copy(error = "Повторить отправку не удалось: ${error.message.orEmpty()}") }
+                }
+        }
+    }
+
+    /** Always use the system picker for a file retry: source URIs/paths are not retained. */
+    fun retryFileTransfer(messageId: String) {
+        requestFileRetryPicker(messageId)
+    }
+
+    private fun requestFileRetryPicker(messageId: String) {
+        if (_uiState.value.isPreparingFile) return
+        if (!_uiState.value.canSendAttachments) {
+            _uiState.update { it.copy(error = it.attachmentsLockedHint) }
+            return
+        }
+        awaitingFileRetryMessageId = messageId
+        _uiState.update { it.copy(error = null, pendingRetryFilePickerId = messageId) }
+    }
+
+    fun onRetryFilePickerLaunched(messageId: String) {
+        if (_uiState.value.pendingRetryFilePickerId == messageId) {
+            _uiState.update { it.copy(pendingRetryFilePickerId = null) }
+        }
+    }
+
+    fun onRetryFilePickerResult(uri: Uri?) {
+        val messageId = awaitingFileRetryMessageId ?: return
+        awaitingFileRetryMessageId = null
+        if (uri == null) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPreparingFile = true, error = null) }
+            try {
+                claimEngineForMediaIfNeeded()
+                val message = chatRepository.getMessageById(messageId)
+                    ?: error("Исходное сообщение не найдено")
+                check(message.isFromMe) { "Можно повторить только свой файл" }
+                check(
+                    message.status == com.vladimir.messenger.domain.model.MessageStatus.LOCAL_FILE ||
+                        message.status == com.vladimir.messenger.domain.model.MessageStatus.FILE_EXPIRED
+                ) { "Файл уже доставлен или больше не ожидает отправки" }
+                val chat = chatRepository.getChatById(message.chatId)
+                    ?: error("Чат недоступен")
+                val recipientId = chat.contactId
+                check(recipientId.startsWith("pk_")) { "У контакта нет ключа для передачи файлов" }
+                check(chatRepository.markOutgoingFileRequeued(messageId)) {
+                    "Статус файла изменился: он уже мог быть подтверждён"
+                }
+                fileTransferRouter.retryOutgoingFile(
+                    source = uri,
+                    messageId = messageId,
+                    chatId = message.chatId,
+                    recipientNodeId = recipientId,
+                    qualifiedDirectReferrals = ReferralRankStore.qualifiedDirectCount(appContext),
+                )
+                _uiState.update { it.copy(scrollToBottom = true) }
+                fileTransferRouter.pumpOutgoing()
+            } catch (e: Exception) {
+                android.util.Log.w("ChatDetailVM", "file retry failed: ${e.javaClass.simpleName}")
+                _uiState.update { it.copy(error = "Файл не отправлен: ${e.message.orEmpty()}") }
+            } finally {
+                _uiState.update { it.copy(isPreparingFile = false) }
+            }
         }
     }
 

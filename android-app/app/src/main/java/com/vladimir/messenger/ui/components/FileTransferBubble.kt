@@ -48,6 +48,7 @@ import com.vladimir.messenger.data.local.entity.FileTransferEntity
 fun FileTransferBubble(
     transfer: FileTransferEntity,
     isFromMe: Boolean,
+    messageStatus: com.vladimir.messenger.domain.model.MessageStatus? = null,
     modifier: Modifier = Modifier,
     onSaveClick: (() -> Unit)? = null,
     /** Раунд 43: файл превью картинки - показываем фото прямо в пузыре. */
@@ -64,6 +65,8 @@ fun FileTransferBubble(
      */
     onLongPress: (() -> Unit)? = null,
     onSwipeReply: (() -> Unit)? = null,
+    /** Explicitly restart a non-delivered outgoing transfer from the system picker. */
+    onRetry: (() -> Unit)? = null,
 ) {
     val messenger = com.vladimir.messenger.ui.theme.LocalMessengerColors.current
     val background = if (isFromMe) messenger.messageBubbleOwn else messenger.messageBubbleOther
@@ -318,7 +321,7 @@ fun FileTransferBubble(
             // лишний текст под картинкой (раунд 169).
             if (!(stickerFloat && transfer.state == "COMPLETE")) {
                 Text(
-                    stateLabel(transfer),
+                    stateLabel(transfer, messageStatus),
                     style = MaterialTheme.typography.bodySmall,
                     color = contentColor.copy(alpha = 0.9f),
                 )
@@ -359,6 +362,9 @@ fun FileTransferBubble(
             if (!(previewBitmap != null && isImage) && onSaveToFavorites != null) {
                 ApuTextAction(label = "В избранное", onClick = onSaveToFavorites)
             }
+            if (isFromMe && onRetry != null) {
+                ApuTextAction(label = "Повторить отправку", onClick = onRetry)
+            }
         }
     }
 }
@@ -371,7 +377,15 @@ private fun iconFor(mediaType: String): ImageVector = when {
     else -> Icons.Default.InsertDriveFile
 }
 
-private fun stateLabel(transfer: FileTransferEntity): String {
+private fun stateLabel(
+    transfer: FileTransferEntity,
+    messageStatus: com.vladimir.messenger.domain.model.MessageStatus?,
+): String {
+    if (transfer.direction == "OUTGOING" &&
+        messageStatus == com.vladimir.messenger.domain.model.MessageStatus.FILE_EXPIRED
+    ) {
+        return "Срок хранения истёк"
+    }
     val ofChunks = if (transfer.chunkCount > 0) {
         " ${transfer.completedChunks}/${transfer.chunkCount}"
     } else {
@@ -399,6 +413,7 @@ private fun stateLabel(transfer: FileTransferEntity): String {
         "COMPLETE" -> if (transfer.direction == "OUTGOING") "Доставлено ✓" else "Сохранено ✓"
         "FAILED" -> "Ошибка (${transfer.errorCode ?: "неизвестно"})"
         "EXPIRED" -> "Срок истёк"
+        "CANCELLED" -> "Передача отменена"
         "WAITING_RECIPIENT" -> if (transfer.custodianNodeId.isNotBlank()) {
             "У хранителя, ждём получателя онлайн"
         } else {

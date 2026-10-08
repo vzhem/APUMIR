@@ -56,6 +56,22 @@ object FileTransferKeyVault {
     fun mode(context: Context, transferId: String): Mode =
         modeIn(transferId, PRODUCTION_ALIAS, productionRoot(context.applicationContext))
 
+    /** Remove one wrapped file key when a user explicitly replaces an unconfirmed attempt. */
+    @Synchronized
+    fun deleteKey(context: Context, transferId: String): Boolean =
+        deleteKeyIn(transferId, PRODUCTION_ALIAS, productionRoot(context.applicationContext))
+
+    @Synchronized
+    internal fun deleteKeyIn(transferId: String, alias: String, root: File): Boolean {
+        validateNamespace(transferId, alias, root)
+        val file = keyFile(root, transferId)
+        val directory = file.parentFile ?: return false
+        if (!file.exists() && !File(directory, "$KEY_FILE.bak").exists()) return true
+        AtomicFile(file).delete()
+        if (directory.isDirectory && directory.listFiles().isNullOrEmpty()) directory.delete()
+        return !file.exists() && !File(directory, "$KEY_FILE.bak").exists()
+    }
+
     @Synchronized
     internal fun <T> withOrCreateKeyIn(
         transferId: String,

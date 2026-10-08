@@ -16,6 +16,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
 
 /**
  * Facade the service layer talks to: routes incoming packet/handshake texts (before they are
@@ -58,6 +60,8 @@ class FileTransferRouter @Inject constructor(
 ) {
     private val appContext: Context
     private val routerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** Serializes sender pumps with explicit replacement/re-preparation of one outgoing message. */
+    private val outgoingTransferMutex = Mutex()
     private val sender: FileTransferSender
     private val receiver: FileTransferReceiver
     private val custodySender: FileCustodySender
@@ -515,9 +519,13 @@ class FileTransferRouter @Inject constructor(
                     runCatching { groupFiles.get().onSeedJoined(chatId, seedId, fileSha256, seedCount) }
                         .onFailure { Log.w(TAG, "group seed hook failed: ${it.message}") }
                     // Рой APK (docs/UPDATE_SEEDING.md): куски обновления тоже
-                    // со всех сидов — просим следующего, пока их меньше трёх.
+                    // со всех сидов — просим следующего до общего лимита приёмника.
                     runCatching { apkSeeder.get().onSeedJoined(chatId, seedId, fileSha256, seedCount) }
                         .onFailure { Log.w(TAG, "apk seed stripe hook failed: ${it.message}") }
+                },
+                onChunkFragment = { transferIdHex, payloadBytes ->
+                    runCatching { apkSeeder.get().onChunkFragmentReceived(transferIdHex, payloadBytes) }
+                        .onFailure { Log.w(TAG, "apk chunk speed hook failed: ${it.message}") }
                 },
             ),
             // K3: собеседник подтвердил, что принимает APUF-кадры — передатчик
@@ -714,7 +722,12 @@ class FileTransferRouter @Inject constructor(
      * Получатель появился: возобновить все передачи, которые его ждали.
      */
     suspend fun resumeWaitingForRecipient() {
-        val resumed = transferDao.resumeAllWaitingRecipient(System.currentTimeMillis())
+        outgoingTransferMutex.lock()
+        val resumed = try {
+            transferDao.resumeAllWaitingRecipient(System.currentTimeMillis())
+        } finally {
+            outgoingTransferMutex.unlock()
+        }
         if (resumed > 0) {
             Log.i(TAG, "Resumed $resumed file transfer(s) waiting for recipient")
             pumpOutgoing()
@@ -728,6 +741,8 @@ class FileTransferRouter @Inject constructor(
         // вызов с главного потока (ViewModel при отправке) давал
         // «Приложение не отвечает» вплоть до убийства системы.
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            outgoingTransferMutex.lock()
+            try {
             if (!RustBridge.isRunning()) {
                 // р231: мы тень, но у нас есть готовый исходящий файл - своей
                 // сессии нет, поэтому просим движок у активного партнёра.
@@ -750,8 +765,52 @@ class FileTransferRouter @Inject constructor(
             runCatching { groupSeeder.pump() }
                 .onFailure { Log.w(TAG, "group seed pump failed: ${it.message}") }
             summary
+            } finally {
+                outgoingTransferMutex.unlock()
+            }
         }
     }
+
+    /** Reprepare a manually retried file with its original chat-message ID and a fresh file TTL. */
+    suspend fun retryOutgoingFile(
+        source: android.net.Uri,
+        messageId: String,
+        chatId: String,
+        recipientNodeId: String,
+        qualifiedDirectReferrals: Int,
+    ): OutgoingFilePreparationService.PreparedTransfer =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            outgoingTransferMutex.lock()
+            try {
+                val message = chatRepository.getMessageById(messageId)
+                check(
+                    message?.isFromMe == true &&
+                        message.status in setOf(
+                            com.vladimir.messenger.domain.model.MessageStatus.LOCAL_FILE,
+                            com.vladimir.messenger.domain.model.MessageStatus.FILE_EXPIRED,
+                        )
+                ) { "Файл уже подтверждён или исходное сообщение недоступно" }
+                val previous = transferDao.getOutgoingForMessage(messageId)
+                for (row in previous) {
+                    check(chunkStore.deleteTransfer(row.transferId)) {
+                        "Не удалось очистить старые зашифрованные части файла"
+                    }
+                    transferDao.deleteTransfer(row.transferId)
+                    FileTransferKeyVault.deleteKey(appContext, row.transferId)
+                    deleteOutgoingPreview(row.transferId)
+                    mirrorAnnounced.remove(row.transferId)
+                }
+                preparation.get().prepare(
+                    source = source,
+                    messageId = messageId,
+                    chatId = chatId,
+                    recipientNodeId = recipientNodeId,
+                    qualifiedDirectReferrals = qualifiedDirectReferrals,
+                )
+            } finally {
+                outgoingTransferMutex.unlock()
+            }
+        }
 
     /**
      * р231: у тени нет своей сетевой сессии, поэтому исходящий файл со
@@ -902,8 +961,13 @@ class FileTransferRouter @Inject constructor(
             .getOrDefault(emptyList())
         var removedRows = 0
         for (row in stale) {
+            if (row.direction == "OUTGOING") {
+                runCatching { chatRepository.markOutgoingFileExpired(row.messageId) }
+            }
             runCatching { chunkStore.deleteTransfer(row.transferId) }
             runCatching { receivedStore.deleteTransfer(row.transferId) }
+            runCatching { FileTransferKeyVault.deleteKey(appContext, row.transferId) }
+            if (row.direction == "OUTGOING") deleteOutgoingPreview(row.transferId)
             transferDao.deleteTransfer(row.transferId)
             removedRows++
         }
@@ -942,17 +1006,24 @@ class FileTransferRouter @Inject constructor(
      * удаляет их локальные зашифрованные куски. Входящие и завершённые не трогает.
      * @return число отменённых передач.
      */
-    suspend fun cancelStalledOutgoing(): Int {
-        val cancelled = transferDao.cancelAllOutgoing(System.currentTimeMillis())
-        val rows = transferDao.getCancelled()
-        var cleanedFiles = 0
-        for (row in rows) {
-            if (runCatching { chunkStore.deleteTransfer(row.transferId) }.getOrDefault(false)) {
-                cleanedFiles++
+    suspend fun cancelStalledOutgoing(): Int = withContext(Dispatchers.IO) {
+        outgoingTransferMutex.lock()
+        try {
+            val cancelled = transferDao.cancelAllOutgoing(System.currentTimeMillis())
+            val rows = transferDao.getCancelled()
+            var cleanedFiles = 0
+            for (row in rows) {
+                runCatching { FileTransferKeyVault.deleteKey(appContext, row.transferId) }
+                if (row.direction == "OUTGOING") deleteOutgoingPreview(row.transferId)
+                if (runCatching { chunkStore.deleteTransfer(row.transferId) }.getOrDefault(false)) {
+                    cleanedFiles++
+                }
             }
+            Log.i(TAG, "Cancelled $cancelled stalled outgoing transfers (files cleaned: $cleanedFiles)")
+            cancelled
+        } finally {
+            outgoingTransferMutex.unlock()
         }
-        Log.i(TAG, "Cancelled $cancelled stalled outgoing transfers (files cleaned: $cleanedFiles)")
-        return cancelled
     }
 
     /**
@@ -1400,6 +1471,16 @@ class FileTransferRouter @Inject constructor(
 
     /** р249: как часто повторять просьбу о байтах одного и того же файла. */
     private val MIRROR_ASK_GAP_MS = 60_000L
+
+    private fun deleteOutgoingPreview(transferId: String) {
+        if (!transferId.matches(Regex("^[0-9a-f]{32}$"))) return
+        val directory = File(appContext.noBackupFilesDir, "file_preview/v1")
+        for (suffix in listOf(".jpg", ".gif")) {
+            val file = File(directory, transferId + suffix)
+            if (java.nio.file.Files.isSymbolicLink(file.toPath())) continue
+            if (file.isFile) file.delete()
+        }
+    }
 
     /**
      * Раунд 43: файл превью для пузыря в чате. Входящая картинка - принятый

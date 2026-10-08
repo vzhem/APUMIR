@@ -206,6 +206,15 @@ fun ChatDetailScreen(
     ) { uri ->
         uri?.let(viewModel::onFileSelected)
     }
+    val retryFilePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> viewModel.onRetryFilePickerResult(uri) }
+    LaunchedEffect(uiState.pendingRetryFilePickerId) {
+        uiState.pendingRetryFilePickerId?.let { messageId ->
+            retryFilePicker.launch(arrayOf("*/*"))
+            viewModel.onRetryFilePickerLaunched(messageId)
+        }
+    }
 
     // F3: экспорт принятого файла — системный диалог «куда сохранить»
     val savePicker = rememberLauncherForActivityResult(
@@ -617,6 +626,7 @@ fun ChatDetailScreen(
                                 FileTransferBubble(
                                     transfer = transfer,
                                     isFromMe = transfer.direction == "OUTGOING",
+                                    messageStatus = row.message?.status,
                                     previewFile = viewModel.previewFileFor(transfer),
                                     onShareClick = { viewModel.shareTransferFile(transfer) },
                                     onSaveClick = if (
@@ -645,6 +655,20 @@ fun ChatDetailScreen(
                                     onSwipeReply = row.message?.let { message ->
                                         { viewModel.startReply(message) }
                                     },
+                                    onRetry = row.message?.takeIf { message ->
+                                        transfer.direction == "OUTGOING" && message.isFromMe &&
+                                            message.status !in setOf(
+                                                com.vladimir.messenger.domain.model.MessageStatus.DELIVERED,
+                                                com.vladimir.messenger.domain.model.MessageStatus.READ,
+                                            ) && (
+                                                message.status == com.vladimir.messenger.domain.model.MessageStatus.FILE_EXPIRED ||
+                                                    (message.status == com.vladimir.messenger.domain.model.MessageStatus.LOCAL_FILE &&
+                                                        transfer.state != "COMPLETE") ||
+                                                    transfer.state in setOf(
+                                                        "SENT", "WAITING_RECIPIENT", "CUSTODIED", "FAILED", "EXPIRED", "CANCELLED",
+                                                    )
+                                            )
+                                    }?.let { { viewModel.retryFileTransfer(transfer.messageId) } },
                                 )
                                 // Реакции файла/гифки - той же строкой под пузырём,
                                 // что и у текстовых сообщений.
@@ -794,6 +818,7 @@ fun ChatDetailScreen(
                                         activeMessage = message
                                         showCopyDialog = message
                                     },
+                                    onRetry = { viewModel.retryMessage(message) },
                                 )
                                 }
                                 // Реакции живут отдельной строкой под пузырём -

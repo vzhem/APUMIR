@@ -509,6 +509,25 @@ object RustBridge {
         }
     }
 
+    /** User-requested resend: refreshes Rust relay retention without changing the message ID. */
+    fun retryMessage(
+        messageId: String,
+        chatId: String,
+        recipientId: String,
+        text: String,
+    ): Boolean {
+        if (rejectMainThreadCall("retryMessage(chat=$chatId)")) return false
+        return try {
+            val payload = sealOutgoing(recipientId, text)
+            val sentDirectly = engine?.retryMessage(messageId, chatId, recipientId, payload) == true
+            Log.i(TAG, "Rust explicit retry result: direct=$sentDirectly sealed=${payload !== text}")
+            sentDirectly
+        } catch (ex: Exception) {
+            Log.e(TAG, "retryMessage error", ex)
+            false
+        }
+    }
+
     /**
      * Запечатать исходящее, если ключ собеседника известен.
      *

@@ -58,6 +58,12 @@ interface FileTransferDao {
     suspend fun getTransfer(transferId: String): FileTransferEntity?
 
     @Query(
+        "SELECT * FROM file_transfers WHERE messageId = :messageId AND direction = 'OUTGOING' " +
+            "ORDER BY createdAtMs DESC"
+    )
+    suspend fun getOutgoingForMessage(messageId: String): List<FileTransferEntity>
+
+    @Query(
         """
         SELECT * FROM file_transfers
         WHERE direction = 'OUTGOING'
