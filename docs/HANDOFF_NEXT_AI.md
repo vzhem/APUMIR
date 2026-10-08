@@ -18,11 +18,13 @@
 ## 2. Где лежат актуальные исходники и что увидит новый чат
 
 - В этой сессии работа велась на ветке `arena/8aa2ecbd-apumir`.
-- Release-statistics checkpoint в Arena-ветке — `9ac7ffa` (`docs(release): record v11.74.206 stable release`); этот handoff и исправления навигационных документов сохранены отдельным documentation-only commit поверх него. Для актуального branch tip всегда смотреть `git log`/`git ls-remote`, а не считать `9ac7ffa` последним commit.
+- Release-statistics checkpoint в Arena-ветке — `9ac7ffa` (`docs(release): record v11.74.206 stable release`); этот handoff и исправления навигационных документов сохранены отдельными documentation-only commits поверх него. Для актуального branch tip всегда смотреть `git log`/`git ls-remote`, а не считать `9ac7ffa` последним commit.
 - Тег `v11.74.206` указывает на commit `69e9632f378ab2f81873fbaaadd856687850f5b0` — именно этот исправленный commit прошёл финальную Android Release-сборку.
 - Ветка `main` на сервере и `origin/main` в этом checkout: `7524e51c46b9e5cc73fe2bb5808f3f3ce536b95c`, исторический `v11.74.182`. Релиз `v11.74.205` и новый `v11.74.206` были собраны из более поздних тегов/коммитов, но не синхронизированы обратно в `main`.
 - PR из Arena-ветки в `main` **не создан**. Не считать, что `main` уже содержит v11.74.206. Перед выбором `main` в новом чате владелец должен либо принять/объединить PR из Arena-ветки, либо явно выбрать другую исходную ветку. Текущая сессия не переключалась на `main` и не пушила туда.
-- Удалённый Arena-branch содержит v11.74.206 и статистику релиза; локальное рабочее дерево дополнительно содержит незакоммиченные изменения из §6. Эти локальные APK-speed изменения на удалённую ветку не попали.
+- **PR scope не только документация:** при сравнении с `main` он должен перенести стабильную цепочку v11.74.183–v11.74.206 и handoff-документы; в перепроверенном двухточечном diff это около 170 файлов. Точный PR diff до создания не подтверждён.
+- Checkout локально shallow: `.git/shallow` обрезает историю на `main` SHA и v11.74.205 commit; `git diff origin/main...HEAD` завершился `no merge base`. Не трактовать локальный `rev-list` count как полный PR scope. Перед любым PR безопасно углубить/fetch-нуть историю или сверить GitHub Compare, не делая reset/checkout и сохраняя dirty APK-speed worktree.
+- Удалённая Arena-ветка содержит v11.74.206, статистику релиза и документационные handoff-коммиты; локальное рабочее дерево дополнительно содержит незакоммиченные изменения из §6. Эти локальные APK-speed изменения на удалённую ветку не попали.
 
 ## 3. Что завершено и выпущено в v11.74.206
 
@@ -74,7 +76,7 @@
 ### P0 — чтобы новый чат на `main` не стартовал с устаревшего кода
 
 1. Сначала проверить `git status`, `main`, тег `v11.74.206` и текущий Latest; не доверять старым статичным заметкам без проверки.
-2. Синхронизировать коммиты стабильных релизов и v11.74.206 с `main` через PR/merge. PR не создан. Владелец должен явно разрешить PR/merge; до этого `main` остаётся v11.74.182.
+2. Если владелец подтверждает, что следующий чат должен видеть v11.74.206 на `main`, согласовать и открыть PR из Arena-ветки. PR не создан; он включает цепочку stable релизов v11.74.183–v11.74.206 плюс handoff docs, а не только документацию. Владелец должен явно разрешить создание PR и отдельно merge; до этого `main` остаётся v11.74.182. Сначала проверить реальный PR compare: локальный checkout shallow и не имеет доступного merge-base.
 3. Не переключать/не сбрасывать ветку с незакоммиченным локальным APK-speed кодом до его сохранения в отдельный commit/patch или до осознанного решения владельца. Сейчас он есть только в рабочем дереве.
 
 ### P1 — отдельная незавершённая задача: скорость и прогресс раздачи/приёма APK
@@ -90,7 +92,7 @@
 - `android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsViewModel.kt`
 - `android-app/app/src/test/java/com/vladimir/messenger/data/file/FileTransferReceiverTest.kt`
 - `android-app/app/src/test/java/com/vladimir/messenger/data/update/ApkUpdateTest.kt`
-- описание текущего статуса и исторические оговорки сохранены в `docs/HANDOFF_NEXT_AI.md`, `docs/AI_HANDOFF.md`, `docs/START_HERE.md` и `docs/UPDATE_SEEDING.md`; они входят в отдельный documentation-only commit, а не в release tag.
+- описание текущего статуса и исторические оговорки сохранены в `docs/HANDOFF_NEXT_AI.md`, `docs/AI_HANDOFF.md`, `docs/START_HERE.md` и `docs/UPDATE_SEEDING.md`; они входят в documentation-only commits, а не в release tag.
 
 Заявленная цель этой отдельной задачи: показывать downloaded/total, остаток, progress bar, скорость и число источников для полного APK и компактного patch; проверить лимит параллельных источников (базово было 3, общий приёмник допускает до 4). Код оценивает скорость по новым fragment payload, UI обновляет её раз в секунду; детали и ограничения — `docs/UPDATE_SEEDING.md` и текущий верхний раздел `docs/AI_HANDOFF.md`.
 
@@ -106,9 +108,9 @@
 
 На момент этой записи:
 
-- Ветка: `arena/8aa2ecbd-apumir`; удалённая ветка содержит release code, statistics и отдельный documentation-only commit с этим handoff.
+- Ветка: `arena/8aa2ecbd-apumir`; удалённая ветка содержит release code, statistics и documentation-only commits с этим handoff.
 - Release tag: `v11.74.206` → `69e9632…`; statistics checkpoint — `9ac7ffa`; handoff/docs commit идёт после него, не меняя release tag.
-- Documentation-only commit включает `HANDOFF_NEXT_AI.md`, `START_HERE.md`, `AI_HANDOFF.md`, `UPDATE_SEEDING.md`, `NEXT_AI_CHAT_BOOTSTRAP.md` и обновлённый вводный/пост-релизный блок `VERSION_STATISTICS.md`; approved release notes не изменены.
+- Documentation-only commits включают `HANDOFF_NEXT_AI.md`, `START_HERE.md`, `AI_HANDOFF.md`, `UPDATE_SEEDING.md`, `NEXT_AI_CHAT_BOOTSTRAP.md` и обновлённый вводный/пост-релизный блок `VERSION_STATISTICS.md`; approved release notes не изменены.
 - Незакоммиченные файлы — только APK-speed исходники и тесты из §5 P1; они намеренно не включены в documentation-only commit, чтобы не смешивать задачу с опубликованным retry-релизом.
 - Рабочая среда не содержит `cargo`, `rustc`, `rustfmt`, `java`, `kotlinc` и исполняемого `gradlew`; релиз собирался на GitHub Actions.
 - Не делать `git reset --hard`, `git clean -fd`, checkout другой ветки или force-push ветки. При дальнейшей работе сначала сохранить текущий незакоммиченный APK-speed diff.
