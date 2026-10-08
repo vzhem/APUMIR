@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.vladimir.messenger.data.local.AppDatabase
 import com.vladimir.messenger.data.local.dao.ChatDao
 import com.vladimir.messenger.data.local.dao.ContactDao
+import com.vladimir.messenger.data.local.dao.PeerRankDao
 import com.vladimir.messenger.data.local.dao.DirectoryDao
 import com.vladimir.messenger.data.local.dao.AvatarDao
 import com.vladimir.messenger.data.local.dao.NicknameDao
@@ -53,6 +54,8 @@ object AppModule {
                 AppDatabase.MIGRATION_23_24,
                 AppDatabase.MIGRATION_24_25,
                 AppDatabase.MIGRATION_25_26,
+                AppDatabase.MIGRATION_26_27,
+                AppDatabase.MIGRATION_27_28,
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -63,6 +66,10 @@ object AppModule {
 
     @Provides @Singleton
     fun provideContactDao(db: AppDatabase): ContactDao = db.contactDao()
+
+    /** Ранги собеседников: знак VIP у имён и золотое кольцо у аватарок. */
+    @Provides @Singleton
+    fun providePeerRankDao(db: AppDatabase): PeerRankDao = db.peerRankDao()
 
     @Provides @Singleton
     fun provideMessageDao(db: AppDatabase): MessageDao = db.messageDao()

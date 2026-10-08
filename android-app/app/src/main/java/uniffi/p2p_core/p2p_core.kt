@@ -923,6 +923,8 @@ internal interface UniffiLib : Library {
     ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_send_message(`ptr`: Pointer,`messageId`: RustBuffer.ByValue,`chatId`: RustBuffer.ByValue,`recipientId`: RustBuffer.ByValue,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_retry_message(`ptr`: Pointer,`messageId`: RustBuffer.ByValue,`chatId`: RustBuffer.ByValue,`recipientId`: RustBuffer.ByValue,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_send_message_mqtt(`ptr`: Pointer,`toNodeId`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_set_custody_enabled(`ptr`: Pointer,`enabled`: Byte,uniffi_out_err: UniffiRustCallStatus, 
@@ -1953,6 +1955,8 @@ public interface P2pCoreHandleInterface {
     
     fun `sendMessage`(`messageId`: kotlin.String, `chatId`: kotlin.String, `recipientId`: kotlin.String, `text`: kotlin.String): kotlin.Boolean
     
+    fun `retryMessage`(`messageId`: kotlin.String, `chatId`: kotlin.String, `recipientId`: kotlin.String, `text`: kotlin.String): kotlin.Boolean
+
     fun `sendMessageMqtt`(`toNodeId`: kotlin.String, `payload`: kotlin.String): kotlin.Boolean
     
     fun `setCustodyEnabled`(`enabled`: kotlin.Boolean): kotlin.Boolean
@@ -2349,6 +2353,18 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     )
     }
     
+
+    override fun `retryMessage`(`messageId`: kotlin.String, `chatId`: kotlin.String, `recipientId`: kotlin.String, `text`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_retry_message(
+        it, FfiConverterString.lower(`messageId`),FfiConverterString.lower(`chatId`),FfiConverterString.lower(`recipientId`),FfiConverterString.lower(`text`),_status)
+}
+    }
+    )
+    }
+
 
     override fun `sendMessageMqtt`(`toNodeId`: kotlin.String, `payload`: kotlin.String): kotlin.Boolean {
             return FfiConverterBoolean.lift(

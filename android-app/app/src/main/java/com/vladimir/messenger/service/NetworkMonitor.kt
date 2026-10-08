@@ -7,6 +7,8 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.diagnostics.Counters
+import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -19,6 +21,10 @@ import kotlinx.coroutines.launch
 class NetworkMonitor(private val context: Context) {
 
     private val TAG = "NetworkMonitor"
+
+    /** Тип сети для журнала: пишем только смену, а не каждый колбэк возможностей. */
+    @Volatile
+    private var lastTransport: String? = null
     private val callbackScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val connectivityManager =
@@ -28,11 +34,15 @@ class NetworkMonitor(private val context: Context) {
 
         override fun onAvailable(network: Network) {
             Log.i(TAG, "Network available: $network")
+            TransferDiagnostics.count(Counters.NETWORK_CHANGES)
+            TransferDiagnostics.record("net", "сеть появилась")
             callbackScope.launch { RustBridge.onNetworkAvailable() }
         }
 
         override fun onLost(network: Network) {
             Log.i(TAG, "Network lost: $network")
+            TransferDiagnostics.count(Counters.NETWORK_CHANGES)
+            TransferDiagnostics.recordWarning("net", "сеть пропала — ждём восстановления")
             callbackScope.launch { RustBridge.onNetworkLost() }
         }
 
@@ -44,6 +54,22 @@ class NetworkMonitor(private val context: Context) {
             val isWifi = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
             val isMobile = caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
             Log.d(TAG, "Network caps changed: internet=$hasInternet wifi=$isWifi mobile=$isMobile")
+            // В журнал «Логов» пишем только смену типа сети: возможности
+            // меняются часто, и полный поток «caps changed» его бы затопил.
+            val transport = when {
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "VPN"
+                isWifi -> "Wi-Fi"
+                isMobile -> "мобильная сеть"
+                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
+                else -> "другая"
+            }
+            if (transport != lastTransport) {
+                lastTransport = transport
+                TransferDiagnostics.record(
+                    "net",
+                    "сеть: $transport" + if (!hasInternet) ", без интернета" else "",
+                )
+            }
         }
     }
 

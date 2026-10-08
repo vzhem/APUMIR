@@ -16,6 +16,10 @@
 //   /mqtt                — НАШ MQTT-брокер (Durable Object MQTT_BRIDGE, привязка
 //                          в дашборде): единый рой для всех телефонов, без
 //                          сторонних брокеров (v11.74.7);
+//   /mqtt/health         — обычный HTTPS-ответ (не WebSocket) о мосте: жив ли,
+//                          сколько клиентов и что происходило со кадрами.
+//                          Открывается с телефона в браузере — быстрая проверка
+//                          «мост развёрнут и работает» без ожидания ConnAck;
 //   /health              — проверка живости;
 //   /vault/put, /vault/get — хранилище личности;
 //   /addrbook/put, /addrbook/get — резервные копии азбуки адресов (зашифрованы
@@ -81,6 +85,10 @@
 
 const MQTT_MAX_CLIENTS = 400;
 const MQTT_MAX_PUBLISH_BYTES = 256 * 1024;
+// Версия моста для /mqtt/health: 1 — само-брокер v11.74.7;
+// 2 — исправлен разбор длины пакета (varint), отказ MQTT 5.0, счётчики,
+// громкая ошибка разбора кадра вместо тихого снятия клиента.
+const MQTT_BRIDGE_VERSION = 2;
 
 function encLen(n) {
   const out = [];
@@ -127,6 +135,20 @@ export class MqttBridge {
     this.clients = new Set();
     this.retained = new Map(); // topic -> {topic, payload}
     this.mirror = new Set(); // р226: участники комнаты зеркала (только в инстансах "mirror:*")
+    // Счётчики здоровья моста. Нужны, чтобы по /mqtt/health с телефона было
+    // видно не только "жив", но и что именно происходило: дошли ли CONNECT,
+    // сколько раз кадр не разобрался (см. громкую ошибку в message-листенере).
+    this.stats = {
+      connects: 0,
+      connacks: 0,
+      subscribes: 0,
+      publishes_in: 0,
+      publishes_out: 0,
+      parse_errors: 0,
+      drops: 0,
+      v5_refused: 0,
+      last_error: null,
+    };
   }
 
   async fetch(request) {
@@ -135,6 +157,18 @@ export class MqttBridge {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/mirror/")) {
       return this.mirrorJoin(request, url);
+    }
+    if (url.pathname === "/mqtt/health") {
+      return json({
+        ok: true,
+        broker: "apu-mqtt-bridge",
+        bridge_version: MQTT_BRIDGE_VERSION,
+        clients: this.clients.size,
+        max_clients: MQTT_MAX_CLIENTS,
+        retained: this.retained.size,
+        subscribed: this.clients.size,
+        stats: this.stats,
+      });
     }
     if (this.clients.size >= MQTT_MAX_CLIENTS) {
       return json({ error: "broker busy" }, 503);
@@ -145,15 +179,8 @@ export class MqttBridge {
     server.binaryType = "arraybuffer";
     const client = new MqttClient(server);
     this.clients.add(client);
-    server.addEventListener("message", (event) => {
-      try {
-        const data = event.data;
-        const chunk = typeof data === "string"
-          ? new TextEncoder().encode(data)
-          : new Uint8Array(data);
-        this.feed(client, chunk);
-      } catch (_) { this.drop(client); }
-    });
+    this.stats.connects += 1;
+    server.addEventListener("message", (event) => this.onMessage(client, event.data));
     server.addEventListener("close", () => this.drop(client));
     server.addEventListener("error", () => this.drop(client));
     // rumqttc требует эхо субпротокола mqtt.
@@ -164,9 +191,40 @@ export class MqttBridge {
     });
   }
 
+  /// Один кадр от клиента. Раньше ошибка разбора молча снимала клиента, а
+  /// WebSocket оставался открытым и тихим: телефон ждал ConnAck 5 с, писал
+  /// "Network timeout" и уходил на публичные брокеры, а причина нигде не была
+  /// видна. Теперь ошибка всегда идёт через failFrame (счётчики + лог + закрытие).
+  onMessage(client, data) {
+    let chunk;
+    try {
+      chunk = typeof data === "string" ? new TextEncoder().encode(data) : new Uint8Array(data);
+    } catch (error) {
+      this.failFrame(client, error);
+      return;
+    }
+    try {
+      this.feed(client, chunk);
+    } catch (error) {
+      this.failFrame(client, error);
+    }
+  }
+
+  /// Ошибка разбора кадра: громко (лог + счётчики) и с закрытием WebSocket -
+  /// клиент должен увидеть отказ сразу, а не ждать таймаута в тишине.
+  failFrame(client, error) {
+    const message = String((error && error.message) || error).slice(0, 160);
+    this.stats.parse_errors += 1;
+    this.stats.last_error = "frame parse error: " + message;
+    console.error("MQTT bridge: frame parse error (clients=" + this.clients.size + "): " + message);
+    try { client.ws.close(1002, "mqtt frame parse error"); } catch (_) {}
+    this.drop(client);
+  }
+
   drop(client) {
     if (!this.clients.has(client)) return;
     this.clients.delete(client);
+    this.stats.drops += 1;
     if (client.will) {
       this.publish(null, client.will.topic, client.will.payload, client.will.retain);
       client.will = null;
@@ -203,15 +261,25 @@ export class MqttBridge {
     buf.set(client.buf); buf.set(chunk, client.buf.length);
     let pos = 0;
     while (pos + 2 <= buf.length) {
-      let len = 0, mult = 1, i = pos + 1, byte = 0;
+      // Length пакета MQTT - varint: 1 байт до 127, дальше 2..4 байта.
+      // Раньше тело и позиция считались как "1 + len", то есть байт самой длины
+      // в счёт не входил: тело теряло последний байт ВСЕГДА (на точном CONNECT
+      // ядра это RangeError при разборе LastWill - мост молча снимал клиента и
+      // не отвечал ConnAck), а с 128 байт начинался ещё и сдвиг всего потока.
+      let len = 0, mult = 1, i = pos + 1, byte = 0, lengthBytes = 0;
       do {
         if (i >= buf.length) { client.buf = buf.slice(pos); return; }
-        byte = buf[i++]; len += (byte & 127) * mult; mult *= 128;
-        if (mult > 128 * 128 * 128 * 2) { this.drop(client); return; }
+        byte = buf[i++]; lengthBytes += 1; len += (byte & 127) * mult; mult *= 128;
+        if (lengthBytes > 4) {
+          // Длины из 5+ байт в MQTT не бывает: поток не наш - закрываем громко.
+          this.failFrame(client, new Error("mqtt length prefix longer than 4 bytes"));
+          return;
+        }
       } while (byte & 128);
-      if (pos + 1 + len > buf.length) { client.buf = buf.slice(pos); return; }
-      this.handle(client, buf[pos], buf.slice(i, pos + 1 + len));
-      pos += 1 + len;
+      const end = i + len;
+      if (end > buf.length) { client.buf = buf.slice(pos); return; }
+      this.handle(client, buf[pos], buf.slice(i, end));
+      pos = end;
     }
     client.buf = buf.slice(pos);
   }
@@ -222,7 +290,20 @@ export class MqttBridge {
     if (type === 1) { // CONNECT
       let p = 0;
       const pnamelen = view.getUint16(p); p += 2 + pnamelen; // "MQTT"
-      p += 1; // level
+      const level = body[p]; p += 1;
+      if (level !== 3 && level !== 4) {
+        // MQTT 5.0 мост не разбирает (у v5 другой формат CONNACK и свойства
+        // в PUBLISH). Отвечаем ПРАВИЛЬНЫМ для v5 отказом 0x84 и закрываем:
+        // так клиент сразу видит причину, а не висит без ответа.
+        try {
+          client.send(new Uint8Array([0x20, 0x03, 0x00, 0x84, 0x00]));
+          client.ws.close(1000, "mqtt v5 unsupported");
+        } catch (_) {}
+        this.stats.v5_refused += 1;
+        this.stats.last_error = "MQTT 5.0 CONNECT refused (bridge speaks 3.1.1)";
+        this.clients.delete(client);
+        return;
+      }
       const flags = body[p]; p += 1;
       p += 2; // keepalive
       const idlen = view.getUint16(p); p += 2 + idlen; // clientId
@@ -232,6 +313,7 @@ export class MqttBridge {
         client.will = { topic: wtopic, payload: wpay, retain: (flags & 32) !== 0 };
       }
       client.send(new Uint8Array([0x20, 0x02, 0x00, 0x00])); // CONNACK ok
+      this.stats.connacks += 1;
     } else if (type === 3) { // PUBLISH
       const qos = (first >> 1) & 3;
       const retain = (first & 1) !== 0;
@@ -245,6 +327,7 @@ export class MqttBridge {
       }
       const payload = body.slice(p);
       if (payload.length > MQTT_MAX_PUBLISH_BYTES) return;
+      this.stats.publishes_in += 1;
       this.publish(client, topic, payload, retain);
     } else if (type === 8) { // SUBSCRIBE
       const pid = [body[0], body[1]];
@@ -265,6 +348,7 @@ export class MqttBridge {
       }
       const out = [0x90, ...encLen(2 + granted.length), pid[0], pid[1], ...granted];
       client.send(new Uint8Array(out));
+      this.stats.subscribes += 1;
     } else if (type === 12) { // PINGREQ
       client.send(new Uint8Array([0xd0, 0x00]));
     } else if (type === 14) { // DISCONNECT
@@ -285,7 +369,11 @@ export class MqttBridge {
     for (const c of this.clients) {
       if (c === from) continue; // себе эхо не шлем
       for (const filter of c.subs) {
-        if (topicMatch(filter, topic)) { c.send(buildPublish(topic, payload, false)); break; }
+        if (topicMatch(filter, topic)) {
+          c.send(buildPublish(topic, payload, false));
+          this.stats.publishes_out += 1;
+          break;
+        }
       }
     }
   }
@@ -384,6 +472,15 @@ export default {
 
     // MQTT-мост: важен только заголовок Upgrade (rumqttc сам выбирает путь).
     // Обычные запросы (приглашения, ссылки, обновление) не задеваем.
+    // Здоровье MQTT-моста: обычный HTTPS-запрос (не WebSocket). Нужен, чтобы
+    // телефон мог ДО подключения проверить, что мост жив и развёрнут (без
+    // ожидания 20 с на ConnAck), а владелец - открыть в браузере на телефоне.
+    if (path === "/mqtt/health") {
+      if (!env.MQTT_BRIDGE) return json({ ok: false, error: "MQTT_BRIDGE binding is not configured" }, 501);
+      const healthStub = env.MQTT_BRIDGE.idFromName("mqtt-bridge");
+      return env.MQTT_BRIDGE.get(healthStub).fetch(request);
+    }
+
     if ((request.headers.get("Upgrade") || "").toLowerCase() === "websocket") {
       if (!env.MQTT_BRIDGE) {
         return json({ error: "MQTT_BRIDGE binding is not configured" }, 501);

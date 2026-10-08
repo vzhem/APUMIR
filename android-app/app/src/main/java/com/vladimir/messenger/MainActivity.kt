@@ -22,6 +22,8 @@ import com.vladimir.messenger.data.link.ShortLinks
 import com.vladimir.messenger.service.CoreServerService
 import com.vladimir.messenger.service.UpdateChecker
 import com.vladimir.messenger.service.UpdateNotifier
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.update.UpdateDialog
 import com.vladimir.messenger.MainViewModel
 import com.vladimir.messenger.ui.navigation.Screen
@@ -61,6 +63,8 @@ interface MainActivityEntryPoint {
     fun updateChecker(): UpdateChecker
     fun updateNotifier(): UpdateNotifier
     fun linkShortener(): LinkShortener
+    /** Рассылка своего ранга собеседникам (знак VIP у имени). */
+    fun peerRankBroadcaster(): com.vladimir.messenger.data.rank.PeerRankBroadcaster
 }
 
 @AndroidEntryPoint
@@ -130,6 +134,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         handleNotificationTap(intent)
         handleUpdateNotificationTap(intent)
+        broadcastPeerRankIfNeeded()
         handleDeepLinkIntent(intent)
     }
 
@@ -165,6 +170,31 @@ class MainActivity : ComponentActivity() {
             intent.removeExtra(com.vladimir.messenger.service.NotificationHelper.EXTRA_CHAT_ID)
             intent.removeExtra(com.vladimir.messenger.service.NotificationHelper.EXTRA_TOPIC_ID)
         }
+    }
+
+    /**
+     * Свой ранг - собеседникам (знак VIP у имени на их стороне).
+     *
+     * Рассылка сама решает, нужна ли она сейчас: ранг изменился с прошлого раза
+     * или прошла неделя (см. `RankBroadcastPrefs`). Вызов на старте, а не в
+     * `Application`: у приложения нет Hilt-инъекции, а этот вход уже есть.
+     * Владелец ждёт появления знака у собеседников, поэтому рассылка не должна
+     * зависеть от того, открывал ли он уведомление об обновлении.
+     */
+    private fun broadcastPeerRankIfNeeded() {
+        runCatching {
+            val entryPoint = EntryPointAccessors.fromApplication(
+                applicationContext,
+                MainActivityEntryPoint::class.java,
+            )
+            val broadcaster = entryPoint.peerRankBroadcaster()
+            kotlinx.coroutines.CoroutineScope(
+                kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO,
+            ).launch {
+                runCatching { broadcaster.broadcastIfNeeded() }
+                    .onFailure { Log.w(TAG_RANK, "peer rank broadcast failed: ${it.message}") }
+            }
+        }.onFailure { Log.w(TAG_RANK, "peer rank broadcast unavailable: ${it.message}") }
     }
 
     /**
@@ -408,7 +438,7 @@ class MainActivity : ComponentActivity() {
                 Log.d("MainActivity", "Checking dialog: pendingContact=${pendingContact != null}")
                 
                 if (pendingContact != null) {
-                    androidx.compose.material3.AlertDialog(
+                    ApuSettingsDialog(
                         onDismissRequest = { pendingContactInfo = null },
                         title = { androidx.compose.material3.Text("Добавить контакт?") },
                         text = {
@@ -417,7 +447,9 @@ class MainActivity : ComponentActivity() {
                             )
                         },
                         confirmButton = {
-                            androidx.compose.material3.TextButton(onClick = {
+                            ApuTextAction(
+                                label = "Добавить",
+                                onClick = {
                                 val (nodeId, publicKey, displayName) = pendingContact
                                 pendingContactInfo = null
 
@@ -435,14 +467,11 @@ class MainActivity : ComponentActivity() {
                                         Log.e("MainActivity", "Failed to add contact: ${result.exceptionOrNull()?.message}")
                                     }
                                 }
-                            }) {
-                                androidx.compose.material3.Text("Добавить")
-                            }
+                            },
+                            )
                         },
                         dismissButton = {
-                            androidx.compose.material3.TextButton(onClick = { pendingContactInfo = null }) {
-                                androidx.compose.material3.Text("Отмена")
-                            }
+                            ApuTextAction(label = "Отмена", onClick = { pendingContactInfo = null })
                         }
                     )
                 }
@@ -455,22 +484,24 @@ class MainActivity : ComponentActivity() {
                     val prompt = remember(pendingGroupLink) {
                         invitePromptFor(GroupInviteLinks.parseTarget(pendingGroupLink))
                     }
-                    androidx.compose.material3.AlertDialog(
+                    ApuSettingsDialog(
                         onDismissRequest = { pendingGroupInviteLink = null },
                         title = { androidx.compose.material3.Text(prompt.title) },
                         text = { androidx.compose.material3.Text(prompt.body) },
                         confirmButton = {
-                            androidx.compose.material3.TextButton(onClick = {
+                            ApuTextAction(
+                                label = prompt.confirm,
+                                onClick = {
                                 pendingGroupInviteLink = null
                                 pendingGroupInvite = pendingGroupLink
-                            }) {
-                                androidx.compose.material3.Text(prompt.confirm)
-                            }
+                            },
+                            )
                         },
                         dismissButton = {
-                            androidx.compose.material3.TextButton(onClick = { pendingGroupInviteLink = null }) {
-                                androidx.compose.material3.Text("Отмена")
-                            }
+                            ApuTextAction(
+                                label = "Отмена",
+                                onClick = { pendingGroupInviteLink = null },
+                            )
                         }
                     )
                 }
@@ -563,7 +594,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-
     private fun checkForUpdates(manual: Boolean = false) {
         lastUpdateCheckAtMs = System.currentTimeMillis()
         lifecycleScope.launch {
@@ -599,5 +629,10 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requestNotificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
+    }
+
+    private companion object {
+        /** Тег журнала передачи ранга: ищем по нему при разборе на телефоне. */
+        const val TAG_RANK = "PeerRank"
     }
 }

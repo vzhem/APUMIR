@@ -1,6 +1,5 @@
 package com.vladimir.messenger.ui.components
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -26,7 +25,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,8 +35,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -87,6 +83,8 @@ fun PeerProfileSheet(
     antiRatingUntilMs: Long = 0,
     /** Стоит ли МОЙ анти-рейтинг этому профилю. */
     antiRatingMine: Boolean = false,
+    /** Собеседник из элиты: знак VIP у имени и золотое кольцо у аватарки. */
+    vip: Boolean = false,
     /** Нажатие на кнопку анти-рейтинга; null - показываем только счётчик. */
     onAntiRatingClick: (() -> Unit)? = null,
     onRename: (() -> Unit)? = null,
@@ -94,12 +92,11 @@ fun PeerProfileSheet(
     onCopyId: (() -> Unit)? = null,
 ) {
     val avatars by AvatarStore.avatars.collectAsState()
-    val bitmap = AvatarBitmaps.rememberAvatar(avatars[contactId])
 
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Закрыть", color = ApuBubbleMutedColor) }
+            ApuTextAction(label = "Закрыть", onClick = onDismiss)
         },
         title = null,
         text = {
@@ -108,35 +105,42 @@ fun PeerProfileSheet(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 // Аватар: присланная картинка, иначе буквы имени на круге.
-                val shown = bitmap
-                if (shown != null) {
-                    Image(
-                        bitmap = shown.asImageBitmap(),
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier
-                            .size(88.dp)
-                            .clip(CircleShape)
-                            .border(
+                // У элиты вокруг него объёмное золотое кольцо — то же, что в
+                // списке чатов и в сообщениях групп.
+                PeerAvatar(
+                    name = name,
+                    avatarB64 = avatars[contactId],
+                    vip = vip,
+                    size = 88.dp,
+                    modifier = Modifier.then(
+                        if (vip) {
+                            Modifier
+                        } else {
+                            Modifier.border(
                                 width = 2.dp,
                                 color = MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
                                 shape = CircleShape,
-                            ),
-                    )
-                } else {
-                    Avatar(name = name, size = 88)
-                }
+                            )
+                        },
+                    ),
+                )
 
                 Spacer(Modifier.height(12.dp))
-                Text(
-                    name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = ApuBubbleTextColor,
-                    textAlign = TextAlign.Center,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = ApuBubbleTextColor,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (vip) {
+                        Spacer(Modifier.width(6.dp))
+                        ApuVipBadge()
+                    }
+                }
                 if (username.isNotBlank()) {
                     Text(
                         "@" + username.removePrefix("@"),
@@ -311,23 +315,17 @@ fun PeerProfileSheet(
                 if (contactId.isNotBlank()) {
                     var idShown by remember { mutableStateOf(false) }
                     if (!idShown) {
-                        TextButton(onClick = { idShown = true }) {
-                            Text(
-                                "Показать адрес узла",
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                        }
+                        ApuTextAction(label = "Показать адрес узла", onClick = { idShown = true })
                     } else {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-                                .border(
-                                    width = 1.dp,
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
-                                    shape = RoundedCornerShape(14.dp),
-                                )
+                                // Владелец 2026-10-07: карточка профиля — та же
+                                // премиальная поверхность, что и остальные разделы.
+                                .apuPremiumLift(5.dp, RoundedCornerShape(14.dp))
+                                .apuBubbleSurface(shape = RoundedCornerShape(14.dp))
+                                .apuPremiumThread(shape = RoundedCornerShape(14.dp), inset = 14.dp)
+                                .apuPremiumGloss(RoundedCornerShape(14.dp), intensity = 0.4f, topFraction = 0.55f)
                                 .then(
                                     if (onCopyId != null) {
                                         Modifier.clickable(onClick = onCopyId)
@@ -372,18 +370,18 @@ fun PeerProfileSheet(
                         horizontalArrangement = Arrangement.SpaceEvenly,
                     ) {
                         if (onCall != null) {
-                            TextButton(onClick = onCall) {
-                                Icon(Icons.Default.Call, contentDescription = null)
-                                Spacer(Modifier.width(6.dp))
-                                Text("Позвонить")
-                            }
+                            ApuTextAction(
+                                label = "Позвонить",
+                                onClick = onCall,
+                                icon = Icons.Default.Call,
+                            )
                         }
                         if (onRename != null) {
-                            TextButton(onClick = onRename) {
-                                Icon(Icons.Default.Edit, contentDescription = null)
-                                Spacer(Modifier.width(6.dp))
-                                Text("Переименовать")
-                            }
+                            ApuTextAction(
+                                label = "Переименовать",
+                                onClick = onRename,
+                                icon = Icons.Default.Edit,
+                            )
                         }
                     }
                 }

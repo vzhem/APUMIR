@@ -21,8 +21,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -52,6 +50,9 @@ import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleShape
 import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
+import com.vladimir.messenger.ui.components.ApuGoldInk
 
 /**
  * Локальное имя и сохранённый @никнейм контакта.
@@ -232,22 +233,16 @@ private fun RenameContactContent(
                 },
             )
 
-            Button(
+            ApuPremiumContentButton(
                 onClick = onRenameClicked,
+                style = DiagnosticsActionStyle.PRIMARY,
                 enabled = canSave,
-                shape = ApuBubbleShape,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                    disabledContainerColor = ApuBubbleMutedColor.copy(alpha = 0.22f),
-                    disabledContentColor = ApuBubbleMutedColor.copy(alpha = 0.68f),
-                ),
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 if (uiState.isLoading) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(19.dp),
-                        color = MaterialTheme.colorScheme.onPrimary,
+                        color = ApuGoldInk,
                         strokeWidth = 2.dp,
                     )
                 } else {

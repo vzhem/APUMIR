@@ -31,6 +31,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -185,19 +187,20 @@ fun ShareProfileScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Button(
+                ApuPremiumContentButton(
                     onClick = {
                         clipboardManager.setText(AnnotatedString(uiState.shareLink))
                         copied = true
                     },
-                    modifier = Modifier.weight(1f)
+                    style = DiagnosticsActionStyle.PRIMARY,
+                    modifier = Modifier.weight(1f),
                 ) {
                     Icon(Icons.Default.ContentCopy, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text(if (copied) "Скопировано!" else "Копировать")
                 }
 
-                Button(
+                ApuPremiumContentButton(
                     onClick = {
                         val shareText = """
                             Добавь меня в APU.
@@ -219,7 +222,8 @@ fun ShareProfileScreen(
                         val shareIntent = Intent.createChooser(sendIntent, null)
                         context.startActivity(shareIntent)
                     },
-                    modifier = Modifier.weight(1f)
+                    style = DiagnosticsActionStyle.PRIMARY,
+                    modifier = Modifier.weight(1f),
                 ) {
                     Icon(Icons.Default.Share, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
@@ -227,12 +231,13 @@ fun ShareProfileScreen(
                 }
             }
 
-            OutlinedButton(
+            ApuPremiumContentButton(
                 onClick = {
                     clipboardManager.setText(AnnotatedString(uiState.alternativeLink))
                     copied = true
                 },
-                modifier = Modifier.fillMaxWidth()
+                style = DiagnosticsActionStyle.QUIET,
+                modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
                     if (uiState.alternativeLink.contains("/s/")) "Скопировать короткую ссылку"

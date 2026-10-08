@@ -9,6 +9,7 @@ package com.vladimir.messenger.ui.screens.groups
 // выбранной группы идут вертикальным списком, каждая в своём пузыре,
 // и у каждой — бейдж непрочитанных. Нажатие на тему открывает ленту.
 
+import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
 import com.vladimir.messenger.ui.components.ApuNotificationBadge
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
@@ -17,6 +18,8 @@ import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuAntiRatingInlineBadge
+import com.vladimir.messenger.ui.components.ApuTextAction
+import com.vladimir.messenger.ui.components.PeerAvatar
 import com.vladimir.messenger.ui.components.ApuCircleCheckIndicator
 import com.vladimir.messenger.ui.components.ApuMessageModerationDialog
 import com.vladimir.messenger.ui.components.ApuPollCard
@@ -30,6 +33,9 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
+import com.vladimir.messenger.ui.components.apuPremiumGloss
+import com.vladimir.messenger.ui.components.apuPremiumLift
+import com.vladimir.messenger.ui.components.apuPremiumThread
 import com.vladimir.messenger.ui.components.swipeBack
 import com.vladimir.messenger.ui.components.swipeToReply
 import androidx.compose.foundation.layout.Box
@@ -84,12 +90,10 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
@@ -100,7 +104,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.Image
@@ -150,6 +153,8 @@ import com.vladimir.messenger.util.ImageLinkDetector
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -321,6 +326,8 @@ fun GroupChatScreen(
             name = uiState.inspectedPeerName.ifBlank { "Участник " + inspectedPeerId.takeLast(4) },
             contactId = inspectedPeerId,
             isOnline = true,
+            // Элита в группе: знак и кольцо в карточке участника тоже.
+            vip = inspectedPeerId.lowercase() in uiState.vipNodeIds,
             heartCount = uiState.inspectedPeerHearts,
             heartMine = uiState.inspectedPeerHeartMine,
             onHeartClick = if (!isSelfPeer) {
@@ -667,11 +674,13 @@ fun GroupChatScreen(
                     }
                 },
                 navigationIcon = {
-                    TextButton(onClick = {
-                        // Из ленты темы «Назад» возвращает к списку тем,
-                        // а не сразу из группы.
+                    ApuTextAction(
+                        label = "Назад",
+                        onClick = {
+
                         if (hasTopics && showFeed) showFeed = false else onBackClick()
-                    }) { Text("Назад") }
+                    },
+                    )
                 },
                 actions = {
                     IconButton(onClick = { onOpenAdmin(uiState.groupId) }) {
@@ -777,6 +786,7 @@ fun GroupChatScreen(
                                     .fillMaxWidth()
                                     .clickable { showNewTopic = true },
                                 shape = RoundedCornerShape(18.dp),
+                                premium = 6.dp,
                             ) {
                                 Row(
                                     modifier = Modifier.padding(12.dp),
@@ -802,7 +812,10 @@ fun GroupChatScreen(
                 val pinnedTopicName = uiState.topics
                     .firstOrNull { it.id == uiState.selectedTopicId }
                     ?.name
-                ApuBubbleCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+                ApuBubbleCard(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                    premium = 6.dp,
+                ) {
                     Column(modifier = Modifier.padding(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Filled.PushPin, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -892,6 +905,7 @@ fun GroupChatScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 8.dp, vertical = 4.dp),
+                    premium = 6.dp,
                 ) {
                     Row(
                         modifier = Modifier
@@ -967,12 +981,11 @@ fun GroupChatScreen(
                 // и здесь может быть не вся ветка. Кнопка тянет более ранние.
                 if (isChannel && uiState.moreComments > 0) {
                     item(key = "more-comments") {
-                        TextButton(
+                        ApuTextAction(
+                            label = "Показать ещё " + uiState.moreComments,
                             onClick = { viewModel.loadOlderComments() },
                             modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Text("Показать ещё " + uiState.moreComments)
-                        }
+                        )
                     }
                 }
                 items(uiState.messages, key = { it.id }) { message ->
@@ -1013,6 +1026,7 @@ fun GroupChatScreen(
                     MessageBubble(
                         message = message,
                         senderName = resolvedSenderName,
+                        senderVip = message.senderId.lowercase() in uiState.vipNodeIds,
                         senderAntiCount = uiState.antiRatings[message.senderId] ?: 0,
                         senderAntiWarning = uiState.antiWarnings.containsKey(message.senderId),
                         canModerate = uiState.canModerate,
@@ -1133,13 +1147,11 @@ fun GroupChatScreen(
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xFFF5F7FA).copy(alpha = 0.96f))
-                        .border(
-                            1.dp,
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.4f),
-                            RoundedCornerShape(16.dp),
-                        )
+                        // Владелец 2026-10-07: фирменная поверхность и у
+                        // «служебных» пилюль ленты — подъём, золотая нить.
+                        .apuPremiumLift(5.dp, RoundedCornerShape(16.dp))
+                        .apuBubbleSurface(shape = RoundedCornerShape(16.dp))
+                        .apuPremiumThread(shape = RoundedCornerShape(16.dp), inset = 14.dp)
                         .clickable {
                             feedScope.launch {
                                 feedListState.animateScrollToItem(lastIndex.coerceAtLeast(0))
@@ -1161,14 +1173,11 @@ fun GroupChatScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(18.dp))
-                        // Раунд 266: фирменная светлая подложка вместо серой.
-                        .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-                        .border(
-                            1.dp,
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                            RoundedCornerShape(18.dp),
-                        )
+                        // Раунд 266 + 2026-10-07: фирменный премиальный пузырь.
+                        .apuPremiumLift(4.dp)
+                        .apuBubbleSurface()
+                        .apuPremiumThread(inset = 16.dp)
+                        .apuPremiumGloss(intensity = 0.4f, topFraction = 0.55f)
                         .padding(6.dp),
                 ) {
                     // р249: «печатает…» в группе - та же строка, что и в личке,
@@ -1219,7 +1228,8 @@ fun GroupChatScreen(
                                     )
                                 }
                             }
-                            TextButton(
+                            ApuTextAction(
+                                label = "GIF",
                                 onClick = {
                                     if (uiState.canAttach) {
                                         showGifCatalog = true
@@ -1232,36 +1242,18 @@ fun GroupChatScreen(
                                     }
                                 },
                                 enabled = !uiState.isPreparingFile && !uiState.sending,
-                            ) {
-                                Text(
-                                    "GIF",
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (uiState.canAttach) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
-                                )
-                            }
+                            )
                         }
                     }
-                    OutlinedTextField(
+                    ApuBubbleField(
                         value = uiState.draft,
                         onValueChange = { viewModel.onDraftChanged(it) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .onFocusChanged { inputFocused = it.isFocused },
                         placeholder = { Text("Сообщение") },
-                        shape = RoundedCornerShape(18.dp),
                         minLines = 1,
                         maxLines = 6,
-                        colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color(0xFF1E2430),
-                            unfocusedTextColor = Color(0xFF1E2430),
-                            focusedContainerColor = Color.White,
-                            unfocusedContainerColor = Color.White,
-                            focusedBorderColor = ApuBubbleAccentColor.copy(alpha = 0.6f),
-                            unfocusedBorderColor = ApuBubbleAccentColor.copy(alpha = 0.35f),
-                            cursorColor = ApuBubbleAccentColor,
-                            focusedPlaceholderColor = Color(0xFF5A6472),
-                            unfocusedPlaceholderColor = Color(0xFF5A6472),
-                        ),
                     )
                 }
                 Spacer(Modifier.height(6.dp))
@@ -1274,34 +1266,15 @@ fun GroupChatScreen(
                 val slowWaitSeconds = (uiState.slowModeWaitMs + 999L) / 1000L
                 val canSend = (uiState.draft.isNotBlank() || uiState.stagedFile != null) &&
                     !uiState.sending && !uiState.isPreparingFile && slowWaitSeconds <= 0L
-                TextButton(
-                    enabled = canSend,
+                ApuTextAction(
+                    label = if (slowWaitSeconds > 0L) "Подождите $slowWaitSeconds с" else "Отправить",
                     onClick = {
-                        // р237: черновик чистит сама модель после успешной отправки.
+
                         viewModel.send(uiState.draft)
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(
-                            if (canSend) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surface.copy(alpha = 0.55f)
-                        )
-                        .border(
-                            1.dp,
-                            if (canSend) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                            RoundedCornerShape(18.dp),
-                        )
-                        .padding(vertical = 8.dp),
-                ) {
-                    Text(
-                        // р250: вместо «Отправить» - обратный отсчёт паузы.
-                        if (slowWaitSeconds > 0L) "Подождите $slowWaitSeconds с" else "Отправить",
-                        fontWeight = FontWeight.Bold,
-                        color = if (canSend) Color.White else Color(0xFF9AA3AF),
-                    )
-                }
+                    enabled = canSend,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 // р250: включённый режим объясняем словами - иначе кажется,
                 // что приложение «не пускает» без причины.
                 if (uiState.slowModeSeconds > 0) {
@@ -1318,7 +1291,6 @@ fun GroupChatScreen(
 
     }
     }
-
 
     // Раунд 143: список заявок поверх экрана (как в привычном мессенджере):
     // поиск-пузырь, прокрутка, «Принять в группу» / «Отклонить».
@@ -1411,10 +1383,13 @@ private fun GroupRail(
     val storeAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
         .collectAsState()
     LazyColumn(
+        // Владелец 2026-10-07: колонка значков — тоже часть общего набора:
+        // та же подложка, что у строк и панелей, с золотой нитью по кромке.
         modifier = Modifier
             .width(76.dp)
             .fillMaxHeight()
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.55f)),
+            .apuBubbleSurface(color = Color(0xFFF5F7FA).copy(alpha = 0.72f))
+            .apuPremiumThread(inset = 10.dp),
         contentPadding = PaddingValues(vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1499,10 +1474,12 @@ private fun TopicRail(
     onTopicClick: (String) -> Unit,
 ) {
     LazyColumn(
+        // Та же колонка-подложка, что у значков групп: один стиль на обе.
         modifier = Modifier
             .width(76.dp)
             .fillMaxHeight()
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.55f)),
+            .apuBubbleSurface(color = Color(0xFFF5F7FA).copy(alpha = 0.72f))
+            .apuPremiumThread(inset = 10.dp),
         contentPadding = PaddingValues(vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1566,13 +1543,11 @@ private fun JoinRequestsBanner(count: Int, expanded: Boolean, onClick: () -> Uni
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.94f))
-            .border(
-                1.dp,
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                RoundedCornerShape(18.dp),
-            )
+            // Владелец 2026-10-07: баннер заявок — в том же премиальном слое.
+            .apuPremiumLift(5.dp)
+            .apuBubbleSurface(color = Color(0xFFF5F7FA).copy(alpha = 0.94f))
+            .apuPremiumThread(inset = 16.dp)
+            .apuPremiumGloss(intensity = 0.45f, topFraction = 0.55f)
             .clickable { onClick() }
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
@@ -1696,12 +1671,13 @@ private fun JoinRequestRow(
         }
         Spacer(Modifier.height(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(onClick = { onDecide(request.nodeId, true) }) {
+            ApuPremiumContentButton(
+                onClick = { onDecide(request.nodeId, true) },
+                style = DiagnosticsActionStyle.PRIMARY,
+            ) {
                 Text("Принять в группу")
             }
-            TextButton(onClick = { onDecide(request.nodeId, false) }) {
-                Text("Отклонить", color = MaterialTheme.colorScheme.primary)
-            }
+            ApuTextAction(label = "Отклонить", onClick = { onDecide(request.nodeId, false) })
         }
     }
 }
@@ -1728,6 +1704,7 @@ private fun TopicBubble(topic: TopicSummary, onClick: () -> Unit) {
             .fillMaxWidth()
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(18.dp),
+        premium = 6.dp,
     ) {
         Row(
             modifier = Modifier.padding(10.dp),
@@ -1830,6 +1807,11 @@ private fun MessageBubble(
     // Картинки и гифки в темах показываем так же, как в личном чате.
     message: MessageEntity,
     senderName: String,
+    /**
+     * Автор сообщения — элита: у аватарки объёмное золотое кольцо. Ранг он
+     * сообщил сам конвертом APURANK1, из базы его взять неоткуда.
+     */
+    senderVip: Boolean = false,
     senderAntiCount: Int = 0,
     senderAntiWarning: Boolean = false,
     canModerate: Boolean = false,
@@ -1935,6 +1917,17 @@ private fun MessageBubble(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.clickable { onOpenAuthorProfile() },
                     ) {
+                        // Аватарка автора: у элиты — в объёмном золотом кольце.
+                        // В группе это единственное место, где видно лицо
+                        // человека, поэтому знак элиты стоит именно здесь.
+                        val senderAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
+                            .collectAsState()
+                        PeerAvatar(
+                            name = senderName,
+                            avatarB64 = senderAvatars[message.senderId],
+                            vip = senderVip,
+                            size = 24.dp,
+                        )
                         Text(
                             senderName,
                             style = MaterialTheme.typography.labelMedium,
@@ -2246,12 +2239,11 @@ private fun NewTopicDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                OutlinedTextField(
+                ApuBubbleField(
                     value = name,
                     onValueChange = { name = it },
                     label = { Text("Название темы") },
                     singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 // Раунд 258: превью значка «подпрыгивает» при смене, как в Telegram.
@@ -2353,12 +2345,13 @@ private fun NewTopicDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                enabled = name.isNotBlank(),
+            ApuTextAction(
+                label = confirmLabel,
                 onClick = { onCreate(name, icon) },
-            ) { Text(confirmLabel) }
+                enabled = name.isNotBlank(),
+            )
         },
-        dismissButton = { TextButton(onDismiss) { Text("Отмена") } },
+        dismissButton = { ApuTextAction(label = "Отмена", onClick = onDismiss) },
     )
 }
 

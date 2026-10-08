@@ -46,7 +46,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -318,9 +317,10 @@ fun GroupFileCard(
             )
         }
         if (transfer != null && (transfer.state == "FAILED" || state.stalled) && !isFromMe) {
-            TextButton(onClick = state.onDownload, contentPadding = PaddingValues(0.dp)) {
-                Text(if (state.stalled) "Спросить у другого" else "Скачать снова", style = MaterialTheme.typography.labelMedium, color = ApuBubbleAccentColor)
-            }
+            ApuTextAction(
+                label = if (state.stalled) "Спросить у другого" else "Скачать снова",
+                onClick = state.onDownload,
+            )
         }
     }
         // Раунд 168: «три точки» в правом верхнем углу карточки; тап -

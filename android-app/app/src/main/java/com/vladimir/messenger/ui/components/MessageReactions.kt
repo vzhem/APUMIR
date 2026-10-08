@@ -20,10 +20,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -169,7 +167,7 @@ fun ReactionPickerDialog(
     myEmoji: String? = null,
     onRemove: (() -> Unit)? = null,
 ) {
-    AlertDialog(
+    ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text("Реакция") },
         text = {
@@ -189,10 +187,10 @@ fun ReactionPickerDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Закрыть") }
+            ApuTextAction(label = "Закрыть", onClick = onDismiss)
         },
         dismissButton = if (myEmoji != null && onRemove != null) {
-            { TextButton(onClick = onRemove) { Text("Убрать реакцию") } }
+            { ApuTextAction(label = "Убрать реакцию", onClick = onRemove) }
         } else {
             null
         },

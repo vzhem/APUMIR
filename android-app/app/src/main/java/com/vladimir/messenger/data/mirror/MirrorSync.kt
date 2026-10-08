@@ -70,6 +70,8 @@ data class MirrorRow(
     val replyToId: String = "",
     val replyAuthor: String = "",
     val replyText: String = "",
+    /** Explicit user resend; the active phone refreshes its native relay TTL. */
+    val manualRetry: Boolean = false,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("id", id)
@@ -84,6 +86,7 @@ data class MirrorRow(
         .put("reply_to", replyToId)
         .put("reply_author", replyAuthor)
         .put("reply_text", replyText)
+        .put("manual_retry", if (manualRetry) 1 else 0)
 
     companion object {
         fun fromJson(o: JSONObject): MirrorRow = MirrorRow(
@@ -99,6 +102,7 @@ data class MirrorRow(
             replyToId = o.optString("reply_to"),
             replyAuthor = o.optString("reply_author"),
             replyText = o.optString("reply_text"),
+            manualRetry = o.optInt("manual_retry") == 1,
         )
     }
 }
@@ -472,6 +476,10 @@ object MirrorEnvelopes {
 
     fun isSafe(text: String): Boolean =
         isServiceAck(text) ||
+            // Ранг собеседника (р246): второй телефон той же личности своего
+            // движка не имеет, поэтому о чужом ранге он узнаёт только отсюда -
+            // без этого знак VIP стоял бы лишь на активном устройстве.
+            com.vladimir.messenger.data.rank.RankWire.isRankPacket(text) ||
         com.vladimir.messenger.data.group.GroupWire.isGroupPacket(text) ||
             ReactionWire.isReactionPacket(text) ||
             text.startsWith(MessageDeletionRepository.PREFIX + "|") ||

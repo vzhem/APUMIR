@@ -22,10 +22,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -127,9 +124,7 @@ fun ApuPollCard(
                 modifier = Modifier.weight(1f),
             )
             if (canClose && !poll.closed) {
-                TextButton(onClick = onClose) {
-                    Text("Закрыть опрос", color = ApuSettingsDangerColor)
-                }
+                ApuTextAction(label = "Закрыть опрос", onClick = onClose)
             }
         }
         // Кто как проголосовал: только в открытом опросе, и только тех, чей
@@ -295,22 +290,20 @@ fun PollDraftFields(
     problem: String? = null,
 ) {
     Column(modifier = modifier) {
-        OutlinedTextField(
+        ApuBubbleField(
             value = state.question,
             onValueChange = { state.question = it },
             label = { Text("Вопрос") },
-            shape = RoundedCornerShape(14.dp),
             modifier = Modifier.fillMaxWidth(),
             maxLines = 3,
         )
         Spacer(Modifier.height(8.dp))
         state.options.forEachIndexed { index, text ->
             Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(
+                ApuBubbleField(
                     value = text,
                     onValueChange = { state.options[index] = it },
                     label = { Text("Вариант ${index + 1}") },
-                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.weight(1f),
                     singleLine = true,
                 )
@@ -318,12 +311,11 @@ fun PollDraftFields(
             Spacer(Modifier.height(6.dp))
         }
         if (state.options.size < GroupWire.MAX_POLL_OPTIONS) {
-            TextButton(
+            ApuTextAction(
+                label = "+ Добавить вариант",
                 onClick = { state.options.add("") },
                 modifier = Modifier.align(Alignment.Start),
-            ) {
-                Text("+ Добавить вариант")
-            }
+            )
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -331,7 +323,7 @@ fun PollDraftFields(
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyMedium,
             )
-            Switch(checked = state.anonymous, onCheckedChange = { state.anonymous = it })
+            ApuPremiumSwitch(checked = state.anonymous, onCheckedChange = { state.anonymous = it })
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -339,7 +331,7 @@ fun PollDraftFields(
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyMedium,
             )
-            Switch(checked = state.multiChoice, onCheckedChange = { state.multiChoice = it })
+            ApuPremiumSwitch(checked = state.multiChoice, onCheckedChange = { state.multiChoice = it })
         }
         Text(
             "Анонимный опрос показывает только числа: кто как проголосовал, не видно никому.",
@@ -371,19 +363,20 @@ fun CreatePollDialog(
             PollDraftFields(state = state, problem = problem)
         },
         confirmButton = {
-            TextButton(
+            ApuTextAction(
+                label = "Создать",
                 onClick = {
                     val issue = state.problem()
                     if (issue != null) {
                         problem = issue
-                        return@TextButton
+                        return@ApuTextAction
                     }
                     state.draft()?.let(onCreate)
                 },
-            ) { Text("Создать") }
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         },
     )
 }

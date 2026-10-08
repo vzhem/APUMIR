@@ -371,7 +371,7 @@ private fun StickerSection(
     // Раунд 174: подтверждение удаления стикера из библиотеки и сети.
     var removeCandidate by remember { mutableStateOf<com.vladimir.messenger.data.sticker.StickerLibrary.StickerEntry?>(null) }
     if (removeCandidate != null) {
-        androidx.compose.material3.AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { removeCandidate = null },
             title = { Text("Удалить стикер?") },
             text = {
@@ -380,20 +380,18 @@ private fun StickerSection(
                 )
             },
             confirmButton = {
-                androidx.compose.material3.TextButton(
+                ApuTextAction(
+                    label = "Удалить",
                     onClick = {
                         val entry = removeCandidate
                         removeCandidate = null
                         if (entry != null) onRemoveSticker?.invoke(entry)
                     },
-                ) {
-                    Text("Удалить", color = MaterialTheme.colorScheme.error)
-                }
+                    danger = true,
+                )
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { removeCandidate = null }) {
-                    Text("Отмена")
-                }
+                ApuTextAction(label = "Отмена", onClick = { removeCandidate = null })
             },
         )
     }

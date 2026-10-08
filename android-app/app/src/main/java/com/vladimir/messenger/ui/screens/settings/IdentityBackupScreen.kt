@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuSettingsCard
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
 
@@ -29,15 +30,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -59,6 +56,8 @@ import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.ui.components.HintBubbleMutedColor
 import com.vladimir.messenger.ui.components.HintBubbleTextColor
 import com.vladimir.messenger.ui.components.swipeBack
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -166,7 +165,7 @@ fun IdentityBackupScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Spacer(Modifier.height(12.dp))
-                            OutlinedTextField(
+                            ApuBubbleField(
                                 value = nickname,
                                 onValueChange = { nickname = it },
                                 label = { Text("Никнейм") },
@@ -174,16 +173,13 @@ fun IdentityBackupScreen(
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             Spacer(Modifier.height(8.dp))
-                            OutlinedTextField(
+                            ApuBubbleField(
                                 value = password,
                                 onValueChange = { password = it },
                                 label = { Text("Пароль") },
                                 singleLine = true,
                                 visualTransformation = PasswordVisualTransformation(),
                                 isError = password.isNotEmpty() && password.length < MIN_PASSWORD,
-                                // Раньше кнопка просто оставалась тёмной, и было
-                                // непонятно, чего не хватает. Теперь требование
-                                // написано прямо под полем.
                                 supportingText = {
                                     Text(
                                         if (password.isNotEmpty() && password.length < MIN_PASSWORD) {
@@ -201,15 +197,12 @@ fun IdentityBackupScreen(
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             Spacer(Modifier.height(8.dp))
-                            OutlinedTextField(
+                            ApuBubbleField(
                                 value = repeat,
                                 onValueChange = { repeat = it },
                                 label = { Text("Пароль ещё раз") },
                                 singleLine = true,
                                 visualTransformation = PasswordVisualTransformation(),
-                                // Повтор обязателен: опечатку в пароле человек
-                                // обнаружил бы только при восстановлении, когда
-                                // исправить уже нечем.
                                 isError = repeat.isNotEmpty() && repeat != password,
                                 supportingText = {
                                     if (repeat.isNotEmpty() && repeat != password) {
@@ -222,13 +215,13 @@ fun IdentityBackupScreen(
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             Spacer(Modifier.height(12.dp))
-                            Button(
+                            ApuPremiumContentButton(
                                 onClick = { viewModel.save(nickname, password) },
+                                style = DiagnosticsActionStyle.PRIMARY,
                                 enabled = !state.busy &&
                                     nickname.isNotBlank() &&
                                     password.length >= MIN_PASSWORD &&
                                     password == repeat,
-                                shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 if (state.busy) {
@@ -276,11 +269,10 @@ fun IdentityBackupScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Spacer(Modifier.height(12.dp))
-                            OutlinedButton(
+                            ApuPremiumContentButton(
                                 onClick = { viewModel.restore(nickname, password) },
+                                style = DiagnosticsActionStyle.QUIET,
                                 enabled = !state.busy && nickname.isNotBlank() && password.isNotEmpty(),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(),
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text("Восстановить") }
                         }

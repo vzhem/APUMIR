@@ -68,3 +68,30 @@ yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || t
 chmod +x android-app/gradlew
 cd android-app || exit 1
 ./gradlew :app:compileReleaseKotlin --no-daemon --console=plain
+
+# ---- JVM-тесты ранга и элиты (чистая логика, без Android) -------------------
+# Разбор APURANK1 и порог VIP - единственные места передачи ранга, которые
+# можно проверить без телефона: тесты гоняются тем же gradle, что уже поднят
+# выше, и стоят секунды. Фильтр узкий нарочно - полный прогон тестов приложения
+# сюда не входит (в песочнице владельца его нет, и трогать чужие тесты не наша
+# задача). FileTransferRankPolicyTest держит порог элиты: «Проводник» (10-й
+# ранг) уже VIP (решение владельца 2026-10-07).
+./gradlew :app:testDebugUnitTest --no-daemon --console=plain \
+    --tests '*RankWireTest*' --tests '*FileTransferRankPolicyTest*'
+TESTS_STATUS=$?
+
+# ---- почему тесты упали: словами в лог, а не «красный шаг без причины» -------
+# Сырые логи прогонов из песочницы бота не скачиваются, а комментарий к PR
+# собирается из ЭТОГО вывода. Поэтому печатаем сводку JUnit-XML и текст падений.
+RESULTS="$REPO_ROOT/android-app/app/build/test-results/testDebugUnitTest"
+if [ -d "$RESULTS" ]; then
+    echo "---- test results (testDebugUnitTest) ----"
+    for f in "$RESULTS"/*.xml; do
+        [ -f "$f" ] || continue
+        echo "$(basename "$f"): $(head -2 "$f" | tail -1 | cut -c1-240)"
+    done
+    grep -h -A 10 "<failure" "$RESULTS"/*.xml | head -100
+else
+    echo "---- test results (testDebugUnitTest): отчётов нет ----"
+fi
+exit "$TESTS_STATUS"

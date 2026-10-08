@@ -36,6 +36,12 @@ import com.vladimir.messenger.ui.components.ApuBubbleShape
 import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuFormTextField
+import com.vladimir.messenger.ui.components.ApuPremiumDialog
+import com.vladimir.messenger.ui.components.apuBubbleSurface
+import com.vladimir.messenger.ui.components.apuPremiumGloss
+import com.vladimir.messenger.ui.components.apuPremiumLift
+import com.vladimir.messenger.ui.components.apuPremiumThread
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 import com.vladimir.messenger.ui.components.ApuActionsMenu
 import com.vladimir.messenger.ui.components.ApuTabBar
 import com.vladimir.messenger.ui.components.Avatar
@@ -48,6 +54,7 @@ import com.vladimir.messenger.ui.components.ApuTab
 import com.vladimir.messenger.ui.components.ApuTabActions
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.CoreWarmBar
+import com.vladimir.messenger.ui.components.ApuVipBadge
 import com.vladimir.messenger.ui.components.RankMedal
 import com.vladimir.messenger.data.group.GroupRole
 import java.text.SimpleDateFormat
@@ -96,6 +103,8 @@ import com.vladimir.messenger.ui.components.InviteAttachDialog
 import com.vladimir.messenger.ui.components.NotificationMuteDialog
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.ApuPremiumFloatingActionButton
 
 private data class NotificationMuteTarget(
     val id: String,
@@ -239,7 +248,11 @@ fun ChatListScreen(
                                     modifier = Modifier.clickable(onClick = onRankClick),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    RankMedal(size = 26.dp)
+                                    // У VIP медаль особая (фиолетово-золотая лента
+                                    // и кольцо элиты) и рядом со званием стоит
+                                    // знак VIP - как награда рядом с именем в
+                                    // топовых мессенджерах.
+                                    RankMedal(size = 26.dp, vip = uiState.rankVip)
                                     Spacer(Modifier.width(6.dp))
                                     Text(
                                         uiState.rankBadge,
@@ -247,6 +260,10 @@ fun ChatListScreen(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
+                                    if (uiState.rankVip) {
+                                        Spacer(Modifier.width(6.dp))
+                                        ApuVipBadge(compact = true)
+                                    }
                                 }
                             }
                         }
@@ -343,16 +360,11 @@ fun ChatListScreen(
         floatingActionButton = {
             // FAB-карандаш: открывает фирменное меню создания чата, группы и канала.
             Box {
-                FloatingActionButton(
+                ApuPremiumFloatingActionButton(
                     onClick = { fabMenuExpanded = true },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                ) {
-                    Icon(
-                        Icons.Default.Edit,
-                        contentDescription = "Создать",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                    )
-                }
+                    icon = Icons.Default.Edit,
+                    contentDescription = "Создать",
+                )
                 ApuActionsMenu(
                     expanded = fabMenuExpanded,
                     onDismiss = { fabMenuExpanded = false },
@@ -403,6 +415,7 @@ fun ChatListScreen(
                         // сотнях чатов это подвешивало жест листания.
                         items = uiState.itemsBySection[section].orEmpty(),
                         isSearchActive = uiState.searchQuery.isNotEmpty(),
+                        vipPeerIds = uiState.vipPeerIds,
                         onChatClick = onChatClick,
                         onSavedClick = onSavedClick,
                         onAddContactClick = onAddContactClick,
@@ -469,10 +482,11 @@ fun ChatListScreen(
 
     inviteChoice?.let { group ->
         val what = if (group.isChannel) "канал" else "группу"
-        AlertDialog(
-            onDismissRequest = { inviteChoice = null },
-            title = { Text("Пригласить в $what") },
-            text = {
+        ApuPremiumDialog(
+            title = "Пригласить в $what",
+            onDismiss = { inviteChoice = null },
+            dismissLabel = null,
+        ) {
                 // Раунд 160: действия - тремя пузырями друг под другом
                 // (владелец: «три горизонтальных пузыря ... с нашей
                 // цветовой гаммой») вместо сжатых текстовых кнопок.
@@ -502,10 +516,7 @@ fun ChatListScreen(
                         inviteApu = chosen
                     }
                 }
-            },
-            confirmButton = {},
-            dismissButton = {},
-        )
+        }
     }
 
     // Раунд 158: «Отправить в APU» - выбираем адресатов галочками (до
@@ -523,10 +534,30 @@ fun ChatListScreen(
             viewModel.personalChatsOnce { contacts = it }
             viewModel.groupMemberIdsOnce(grp.id) { memberIds = it }
         }
-        AlertDialog(
-            onDismissRequest = { if (!sending) inviteApu = null },
-            title = { Text("Кому отправить") },
-            text = {
+        ApuPremiumDialog(
+            title = "Кому отправить",
+            onDismiss = { if (!sending) inviteApu = null },
+            confirmLabel = if (selected.isNotEmpty()) {
+                if (sending) "Отправляем…" else "Отправить"
+            } else {
+                null
+            },
+            confirmEnabled = !sending,
+            onConfirm = {
+                sending = true
+                val ids = selected.toList()
+                viewModel.sendGroupInviteToChats(grp.id, what, ids) { sent, failed ->
+                    sending = false
+                    inviteApu = null
+                    android.widget.Toast.makeText(
+                        context,
+                        if (failed == 0) "Отправлено: $sent" else "Отправлено: $sent, не удалось: $failed",
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            },
+            dismissEnabled = !sending,
+        ) {
                 Column {
                     val list = contacts
                     when {
@@ -536,7 +567,7 @@ fun ChatListScreen(
                             Text(
                                 "Выбрано: ${selected.size} из $maxPick",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF8A93A2),
+                                color = Color(0xFF5A6472),
                             )
                             androidx.compose.foundation.lazy.LazyColumn(
                                 modifier = Modifier
@@ -640,136 +671,106 @@ fun ChatListScreen(
                         }
                     }
                 }
-            },
-            confirmButton = {
-                if (selected.isNotEmpty()) {
-                    TextButton(
-                        enabled = !sending,
-                        onClick = {
-                            sending = true
-                            val ids = selected.toList()
-                            viewModel.sendGroupInviteToChats(grp.id, what, ids) { sent, failed ->
-                                sending = false
-                                inviteApu = null
-                                android.widget.Toast.makeText(
-                                    context,
-                                    if (failed == 0) "Отправлено: $sent" else "Отправлено: $sent, не удалось: $failed",
-                                    android.widget.Toast.LENGTH_SHORT,
-                                ).show()
-                            }
-                        },
-                    ) { Text(if (sending) "Отправляем…" else "Отправить") }
-                }
-            },
-            dismissButton = {
-                TextButton(enabled = !sending, onClick = { inviteApu = null }) { Text("Отмена") }
-            },
-        )
+        }
     }
 
     qrInvite?.let { (title, link) ->
-        AlertDialog(
-            onDismissRequest = { qrInvite = null },
-            title = { Text(title) },
-            text = {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        "Пусть собеседник откроет сканер QR на главном экране " +
-                            "и наведёт камеру. Он войдёт без подтверждения.",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    com.vladimir.messenger.ui.components.InviteShareCard(
-                        link = link,
-                        displayName = title,
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { qrInvite = null }) { Text("Готово") }
-            },
-        )
+        // Премиальный общий вид диалога (стиль «Логов»): золотая капсула
+        // заголовка, светлая подложка house style, наши кнопки.
+        ApuPremiumDialog(
+            title = title,
+            onDismiss = { qrInvite = null },
+            confirmLabel = "Готово",
+            onConfirm = { qrInvite = null },
+            confirmStyle = DiagnosticsActionStyle.GLASS,
+            dismissLabel = null,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "Пусть собеседник откроет сканер QR на главном экране " +
+                        "и наведёт камеру. Он войдёт без подтверждения.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = ApuBubbleTextColor,
+                )
+                Spacer(Modifier.height(12.dp))
+                com.vladimir.messenger.ui.components.InviteShareCard(
+                    link = link,
+                    displayName = title,
+                )
+            }
+        }
     }
 
     // Подтверждение удаления чата.
     confirmDeleteChat?.let { chat ->
-        AlertDialog(
-            onDismissRequest = { confirmDeleteChat = null },
-            title = { Text("Удалить чат?") },
-            text = { Text("Чат с «${chat.contactName}» и вся переписка будут удалены на этом телефоне.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.deleteChat(chat.id)
-                    confirmDeleteChat = null
-                }) { Text("Удалить") }
+        ApuPremiumDialog(
+            title = "Удалить чат?",
+            onDismiss = { confirmDeleteChat = null },
+            confirmLabel = "Удалить",
+            onConfirm = {
+                viewModel.deleteChat(chat.id)
+                confirmDeleteChat = null
             },
-            dismissButton = {
-                TextButton(onClick = { confirmDeleteChat = null }) { Text("Отмена") }
-            },
-        )
+        ) {
+            Text(
+                "Чат с «${chat.contactName}» и вся переписка будут удалены на этом телефоне.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = ApuBubbleTextColor,
+            )
+        }
     }
 
     // Подтверждение очистки переписки.
     confirmClearChat?.let { chat ->
-        AlertDialog(
-            onDismissRequest = { confirmClearChat = null },
-            title = { Text("Очистить переписку?") },
-            text = { Text("Сообщения чата с «${chat.contactName}» будут удалены, сам чат останется.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    viewModel.clearChatHistory(chat.id)
-                    confirmClearChat = null
-                }) { Text("Очистить") }
+        ApuPremiumDialog(
+            title = "Очистить переписку?",
+            onDismiss = { confirmClearChat = null },
+            confirmLabel = "Очистить",
+            onConfirm = {
+                viewModel.clearChatHistory(chat.id)
+                confirmClearChat = null
             },
-            dismissButton = {
-                TextButton(onClick = { confirmClearChat = null }) { Text("Отмена") }
-            },
-        )
+        ) {
+            Text(
+                "Сообщения чата с «${chat.contactName}» будут удалены, сам чат останется.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = ApuBubbleTextColor,
+            )
+        }
     }
 
     // Подтверждение выхода/удаления группы или канала.
     confirmGroup?.let { group ->
         val owner = group.myRole == GroupRole.OWNER
         val what = if (group.isChannel) "канал" else "группу"
-        AlertDialog(
-            onDismissRequest = { confirmGroup = null },
-            title = {
-                Text(
-                    when {
-                        owner -> "Удалить $what?"
-                        group.isChannel -> "Отписаться от канала?"
-                        else -> "Выйти из группы?"
-                    }
-                )
+        ApuPremiumDialog(
+            title = when {
+                owner -> "Удалить $what?"
+                group.isChannel -> "Отписаться от канала?"
+                else -> "Выйти из группы?"
             },
-            text = {
-                Text(
-                    when {
-                        owner && group.isChannel -> "«${group.title}» будет удалён у всех подписчиков."
-                        owner -> "«${group.title}» будет удалён у всех участников."
-                        group.isChannel -> "Вы перестанете получать посты канала «${group.title}»."
-                        else -> "Вы перестанете получать сообщения «${group.title}»."
-                    }
-                )
+            onDismiss = { confirmGroup = null },
+            confirmLabel = when {
+                owner -> "Удалить"
+                group.isChannel -> "Отписаться"
+                else -> "Выйти"
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    if (owner) viewModel.deleteGroup(group.id) else viewModel.leaveGroup(group.id)
-                    confirmGroup = null
-                }) {
-                    Text(
-                        when {
-                            owner -> "Удалить"
-                            group.isChannel -> "Отписаться"
-                            else -> "Выйти"
-                        }
-                    )
-                }
+            onConfirm = {
+                if (owner) viewModel.deleteGroup(group.id) else viewModel.leaveGroup(group.id)
+                confirmGroup = null
             },
-            dismissButton = {
-                TextButton(onClick = { confirmGroup = null }) { Text("Отмена") }
-            },
-        )
+        ) {
+            Text(
+                when {
+                    owner && group.isChannel -> "«${group.title}» будет удалён у всех подписчиков."
+                    owner -> "«${group.title}» будет удалён у всех участников."
+                    group.isChannel -> "Вы перестанете получать посты канала «${group.title}»."
+                    else -> "Вы перестанете получать сообщения «${group.title}»."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = ApuBubbleTextColor,
+            )
+        }
     }
 
     // Диалог «Мой адрес для подключения» убран вместе с пунктом меню:
@@ -955,30 +956,17 @@ private fun ApuConnectByLinkDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    OutlinedButton(
+                    ApuPremiumContentButton(
                         onClick = onDismiss,
-                        shape = ApuBubbleShape,
-                        border = BorderStroke(
-                            1.dp,
-                            ApuBubbleAccentColor.copy(alpha = 0.48f),
-                        ),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = ApuBubbleAccentColor,
-                        ),
+                        style = DiagnosticsActionStyle.QUIET,
                         modifier = Modifier.weight(1f),
                     ) {
                         Text("Отмена", fontWeight = FontWeight.SemiBold)
                     }
-                    Button(
+                    ApuPremiumContentButton(
                         onClick = onConnect,
+                        style = DiagnosticsActionStyle.PRIMARY,
                         enabled = link.isNotBlank(),
-                        shape = ApuBubbleShape,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                            disabledContainerColor = ApuBubbleMutedColor.copy(alpha = 0.24f),
-                            disabledContentColor = ApuBubbleMutedColor.copy(alpha = 0.70f),
-                        ),
                         modifier = Modifier.weight(1.35f),
                     ) {
                         Icon(
@@ -1046,6 +1034,12 @@ private fun SectionPage(
     section: InboxSection,
     items: List<InboxItem>,
     isSearchActive: Boolean,
+    /**
+     * Узлы собеседников, сообщивших ранг VIP: у их имён — знак, у аватарки кольцо.
+     * Множество приходит сверху, потому что решение живёт в базе и модели, а
+     * страница лишь рисует строки.
+     */
+    vipPeerIds: Set<String>,
     onChatClick: (chatId: String, contactName: String, contactId: String) -> Unit,
     /** «Избранное» - постоянный личный контакт в разделах с личными чатами. */
     onSavedClick: () -> Unit,
@@ -1236,6 +1230,9 @@ private fun SectionPage(
                                 chat    = item.chat,
                                 kind    = BubbleKind.Personal,
                                 showPinnedIndicator = true,
+                                // Знак VIP у имени собеседника: он сам сообщил
+                                // ранг конвертом APURANK1 (см. PeerRankRouter).
+                                peerVip = item.chat.contactId.lowercase() in vipPeerIds,
                                 onClick = {
                                     onChatClick(
                                         item.chat.id,
@@ -1457,6 +1454,11 @@ private fun SearchTextField(
         },
         modifier = Modifier
             .fillMaxWidth()
+            // Владелец 2026-10-07: поиск — тот же премиальный слой, что строки
+            // списка: подъём, золотая нить по верхней кромке, блеск под текстом.
+            .apuPremiumLift(4.dp)
+            .apuPremiumThread(inset = 16.dp)
+            .apuPremiumGloss(intensity = 0.35f, topFraction = 0.6f)
             .clip(RoundedCornerShape(18.dp))
             .border(
                 width = 1.dp,
@@ -1513,7 +1515,10 @@ private fun EmptyChatList(
                 color     = HintBubbleMutedColor,
             )
             Spacer(modifier = Modifier.height(24.dp))
-            Button(onClick = onAddContact) {
+            ApuPremiumContentButton(
+                onClick = onAddContact,
+                style = DiagnosticsActionStyle.PRIMARY,
+            ) {
                 Icon(Icons.Default.PersonAdd, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Добавить контакт")
@@ -1537,13 +1542,13 @@ private fun SavedContactCard(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.52f),
-                shape = RoundedCornerShape(18.dp),
-            )
+            // Владелец 2026-10-07: строки списка — в том же премиальном стиле,
+            // что шапки, пузыри и диалоги: подъём, единая подложка, золотая
+            // нить по кромке и глянец ПОД содержимым.
+            .apuPremiumLift(5.dp)
+            .apuBubbleSurface()
+            .apuPremiumThread(inset = 16.dp)
+            .apuPremiumGloss(intensity = 0.45f, topFraction = 0.55f)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1617,13 +1622,12 @@ private fun GroupCard(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(18.dp),
-            )
+            // Владелец 2026-10-07: строки списка — в том же премиальном стиле,
+            // что шапки, пузыри и диалоги.
+            .apuPremiumLift(5.dp)
+            .apuBubbleSurface()
+            .apuPremiumThread(inset = 16.dp)
+            .apuPremiumGloss(intensity = 0.45f, topFraction = 0.55f)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -1667,7 +1671,7 @@ private fun GroupCard(
             Text(
                 text = if (group.isChannel) BubbleKind.Channel.label else BubbleKind.Group.label,
                 style = MaterialTheme.typography.labelSmall,
-                color = Color(0xFF8A93A2),
+                color = Color(0xFF5A6472),
                 maxLines = 1,
             )
             if (draftText.isNotEmpty()) {

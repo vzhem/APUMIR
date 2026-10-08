@@ -14,10 +14,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -60,7 +58,7 @@ fun AvatarCropDialog(
     var offsetY by remember { mutableFloatStateOf(0f) }
     var viewportPx by remember { mutableStateOf(1f) }
 
-    AlertDialog(
+    ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text("Область аватара") },
         text = {
@@ -118,13 +116,16 @@ fun AvatarCropDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
+            ApuTextAction(
+                label = "Готово",
+                onClick = {
                 val cropped = cropVisibleArea(source, scale, offsetX, offsetY, viewportPx)
                 onConfirm(cropped)
-            }) { Text("Готово") }
+            },
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         },
     )
 }

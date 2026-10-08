@@ -45,7 +45,9 @@ import com.vladimir.messenger.ui.theme.LocalAppDarkTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 
-private val ApuGold = Color(0xFFE4B45A)
+// Имя с префиксом Splash: в этом пакете теперь живёт общая золотая палитра
+// приложения (ApuPremium.kt, SplashGold = 0xFFF2B836) — совпадать имена не должны.
+private val SplashGold = Color(0xFFE4B45A)
 private val SplashSteel = Color(0xFF91A8C5)
 private const val SPLASH_MAX_MILLIS = 10_000L
 private const val SPLASH_MIN_MILLIS = 900L
@@ -133,7 +135,7 @@ fun AppSplash(onFinished: () -> Unit) {
             Crossfade(targetState = coreStage, label = "splash-stage") { stage ->
                 Text(
                     text = stage,
-                    color = ApuGold,
+                    color = SplashGold,
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
@@ -169,18 +171,18 @@ fun CoreWarmBar() {
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .background(ApuGold.copy(alpha = 0.10f))
+                .background(SplashGold.copy(alpha = 0.10f))
                 .padding(horizontal = 16.dp, vertical = 3.dp),
         ) {
             CircularProgressIndicator(
                 modifier = Modifier.size(11.dp),
                 strokeWidth = 1.5.dp,
-                color = ApuGold,
+                color = SplashGold,
             )
             Spacer(Modifier.width(8.dp))
             Text(
                 text = "Ядро подключается…",
-                color = ApuGold,
+                color = SplashGold,
                 fontSize = 12.sp,
             )
         }

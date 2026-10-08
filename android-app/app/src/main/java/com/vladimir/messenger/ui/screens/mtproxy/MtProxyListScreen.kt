@@ -2,6 +2,7 @@ package com.vladimir.messenger.ui.screens.mtproxy
 
 import com.vladimir.messenger.ui.components.ApuAction
 import com.vladimir.messenger.ui.components.ApuActionsMenu
+import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 
@@ -28,9 +29,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.domain.model.MtProtoProxy
 import com.vladimir.messenger.ui.components.ApuBubble
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import java.text.SimpleDateFormat
 import java.util.*
+import com.vladimir.messenger.ui.components.ApuPremiumFloatingActionButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -113,9 +116,11 @@ fun MtProxyListScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showAddDialog = true }) {
-                Icon(Icons.Default.Add, "Добавить прокси")
-            }
+            ApuPremiumFloatingActionButton(
+                onClick = { showAddDialog = true },
+                icon = Icons.Default.Add,
+                contentDescription = "Добавить прокси",
+            )
         }
     ) { padding ->
         if (uiState.isLoading) {
@@ -313,33 +318,28 @@ private fun AddProxyDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(16.dp))
-                OutlinedTextField(
+                ApuBubbleField(
                     value = input,
                     onValueChange = { input = it },
                     label = { Text("Прокси") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = false,
-                    minLines = 3
+                    minLines = 3,
                 )
             }
         },
         confirmButton = {
-            TextButton(
+            ApuTextAction(
+                label = "Добавить",
                 onClick = { onConfirm(input) },
-                enabled = input.isNotBlank()
-            ) {
-                Text("Добавить")
-            }
+                enabled = input.isNotBlank(),
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Отмена")
-            }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         }
     )
 }
-
-
 
 @Composable
 private fun ImportProxyDialog(
@@ -384,7 +384,7 @@ private fun ImportProxyDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
+                ApuBubbleField(
                     value = input,
                     onValueChange = { input = it },
                     label = { Text("Прокси") },
@@ -393,22 +393,19 @@ private fun ImportProxyDialog(
                         .fillMaxWidth()
                         .heightIn(min = 150.dp),
                     singleLine = false,
-                    maxLines = 10
+                    maxLines = 10,
                 )
             }
         },
         confirmButton = {
-            TextButton(
+            ApuTextAction(
+                label = "Импортировать",
                 onClick = { onConfirm(input) },
-                enabled = input.isNotBlank()
-            ) {
-                Text("Импортировать")
-            }
+                enabled = input.isNotBlank(),
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Отмена")
-            }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         }
     )
 }

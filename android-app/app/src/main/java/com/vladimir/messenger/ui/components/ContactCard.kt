@@ -16,13 +16,10 @@ package com.vladimir.messenger.ui.components
 //   - Индикатор онлайн-статуса
 // =============================================================================
 
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -31,8 +28,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.runtime.remember
 import com.vladimir.messenger.ui.theme.AvatarStore
 import androidx.compose.ui.text.font.FontWeight
@@ -64,11 +59,17 @@ fun ContactCard(
     menuActions: List<BubbleMenuAction> = emptyList(),
     /** Main-inbox marker; ContactsScreen reuses this card without the marker. */
     showPinnedIndicator: Boolean = false,
+    /**
+     * Собеседник сообщил ранг VIP (конверт APURANK1): рядом с именем
+     * ставим знак VIP — как знак элиты в топовых мессенджерах. По умолчанию нет:
+     * контакты без сообщённого ранга выглядят как раньше, без ложных знаков.
+     */
+    peerVip: Boolean = false,
 ) {
     // Присланный аватар из роевого реестра (если есть) - иначе инициалы.
+    // Разбор картинки - в фоне и один раз на строку base64 (AvatarBitmaps);
+    // рисует её PeerAvatar, поэтому отдельная копия битмапа тут не нужна.
     val avatars by AvatarStore.avatars.collectAsState()
-    // Разбор картинки - в фоне и один раз на строку base64 (AvatarBitmaps).
-    val avatarBitmap = AvatarBitmaps.rememberAvatar(avatars[chat.contactId])
     // Раунд 255: недописанный текст поля ввода виден прямо в пузыре списка.
     val drafts by com.vladimir.messenger.data.draft.DraftStore.drafts.collectAsState()
     val draftText = drafts[
@@ -79,13 +80,14 @@ fun ContactCard(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(18.dp),
-            )
+            // Владелец 2026-10-07: «в таком стиле нужно переделать всё приложение».
+            // Строка списка — та же поверхность, что шапки и пузыри: подъём,
+            // единая подложка house style, золотая нить по верхней кромке и
+            // глянец ПОД содержимым (имя и превью остаются чёрными и чёткими).
+            .apuPremiumLift(5.dp)
+            .apuBubbleSurface()
+            .apuPremiumThread(inset = 16.dp)
+            .apuPremiumGloss(intensity = 0.45f, topFraction = 0.55f)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -93,22 +95,14 @@ fun ContactCard(
         // ------------------------------------------------------------------
         // АВАТАР с индикатором онлайн
         // ------------------------------------------------------------------
-        Box {
-            // Аватар - картинка из сети либо круг с инициалами.
-            if (avatarBitmap != null) {
-                Image(
-                    bitmap = avatarBitmap.asImageBitmap(),
-                    contentDescription = null,
-                    modifier = Modifier.size(52.dp).clip(CircleShape),
-                    contentScale = ContentScale.Crop,
-                )
-            } else {
-                Avatar(
-                    name     = chat.contactName,
-                    modifier = Modifier.size(52.dp),
-                )
-            }
-
+        // Аватар - картинка из сети либо круг с инициалами; у элиты вокруг него
+        // объёмное золотое кольцо с редким блеском (см. ApuVipRing.kt).
+        PeerAvatar(
+            name = chat.contactName,
+            avatarB64 = avatars[chat.contactId],
+            vip = peerVip,
+            size = 52.dp,
+        ) {
             // Точка онлайн-статуса
             if (chat.isContactOnline) {
                 Box(
@@ -128,15 +122,23 @@ fun ContactCard(
         // ТЕКСТОВАЯ ИНФОРМАЦИЯ
         // ------------------------------------------------------------------
         Column(modifier = Modifier.weight(1f)) {
-            // Имя контакта
-            Text(
-                text      = chat.contactName,
-                style     = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color     = Color(0xFF1E2430),
-                maxLines  = 1,
-                overflow  = TextOverflow.Ellipsis,
-            )
+            // Имя контакта. Знак VIP стоит рядом с именем, а не вместо него:
+            // имя должно читаться в первую очередь.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text      = chat.contactName,
+                    style     = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color     = Color(0xFF1E2430),
+                    maxLines  = 1,
+                    overflow  = TextOverflow.Ellipsis,
+                    modifier  = Modifier.weight(1f, fill = false),
+                )
+                if (peerVip) {
+                    Spacer(Modifier.width(6.dp))
+                    ApuVipBadge(compact = true)
+                }
+            }
 
             // Оригинальное имя через собаку - золотом, как акценты темы.
             if (username.isNotEmpty()) {

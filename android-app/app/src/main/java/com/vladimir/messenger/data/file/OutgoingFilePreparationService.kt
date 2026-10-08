@@ -2,6 +2,9 @@ package com.vladimir.messenger.data.file
 
 import android.content.Context
 import android.net.Uri
+import com.vladimir.messenger.data.diagnostics.Counters
+import com.vladimir.messenger.data.diagnostics.DiagnosticsReport
+import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
@@ -184,7 +187,12 @@ class OutgoingFilePreparationService private constructor(
             declaredSize = source.length().takeIf { source.isFile },
         ) { local.open(context) }
         check(inspected.sha256 == expectedSha256) { "Group file copy does not match its card" }
-        val expiresAtMs = Math.addExact(nowMs, TRANSFER_TTL_MS)
+        // Владелец 2026-10-07: тяжёлое (фото, видео, большие файлы) хранится и
+        // предлагается максимум сутки, текст и малое — неделю.
+        val expiresAtMs = Math.addExact(
+            nowMs,
+            FileTransferRetention.ttlMs(inspected.mediaType, inspected.sizeBytes),
+        )
         val manifest = try {
             uniffi.p2p_core.createGroupFileManifest(
                 senderNodeId,
@@ -204,6 +212,11 @@ class OutgoingFilePreparationService private constructor(
         }
         val entity = manifest.toEntity(messageId, groupId, "", nowMs).copy(state = "PREPARING")
         check(transferDao.insertNewTransfer(entity)) { "Transfer ID collision" }
+        TransferDiagnostics.count(Counters.FILE_STARTED_OUT)
+        TransferDiagnostics.record(
+            "file",
+            "отправка файла сообщества: ${DiagnosticsReport.formatBytes(inspected.sizeBytes)}",
+        )
         try {
             check(store.storeManifest(manifest.transferIdHex, manifest.manifestBytes)) {
                 "New transfer unexpectedly reused a manifest"
@@ -299,7 +312,10 @@ class OutgoingFilePreparationService private constructor(
                 sizeBytes = inspected.sizeBytes,
             )
         }
-        val expiresAtMs = Math.addExact(nowMs, TRANSFER_TTL_MS)
+        val expiresAtMs = Math.addExact(
+            nowMs,
+            FileTransferRetention.ttlMs(inspected.mediaType, inspected.sizeBytes),
+        )
         val manifest = createFileTransferManifest(
             senderNodeId,
             recipientNodeId,
@@ -312,6 +328,12 @@ class OutgoingFilePreparationService private constructor(
         )
         val entity = manifest.toEntity(messageId, chatId, recipientNodeId, nowMs)
         check(transferDao.insertNewTransfer(entity)) { "Transfer ID collision" }
+        TransferDiagnostics.count(Counters.FILE_STARTED_OUT)
+        TransferDiagnostics.record(
+            "file",
+            "отправка файла: ${DiagnosticsReport.formatBytes(inspected.sizeBytes)} " +
+                "(${inspected.mediaType})",
+        )
         try {
             check(store.storeManifest(manifest.transferIdHex, manifest.manifestBytes)) {
                 "New transfer unexpectedly reused a manifest"
@@ -519,7 +541,7 @@ class OutgoingFilePreparationService private constructor(
 
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
-    companion object {
-        private const val TRANSFER_TTL_MS = 7L * 24 * 60 * 60 * 1_000
-    }
+    // Срок жизни передачи больше не живёт здесь константой: его считает
+    // FileTransferRetention (тяжёлое — сутки, текст и малое — неделя), чтобы
+    // правило было одно на отправку, хранение у соседей и уборку.
 }

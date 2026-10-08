@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.channels
 
+import androidx.compose.material3.HorizontalDivider
 import com.vladimir.messenger.data.local.MessagePinPolicy
 
 // =============================================================================
@@ -11,7 +12,7 @@ import com.vladimir.messenger.data.local.MessagePinPolicy
 // =============================================================================
 
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.material3.ButtonDefaults
+import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
 import com.vladimir.messenger.ui.components.ApuNotificationBadge
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
@@ -23,6 +24,9 @@ import com.vladimir.messenger.ui.components.ApuAntiRatingInlineBadge
 import com.vladimir.messenger.ui.components.ApuCircleCheckIndicator
 import com.vladimir.messenger.ui.components.ApuMessageModerationDialog
 import com.vladimir.messenger.ui.components.ApuSettingsDangerColor
+import com.vladimir.messenger.ui.components.ApuSettingsDivider
+import com.vladimir.messenger.ui.components.ApuTextAction
+import com.vladimir.messenger.ui.components.PeerAvatar
 import com.vladimir.messenger.ui.components.PeerProfileSheet
 import com.vladimir.messenger.ui.components.apuBubbleSurface
 import com.vladimir.messenger.ui.components.swipeBack
@@ -62,7 +66,6 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BookmarkBorder
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MoreVert
@@ -83,15 +86,11 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -127,6 +126,7 @@ import com.vladimir.messenger.util.InlineImage
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.vladimir.messenger.ui.components.ApuPremiumFloatingActionButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -271,9 +271,11 @@ fun ChannelScreen(
         },
         floatingActionButton = {
             if (uiState.canPost) {
-                FloatingActionButton(onClick = { showNewPost = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "Новый пост")
-                }
+                ApuPremiumFloatingActionButton(
+                    onClick = { showNewPost = true },
+                    icon = Icons.Default.Add,
+                    contentDescription = "Новый пост",
+                )
             }
         },
     ) { padding ->
@@ -419,6 +421,8 @@ fun ChannelScreen(
                         name = uiState.inspectedPeerName.ifBlank { "Участник " + inspectedPeerId.takeLast(4) },
                         contactId = inspectedPeerId,
                         isOnline = true,
+                        // Элита: знак и кольцо в карточке автора.
+                        vip = inspectedPeerId.lowercase() in uiState.vipNodeIds,
                         heartCount = uiState.inspectedPeerHearts,
                         heartMine = uiState.inspectedPeerHeartMine,
                         onHeartClick = if (!isSelfPeer) {
@@ -452,6 +456,7 @@ fun ChannelScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 4.dp),
+                        premium = 6.dp,
                     ) {
                         Row(
                             modifier = Modifier
@@ -515,7 +520,10 @@ fun ChannelScreen(
                 // к самому посту.
                 if (uiState.pinnedPostIds.isNotEmpty()) {
                     val feedScope = androidx.compose.runtime.rememberCoroutineScope()
-                    ApuBubbleCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
+                    ApuBubbleCard(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                        premium = 6.dp,
+                    ) {
                         Column(modifier = Modifier.padding(8.dp)) {
                             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                 Icon(
@@ -596,6 +604,7 @@ fun ChannelScreen(
                                 (post.authorId == myId || uiState.channel?.ownerId == myId)
                             PostCard(
                                 post = post,
+                                authorVip = post.authorId.lowercase() in uiState.vipNodeIds,
                                 authorAntiCount = uiState.antiRatings[post.authorId] ?: 0,
                                 authorAntiWarning = uiState.antiWarnings.containsKey(post.authorId),
                                 canEdit = canEditPost,
@@ -822,6 +831,8 @@ fun ChannelScreen(
 @OptIn(ExperimentalFoundationApi::class)
 private fun PostCard(
     post: ChannelPost,
+    /** Автор поста — элита: у аватарки объёмное золотое кольцо. */
+    authorVip: Boolean = false,
     authorAntiCount: Int = 0,
     authorAntiWarning: Boolean = false,
     /** Правка доступна автору поста и владельцу канала. */
@@ -905,6 +916,17 @@ private fun PostCard(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.clickable { onOpenAuthorProfile() },
                     ) {
+                        // Аватарка автора поста: у элиты — в объёмном золотом
+                        // кольце. В канале лицо автора появляется только здесь,
+                        // поэтому знак элиты стоит именно тут.
+                        val authorAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
+                            .collectAsStateWithLifecycle()
+                        PeerAvatar(
+                            name = post.authorName,
+                            avatarB64 = authorAvatars[post.authorId],
+                            vip = authorVip,
+                            size = 24.dp,
+                        )
                         Text(
                             "${post.authorName} - $time",
                             style = MaterialTheme.typography.labelSmall,
@@ -1094,31 +1116,16 @@ private fun PostCard(
             }
             HorizontalDivider(modifier = Modifier.padding(top = 10.dp), color = ApuBubbleAccentColor.copy(alpha = 0.2f))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(
-                    onClick = { showReactions = true },
-                    colors = ButtonDefaults.textButtonColors(contentColor = ApuBubbleAccentColor),
-                ) {
-                    Text("Реакция")
-                }
-                TextButton(
-                    onClick = onOpenComments,
-                    colors = ButtonDefaults.textButtonColors(contentColor = ApuBubbleAccentColor),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(
-                        if (post.comments > 0) {
+                ApuTextAction(label = "Реакция", onClick = { showReactions = true })
+                ApuTextAction(
+                    label = if (post.comments > 0) {
                             "Комментарии (${post.comments})"
                         } else {
                             "Оставить комментарий"
                         },
-                    )
-                    // Непрочитанные комментарии поста: тот же золотой кружок,
-                    // что на канале и на темах группы.
-                    if (post.unreadComments > 0) {
-                        Spacer(Modifier.width(6.dp))
-                        ApuNotificationBadge(post.unreadComments)
-                    }
-                }
+                    onClick = onOpenComments,
+                    modifier = Modifier.weight(1f),
+                )
                 // Переслать пост: и внутрь APU, и в любой другой мессенджер.
                 IconButton(onClick = onSharePost) {
                     Icon(
@@ -1317,11 +1324,10 @@ private fun PostEditorDialog(
         title = { Text(title) },
         text = {
             Column {
-                OutlinedTextField(
+                ApuBubbleField(
                     value = text,
                     onValueChange = { text = it },
                     label = { Text("Текст поста") },
-                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
                 )
                 Spacer(Modifier.height(8.dp))
@@ -1369,14 +1375,11 @@ private fun PostEditorDialog(
                 }
                 if (imagesEditable) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(
+                        ApuTextAction(
+                            label = if (images.isEmpty()) "Прикрепить фото" else "Ещё фото (${images.size}/${InlineImage.MAX_PHOTOS})",
                             onClick = { picker.launch("image/*") },
                             enabled = !preparing && !creating && images.size < InlineImage.MAX_PHOTOS,
-                        ) {
-                            Text(
-                                if (images.isEmpty()) "Прикрепить фото" else "Ещё фото (${images.size}/${InlineImage.MAX_PHOTOS})",
-                            )
-                        }
+                        )
                         if (preparing) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                         }
@@ -1429,9 +1432,11 @@ private fun PostEditorDialog(
                         }
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            TextButton(onClick = onPickFile, enabled = !preparingFile && !creating) {
-                                Text("Прикрепить файл")
-                            }
+                            ApuTextAction(
+                                label = "Прикрепить файл",
+                                onClick = onPickFile,
+                                enabled = !preparingFile && !creating,
+                            )
                             if (preparingFile) {
                                 CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                             }
@@ -1442,7 +1447,7 @@ private fun PostEditorDialog(
                 // загромождать окно, когда опрос не нужен.
                 if (pollEditable) {
                     if (withPoll) {
-                        HorizontalDivider()
+                        ApuSettingsDivider(startPadding = 16.dp)
                         Spacer(Modifier.height(6.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
@@ -1451,39 +1456,40 @@ private fun PostEditorDialog(
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.weight(1f),
                             )
-                            TextButton(onClick = { withPoll = false }) { Text("Убрать") }
+                            ApuTextAction(label = "Убрать", onClick = { withPoll = false })
                         }
                         com.vladimir.messenger.ui.components.PollDraftFields(
                             state = pollState,
                             problem = pollProblem,
                         )
                     } else {
-                        TextButton(
+                        ApuTextAction(
+                            label = "Прикрепить опрос",
                             onClick = { withPoll = true },
                             enabled = !creating,
-                        ) { Text("Прикрепить опрос") }
+                        )
                     }
                 }
             }
         },
         confirmButton = {
-            TextButton(
+            ApuTextAction(
+                label = confirmLabel,
                 onClick = {
                     val draft = if (withPoll) pollState.draft() else null
-                    // Опрос выбран, но заполнен не до конца - не публикуем молча:
-                    // написать, чего не хватает, полезнее, чем потерять пост.
+
                     if (withPoll && draft == null) {
                         pollProblem = pollState.problem()
-                        return@TextButton
+                        return@ApuTextAction
                     }
                     onConfirm(text, images, draft)
                 },
                 enabled = (text.isNotBlank() || images.isNotEmpty() || stagedFile != null || withPoll) &&
                     !creating && !preparing && !preparingFile,
-            ) { Text(confirmLabel) }
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         },
     )
 }

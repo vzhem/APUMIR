@@ -200,6 +200,9 @@ if python3 scripts/ci/check-chat-startup.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-pin-notice.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-splash-scene.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-settings-style.py >>"$LOG" 2>&1 && \
+   python3 scripts/ci/check-saved-input.py >>"$LOG" 2>&1 && \
+   python3 scripts/ci/check-peer-rank.py >>"$LOG" 2>&1 && \
+   python3 scripts/ci/check-diagnostics-report.py >>"$LOG" 2>&1 && \
    bash scripts/ci/check-chat-history.sh >>"$LOG" 2>&1; then
     say "local-first chat history: OK"
 else
@@ -298,6 +301,32 @@ if [ "$TESTS_OK" = 0 ]; then
     fi
 fi
 
+# ── 4b. тест MQTT-моста воркера (Node, без Cloudflare) ─────────────────────
+# Зачем: 2026-10-06 телефон владельца не получал ConnAck моста. Причина была в
+# воркере (`tools/worker/p2p_relay_worker.js`): длина MQTT-пакета - varint, а тело
+# и позиция считались как «1 + len», поэтому тело КАЖДОГО пакета теряло последний
+# байт, точный CONNECT ядра падал с RangeError, а catch молча снимал клиента.
+# Ни один прогон этого не видел: воркер не компилируется и не тестировался в CI.
+# Тест `tools/worker/test-mqtt-bridge.mjs` гоняет класс MqttBridge напрямую.
+begin "worker MQTT bridge test (node)"
+BRIDGE_OK=0
+if command -v node >/dev/null 2>&1; then
+    if node tools/worker/test-mqtt-bridge.mjs >>"$LOG" 2>&1; then
+        BRIDGE_OK=1
+    fi
+    strip_ansi
+    say "тест моста: $([ "$BRIDGE_OK" = 1 ] && echo OK || echo FAILED)"
+    if [ "$BRIDGE_OK" = 0 ]; then
+        say "$(grep -E '^(FAIL|ok )' "$LOG" | tail -12)"
+        if [ "$FAILED" = 0 ]; then
+            FAILED=1
+            FAILED_STEP="worker MQTT bridge test (node)"
+        fi
+    fi
+else
+    say "тест моста: пропущено (нет node в окружении)"
+fi
+
 # ── 5. формат дифф-патча обновлений: кросс-проверка python <-> pwsh ────────
 # Патч APUBSP1 (раунд 132) генерируется на машине владельца
 # (tools/ci/make_update_patch.ps1 - в песочницы нет доступа к релизным
@@ -371,7 +400,7 @@ fi
 # ── 6. итог ────────────────────────────────────────────────────────────────
 say ""
 if [ "$FAILED" = 0 ]; then
-    say "RESULT: OK (check=pass, bindings=$([ "$BINDING_OK" = 1 ] && echo pass || echo fail), tests=$([ "$TESTS_OK" = 1 ] && echo pass || echo fail))"
+    say "RESULT: OK (check=pass, bindings=$([ "$BINDING_OK" = 1 ] && echo pass || echo fail), tests=$([ "$TESTS_OK" = 1 ] && echo pass || echo fail), bridge=$([ "$BRIDGE_OK" = 1 ] && echo pass || echo skip))"
     exit 0
 fi
 

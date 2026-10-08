@@ -922,7 +922,35 @@ class GroupFileSwarm @Inject constructor(
         runCatching { releaseServed(now) }.onFailure { Log.w(TAG, "release failed: ${it.message}") }
         if (now - lastSweepAt > SWEEP_INTERVAL_MS) {
             lastSweepAt = now
-            runCatching { store.sweep(now) }.onFailure { Log.w(TAG, "sweep failed: ${it.message}") }
+            runCatching { sweepCopies(now) }
+                .onFailure { Log.w(TAG, "sweep failed: ${it.message}") }
+        }
+    }
+
+    /**
+     * Уборка копий, которые я раздаю группе: у тяжёлого (фото, видео, большие
+     * файлы) срок сутки, у остального неделя — правило то же, что у передач
+     * (`FileTransferRetention`). Копия без живой строки передачи бесполезна:
+     * по ней нечего раздавать, поэтому она уходит сразу.
+     */
+    private suspend fun sweepCopies(now: Long) {
+        // Имена папок — ключи групп. Сверять со строками передач можно только
+        // те, что совпадают с настоящим идентификатором группы (у группы с
+        // «неудобным» id ключ — его хэш): иначе копия удалялась бы по ошибке.
+        val known = runCatching { groupDao.getGroups().mapTo(HashSet<String>()) { it.id } }
+            .getOrDefault(emptySet())
+        var removed = 0
+        for (entry in store.entries()) {
+            if (entry.groupId !in known) continue
+            val alive = transferDao.getForFile(entry.groupId, entry.sha256)
+                .any { it.expiresAtMs > now }
+            if (!alive && store.delete(entry.groupId, entry.sha256)) removed++
+        }
+        // Возрастная страховка (неделя, как было): уходят копии групп, которых
+        // на телефоне уже нет, и копии без строки передачи.
+        val byAge = store.sweep(now)
+        if (removed > 0 || byAge > 0) {
+            Log.i(TAG, "group copies swept: expired=$removed byAge=$byAge")
         }
     }
 

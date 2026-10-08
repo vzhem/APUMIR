@@ -7,8 +7,13 @@ package com.vladimir.messenger.ui.screens.groups
 // Статистика, Разрешения.
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
+import com.vladimir.messenger.ui.components.ApuSettingsDivider
+import com.vladimir.messenger.ui.components.ApuTextAction
+import com.vladimir.messenger.ui.components.ApuVipBadge
+import com.vladimir.messenger.ui.components.PeerAvatar
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -37,17 +42,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PageSize
@@ -91,6 +91,8 @@ import com.vladimir.messenger.data.group.MemberSummary
 import com.vladimir.messenger.data.group.TopicSummary
 import com.vladimir.messenger.util.AppShare
 import com.vladimir.messenger.util.QrCodeGenerator
+import com.vladimir.messenger.ui.components.ApuPremiumCheckbox
+import com.vladimir.messenger.ui.components.ApuPremiumSwitch
 
 /**
  * Вкладки админ-кабинета.
@@ -176,7 +178,7 @@ fun GroupAdminScreen(
                         )
                     }
                 },
-                navigationIcon = { TextButton(onClick = onBackClick) { Text("Назад") } },
+                navigationIcon = { ApuTextAction(label = "Назад", onClick = onBackClick) },
             )
         },
     ) { padding ->
@@ -249,6 +251,7 @@ fun GroupAdminScreen(
                 AdminTab.Members -> MembersTab(
                     isAdmin = uiState.isAdmin,
                     members = uiState.searchResults,
+                    vipNodeIds = uiState.vipNodeIds,
                     query = uiState.searchQuery,
                     onQueryChange = viewModel::onSearchQueryChanged,
                     onToggleAdmin = viewModel::toggleAdmin,
@@ -372,23 +375,19 @@ private fun OverviewTab(
             // Поля внутри светлого пузыря: цвета ФИКСИРОВАННЫЕ, из темы брать
             // нельзя - в тёмной теме поле красилось в белый и на светлой
             // подложке «Название» и «Описание» пропадали (жалоба владельца).
-            OutlinedTextField(
+            ApuBubbleField(
                 value = titleDraft,
                 onValueChange = { titleDraft = it },
                 label = { Text("Название") },
-                shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.fillMaxWidth(),
-                colors = bubbleFieldColors(),
             )
-            OutlinedTextField(
+            ApuBubbleField(
                 value = aboutDraft,
                 onValueChange = { aboutDraft = it },
                 label = { Text("Описание") },
-                shape = RoundedCornerShape(18.dp),
                 modifier = Modifier.fillMaxWidth(),
-                colors = bubbleFieldColors(),
             )
-            TextButton(onClick = { onSave(titleDraft, aboutDraft) }) { Text("Сохранить") }
+            ApuTextAction(label = "Сохранить", onClick = { onSave(titleDraft, aboutDraft) })
         } else {
             // Без права менять информацию показываем только текст: поля и
             // кнопка «Сохранить» обещали правку, которой на самом деле нет -
@@ -436,7 +435,7 @@ private fun OverviewTab(
                         color = ApuBubbleMutedColor,
                     )
                 }
-                TextButton(onClick = { showAvatarPicker = true }) { Text("Сменить") }
+                ApuTextAction(label = "Сменить", onClick = { showAvatarPicker = true })
             }
             }
         }
@@ -455,7 +454,7 @@ private fun OverviewTab(
                     )
                 }
                 if (canChangeVisibility) {
-                    Switch(checked = isPublic, onCheckedChange = onTogglePublic)
+                    ApuPremiumSwitch(checked = isPublic, onCheckedChange = onTogglePublic)
                 }
             }
         }
@@ -474,7 +473,7 @@ private fun OverviewTab(
                             color = ApuBubbleMutedColor,
                         )
                     }
-                    Switch(checked = false, onCheckedChange = { onEnableTopics() })
+                    ApuPremiumSwitch(checked = false, onCheckedChange = { onEnableTopics() })
                 }
             }
         }
@@ -540,12 +539,13 @@ private fun OverviewTab(
         }
 
         ApuBubble {
-            TextButton(onClick = { showLeaveConfirm = true }) {
-                Text(if (isChannel) "Отписаться от канала" else "Покинуть группу")
-            }
+            ApuTextAction(
+                label = if (isChannel) "Отписаться от канала" else "Покинуть группу",
+                onClick = { showLeaveConfirm = true },
+            )
 
             if (isOwner) {
-                HorizontalDivider()
+                ApuSettingsDivider(startPadding = 16.dp)
                 Text(
                     if (isChannel) {
                         "Удаление стирает канал, его посты и комментарии у всех подписчиков."
@@ -555,12 +555,11 @@ private fun OverviewTab(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
-                TextButton(onClick = { showDeleteConfirm = true }) {
-                    Text(
-                        if (isChannel) "Удалить канал" else "Удалить группу",
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
+                ApuTextAction(
+                    label = if (isChannel) "Удалить канал" else "Удалить группу",
+                    onClick = { showDeleteConfirm = true },
+                    danger = true,
+                )
             }
         }
     }
@@ -579,15 +578,16 @@ private fun OverviewTab(
                 )
             },
             confirmButton = {
-                TextButton(
+                ApuTextAction(
+                    label = if (isChannel) "Отписаться" else "Покинуть",
                     onClick = {
                         showLeaveConfirm = false
                         onLeave()
                     },
-                ) { Text(if (isChannel) "Отписаться" else "Покинуть") }
+                )
             },
             dismissButton = {
-                TextButton(onClick = { showLeaveConfirm = false }) { Text("Отмена") }
+                ApuTextAction(label = "Отмена", onClick = { showLeaveConfirm = false })
             },
         )
     }
@@ -698,24 +698,25 @@ private fun DeleteGroupDialog(
                     },
                 )
                 Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
+                ApuBubbleField(
                     value = typed,
                     onValueChange = { typed = it },
                     label = { Text("Введите: $expected") },
                     singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
         },
         confirmButton = {
-            TextButton(
-                enabled = typed.trim() == expected,
+            ApuTextAction(
+                label = "Удалить",
                 onClick = onConfirm,
-            ) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+                enabled = typed.trim() == expected,
+                danger = true,
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         },
     )
 }
@@ -756,9 +757,7 @@ private fun AdminsTab(
                             style = MaterialTheme.typography.bodySmall,
                             color = ApuBubbleMutedColor,
                         )
-                        TextButton(onClick = onClaimOwnership) {
-                            Text("Стать владельцем")
-                        }
+                        ApuTextAction(label = "Стать владельцем", onClick = onClaimOwnership)
                     }
                 }
             }
@@ -788,7 +787,7 @@ private fun AdminsTab(
                         // Разрешения занимают пол-экрана, поэтому список сворачивается:
                         // нажал на строку - развернулось, нажал ещё раз - свернулось.
                         var expanded by remember(admin.nodeId) { mutableStateOf(false) }
-                        HorizontalDivider()
+                        ApuSettingsDivider(startPadding = 16.dp)
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
@@ -816,7 +815,7 @@ private fun AdminsTab(
                                             color = ApuBubbleMutedColor,
                                         )
                                     }
-                                    Switch(
+                                    ApuPremiumSwitch(
                                         checked = GroupPermissions.has(admin.permissions, entry.flag),
                                         onCheckedChange = { onTogglePermission(admin.nodeId, entry.flag, it) },
                                     )
@@ -824,18 +823,20 @@ private fun AdminsTab(
                             }
                         }
                         if (!admin.isMe) {
-                            TextButton(onClick = { onToggleAdmin(admin.nodeId, false) }) {
-                                Text("Снять администратора")
-                            }
+                            ApuTextAction(
+                                label = "Снять администратора",
+                                onClick = { onToggleAdmin(admin.nodeId, false) },
+                            )
                         }
                         // Передача владения: только владелец и только другому
                         // администратору (наследование после удаления владельца
                         // работает и без этой кнопки).
                         if (isOwner && !admin.isMe) {
-                            HorizontalDivider()
-                            TextButton(onClick = { transferTarget = admin }) {
-                                Text("Передать владение")
-                            }
+                            ApuSettingsDivider(startPadding = 16.dp)
+                            ApuTextAction(
+                                label = "Передать владение",
+                                onClick = { transferTarget = admin },
+                            )
                         }
                     }
                 }
@@ -855,15 +856,16 @@ private fun AdminsTab(
                 )
             },
             confirmButton = {
-                TextButton(
+                ApuTextAction(
+                    label = "Передать",
                     onClick = {
                         transferTarget = null
                         onTransferOwnership(target.nodeId)
                     },
-                ) { Text("Передать") }
+                )
             },
             dismissButton = {
-                TextButton(onClick = { transferTarget = null }) { Text("Отмена") }
+                ApuTextAction(label = "Отмена", onClick = { transferTarget = null })
             },
         )
     }
@@ -873,6 +875,8 @@ private fun AdminsTab(
 private fun MembersTab(
     isAdmin: Boolean,
     members: List<MemberSummary>,
+    /** Узлы-элита: кольцо и знак VIP у участников. */
+    vipNodeIds: Set<String>,
     query: String,
     onQueryChange: (String) -> Unit,
     onToggleAdmin: (String, Boolean) -> Unit,
@@ -886,9 +890,7 @@ private fun MembersTab(
         // Обычному участнику не показываем: рассылка - дело администратора.
         if (isAdmin) {
             ApuBubble(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
-                TextButton(onClick = onResync) {
-                    Text("Разослать темы и состав заново")
-                }
+                ApuTextAction(label = "Разослать темы и состав заново", onClick = onResync)
             }
         }
         ApuSearchField(
@@ -902,11 +904,12 @@ private fun MembersTab(
                 MemberRow(
                     isAdmin = isAdmin,
                     member = member,
+                    vip = member.nodeId.lowercase() in vipNodeIds,
                     onToggleAdmin = { onToggleAdmin(member.nodeId, member.role != GroupRole.ADMIN) },
                     onTogglePermission = { flag, enabled -> onTogglePermission(member.nodeId, flag, enabled) },
                     onBlock = { onBlock(member.nodeId) },
                 )
-                HorizontalDivider()
+                ApuSettingsDivider(startPadding = 16.dp)
             }
         }
     }
@@ -916,6 +919,8 @@ private fun MembersTab(
 private fun MemberRow(
     isAdmin: Boolean,
     member: MemberSummary,
+    /** Участник из элиты: кольцо вокруг аватарки и знак VIP у имени. */
+    vip: Boolean = false,
     onToggleAdmin: () -> Unit,
     onTogglePermission: (Long, Boolean) -> Unit,
     onBlock: () -> Unit,
@@ -925,8 +930,27 @@ private fun MemberRow(
     ApuBubble(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // Аватарка участника: у элиты — в объёмном золотом кольце.
+                val memberAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
+                    .collectAsState()
+                PeerAvatar(
+                    name = member.displayName.ifBlank { member.nodeId },
+                    avatarB64 = memberAvatars[member.nodeId],
+                    vip = vip,
+                    size = 40.dp,
+                )
+                Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(member.displayName.ifBlank { member.nodeId }, fontWeight = FontWeight.Medium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            member.displayName.ifBlank { member.nodeId },
+                            fontWeight = FontWeight.Medium,
+                        )
+                        if (vip) {
+                            Spacer(Modifier.width(6.dp))
+                            ApuVipBadge(compact = true)
+                        }
+                    }
                     Text(
                         when (member.role) {
                             GroupRole.OWNER -> "Владелец"
@@ -940,13 +964,13 @@ private fun MemberRow(
                 // Управление участниками видно только администраторам:
                 // обычный участник не должен видеть чужие «Права» и «Исключить».
                 if (isAdmin && !member.isMe && member.role != GroupRole.OWNER) {
-                    TextButton(onClick = { expanded = !expanded }) { Text("Права") }
-                    TextButton(onClick = onBlock) { Text("Исключить") }
+                    ApuTextAction(label = "Права", onClick = { expanded = !expanded })
+                    ApuTextAction(label = "Исключить", onClick = onBlock)
                 }
             }
 
             if (expanded && member.role == GroupRole.ADMIN) {
-                HorizontalDivider()
+                ApuSettingsDivider(startPadding = 16.dp)
                 Text("Разрешения администратора", style = MaterialTheme.typography.labelLarge)
                 GroupPermissions.Admin.entries.forEach { entry ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -958,17 +982,18 @@ private fun MemberRow(
                                 color = ApuBubbleMutedColor,
                             )
                         }
-                        Switch(
+                        ApuPremiumSwitch(
                             checked = GroupPermissions.has(member.permissions, entry.flag),
                             onCheckedChange = { onTogglePermission(entry.flag, it) },
                         )
                     }
                 }
             } else if (expanded) {
-                HorizontalDivider()
-                TextButton(onClick = onToggleAdmin) {
-                    Text(if (member.role == GroupRole.ADMIN) "Снять администратора" else "Назначить администратором")
-                }
+                ApuSettingsDivider(startPadding = 16.dp)
+                ApuTextAction(
+                    label = if (member.role == GroupRole.ADMIN) "Снять администратора" else "Назначить администратором",
+                    onClick = onToggleAdmin,
+                )
             }
         }
     }
@@ -995,8 +1020,14 @@ private fun RequestsTab(requests: List<JoinRequestSummary>, onDecide: (String, B
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TextButton(onClick = { onDecide(request.nodeId, true) }) { Text("Одобрить") }
-                        TextButton(onClick = { onDecide(request.nodeId, false) }) { Text("Отклонить") }
+                        ApuTextAction(
+                            label = "Одобрить",
+                            onClick = { onDecide(request.nodeId, true) },
+                        )
+                        ApuTextAction(
+                            label = "Отклонить",
+                            onClick = { onDecide(request.nodeId, false) },
+                        )
                     }
                 }
             }
@@ -1040,9 +1071,9 @@ private fun InvitesTab(
                             color = ApuBubbleMutedColor,
                         )
                     }
-                    Switch(checked = needsApproval, onCheckedChange = { needsApproval = it })
+                    ApuPremiumSwitch(checked = needsApproval, onCheckedChange = { needsApproval = it })
                 }
-                TextButton(onClick = { onCreate(needsApproval) }) { Text("Создать ссылку") }
+                ApuTextAction(label = "Создать ссылку", onClick = { onCreate(needsApproval) })
             } else {
                 Text(
                     "Ссылки создают и отзывают администраторы. Попросите ссылку у них " +
@@ -1141,7 +1172,7 @@ private fun InviteCard(
                     .clickable { attachApk = !attachApk }
                     .padding(horizontal = 4.dp),
             ) {
-                Checkbox(checked = attachApk, onCheckedChange = { attachApk = it })
+                ApuPremiumCheckbox(checked = attachApk, onCheckedChange = { attachApk = it })
                 Text(
                     "Приложить установочный файл (APK)",
                     style = MaterialTheme.typography.bodySmall,
@@ -1149,26 +1180,27 @@ private fun InviteCard(
             }
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                TextButton(onClick = { clipboard.setText(AnnotatedString(invite.shareLink)) }) {
-                    Text("Копировать")
-                }
-                TextButton(onClick = { AppShare.shareGroupInvite(context, groupTitle, invite.shareLink, isChannel, attachApk) }) {
-                    Text("Поделиться")
-                }
+                ApuTextAction(
+                    label = "Копировать",
+                    onClick = { clipboard.setText(AnnotatedString(invite.shareLink)) },
+                )
+                ApuTextAction(
+                    label = "Поделиться",
+                    onClick = { AppShare.shareGroupInvite(context, groupTitle, invite.shareLink, isChannel, attachApk) },
+                )
                 // Отозвать и удалить ссылку может только администратор:
                 // участник без права приглашать этих кнопок не видит.
                 if (canManage) {
                     if (invite.revoked) {
-                        TextButton(onClick = onDelete) { Text("Удалить") }
+                        ApuTextAction(label = "Удалить", onClick = onDelete)
                     } else {
-                        TextButton(onClick = onRevoke) { Text("Отозвать") }
+                        ApuTextAction(label = "Отозвать", onClick = onRevoke)
                     }
                 }
             }
         }
     }
 }
-
 
 @Composable
 private fun PermissionsTab(mask: Long, onToggle: (Long, Boolean) -> Unit) {
@@ -1195,7 +1227,7 @@ private fun PermissionsTab(mask: Long, onToggle: (Long, Boolean) -> Unit) {
                             color = ApuBubbleMutedColor,
                         )
                     }
-                    Switch(
+                    ApuPremiumSwitch(
                         checked = GroupPermissions.has(mask, entry.flag),
                         onCheckedChange = { onToggle(entry.flag, it) },
                     )
@@ -1204,20 +1236,3 @@ private fun PermissionsTab(mask: Long, onToggle: (Long, Boolean) -> Unit) {
         }
     }
 }
-
-/** Цвета поля ввода внутри светлого пузыря: тёмный текст/подпись на светлой
- *  подложке при ЛЮБОЙ теме (в тёмной теме стандартное поле белело). */
-@Composable
-// Раунд 267: поля настроек - в фирменной гамме: золотая рамка (как у
-// пузырей), белая заливка, скругление 18 - никаких серых «канцелярских» линий.
-private fun bubbleFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedTextColor = Color(0xFF1E2430),
-    unfocusedTextColor = Color(0xFF1E2430),
-    cursorColor = MaterialTheme.colorScheme.primary,
-    focusedLabelColor = MaterialTheme.colorScheme.primary,
-    unfocusedLabelColor = Color(0xFF5A6472),
-    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
-    unfocusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-    focusedContainerColor = Color.White,
-    unfocusedContainerColor = Color.White,
-)

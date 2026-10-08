@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 
 // =============================================================================
@@ -23,19 +24,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Wifi
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -51,10 +47,13 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.backup.ProfileSyncNet
 import com.vladimir.messenger.ui.components.ApuActionBubble
+import com.vladimir.messenger.ui.components.ApuSettingsDivider
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.util.QrCodeGenerator
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.vladimir.messenger.ui.components.ApuPremiumSwitch
 
 @Composable
 fun ProfileSyncDialog(
@@ -72,9 +71,10 @@ fun ProfileSyncDialog(
         title = { Text("Перенос профиля на новое устройство") },
         text = {
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
+                // ApuSettingsDialog уже ограничивает высоту и прокручивает текст.
+                // Вложенный verticalScroll здесь измерялся бы с бесконечной высотой
+                // и ронял Compose при открытии окна на некоторых версиях Android.
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
@@ -86,7 +86,7 @@ fun ProfileSyncDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
 
-                androidx.compose.material3.OutlinedTextField(
+                ApuBubbleField(
                     value = ui.password,
                     onValueChange = viewModel::onPasswordChange,
                     modifier = Modifier.fillMaxWidth(),
@@ -139,9 +139,10 @@ fun ProfileSyncDialog(
                     )
                     val mine = ProfileSyncNet.isOwnDevice(meta, ui.myDeviceId, ui.myAccountNodeId)
                     if (!mine) {
-                        TextButton(onClick = viewModel::netFetchAndStage) {
-                            Text("Забрать копию по паролю")
-                        }
+                        ApuTextAction(
+                            label = "Забрать копию по паролю",
+                            onClick = viewModel::netFetchAndStage,
+                        )
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -158,7 +159,7 @@ fun ProfileSyncDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Switch(
+                    ApuPremiumSwitch(
                         checked = ui.autoEnabled,
                         onCheckedChange = { viewModel.setAutoEnabled(it) },
                     )
@@ -173,7 +174,7 @@ fun ProfileSyncDialog(
                     )
                 }
 
-                HorizontalDivider()
+                ApuSettingsDivider(startPadding = 16.dp)
 
                 // ── Wi-Fi напрямую: без интернета ────────────────────────
                 Text(
@@ -227,19 +228,17 @@ fun ProfileSyncDialog(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        TextButton(onClick = viewModel::stopShare) {
-                            Text("Отменить передачу")
-                        }
+                        ApuTextAction(label = "Отменить передачу", onClick = viewModel::stopShare)
                     }
                 }
-                androidx.compose.material3.OutlinedTextField(
+                ApuBubbleField(
                     value = ui.pullAddress,
                     onValueChange = viewModel::onPullAddressChange,
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Адрес с экрана телефона (192.168.х.х:48126)") },
                     singleLine = true,
                 )
-                androidx.compose.material3.OutlinedTextField(
+                ApuBubbleField(
                     value = ui.pullToken,
                     onValueChange = viewModel::onPullTokenChange,
                     modifier = Modifier.fillMaxWidth(),
@@ -255,7 +254,7 @@ fun ProfileSyncDialog(
                 // ── Подготовленная копия: подтверждение ─────────────────
                 ui.staged?.let { manifest ->
                     Spacer(Modifier.height(4.dp))
-                    HorizontalDivider()
+                    ApuSettingsDivider(startPadding = 16.dp)
                     Spacer(Modifier.height(4.dp))
                     val created = SimpleDateFormat("d.MM.yyyy HH:mm", Locale.getDefault())
                         .format(Date(manifest.createdAtMs))
@@ -275,9 +274,7 @@ fun ProfileSyncDialog(
                             }
                         },
                     )
-                    TextButton(onClick = viewModel::discardStaged) {
-                        Text("Не применять")
-                    }
+                    ApuTextAction(label = "Не применять", onClick = viewModel::discardStaged)
                 }
 
                 ui.message?.let { message ->
@@ -292,13 +289,14 @@ fun ProfileSyncDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                enabled = !ui.busy && !ui.restarting,
+            ApuTextAction(
+                label = "Закрыть",
                 onClick = {
                     viewModel.stopShare()
                     onDismiss()
                 },
-            ) { Text("Закрыть") }
+                enabled = !ui.busy && !ui.restarting,
+            )
         },
     )
 }

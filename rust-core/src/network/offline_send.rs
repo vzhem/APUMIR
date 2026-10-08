@@ -66,7 +66,20 @@ pub fn prepare_offline_relay(
         return Err(OfflineRelayPrepareError::InvalidChatScope);
     }
 
-    let ttl = DEFAULT_RELAY_TTL;
+    // Владелец 2026-10-07: сигналы транспорта (NAT-пробивание, «печатает…») и
+    // пакеты файловой передачи больше НЕ лежат в очереди неделю. Сигнал живёт
+    // минуты, пакет передачи — до конца передачи; иначе они забивали резерв
+    // «своих» и вытесняли настоящую переписку. Срок уезжает и в конверт (ttl
+    // в секундах), поэтому соседние узлы видят его же.
+    let ttl = match crate::network::relay_queue::payload_kind(payload) {
+        crate::network::relay_queue::RelayPayloadKind::ServiceSignal => {
+            crate::network::relay_queue::TRANSIENT_SIGNAL_TTL
+        }
+        crate::network::relay_queue::RelayPayloadKind::FilePacket => {
+            crate::network::relay_queue::FILE_PACKET_TTL
+        }
+        crate::network::relay_queue::RelayPayloadKind::Correspondence => DEFAULT_RELAY_TTL,
+    };
     let envelope = wire::build_relay(
         message_id,
         recipient,
@@ -98,7 +111,55 @@ pub fn prepare_offline_relay(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::network::relay_queue::{ttl_to_ms, FILE_PACKET_TTL, TRANSIENT_SIGNAL_TTL};
     use crate::network::wire::MeshEnvelope;
+
+    #[test]
+    fn signals_and_file_packets_get_a_short_lifetime() {
+        // Владелец 2026-10-07: сигнал транспорта не должен лежать в очереди
+        // неделю — иначе он занимает резерв «своих» и вытесняет переписку.
+        let signal = prepare_offline_relay(
+            "msg-sig",
+            "pk_recipient",
+            "pk_origin",
+            "direct",
+            b"APUUDP1|ufseek|AAAA|body|tag",
+        )
+        .unwrap();
+        let signal_ms = signal.message.expires_at_ms - signal.message.created_at_ms;
+        assert_eq!(signal_ms, ttl_to_ms(TRANSIENT_SIGNAL_TTL));
+
+        let packet = prepare_offline_relay(
+            "msg-pkt",
+            "pk_recipient",
+            "pk_origin",
+            "direct",
+            b"apu-file1|chunk|1|0",
+        )
+        .unwrap();
+        let packet_ms = packet.message.expires_at_ms - packet.message.created_at_ms;
+        assert_eq!(packet_ms, ttl_to_ms(FILE_PACKET_TTL));
+
+        // Переписка живёт как прежде - неделю (проверяем, что срок не укорочен).
+        let letter = prepare_offline_relay(
+            "msg-txt",
+            "pk_recipient",
+            "pk_origin",
+            "chat-1",
+            "привет".as_bytes(),
+        )
+        .unwrap();
+        let letter_ms = letter.message.expires_at_ms - letter.message.created_at_ms;
+        assert_eq!(letter_ms, ttl_to_ms(DEFAULT_RELAY_TTL));
+
+        // И в самом конверте уезжает короткий срок: сосед знает, что это сигнал.
+        match wire::parse(&signal.envelope).unwrap() {
+            MeshEnvelope::Relay { ttl_secs, .. } => {
+                assert_eq!(ttl_secs, TRANSIENT_SIGNAL_TTL.as_secs());
+            }
+            other => panic!("ожидали relay-конверт, получили {other:?}"),
+        }
+    }
 
     #[test]
     fn prepares_legacy_compatible_hop_zero_relay() {

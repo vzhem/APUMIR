@@ -2,10 +2,8 @@ param(
     [Parameter(Mandatory = $true)][string]$Version,
     [int]$TimeoutMinutes = 25,
     # Public release notes (docs/RELEASE_NOTES_<version>.md). When given, the
-    # Actions placeholder text is replaced before the release is published
-    # again, so the public page never shows "automatic build from tag".
-    # Write them by docs/RELEASE_PUBLICATION_POLICY.md and show the owner the
-    # exact text first.
+    # owner-approved text is applied to the draft before publication. Write it
+    # by docs/RELEASE_PUBLICATION_POLICY.md and show the owner the exact text first.
     [string]$NotesFile = ''
 )
 
@@ -97,8 +95,8 @@ if ($NotesFile -ne '') {
     if ($LASTEXITCODE -ne 0) { Write-Output 'RESULT: FAILED to replace the description.'; exit 1 }
 } else {
     Write-Output ''
-    Write-Output 'NOTE: no -NotesFile given; the public page keeps the Actions placeholder text.'
-    Write-Output '      Fix later with: gh release edit <version> --notes-file docs\RELEASE_NOTES_<version>.md'
+    Write-Output 'NOTE: no -NotesFile given; verify that the draft body is exactly the owner-approved public text.'
+    Write-Output '      Fix before publication with: gh release edit <version> --notes-file docs\RELEASE_NOTES_<version>.md'
 }
 
 # ---- make it a full release, then publish it again --------------------------

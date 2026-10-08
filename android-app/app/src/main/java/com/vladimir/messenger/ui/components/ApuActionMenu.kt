@@ -59,6 +59,8 @@ fun ApuActionBubble(
     icon: ImageVector,
     enabled: Boolean = true,
     destructive: Boolean = false,
+    /** Подпись кнопки переносится; в компактном меню можно оставить одну строку. */
+    maxLines: Int = 2,
     onClick: () -> Unit,
 ) {
     val contentColor = Color.White.copy(alpha = if (enabled) 1f else 0.52f)
@@ -86,7 +88,7 @@ fun ApuActionBubble(
             color = contentColor,
             fontWeight = FontWeight.SemiBold,
             style = MaterialTheme.typography.labelLarge,
-            maxLines = 1,
+            maxLines = maxLines,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
@@ -124,6 +126,7 @@ fun ApuActionsMenu(
                     icon = action.icon,
                     enabled = action.enabled,
                     destructive = action.destructive,
+                    maxLines = 1,
                     onClick = {
                         onDismiss()
                         action.onClick()

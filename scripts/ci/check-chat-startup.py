@@ -75,7 +75,11 @@ class ChatStartupTest(unittest.TestCase):
         self.assertIn("ApuBubbleCard", retry)
         self.assertIn("ApuBubbleTextColor", retry)
         self.assertIn("ApuBubbleMutedColor", retry)
-        self.assertIn("ButtonDefaults.textButtonColors(contentColor = ApuBubbleLinkColor)", retry)
+        # Владелец 2026-10-07: «в таком стиле нужно переделать всё приложение».
+        # Кнопка «Повторить» — фирменная ApuTextAction, а не стоковый TextButton.
+        self.assertIn("ApuTextAction(", retry)
+        self.assertIn('label = "Повторить"', retry)
+        self.assertNotIn("TextButton(", retry)
         self.assertNotIn("TextButtonDefaults", retry)
 
 

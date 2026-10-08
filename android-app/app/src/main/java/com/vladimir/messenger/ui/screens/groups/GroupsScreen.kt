@@ -6,13 +6,19 @@ package com.vladimir.messenger.ui.screens.groups
 
 import com.vladimir.messenger.ui.components.ApuAction
 import com.vladimir.messenger.ui.components.ApuActionsMenu
+import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuNotificationBadge
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.NotificationMuteDialog
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuSearchField
+import com.vladimir.messenger.ui.components.apuBubbleSurface
+import com.vladimir.messenger.ui.components.apuPremiumGloss
+import com.vladimir.messenger.ui.components.apuPremiumLift
+import com.vladimir.messenger.ui.components.apuPremiumThread
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
 import com.vladimir.messenger.ui.components.ApuSettingsLayout
@@ -75,20 +81,14 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -111,6 +111,12 @@ import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.ui.components.HintBubbleMutedColor
 import com.vladimir.messenger.ui.components.HintBubbleTextColor
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.ApuPremiumFloatingActionButton
+import com.vladimir.messenger.ui.components.ApuPremiumCheckbox
+import com.vladimir.messenger.ui.components.ApuPremiumSwitch
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
+import com.vladimir.messenger.ui.components.ApuGoldInk
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -253,12 +259,14 @@ fun GroupsScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = {
-                createAsChannel = false
-                if (uiState.canCreate) showCreate = true else showRankHint = true
-            }) {
-                Icon(Icons.Filled.Add, contentDescription = "Создать группу или канал")
-            }
+            ApuPremiumFloatingActionButton(
+                onClick = {
+                    createAsChannel = false
+                    if (uiState.canCreate) showCreate = true else showRankHint = true
+                },
+                icon = Icons.Filled.Add,
+                contentDescription = "Создать группу или канал",
+            )
         },
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
@@ -306,9 +314,7 @@ fun GroupsScreen(
                                 color = HintBubbleMutedColor,
                             )
                             Spacer(Modifier.height(12.dp))
-                            TextButton(onClick = { showJoin = true }) {
-                                Text("Войти по ссылке")
-                            }
+                            ApuTextAction(label = "Войти по ссылке", onClick = { showJoin = true })
                         }
                     }
                 }
@@ -415,13 +421,16 @@ fun GroupsScreen(
             confirmButton = {
                 val target = uiState.joinedGroupId
                 val postTopic = uiState.joinedPostTopicId
-                TextButton(
-                    enabled = !uiState.joining,
+                ApuTextAction(
+                    label = when {
+                            target == null -> "Готово"
+                            postTopic != null -> "Открыть пост"
+                            else -> "Открыть чат"
+                        },
                     onClick = {
                         viewModel.consumeJoinResult()
                         if (target != null) {
-                            // Ссылка на пост открывает сам пост, а не начало
-                            // ленты: человек перешёл ради конкретной записи.
+
                             if (postTopic != null) {
                                 onOpenPost(target, postTopic)
                             } else {
@@ -429,15 +438,8 @@ fun GroupsScreen(
                             }
                         }
                     },
-                ) {
-                    Text(
-                        when {
-                            target == null -> "Готово"
-                            postTopic != null -> "Открыть пост"
-                            else -> "Открыть чат"
-                        }
-                    )
-                }
+                    enabled = !uiState.joining,
+                )
             },
         )
     }
@@ -500,7 +502,7 @@ fun GroupsScreen(
                             .clickable { attachApk = !attachApk }
                             .padding(horizontal = 4.dp),
                     ) {
-                        Checkbox(checked = attachApk, onCheckedChange = { attachApk = it })
+                        ApuPremiumCheckbox(checked = attachApk, onCheckedChange = { attachApk = it })
                         Text(
                             "Приложить установочный файл (APK)",
                             style = MaterialTheme.typography.bodySmall,
@@ -509,23 +511,29 @@ fun GroupsScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
+                ApuTextAction(
+                    label = "Показать QR-код",
+                    onClick = {
                     val chosen = group
                     inviteChoice = null
                     viewModel.prepareQrInvite(chosen.id) { title, link ->
                         qrInvite = title to link
                     }
-                }) { Text("Показать QR-код") }
+                },
+                )
             },
             dismissButton = {
-                TextButton(onClick = {
+                ApuTextAction(
+                    label = "Отправить ссылку",
+                    onClick = {
                     val chosen = group
                     inviteChoice = null
                     viewModel.shareInvite(chosen.id) { title, link ->
-                        // Раунд 162: каналу - «канал».
+
                         AppShare.shareGroupInvite(context, title, link, chosen.isChannel, attachApk)
                     }
-                }) { Text("Отправить ссылку") }
+                },
+                )
             },
         )
     }
@@ -547,7 +555,7 @@ fun GroupsScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { qrInvite = null }) { Text("Готово") }
+                ApuTextAction(label = "Готово", onClick = { qrInvite = null })
             },
         )
     }
@@ -582,22 +590,21 @@ fun GroupsScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    viewModel.leaveOrDelete(group)
-                    confirmLeave = null
-                }) {
-                    Text(
-                        when {
+                ApuTextAction(
+                    label = when {
                             owner -> "Удалить"
                             group.isChannel -> "Отписаться"
                             else -> "Выйти"
                         },
-                        color = if (owner) MaterialTheme.colorScheme.error else ApuBubbleAccentColor,
-                    )
-                }
+                    onClick = {
+                    viewModel.leaveOrDelete(group)
+                    confirmLeave = null
+                },
+                    danger = true,
+                )
             },
             dismissButton = {
-                TextButton(onClick = { confirmLeave = null }) { Text("Отмена") }
+                ApuTextAction(label = "Отмена", onClick = { confirmLeave = null })
             },
         )
     }
@@ -612,7 +619,7 @@ fun GroupsScreen(
                         "приглашённых. Вступать в группы по ссылке можно уже сейчас."
                 )
             },
-            confirmButton = { TextButton(onClick = { showRankHint = false }) { Text("Понятно") } },
+            confirmButton = { ApuTextAction(label = "Понятно", onClick = { showRankHint = false }) },
         )
     }
 
@@ -646,13 +653,13 @@ private fun GroupRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(ApuBubbleSurfaceColor)
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(18.dp),
-            )
+            // Владелец 2026-10-07: «в таком стиле нужно переделать всё приложение».
+            // Строка списка — та же премиальная поверхность, что шапки и диалоги:
+            // подъём, единая подложка, золотая нить по кромке, блеск под текстом.
+            .apuPremiumLift(5.dp)
+            .apuBubbleSurface()
+            .apuPremiumThread(inset = 16.dp)
+            .apuPremiumGloss(intensity = 0.45f, topFraction = 0.55f)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -798,7 +805,7 @@ private fun CreateGroupDialog(
                     onSelectChannel = { isChannel = it },
                 )
 
-                OutlinedTextField(
+                ApuBubbleField(
                     value = title,
                     onValueChange = { title = it },
                     label = { Text(if (isChannel) "Название канала" else "Название") },
@@ -806,17 +813,15 @@ private fun CreateGroupDialog(
                         Text(if (isChannel) "Например, Новости APU" else "Например, Рабочий чат")
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
+                ApuBubbleField(
                     value = about,
                     onValueChange = { about = it },
                     label = { Text(if (isChannel) "Описание канала" else "Описание") },
                     placeholder = { Text("О чём сообщество (необязательно)") },
                     minLines = 2,
                     maxLines = 4,
-                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
 
@@ -878,7 +883,7 @@ private fun CreateGroupDialog(
                             )
                         }
                         Spacer(Modifier.width(8.dp))
-                        Switch(checked = isPublic, onCheckedChange = { isPublic = it })
+                        ApuPremiumSwitch(checked = isPublic, onCheckedChange = { isPublic = it })
                     }
 
                     if (!isChannel) {
@@ -929,7 +934,7 @@ private fun CreateGroupDialog(
                                 )
                             }
                             Spacer(Modifier.width(8.dp))
-                            Switch(checked = topics, onCheckedChange = { topics = it })
+                            ApuPremiumSwitch(checked = topics, onCheckedChange = { topics = it })
                         }
                     }
                 }
@@ -944,23 +949,23 @@ private fun CreateGroupDialog(
             }
         },
         confirmButton = {
-            Button(
+            ApuPremiumContentButton(
                 enabled = title.isNotBlank() && !creating,
                 onClick = { onCreate(title, about, isPublic, topics, isChannel) },
-                shape = RoundedCornerShape(14.dp),
+                style = DiagnosticsActionStyle.PRIMARY,
             ) {
                 if (creating) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(16.dp),
                         strokeWidth = 2.dp,
-                        color = Color(0xFFFFF8E6),
+                        color = ApuGoldInk,
                     )
                     Spacer(Modifier.width(8.dp))
                 }
                 Text(if (creating) "Создаём…" else "Создать")
             }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Отмена") } },
+        dismissButton = { ApuTextAction(label = "Отмена", onClick = onDismiss) },
     )
 }
 
@@ -1067,7 +1072,7 @@ private fun JoinByLinkDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = ApuBubbleMutedColor,
                 )
-                OutlinedTextField(
+                ApuBubbleField(
                     value = link,
                     onValueChange = {
                         link = it
@@ -1075,9 +1080,7 @@ private fun JoinByLinkDialog(
                     },
                     label = { Text("Ссылка-приглашение") },
                     placeholder = { Text("Ссылка") },
-                    // Ссылка длинная (в ней адрес владельца) — даём ей переноситься.
                     maxLines = 4,
-                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 error?.let {
@@ -1090,7 +1093,7 @@ private fun JoinByLinkDialog(
             }
         },
         confirmButton = {
-            Button(
+            ApuPremiumContentButton(
                 onClick = {
                     // Проверяем, что это приглашение в группу, но отдаём ВСЮ
                     // ссылку: в ней id группы и адрес владельца, без них войти
@@ -1103,11 +1106,11 @@ private fun JoinByLinkDialog(
                         onSubmit(link.trim())
                     }
                 },
-                shape = RoundedCornerShape(14.dp),
+                style = DiagnosticsActionStyle.PRIMARY,
             ) { Text("Войти") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         },
     )
 }
@@ -1127,13 +1130,12 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(ApuBubbleSurfaceColor)
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(18.dp),
-            )
+            // Владелец 2026-10-07: та же премиальная поверхность, что у «моих»
+            // сообществ — списки выглядят едино.
+            .apuPremiumLift(5.dp)
+            .apuBubbleSurface()
+            .apuPremiumThread(inset = 16.dp)
+            .apuPremiumGloss(intensity = 0.45f, topFraction = 0.55f)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1164,7 +1166,9 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
                 color = ApuBubbleMutedColor,
             )
         }
-        TextButton(onClick = {
+        ApuTextAction(
+            label = if (entry.isChannel) "Подписаться" else "Вступить",
+            onClick = {
             onJoin(
                 GroupInviteLinks.build(
                     slug = entry.slug,
@@ -1174,13 +1178,8 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
                     requestApproval = entry.needsApproval,
                 )
             )
-        }) {
-            Text(
-                if (entry.isChannel) "Подписаться" else "Вступить",
-                color = ApuBubbleAccentColor,
-                fontWeight = FontWeight.SemiBold,
-            )
-        }
+        },
+        )
     }
 }
 

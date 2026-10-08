@@ -45,6 +45,23 @@ data class ChatDetailUiState(
      * вместо того чтобы молча копить строки «в ожидании».
      */
     val isSelfChat: Boolean = false,
+    /**
+     * Собеседник сообщил ранг VIP (APURANK1) — у имени в шапке чата появляется
+     * знак, а вокруг аватарки — объёмное золотое кольцо с блеском.
+     */
+    val peerVip: Boolean = false,
+    /**
+     * От собеседника приходят конверты, которые не вскрываются: у него осталась
+     * прежняя копия нашего ключа (переустановка/восстановление профиля). Пока
+     * это так, в переписке висит золотая плашка с объяснением и кнопкой
+     * «Отправить мой ключ» — раньше об этом знал только отчёт «Логи».
+     */
+    val keyDesync: Boolean = false,
+    /**
+     * Переписка с САМИМ СОБОЙ и мой ранг — VIP: тогда кольцо и знак показываем
+     * у своего узла (в такой переписке собеседника нет).
+     */
+    val selfVip: Boolean = false,
     val transfers: List<FileTransferEntity> = emptyList(),
     val inputText: String       = "",
     val isLoading: Boolean      = true,
@@ -68,6 +85,8 @@ data class ChatDetailUiState(
     val antiRatingUntilMs: Long = 0,
     val scrollToBottom: Boolean = false,
     val pendingSave: FileTransferEntity? = null,
+    /** Non-null asks the screen to open Android's system picker for an explicit file retry. */
+    val pendingRetryFilePickerId: String? = null,
     /** Ранг ещё не открыл вложения: кнопка объяснит это сразу, а не после выбора файла. */
     val canSendAttachments: Boolean = true,
     val attachmentsLockedHint: String = "",
@@ -108,10 +127,14 @@ class ChatDetailViewModel @Inject constructor(
     private val messageDeletion: com.vladimir.messenger.data.repository.MessageDeletionRepository,
     private val stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary,
     @ApplicationContext private val appContext: Context,
+    /** Ранги собеседников: поток узлов-элиты для знака и кольца у аватарки. */
+    private val peerRankStore: com.vladimir.messenger.data.rank.PeerRankStore,
 ) : ViewModel() {
 
     // chatId передаётся через навигацию (SavedStateHandle)
     private val chatId: String = checkNotNull(savedStateHandle["chatId"])
+    /** Picker result is bound to the original outgoing file message ID. */
+    @Volatile private var awaitingFileRetryMessageId: String? = null
 
     /** р235: собеседник личного чата - ему уходит «печатает…». */
     @Volatile private var peerId: String = ""
@@ -127,6 +150,14 @@ class ChatDetailViewModel @Inject constructor(
 
     /** р236: когда последний раз отправляли черновик партнёрскому устройству. */
     @Volatile private var lastDraftSentAt = 0L
+
+    /** р244-подобное: собеседник личного чата, за пометкой ключа которого следим. */
+    @Volatile private var keyDesyncPeer: String = ""
+
+    /** Наблюдение за пометкой ключа заведено (один раз на экран). */
+    @Volatile private var keyDesyncWatched = false
+
+    private var keyDesyncJob: kotlinx.coroutines.Job? = null
 
     private val _uiState = MutableStateFlow(ChatDetailUiState())
     val uiState: StateFlow<ChatDetailUiState> = _uiState.asStateFlow()
@@ -283,6 +314,26 @@ class ChatDetailViewModel @Inject constructor(
      * Слушаем строку чата в БД — peer_discovered/peer_lost её же и обновляют.
      */
     private fun observeContactPresence() {
+        // Знак VIP и золотое кольцо у имени собеседника обновляем на лету: ранг
+        // может приехать в любой момент конвертом APURANK1, а экран уже открыт.
+        viewModelScope.launch {
+            peerRankStore.vipNodeIds.collect { vipIds ->
+                val peer = peerId.lowercase()
+                // В переписке с собственным узлом собеседника нет: кольцо решает
+                // МОЙ ранг (он же виден в профиле и на главной). Свой ранг лежит
+                // в настройках, поэтому читаем его в фоне, а не на главном потоке.
+                val selfVip = withContext(Dispatchers.IO) {
+                    isSelfChat(_uiState.value.messages, peerId) && ownVip()
+                }
+                _uiState.update {
+                    it.copy(
+                        peerVip = peer.isNotBlank() && peer in vipIds,
+                        selfVip = selfVip,
+                    )
+                }
+            }
+        }
+
         viewModelScope.launch {
             // р243: пока чат не опознан, считаем его обычным: плашка «это ваш
             // узел» появляется после загрузки переписки (р241), а не после
@@ -327,8 +378,51 @@ class ChatDetailViewModel @Inject constructor(
                         heartsWatched = true
                         observeHearts(chat.contactId)
                     }
+                    // «Сообщения от него не открываются»: пока экран открыт,
+                    // спрашиваем пометку раз в 5 секунд. Это одно чтение
+                    // настроек — дешевле любого нового потока событий.
+                    if (!keyDesyncWatched && chat.contactId.startsWith("pk_")) {
+                        keyDesyncWatched = true
+                        observeKeyDesync(chat.contactId)
+                    }
                 }
             }
+        }
+    }
+
+    /**
+     * Пометка «от собеседника не открывается». Опрос: пометку ставит служба
+     * ядра (при нерасшифрованном конверте), а экран лишь показывает её словами.
+     * Гасим сразу, как только что-то от него открылось, — состояние видно и так.
+     */
+    private fun observeKeyDesync(peer: String) {
+        keyDesyncPeer = peer
+        keyDesyncJob = viewModelScope.launch {
+            while (true) {
+                val pending = com.vladimir.messenger.data.security.KeyDesyncNotice
+                    .isPending(appContext, peer)
+                _uiState.update { if (it.keyDesync == pending) it else it.copy(keyDesync = pending) }
+                kotlinx.coroutines.delay(KEY_DESYNC_POLL_MS)
+            }
+        }
+    }
+
+    /**
+     * Кнопка плашки: отдать собеседнику свой ключ ещё раз.
+     *
+     * Само по себе это его приложение не «починит» (пин сбрасывает только
+     * человек, отсканировав QR заново), но оно покажет ЕМУ нашу настоящую
+     * привязку и подсказку — так переписка восстанавливается быстрее, чем при
+     * ожидании фоновой рассылки. Пометку у себя снимаем: сигнал отправлен.
+     */
+    fun onKeyDesyncAction() {
+        val peer = keyDesyncPeer
+        if (peer.isBlank()) return
+        viewModelScope.launch {
+            runCatching { fileTransferRouter.announceMyKeyTo(peer) }
+                .onFailure { error -> android.util.Log.w("ChatDetailVM", "key announce failed", error) }
+            com.vladimir.messenger.data.security.KeyDesyncNotice.clear(appContext, peer)
+            _uiState.update { it.copy(keyDesync = false) }
         }
     }
 
@@ -467,6 +561,11 @@ class ChatDetailViewModel @Inject constructor(
             )
         }
     }
+
+    /** Мой ранг дотягивает до VIP: кольцо и знак в переписке с собственным узлом. */
+    private fun ownVip(): Boolean = com.vladimir.messenger.data.rank.PeerRankStore.isVipRank(
+        com.vladimir.messenger.data.referral.ReferralRankStore.qualifiedDirectCount(appContext),
+    )
 
     /** Peer metadata arrives independently; history must not wait for a second DB query. */
     private fun isSelfChat(messages: List<Message>, peer: String): Boolean {
@@ -682,6 +781,84 @@ class ChatDetailViewModel @Inject constructor(
         }
         if (!RustBridge.isRunning()) {
             android.util.Log.i("ChatDetailVM", "р245: движок не поднялся, пробуем как есть")
+        }
+    }
+
+    /** Manual resend for an undelivered text message or file placeholder. */
+    fun retryMessage(message: Message) {
+        if (!message.isFromMe || _uiState.value.isPreparingFile) return
+        if (message.status == com.vladimir.messenger.domain.model.MessageStatus.LOCAL_FILE ||
+            message.status == com.vladimir.messenger.domain.model.MessageStatus.FILE_EXPIRED
+        ) {
+            requestFileRetryPicker(message.id)
+            return
+        }
+        viewModelScope.launch {
+            chatRepository.retryOutgoingMessage(message.id)
+                .onFailure { error ->
+                    _uiState.update { it.copy(error = "Повторить отправку не удалось: ${error.message.orEmpty()}") }
+                }
+        }
+    }
+
+    /** Always use the system picker for a file retry: source URIs/paths are not retained. */
+    fun retryFileTransfer(messageId: String) {
+        requestFileRetryPicker(messageId)
+    }
+
+    private fun requestFileRetryPicker(messageId: String) {
+        if (_uiState.value.isPreparingFile) return
+        if (!_uiState.value.canSendAttachments) {
+            _uiState.update { it.copy(error = it.attachmentsLockedHint) }
+            return
+        }
+        awaitingFileRetryMessageId = messageId
+        _uiState.update { it.copy(error = null, pendingRetryFilePickerId = messageId) }
+    }
+
+    fun onRetryFilePickerLaunched(messageId: String) {
+        if (_uiState.value.pendingRetryFilePickerId == messageId) {
+            _uiState.update { it.copy(pendingRetryFilePickerId = null) }
+        }
+    }
+
+    fun onRetryFilePickerResult(uri: Uri?) {
+        val messageId = awaitingFileRetryMessageId ?: return
+        awaitingFileRetryMessageId = null
+        if (uri == null) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isPreparingFile = true, error = null) }
+            try {
+                claimEngineForMediaIfNeeded()
+                val message = chatRepository.getMessageById(messageId)
+                    ?: error("Исходное сообщение не найдено")
+                check(message.isFromMe) { "Можно повторить только свой файл" }
+                check(
+                    message.status == com.vladimir.messenger.domain.model.MessageStatus.LOCAL_FILE ||
+                        message.status == com.vladimir.messenger.domain.model.MessageStatus.FILE_EXPIRED
+                ) { "Файл уже доставлен или больше не ожидает отправки" }
+                val chat = chatRepository.getChatById(message.chatId)
+                    ?: error("Чат недоступен")
+                val recipientId = chat.contactId
+                check(recipientId.startsWith("pk_")) { "У контакта нет ключа для передачи файлов" }
+                check(chatRepository.markOutgoingFileRequeued(messageId)) {
+                    "Статус файла изменился: он уже мог быть подтверждён"
+                }
+                fileTransferRouter.retryOutgoingFile(
+                    source = uri,
+                    messageId = messageId,
+                    chatId = message.chatId,
+                    recipientNodeId = recipientId,
+                    qualifiedDirectReferrals = ReferralRankStore.qualifiedDirectCount(appContext),
+                )
+                _uiState.update { it.copy(scrollToBottom = true) }
+                fileTransferRouter.pumpOutgoing()
+            } catch (e: Exception) {
+                android.util.Log.w("ChatDetailVM", "file retry failed: ${e.javaClass.simpleName}")
+                _uiState.update { it.copy(error = "Файл не отправлен: ${e.message.orEmpty()}") }
+            } finally {
+                _uiState.update { it.copy(isPreparingFile = false) }
+            }
         }
     }
 
@@ -1550,5 +1727,12 @@ class ChatDetailViewModel @Inject constructor(
 
         /** р236: черновик уходит партнёру не чаще раза в 1.5 с. */
         const val DRAFT_REFRESH_MS = 1_500L
+
+        /**
+         * Как часто экран перечитывает пометку «от собеседника не открывается».
+         * Пять секунд: человек всё равно вернётся к чату не мгновенно, а чтение
+         * настроек стоит дешевле одного кадра отрисовки.
+         */
+        const val KEY_DESYNC_POLL_MS = 5_000L
     }
 }

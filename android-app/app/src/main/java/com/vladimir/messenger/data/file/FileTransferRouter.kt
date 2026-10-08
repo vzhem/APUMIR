@@ -3,6 +3,7 @@ package com.vladimir.messenger.data.file
 import android.content.Context
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.diagnostics.Counters
 import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.repository.ChatRepository
@@ -15,6 +16,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
 
 /**
  * Facade the service layer talks to: routes incoming packet/handshake texts (before they are
@@ -57,6 +60,8 @@ class FileTransferRouter @Inject constructor(
 ) {
     private val appContext: Context
     private val routerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** Serializes sender pumps with explicit replacement/re-preparation of one outgoing message. */
+    private val outgoingTransferMutex = Mutex()
     private val sender: FileTransferSender
     private val receiver: FileTransferReceiver
     private val custodySender: FileCustodySender
@@ -78,6 +83,8 @@ class FileTransferRouter @Inject constructor(
 
     /** р231: когда последний раз принимали файловый пакет (передача идёт к нам). */
     @Volatile private var lastIncomingActivityAt = 0L
+    /** Когда последний раз убирали просроченные передачи (диск + база). */
+    @Volatile private var lastExpiredSweepAt = 0L
 
     /**
      * р231: идёт ли передача (отдача или приём) прямо сейчас. Передача роли
@@ -531,10 +538,20 @@ class FileTransferRouter @Inject constructor(
             },
             onAuthenticatedDirectFcap = { transferIdHex, from, maxFramePayload ->
                 if (isPeerViaUdp(from)) {
-                    TransferDiagnostics.record("F4", "FCAP v2 received over UDP; keeping F3 compatibility route")
+                    TransferDiagnostics.count(Counters.F4_UDP_FALLBACK)
+                    TransferDiagnostics.recordWarning(
+                        "F4",
+                        "FCAP v2 пришёл по UDP — бинарный прямой канал не включаем, " +
+                            "остаётся совместимый путь",
+                    )
                     Log.i(TAG, "F4 FCAP $transferIdHex from ${from.takeLast(8)}: peer via UDP, keeping F3")
                 } else {
-                    TransferDiagnostics.record("F4", "FCAP v2 negotiated; next binary ranges prefer authenticated direct session")
+                    TransferDiagnostics.count(Counters.F4_NEGOTIATED)
+                    TransferDiagnostics.recordSuccess(
+                        "F4",
+                        "прямой канал согласован (диапазон до $maxFramePayload Б) — " +
+                            "следующие куски пойдут бинарными диапазонами",
+                    )
                     senderLocal.markBinaryCapable(
                         transferIdHex,
                         maxFramePayload,
@@ -701,7 +718,12 @@ class FileTransferRouter @Inject constructor(
      * Получатель появился: возобновить все передачи, которые его ждали.
      */
     suspend fun resumeWaitingForRecipient() {
-        val resumed = transferDao.resumeAllWaitingRecipient(System.currentTimeMillis())
+        outgoingTransferMutex.lock()
+        val resumed = try {
+            transferDao.resumeAllWaitingRecipient(System.currentTimeMillis())
+        } finally {
+            outgoingTransferMutex.unlock()
+        }
         if (resumed > 0) {
             Log.i(TAG, "Resumed $resumed file transfer(s) waiting for recipient")
             pumpOutgoing()
@@ -715,6 +737,8 @@ class FileTransferRouter @Inject constructor(
         // вызов с главного потока (ViewModel при отправке) давал
         // «Приложение не отвечает» вплоть до убийства системы.
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            outgoingTransferMutex.lock()
+            try {
             if (!RustBridge.isRunning()) {
                 // р231: мы тень, но у нас есть готовый исходящий файл - своей
                 // сессии нет, поэтому просим движок у активного партнёра.
@@ -737,8 +761,52 @@ class FileTransferRouter @Inject constructor(
             runCatching { groupSeeder.pump() }
                 .onFailure { Log.w(TAG, "group seed pump failed: ${it.message}") }
             summary
+            } finally {
+                outgoingTransferMutex.unlock()
+            }
         }
     }
+
+    /** Reprepare a manually retried file with its original chat-message ID and a fresh file TTL. */
+    suspend fun retryOutgoingFile(
+        source: android.net.Uri,
+        messageId: String,
+        chatId: String,
+        recipientNodeId: String,
+        qualifiedDirectReferrals: Int,
+    ): OutgoingFilePreparationService.PreparedTransfer =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            outgoingTransferMutex.lock()
+            try {
+                val message = chatRepository.getMessageById(messageId)
+                check(
+                    message?.isFromMe == true &&
+                        message.status in setOf(
+                            com.vladimir.messenger.domain.model.MessageStatus.LOCAL_FILE,
+                            com.vladimir.messenger.domain.model.MessageStatus.FILE_EXPIRED,
+                        )
+                ) { "Файл уже подтверждён или исходное сообщение недоступно" }
+                val previous = transferDao.getOutgoingForMessage(messageId)
+                for (row in previous) {
+                    check(chunkStore.deleteTransfer(row.transferId)) {
+                        "Не удалось очистить старые зашифрованные части файла"
+                    }
+                    transferDao.deleteTransfer(row.transferId)
+                    FileTransferKeyVault.deleteKey(appContext, row.transferId)
+                    deleteOutgoingPreview(row.transferId)
+                    mirrorAnnounced.remove(row.transferId)
+                }
+                preparation.get().prepare(
+                    source = source,
+                    messageId = messageId,
+                    chatId = chatId,
+                    recipientNodeId = recipientNodeId,
+                    qualifiedDirectReferrals = qualifiedDirectReferrals,
+                )
+            } finally {
+                outgoingTransferMutex.unlock()
+            }
+        }
 
     /**
      * р231: у тени нет своей сетевой сессии, поэтому исходящий файл со
@@ -776,6 +844,9 @@ class FileTransferRouter @Inject constructor(
             val origin = custodySender.pumpOrigin()
             val forward = custodySender.pumpForwarding()
             val swept = custodySender.sweep()
+            // Потеряшки: просроченное убираем здесь же, чтобы строка, куски и
+            // принятый недокачанный файл уходили вместе.
+            purgeExpiredTransfers(now)
             if (origin.originPumped > 0 || forward.forwarded > 0 || swept > 0) {
                 Log.i(
                     TAG,
@@ -856,22 +927,99 @@ class FileTransferRouter @Inject constructor(
     }
 
     /**
+     * Уборка «потеряшек»: просроченное не живёт вечно.
+     *
+     * Владелец 2026-10-07: «У нас нет такого что некоторые потеряшки живут в
+     * очереди вечно? Текст и малые файлы объёмы можно по дольше хранить. А вот
+     * видио фото и всё тяжёлое максимум нужно хранить 24 часа.»
+     *
+     * Что делает:
+     *  1) незавершённые передачи с истёкшим сроком — строка, зашифрованные куски
+     *     и недокачанный принятый файл удаляются (до этого такая строка могла
+     *     лежать на телефоне бесконечно: удалять её было некому);
+     *  2) на диске не остаётся копий без живой строки (осиротевшие) и копий
+     *     завершённых передач, у которых срок вышел: дальше они никому не
+     *     раздаются, значит место занимают зря. Принятый (расшифрованный) файл
+     *     и строка истории остаются — это уже файл человека, а не «потеряшка».
+     *
+     * Возвращает, сколько строк убрано и сколько копий освобождено.
+     */
+    suspend fun purgeExpiredTransfers(
+        nowMs: Long = System.currentTimeMillis(),
+        force: Boolean = false,
+    ): Pair<Int, Int> {
+        // Диск и база: не чаще раза в 10 минут, иначе уборка дороже пользы.
+        if (!force && nowMs - lastExpiredSweepAt < EXPIRED_SWEEP_INTERVAL_MS) return 0 to 0
+        lastExpiredSweepAt = nowMs
+
+        // 1) Незавершённые просроченные: забираем строками, чтобы убрать и куски.
+        val stale = runCatching { transferDao.getExpiredIncomplete(nowMs, EXPIRED_PURGE_BATCH) }
+            .getOrDefault(emptyList())
+        var removedRows = 0
+        for (row in stale) {
+            if (row.direction == "OUTGOING") {
+                runCatching { chatRepository.markOutgoingFileExpired(row.messageId) }
+            }
+            runCatching { chunkStore.deleteTransfer(row.transferId) }
+            runCatching { receivedStore.deleteTransfer(row.transferId) }
+            runCatching { FileTransferKeyVault.deleteKey(appContext, row.transferId) }
+            if (row.direction == "OUTGOING") deleteOutgoingPreview(row.transferId)
+            transferDao.deleteTransfer(row.transferId)
+            removedRows++
+        }
+
+        // 2) Диск: осиротевшие копии и копии просроченных завершённых передач.
+        var freedCopies = 0
+        for (transferId in runCatching { chunkStore.transferIds() }.getOrDefault(emptyList())) {
+            val row = runCatching { transferDao.getTransfer(transferId) }.getOrNull()
+            if (row == null) {
+                if (chunkStore.deleteTransfer(transferId)) freedCopies++
+                continue
+            }
+            // Чужое хранение (CUSTODY) убирает свой проход: у него отдельные
+            // состояния и отпускание хранителем, здесь его не трогаем.
+            if (row.direction == "CUSTODY") continue
+            if (row.state != "COMPLETE") continue
+            if (row.expiresAtMs > nowMs) continue
+            if (chunkStore.deleteTransfer(transferId)) freedCopies++
+        }
+
+        if (removedRows > 0 || freedCopies > 0) {
+            Log.i(TAG, "expired sweep: rows=$removedRows copies=$freedCopies")
+            TransferDiagnostics.count(Counters.TRANSFER_EXPIRED_ROWS, removedRows.toLong())
+            TransferDiagnostics.count(Counters.TRANSFER_EXPIRED_COPIES, freedCopies.toLong())
+            TransferDiagnostics.record(
+                "file",
+                FileTransferRetention.describeSweep(removedRows, freedCopies),
+            )
+        }
+        return removedRows to freedCopies
+    }
+
+    /**
      * Пользовательская «очистка зависших» (настройки → Передача файлов): отменяет все
      * незавершённые ИСХОДЯЩИЕ передачи (передатчик больше не пытается их докачать) и
      * удаляет их локальные зашифрованные куски. Входящие и завершённые не трогает.
      * @return число отменённых передач.
      */
-    suspend fun cancelStalledOutgoing(): Int {
-        val cancelled = transferDao.cancelAllOutgoing(System.currentTimeMillis())
-        val rows = transferDao.getCancelled()
-        var cleanedFiles = 0
-        for (row in rows) {
-            if (runCatching { chunkStore.deleteTransfer(row.transferId) }.getOrDefault(false)) {
-                cleanedFiles++
+    suspend fun cancelStalledOutgoing(): Int = withContext(Dispatchers.IO) {
+        outgoingTransferMutex.lock()
+        try {
+            val cancelled = transferDao.cancelAllOutgoing(System.currentTimeMillis())
+            val rows = transferDao.getCancelled()
+            var cleanedFiles = 0
+            for (row in rows) {
+                runCatching { FileTransferKeyVault.deleteKey(appContext, row.transferId) }
+                if (row.direction == "OUTGOING") deleteOutgoingPreview(row.transferId)
+                if (runCatching { chunkStore.deleteTransfer(row.transferId) }.getOrDefault(false)) {
+                    cleanedFiles++
+                }
             }
+            Log.i(TAG, "Cancelled $cancelled stalled outgoing transfers (files cleaned: $cleanedFiles)")
+            cancelled
+        } finally {
+            outgoingTransferMutex.unlock()
         }
-        Log.i(TAG, "Cancelled $cancelled stalled outgoing transfers (files cleaned: $cleanedFiles)")
-        return cancelled
     }
 
     /**
@@ -1060,7 +1208,10 @@ class FileTransferRouter @Inject constructor(
                     completedChunks = chunks,
                     transferredBytes = 0,
                     createdAtMs = timestamp,
-                    expiresAtMs = timestamp + 30L * 24 * 60 * 60 * 1000,
+                    // Владелец 2026-10-07: тяжёлое (фото, видео, большие файлы)
+                    // хранится сутки, текст и малое — неделю.
+                    expiresAtMs = timestamp +
+                        FileTransferRetention.ttlMs(mime, size),
                     updatedAtMs = System.currentTimeMillis(),
                 ),
             )
@@ -1317,6 +1468,16 @@ class FileTransferRouter @Inject constructor(
     /** р249: как часто повторять просьбу о байтах одного и того же файла. */
     private val MIRROR_ASK_GAP_MS = 60_000L
 
+    private fun deleteOutgoingPreview(transferId: String) {
+        if (!transferId.matches(Regex("^[0-9a-f]{32}$"))) return
+        val directory = File(appContext.noBackupFilesDir, "file_preview/v1")
+        for (suffix in listOf(".jpg", ".gif")) {
+            val file = File(directory, transferId + suffix)
+            if (java.nio.file.Files.isSymbolicLink(file.toPath())) continue
+            if (file.isFile) file.delete()
+        }
+    }
+
     /**
      * Раунд 43: файл превью для пузыря в чате. Входящая картинка - принятый
      * plaintext после COMPLETE; исходящая - маленькое превью, записанное при
@@ -1440,6 +1601,10 @@ class FileTransferRouter @Inject constructor(
         /** Пульс присутствия идёт раз в минуту; три пропуска - узел «не в сети» (как в сервисе). */
         const val ONLINE_TTL_MS = 200_000L
         const val MAX_CUSTODY_CANDIDATES = 8
+        /** Сколько потеряшек убираем за один проход: уборка не должна запирать насос. */
+        const val EXPIRED_PURGE_BATCH = 128
+        /** Как часто убираем просроченное (диск + база). */
+        const val EXPIRED_SWEEP_INTERVAL_MS = 10L * 60_000L
 
         /** Как часто сверять, со всеми ли контактами обменялись ключами. */
         const val HELLO_SWEEP_INTERVAL_MS = 5 * 60_000L

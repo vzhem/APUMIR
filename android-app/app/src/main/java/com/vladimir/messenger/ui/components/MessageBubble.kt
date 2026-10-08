@@ -73,6 +73,8 @@ fun MessageBubble(
      * Владелец: точки должны быть и на текстовых пузырях. null - не рисовать.
      */
     onMenu: (() -> Unit)? = null,
+    /** Явно повторить недоставленное исходящее сообщение. */
+    onRetry: (() -> Unit)? = null,
 ) {
     val isOwn = message.isFromMe
     val context = LocalContext.current
@@ -282,6 +284,28 @@ fun MessageBubble(
                         MessageStatusIcon(status = message.status, tint = messenger.messageBubbleOwnText)
                     }
                 }
+                if (
+                    isOwn && onRetry != null && message.status in setOf(
+                        MessageStatus.PENDING,
+                        MessageStatus.QUEUED_OFFLINE,
+                        MessageStatus.SENT,
+                        MessageStatus.FAILED,
+                        MessageStatus.LOCAL_FILE,
+                        MessageStatus.FILE_EXPIRED,
+                    )
+                ) {
+                    androidx.compose.material3.TextButton(
+                        onClick = onRetry,
+                        contentPadding = PaddingValues(0.dp),
+                        modifier = Modifier.align(Alignment.End),
+                    ) {
+                        Text(
+                            "Повторить отправку",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = textColor,
+                        )
+                    }
+                }
             }
         }
         if (onMenu != null && !isOwn) {
@@ -334,6 +358,8 @@ private fun MessageStatusIcon(status: MessageStatus, tint: Color) {
         // Цвет задан явно: он должен читаться и на золотом пузыре, и на белом.
         MessageStatus.READ           -> Pair(Icons.Default.DoneAll, ReadTickColor)
         MessageStatus.FAILED         -> Pair(Icons.Default.Error, Color.Red.copy(alpha = 0.8f))
+        MessageStatus.LOCAL_FILE     -> Pair(Icons.Default.Schedule, tint.copy(alpha = 0.6f))
+        MessageStatus.FILE_EXPIRED   -> Pair(Icons.Default.Error, Color.Red.copy(alpha = 0.8f))
     }
     Icon(
         imageVector = icon,
@@ -384,13 +410,9 @@ private fun ContactInviteCardView(
             )
         }
         Spacer(Modifier.height(8.dp))
-        Button(
+        ApuPremiumContentButton(
             onClick = onAdd,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ),
-            shape = RoundedCornerShape(14.dp),
+            style = DiagnosticsActionStyle.PRIMARY,
         ) {
             Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
@@ -428,13 +450,9 @@ private fun GroupInviteCardView(
             )
         }
         Spacer(Modifier.height(8.dp))
-        Button(
+        ApuPremiumContentButton(
             onClick = onJoin,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ),
-            shape = RoundedCornerShape(14.dp),
+            style = DiagnosticsActionStyle.PRIMARY,
         ) {
             Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
@@ -442,13 +460,9 @@ private fun GroupInviteCardView(
         }
         card.apkLink?.let { apk ->
             Spacer(Modifier.height(8.dp))
-            Button(
+            ApuPremiumContentButton(
                 onClick = { onDownload(apk) },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                ),
-                shape = RoundedCornerShape(14.dp),
+                style = DiagnosticsActionStyle.PRIMARY,
             ) {
                 Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
@@ -492,13 +506,9 @@ private fun MultiInviteCardView(
                 color = textColor.copy(alpha = 0.7f),
             )
             Spacer(Modifier.height(4.dp))
-            Button(
+            ApuPremiumContentButton(
                 onClick = { onOpen(item.link) },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                ),
-                shape = RoundedCornerShape(14.dp),
+                style = DiagnosticsActionStyle.PRIMARY,
             ) {
                 Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
@@ -507,13 +517,9 @@ private fun MultiInviteCardView(
             Spacer(Modifier.height(8.dp))
         }
         card.apkLink?.let { apk ->
-            Button(
+            ApuPremiumContentButton(
                 onClick = { onDownload(apk) },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                ),
-                shape = RoundedCornerShape(14.dp),
+                style = DiagnosticsActionStyle.PRIMARY,
             ) {
                 Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))

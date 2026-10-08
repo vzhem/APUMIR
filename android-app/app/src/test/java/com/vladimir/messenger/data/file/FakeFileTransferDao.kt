@@ -1,6 +1,8 @@
 package com.vladimir.messenger.data.file
 
 import com.vladimir.messenger.data.local.dao.FileTransferDao
+import com.vladimir.messenger.data.local.dao.TransferErrorCount
+import com.vladimir.messenger.data.local.dao.TransferStateCount
 import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import kotlinx.coroutines.flow.Flow
@@ -17,6 +19,28 @@ class FakeFileTransferDao : FileTransferDao {
         observe.map { transfers.values.filter { entity -> entity.chatId == chatId } }
 
     override suspend fun getTransfer(transferId: String): FileTransferEntity? = transfers[transferId]
+
+    override suspend fun getOutgoingForMessage(messageId: String): List<FileTransferEntity> =
+        transfers.values
+            .filter { it.messageId == messageId && it.direction == "OUTGOING" }
+            .sortedByDescending { it.createdAtMs }
+
+    // Сводка для отчёта «Логи»: те же три запроса, что и в Room, но по памяти.
+    override suspend fun transferStateCounts(): List<TransferStateCount> =
+        transfers.values
+            .groupBy { it.state }
+            .map { (state, rows) -> TransferStateCount(state, rows.size.toLong()) }
+            .sortedBy { it.state }
+
+    override suspend fun transferErrorCounts(): List<TransferErrorCount> =
+        transfers.values
+            .filter { it.state == "FAILED" && it.errorCode != null }
+            .groupBy { it.errorCode }
+            .map { (code, rows) -> TransferErrorCount(code, rows.size) }
+            .sortedBy { it.errorCode.orEmpty() }
+
+    override suspend fun lastFailureAtMs(): Long? =
+        transfers.values.filter { it.state == "FAILED" }.maxOfOrNull { it.updatedAtMs }
 
     override suspend fun getActiveOutgoing(nowMs: Long): List<FileTransferEntity> =
         transfers.values
@@ -83,11 +107,12 @@ class FakeFileTransferDao : FileTransferDao {
     override suspend fun getChunks(transferId: String): List<FileTransferChunkEntity> =
         chunks.filterKeys { it.first == transferId }.values.sortedBy { it.chunkIndex }
 
-    override suspend fun deleteExpiredIncomplete(nowMs: Long): Int {
-        val doomed = transfers.values.filter { it.expiresAtMs < nowMs && it.state != "COMPLETE" }
-        doomed.forEach { transfers.remove(it.transferId) }
-        return doomed.size
-    }
+    /** Просроченные незавершённые — «потеряшки»: их убирает FileTransferRouter. */
+    override suspend fun getExpiredIncomplete(nowMs: Long, limit: Int): List<FileTransferEntity> =
+        transfers.values
+            .filter { it.expiresAtMs < nowMs && it.state != "COMPLETE" }
+            .sortedBy { it.expiresAtMs }
+            .take(limit)
 
     override suspend fun deleteTransfer(transferId: String): Int {
         chunks.keys.filter { it.first == transferId }.forEach(chunks::remove)

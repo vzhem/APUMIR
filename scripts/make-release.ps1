@@ -13,14 +13,13 @@ param(
 #
 # What happens after the tag is pushed (.github/workflows/build-release.yml):
 #   the workflow builds rust-core for three ABIs with cargo-ndk, rewrites
-#   versionName from the tag, runs :app:assembleRelease signed with
-#   android-app/p2p-release.jks, and publishes a GitHub Release named
-#   "Release <version>" with app-release.apk. It is published as a PRERELEASE,
-#   exactly like v11.18.0 was; promoting it to a full release is a separate
-#   manual step on GitHub.
+#   versionName from the tag, runs :app:assembleRelease, signs the APK, and
+#   creates a hidden PRERELEASE draft with the versioned, owner-approved notes
+#   and APK/checksum assets. It is not a public release until explicitly
+#   promoted after verification.
 #
-# Before tagging this script re-runs the whole groups gate, because a tag is
-# public and cannot be taken back cleanly once Actions has published a release.
+# Before tagging this script re-runs the whole groups gate. A tag is public and
+# triggers a build; it cannot be taken back cleanly once pushed.
 # ============================================================================
 
 $ErrorActionPreference = 'Stop'

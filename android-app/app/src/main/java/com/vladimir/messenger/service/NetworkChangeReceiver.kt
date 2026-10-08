@@ -8,6 +8,7 @@ import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.util.Log
+import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 
 /**
  * Отслеживает смену сети (WiFi → Mobile, потеря связи, восстановление).
@@ -52,6 +53,10 @@ class NetworkChangeReceiver : BroadcastReceiver() {
             return
         }
         prefs.edit().putLong("last_rx", now).apply()
+        TransferDiagnostics.recordWarning(
+            "net",
+            "смена сети ($type) — перезапускаю ядро и связь",
+        )
         val pending = goAsync()
         Thread {
             try {

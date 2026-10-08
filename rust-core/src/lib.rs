@@ -269,6 +269,19 @@ impl P2PCoreHandle {
             .send_message(message_id, chat_id, recipient_id, text)
     }
 
+    pub fn retry_message(
+        &self,
+        message_id: String,
+        chat_id: String,
+        recipient_id: String,
+        text: String,
+    ) -> bool {
+        self.inner
+            .lock()
+            .unwrap()
+            .retry_message(message_id, chat_id, recipient_id, text)
+    }
+
     pub fn receive_message(
         &self,
         message_id: String,

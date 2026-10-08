@@ -49,10 +49,30 @@ interface MessageDao {
     @Query("UPDATE messages SET status = :status WHERE id = :messageId")
     suspend fun updateMessageStatus(messageId: String, status: String)
 
+    /** Retry result must never downgrade a delivery ACK that raced the network call. */
+    @Query(
+        "UPDATE messages SET status = :status, channel = :channel WHERE id = :messageId " +
+            "AND isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE', 'SENT', 'FAILED')"
+    )
+    suspend fun updateOutgoingRetryResult(messageId: String, status: String, channel: String): Int
+
+    /** User may retry an expired/cancelled file, but delivered file rows stay terminal. */
+    @Query(
+        "UPDATE messages SET status = 'FILE_EXPIRED' WHERE id = :messageId " +
+            "AND isFromMe = 1 AND status = 'LOCAL_FILE'"
+    )
+    suspend fun markOutgoingFileExpired(messageId: String): Int
+
+    @Query(
+        "UPDATE messages SET status = 'LOCAL_FILE' WHERE id = :messageId " +
+            "AND isFromMe = 1 AND status IN ('LOCAL_FILE', 'FILE_EXPIRED')"
+    )
+    suspend fun markOutgoingFileRequeued(messageId: String): Int
+
     /** A delivery ACK can update only an outgoing message, and must not downgrade READ. */
     @Query(
         "UPDATE messages SET status = 'DELIVERED' WHERE id = :messageId " +
-            "AND isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE', 'SENT', 'FAILED')"
+            "AND isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE', 'SENT', 'FAILED', 'LOCAL_FILE', 'FILE_EXPIRED')"
     )
     suspend fun markOutgoingMessageDelivered(messageId: String): Int
 

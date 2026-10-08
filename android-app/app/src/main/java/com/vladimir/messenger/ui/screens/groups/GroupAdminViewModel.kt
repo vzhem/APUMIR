@@ -26,6 +26,12 @@ data class GroupAdminUiState(
     val groupId: String = "",
     val group: GroupSummary? = null,
     val members: List<MemberSummary> = emptyList(),
+    /**
+     * Узлы-элита: у участника в списке — золотое кольцо вокруг аватарки и знак
+     * VIP. Ранг участник сообщил сам конвертом APURANK1 (решение владельца
+     * 2026-10-07: «VIP должно быть видно везде, и в группах, и в каналах»).
+     */
+    val vipNodeIds: Set<String> = emptySet(),
     val searchQuery: String = "",
     val searchResults: List<MemberSummary> = emptyList(),
     val requests: List<JoinRequestSummary> = emptyList(),
@@ -51,10 +57,24 @@ data class GroupAdminUiState(
 class GroupAdminViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val groupRepository: GroupRepository,
+    /** Ранги собеседников: поток узлов-элиты для знака и кольца. */
+    private val peerRankStore: com.vladimir.messenger.data.rank.PeerRankStore,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
     private val groupId: String = savedStateHandle.get<String>("groupId").orEmpty()
+
+    /**
+     * Знак VIP и золотое кольцо у участников в списке: подписка на поток
+     * узлов-элиты. Ранги приходят конвертами APURANK1 от самих участников.
+     */
+    private fun observePeerVip() {
+        viewModelScope.launch {
+            peerRankStore.vipNodeIds.collect { ids ->
+                _uiState.update { it.copy(vipNodeIds = ids) }
+            }
+        }
+    }
 
     private val _uiState = MutableStateFlow(GroupAdminUiState(groupId = groupId))
     val uiState: StateFlow<GroupAdminUiState> = _uiState.asStateFlow()
@@ -62,6 +82,7 @@ class GroupAdminViewModel @Inject constructor(
     private var statsJob: Job? = null
 
     init {
+        observePeerVip()
         observeGroup()
         observeMembers()
         observeRequests()

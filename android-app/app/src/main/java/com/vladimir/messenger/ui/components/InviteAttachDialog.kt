@@ -18,11 +18,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PersonAdd
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -154,27 +151,16 @@ fun InviteAttachDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    OutlinedButton(
+                    ApuPremiumContentButton(
                         onClick = onDismiss,
-                        shape = ApuBubbleShape,
-                        border = BorderStroke(
-                            1.dp,
-                            ApuBubbleAccentColor.copy(alpha = 0.48f),
-                        ),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = ApuBubbleAccentColor,
-                        ),
+                        style = DiagnosticsActionStyle.QUIET,
                         modifier = Modifier.weight(1f),
                     ) {
                         Text("Отмена", fontWeight = FontWeight.SemiBold)
                     }
-                    Button(
+                    ApuPremiumContentButton(
                         onClick = { onShare(attachApk) },
-                        shape = ApuBubbleShape,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                        ),
+                        style = DiagnosticsActionStyle.PRIMARY,
                         modifier = Modifier.weight(1.2f),
                     ) {
                         Text("Поделиться", fontWeight = FontWeight.SemiBold)

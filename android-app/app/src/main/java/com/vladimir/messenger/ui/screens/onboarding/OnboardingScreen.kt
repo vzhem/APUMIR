@@ -13,7 +13,6 @@ import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -23,7 +22,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -39,6 +37,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
+import com.vladimir.messenger.ui.components.ApuBubbleCard
+import com.vladimir.messenger.ui.components.ApuBubbleField
+import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.ApuPremiumIconTile
+import com.vladimir.messenger.ui.components.ApuTabBar
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
+import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.util.QrCodeGenerator
 
 @Composable
@@ -135,55 +143,52 @@ private fun EnterNameStep(
             .padding(horizontal = 28.dp, vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(
-            imageVector        = Icons.Default.Hub,
-            contentDescription = null,
-            modifier           = Modifier.size(64.dp),
-            tint               = MaterialTheme.colorScheme.primary,
+        ApuPremiumIconTile(
+            icon = Icons.Default.Hub,
+            contentDescription = "APU",
+            size = 64.dp,
+            corner = 20.dp,
         )
 
         Spacer(modifier = Modifier.height(12.dp))
 
         Text(
-            text      = "APU",
-            style     = MaterialTheme.typography.headlineLarge,
+            text = "APU",
+            style = MaterialTheme.typography.headlineLarge,
             fontWeight = FontWeight.Bold,
+            color = ApuBubbleTextColor,
         )
 
         Spacer(modifier = Modifier.height(16.dp))
 
         // Две вкладки: новичок и тот, кто уже был зарегистрирован.
-        TabRow(selectedTabIndex = if (state.restoreMode) 1 else 0) {
-            Tab(
-                selected = !state.restoreMode,
-                onClick  = { onRestoreModeChanged(false) },
-                text     = { Text("Новый профиль") },
-            )
-            Tab(
-                selected = state.restoreMode,
-                onClick  = { onRestoreModeChanged(true) },
-                text     = { Text("Я уже зарегистрирован") },
+        ApuTabBar(
+            titles = listOf("Новый профиль", "Я уже зарегистрирован"),
+            selectedIndex = if (state.restoreMode) 1 else 0,
+            offsetFraction = 0f,
+            onSelect = { onRestoreModeChanged(it == 1) },
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        HintBubble(modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = if (state.restoreMode) {
+                    "Введите никнейм и пароль, которые задавали раньше — вернётся ваш прежний профиль со всеми контактами и рангом."
+                } else {
+                    "Никнейм и пароль понадобятся, чтобы вернуть себя после переустановки. Запомните их."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                color = ApuBubbleMutedColor,
             )
         }
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        Text(
-            text = if (state.restoreMode) {
-                "Введите никнейм и пароль, которые задавали раньше — вернётся ваш прежний профиль со всеми контактами и рангом."
-            } else {
-                "Никнейм и пароль понадобятся, чтобы вернуть себя после переустановки. Запомните их."
-            },
-            style     = MaterialTheme.typography.bodyMedium,
-            textAlign = TextAlign.Center,
-            color     = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
-        Spacer(modifier = Modifier.height(20.dp))
-
         // Имя нужно только новичку: при восстановлении оно придёт из профиля.
         if (!state.restoreMode) {
-            OutlinedTextField(
+            ApuBubbleField(
                 value    = state.displayName,
                 onValueChange = onNameChanged,
                 label    = { Text("Ваше имя") },
@@ -194,7 +199,7 @@ private fun EnterNameStep(
                     if (state.nameError != null) {
                         Text(state.nameError, color = MaterialTheme.colorScheme.error)
                     } else {
-                        Text("${state.displayName.length}/50", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${state.displayName.length}/50", color = ApuBubbleMutedColor)
                     }
                 },
                 leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
@@ -207,22 +212,20 @@ private fun EnterNameStep(
             Spacer(modifier = Modifier.height(12.dp))
         }
 
-        OutlinedTextField(
+        ApuBubbleField(
             value    = state.nickname,
             onValueChange = onNicknameChanged,
             label    = { Text("Никнейм") },
             placeholder = { Text("ваш_никнейм") },
             singleLine = true,
             isError  = state.nicknameError != null,
-            // Собачку рисует только значок слева. Текстовый префикс давал
-            // вторую - в поле было «@@».
             supportingText = {
                 Text(
                     state.nicknameError ?: "Латиница, цифры и подчёркивание, минимум 3 знака",
                     color = if (state.nicknameError != null) {
                         MaterialTheme.colorScheme.error
                     } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                        ApuBubbleMutedColor
                     },
                 )
             },
@@ -233,7 +236,7 @@ private fun EnterNameStep(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        OutlinedTextField(
+        ApuBubbleField(
             value    = state.password,
             onValueChange = onPasswordChanged,
             label    = { Text("Пароль") },
@@ -248,7 +251,7 @@ private fun EnterNameStep(
                     color = if (state.passwordError != null) {
                         MaterialTheme.colorScheme.error
                     } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                        ApuBubbleMutedColor
                     },
                 )
             },
@@ -268,7 +271,7 @@ private fun EnterNameStep(
         if (!state.restoreMode) {
             Spacer(modifier = Modifier.height(12.dp))
             val mismatch = state.passwordRepeat.isNotEmpty() && state.passwordRepeat != state.password
-            OutlinedTextField(
+            ApuBubbleField(
                 value    = state.passwordRepeat,
                 onValueChange = onPasswordRepeatChanged,
                 label    = { Text("Подтвердите пароль") },
@@ -294,13 +297,13 @@ private fun EnterNameStep(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        Button(
+        ApuPremiumContentButton(
             onClick  = if (state.restoreMode) onRestoreClick else onCreateClick,
+            style = DiagnosticsActionStyle.PRIMARY,
             enabled  = state.canSubmit,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
-            shape    = RoundedCornerShape(14.dp),
         ) {
             Icon(Icons.Default.Key, contentDescription = null)
             Spacer(modifier = Modifier.width(8.dp))
@@ -315,13 +318,13 @@ private fun EnterNameStep(
         // сообщества, ключи и ранг.
         if (state.restoreMode) {
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(
+            ApuPremiumContentButton(
                 onClick  = onRestoreFromFile,
+                style = DiagnosticsActionStyle.QUIET,
                 enabled  = !state.isLoading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
-                shape    = RoundedCornerShape(14.dp),
             ) {
                 Icon(Icons.Default.Restore, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
@@ -331,27 +334,23 @@ private fun EnterNameStep(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Card(
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            ),
-        ) {
+        HintBubble(modifier = Modifier.fillMaxWidth()) {
             Row(
-                modifier = Modifier.padding(12.dp),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Top,
             ) {
                 Icon(
                     Icons.Default.Shield,
                     contentDescription = null,
-                    tint     = MaterialTheme.colorScheme.primary,
+                    tint = ApuBubbleAccentColor,
                     modifier = Modifier.size(20.dp),
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text  = "Пароль не покидает телефон: ключи запираются прямо здесь. " +
-                        "Ни телефонного номера, ни почты - только вы и ваши контакты.",
+                    text = "Пароль не покидает телефон: ключи запираются прямо здесь. " +
+                        "Ни телефонного номера, ни почты — только вы и ваши контакты.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = ApuBubbleMutedColor,
                 )
             }
         }
@@ -383,14 +382,15 @@ private fun GeneratingStep() {
         // Анимированная иконка
         Box(contentAlignment = Alignment.Center) {
             CircularProgressIndicator(
-                modifier  = Modifier.size(100.dp),
+                modifier = Modifier.size(100.dp),
+                color = ApuBubbleAccentColor,
                 strokeWidth = 3.dp,
             )
             Icon(
                 imageVector        = Icons.Default.Key,
                 contentDescription = null,
                 modifier           = Modifier.size(48.dp),
-                tint               = MaterialTheme.colorScheme.primary,
+                tint               = ApuBubbleAccentColor,
             )
         }
 
@@ -426,7 +426,7 @@ private fun GeneratingStep() {
             Text(
                 text  = steps.getOrElse(step) { steps.last() },
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = ApuBubbleMutedColor,
             )
         }
     }
@@ -462,11 +462,11 @@ private fun ShowInviteStep(
     ) {
         Spacer(modifier = Modifier.height(16.dp))
 
-        Icon(
-            imageVector = Icons.Default.CheckCircle,
-            contentDescription = null,
-            modifier = Modifier.size(48.dp),
-            tint     = MaterialTheme.colorScheme.primary,
+        ApuPremiumIconTile(
+            icon = Icons.Default.CheckCircle,
+            contentDescription = "Профиль создан",
+            size = 48.dp,
+            corner = 15.dp,
         )
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -485,7 +485,7 @@ private fun ShowInviteStep(
             style = MaterialTheme.typography.bodySmall.copy(
                 fontFamily = FontFamily.Monospace
             ),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = ApuBubbleMutedColor,
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -494,23 +494,22 @@ private fun ShowInviteStep(
             text  = "Поделитесь QR-кодом или ссылкой, чтобы добавить первый контакт",
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = ApuBubbleMutedColor,
         )
 
         Spacer(modifier = Modifier.height(20.dp))
 
         // QR-код
         qrBitmap?.let { bitmap ->
-            Card(
-                modifier = Modifier
-                    .size(220.dp)
-                    .clip(RoundedCornerShape(16.dp)),
-                elevation = CardDefaults.cardElevation(4.dp),
+            ApuBubbleCard(
+                modifier = Modifier.size(220.dp),
+                backgroundColor = androidx.compose.ui.graphics.Color.White,
+                premium = 7.dp,
             ) {
                 Image(
-                    bitmap             = bitmap.asImageBitmap(),
+                    bitmap = bitmap.asImageBitmap(),
                     contentDescription = "QR-код для добавления контакта",
-                    modifier           = Modifier.fillMaxSize().padding(12.dp),
+                    modifier = Modifier.fillMaxSize().padding(12.dp),
                 )
             }
         }
@@ -518,9 +517,7 @@ private fun ShowInviteStep(
         Spacer(modifier = Modifier.height(16.dp))
 
         // Текстовая ссылка
-        OutlinedCard(
-            modifier = Modifier.fillMaxWidth(),
-        ) {
+        ApuBubbleCard(modifier = Modifier.fillMaxWidth(), premium = 5.dp) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -532,20 +529,17 @@ private fun ShowInviteStep(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text     = inviteLink,
-                    style    = MaterialTheme.typography.bodySmall.copy(
-                        fontFamily = FontFamily.Monospace
-                    ),
+                    text = inviteLink,
+                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
                     modifier = Modifier.weight(1f),
                     maxLines = 2,
-                    color    = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = ApuBubbleTextColor,
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Icon(
                     imageVector = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
                     contentDescription = "Скопировать",
-                    tint = if (copied) MaterialTheme.colorScheme.primary
-                           else MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = if (copied) ApuBubbleAccentColor else ApuBubbleMutedColor,
                 )
             }
         }
@@ -558,21 +552,22 @@ private fun ShowInviteStep(
         var joinText by remember { mutableStateOf("") }
         val joinValid = com.vladimir.messenger.util.InviteLinkParser.parse(joinText) != null ||
             com.vladimir.messenger.data.group.GroupInviteLinks.parseTarget(joinText) != null
-        OutlinedCard(modifier = Modifier.fillMaxWidth()) {
+        ApuBubbleCard(modifier = Modifier.fillMaxWidth(), premium = 5.dp) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
-                    text  = "Вас пригласили в APU?",
+                    text = "Вас пригласили в APU?",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
+                    color = ApuBubbleTextColor,
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text  = "Вставьте сообщение от друга целиком - контакт добавится сам, и приглашение другу засчитается.",
+                    text = "Вставьте сообщение от друга целиком — контакт добавится сам, и приглашение другу засчитается.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = ApuBubbleMutedColor,
                 )
                 Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(
+                ApuBubbleField(
                     value = joinText,
                     onValueChange = { joinText = it },
                     label = { Text("Ссылка или сообщение от друга") },
@@ -580,11 +575,11 @@ private fun ShowInviteStep(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(modifier = Modifier.height(10.dp))
-                Button(
+                ApuPremiumContentButton(
                     onClick = { onJoinByInvite(joinText) },
+                    style = DiagnosticsActionStyle.PRIMARY,
                     enabled = joinValid,
                     modifier = Modifier.fillMaxWidth().height(46.dp),
-                    shape = RoundedCornerShape(12.dp),
                 ) {
                     Text("Добавить пригласившего")
                 }
@@ -593,12 +588,12 @@ private fun ShowInviteStep(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        Button(
+        ApuPremiumContentButton(
             onClick  = onFinish,
+            style = DiagnosticsActionStyle.PRIMARY,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
-            shape    = RoundedCornerShape(14.dp),
         ) {
             Text(
                 "Начать общение",

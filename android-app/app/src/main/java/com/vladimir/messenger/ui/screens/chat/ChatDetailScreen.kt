@@ -4,6 +4,11 @@ import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
+import com.vladimir.messenger.ui.components.ApuTextAction
+import com.vladimir.messenger.ui.components.ApuVipBadge
+import com.vladimir.messenger.ui.components.PeerAvatar
+import com.vladimir.messenger.ui.theme.AvatarStore
 import com.vladimir.messenger.ui.components.ApuBubbleCard
 import com.vladimir.messenger.ui.components.ApuBubbleLinkColor
 import com.vladimir.messenger.ui.components.apuBubbleSurface
@@ -34,6 +39,13 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTapGestures
 import com.vladimir.messenger.ui.components.PeerProfileSheet
 import com.vladimir.messenger.ui.components.NotificationMuteDialog
+import com.vladimir.messenger.ui.components.ApuGold
+import com.vladimir.messenger.ui.components.ApuGoldDeep
+import com.vladimir.messenger.ui.components.ApuGoldInk
+import com.vladimir.messenger.ui.components.apuGoldBrush
+import com.vladimir.messenger.ui.components.apuPremiumGloss
+import com.vladimir.messenger.ui.components.apuPremiumLift
+import com.vladimir.messenger.ui.components.apuPremiumThread
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
@@ -194,6 +206,15 @@ fun ChatDetailScreen(
     ) { uri ->
         uri?.let(viewModel::onFileSelected)
     }
+    val retryFilePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> viewModel.onRetryFilePickerResult(uri) }
+    LaunchedEffect(uiState.pendingRetryFilePickerId) {
+        uiState.pendingRetryFilePickerId?.let { messageId ->
+            retryFilePicker.launch(arrayOf("*/*"))
+            viewModel.onRetryFilePickerLaunched(messageId)
+        }
+    }
 
     // F3: экспорт принятого файла — системный диалог «куда сохранить»
     val savePicker = rememberLauncherForActivityResult(
@@ -234,6 +255,8 @@ fun ChatDetailScreen(
             name = contactName,
             contactId = contactId,
             isOnline = uiState.isContactOnline,
+            // Знак и кольцо у профиля элиты: ранг собеседник сообщил сам.
+            vip = uiState.peerVip || uiState.selfVip,
             username = uiState.contactUsername,
             heartCount = uiState.heartCount,
             heartMine = uiState.heartMine,
@@ -302,13 +325,36 @@ fun ChatDetailScreen(
                     // Общий пузырь шапки, как в группах и каналах.
                     ApuHeaderBubble(onClick = { showPeerProfile = true }) {
                         Column {
-                            Text(
-                                contactName,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xFF1E2430),
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            )
+                            // Знак VIP у имени: собеседник сам сообщил ранг выше
+                            // десятого (конверт APURANK1) — это признание, а не
+                            // платная функция, поэтому знак просто рядом с именем.
+                            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                // Аватарка собеседника: у элиты — в объёмном
+                                // золотом кольце. Маленькая, чтобы шапка не
+                                // разъезжалась: строка имени остаётся главной.
+                                if (contactId.isNotBlank()) {
+                                    val headerAvatars by AvatarStore.avatars.collectAsStateWithLifecycle()
+                                    PeerAvatar(
+                                        name = contactName,
+                                        avatarB64 = headerAvatars[contactId],
+                                        vip = uiState.peerVip || uiState.selfVip,
+                                        size = 30.dp,
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                }
+                                Text(
+                                    contactName,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFF1E2430),
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false),
+                                )
+                                if (uiState.peerVip) {
+                                    Spacer(Modifier.width(6.dp))
+                                    ApuVipBadge(compact = true)
+                                }
+                            }
                             // р235: «печатает…» важнее статуса сети и гаснет само.
                             val peerTyping = uiState.isPeerTyping
                             Text(
@@ -377,6 +423,10 @@ fun ChatDetailScreen(
                 onClearReply = viewModel::clearReply,
                 isSending    = uiState.isSending,
                 isSelfChat   = uiState.isSelfChat,
+                // «От него не открывается»: показываем плашку и кнопку «отдать
+                // свой ключ» — раньше про это знал только отчёт «Логи».
+                keyDesync    = uiState.keyDesync,
+                onKeyDesyncAction = viewModel::onKeyDesyncAction,
                 canAttach    = uiState.canSendAttachments,
                 onAttach     = {
                     if (uiState.canSendAttachments) {
@@ -576,6 +626,7 @@ fun ChatDetailScreen(
                                 FileTransferBubble(
                                     transfer = transfer,
                                     isFromMe = transfer.direction == "OUTGOING",
+                                    messageStatus = row.message?.status,
                                     previewFile = viewModel.previewFileFor(transfer),
                                     onShareClick = { viewModel.shareTransferFile(transfer) },
                                     onSaveClick = if (
@@ -604,6 +655,20 @@ fun ChatDetailScreen(
                                     onSwipeReply = row.message?.let { message ->
                                         { viewModel.startReply(message) }
                                     },
+                                    onRetry = row.message?.takeIf { message ->
+                                        transfer.direction == "OUTGOING" && message.isFromMe &&
+                                            message.status !in setOf(
+                                                com.vladimir.messenger.domain.model.MessageStatus.DELIVERED,
+                                                com.vladimir.messenger.domain.model.MessageStatus.READ,
+                                            ) && (
+                                                message.status == com.vladimir.messenger.domain.model.MessageStatus.FILE_EXPIRED ||
+                                                    (message.status == com.vladimir.messenger.domain.model.MessageStatus.LOCAL_FILE &&
+                                                        transfer.state != "COMPLETE") ||
+                                                    transfer.state in setOf(
+                                                        "SENT", "WAITING_RECIPIENT", "CUSTODIED", "FAILED", "EXPIRED", "CANCELLED",
+                                                    )
+                                            )
+                                    }?.let { { viewModel.retryFileTransfer(transfer.messageId) } },
                                 )
                                 // Реакции файла/гифки - той же строкой под пузырём,
                                 // что и у текстовых сообщений.
@@ -753,6 +818,7 @@ fun ChatDetailScreen(
                                         activeMessage = message
                                         showCopyDialog = message
                                     },
+                                    onRetry = { viewModel.retryMessage(message) },
                                 )
                                 }
                                 // Реакции живут отдельной строкой под пузырём -
@@ -778,7 +844,7 @@ fun ChatDetailScreen(
     // сообщение?» и «В избранное» пряталось на месте кнопки «Отмена» - её там
     // никто не искал. Теперь это список действий, а отмена закрывает окно.
     showCopyDialog?.let { message ->
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { showCopyDialog = null },
             title = { Text("Действия с сообщением") },
             text = {
@@ -896,7 +962,7 @@ fun ChatDetailScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showCopyDialog = null }) { Text("Закрыть") }
+                ApuTextAction(label = "Закрыть", onClick = { showCopyDialog = null })
             },
         )
     }
@@ -973,18 +1039,22 @@ fun ChatDetailScreen(
     // Раунд 135: подтверждение удаления у всех - сообщение пропадёт и у
     // собеседника (он должен быть на связи; иначе - честный отказ).
     deleteForAllTarget?.let { target ->
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { deleteForAllTarget = null },
             title = { Text("Удалить у всех?") },
             text = { Text("Сообщение исчезнет и у вас, и у собеседника. Отменить будет нельзя.") },
             confirmButton = {
-                TextButton(onClick = {
+                ApuTextAction(
+                    label = "Удалить",
+                    onClick = {
                     deleteForAllTarget = null
                     viewModel.deleteMessageForAll(target.id)
-                }) { Text("Удалить", color = MaterialTheme.colorScheme.error) }
+                },
+                    danger = true,
+                )
             },
             dismissButton = {
-                TextButton(onClick = { deleteForAllTarget = null }) { Text("Отмена") }
+                ApuTextAction(label = "Отмена", onClick = { deleteForAllTarget = null })
             },
         )
     }
@@ -1047,6 +1117,12 @@ private fun MessageInputBar(
     isSending: Boolean,
     /** р241: переписка с собственным узлом - отправлять здесь нечего. */
     isSelfChat: Boolean = false,
+    /**
+     * От собеседника приходят невскрываемые конверты (у него прежняя копия
+     * нашего ключа). Плашка объясняет это словами и даёт кнопку «отдать ключ».
+     */
+    keyDesync: Boolean = false,
+    onKeyDesyncAction: () -> Unit = {},
     onAttach: () -> Unit = {},
     isPreparingFile: Boolean = false,
     canAttach: Boolean = true,
@@ -1073,19 +1149,21 @@ private fun MessageInputBar(
     // Раунд 266: фирменный пузырь панели ввода - светлая полупрозрачная
     // подложка с золотой рамкой вместо серого «квадрата» на обоях.
     // Раунд 149: imePadding - панель поднимается над клавиатурой.
+    // Владелец 2026-10-07: «Доделывай все разделы с новым стилем».
+    // Панель ввода — та же премиальная поверхность, что строки списков,
+    // «Избранное» и диалоги: подъём, единая подложка, золотая нить по кромке,
+    // блеск ПОД текстом (поле и подписи остаются чёткими). Облачка самих
+    // сообщений не трогаем — так решил владелец, у них свой фирменный пузырь.
     Column(
         modifier = modifier
             .fillMaxWidth()
             .imePadding()
             .navigationBarsPadding()
             .padding(horizontal = 8.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(18.dp),
-            )
+            .apuPremiumLift(6.dp)
+            .apuBubbleSurface()
+            .apuPremiumThread(inset = 16.dp)
+            .apuPremiumGloss(intensity = 0.45f, topFraction = 0.55f)
             .padding(horizontal = 8.dp, vertical = 8.dp),
     ) {
         if (!replyAuthor.isNullOrBlank()) {
@@ -1143,16 +1221,11 @@ private fun MessageInputBar(
             // Каталог GIF (v11.74.15): ОТДЕЛЬНАЯ кнопка рядом со скрепкой,
             // те же права, что у вложений. Раньше кнопка была вложена внутрь
             // IconButton скрепки и накладывалась на неё.
-                TextButton(
+                ApuTextAction(
+                    label = "GIF",
                     onClick = onGifClick,
                     enabled = !isPreparingFile && !isSending && canAttach,
-                ) {
-                    Text(
-                        "GIF",
-                        fontWeight = FontWeight.Bold,
-                        color = if (canAttach) MaterialTheme.colorScheme.primary else Color(0xFF9AA3AF),
-                    )
-                }
+                )
                 }
             }
 
@@ -1211,6 +1284,47 @@ private fun MessageInputBar(
 
             Spacer(modifier = Modifier.height(6.dp))
 
+            // «Сообщения от него не открываются». Это премиальный стиль из
+            // «Логов»: золотая плашка с нитью и блеском под текстом, чёрные
+            // чернила (контраст проверен контрактом »4.5), кнопка справа.
+            if (keyDesync && !isSelfChat) {
+                val noticeShape = RoundedCornerShape(16.dp)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .apuPremiumLift(8.dp, noticeShape, ApuGold.copy(alpha = 0.45f))
+                        .clip(noticeShape)
+                        .background(apuGoldBrush(), noticeShape)
+                        .border(1.dp, Color.White.copy(alpha = 0.45f), noticeShape)
+                        .apuPremiumThread(shape = noticeShape, inset = 18.dp)
+                        .apuPremiumGloss(noticeShape, intensity = 0.8f, topFraction = 0.55f)
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                ) {
+                    Text(
+                        text = "Сообщения от собеседника не открываются: у него осталась прежняя " +
+                            "копия вашего ключа (переустановка или восстановление профиля). " +
+                            "Пусть он заново отсканирует ваш QR-код — «Мой QR» в профиле.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ApuGoldInk,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(ApuGoldDeep)
+                            .clickable(onClick = onKeyDesyncAction)
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                    ) {
+                        Text(
+                            "Отправить мой ключ ещё раз",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Color.White,
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+            }
+
             // р241: переписка с собственным узлом. Такое случается, если в
             // контакты попал свой же адрес (в профиле есть «Мой QR» - его
             // легко отсканировать самому). Объясняем честно: собеседника
@@ -1240,30 +1354,12 @@ private fun MessageInputBar(
             // recomposition), и кнопка активировалась с задержкой; плюс
             // золотая заливка и белый текст (как в темах) - видно сразу.
             val canSend = inputState.text.isNotBlank() && !isSending && !isSelfChat
-            TextButton(
+            ApuTextAction(
+                label = "Отправить",
                 onClick = onSend,
                 enabled = canSend,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(
-                        if (canSend) MaterialTheme.colorScheme.primary
-                        else Color.White.copy(alpha = 0.85f)
-                    )
-                    .border(
-                        1.dp,
-                        if (canSend) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                        RoundedCornerShape(18.dp),
-                    )
-                    .padding(vertical = 8.dp),
-            ) {
-                Text(
-                    "Отправить",
-                    fontWeight = FontWeight.Bold,
-                    color = if (canSend) Color.White else Color(0xFF9AA3AF),
-                )
-            }
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
@@ -1282,10 +1378,7 @@ private fun ChatHistoryError(message: String, onRetry: () -> Unit, modifier: Mod
                 color = ApuBubbleMutedColor,
                 style = MaterialTheme.typography.bodySmall,
             )
-            TextButton(
-                onClick = onRetry,
-                colors = ButtonDefaults.textButtonColors(contentColor = ApuBubbleLinkColor),
-            ) { Text("Повторить") }
+            ApuTextAction(label = "Повторить", onClick = onRetry)
         }
     }
 }

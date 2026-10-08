@@ -45,7 +45,14 @@ import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.data.call.CallStateMachine
+import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.apuBubbleSurface
+import com.vladimir.messenger.ui.components.apuGoldBrush
+import com.vladimir.messenger.ui.components.apuPremiumGloss
+import com.vladimir.messenger.ui.components.apuPremiumLift
+import com.vladimir.messenger.ui.components.apuPremiumThread
 import kotlinx.coroutines.delay
 
 /**
@@ -123,22 +130,24 @@ fun CallScreen(
             ) {
                 Spacer(modifier = Modifier.height(56.dp))
 
-                // Имя собеседника на белой полосочке с золотой рамкой (как шапка чата).
+                // Имя собеседника на полосочке (как шапка чата). Владелец
+                // 2026-10-07: «Теперь в таком стиле нужно переделать всё
+                // приложение» — та же премиальная поверхность, что шапки,
+                // диалоги и строки списков: подъём, золотая нить, блеск под
+                // текстом.
+                val nameShape = RoundedCornerShape(18.dp)
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-                        .border(
-                            1.dp,
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                            RoundedCornerShape(18.dp),
-                        )
+                        .apuPremiumLift(6.dp, nameShape)
+                        .apuBubbleSurface(shape = nameShape)
+                        .apuPremiumThread(shape = nameShape, inset = 18.dp)
+                        .apuPremiumGloss(nameShape, intensity = 0.5f, topFraction = 0.6f)
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                 ) {
                     Text(
                         state.peerName.ifBlank { shortId(state.peerId) },
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF1E2430),
+                        color = ApuBubbleTextColor,
                         style = MaterialTheme.typography.titleLarge,
                     )
                 }
@@ -147,7 +156,7 @@ fun CallScreen(
 
                 Text(
                     statusText(state, nowMs),
-                    color = Color(0xFF5A6472),
+                    color = ApuBubbleMutedColor,
                     style = MaterialTheme.typography.bodyLarge,
                 )
                 if (state.phase == CallStateMachine.Phase.ACTIVE && state.recovering) {
@@ -164,20 +173,24 @@ fun CallScreen(
                             state.viaBroker -> "Через интернет — сжатый звук, возможна задержка"
                             else -> "Медленный канал — собеседник не в одной Wi-Fi сети"
                         },
-                        color = Color(0xFF5A6472),
+                        color = ApuBubbleMutedColor,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
 
                 Spacer(modifier = Modifier.height(48.dp))
 
-                // Аватар-круг с первой буквой (золотой ободок фирменной темы).
+                // Аватар-круг с первой буквой: объёмное золотое кольцо и
+                // блеск по верхней кромке (тот же приём, что у знака VIP и у
+                // золотых плиток), буква остаётся на своей подложке и читается.
                 Box(
                     modifier = Modifier
                         .size(132.dp)
+                        .apuPremiumLift(10.dp, CircleShape, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primaryContainer)
-                        .border(3.dp, MaterialTheme.colorScheme.primary, CircleShape),
+                        .border(3.dp, apuGoldBrush(), CircleShape)
+                        .apuPremiumGloss(CircleShape, intensity = 0.5f, topFraction = 0.55f),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
@@ -257,7 +270,7 @@ private fun CallButtons(
                     Icon(
                         if (state.muted) Icons.Default.MicOff else Icons.Default.Mic,
                         if (state.muted) "Включить микрофон" else "Выключить микрофон",
-                        tint = if (state.muted) Color.White else Color(0xFF5A6472),
+                        tint = if (state.muted) Color.White else ApuBubbleMutedColor,
                     )
                 }
                 RoundCallButton(
@@ -278,7 +291,7 @@ private fun CallButtons(
                         Icons.Default.VolumeUp,
                         "Громкая связь",
                         tint = if (state.speaker) MaterialTheme.colorScheme.onPrimary
-                        else Color(0xFF5A6472),
+                        else ApuBubbleMutedColor,
                     )
                 }
             }
@@ -309,16 +322,17 @@ private fun RoundCallButton(
     content: @Composable () -> Unit,
 ) {
     val size = if (big) 72.dp else 64.dp
+    // Кнопки звонка — как золотые плитки: «стоят» над обоями (мягкая тень),
+    // светлая кромка и блеск по верхней кромке. Значок рисуется ПОВЕРХ
+    // блеска, поэтому трубка и микрофон остаются чёткими.
     Box(
         modifier = Modifier
             .size(size)
+            .apuPremiumLift(8.dp, CircleShape)
             .clip(CircleShape)
             .background(background)
-            .border(
-                1.dp,
-                MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
-                CircleShape,
-            ),
+            .border(1.dp, Color.White.copy(alpha = 0.35f), CircleShape)
+            .apuPremiumGloss(CircleShape, intensity = 0.55f, topFraction = 0.6f),
         contentAlignment = Alignment.Center,
     ) {
         IconButton(onClick = onClick, modifier = Modifier.size(size)) {

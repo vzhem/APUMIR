@@ -41,6 +41,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /** Цвет обычного текста в пузыре настроек. */
@@ -89,9 +90,17 @@ fun ApuHeaderBubble(
     onClick: (() -> Unit)? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    // Шапка — тот же премиальный стиль, что у окна «Логи»: поверхность чуть
+    // приподнята (мягкая тень), по верхней кромке идёт золотая нить, а глянец
+    // ложится ПОД содержимым, поэтому название раздела остаётся чётким.
+    // Через этот общий компонент новый вид получают шапки ВСЕХ разделов:
+    // чатов, групп, каналов, настроек и остальных экранов.
     Box(
         modifier = modifier
+            .apuPremiumLift(8.dp)
             .apuBubbleSurface()
+            .apuPremiumThread(inset = 12.dp)
+            .apuPremiumGloss(intensity = 0.5f, topFraction = 0.6f)
             .then(if (onClick != null) Modifier.clickable(role = Role.Button, onClick = onClick) else Modifier)
             .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
@@ -103,6 +112,16 @@ fun ApuHeaderBubble(
  * Card без стандартной серо-сиреневой заливки и тени Material. Не меняет
  * размеры и внутренние отступы существующих карточек ленты/закрепов.
  * Для парящих стикеров transparent отключает и фон, и рамку.
+ *
+ * `premium` — высота подъёма для самостоятельных карточек (панель выбора,
+ * закрепы, карточка темы, блок настроек). Тогда поверхность рисуется тем же
+ * слоем, что у шапок и диалогов: подъём, единая подложка, золотая нить по
+ * верхней кромке и блеск ПОД содержимым. Для строк ленты (облачко сообщения)
+ * оставляем `null`: тень на каждой строке ленты превращается в шум.
+ *
+ * Важно: премиальная ветка рисует поверхность сама (Box + `apuBubbleSurface`),
+ * а не через `Card`. Переданные в `modifier` слои легли бы ПОД фоном Card —
+ * нить и блеск просто не были бы видны.
  */
 @Composable
 fun ApuBubbleCard(
@@ -111,8 +130,26 @@ fun ApuBubbleCard(
     contentColor: Color = ApuBubbleTextColor,
     shape: Shape = ApuBubbleShape,
     transparent: Boolean = false,
+    premium: Dp? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    if (premium != null && !transparent) {
+        Box(
+            modifier = modifier
+                .apuPremiumLift(premium, shape)
+                .apuBubbleSurface(color = backgroundColor, shape = shape)
+                .apuPremiumThread(shape = shape)
+                .apuPremiumGloss(shape, intensity = 0.5f, topFraction = 0.55f),
+        ) {
+            Column {
+                val scope = this
+                CompositionLocalProvider(LocalContentColor provides contentColor) {
+                    scope.content()
+                }
+            }
+        }
+        return
+    }
     Card(
         modifier = modifier,
         shape = if (transparent) RectangleShape else shape,
@@ -138,8 +175,39 @@ fun ApuBubble(
     verticalArrangement: Arrangement.Vertical = Arrangement.spacedBy(6.dp),
     /** Раунд 169: стикеры в «Избранном» - без рамки и подложки. */
     transparent: Boolean = false,
+    /**
+     * Владелец 2026-10-07: «Теперь в таком стиле нужно переделать всё приложение».
+     * Блок в премиальном слое — как шапки, диалоги и строки списков: подъём,
+     * единая подложка, золотая нить по кромке и блеск ПОД содержимым, поэтому
+     * цифры статистики и подписи остаются чёткими.
+     *
+     * `null` — плоская поверхность: внутри другой карточки, где вторая тень
+     * превратилась бы в грязь.
+     */
+    premium: Dp? = 5.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
+    if (premium != null && !transparent) {
+        val shape = ApuBubbleShape
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .apuPremiumLift(premium, shape)
+                .apuBubbleSurface(shape = shape)
+                .apuPremiumThread(shape = shape, inset = 16.dp)
+                .apuPremiumGloss(shape, intensity = 0.45f, topFraction = 0.55f),
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = verticalArrangement,
+            ) {
+                CompositionLocalProvider(LocalContentColor provides ApuBubbleTextColor) {
+                    content()
+                }
+            }
+        }
+        return
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()

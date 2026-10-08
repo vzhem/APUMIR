@@ -498,8 +498,9 @@ class FileCustodyFlowTest {
         assertEquals(1, custodianDao.getActiveCustody(now).size)
         assertEquals(3L, custodianDao.getTransfer(transferIdHex)!!.completedChunks)
 
-        // Срок вышел - уборка удаляет чужой файл.
-        now += FileCustodySender.CUSTODY_TTL_MS + 1
+        // Срок вышел - уборка удаляет чужой файл. Файл тут картинка (image/png),
+        // значит по правилу владельца 2026-10-07 он живёт у хранителя сутки.
+        now += FileTransferRetention.HEAVY_TTL_MS + 1
         assertEquals(1, custodianSender.sweep(force = true))
         assertNull(custodianDao.getTransfer(transferIdHex))
         assertTrue(custodianStore.storedChunkIndices(transferIdHex).isEmpty())

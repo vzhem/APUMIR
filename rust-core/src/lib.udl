@@ -216,6 +216,15 @@ interface P2PCoreHandle {
         string text
     );
 
+    // An explicit user retry refreshes offline relay retention from the current time;
+    // regular background sends remain first-wins and do not extend TTL.
+    boolean retry_message(
+        string message_id,
+        string chat_id,
+        string recipient_id,
+        string text
+    );
+
     // Parallel QUIC file stream: direct send WITHOUT relay queue (bulk transfer).
     boolean send_direct_payload(string recipient_id, string payload);
 

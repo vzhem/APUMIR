@@ -22,14 +22,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -517,7 +513,7 @@ fun ApuMessageModerationDialog(
                                             )
                                         }
                                         Spacer(Modifier.width(8.dp))
-                                        Switch(
+                                        ApuPremiumSwitch(
                                             checked = enabled,
                                             onCheckedChange = { checked ->
                                                 allowedMemberMask = GroupPermissions.withFlag(
@@ -544,7 +540,7 @@ fun ApuMessageModerationDialog(
                 deleteAllInGroup,
                 restrictAuthorPermissions,
             ).count { it }
-            Button(
+            ApuPremiumContentButton(
                 onClick = {
                     onConfirm(
                         ApuModerationResult(
@@ -558,15 +554,7 @@ fun ApuMessageModerationDialog(
                         ),
                     )
                 },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (blockAuthor || deleteAllInGroup || giveAntiRating) {
-                        ApuSettingsDangerColor
-                    } else {
-                        ApuBubbleAccentColor
-                    },
-                    contentColor = Color(0xFFFFF8E6),
-                ),
-                shape = RoundedCornerShape(14.dp),
+                style = if (blockAuthor || deleteAllInGroup || giveAntiRating) DiagnosticsActionStyle.DANGER else DiagnosticsActionStyle.PRIMARY,
             ) {
                 Text(
                     text = if (selectedExtras > 0) {
@@ -579,9 +567,7 @@ fun ApuMessageModerationDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Отмена", color = ApuBubbleMutedColor)
-            }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         },
     )
 }

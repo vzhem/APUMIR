@@ -99,17 +99,19 @@ fun ApuTabBar(
         }
     }
 
+    // Владелец 2026-10-07: «Теперь в таком стиле нужно переделать всё приложение».
+    // Полоска вкладок — та же премиальная поверхность, что верхняя и нижняя
+    // панели: подъём, единая подложка, золотая нить по кромке и блеск, который
+    // ложится ПОД надписями, поэтому подписи вкладок остаются чёткими.
+    val barShape = RoundedCornerShape(18.dp)
     Box(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFF5F7FA).copy(alpha = 0.92f))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(18.dp),
-            ),
+            .apuPremiumLift(6.dp, barShape)
+            .apuBubbleSurface(shape = barShape)
+            .apuPremiumThread(shape = barShape, inset = 18.dp)
+            .apuPremiumGloss(barShape, intensity = 0.45f, topFraction = 0.6f),
     ) {
         Box(
             modifier = Modifier
@@ -117,13 +119,19 @@ fun ApuTabBar(
                 .padding(horizontal = 6.dp, vertical = 6.dp),
         ) {
             if (markerWidth > 0f) {
+                // Метка — золотая плитка с блеском: видно, где ты, и это ровно
+                // тот же «свой» вид, что у выбранного раздела в нижней панели
+                // и у кнопок окна «Логи».
+                val markerShape = RoundedCornerShape(17.dp)
                 Box(
                     modifier = Modifier
                         .offset { IntOffset(markerX.toInt(), 0) }
                         .width(with(density) { markerWidth.toDp() })
                         .height(34.dp)
-                        .clip(RoundedCornerShape(17.dp))
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
+                        .clip(markerShape)
+                        .background(apuGoldBrush())
+                        .border(1.dp, Color.White.copy(alpha = 0.45f), markerShape)
+                        .apuPremiumGloss(markerShape, intensity = 0.8f, topFraction = 0.7f),
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -156,9 +164,12 @@ fun ApuTabBar(
                                 text = title,
                                 maxLines = 1,
                                 style = MaterialTheme.typography.labelLarge,
+                                // Обе краски — тёмные чернила: на золотой метке
+                                // и на светлой подложке текст читается одинаково
+                                // (светлый onPrimary на золоте «выгорал»).
                                 color = lerp(
                                     ApuBubbleTextColor,
-                                    MaterialTheme.colorScheme.onPrimary,
+                                    ApuGoldInk,
                                     nearness,
                                 ),
                             )

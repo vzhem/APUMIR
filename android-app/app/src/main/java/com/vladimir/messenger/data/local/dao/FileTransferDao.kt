@@ -9,13 +9,59 @@ import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import kotlinx.coroutines.flow.Flow
 
+/** Сколько передач в одном состоянии: строка отчёта «Логи» без чтения всех строк. */
+data class TransferStateCount(
+    val state: String,
+    val total: Long,
+)
+
+/** Код ошибки передачи и число таких записей: объясняют «ошибок N» без имён файлов. */
+data class TransferErrorCount(
+    val errorCode: String?,
+    val total: Int,
+)
+
 @Dao
 interface FileTransferDao {
     @Query("SELECT * FROM file_transfers WHERE chatId = :chatId ORDER BY createdAtMs ASC")
     fun observeForChat(chatId: String): Flow<List<FileTransferEntity>>
 
+    /**
+     * Состояния очереди передач одним запросом (COMPLETE/FAILED/WAITING_RECIPIENT/…).
+     * Нужен отчёту «Логи» и сводке в настройках: у владельца не должно быть
+     * «голословного» скриншота без цифр о том, что сейчас с файлами.
+     */
+    @Query("SELECT state, COUNT(*) AS total FROM file_transfers GROUP BY state")
+    suspend fun transferStateCounts(): List<TransferStateCount>
+
+    /**
+     * Почему передачи падали: коды ошибок без имён файлов и путей.
+     * Сводка «ошибок 14» без этого выглядит голословно.
+     */
+    @Query(
+        """
+        SELECT errorCode AS errorCode, COUNT(*) AS total
+        FROM file_transfers
+        WHERE state = 'FAILED' AND errorCode IS NOT NULL
+        GROUP BY errorCode
+        ORDER BY total DESC
+        LIMIT 5
+        """
+    )
+    suspend fun transferErrorCounts(): List<TransferErrorCount>
+
+    /** Когда последний раз падала передача (для «последняя ошибка N назад»). */
+    @Query("SELECT MAX(updatedAtMs) FROM file_transfers WHERE state = 'FAILED'")
+    suspend fun lastFailureAtMs(): Long?
+
     @Query("SELECT * FROM file_transfers WHERE transferId = :transferId")
     suspend fun getTransfer(transferId: String): FileTransferEntity?
+
+    @Query(
+        "SELECT * FROM file_transfers WHERE messageId = :messageId AND direction = 'OUTGOING' " +
+            "ORDER BY createdAtMs DESC"
+    )
+    suspend fun getOutgoingForMessage(messageId: String): List<FileTransferEntity>
 
     @Query(
         """
@@ -83,8 +129,21 @@ interface FileTransferDao {
     )
     suspend fun getChunks(transferId: String): List<FileTransferChunkEntity>
 
-    @Query("DELETE FROM file_transfers WHERE expiresAtMs < :nowMs AND state != 'COMPLETE'")
-    suspend fun deleteExpiredIncomplete(nowMs: Long): Int
+    /**
+     * Просроченные незавершённые передачи — «потеряшки»: срок прошёл, а строка и
+     * зашифрованные куски остались. Уборка (`FileTransferRouter.purgeExpiredTransfers`)
+     * сначала берёт их списком, чтобы удалить и куски, а не только строку.
+     * Владелец 2026-10-07: «некоторые потеряшки живут в очереди вечно?» — жили.
+     */
+    @Query(
+        """
+        SELECT * FROM file_transfers
+        WHERE expiresAtMs < :nowMs AND state != 'COMPLETE'
+        ORDER BY expiresAtMs ASC
+        LIMIT :limit
+        """
+    )
+    suspend fun getExpiredIncomplete(nowMs: Long, limit: Int): List<FileTransferEntity>
 
     @Query("DELETE FROM file_transfers WHERE transferId = :transferId")
     suspend fun deleteTransfer(transferId: String): Int

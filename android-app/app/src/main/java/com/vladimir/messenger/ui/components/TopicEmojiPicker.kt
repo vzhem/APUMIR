@@ -35,7 +35,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -225,7 +224,7 @@ fun TopicEmojiPicker(
     val items = remember(query) { TopicEmojiCatalog.search(query) }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(
+        ApuBubbleField(
             value = query,
             onValueChange = { query = it },
             label = { Text("Поиск") },

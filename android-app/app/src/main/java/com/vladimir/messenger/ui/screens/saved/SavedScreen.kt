@@ -11,6 +11,9 @@ package com.vladimir.messenger.ui.screens.saved
 // папки) и «Поделиться».
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.ApuBubbleField
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.rememberCoroutineScope
@@ -35,9 +38,13 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.TextFieldDecorator
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
@@ -50,19 +57,15 @@ import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -72,10 +75,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -90,9 +96,14 @@ import com.vladimir.messenger.ui.components.ApuActionsMenu
 import com.vladimir.messenger.ui.components.ApuBubble
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.apuBubbleSurface
+import com.vladimir.messenger.ui.components.apuPremiumGloss
+import com.vladimir.messenger.ui.components.apuPremiumLift
+import com.vladimir.messenger.ui.components.apuPremiumThread
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.vladimir.messenger.ui.components.ApuPremiumFloatingActionButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -116,6 +127,13 @@ fun SavedScreen(
     var showStickerPicker by remember { mutableStateOf(false) }
     var showGifCatalog by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<SavedItemEntity?>(null) }
+    // Черновик нижней панели ввода: пишем заметку прямо здесь, как сообщение в
+    // чате (просьба владельца от 2026-10-06). Раньше текст можно было ввести
+    // только через «+» → «Заметка» в диалоге.
+    var draft by remember { mutableStateOf("") }
+    // Пока клавиатура открыта, панель разделов уступает место: так в чате и
+    // так остаётся больше строк списка. Фокус вернётся - панель вернётся.
+    var inputFocused by remember { mutableStateOf(false) }
 
     // Раунд 126: «+» добавляет не только заметку - файл и гифку с телефона,
     // гифку из внешнего каталога, любую свою гифку из библиотеки.
@@ -163,9 +181,28 @@ fun SavedScreen(
             .swipeBack(onBack = onBackClick),
     ) {
         ChatWallpaper()
+        // Раунд 266 (как в чате): клавиатура не закрывает поле ввода - список
+        // сжимается над ней, панель ввода остаётся видимой.
         Scaffold(
+            modifier = Modifier.imePadding(),
             containerColor = Color.Transparent,
-            bottomBar = bottomBar,
+            bottomBar = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Пишем в избранное как в чате: поле и кнопка «Отправить».
+                    SavedInputBar(
+                        text = draft,
+                        onTextChange = { draft = it },
+                        onSend = {
+                            viewModel.addNote(draft)
+                            draft = ""
+                        },
+                        onFocusChange = { focused -> inputFocused = focused },
+                    )
+                    // Панель разделов не мешает набору: пока печатаешь, она
+                    // уходит, освобождая место под клавиатурой.
+                    if (!inputFocused) bottomBar()
+                }
+            },
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {
                 TopAppBar(
@@ -183,9 +220,11 @@ fun SavedScreen(
                 )
             },
             floatingActionButton = {
-                FloatingActionButton(onClick = { showAddMenu = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "Добавить")
-                }
+                ApuPremiumFloatingActionButton(
+                    onClick = { showAddMenu = true },
+                    icon = Icons.Default.Add,
+                    contentDescription = "Добавить",
+                )
             },
         ) { padding ->
             when {
@@ -296,7 +335,7 @@ fun SavedScreen(
     if (showAddMenu) {
         // Раунд 163: действия - золотыми пузырями друг под другом
         // (владелец: «красивые пузыри горизонтальные в нашем стиле»).
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { showAddMenu = false },
             title = { Text("Добавить в избранное") },
             text = {
@@ -337,7 +376,7 @@ fun SavedScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showAddMenu = false }) { Text("Закрыть") }
+                ApuTextAction(label = "Закрыть", onClick = { showAddMenu = false })
             },
         )
     }
@@ -349,7 +388,7 @@ fun SavedScreen(
         LaunchedEffect(stickerTick) {
             viewModel.stickersOnce { stickers = it }
         }
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { showStickerPicker = false },
             title = { Text("Выберите стикер") },
             text = {
@@ -413,7 +452,7 @@ fun SavedScreen(
             },
             confirmButton = {},
             dismissButton = {
-                TextButton(onClick = { showStickerPicker = false }) { Text("Закрыть") }
+                ApuTextAction(label = "Закрыть", onClick = { showStickerPicker = false })
             },
         )
     }
@@ -450,7 +489,7 @@ fun SavedScreen(
     }
 
     confirmDelete?.let { item ->
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { confirmDelete = null },
             title = { Text("Убрать из избранного?") },
             text = {
@@ -464,13 +503,16 @@ fun SavedScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                ApuTextAction(
+                    label = "Убрать",
+                    onClick = {
                     viewModel.delete(item.id)
                     confirmDelete = null
-                }) { Text("Убрать") }
+                },
+                )
             },
             dismissButton = {
-                TextButton(onClick = { confirmDelete = null }) { Text("Отмена") }
+                ApuTextAction(label = "Отмена", onClick = { confirmDelete = null })
             },
         )
     }
@@ -729,11 +771,11 @@ private fun SavedItemBubble(
 @Composable
 private fun NoteDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
     var text by remember { mutableStateOf("") }
-    AlertDialog(
+    ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text("Заметка себе") },
         text = {
-            OutlinedTextField(
+            ApuBubbleField(
                 value = text,
                 onValueChange = { text = it },
                 label = { Text("Текст") },
@@ -742,13 +784,14 @@ private fun NoteDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
             )
         },
         confirmButton = {
-            TextButton(
+            ApuTextAction(
+                label = "Сохранить",
                 onClick = { onSave(text) },
                 enabled = text.isNotBlank(),
-            ) { Text("Сохранить") }
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         },
     )
 }
@@ -759,7 +802,6 @@ private fun formatSize(bytes: Long): String = when {
     bytes >= 1024L -> String.format(Locale.getDefault(), "%.0f КБ", bytes / 1024.0)
     else -> "$bytes Б"
 }
-
 
 /**
  * Раунд 163: пузырь-кнопка меню «Добавить в избранное» в гамме APU -
@@ -842,5 +884,99 @@ private fun SavedPinnedBar(
                 }
             }
         }
+    }
+}
+
+/**
+ * Нижняя панель ввода «Избранного»: пишем заметку прямо здесь, как сообщение в
+ * чате (просьба владельца от 2026-10-06: «в избранное нужно писать как в чате с
+ * кнопкой отправить; когда пишешь, чтобы клавиатура не перекрывала»).
+ *
+ * Сделана по образцу панели чата, а не как новая форма:
+ * - тот же светлый пузырь с золотой рамкой ([apuBubbleSurface] на поле);
+ * - поле с подсказкой и кнопка «Отправить» ПОД ним во всю ширину — активная
+ *   залита золотом, неактивная светлая с серым текстом;
+ * - `.imePadding()` на панели: клавиатура её не накрывает (в чате этот приём
+ *   проверен на телефоне).
+ *
+ * Текст сохраняется тем же путём, что и «+» → «Заметка» ([SavedViewModel.addNote]
+ * → `SavedItemsRepository.saveText`), поэтому пустое поле ничего не пишет.
+ */
+@Composable
+private fun SavedInputBar(
+    text: String,
+    onTextChange: (String) -> Unit,
+    onSend: () -> Unit,
+    onFocusChange: (Boolean) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    // Тот же приём, что в панели чата: BasicTextField(state) - он же проводит
+    // вставку картинок со стикер-клавиатуры в contentReceiver, а не показывает
+    // системный тост «приложение не поддерживает вставку изображений».
+    val inputState = rememberTextFieldState(text)
+    LaunchedEffect(text) {
+        if (inputState.text.toString() != text) {
+            inputState.edit { replace(0, length, text) }
+        }
+    }
+    LaunchedEffect(Unit) {
+        snapshotFlow { inputState.text.toString() }.collect { onTextChange(it) }
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .imePadding()
+            .padding(horizontal = 8.dp)
+            // Владелец 2026-10-07: «в таком стиле нужно переделать всё приложение».
+            // Панель ввода избранного — та же премиальная поверхность, что строки
+            // списка и пузыри: подъём, единая подложка, золотая нить, блеск под
+            // текстом (сам текст остаётся тёмными чернилами).
+            .apuPremiumLift(6.dp)
+            .apuBubbleSurface()
+            .apuPremiumThread(inset = 16.dp)
+            .apuPremiumGloss(intensity = 0.45f, topFraction = 0.55f)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+    ) {
+        BasicTextField(
+            state = inputState,
+            textStyle = MaterialTheme.typography.bodyLarge.copy(color = Color(0xFF1E2430)),
+            cursorBrush = SolidColor(Color(0xFF1E2430)),
+            decorator = object : TextFieldDecorator {
+                @Composable
+                override fun Decoration(content: @Composable () -> Unit) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .apuBubbleSurface(color = Color.White)
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                    ) {
+                        if (inputState.text.isEmpty()) {
+                            Text(
+                                "Заметка или сообщение себе...",
+                                color = Color(0xFF5A6472),
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        }
+                        content()
+                    }
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { state -> onFocusChange(state.isFocused) },
+        )
+
+        Spacer(Modifier.height(6.dp))
+
+        // Кнопка читает активность прямо из inputState: как в чате, она
+        // загорается сразу при первом символе, без задержки на рекомпозицию.
+        val canSend = inputState.text.isNotBlank()
+        ApuTextAction(
+            label = "Отправить",
+            onClick = onSend,
+            enabled = canSend,
+            modifier = Modifier.fillMaxWidth(),
+        )
     }
 }

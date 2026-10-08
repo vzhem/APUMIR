@@ -1,27 +1,18 @@
 package com.vladimir.messenger.ui.components
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import com.vladimir.messenger.data.notification.NotificationMuteDuration
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -29,7 +20,8 @@ import java.util.Locale
 
 /**
  * Общий выбор срока отключения уведомлений для настроек, чатов, групп,
- * каналов и отдельных тем.
+ * каналов и отдельных тем. Использует тот же диалог и палитру APU, что и
+ * остальные экраны приложения.
  */
 @Composable
 fun NotificationMuteDialog(
@@ -40,80 +32,77 @@ fun NotificationMuteDialog(
     onDismiss: () -> Unit,
 ) {
     val nowMs = System.currentTimeMillis()
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            modifier = Modifier.fillMaxWidth().widthIn(max = 380.dp),
-            shape = RoundedCornerShape(26.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 8.dp,
-            shadowElevation = 12.dp,
-        ) {
+    val isMuted = mutedUntilMs > nowMs
+
+    ApuSettingsDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            ApuPremiumIconTile(
+                icon = if (isMuted) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
+                size = 34.dp,
+                corner = 10.dp,
+            )
+        },
+        title = {
+            Text(
+                "Отключить уведомления",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+        },
+        text = {
             Column(
-                modifier = Modifier.padding(horizontal = 22.dp, vertical = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(
-                    "Отключить уведомления",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
                 Text(
                     targetName,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = ApuBubbleMutedColor,
+                )
+                Text(
+                    "На какой срок?",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = ApuBubbleTextColor,
+                    modifier = Modifier.padding(top = 4.dp),
                 )
 
-                Spacer(Modifier.height(5.dp))
                 NotificationMuteDuration.entries.forEach { duration ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .clickable { onSelectUntil(duration.deadlineFrom(nowMs)) }
-                            .padding(horizontal = 12.dp, vertical = 13.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            duration.label,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = if (duration == NotificationMuteDuration.FOREVER) {
-                                FontWeight.SemiBold
-                            } else {
-                                FontWeight.Medium
-                            },
-                            color = if (duration == NotificationMuteDuration.FOREVER) {
-                                Color(0xFFE53950)
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                        )
-                    }
+                    ApuPremiumChoiceRow(
+                        title = duration.label,
+                        subtitle = if (duration == NotificationMuteDuration.FOREVER) {
+                            "Включить вручную"
+                        } else {
+                            "Включатся автоматически"
+                        },
+                        selected = false,
+                        onClick = { onSelectUntil(duration.deadlineFrom(nowMs)) },
+                    )
                 }
 
-                if (mutedUntilMs > nowMs) {
-                    Text(
-                        notificationMuteStatus(mutedUntilMs, nowMs),
-                        modifier = Modifier.padding(start = 12.dp, top = 2.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                if (isMuted) {
+                    ApuSettingsChip(
+                        text = notificationMuteStatus(mutedUntilMs, nowMs),
+                        highlighted = false,
+                        modifier = Modifier.padding(top = 4.dp),
                     )
-                    TextButton(
+                    ApuTextAction(
+                        label = "Включить уведомления",
                         onClick = onTurnOn,
                         modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Включить уведомления")
-                    }
-                }
-                TextButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Отменить")
+                        icon = Icons.Default.NotificationsActive,
+                    )
                 }
             }
-        }
-    }
+        },
+        confirmButton = {
+            ApuTextAction(
+                label = "Отменить",
+                onClick = onDismiss,
+            )
+        },
+    )
 }
 
 /** Короткий статус для списка настроек и диалога отключения. */

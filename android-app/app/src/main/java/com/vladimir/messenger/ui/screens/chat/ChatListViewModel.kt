@@ -101,6 +101,17 @@ data class ChatListUiState(
     val searchQuery: String      = "",
     val filteredChats: List<Chat> = emptyList(),
     val rankBadge: String        = "",
+    /**
+     * Ранг VIP («Проводник», 10-й, и выше): знак у имени и кольцо у аватарки.
+     * Решение владельца от 2026-10-06.
+     */
+    val rankVip: Boolean         = false,
+    /**
+     * Собеседники, чей сообщённый ранг дотягивает до VIP (конверт APURANK1):
+     * у их имён в списке стоит знак VIP. Пустое множество — никто ещё не
+     * сообщал ранг, и знаков нет.
+     */
+    val vipPeerIds: Set<String>  = emptySet(),
     /** Группы, в которых телефон состоит (без тех, из которых вышел). */
     val groups: List<InboxGroup> = emptyList(),
     /** Выбранный раздел. */
@@ -142,6 +153,14 @@ class ChatListViewModel @Inject constructor(
     private val contactRepository: com.vladimir.messenger.data.repository.ContactRepository,
     private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
+    /** Рассылка своего ранга собеседникам (знак VIP у имени): нужна, когда ранг вырос. */
+    private val peerRankBroadcaster: com.vladimir.messenger.data.rank.PeerRankBroadcaster,
+    /**
+     * Ранги собеседников: поток узлов-элиты, по нему рисуется знак VIP у имени.
+     * Источник — общая таблица `peer_ranks`, а не адресная книга, поэтому знак
+     * виден и у тех, кого в контактах нет.
+     */
+    private val peerRankStore: com.vladimir.messenger.data.rank.PeerRankStore,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatListUiState())
@@ -197,6 +216,7 @@ class ChatListViewModel @Inject constructor(
         }
         observeInbox()
         observeNetworkStatus()
+        observePeerVip()
         refreshRankBadge()
     }
 
@@ -578,6 +598,19 @@ class ChatListViewModel @Inject constructor(
     fun itemsOf(state: ChatListUiState, target: InboxSection): List<InboxItem> =
         state.itemsBySection[target].orEmpty()
 
+    /**
+     * Знак VIP у имён собеседников. Подписка на поток узлов-элиты: экран сам не
+     * опрашивает базу — таблица `peer_ranks` сообщает об изменении, как только
+     * придёт конверт APURANK1.
+     */
+    private fun observePeerVip() {
+        viewModelScope.launch {
+            peerRankStore.vipNodeIds.collect { ids ->
+                _uiState.update { state -> state.copy(vipPeerIds = ids) }
+            }
+        }
+    }
+
     /** Видный бейдж ранга на главном экране: имя ранга + число квалифицированных друзей. */
     private fun refreshRankBadge() {
         // Ранг лежит в SharedPreferences: первое чтение открывает файл с диска,
@@ -599,8 +632,14 @@ class ChatListViewModel @Inject constructor(
                     // Только название: медаль рисует отдельный значок
                     // RankMedal - объёмный и анимированный, эмодзи такого не
                     // умеет и выглядит по-разному на разных прошивках.
-                    state.copy(rankBadge = rank.rankName)
+                    // Флаг VIP едет рядом с названием: он решает, какая медаль
+                    // (обычная или элитная) и есть ли знак VIP у имени.
+                    state.copy(rankBadge = rank.rankName, rankVip = rank.isVip)
                 }
+                // Ранг мог дойти до VIP: собеседники должны увидеть знак у
+                // имени, не дожидаясь следующей недели. Рассылка сама решает,
+                // нужна ли она (внутри — отметка о последней отправке).
+                runCatching { peerRankBroadcaster.broadcastIfNeeded() }
             }
         }
     }

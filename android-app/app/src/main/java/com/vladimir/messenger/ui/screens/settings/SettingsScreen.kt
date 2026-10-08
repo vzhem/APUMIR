@@ -11,35 +11,51 @@ package com.vladimir.messenger.ui.screens.settings
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
+import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuSettingsDangerColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
+import com.vladimir.messenger.ui.components.ApuGold
+import com.vladimir.messenger.ui.components.ApuGoldInk
+import com.vladimir.messenger.ui.components.ApuPremiumButton
 import com.vladimir.messenger.ui.components.ApuSettingsCard
+import com.vladimir.messenger.ui.components.ApuTextAction
+import com.vladimir.messenger.ui.components.apuGoldBrush
+import com.vladimir.messenger.ui.components.apuPremiumGloss
+import com.vladimir.messenger.ui.components.apuPremiumLift
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuSettingsDivider
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
+import com.vladimir.messenger.ui.components.ApuDiagnosticsActionButton
+import com.vladimir.messenger.ui.components.ApuDiagnosticsEventList
+import com.vladimir.messenger.ui.components.ApuDiagnosticsHero
+import com.vladimir.messenger.ui.components.ApuDiagnosticsPrivacyStrip
+import com.vladimir.messenger.ui.components.ApuDiagnosticsReportCard
+import com.vladimir.messenger.ui.components.ApuDiagnosticsStatusCard
+import com.vladimir.messenger.ui.components.DiagnosticsActionIcons
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 import com.vladimir.messenger.ui.components.ApuSettingsItem
 import com.vladimir.messenger.ui.components.ApuSettingsLayout
 import com.vladimir.messenger.ui.components.ApuSettingsSectionTitle
 import com.vladimir.messenger.ui.components.ApuProfileQuickAction
 import com.vladimir.messenger.ui.components.NotificationMuteDialog
 import com.vladimir.messenger.ui.components.notificationMuteStatus
+import com.vladimir.messenger.data.diagnostics.DiagnosticsReport
 import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.notification.NotificationMuteScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import com.vladimir.messenger.ui.components.swipeBack
+import com.vladimir.messenger.util.AppShare
 import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -85,6 +101,7 @@ import com.vladimir.messenger.data.swarm.SwarmMode
 import com.vladimir.messenger.data.swarm.SwarmPolicy
 import com.vladimir.messenger.data.swarm.SwarmSettings
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 import com.vladimir.messenger.ui.theme.ThemeMode
@@ -94,6 +111,9 @@ import com.vladimir.messenger.ui.theme.AppFontSizeHolder
 import com.vladimir.messenger.ui.theme.UsernameHolder
 import com.vladimir.messenger.ui.theme.WallpaperHolder
 import com.vladimir.messenger.util.QrCodeGenerator
+import com.vladimir.messenger.ui.components.ApuPremiumRadioButton
+import com.vladimir.messenger.ui.components.ApuPremiumSlider
+import com.vladimir.messenger.ui.components.ApuPremiumSwitch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -207,7 +227,7 @@ fun SettingsScreen(
             onDismissRequest = { showNameDialog = false },
             title = { Text("Ваше имя") },
             text = {
-                OutlinedTextField(
+                ApuBubbleField(
                     value = nameValue,
                     onValueChange = { nameValue = it.take(50) },
                     label = { Text("Имя") },
@@ -218,16 +238,17 @@ fun SettingsScreen(
                 )
             },
             confirmButton = {
-                TextButton(
-                    enabled = nameValue.trim().length >= 2,
+                ApuTextAction(
+                    label = "Сохранить",
                     onClick = {
                         viewModel.onDisplayNameChanged(nameValue)
                         showNameDialog = false
                     },
-                ) { Text("Сохранить") }
+                    enabled = nameValue.trim().length >= 2,
+                )
             },
             dismissButton = {
-                TextButton(onClick = { showNameDialog = false }) { Text("Отмена") }
+                ApuTextAction(label = "Отмена", onClick = { showNameDialog = false })
             },
         )
     }
@@ -242,10 +263,8 @@ fun SettingsScreen(
             title = { Text("Ваш @никнейм") },
             text = {
                 Column {
-                    OutlinedTextField(
+                    ApuBubbleField(
                         value = usernameValue,
-                        // Чистим прямо при наборе: недопустимый знак не
-                        // появляется в поле, а не отвергается после «Сохранить».
                         onValueChange = { usernameValue = UsernameHolder.sanitize(it) },
                         label = { Text("никнейм") },
                         placeholder = { Text("никнейм") },
@@ -262,15 +281,19 @@ fun SettingsScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = {
-                    // Собака - неснимаемый префикс; храним имя без неё.
+                ApuTextAction(
+                    label = "Сохранить",
+                    onClick = {
+
                     UsernameHolder.set(usernameContext, usernameValue)
                     UsernameHolder.clearConflict(usernameContext)
                     showUsernameDialog = false
-                }, enabled = UsernameHolder.isValid(usernameValue)) { Text("Сохранить") }
+                },
+                    enabled = UsernameHolder.isValid(usernameValue),
+                )
             },
             dismissButton = {
-                TextButton(onClick = { showUsernameDialog = false }) { Text("Отмена") }
+                ApuTextAction(label = "Отмена", onClick = { showUsernameDialog = false })
             },
         )
     }
@@ -309,9 +332,7 @@ fun SettingsScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showMyQrDialog = false }) {
-                    Text("Закрыть")
-                }
+                ApuTextAction(label = "Закрыть", onClick = { showMyQrDialog = false })
             },
         )
     }
@@ -540,7 +561,10 @@ private fun ProfileTabContent(
                         }
                         if (avatarUri != null) {
                             Spacer(Modifier.height(6.dp))
-                            TextButton(onClick = { AvatarHolder.set(context, null) }) { Text("Убрать аватар") }
+                            ApuTextAction(
+                                label = "Убрать аватар",
+                                onClick = { AvatarHolder.set(context, null) },
+                            )
                         }
                     }
                 }
@@ -637,17 +661,58 @@ private fun SettingsTabContent(
     // Диалог «Сеть сообщений» и буфер обмена для «Скопировать» в нём —
     // локальные для этого экрана.
     var showMqttDialog by remember { mutableStateOf(false) }
-    // Бounded, privacy-filtered transfer/network diagnostic report for phone acceptance tests.
+    // Безопасный отчёт о сети, ядре и передачах: сводка для человека плюс
+    // текст, который копируют целиком (TransferDiagnostics.collect).
     var showTransferLogsDialog by remember { mutableStateOf(false) }
     var transferLogsRefresh by remember { mutableIntStateOf(0) }
-    var transferLogsText by remember { mutableStateOf("") }
+    var transferLogsSnapshot by remember { mutableStateOf<TransferDiagnostics.Snapshot?>(null) }
+    var transferLogsLoading by remember { mutableStateOf(false) }
+    // Что именно сейчас делает сбор — словами. Владелец 2026-10-07: «кнопки не
+    // работают… всё на паузе»; окно должно объяснять, что происходит, а не
+    // молчать пустым экраном.
+    var transferLogsStage by remember { mutableStateOf<String?>(null) }
+    // Ошибка сбора — отдельно от хода работ: «читаю журнал» это не то же
+    // самое, что «сбор не удался», и красить их одним цветом нельзя.
+    var transferLogsError by remember { mutableStateOf<String?>(null) }
+    // Сторож: сбор идёт дольше обычного — человек узнает об этом словами,
+    // а не догадкой «приложение, похоже, встало».
+    var transferLogsSlow by remember { mutableStateOf(false) }
     val settingsContext = LocalContext.current
     LaunchedEffect(showTransferLogsDialog, transferLogsRefresh) {
         if (showTransferLogsDialog) {
-            transferLogsText = "Собираю безопасный отчёт…"
-            transferLogsText = withContext(Dispatchers.IO) {
-                TransferDiagnostics.buildReport(settingsContext)
+            transferLogsLoading = true
+            transferLogsError = null
+            transferLogsStage = TransferDiagnostics.STAGE_DEVICE
+            try {
+                // Сбор идёт в фоне: внутри вызовы ядра, база и `logcat`.
+                // Быстрая часть приходит сразу (onPartial) — окно не пустует,
+                // журнал процесса догоняет и уточняет отчёт.
+                val full = withContext(Dispatchers.IO) {
+                    TransferDiagnostics.collect(
+                        context = settingsContext,
+                        onStage = { stage -> transferLogsStage = stage },
+                        onPartial = { partial -> transferLogsSnapshot = partial },
+                    )
+                }
+                transferLogsSnapshot = full
+                transferLogsStage = null
+            } catch (failure: Throwable) {
+                // Сбор не имеет права оставить окно в вечной «паузе»: говорим,
+                // что случилось, и предлагаем повторить. Быстрая часть отчёта
+                // при этом остаётся на экране — она уже собрана.
+                transferLogsStage = null
+                transferLogsError = "сбор отчёта не завершился (" +
+                    failure.javaClass.simpleName + ") — нажмите «Обновить»"
+            } finally {
+                transferLogsLoading = false
             }
+        }
+    }
+    LaunchedEffect(showTransferLogsDialog, transferLogsRefresh) {
+        transferLogsSlow = false
+        if (showTransferLogsDialog) {
+            delay(5_000)
+            if (transferLogsLoading) transferLogsSlow = true
         }
     }
     // р240: диагностика синхронизации устройств одной личности.
@@ -777,18 +842,29 @@ private fun SettingsTabContent(
                         subtitle = if (customWallpaper != null) "Своя картинка из галереи" else "Стандартные, в тон теме",
                         onClick = { wallpaperPicker.launch("image/*") },
                     )
-                    TextButton(onClick = { wallpaperPicker.launch("image/*") }) {
-                        Text("Из галереи")
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
+                    ) {
+                        ApuPremiumButton(
+                            label = "Из галереи",
+                            icon = Icons.Default.PhotoLibrary,
+                            onClick = { wallpaperPicker.launch("image/*") },
+                        )
                     }
                     if (customWallpaper != null) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 2.dp),
+                                .padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
                         ) {
-                            TextButton(onClick = { WallpaperHolder.set(context, null) }) {
-                                Text("Вернуть стандартные")
-                            }
+                            ApuPremiumButton(
+                                label = "Вернуть стандартные",
+                                icon = Icons.Default.RestartAlt,
+                                style = DiagnosticsActionStyle.QUIET,
+                                onClick = { WallpaperHolder.set(context, null) },
+                            )
                         }
                     }
                 }
@@ -913,7 +989,7 @@ private fun SettingsTabContent(
                         title    = "Туннель через прокси",
                         subtitle = "Автовыбор лучшего прокси для соединений (любая сеть)",
                         trailingContent = {
-                            Switch(
+                            ApuPremiumSwitch(
                                 checked = uiState.proxyTunnelEnabled,
                                 onCheckedChange = viewModel::onProxyTunnelToggle,
                             )
@@ -972,7 +1048,7 @@ private fun SettingsTabContent(
                                 .padding(horizontal = 16.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            RadioButton(
+                            ApuPremiumRadioButton(
                                 selected = swarmMode == mode,
                                 onClick = { SwarmSettings.set(context, mode) },
                             )
@@ -1029,7 +1105,7 @@ private fun SettingsTabContent(
                                 "документы и стикеры, текст и резервные копии, APK обновлений."
                         },
                         trailingContent = {
-                            Switch(
+                            ApuPremiumSwitch(
                                 checked = imServer,
                                 onCheckedChange = {
                                     com.vladimir.messenger.data.swarm.ServerMode.set(context, it)
@@ -1080,7 +1156,7 @@ private fun SettingsTabContent(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Slider(
+                        ApuPremiumSlider(
                             value = step.toFloat(),
                             onValueChange = {
                                 step = it.roundToInt().coerceIn(0, StoragePolicy.STEPS.lastIndex)
@@ -1180,7 +1256,7 @@ private fun SettingsTabContent(
                     SettingsItem(
                         icon     = Icons.Default.Sync,
                         title    = "Перенос профиля на новое устройство",
-                        subtitle = "Уже подключённые телефоны синхронизируются сами — без этого окна",
+                        subtitle = "Подключённые телефоны синхронизируются сами",
                         onClick  = { showSyncDialog = true },
                     )
                 }
@@ -1270,12 +1346,10 @@ private fun SettingsTabContent(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { viewModel.logout() }) {
-                    Text("Выйти", color = MaterialTheme.colorScheme.error)
-                }
+                ApuTextAction(label = "Выйти", onClick = { viewModel.logout() }, danger = true)
             },
             dismissButton = {
-                TextButton(onClick = { showLogoutDialog = false }) { Text("Отмена") }
+                ApuTextAction(label = "Отмена", onClick = { showLogoutDialog = false })
             },
         )
     }
@@ -1294,10 +1368,16 @@ private fun SettingsTabContent(
                 )
             },
             confirmButton = {
-                TextButton(onClick = { viewModel.backupAddressBookNow() }) { Text("Создать копию") }
+                ApuTextAction(
+                    label = "Создать копию",
+                    onClick = { viewModel.backupAddressBookNow() },
+                )
             },
             dismissButton = {
-                TextButton(onClick = { viewModel.restoreAddressBookNow() }) { Text("Восстановить") }
+                ApuTextAction(
+                    label = "Восстановить",
+                    onClick = { viewModel.restoreAddressBookNow() },
+                )
             },
         )
     }
@@ -1327,64 +1407,171 @@ private fun SettingsTabContent(
             title = { Text("Сеть сообщений") },
             text = { Text(mqttHumanText) },
             confirmButton = {
-                TextButton(onClick = {
+                ApuTextAction(
+                    label = "Скопировать",
+                    onClick = {
                     val forDiagnostics = listOf(uiState.mqttHuman, uiState.mqttLink)
                         .filter { it.isNotBlank() }
                         .joinToString("\n\n")
                     mqttClipboard.setText(androidx.compose.ui.text.AnnotatedString(forDiagnostics))
                     showMqttDialog = false
-                }) { Text("Скопировать") }
+                },
+                )
             },
             dismissButton = {
-                TextButton(onClick = { showMqttDialog = false }) { Text("Закрыть") }
+                ApuTextAction(label = "Закрыть", onClick = { showMqttDialog = false })
             },
         )
     }
 
     if (showTransferLogsDialog) {
-        val reportScroll = rememberScrollState()
+        val logsSnapshot = transferLogsSnapshot
+        val reportText = logsSnapshot?.report.orEmpty()
+        // Владелец 2026-10-07: «как то всё по пенсионерски и по деревенски…
+        // цвета яркие и чёткие, объём кнопок выразителен, блеск премиальный».
+        // Шапка окна — тёмный градиентный баннер со статусом, строки проверок —
+        // яркие «well»-метки, отчёт — тёмная консоль, кнопки — золотая
+        // глянцевая и стеклянные. Подложка остаётся house-стиля
+        // (ApuSettingsDialog/ApuSettingsCard), ничего stock Material.
         ApuSettingsDialog(
             onDismissRequest = { showTransferLogsDialog = false },
-            icon = { Icon(Icons.Default.Description, contentDescription = null) },
+            icon = { Icon(Icons.Default.Terminal, contentDescription = null) },
             title = { Text("Логи") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text(
-                        "Отчёт содержит только состояние сети и F4/F3-переходы. " +
-                            "Чаты, имена файлов, ключи, ciphertext, адреса и contact ID не копируются.",
-                        style = MaterialTheme.typography.bodySmall,
+                // Диалог прокручивает сводку целиком; только длинный список и
+                // сырая консоль имеют собственные ограниченные области.
+                Column(
+                    // ApuSettingsDialog уже даёт одну прокрутку всей области.
+                    // Вторая вложенная вертикальная прокрутка перехватывала жесты.
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    val statusLines = logsSnapshot?.statusLines.orEmpty()
+                    ApuDiagnosticsHero(
+                        lines = statusLines,
+                        appVersion = logsSnapshot?.appVersion,
+                        collectedAt = logsSnapshot?.let { DiagnosticsReport.clock(it.createdAtMs) },
+                        journalSize = logsSnapshot?.journalSize ?: 0,
+                        warnCount = logsSnapshot?.warnCount ?: 0,
+                        badCount = logsSnapshot?.badCount ?: 0,
                     )
-                    SelectionContainer {
+                    // Ход работ и ошибка говорятся словами — окно никогда не
+                    // молчит пустым экраном.
+                    val stageLine = when {
+                        transferLogsLoading -> transferLogsStage ?: "Собираю безопасный отчёт…"
+                        transferLogsError != null -> transferLogsError
+                        else -> null
+                    }
+                    if (stageLine != null) {
                         Text(
-                            transferLogsText.ifBlank { "Собираю безопасный отчёт…" },
-                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 300.dp)
-                                .verticalScroll(reportScroll),
+                            stageLine,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (transferLogsLoading) {
+                                ApuBubbleMutedColor
+                            } else {
+                                ApuSettingsDangerColor
+                            },
+                        )
+                        if (transferLogsLoading && transferLogsSlow) {
+                            Text(
+                                "сбор идёт дольше обычного — что-то в телефоне занято; " +
+                                    "«Обновить» запустит заново",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = ApuBubbleMutedColor,
+                            )
+                        }
+                    } else {
+                        ApuDiagnosticsStatusCard(lines = logsSnapshot?.statusLines.orEmpty())
+                    }
+                    // Список событий — то, что человек называет «логи»: он виден
+                    // сразу, как только пришла быстрая часть отчёта.
+                    ApuDiagnosticsEventList(events = logsSnapshot?.events.orEmpty())
+                    // Обещание приватности — тёмной стеклянной полосой со щитом:
+                    // его читают, а не пролистывают.
+                    ApuDiagnosticsPrivacyStrip(
+                        "Отчёт содержит состояние сети, ядра, брокера и передач. Чаты, имена " +
+                            "файлов, ключи, ciphertext, адреса и contact ID в него не попадают — " +
+                            "его можно копировать и присылать целиком.",
+                    )
+                    ApuDiagnosticsReportCard(
+                        text = reportText.ifBlank { "Собираю безопасный отчёт…" },
+                        maxHeight = 260.dp,
+                    )
+                }
+            },
+            confirmButton = {
+                // На узком экране четыре кнопки в одной строке сжимались по
+                // ширине: «Отправить» исчезала за краем. Сетка 2×2 даёт всем
+                // действиям одинаковую ширину и оставляет главную кнопку первой.
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        // Кнопка всегда живая: при сборке отчёта объясняет,
+                        // что происходит, вместо того чтобы молчать.
+                        ApuDiagnosticsActionButton(
+                            label = "Отправить",
+                            icon = DiagnosticsActionIcons.Send,
+                            modifier = Modifier.weight(1f),
+                            style = DiagnosticsActionStyle.PRIMARY,
+                            compact = true,
+                            onClick = {
+                                if (reportText.isNotBlank()) {
+                                    AppShare.shareText(settingsContext, reportText, "Логи APU")
+                                } else {
+                                    apuDiagnosticsNothingYet(settingsContext, transferLogsStage)
+                                }
+                            },
+                        )
+                        ApuDiagnosticsActionButton(
+                            label = "Скопировать",
+                            icon = DiagnosticsActionIcons.Copy,
+                            modifier = Modifier.weight(1f),
+                            compact = true,
+                            onClick = {
+                                if (reportText.isNotBlank()) {
+                                    mqttClipboard.setText(AnnotatedString(reportText))
+                                    android.widget.Toast.makeText(
+                                        settingsContext,
+                                        "Логи скопированы",
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                } else {
+                                    apuDiagnosticsNothingYet(settingsContext, transferLogsStage)
+                                }
+                            },
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        ApuDiagnosticsActionButton(
+                            label = "Обновить",
+                            icon = DiagnosticsActionIcons.Refresh,
+                            modifier = Modifier.weight(1f),
+                            style = DiagnosticsActionStyle.QUIET,
+                            compact = true,
+                            onClick = {
+                                transferLogsStage = TransferDiagnostics.STAGE_DEVICE
+                                transferLogsLoading = true
+                                transferLogsRefresh++
+                            },
+                        )
+                        ApuDiagnosticsActionButton(
+                            label = "Закрыть",
+                            modifier = Modifier.weight(1f),
+                            style = DiagnosticsActionStyle.QUIET,
+                            compact = true,
+                            onClick = { showTransferLogsDialog = false },
                         )
                     }
                 }
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    mqttClipboard.setText(
-                        AnnotatedString(transferLogsText.ifBlank { "Отчёт ещё собирается" }),
-                    )
-                    android.widget.Toast.makeText(
-                        settingsContext,
-                        "Логи скопированы",
-                        android.widget.Toast.LENGTH_SHORT,
-                    ).show()
-                }) { Text("Скопировать") }
-            },
-            dismissButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(onClick = { transferLogsRefresh++ }) { Text("Обновить") }
-                    TextButton(onClick = { showTransferLogsDialog = false }) { Text("Закрыть") }
-                }
-            },
+
         )
     }
 
@@ -1426,19 +1613,19 @@ private fun SettingsTabContent(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
-                    // Буфер обмена берём тот же, что у соседнего диалога
-                    // (mqttClipboard объявлен в этой же функции экрана).
-                    // р243: копируем уже собранный текст - повторный вызов
-                    // диагностики (JNI) на главном потоке снова подвесил бы окно.
+                ApuTextAction(
+                    label = "Скопировать",
+                    onClick = {
+
                     mqttClipboard.setText(
                         androidx.compose.ui.text.AnnotatedString(syncText),
                     )
                     showMirrorDiag = false
-                }) { Text("Скопировать") }
+                },
+                )
             },
             dismissButton = {
-                TextButton(onClick = { showMirrorDiag = false }) { Text("Закрыть") }
+                ApuTextAction(label = "Закрыть", onClick = { showMirrorDiag = false })
             },
         )
     }
@@ -1478,15 +1665,39 @@ private fun ThemeModeChoices(selected: ThemeMode, onSelect: (ThemeMode) -> Unit)
                             ThemeMode.DARK -> Icons.Default.DarkMode
                         }
                         Column(
-                            modifier = Modifier.weight(1f).clip(shape)
-                                .background(if (checked) ApuBubbleAccentColor else ApuBubbleAccentColor.copy(alpha = 0.06f))
-                                .border(1.dp, ApuBubbleAccentColor.copy(alpha = if (checked) 0.7f else 0.16f), shape)
+                            // Выбранный режим — золотая плитка с глянцем и тенью
+                            // (премиальный слой, как в «Логах»); остальные —
+                            // спокойное стекло, чтобы выбор читался сразу.
+                            modifier = Modifier.weight(1f)
+                                .then(
+                                    if (checked) {
+                                        Modifier.apuPremiumLift(8.dp, shape, ApuGold.copy(alpha = 0.45f))
+                                    } else {
+                                        Modifier
+                                    },
+                                )
+                                .clip(shape)
+                                .then(
+                                    if (checked) {
+                                        Modifier.background(apuGoldBrush(), shape)
+                                    } else {
+                                        Modifier.background(ApuBubbleAccentColor.copy(alpha = 0.06f), shape)
+                                    },
+                                )
+                                .border(
+                                    1.dp,
+                                    if (checked) Color.White.copy(alpha = 0.5f) else ApuBubbleAccentColor.copy(alpha = 0.16f),
+                                    shape,
+                                )
+                                .then(
+                                    if (checked) Modifier.apuPremiumGloss(shape, intensity = 0.85f, topFraction = 0.7f) else Modifier,
+                                )
                                 .selectable(checked, role = androidx.compose.ui.semantics.Role.RadioButton, onClick = { onSelect(mode) })
                                 .heightIn(min = 64.dp).padding(horizontal = 8.dp, vertical = 10.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(5.dp),
                         ) {
-                            val ink = if (checked) Color(0xFFFFF8E6) else ApuBubbleAccentColor
+                            val ink = if (checked) ApuGoldInk else ApuBubbleAccentColor
                             Icon(icon, contentDescription = null, tint = ink, modifier = Modifier.size(22.dp))
                             Text(label, style = MaterialTheme.typography.labelLarge, color = ink, fontWeight = FontWeight.SemiBold)
                         }
@@ -1802,7 +2013,7 @@ private fun ApkVersionDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(
+                ApuBubbleField(
                     value        = version,
                     onValueChange = { version = it },
                     singleLine = true,
@@ -1812,13 +2023,14 @@ private fun ApkVersionDialog(
             }
         },
         confirmButton = {
-            TextButton(
+            ApuTextAction(
+                label = "Раздавать",
                 onClick = { onConfirm(version) },
                 enabled = !reading && version.isNotBlank(),
-            ) { Text("Раздавать") }
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         },
     )
 }
@@ -1846,3 +2058,15 @@ private val com.vladimir.messenger.data.repository.NetworkStatus.displayName: St
         com.vladimir.messenger.data.repository.NetworkStatus.Degraded     -> "Через ретранслятор"
         com.vladimir.messenger.data.repository.NetworkStatus.Disconnected -> "Нет соединения"
     }
+
+/**
+ * Отчёт ещё собирается: кнопка не молчит, а объясняет, где именно идёт сбор.
+ * Владелец 2026-10-07: «кнопки в новом не работают» — мёртвых кнопок быть не
+ * должно: у нажатия всегда есть видимый ответ.
+ */
+private fun apuDiagnosticsNothingYet(context: android.content.Context, stage: String?) {
+    val text = stage?.takeIf { it.isNotBlank() }
+        ?.let { "Отчёт собирается: $it" }
+        ?: "Отчёт ещё собирается — нажмите «Обновить»"
+    android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_SHORT).show()
+}

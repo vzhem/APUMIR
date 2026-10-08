@@ -51,15 +51,17 @@ fun ApuSearchField(
     modifier: Modifier = Modifier,
     trailing: (@Composable () -> Unit)? = null,
 ) {
+    // Владелец 2026-10-07: «Теперь в таком стиле нужно переделать всё приложение».
+    // Поле поиска — та же премиальная поверхность, что строки списков: подъём,
+    // единая подложка, золотая нить по кромке, блеск под текстом (подсказка
+    // и вводимые буквы остаются чёрными и чёткими).
+    val shape = RoundedCornerShape(18.dp)
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(18.dp))
-            .background(ApuBubbleFill)
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(18.dp),
-            )
+            .apuPremiumLift(5.dp, shape)
+            .apuBubbleSurface(color = ApuBubbleFill, shape = shape)
+            .apuPremiumThread(shape = shape, inset = 16.dp)
+            .apuPremiumGloss(shape, intensity = 0.45f, topFraction = 0.55f)
             .padding(horizontal = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

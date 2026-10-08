@@ -16,16 +16,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.material3.Checkbox
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Alignment
@@ -81,7 +78,7 @@ fun InviteShareCard(
                 .clickable { attachApk = !attachApk }
                 .padding(horizontal = 4.dp),
         ) {
-            Checkbox(checked = attachApk, onCheckedChange = { attachApk = it })
+            ApuPremiumCheckbox(checked = attachApk, onCheckedChange = { attachApk = it })
             Text(
                 "Приложить установочный файл (APK)",
                 style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
@@ -89,12 +86,18 @@ fun InviteShareCard(
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { clipboard.setText(AnnotatedString(link)) }) {
+            ApuPremiumContentButton(
+                onClick = { clipboard.setText(AnnotatedString(link)) },
+                style = DiagnosticsActionStyle.QUIET,
+            ) {
                 Text("Копировать")
             }
             // Наружу - короткой https-ссылкой (кликабельна везде); QR выше
             // остаётся прежней ссылкой, сканер разбирает её без сети.
-            Button(onClick = { ShortShare.shareInvite(context, displayName, link, attachApk) }) {
+            ApuPremiumContentButton(
+                onClick = { ShortShare.shareInvite(context, displayName, link, attachApk) },
+                style = DiagnosticsActionStyle.PRIMARY,
+            ) {
                 Text("Поделиться")
             }
         }

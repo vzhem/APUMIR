@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Real Kotlin/JVM history, pin-notice and splash regressions, without an Android SDK or native core.
+# Real Kotlin/JVM history, pin-notice, splash and diagnostics-report regressions,
+# without an Android SDK or native core.
 # Uses the same Kotlin/coroutines/JUnit versions as the app. All downloads and
 # compiled output stay in ignored target/. Requires Java 17+, curl and Python 3.
 set -euo pipefail
@@ -63,11 +64,24 @@ POST_MANIFEST="$BASE/main/java/com/vladimir/messenger/data/swarm/PostManifest.kt
 GROUP_WIRE="$BASE/main/java/com/vladimir/messenger/data/group/GroupWire.kt"
 GROUP_WIRE_TEST="$BASE/test/java/com/vladimir/messenger/data/group/GroupWireTest.kt"
 GROUP_WIRE_UPDATE_TEST="$BASE/test/java/com/vladimir/messenger/data/group/GroupWireUpdateTest.kt"
+# Отчёт «Логи» и разбор строки MQTT: чистый Kotlin без Android. Здесь они
+# компилируются и проверяются на runner, то есть формат отчёта ловится до
+# выпуска, а не по скриншоту с телефона владельца (2026-10-06).
+DIAG_REPORT="$BASE/main/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReport.kt"
+DIAG_MQTT="$BASE/main/java/com/vladimir/messenger/data/diagnostics/MqttLinkText.kt"
+DIAG_REPORT_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReportTest.kt"
+DIAG_MQTT_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/MqttLinkTextTest.kt"
+# Сроки хранения «потеряшек» (владелец 2026-10-07: тяжёлое — сутки, текст и
+# малое — неделя). Файл чистый, поэтому проверяется здесь же на runner.
+RETENTION="$BASE/main/java/com/vladimir/messenger/data/file/FileTransferRetention.kt"
+RETENTION_TEST="$BASE/test/java/com/vladimir/messenger/data/file/FileTransferRetentionTest.kt"
 "$JAVA" -cp "$OUT/compiler/*:$OUT/runtime/kotlin-stdlib-$KOTLIN.jar" \
     org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
     -no-stdlib -no-reflect -jvm-target 17 -classpath "$CP" -d "$OUT/classes" \
     "$MODEL/Message.kt" "$MODEL/MessageStatus.kt" "$MODEL/MessageChannel.kt" "$OBSERVER" "$TEST" "$PIN_POLICY" "$PIN_TEST" "$SPLASH_MATH" "$SPLASH_TEST" "$SETTINGS_LAYOUT" "$SETTINGS_TEST" "$HEART_WIRE" "$HEART_TEST" "$GROUP_PERMS" "$GROUP_PERMS_TEST" \
-    "$POST_MANIFEST" "$GROUP_WIRE" "$GROUP_WIRE_TEST" "$GROUP_WIRE_UPDATE_TEST"
+    "$POST_MANIFEST" "$GROUP_WIRE" "$GROUP_WIRE_TEST" "$GROUP_WIRE_UPDATE_TEST" \
+    "$DIAG_REPORT" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
+    "$RETENTION" "$RETENTION_TEST"
 "$JAVA" -cp "$OUT/classes:$CP" org.junit.runner.JUnitCore \
     com.vladimir.messenger.ui.screens.chat.ChatHistoryObserverTest \
     com.vladimir.messenger.data.local.MessagePinPolicyTest \
@@ -76,4 +90,7 @@ GROUP_WIRE_UPDATE_TEST="$BASE/test/java/com/vladimir/messenger/data/group/GroupW
     com.vladimir.messenger.data.heart.HeartWireTest \
     com.vladimir.messenger.data.group.GroupPermissionsTest \
     com.vladimir.messenger.data.group.GroupWireTest \
-    com.vladimir.messenger.data.group.GroupWireUpdateTest
+    com.vladimir.messenger.data.group.GroupWireUpdateTest \
+    com.vladimir.messenger.data.diagnostics.DiagnosticsReportTest \
+    com.vladimir.messenger.data.diagnostics.MqttLinkTextTest \
+    com.vladimir.messenger.data.file.FileTransferRetentionTest

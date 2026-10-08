@@ -189,6 +189,8 @@ class ChatRepository @Inject constructor(
                         )
                         if (offered) {
                             Log.i(TAG, "🪞 sent via mirror partner: $messageId")
+                            com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                                .noteMessageOutgoing()
                             return Result.success(mirrorEntity.toDomain())
                         }
                         // Партнёр мигнул в момент отправки: строка останется
@@ -252,6 +254,10 @@ class ChatRepository @Inject constructor(
             if (sentDirectly) {
                 messageDao.updateMessageStatus(messageId, MessageStatus.SENT.name)
                 messageDao.updateMessageChannel(messageId, MessageChannel.LOCAL.name)
+                // Диагностика (2026-10-07): считаем ЗДЕСЬ, а не в конце функции:
+                // отложенное до сети — это ещё не отправка, и путать их нельзя.
+                com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                    .noteMessageOutgoing()
             } else if (actualRecipientId.isNotBlank()) {
                 // No transport confirmed delivery. Room remains the phone-owned persistent outbox;
                 // Rust may also retain the compatible relay in its bounded mesh queue. Until a
@@ -259,6 +265,8 @@ class ChatRepository @Inject constructor(
                 messageDao.updateMessageStatus(messageId, MessageStatus.QUEUED_OFFLINE.name)
                 messageDao.updateMessageChannel(messageId, MessageChannel.STORE_FORWARD.name)
                 Log.i(TAG, "Message queued offline in phone-owned mesh: $messageId")
+                com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                    .noteMessageQueuedOffline()
             }
 
             // р226: отразить отправленное на зеркале второго устройства.
@@ -304,8 +312,135 @@ class ChatRepository @Inject constructor(
             Result.success(entity.toDomain())
         } catch (e: Exception) {
             Log.e(TAG, "sendMessage error", e)
+            // Только вид ошибки: текст исключения может нести идентификаторы
+            // узла, а отчёт должен оставаться без чужих данных.
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                .noteMessageSendFailed(e.javaClass.simpleName)
             Result.failure(e)
         }
+    }
+
+    /** Explicit user retry for an outgoing text message; keeps the original ID. */
+    suspend fun retryOutgoingMessage(messageId: String): Result<Message> {
+        val row = messageDao.getMessageById(messageId)
+            ?: return Result.failure(IllegalArgumentException("Исходящее сообщение не найдено"))
+        return retryOutgoingEntity(row, fromMirror = false)
+    }
+
+    /** Active phone receives a manual retry request from its paired mirror. */
+    suspend fun retryOutgoingFromMirror(row: MirrorRow, localChatId: String): Result<Message> {
+        val existing = messageDao.getMessageById(row.id)
+        val entity = existing ?: MessageEntity(
+            id = row.id,
+            chatId = localChatId,
+            senderId = "self",
+            content = row.content,
+            timestamp = row.timestamp,
+            isFromMe = true,
+            status = row.status,
+            channel = MessageChannel.UNKNOWN.name,
+            recipientId = row.recipientId,
+            replyToId = row.replyToId.takeIf { it.isNotBlank() },
+            replyAuthor = row.replyAuthor,
+            replyText = row.replyText,
+        ).also { messageDao.insertMessageIgnore(it) }
+        if (!entity.isFromMe) {
+            return Result.failure(IllegalArgumentException("Нельзя повторить входящее сообщение"))
+        }
+        return retryOutgoingEntity(entity.copy(chatId = localChatId), fromMirror = true)
+    }
+
+    private suspend fun retryOutgoingEntity(
+        original: MessageEntity,
+        fromMirror: Boolean,
+    ): Result<Message> {
+        if (!original.isFromMe) {
+            return Result.failure(IllegalArgumentException("Нельзя повторить входящее сообщение"))
+        }
+        if (original.status in setOf(
+                MessageStatus.DELIVERED.name,
+                MessageStatus.READ.name,
+                MessageStatus.LOCAL_FILE.name,
+                MessageStatus.FILE_EXPIRED.name,
+            )
+        ) {
+            return Result.failure(IllegalStateException("Это сообщение нельзя повторить этим способом"))
+        }
+
+        val chat = chatDao.getChatById(original.chatId)
+        val rawRecipient = original.recipientId.ifBlank { chat?.contactId.orEmpty() }
+        val recipientId = when {
+            rawRecipient.startsWith("pk_") -> rawRecipient
+            rawRecipient.contains("node=pk_") ->
+                "pk_" + rawRecipient.substringAfter("node=pk_").substringBefore("&")
+            else -> rawRecipient
+        }
+        if (recipientId.isBlank()) {
+            return Result.failure(IllegalStateException("У сообщения не найден адресат"))
+        }
+
+        // Теневой телефон не обновляет TTL локальной first-wins очереди:
+        // передаёт партнёру отдельный флаг явного пользовательского повтора.
+        if (!fromMirror) {
+            val channel = MirrorHub.routeOutgoing()
+            if (channel != null && channel.publishOutgoing(
+                    MirrorRow(
+                        id = original.id,
+                        chatId = original.chatId,
+                        contactName = chat?.contactName.orEmpty(),
+                        senderId = "self",
+                        content = original.content,
+                        timestamp = original.timestamp,
+                        mine = true,
+                        recipientId = recipientId,
+                        status = original.status,
+                        replyToId = original.replyToId.orEmpty(),
+                        replyAuthor = original.replyAuthor,
+                        replyText = original.replyText,
+                        manualRetry = true,
+                    )
+                )
+            ) {
+                messageDao.updateOutgoingRetryResult(
+                    original.id,
+                    MessageStatus.QUEUED_OFFLINE.name,
+                    MessageChannel.STORE_FORWARD.name,
+                )
+                return Result.success(
+                    (messageDao.getMessageById(original.id) ?: original).toDomain(),
+                )
+            }
+        }
+
+        val sentDirectly = sendViaRustRetry(
+            original.id,
+            original.chatId,
+            recipientId,
+            original.content,
+        )
+        val nextStatus = if (sentDirectly) MessageStatus.SENT else MessageStatus.QUEUED_OFFLINE
+        val nextChannel = if (sentDirectly) MessageChannel.LOCAL else MessageChannel.STORE_FORWARD
+        messageDao.updateOutgoingRetryResult(original.id, nextStatus.name, nextChannel.name)
+        MirrorHub.noteOutgoing()
+        if (sentDirectly) {
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics.noteMessageOutgoing()
+        } else {
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics.noteMessageQueuedOffline()
+        }
+        // Return the delivery/READ status if an ACK raced this retry.
+        val updated = messageDao.getMessageById(original.id) ?: original
+        MirrorHub.publishSentEcho(
+            id = original.id,
+            chatId = original.chatId,
+            content = original.content,
+            ts = original.timestamp,
+            recipientId = recipientId,
+            status = updated.status,
+            replyToId = original.replyToId.orEmpty(),
+            replyAuthor = original.replyAuthor,
+            replyText = original.replyText,
+        )
+        return Result.success(updated.toDomain())
     }
 
     /**
@@ -524,7 +659,11 @@ class ChatRepository @Inject constructor(
         }
         // Статус уважаем чужой: эхо может принести и QUEUED_OFFLINE.
         val mirrorStatus = when (row.status) {
-            MessageStatus.SENT.name, MessageStatus.QUEUED_OFFLINE.name, MessageStatus.PENDING.name -> row.status
+            MessageStatus.SENT.name,
+            MessageStatus.QUEUED_OFFLINE.name,
+            MessageStatus.PENDING.name,
+            MessageStatus.LOCAL_FILE.name,
+            MessageStatus.FILE_EXPIRED.name -> row.status
             else -> MessageStatus.SENT.name
         }
         if (messageDao.messageExists(row.id)) {
@@ -709,8 +848,8 @@ class ChatRepository @Inject constructor(
     /**
      * Local-only outgoing file placeholder: it never rides the text transport (the file packets
      * are the transport); the row exists so the chat shows the transfer and its delivery state.
-     * LOCAL_FILE status is outside the retry paths' sets, so FULL SYNC never re-sends it as a
-     * text message; the chat renders the transfer bubble in its place.
+     * LOCAL_FILE stays outside automatic text resend/FULL SYNC; only explicit file retry reopens
+     * the system picker and prepares a fresh transfer under the same message ID.
      */
     suspend fun insertLocalFileMessage(
         chatId: String,
@@ -1054,10 +1193,44 @@ class ChatRepository @Inject constructor(
         messageDao.updateMessageStatus(messageId, status.name)
     }
 
+    suspend fun markOutgoingFileExpired(messageId: String): Boolean {
+        val changed = messageDao.markOutgoingFileExpired(messageId) > 0
+        if (changed) publishFileStatusToMirror(messageId, MessageStatus.FILE_EXPIRED)
+        return changed
+    }
+
+    suspend fun markOutgoingFileRequeued(messageId: String): Boolean {
+        val changed = messageDao.markOutgoingFileRequeued(messageId) > 0
+        if (changed) publishFileStatusToMirror(messageId, MessageStatus.LOCAL_FILE)
+        return changed
+    }
+
+    private suspend fun publishFileStatusToMirror(messageId: String, status: MessageStatus) {
+        val row = messageDao.getMessageById(messageId) ?: return
+        MirrorHub.publishSentEcho(
+            id = row.id,
+            chatId = row.chatId,
+            content = row.content,
+            ts = row.timestamp,
+            recipientId = row.recipientId,
+            status = status.name,
+            replyToId = row.replyToId.orEmpty(),
+            replyAuthor = row.replyAuthor,
+            replyText = row.replyText,
+        )
+    }
+
     /** ACKs only acknowledge our outgoing rows; an old ACK cannot downgrade READ. */
     suspend fun markOutgoingMessageDelivered(messageId: String): Boolean {
         if (messageId.isBlank()) return false
-        return messageDao.markOutgoingMessageDelivered(messageId) > 0
+        val changed = messageDao.markOutgoingMessageDelivered(messageId) > 0
+        // Диагностика: подтверждение — единственное доказательство, что
+        // собеседник ПОЛУЧИЛ сообщение. Считаем только настоящую смену
+        // статуса, иначе повторные кадры надували бы число.
+        if (changed) {
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics.noteDeliveryAck()
+        }
+        return changed
     }
 
     private fun ChatEntity.toDomain() = Chat(
@@ -1110,6 +1283,15 @@ class ChatRepository @Inject constructor(
         withContext(Dispatchers.IO) {
             RustBridge.sendMessage(messageId, chatId, peerId, content)
         }
+
+    private suspend fun sendViaRustRetry(
+        messageId: String,
+        chatId: String,
+        peerId: String,
+        content: String,
+    ): Boolean = withContext(Dispatchers.IO) {
+        RustBridge.retryMessage(messageId, chatId, peerId, content)
+    }
 
     /** Observe all messages for callers that explicitly need a full-table stream. */
     fun observeAllMessages(): Flow<List<Message>> =

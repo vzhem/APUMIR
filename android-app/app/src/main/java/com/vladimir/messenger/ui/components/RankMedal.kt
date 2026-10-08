@@ -41,6 +41,12 @@ import kotlin.math.sin
 fun RankMedal(
     modifier: Modifier = Modifier,
     size: Dp = 22.dp,
+    /**
+     * VIP-вариант («Проводник», 10-й ранг, и выше): лента становится фиолетово-золотой, а
+     * вокруг диска появляется второе золотое кольцо. Так медаль элиты
+     * отличается от обычной, но остаётся той же наградой, а не другим значком.
+     */
+    vip: Boolean = false,
 ) {
     val transition = rememberInfiniteTransition(label = "rank-medal")
 
@@ -69,12 +75,15 @@ fun RankMedal(
     Canvas(modifier = modifier.size(size)) {
         val w = this.size.width
         val h = this.size.height
-        // Лента занимает верхнюю треть, диск - остальное.
+        // Лента занимает верхнюю треть, диск - остальное. У VIP диск поднят чуть
+        // выше: иначе внешнее кольцо элиты обрезалось бы о край значка.
         val diskRadius = w * 0.34f
-        val diskCenter = Offset(w / 2f, h - diskRadius - h * 0.04f)
+        val bottomGap = if (vip) 0.13f else 0.04f
+        val diskCenter = Offset(w / 2f, h - diskRadius - h * bottomGap)
 
         rotate(degrees = swing, pivot = Offset(w / 2f, 0f)) {
-            drawRibbon(w, h, diskCenter, diskRadius)
+            drawRibbon(w, h, diskCenter, diskRadius, vip)
+            if (vip) drawVipAura(diskCenter, diskRadius, shine)
             drawDisk(diskCenter, diskRadius, shine)
         }
     }
@@ -86,12 +95,15 @@ private fun DrawScope.drawRibbon(
     h: Float,
     diskCenter: Offset,
     diskRadius: Float,
+    vip: Boolean = false,
 ) {
     val topY = h * 0.02f
     val bottomY = diskCenter.y - diskRadius * 0.55f
     val halfWidth = w * 0.17f
 
     // Левая половина - синяя, правая - красная: узнаваемый наградной вид.
+    // У VIP лента фиолетово-золотая: тот же наградной силуэт, но сразу видно,
+    // что ступень особая.
     val left = Path().apply {
         moveTo(w / 2f - halfWidth, topY)
         lineTo(w / 2f, topY)
@@ -106,8 +118,42 @@ private fun DrawScope.drawRibbon(
         lineTo(w / 2f, bottomY)
         close()
     }
-    drawPath(left, Brush.verticalGradient(listOf(Color(0xFF3E64C8), Color(0xFF27407F))))
-    drawPath(right, Brush.verticalGradient(listOf(Color(0xFFD3453F), Color(0xFF8E2B27))))
+    if (vip) {
+        drawPath(left, Brush.verticalGradient(listOf(Color(0xFF7B57C9), Color(0xFF4A2F86))))
+        drawPath(right, Brush.verticalGradient(listOf(Color(0xFFF0C64A), Color(0xFF9A6F16))))
+    } else {
+        drawPath(left, Brush.verticalGradient(listOf(Color(0xFF3E64C8), Color(0xFF27407F))))
+        drawPath(right, Brush.verticalGradient(listOf(Color(0xFFD3453F), Color(0xFF8E2B27))))
+    }
+}
+
+/**
+ * Кольцо элиты вокруг диска: золотое, с медленно бегущим отблеском. Это и есть
+ * «VIP» на медали — второй ободок, как у юбилейной награды.
+ */
+private fun DrawScope.drawVipAura(center: Offset, radius: Float, shine: Float) {
+    val auraRadius = radius * 1.14f
+    drawCircle(
+        brush = Brush.linearGradient(
+            colors = listOf(
+                Color(0xFFFFF0BE),
+                Color(0xFFE7B93F),
+                Color(0xFF8A6410),
+            ),
+            start = Offset(center.x - auraRadius, center.y - auraRadius),
+            end = Offset(center.x + auraRadius, center.y + auraRadius),
+        ),
+        radius = auraRadius,
+        center = center,
+        style = Stroke(width = radius * 0.11f),
+    )
+    // Искра, обегающая кольцо: заметно, что знак «живой», но без мельтешения.
+    val angle = shine * 2f * Math.PI.toFloat()
+    val sparkle = Offset(
+        center.x + auraRadius * cos(angle),
+        center.y + auraRadius * sin(angle),
+    )
+    drawCircle(color = Color(0xCCFFFFFF), radius = radius * 0.10f, center = sparkle)
 }
 
 /** Золотой диск: объём даёт градиент, ободок и бегущий отблеск. */

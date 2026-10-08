@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.contacts
 
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
+import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.fillMaxSize
@@ -50,6 +52,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.draw.clip
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.ApuPremiumCheckbox
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -191,17 +196,21 @@ fun ContactsScreen(
                         color = HintBubbleTextColor
                     )
                     Spacer(modifier = Modifier.height(16.dp))
-                    Button(onClick = onAddContactClick) {
+                    ApuPremiumContentButton(
+                        onClick = onAddContactClick,
+                        style = DiagnosticsActionStyle.PRIMARY,
+                    ) {
                         Icon(Icons.Default.Add, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Добавить контакт")
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     // Пустой список - самое место, чтобы позвать первого друга.
-                    OutlinedButton(
+                    ApuPremiumContentButton(
                         onClick = {
                             showInviteShare = true
                         },
+                        style = DiagnosticsActionStyle.QUIET,
                     ) {
                         Icon(Icons.Default.Share, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
@@ -288,18 +297,21 @@ fun ContactsScreen(
 
     // Подтверждение удаления контакта.
     confirmDelete?.let { contact ->
-        AlertDialog(
+        ApuSettingsDialog(
             onDismissRequest = { confirmDelete = null },
             title = { Text("Удалить контакт?") },
             text = { Text("«${contact.displayName}» будет удалён из списка контактов.") },
             confirmButton = {
-                TextButton(onClick = {
+                ApuTextAction(
+                    label = "Удалить",
+                    onClick = {
                     viewModel.deleteContact(contact.id)
                     confirmDelete = null
-                }) { Text("Удалить") }
+                },
+                )
             },
             dismissButton = {
-                TextButton(onClick = { confirmDelete = null }) { Text("Отмена") }
+                ApuTextAction(label = "Отмена", onClick = { confirmDelete = null })
             },
         )
     }
@@ -449,7 +461,7 @@ private fun InviteToGroupsDialog(
     }
     val listState = rememberLazyListState()
 
-    AlertDialog(
+    ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text("Пригласить $contactName") },
         text = {
@@ -468,7 +480,7 @@ private fun InviteToGroupsDialog(
                         .clickable { attachApk = !attachApk }
                         .padding(horizontal = 4.dp),
                 ) {
-                    Checkbox(checked = attachApk, onCheckedChange = { attachApk = it })
+                    ApuPremiumCheckbox(checked = attachApk, onCheckedChange = { attachApk = it })
                     Text(
                         "Приложить установочный файл (APK)",
                         style = MaterialTheme.typography.bodySmall,
@@ -503,7 +515,7 @@ private fun InviteToGroupsDialog(
                                     .padding(horizontal = 4.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Checkbox(checked = checked, onCheckedChange = {
+                                ApuPremiumCheckbox(checked = checked, onCheckedChange = {
                                     if (checked) selected.remove(group.id)
                                     else selected.add(group.id)
                                 })
@@ -529,26 +541,25 @@ private fun InviteToGroupsDialog(
         },
         confirmButton = {
             Column(horizontalAlignment = Alignment.End) {
-                Button(
+                ApuPremiumContentButton(
                     onClick = { onSendInApp(selected.toList()) },
+                    style = DiagnosticsActionStyle.PRIMARY,
                     enabled = selected.isNotEmpty(),
                 ) {
                     Icon(Icons.Default.Send, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text("Отправить в APU")
                 }
-                TextButton(
+                ApuTextAction(
+                    label = "Другим приложением",
                     onClick = { onShare(selected.toList(), attachApk) },
                     enabled = selected.isNotEmpty(),
-                ) {
-                    Icon(Icons.Default.Share, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("Другим приложением")
-                }
+                    icon = Icons.Default.Share,
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Отмена") }
+            ApuTextAction(label = "Отмена", onClick = onDismiss)
         },
     )
 }

@@ -17,6 +17,8 @@ import androidx.core.app.NotificationCompat
 import com.vladimir.messenger.MainActivity
 import com.vladimir.messenger.MessengerApplication
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.diagnostics.Counters
+import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.repository.ChatRepository
 import com.vladimir.messenger.data.repository.MtProxyRepository
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
@@ -72,6 +74,7 @@ class CoreServerService : Service() {
     @Inject lateinit var swarmPeerDirectory: com.vladimir.messenger.data.swarm.SwarmPeerDirectory
     @Inject lateinit var apkSeeder: com.vladimir.messenger.data.update.ApkSeeder
     @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
+    @Inject lateinit var peerRankRouter: com.vladimir.messenger.data.rank.PeerRankRouter
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
     @Inject lateinit var groupDao: com.vladimir.messenger.data.local.dao.GroupDao
@@ -356,6 +359,9 @@ class CoreServerService : Service() {
         if (runCatching { addressBookSwarm.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { readReceipts.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { referralAttributionRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        // Ранг собеседника (APURANK1): знак VIP у имени. Поглощается здесь же,
+        // чтобы служебная строка не стала текстом в переписке.
+        if (runCatching { peerRankRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { callManager.routeIncoming(senderId, chatId, messageId, text) }
             .getOrDefault(false)
         ) {
@@ -491,6 +497,7 @@ class CoreServerService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.i(TAG, "CoreServerService created")
+        TransferDiagnostics.record("core", "служба ядра запускается")
         val powerManager = getSystemService(POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK, "P2PMessenger::CoreWakeLock"
@@ -788,6 +795,8 @@ class CoreServerService : Service() {
             if (ok) {
                 val nodeId = RustBridge.nodeId()
                 Log.i(TAG, "Engine OK. NodeId=$nodeId")
+                TransferDiagnostics.count(Counters.CORE_STARTS)
+                TransferDiagnostics.recordSuccess("core", "ядро поднято")
                 // Раунд 263: ядро поднято - сплэш может отпустить человека.
                 CoreStatus.markReady()
 
@@ -924,8 +933,30 @@ class CoreServerService : Service() {
                                         parsed.content
                                     }
                                     if (cfContent == null) {
-                                        Log.w(TAG, "CF sealed envelope not opened msgId=$messageId; skipped")
+                                        val knownHere = MessageSealer
+                                            .canSeal(applicationContext, senderId)
+                                        // Тот же различитель, что в основном пути:
+                                        // недавно что-то открылось — ключ рабочий,
+                                        // значит это старая копия в пути.
+                                        val leftoverHere = knownHere &&
+                                            com.vladimir.messenger.data.security.KeyDesyncNotice
+                                                .isWorkingRecently(applicationContext, senderId)
+                                        Log.w(
+                                            TAG,
+                                            "CF sealed envelope not opened msgId=$messageId " +
+                                                "leftover=$leftoverHere; skipped",
+                                        )
+                                        com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                                            .noteSealedNotOpened(
+                                                senderKeyKnown = knownHere,
+                                                staleKeyCopy = leftoverHere,
+                                            )
                                     } else {
+                                        // Ключ рабочий: гасим плашку и запоминаем
+                                        // время успеха — по нему отличаются старые
+                                        // копии в пути от настоящего рассинхрона.
+                                        com.vladimir.messenger.data.security.KeyDesyncNotice
+                                            .opened(applicationContext, senderId)
                                         // Раунд 140: служебные конверты разбираются ДО
                                         // сохранения - тем же стражем, что и основной
                                         // путь. У неизвестного отправителя чат ради
@@ -956,6 +987,11 @@ class CoreServerService : Service() {
                                                 channel = MessageChannel.CF,
                                             )
                                             Log.i(TAG, "CF message handled for chat ${chat.id} msgId=$messageId")
+                                            // Диагностика: и этот путь считает входящие
+                                            // - иначе через релей сообщения были бы
+                                            // невидимы в отчёте.
+                                            com.vladimir.messenger.data.diagnostics
+                                                .TransferDiagnostics.noteMessageIncoming()
                                             // Раунд 175: как и в основном пути -
                                             // техническое имя -> адресный whois.
                                             runCatching {
@@ -999,6 +1035,8 @@ class CoreServerService : Service() {
                                         channel = MessageChannel.CF,
                                     )
                                     Log.i(TAG, "CF plain-text saved to chat ${chat.id}: ${parsed.raw.take(30)}")
+                                    com.vladimir.messenger.data.diagnostics
+                                        .TransferDiagnostics.noteMessageIncoming()
                                 }
                             }
                         }
@@ -1041,6 +1079,8 @@ class CoreServerService : Service() {
                 startEventPolling()
             } else {
                 updateNotification("Не удалось подключиться")
+                TransferDiagnostics.count(Counters.CORE_FAILURES)
+                TransferDiagnostics.recordFailure("core", "ядро не поднялось — ограниченный режим")
                 // Раунд 263: движок не поднялся - не держим человека на
                 // заставке: честный ограниченный режим, сплэш отпускаем.
                 CoreStatus.report("Ядро в ограниченном режиме")
@@ -1271,20 +1311,27 @@ class CoreServerService : Service() {
                     row.recipientId,
                     NodeIds.autoName(row.recipientId),
                 )
-            chatRepository.sendMessage(
-                chatId = chat.id,
-                recipientId = row.recipientId,
-                content = row.content,
-                fixedMessageId = row.id,
-                fromMirror = true,
-                reply = row.replyToId.takeIf { it.isNotBlank() }?.let {
-                    com.vladimir.messenger.data.reply.DirectReplyWire.Target(
-                        messageId = it,
-                        author = row.replyAuthor,
-                        text = row.replyText,
-                    )
-                },
-            )
+            if (row.manualRetry) {
+                chatRepository.retryOutgoingFromMirror(
+                    row = row,
+                    localChatId = chat.id,
+                )
+            } else {
+                chatRepository.sendMessage(
+                    chatId = chat.id,
+                    recipientId = row.recipientId,
+                    content = row.content,
+                    fixedMessageId = row.id,
+                    fromMirror = true,
+                    reply = row.replyToId.takeIf { it.isNotBlank() }?.let {
+                        com.vladimir.messenger.data.reply.DirectReplyWire.Target(
+                            messageId = it,
+                            author = row.replyAuthor,
+                            text = row.replyText,
+                        )
+                    },
+                )
+            }
         }
 
         override fun onPromote() {
@@ -1433,6 +1480,13 @@ class CoreServerService : Service() {
             return true
         }
         if (!com.vladimir.messenger.data.mirror.MirrorEnvelopes.isSafe(text)) return false
+        // Ранг собеседника едет в обёртке «печатает…» (см. RankWire.WRAPPER).
+        // Разбираем его РАНЬШЕ индикатора набора: иначе конверт был бы прочитан
+        // как «партнёр перестал печатать» и молча пропал бы вместе с рангом.
+        if (runCatching { peerRankRouter.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            Log.i(TAG, "Mirror envelope: ранг собеседника применён")
+            return true
+        }
         // р239: «печатает…» от партнёра - показать индикатор и не сохранять.
         val mirrorTyping = com.vladimir.messenger.data.typing.TypingWire.parse(text)
         if (mirrorTyping != null) {
@@ -1523,6 +1577,14 @@ class CoreServerService : Service() {
      * отправок здесь нет: конверт в сеть уйдёт отдельно.
      */
     private suspend fun mirrorApplyActionLocally(peerId: String, groupId: String, text: String) {
+        // Разосланный с тени ранг («печатает…» с полезной нагрузкой APURANK1):
+        // это наше собственное звание, локально записывать нечего - пакет просто
+        // уходит собеседникам. Проверяем ДО «печатает…»: иначе он попал бы в
+        // чужую ветку и в журнале значился бы не тем, чем является.
+        if (com.vladimir.messenger.data.rank.RankWire.isRankPacket(text)) {
+            Log.i(TAG, "Mirror action: ранг собеседникам, локально применять нечего")
+            return
+        }
         // р235: «печатает…» с тени - локально показывать нечего (это наше
         // собственное состояние), пакет просто уходит собеседнику.
         if (com.vladimir.messenger.data.typing.TypingWire.isTypingPacket(text)) return
@@ -1682,6 +1744,7 @@ class CoreServerService : Service() {
         com.vladimir.messenger.data.mirror.MirrorHub.close()
         mirror = null
         Log.i(TAG, "CoreServerService destroyed")
+        TransferDiagnostics.record("core", "служба ядра остановлена")
         eventPollingJob?.cancel()
         filePumpJob?.cancel()
         networkMonitor?.stop()
@@ -1918,6 +1981,10 @@ class CoreServerService : Service() {
                         "Dropped message with non-node sender '" + senderId.take(24) +
                             "' msgId=" + messageId.take(24) + " text=" + rawText.take(24),
                     )
+                    // Диагностика (2026-10-07): такой пакет в переписку не попадёт
+                    // НИКОГДА, и без счётчика он выглядел бы как «сообщение не
+                    // пришло» без причины. Число видно в разделе [сообщения].
+                    com.vladimir.messenger.data.diagnostics.TransferDiagnostics.noteBadSender()
                     return
                 }
 
@@ -1953,15 +2020,53 @@ class CoreServerService : Service() {
                     val opened = MessageSealer.open(applicationContext, rawText)
                     if (opened == null) {
                         val known = MessageSealer.canSeal(applicationContext, senderId)
+                        // Владелец 2026-10-07: после обмена QR переписка
+                        // работает, но в сети ещё летят СТАРЫЕ копии, запечатанные
+                        // прежним ключом. Если от собеседника только что ЧТО-ТО
+                        // открылось — ключ рабочий, а этот конверт остаток в пути:
+                        // человека не тревожим и сигнал «отдай ключ ещё раз» ему
+                        // не шлём.
+                        val leftover = known &&
+                            com.vladimir.messenger.data.security.KeyDesyncNotice
+                                .isWorkingRecently(applicationContext, senderId)
                         Log.w(
                             TAG,
                             "Sealed envelope NOT opened msgId=$messageId " +
                                 "sender=${senderId.takeLast(8)} senderKeyKnown=$known " +
-                                "bytes=${rawText.length} - relaying for another node, " +
-                                "or our key does not match",
+                                "leftover=$leftover bytes=${rawText.length} - relaying " +
+                                "for another node, or our key does not match",
                         )
+                        // «Сообщение не пришло» чаще всего выглядит именно так:
+                        // конверт не вскрылся, и раньше об этом знал только
+                        // системный журнал. Теперь это предупреждение в журнале
+                        // отчёта и число в разделе [сообщения].
+                        com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                            .noteSealedNotOpened(
+                                senderKeyKnown = known,
+                                staleKeyCopy = leftover,
+                            )
+                        if (known && !leftover) {
+                            // Ключ собеседника нам известен — значит, проблема на
+                            // его стороне: он запечатал для нашей ПРЕЖНЕЙ копии
+                            // ключа. Две вещи для человека, а не для отчёта:
+                            // 1) пометка у этого чата («не открывается, что
+                            //    делать») — её читает экран переписки;
+                            // 2) мягкий сигнал собеседнику: отдать ему свой ключ
+                            //    ещё раз (не чаще раза в минуту на узел). Если у
+                            //    него закреплена старая копия, его приложение
+                            //    скажет ему то же самое, и пересканирование QR
+                            //    починит переписку.
+                            com.vladimir.messenger.data.security.KeyDesyncNotice
+                                .note(applicationContext, senderId)
+                            runCatching { fileTransferRouter.requestExchangeBinding(senderId) }
+                                .onFailure { Log.w(TAG, "key re-announce failed: ${it.message}") }
+                        }
                         return
                     }
+                    // Переписка с ним снова открывается — подсказка «не
+                    // открывается» больше не нужна и не должна висеть сутками.
+                    com.vladimir.messenger.data.security.KeyDesyncNotice
+                        .opened(applicationContext, senderId)
                     opened
                 } else {
                     rawText
@@ -2206,6 +2311,19 @@ class CoreServerService : Service() {
                         return
                     }
 
+                    // Ранг собеседника: APURANK1-конверт «у меня такой ранг».
+                    // Разбирается ДО авто-создания контакта: иначе служебная
+                    // строка создала бы чат с мусорным текстом у того, кто ещё
+                    // не добавил этого человека.
+                    if (peerRankRouter.routeIncoming(senderId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Rank packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
                     // Звонки: APUCALL1-конверты разбираются здесь же, ДО
                     // авто-создания контакта, — иначе сигнализация звонка
                     // превратилась бы в мусорное сообщение личного чата.
@@ -2255,6 +2373,10 @@ class CoreServerService : Service() {
                         recipientId = RustBridge.nodeId() ?: "",
                     )
                     Log.i(TAG, "Saved incoming message to chat ${chat.id}")
+                    // Диагностика (2026-10-07): встречное направление в отчёте.
+                    // Показываем в журнале первое и каждое двадцатое сообщение,
+                    // а в разделе [сообщения] - точные числа и свежесть.
+                    com.vladimir.messenger.data.diagnostics.TransferDiagnostics.noteMessageIncoming()
                     // р242: для диагностики - когда последний раз что-то приходило.
                     com.vladimir.messenger.data.mirror.MirrorHub.noteIncoming()
                     // р226: мгновенно отразить входящее на зеркале-партнёре.
@@ -2281,6 +2403,12 @@ class CoreServerService : Service() {
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error saving incoming message", e)
+                    // Без этой записи сбой сохранения выглядел бы как «молча не
+                    // пришло»: числа подтверждений растут, а переписка пуста.
+                    com.vladimir.messenger.data.diagnostics.TransferDiagnostics.recordFailure(
+                        "msg",
+                        "входящее сообщение не удалось сохранить (подробности в системном журнале)",
+                    )
                 }
             }
 

@@ -205,6 +205,12 @@ INSERT OR IGNORE INTO relay_records_enc
 VALUES (?1, ?2, ?3, ?4)
 ";
 
+const SQL_REFRESH_ENC: &str = "
+INSERT OR REPLACE INTO relay_records_enc
+    (msg_id, recipient, expires_at_ms, envelope)
+VALUES (?1, ?2, ?3, ?4)
+";
+
 const SQL_LOAD_UNEXPIRED_ENC: &str = "
 SELECT msg_id, recipient, expires_at_ms, envelope
 FROM relay_records_enc
@@ -515,6 +521,30 @@ impl RelayStore {
         let conn = self.conn.lock().unwrap();
         let n = conn.execute(
             SQL_STORE_ENC,
+            params![msg.msg_id, msg.recipient, msg.expires_at_ms, envelope],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Явно заменить/добавить зашифрованную запись при пользовательском повторе.
+    ///
+    /// Обычный [`store_encrypted`] остаётся first-wins, чтобы фоновые дубли не
+    /// продлевали TTL. Этот путь переписывает envelope, потому что AAD включает
+    /// абсолютный expiry нового повтора.
+    pub fn refresh_encrypted(
+        &self,
+        key_source: &dyn RelayAtRestKeySource,
+        msg: &RelayMessage,
+        now_ms: i64,
+    ) -> Result<bool, RelayStoreError> {
+        msg.validate_durable(now_ms)?;
+        let sensitive = encode_sensitive(msg)?;
+        let aad = build_record_aad(&msg.msg_id, &msg.recipient, msg.expires_at_ms);
+        let key = key_source.current_key()?;
+        let envelope = encrypt_record(&key, &aad, &sensitive)?;
+        let conn = self.conn.lock().unwrap();
+        let n = conn.execute(
+            SQL_REFRESH_ENC,
             params![msg.msg_id, msg.recipient, msg.expires_at_ms, envelope],
         )?;
         Ok(n > 0)
@@ -1220,6 +1250,55 @@ mod tests {
         assert!(!envelope
             .windows(b"pk_secret_origin".len())
             .any(|w| w == b"pk_secret_origin"));
+    }
+
+    /// Обычный enqueue сохраняет first-wins, а явный retry обновляет expiry
+    /// и чувствительную часть envelope тем же ID.
+    #[test]
+    fn test_enc_refresh_replaces_expired_or_existing_record() {
+        let s = store();
+        let now = 1_000_000i64;
+        let mut original = relay("m1", "pk_b", now);
+        original.expires_at_ms = now + 5;
+        assert!(s.store_encrypted(&keys(), &original, now).unwrap());
+
+        let mut automatic_duplicate = relay("m1", "pk_b", now + 1);
+        automatic_duplicate.expires_at_ms = now + 10_000;
+        assert!(!s
+            .store_encrypted(&keys(), &automatic_duplicate, now + 1)
+            .unwrap());
+        let unchanged = s
+            .load_unexpired_encrypted(&keys(), now + 1, 10)
+            .unwrap();
+        assert_eq!(unchanged.records[0].expires_at_ms, now + 5);
+
+        let retry_at = now + 10;
+        let mut refreshed = relay("m1", "pk_b", retry_at);
+        refreshed.expires_at_ms = retry_at + 5_000;
+        refreshed.e2e_payload = b"fresh sealed payload".to_vec();
+        assert!(s.refresh_encrypted(&keys(), &refreshed, retry_at).unwrap());
+
+        let loaded = s
+            .load_unexpired_encrypted(&keys(), retry_at + 1, 10)
+            .unwrap();
+        assert_eq!(loaded.records.len(), 1);
+        assert_eq!(loaded.records[0].created_at_ms, retry_at);
+        assert_eq!(loaded.records[0].expires_at_ms, retry_at + 5_000);
+        assert_eq!(loaded.records[0].e2e_payload, b"fresh sealed payload");
+    }
+
+    #[test]
+    fn test_enc_refresh_inserts_missing_record() {
+        let s = store();
+        let now = 2_000_000i64;
+        let mut retry = relay("m-after-cleanup", "pk_b", now);
+        retry.expires_at_ms = now + 7 * 24 * 60 * 60 * 1000;
+        assert!(!s.contains_encrypted("m-after-cleanup").unwrap());
+        assert!(s.refresh_encrypted(&keys(), &retry, now).unwrap());
+        assert!(s.contains_encrypted("m-after-cleanup").unwrap());
+        let loaded = s.load_unexpired_encrypted(&keys(), now + 1, 10).unwrap();
+        assert_eq!(loaded.records.len(), 1);
+        assert_eq!(loaded.records[0].expires_at_ms, retry.expires_at_ms);
     }
 
     /// Дедуп как в V1: первый выиграл.
