@@ -7,6 +7,8 @@ package com.vladimir.messenger.ui.screens.groups
 // Статистика, Разрешения.
 // =============================================================================
 
+import com.vladimir.messenger.R
+import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
@@ -178,7 +180,7 @@ fun GroupAdminScreen(
                         )
                     }
                 },
-                navigationIcon = { ApuTextAction(label = "Назад", onClick = onBackClick) },
+                navigationIcon = { ApuTextAction(label = stringResource(R.string.action_back), onClick = onBackClick) },
             )
         },
     ) { padding ->
@@ -378,26 +380,26 @@ private fun OverviewTab(
             ApuBubbleField(
                 value = titleDraft,
                 onValueChange = { titleDraft = it },
-                label = { Text("Название") },
+                label = { Text(stringResource(R.string.groups_name)) },
                 modifier = Modifier.fillMaxWidth(),
             )
             ApuBubbleField(
                 value = aboutDraft,
                 onValueChange = { aboutDraft = it },
-                label = { Text("Описание") },
+                label = { Text(stringResource(R.string.groups_desc)) },
                 modifier = Modifier.fillMaxWidth(),
             )
-            ApuTextAction(label = "Сохранить", onClick = { onSave(titleDraft, aboutDraft) })
+            ApuTextAction(label = stringResource(R.string.admin_save), onClick = { onSave(titleDraft, aboutDraft) })
         } else {
             // Без права менять информацию показываем только текст: поля и
             // кнопка «Сохранить» обещали правку, которой на самом деле нет -
             // сохранение молча отклонялось.
-            Text("Название", style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(R.string.groups_name), style = MaterialTheme.typography.labelLarge)
             Text(title.ifBlank { "—" })
-            Text("Описание", style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(R.string.groups_desc), style = MaterialTheme.typography.labelLarge)
             Text(about.ifBlank { "—" }, style = MaterialTheme.typography.bodyMedium)
             Text(
-                "Название и описание меняют администраторы.",
+                stringResource(R.string.admin_name_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = ApuBubbleMutedColor,
             )
@@ -426,16 +428,16 @@ private fun OverviewTab(
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        if (isChannel) "Аватар канала" else "Аватар группы",
+                        if (isChannel) stringResource(R.string.admin_avatar_channel) else stringResource(R.string.admin_avatar_group),
                         fontWeight = FontWeight.Medium,
                     )
                     Text(
-                        "Видят участники и Ваши контакты в списке чатов",
+                        stringResource(R.string.admin_avatar_hint),
                         style = MaterialTheme.typography.bodySmall,
                         color = ApuBubbleMutedColor,
                     )
                 }
-                ApuTextAction(label = "Сменить", onClick = { showAvatarPicker = true })
+                ApuTextAction(label = stringResource(R.string.admin_change), onClick = { showAvatarPicker = true })
             }
             }
         }
@@ -444,11 +446,11 @@ private fun OverviewTab(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        if (isChannel) "Публичный канал" else "Публичная группа",
+                        if (isChannel) stringResource(R.string.groups_public_channel) else stringResource(R.string.groups_public_group),
                         fontWeight = FontWeight.Medium,
                     )
                     Text(
-                        if (isPublic) "Вход по ссылке без одобрения" else "Вход только по одобрению заявки",
+                        if (isPublic) stringResource(R.string.groups_join_no_approval) else stringResource(R.string.admin_join_approval_only),
                         style = MaterialTheme.typography.bodySmall,
                         color = ApuBubbleMutedColor,
                     )
@@ -466,9 +468,9 @@ private fun OverviewTab(
             ApuBubble {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Темы в группе", fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.admin_topics_title), fontWeight = FontWeight.Medium)
                         Text(
-                            "Сейчас один общий чат без тем. Нажмите, чтобы включить темы",
+                            stringResource(R.string.admin_topics_hint),
                             style = MaterialTheme.typography.bodySmall,
                             color = ApuBubbleMutedColor,
                         )
@@ -483,13 +485,13 @@ private fun OverviewTab(
         // информацию о группе (как название и описание).
         ApuBubble {
             Column {
-                Text("Медленный режим", fontWeight = FontWeight.Medium)
+                Text(stringResource(R.string.admin_slow_mode), fontWeight = FontWeight.Medium)
                 Text(
                     if (slowModeSeconds > 0) {
                         "Участники пишут не чаще одного сообщения в ${slowModeLabel(slowModeSeconds)}. " +
                             "Администраторы и владелец - без паузы."
                     } else {
-                        "Выключен: писать можно как угодно часто."
+                        stringResource(R.string.admin_slow_off)
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = ApuBubbleMutedColor,
@@ -530,7 +532,7 @@ private fun OverviewTab(
                 }
                 if (!canChangeInfo) {
                     Text(
-                        "Режим меняют администраторы.",
+                        stringResource(R.string.admin_mode_hint),
                         style = MaterialTheme.typography.bodySmall,
                         color = ApuBubbleMutedColor,
                     )
@@ -540,7 +542,7 @@ private fun OverviewTab(
 
         ApuBubble {
             ApuTextAction(
-                label = if (isChannel) "Отписаться от канала" else "Покинуть группу",
+                label = if (isChannel) stringResource(R.string.admin_unsubscribe_channel) else stringResource(R.string.admin_leave_group),
                 onClick = { showLeaveConfirm = true },
             )
 
@@ -548,15 +550,15 @@ private fun OverviewTab(
                 ApuSettingsDivider(startPadding = 16.dp)
                 Text(
                     if (isChannel) {
-                        "Удаление стирает канал, его посты и комментарии у всех подписчиков."
+                        stringResource(R.string.admin_delete_channel_hint)
                     } else {
-                        "Удаление стирает группу, её темы и сообщения у всех участников."
+                        stringResource(R.string.admin_delete_group_hint)
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error,
                 )
                 ApuTextAction(
-                    label = if (isChannel) "Удалить канал" else "Удалить группу",
+                    label = if (isChannel) stringResource(R.string.menu_delete_channel) else stringResource(R.string.menu_delete_group),
                     onClick = { showDeleteConfirm = true },
                     danger = true,
                 )
@@ -567,19 +569,19 @@ private fun OverviewTab(
     if (showLeaveConfirm) {
         ApuSettingsDialog(
             onDismissRequest = { showLeaveConfirm = false },
-            title = { Text(if (isChannel) "Отписаться от канала?" else "Покинуть группу?") },
+            title = { Text(if (isChannel) stringResource(R.string.groups_unsubscribe_channel_q) else stringResource(R.string.admin_leave_group_q)) },
             text = {
                 Text(
                     if (isChannel) {
-                        "Вы перестанете получать посты этого канала. Вернуться можно только по ссылке-приглашению."
+                        stringResource(R.string.admin_leave_channel_body)
                     } else {
-                        "Вы перестанете получать сообщения этой группы. Вернуться можно только по ссылке-приглашению."
+                        stringResource(R.string.admin_leave_group_body)
                     }
                 )
             },
             confirmButton = {
                 ApuTextAction(
-                    label = if (isChannel) "Отписаться" else "Покинуть",
+                    label = if (isChannel) stringResource(R.string.menu_unsubscribe) else stringResource(R.string.admin_leave),
                     onClick = {
                         showLeaveConfirm = false
                         onLeave()
@@ -587,7 +589,7 @@ private fun OverviewTab(
                 )
             },
             dismissButton = {
-                ApuTextAction(label = "Отмена", onClick = { showLeaveConfirm = false })
+                ApuTextAction(label = stringResource(R.string.action_cancel), onClick = { showLeaveConfirm = false })
             },
         )
     }
@@ -685,16 +687,14 @@ private fun DeleteGroupDialog(
 
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (isChannel) "Удалить канал?" else "Удалить группу?") },
+        title = { Text(if (isChannel) stringResource(R.string.admin_delete_channel_q) else stringResource(R.string.admin_delete_group_q)) },
         text = {
             Column {
                 Text(
                     if (isChannel) {
-                        "Канал, его посты, комментарии и ссылки-приглашения будут удалены " +
-                            "у всех подписчиков. Отменить это нельзя."
+                        stringResource(R.string.admin_delete_channel_text)
                     } else {
-                        "Группа, её темы, сообщения и ссылки-приглашения будут удалены " +
-                            "у всех участников. Отменить это нельзя."
+                        stringResource(R.string.admin_delete_group_text)
                     },
                 )
                 Spacer(Modifier.height(12.dp))
@@ -709,14 +709,14 @@ private fun DeleteGroupDialog(
         },
         confirmButton = {
             ApuTextAction(
-                label = "Удалить",
+                label = stringResource(R.string.action_delete),
                 onClick = onConfirm,
                 enabled = typed.trim() == expected,
                 danger = true,
             )
         },
         dismissButton = {
-            ApuTextAction(label = "Отмена", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
         },
     )
 }
@@ -753,11 +753,11 @@ private fun AdminsTab(
                             style = MaterialTheme.typography.bodyMedium,
                         )
                         Text(
-                            "Вы можете стать владельцем группы. Владелец сохранит права администратора, если вернётся.",
+                            stringResource(R.string.admin_claim_body),
                             style = MaterialTheme.typography.bodySmall,
                             color = ApuBubbleMutedColor,
                         )
-                        ApuTextAction(label = "Стать владельцем", onClick = onClaimOwnership)
+                        ApuTextAction(label = stringResource(R.string.admin_claim_owner), onClick = onClaimOwnership)
                     }
                 }
             }
@@ -765,21 +765,21 @@ private fun AdminsTab(
         item {
             ApuBubble {
                 Text(
-                    "Назначить администратора можно во вкладке «Участники».",
+                    stringResource(R.string.admin_assign_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = ApuBubbleMutedColor,
                 )
             }
         }
         if (admins.isEmpty()) {
-            item { ApuBubble { Text("Администраторов пока нет") } }
+            item { ApuBubble { Text(stringResource(R.string.admin_no_admins)) } }
         }
         items(admins, key = { it.nodeId }) { admin ->
             ApuBubble {
                 Column {
                     Text(admin.displayName.ifBlank { admin.nodeId }, fontWeight = FontWeight.Medium)
                     Text(
-                        if (admin.role == GroupRole.OWNER) "Владелец — все права безусловно" else "Администратор",
+                        if (admin.role == GroupRole.OWNER) stringResource(R.string.admin_owner_rights) else stringResource(R.string.admin_role_admin),
                         style = MaterialTheme.typography.bodySmall,
                         color = ApuBubbleMutedColor,
                     )
@@ -796,9 +796,9 @@ private fun AdminsTab(
                         ) {
                             Text(
                                 if (expanded) {
-                                    "Разрешения администратора — нажмите, чтобы свернуть"
+                                    stringResource(R.string.admin_perms_collapse)
                                 } else {
-                                    "Разрешения администратора — нажмите, чтобы развернуть"
+                                    stringResource(R.string.admin_perms_expand)
                                 },
                                 style = MaterialTheme.typography.labelLarge,
                                 modifier = Modifier.weight(1f),
@@ -824,7 +824,7 @@ private fun AdminsTab(
                         }
                         if (!admin.isMe) {
                             ApuTextAction(
-                                label = "Снять администратора",
+                                label = stringResource(R.string.admin_remove_admin),
                                 onClick = { onToggleAdmin(admin.nodeId, false) },
                             )
                         }
@@ -834,7 +834,7 @@ private fun AdminsTab(
                         if (isOwner && !admin.isMe) {
                             ApuSettingsDivider(startPadding = 16.dp)
                             ApuTextAction(
-                                label = "Передать владение",
+                                label = stringResource(R.string.admin_transfer_ownership),
                                 onClick = { transferTarget = admin },
                             )
                         }
@@ -847,7 +847,7 @@ private fun AdminsTab(
     transferTarget?.let { target ->
         ApuSettingsDialog(
             onDismissRequest = { transferTarget = null },
-            title = { Text("Передать владение?") },
+            title = { Text(stringResource(R.string.admin_transfer_q)) },
             text = {
                 Text(
                     "«${target.displayName.ifBlank { target.nodeId }}» станет владельцем группы. " +
@@ -857,7 +857,7 @@ private fun AdminsTab(
             },
             confirmButton = {
                 ApuTextAction(
-                    label = "Передать",
+                    label = stringResource(R.string.admin_transfer),
                     onClick = {
                         transferTarget = null
                         onTransferOwnership(target.nodeId)
@@ -865,7 +865,7 @@ private fun AdminsTab(
                 )
             },
             dismissButton = {
-                ApuTextAction(label = "Отмена", onClick = { transferTarget = null })
+                ApuTextAction(label = stringResource(R.string.action_cancel), onClick = { transferTarget = null })
             },
         )
     }
@@ -890,13 +890,13 @@ private fun MembersTab(
         // Обычному участнику не показываем: рассылка - дело администратора.
         if (isAdmin) {
             ApuBubble(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
-                ApuTextAction(label = "Разослать темы и состав заново", onClick = onResync)
+                ApuTextAction(label = stringResource(R.string.admin_resync), onClick = onResync)
             }
         }
         ApuSearchField(
             value = query,
             onValueChange = onQueryChange,
-            placeholder = "Поиск участника по имени или узлу",
+            placeholder = stringResource(R.string.admin_search_placeholder),
             modifier = Modifier.fillMaxWidth().padding(12.dp),
         )
         LazyColumn(contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -953,9 +953,9 @@ private fun MemberRow(
                     }
                     Text(
                         when (member.role) {
-                            GroupRole.OWNER -> "Владелец"
-                            GroupRole.ADMIN -> "Администратор"
-                            else -> "Участник"
+                            GroupRole.OWNER -> stringResource(R.string.admin_role_owner)
+                            GroupRole.ADMIN -> stringResource(R.string.admin_role_admin)
+                            else -> stringResource(R.string.admin_role_member)
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = ApuBubbleMutedColor,
@@ -964,14 +964,14 @@ private fun MemberRow(
                 // Управление участниками видно только администраторам:
                 // обычный участник не должен видеть чужие «Права» и «Исключить».
                 if (isAdmin && !member.isMe && member.role != GroupRole.OWNER) {
-                    ApuTextAction(label = "Права", onClick = { expanded = !expanded })
-                    ApuTextAction(label = "Исключить", onClick = onBlock)
+                    ApuTextAction(label = stringResource(R.string.admin_perms), onClick = { expanded = !expanded })
+                    ApuTextAction(label = stringResource(R.string.admin_exclude), onClick = onBlock)
                 }
             }
 
             if (expanded && member.role == GroupRole.ADMIN) {
                 ApuSettingsDivider(startPadding = 16.dp)
-                Text("Разрешения администратора", style = MaterialTheme.typography.labelLarge)
+                Text(stringResource(R.string.admin_perms_title), style = MaterialTheme.typography.labelLarge)
                 GroupPermissions.Admin.entries.forEach { entry ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(modifier = Modifier.weight(1f)) {
@@ -991,7 +991,7 @@ private fun MemberRow(
             } else if (expanded) {
                 ApuSettingsDivider(startPadding = 16.dp)
                 ApuTextAction(
-                    label = if (member.role == GroupRole.ADMIN) "Снять администратора" else "Назначить администратором",
+                    label = if (member.role == GroupRole.ADMIN) stringResource(R.string.admin_remove_admin) else stringResource(R.string.admin_make_admin),
                     onClick = onToggleAdmin,
                 )
             }
@@ -1003,7 +1003,7 @@ private fun MemberRow(
 private fun RequestsTab(requests: List<JoinRequestSummary>, onDecide: (String, Boolean) -> Unit) {
     if (requests.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            ApuBubble(modifier = Modifier.padding(24.dp)) { Text("Новых заявок нет") }
+            ApuBubble(modifier = Modifier.padding(24.dp)) { Text(stringResource(R.string.admin_no_requests)) }
         }
         return
     }
@@ -1021,11 +1021,11 @@ private fun RequestsTab(requests: List<JoinRequestSummary>, onDecide: (String, B
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         ApuTextAction(
-                            label = "Одобрить",
+                            label = stringResource(R.string.admin_approve),
                             onClick = { onDecide(request.nodeId, true) },
                         )
                         ApuTextAction(
-                            label = "Отклонить",
+                            label = stringResource(R.string.admin_reject),
                             onClick = { onDecide(request.nodeId, false) },
                         )
                     }
@@ -1060,12 +1060,12 @@ private fun InvitesTab(
                 var needsApproval by remember { mutableStateOf(!isPublic) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Вход только после одобрения", fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.admin_approval_only), fontWeight = FontWeight.Medium)
                         Text(
                             if (needsApproval) {
-                                "По ссылке человек оставляет заявку владельцу"
+                                stringResource(R.string.admin_by_link_request)
                             } else {
-                                "По ссылке человек входит сразу"
+                                stringResource(R.string.admin_by_link_direct)
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = ApuBubbleMutedColor,
@@ -1073,18 +1073,17 @@ private fun InvitesTab(
                     }
                     ApuPremiumSwitch(checked = needsApproval, onCheckedChange = { needsApproval = it })
                 }
-                ApuTextAction(label = "Создать ссылку", onClick = { onCreate(needsApproval) })
+                ApuTextAction(label = stringResource(R.string.chat_create_link), onClick = { onCreate(needsApproval) })
             } else {
                 Text(
-                    "Ссылки создают и отзывают администраторы. Попросите ссылку у них " +
-                        "или воспользуйтесь QR-кодом группы.",
+                    stringResource(R.string.admin_links_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = ApuBubbleMutedColor,
                 )
             }
             if (!isPublic) {
                 Text(
-                    "Группа частная: даже по ссылке участник попадёт в заявки.",
+                    stringResource(R.string.admin_private_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = ApuBubbleMutedColor,
                 )
@@ -1154,12 +1153,12 @@ private fun InviteCard(
                 if (bitmap != null) {
                     Image(
                         bitmap = bitmap.asImageBitmap(),
-                        contentDescription = "QR-код приглашения",
+                        contentDescription = stringResource(R.string.admin_qr_desc),
                         modifier = Modifier.size(120.dp),
                     )
                 } else {
                     Text(
-                        "QR недоступен",
+                        stringResource(R.string.admin_qr_unavailable),
                         style = MaterialTheme.typography.bodySmall,
                         color = ApuBubbleMutedColor,
                     )
@@ -1174,27 +1173,27 @@ private fun InviteCard(
             ) {
                 ApuPremiumCheckbox(checked = attachApk, onCheckedChange = { attachApk = it })
                 Text(
-                    "Приложить установочный файл (APK)",
+                    stringResource(R.string.contacts_attach_apk),
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 ApuTextAction(
-                    label = "Копировать",
+                    label = stringResource(R.string.action_copy),
                     onClick = { clipboard.setText(AnnotatedString(invite.shareLink)) },
                 )
                 ApuTextAction(
-                    label = "Поделиться",
+                    label = stringResource(R.string.admin_share),
                     onClick = { AppShare.shareGroupInvite(context, groupTitle, invite.shareLink, isChannel, attachApk) },
                 )
                 // Отозвать и удалить ссылку может только администратор:
                 // участник без права приглашать этих кнопок не видит.
                 if (canManage) {
                     if (invite.revoked) {
-                        ApuTextAction(label = "Удалить", onClick = onDelete)
+                        ApuTextAction(label = stringResource(R.string.action_delete), onClick = onDelete)
                     } else {
-                        ApuTextAction(label = "Отозвать", onClick = onRevoke)
+                        ApuTextAction(label = stringResource(R.string.admin_revoke), onClick = onRevoke)
                     }
                 }
             }
@@ -1208,9 +1207,9 @@ private fun PermissionsTab(mask: Long, onToggle: (Long, Boolean) -> Unit) {
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
     ) {
         ApuBubble {
-            Text("Разрешения для участников", fontWeight = FontWeight.Medium)
+            Text(stringResource(R.string.admin_member_perms), fontWeight = FontWeight.Medium)
             Text(
-                "Применяются ко всем обычным участникам. Администраторы и владелец не ограничиваются.",
+                stringResource(R.string.admin_member_perms_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = ApuBubbleMutedColor,
             )
