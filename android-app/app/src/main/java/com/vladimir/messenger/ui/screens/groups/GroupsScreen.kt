@@ -1066,6 +1066,7 @@ private fun JoinByLinkDialog(
 ) {
     var link by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    val notInviteLinkText = stringResource(R.string.groups_not_invite_link)
 
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
@@ -1106,7 +1107,7 @@ private fun JoinByLinkDialog(
                     // Короткую ссылку /s/<код> принимаем тоже: что за ней -
                     // узнает репозиторий у сервиса.
                     if (GroupInviteLinks.parseTarget(link) == null && !ShortLinks.isShortLink(link)) {
-                        error = stringResource(R.string.groups_not_invite_link)
+                        error = notInviteLinkText
                     } else {
                         onSubmit(link.trim())
                     }
