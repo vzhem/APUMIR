@@ -35,7 +35,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Redeem
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -73,6 +72,8 @@ import com.vladimir.messenger.ui.components.swipeBack
 import com.vladimir.messenger.data.link.ShortShare
 import com.vladimir.messenger.util.OwnInvite
 import kotlinx.coroutines.delay
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -143,9 +144,9 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                                 style = MaterialTheme.typography.bodySmall,
                                 color = HintBubbleMutedColor,
                             )
-                            Button(
+                            ApuPremiumContentButton(
                                 onClick = { showInviteShare = true },
-                                shape = RoundedCornerShape(14.dp),
+                                style = DiagnosticsActionStyle.PRIMARY,
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 Icon(Icons.Default.Share, contentDescription = null)
@@ -510,7 +511,7 @@ private fun PromoCodeCard(onRedeemed: () -> Unit) {
                         .fillMaxWidth()
                         .onFocusChanged { state -> focused = state.isFocused },
                 )
-                Button(
+                ApuPremiumContentButton(
                     onClick = {
                         when (PromoCodes.redeem(context, code)) {
                             PromoCodes.Result.APPLIED -> {
@@ -534,8 +535,8 @@ private fun PromoCodeCard(onRedeemed: () -> Unit) {
                             }
                         }
                     },
+                    style = DiagnosticsActionStyle.PRIMARY,
                     enabled = code.isNotBlank(),
-                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Применить")

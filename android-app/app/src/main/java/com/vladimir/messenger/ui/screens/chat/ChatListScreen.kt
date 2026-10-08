@@ -103,6 +103,8 @@ import com.vladimir.messenger.ui.components.InviteAttachDialog
 import com.vladimir.messenger.ui.components.NotificationMuteDialog
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.ApuPremiumFloatingActionButton
 
 private data class NotificationMuteTarget(
     val id: String,
@@ -358,16 +360,11 @@ fun ChatListScreen(
         floatingActionButton = {
             // FAB-карандаш: открывает фирменное меню создания чата, группы и канала.
             Box {
-                FloatingActionButton(
+                ApuPremiumFloatingActionButton(
                     onClick = { fabMenuExpanded = true },
-                    containerColor = MaterialTheme.colorScheme.primary,
-                ) {
-                    Icon(
-                        Icons.Default.Edit,
-                        contentDescription = "Создать",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                    )
-                }
+                    icon = Icons.Default.Edit,
+                    contentDescription = "Создать",
+                )
                 ApuActionsMenu(
                     expanded = fabMenuExpanded,
                     onDismiss = { fabMenuExpanded = false },
@@ -959,30 +956,17 @@ private fun ApuConnectByLinkDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    OutlinedButton(
+                    ApuPremiumContentButton(
                         onClick = onDismiss,
-                        shape = ApuBubbleShape,
-                        border = BorderStroke(
-                            1.dp,
-                            ApuBubbleAccentColor.copy(alpha = 0.48f),
-                        ),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = ApuBubbleAccentColor,
-                        ),
+                        style = DiagnosticsActionStyle.QUIET,
                         modifier = Modifier.weight(1f),
                     ) {
                         Text("Отмена", fontWeight = FontWeight.SemiBold)
                     }
-                    Button(
+                    ApuPremiumContentButton(
                         onClick = onConnect,
+                        style = DiagnosticsActionStyle.PRIMARY,
                         enabled = link.isNotBlank(),
-                        shape = ApuBubbleShape,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                            disabledContainerColor = ApuBubbleMutedColor.copy(alpha = 0.24f),
-                            disabledContentColor = ApuBubbleMutedColor.copy(alpha = 0.70f),
-                        ),
                         modifier = Modifier.weight(1.35f),
                     ) {
                         Icon(
@@ -1531,7 +1515,10 @@ private fun EmptyChatList(
                 color     = HintBubbleMutedColor,
             )
             Spacer(modifier = Modifier.height(24.dp))
-            Button(onClick = onAddContact) {
+            ApuPremiumContentButton(
+                onClick = onAddContact,
+                style = DiagnosticsActionStyle.PRIMARY,
+            ) {
                 Icon(Icons.Default.PersonAdd, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Добавить контакт")

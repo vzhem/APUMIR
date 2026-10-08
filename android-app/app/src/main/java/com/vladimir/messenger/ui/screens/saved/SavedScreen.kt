@@ -59,7 +59,6 @@ import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -104,6 +103,7 @@ import com.vladimir.messenger.ui.components.apuPremiumThread
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.vladimir.messenger.ui.components.ApuPremiumFloatingActionButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -220,9 +220,11 @@ fun SavedScreen(
                 )
             },
             floatingActionButton = {
-                FloatingActionButton(onClick = { showAddMenu = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "Добавить")
-                }
+                ApuPremiumFloatingActionButton(
+                    onClick = { showAddMenu = true },
+                    icon = Icons.Default.Add,
+                    contentDescription = "Добавить",
+                )
             },
         ) { padding ->
             when {

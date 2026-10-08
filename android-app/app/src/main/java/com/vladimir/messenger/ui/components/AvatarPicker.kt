@@ -26,10 +26,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoCamera
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -177,11 +175,9 @@ fun AvatarPickerDialog(
                     )
                 }
 
-                OutlinedButton(
+                ApuPremiumContentButton(
                     onClick = onDismiss,
-                    shape = ApuBubbleShape,
-                    border = BorderStroke(1.dp, ApuBubbleAccentColor.copy(alpha = 0.48f)),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = ApuBubbleAccentColor),
+                    style = DiagnosticsActionStyle.QUIET,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Отмена", fontWeight = FontWeight.SemiBold)
@@ -234,12 +230,10 @@ private fun AvatarSourceButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    OutlinedButton(
+    ApuPremiumContentButton(
         onClick = onClick,
+        style = DiagnosticsActionStyle.QUIET,
         modifier = modifier,
-        shape = ApuBubbleShape,
-        border = BorderStroke(1.dp, ApuBubbleAccentColor.copy(alpha = 0.48f)),
-        colors = ButtonDefaults.outlinedButtonColors(contentColor = ApuBubbleAccentColor),
     ) {
         Icon(
             imageVector = icon,

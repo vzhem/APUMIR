@@ -81,17 +81,13 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Checkbox
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -115,6 +111,12 @@ import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.ui.components.HintBubbleMutedColor
 import com.vladimir.messenger.ui.components.HintBubbleTextColor
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.ApuPremiumFloatingActionButton
+import com.vladimir.messenger.ui.components.ApuPremiumCheckbox
+import com.vladimir.messenger.ui.components.ApuPremiumSwitch
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
+import com.vladimir.messenger.ui.components.ApuGoldInk
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -257,12 +259,14 @@ fun GroupsScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = {
-                createAsChannel = false
-                if (uiState.canCreate) showCreate = true else showRankHint = true
-            }) {
-                Icon(Icons.Filled.Add, contentDescription = "Создать группу или канал")
-            }
+            ApuPremiumFloatingActionButton(
+                onClick = {
+                    createAsChannel = false
+                    if (uiState.canCreate) showCreate = true else showRankHint = true
+                },
+                icon = Icons.Filled.Add,
+                contentDescription = "Создать группу или канал",
+            )
         },
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
@@ -498,7 +502,7 @@ fun GroupsScreen(
                             .clickable { attachApk = !attachApk }
                             .padding(horizontal = 4.dp),
                     ) {
-                        Checkbox(checked = attachApk, onCheckedChange = { attachApk = it })
+                        ApuPremiumCheckbox(checked = attachApk, onCheckedChange = { attachApk = it })
                         Text(
                             "Приложить установочный файл (APK)",
                             style = MaterialTheme.typography.bodySmall,
@@ -879,7 +883,7 @@ private fun CreateGroupDialog(
                             )
                         }
                         Spacer(Modifier.width(8.dp))
-                        Switch(checked = isPublic, onCheckedChange = { isPublic = it })
+                        ApuPremiumSwitch(checked = isPublic, onCheckedChange = { isPublic = it })
                     }
 
                     if (!isChannel) {
@@ -930,7 +934,7 @@ private fun CreateGroupDialog(
                                 )
                             }
                             Spacer(Modifier.width(8.dp))
-                            Switch(checked = topics, onCheckedChange = { topics = it })
+                            ApuPremiumSwitch(checked = topics, onCheckedChange = { topics = it })
                         }
                     }
                 }
@@ -945,16 +949,16 @@ private fun CreateGroupDialog(
             }
         },
         confirmButton = {
-            Button(
+            ApuPremiumContentButton(
                 enabled = title.isNotBlank() && !creating,
                 onClick = { onCreate(title, about, isPublic, topics, isChannel) },
-                shape = RoundedCornerShape(14.dp),
+                style = DiagnosticsActionStyle.PRIMARY,
             ) {
                 if (creating) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(16.dp),
                         strokeWidth = 2.dp,
-                        color = Color(0xFFFFF8E6),
+                        color = ApuGoldInk,
                     )
                     Spacer(Modifier.width(8.dp))
                 }
@@ -1089,7 +1093,7 @@ private fun JoinByLinkDialog(
             }
         },
         confirmButton = {
-            Button(
+            ApuPremiumContentButton(
                 onClick = {
                     // Проверяем, что это приглашение в группу, но отдаём ВСЮ
                     // ссылку: в ней id группы и адрес владельца, без них войти
@@ -1102,7 +1106,7 @@ private fun JoinByLinkDialog(
                         onSubmit(link.trim())
                     }
                 },
-                shape = RoundedCornerShape(14.dp),
+                style = DiagnosticsActionStyle.PRIMARY,
             ) { Text("Войти") }
         },
         dismissButton = {

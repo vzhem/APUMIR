@@ -33,7 +33,6 @@ import androidx.compose.material.icons.filled.CloudSync
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -56,6 +55,7 @@ import com.vladimir.messenger.util.QrCodeGenerator
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.vladimir.messenger.ui.components.ApuPremiumSwitch
 
 @Composable
 fun ProfileSyncDialog(
@@ -160,7 +160,7 @@ fun ProfileSyncDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Switch(
+                    ApuPremiumSwitch(
                         checked = ui.autoEnabled,
                         onCheckedChange = { viewModel.setAutoEnabled(it) },
                     )

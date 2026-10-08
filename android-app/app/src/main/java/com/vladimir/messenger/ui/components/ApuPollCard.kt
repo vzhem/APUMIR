@@ -22,7 +22,6 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -324,7 +323,7 @@ fun PollDraftFields(
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyMedium,
             )
-            Switch(checked = state.anonymous, onCheckedChange = { state.anonymous = it })
+            ApuPremiumSwitch(checked = state.anonymous, onCheckedChange = { state.anonymous = it })
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -332,7 +331,7 @@ fun PollDraftFields(
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyMedium,
             )
-            Switch(checked = state.multiChoice, onCheckedChange = { state.multiChoice = it })
+            ApuPremiumSwitch(checked = state.multiChoice, onCheckedChange = { state.multiChoice = it })
         }
         Text(
             "Анонимный опрос показывает только числа: кто как проголосовал, не видно никому.",

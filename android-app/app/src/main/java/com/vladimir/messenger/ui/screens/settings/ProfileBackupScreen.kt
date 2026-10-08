@@ -36,18 +36,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -78,6 +75,9 @@ import com.vladimir.messenger.ui.components.swipeBack
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.ApuPremiumSwitch
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -276,10 +276,10 @@ fun ProfileBackupScreen(
                                     )
                                 } else {
                                     Row {
-                                        Button(
+                                        ApuPremiumContentButton(
                                             onClick = { viewModel.confirmAndExit(onExit = closeApp) },
+                                            style = DiagnosticsActionStyle.PRIMARY,
                                             enabled = !state.busy,
-                                            shape = RoundedCornerShape(14.dp),
                                             modifier = Modifier.weight(1f),
                                         ) { Text("Восстановить и закрыть") }
                                         Spacer(Modifier.width(8.dp))
@@ -357,16 +357,16 @@ fun ProfileBackupScreen(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
-                                Switch(checked = includeReceived, onCheckedChange = { includeReceived = it })
+                                ApuPremiumSwitch(checked = includeReceived, onCheckedChange = { includeReceived = it })
                             }
                             Spacer(Modifier.height(12.dp))
                             val canCreate = !state.busy &&
                                 password.length >= BackupCipher.MIN_PASSWORD_LENGTH &&
                                 password == repeat
-                            Button(
+                            ApuPremiumContentButton(
                                 onClick = { createLauncher.launch(viewModel.suggestedFileName()) },
+                                style = DiagnosticsActionStyle.PRIMARY,
                                 enabled = canCreate,
-                                shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 if (state.busy && state.busyText.startsWith("Собираем")) {
@@ -432,10 +432,10 @@ fun ProfileBackupScreen(
                                 )
                                 Spacer(Modifier.height(10.dp))
                                 Row {
-                                    OutlinedButton(
+                                    ApuPremiumContentButton(
                                         onClick = viewModel::runAutoNow,
+                                        style = DiagnosticsActionStyle.QUIET,
                                         enabled = !state.busy,
-                                        shape = RoundedCornerShape(14.dp),
                                         modifier = Modifier.weight(1f),
                                     ) { Text("Обновить сейчас") }
                                     Spacer(Modifier.width(8.dp))
@@ -469,10 +469,10 @@ fun ProfileBackupScreen(
                                         onSelect = { autoPeriod = it },
                                     )
                                     Spacer(Modifier.height(10.dp))
-                                    Button(
+                                    ApuPremiumContentButton(
                                         onClick = { viewModel.enableAutoUpdate(password, includeReceived, autoPeriod) },
+                                        style = DiagnosticsActionStyle.PRIMARY,
                                         enabled = !state.busy && password.length >= BackupCipher.MIN_PASSWORD_LENGTH,
-                                        shape = RoundedCornerShape(14.dp),
                                         modifier = Modifier.fillMaxWidth(),
                                     ) { Text("Включить: ${autoPeriod.title}") }
                                     if (password.length < BackupCipher.MIN_PASSWORD_LENGTH) {
@@ -509,13 +509,13 @@ fun ProfileBackupScreen(
                                         )
                                         Spacer(Modifier.height(6.dp))
                                         state.foundBackups.forEach { fb ->
-                                            OutlinedButton(
+                                            ApuPremiumContentButton(
                                                 onClick = {
                                                     autoAttachTarget = fb
                                                     autoAttachPassword = ""
                                                 },
+                                                style = DiagnosticsActionStyle.QUIET,
                                                 enabled = !state.busy,
-                                                shape = RoundedCornerShape(14.dp),
                                                 modifier = Modifier.fillMaxWidth(),
                                             ) {
                                                 Text("Обновлять: " + fb.name, maxLines = 1)
@@ -523,10 +523,10 @@ fun ProfileBackupScreen(
                                             Spacer(Modifier.height(6.dp))
                                         }
                                     }
-                                    OutlinedButton(
+                                    ApuPremiumContentButton(
                                         onClick = { autoAttachLauncher.launch(arrayOf("*/*")) },
+                                        style = DiagnosticsActionStyle.QUIET,
                                         enabled = !state.busy,
-                                        shape = RoundedCornerShape(14.dp),
                                         modifier = Modifier.fillMaxWidth(),
                                     ) { Text("Выбрать другой файл…") }
                                 }
@@ -572,10 +572,10 @@ fun ProfileBackupScreen(
                                 )
                                 Spacer(Modifier.height(6.dp))
                                 state.foundBackups.forEach { fb ->
-                                    OutlinedButton(
+                                    ApuPremiumContentButton(
                                         onClick = { viewModel.stage(fb.uri, restorePassword) },
+                                        style = DiagnosticsActionStyle.QUIET,
                                         enabled = !state.busy && restorePassword.isNotEmpty(),
-                                        shape = RoundedCornerShape(14.dp),
                                         modifier = Modifier.fillMaxWidth(),
                                     ) {
                                         Text(
@@ -587,10 +587,10 @@ fun ProfileBackupScreen(
                                 }
                             }
                             Spacer(Modifier.height(12.dp))
-                            OutlinedButton(
+                            ApuPremiumContentButton(
                                 onClick = { openLauncher.launch(arrayOf("*/*")) },
+                                style = DiagnosticsActionStyle.QUIET,
                                 enabled = !state.busy && restorePassword.isNotEmpty(),
-                                shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 if (state.busy && state.busyText.startsWith("Открываем")) {

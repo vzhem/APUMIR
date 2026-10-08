@@ -384,13 +384,9 @@ private fun ContactInviteCardView(
             )
         }
         Spacer(Modifier.height(8.dp))
-        Button(
+        ApuPremiumContentButton(
             onClick = onAdd,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ),
-            shape = RoundedCornerShape(14.dp),
+            style = DiagnosticsActionStyle.PRIMARY,
         ) {
             Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
@@ -428,13 +424,9 @@ private fun GroupInviteCardView(
             )
         }
         Spacer(Modifier.height(8.dp))
-        Button(
+        ApuPremiumContentButton(
             onClick = onJoin,
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            ),
-            shape = RoundedCornerShape(14.dp),
+            style = DiagnosticsActionStyle.PRIMARY,
         ) {
             Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
@@ -442,13 +434,9 @@ private fun GroupInviteCardView(
         }
         card.apkLink?.let { apk ->
             Spacer(Modifier.height(8.dp))
-            Button(
+            ApuPremiumContentButton(
                 onClick = { onDownload(apk) },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                ),
-                shape = RoundedCornerShape(14.dp),
+                style = DiagnosticsActionStyle.PRIMARY,
             ) {
                 Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
@@ -492,13 +480,9 @@ private fun MultiInviteCardView(
                 color = textColor.copy(alpha = 0.7f),
             )
             Spacer(Modifier.height(4.dp))
-            Button(
+            ApuPremiumContentButton(
                 onClick = { onOpen(item.link) },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                ),
-                shape = RoundedCornerShape(14.dp),
+                style = DiagnosticsActionStyle.PRIMARY,
             ) {
                 Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
@@ -507,13 +491,9 @@ private fun MultiInviteCardView(
             Spacer(Modifier.height(8.dp))
         }
         card.apkLink?.let { apk ->
-            Button(
+            ApuPremiumContentButton(
                 onClick = { onDownload(apk) },
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary,
-                ),
-                shape = RoundedCornerShape(14.dp),
+                style = DiagnosticsActionStyle.PRIMARY,
             ) {
                 Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))

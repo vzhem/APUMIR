@@ -33,8 +33,6 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -71,6 +69,9 @@ import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ApuSearchField
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
+import com.vladimir.messenger.ui.components.ApuGoldInk
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -175,24 +176,16 @@ fun AddContactScreen(
                             )
                         },
                     )
-                    Button(
+                    ApuPremiumContentButton(
                         onClick = viewModel::onAddContactClicked,
+                        style = DiagnosticsActionStyle.PRIMARY,
                         enabled = uiState.inviteLink.isNotBlank() && !uiState.isLoading,
-                        shape = ApuBubbleShape,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            contentColor = MaterialTheme.colorScheme.onPrimary,
-                            // Не превращаем отключённое действие в бесформенную
-                            // серую плашку: золотой контур остаётся частью стиля.
-                            disabledContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
-                            disabledContentColor = ApuBubbleAccentColor.copy(alpha = 0.58f),
-                        ),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         if (uiState.isLoading) {
                             CircularProgressIndicator(
                                 modifier = Modifier.size(19.dp),
-                                color = MaterialTheme.colorScheme.onPrimary,
+                                color = ApuGoldInk,
                                 strokeWidth = 2.dp,
                             )
                         } else {

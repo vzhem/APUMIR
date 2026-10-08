@@ -90,7 +90,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -154,6 +153,8 @@ import com.vladimir.messenger.util.ImageLinkDetector
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1670,7 +1671,10 @@ private fun JoinRequestRow(
         }
         Spacer(Modifier.height(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(onClick = { onDecide(request.nodeId, true) }) {
+            ApuPremiumContentButton(
+                onClick = { onDecide(request.nodeId, true) },
+                style = DiagnosticsActionStyle.PRIMARY,
+            ) {
                 Text("Принять в группу")
             }
             ApuTextAction(label = "Отклонить", onClick = { onDecide(request.nodeId, false) })

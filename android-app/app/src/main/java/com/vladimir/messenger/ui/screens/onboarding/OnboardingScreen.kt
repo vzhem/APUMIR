@@ -41,6 +41,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.util.QrCodeGenerator
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 @Composable
 fun OnboardingScreen(
@@ -293,13 +295,13 @@ private fun EnterNameStep(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        Button(
+        ApuPremiumContentButton(
             onClick  = if (state.restoreMode) onRestoreClick else onCreateClick,
+            style = DiagnosticsActionStyle.PRIMARY,
             enabled  = state.canSubmit,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
-            shape    = RoundedCornerShape(14.dp),
         ) {
             Icon(Icons.Default.Key, contentDescription = null)
             Spacer(modifier = Modifier.width(8.dp))
@@ -314,13 +316,13 @@ private fun EnterNameStep(
         // сообщества, ключи и ранг.
         if (state.restoreMode) {
             Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(
+            ApuPremiumContentButton(
                 onClick  = onRestoreFromFile,
+                style = DiagnosticsActionStyle.QUIET,
                 enabled  = !state.isLoading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
-                shape    = RoundedCornerShape(14.dp),
             ) {
                 Icon(Icons.Default.Restore, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
@@ -579,11 +581,11 @@ private fun ShowInviteStep(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(modifier = Modifier.height(10.dp))
-                Button(
+                ApuPremiumContentButton(
                     onClick = { onJoinByInvite(joinText) },
+                    style = DiagnosticsActionStyle.PRIMARY,
                     enabled = joinValid,
                     modifier = Modifier.fillMaxWidth().height(46.dp),
-                    shape = RoundedCornerShape(12.dp),
                 ) {
                     Text("Добавить пригласившего")
                 }
@@ -592,12 +594,12 @@ private fun ShowInviteStep(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        Button(
+        ApuPremiumContentButton(
             onClick  = onFinish,
+            style = DiagnosticsActionStyle.PRIMARY,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp),
-            shape    = RoundedCornerShape(14.dp),
         ) {
             Text(
                 "Начать общение",

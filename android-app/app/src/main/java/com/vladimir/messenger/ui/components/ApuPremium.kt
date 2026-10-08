@@ -24,6 +24,7 @@ package com.vladimir.messenger.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -220,7 +221,7 @@ fun ApuPremiumIconTile(
 
 /**
  * Кнопка премиального стиля для всего приложения — та же самая, что стоит в
- * окне «Логи» (золотая с блеском, стеклянная или тихая). Держим один
+ * окне «Логи» (золотая, стеклянная, тихая или красная опасная). Держим один
  * реализацию, чтобы кнопки в разных разделах не разъезжались по виду.
  */
 @Composable
@@ -231,6 +232,8 @@ fun ApuPremiumButton(
     icon: ImageVector? = null,
     style: DiagnosticsActionStyle = DiagnosticsActionStyle.GLASS,
     enabled: Boolean = true,
+    compact: Boolean = false,
+    progress: Boolean = false,
 ) = ApuDiagnosticsActionButton(
     label = label,
     onClick = onClick,
@@ -238,4 +241,27 @@ fun ApuPremiumButton(
     icon = icon,
     style = style,
     enabled = enabled,
+    compact = compact,
+    progress = progress,
+)
+
+/**
+ * Вариант той же объёмной кнопки для существующих действий с нестандартным
+ * содержимым (например, индикатором загрузки). Контейнер, контраст и нажатие
+ * всё равно задаёт общая кнопка APU.
+ */
+@Composable
+fun ApuPremiumContentButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    style: DiagnosticsActionStyle = DiagnosticsActionStyle.GLASS,
+    enabled: Boolean = true,
+    content: @Composable RowScope.() -> Unit,
+) = ApuDiagnosticsActionButton(
+    label = "",
+    onClick = onClick,
+    modifier = modifier,
+    style = style,
+    enabled = enabled,
+    content = content,
 )

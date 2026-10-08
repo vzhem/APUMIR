@@ -42,13 +42,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.foundation.pager.HorizontalPager
@@ -93,6 +91,8 @@ import com.vladimir.messenger.data.group.MemberSummary
 import com.vladimir.messenger.data.group.TopicSummary
 import com.vladimir.messenger.util.AppShare
 import com.vladimir.messenger.util.QrCodeGenerator
+import com.vladimir.messenger.ui.components.ApuPremiumCheckbox
+import com.vladimir.messenger.ui.components.ApuPremiumSwitch
 
 /**
  * Вкладки админ-кабинета.
@@ -454,7 +454,7 @@ private fun OverviewTab(
                     )
                 }
                 if (canChangeVisibility) {
-                    Switch(checked = isPublic, onCheckedChange = onTogglePublic)
+                    ApuPremiumSwitch(checked = isPublic, onCheckedChange = onTogglePublic)
                 }
             }
         }
@@ -473,7 +473,7 @@ private fun OverviewTab(
                             color = ApuBubbleMutedColor,
                         )
                     }
-                    Switch(checked = false, onCheckedChange = { onEnableTopics() })
+                    ApuPremiumSwitch(checked = false, onCheckedChange = { onEnableTopics() })
                 }
             }
         }
@@ -815,7 +815,7 @@ private fun AdminsTab(
                                             color = ApuBubbleMutedColor,
                                         )
                                     }
-                                    Switch(
+                                    ApuPremiumSwitch(
                                         checked = GroupPermissions.has(admin.permissions, entry.flag),
                                         onCheckedChange = { onTogglePermission(admin.nodeId, entry.flag, it) },
                                     )
@@ -982,7 +982,7 @@ private fun MemberRow(
                                 color = ApuBubbleMutedColor,
                             )
                         }
-                        Switch(
+                        ApuPremiumSwitch(
                             checked = GroupPermissions.has(member.permissions, entry.flag),
                             onCheckedChange = { onTogglePermission(entry.flag, it) },
                         )
@@ -1071,7 +1071,7 @@ private fun InvitesTab(
                             color = ApuBubbleMutedColor,
                         )
                     }
-                    Switch(checked = needsApproval, onCheckedChange = { needsApproval = it })
+                    ApuPremiumSwitch(checked = needsApproval, onCheckedChange = { needsApproval = it })
                 }
                 ApuTextAction(label = "Создать ссылку", onClick = { onCreate(needsApproval) })
             } else {
@@ -1172,7 +1172,7 @@ private fun InviteCard(
                     .clickable { attachApk = !attachApk }
                     .padding(horizontal = 4.dp),
             ) {
-                Checkbox(checked = attachApk, onCheckedChange = { attachApk = it })
+                ApuPremiumCheckbox(checked = attachApk, onCheckedChange = { attachApk = it })
                 Text(
                     "Приложить установочный файл (APK)",
                     style = MaterialTheme.typography.bodySmall,
@@ -1227,7 +1227,7 @@ private fun PermissionsTab(mask: Long, onToggle: (Long, Boolean) -> Unit) {
                             color = ApuBubbleMutedColor,
                         )
                     }
-                    Switch(
+                    ApuPremiumSwitch(
                         checked = GroupPermissions.has(mask, entry.flag),
                         onCheckedChange = { onToggle(entry.flag, it) },
                     )

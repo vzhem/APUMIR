@@ -48,8 +48,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -77,6 +75,8 @@ import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.ui.components.HintBubbleMutedColor
 import com.vladimir.messenger.ui.components.HintBubbleTextColor
 import com.vladimir.messenger.ui.components.swipeBack
+import com.vladimir.messenger.ui.components.ApuPremiumSlider
+import com.vladimir.messenger.ui.components.ApuPremiumSwitch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -262,7 +262,7 @@ fun SupportScreen(
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
-                                    Switch(
+                                    ApuPremiumSwitch(
                                         checked = reminder.enabled,
                                         onCheckedChange = { viewModel.setReminderEnabled(it) },
                                     )
@@ -294,7 +294,7 @@ fun SupportScreen(
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
-                                    Slider(
+                                    ApuPremiumSlider(
                                         value = reminder.day.toFloat(),
                                         onValueChange = { viewModel.setReminderDay(it.toInt()) },
                                         valueRange = 1f..28f,

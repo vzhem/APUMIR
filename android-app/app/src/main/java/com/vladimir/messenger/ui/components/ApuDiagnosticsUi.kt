@@ -7,8 +7,8 @@ package com.vladimir.messenger.ui.components
 // кнопок чтобы был выразителен, и блеск передавался премиальный»).
 // =============================================================================
 // Что изменилось против прежней версии:
-//   * шапка — тёмный градиентный баннер (полуночный синий → бронза) с глянцевым
-//     блеском, эмблемой, статус-плашкой и стеклянными чипами;
+//   * шапка — тёмный градиентный баннер (полуночный синий → бронза) с эмблемой,
+//     итогом и стеклянными чипами; блик статичный, пока человек не нажал кнопку;
 //   * строки проверок — крупные пиктограммы-«well» с яркими градиентами и
 //     свечением, а не точки с серым текстом;
 //   * отчёт — тёмная КОНСОЛЬ с «светофором» и подсветкой разделов, как в
@@ -16,7 +16,8 @@ package com.vladimir.messenger.ui.components
 //   * кнопки — объёмные: золотая глянцевая основная и стеклянные вторичные, с
 //     мягкой тенью, верхним бликом и откликом на нажатие;
 //   * журнал событий — отдельным списком (10-07: «нет логов списка вообще»):
-//     время, область, уровень и суть, свежие сверху.
+//     время, область, уровень и суть, свежие сверху;
+//   * без бесконечных переливов: движение есть только в коротком отклике нажатия.
 //
 // Правило прежних замечаний владельца соблюдено: НИЧЕГО stock Material — только
 // наши цвета, наши формы и наши обёртки (ApuSettingsCard/ApuBubble). Читаемость
@@ -25,13 +26,8 @@ package com.vladimir.messenger.ui.components
 // (scripts/ci/check-diagnostics-report.py, test_premium_palette_keeps_contrast).
 // =============================================================================
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -42,6 +38,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -61,10 +58,13 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -80,6 +80,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -251,22 +252,6 @@ private fun Modifier.diagnosticsGloss(
     }
 }
 
-/** Бегущий блик по элементу: одна общая скорость у всего окна. */
-@Composable
-private fun rememberSweep(periodMs: Int = 2400): Float {
-    val transition = rememberInfiniteTransition(label = "diag-sweep")
-    val sweep by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = periodMs, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "diag-sweep-value",
-    )
-    return sweep
-}
-
 /** Мягкая тень под элементом: объём, а не плоская заливка. */
 private fun Modifier.diagnosticsLift(elevation: Dp, shape: Shape, color: Color): Modifier =
     shadow(elevation = elevation, shape = shape, clip = false, ambientColor = color, spotColor = color)
@@ -294,7 +279,6 @@ fun ApuDiagnosticsHero(
     val collecting = lines.isEmpty()
     val level = if (collecting) DiagnosticsLevel.INFO else diagnosticsWorstLevel(lines)
     val shape = RoundedCornerShape(22.dp)
-    val sweep = rememberSweep(periodMs = 3200)
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -335,7 +319,7 @@ fun ApuDiagnosticsHero(
                 ),
                 shape,
             )
-            .diagnosticsGloss(shape, intensity = 0.85f, sweep = sweep),
+            .diagnosticsGloss(shape, intensity = 0.78f),
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
@@ -346,7 +330,7 @@ fun ApuDiagnosticsHero(
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Логи",
+                        "Состояние APU",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Black,
                         color = Color.White,
@@ -369,65 +353,36 @@ fun ApuDiagnosticsHero(
                 level = level,
                 checks = lines.size,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ApuDiagnosticsGlassChip("записей", journalSize.toString())
-                ApuDiagnosticsGlassChip("предупреждений", warnCount.toString())
-                ApuDiagnosticsGlassChip("ошибок", badCount.toString(), alarm = badCount > 0)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ApuDiagnosticsGlassChip("событий", journalSize.toString(), modifier = Modifier.weight(1f))
+                ApuDiagnosticsGlassChip("предупр.", warnCount.toString(), modifier = Modifier.weight(1f))
+                ApuDiagnosticsGlassChip(
+                    "ошибок",
+                    badCount.toString(),
+                    alarm = badCount > 0,
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
     }
 }
 
 /**
- * Эмблема: золотое кольцо с тёмным стеклом внутри — знак APU.
- *
- * Кольцо «блестит»: по нему медленно идёт светлая волна (sweep-градиент), а
- * вокруг дышит мягкое свечение. Это тот самый премиальный блеск, который
- * владелец просил 2026-10-07, и он ничего не стоит по перерисовкам: меняется
- * только поворот кисти и альфа одной подсветки.
+ * Эмблема: золотое кольцо с тёмным стеклом внутри — знак APU. Статический
+ * sweep-градиент даёт металлический блик без постоянного вращения и мигания.
  */
 @Composable
 private fun ApuDiagnosticsEmblem() {
-    val spinTransition = rememberInfiniteTransition(label = "diag-emblem")
-    val spin by spinTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 4200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "diag-emblem-spin",
-    )
-    val halo by spinTransition.animateFloat(
-        initialValue = 0.16f,
-        targetValue = 0.42f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1500, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "diag-emblem-halo",
-    )
     Box(modifier = Modifier.size(58.dp), contentAlignment = Alignment.Center) {
-        // Дышащее свечение вокруг кольца.
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer { alpha = halo }
-                .clip(CircleShape)
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(DiagGold.copy(alpha = 0.55f), Color.Transparent),
-                    ),
-                ),
-        )
         Box(
             modifier = Modifier
                 .size(56.dp)
-                .graphicsLayer { rotationZ = spin }
-                .diagnosticsLift(10.dp, CircleShape, DiagGold.copy(alpha = 0.50f))
+                .diagnosticsLift(10.dp, CircleShape, DiagGold.copy(alpha = 0.42f))
                 .clip(CircleShape)
                 .background(
-                    // Светлая волна поверх золота: кольцо читается как металл.
                     Brush.sweepGradient(
                         listOf(
                             DiagGoldDeep,
@@ -440,16 +395,15 @@ private fun ApuDiagnosticsEmblem() {
                             DiagGoldDeep,
                         ),
                     ),
-                ),
+                )
+                .diagnosticsGloss(CircleShape, intensity = 0.82f),
             contentAlignment = Alignment.Center,
         ) {
             Box(
                 modifier = Modifier
                     .size(42.dp)
                     .clip(CircleShape)
-                    .background(
-                        Brush.verticalGradient(listOf(Color(0xFF22334C), Color(0xFF0B1220))),
-                    )
+                    .background(Brush.verticalGradient(listOf(Color(0xFF22334C), Color(0xFF0B1220))))
                     .border(1.dp, Color.White.copy(alpha = 0.20f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
@@ -495,7 +449,7 @@ private fun ApuDiagnosticsVerdictPill(text: String, level: DiagnosticsLevel, che
                     ),
                     shape,
                 )
-                .diagnosticsGloss(shape, intensity = 1f, sweep = rememberSweep(periodMs = 2600))
+                .diagnosticsGloss(shape, intensity = 0.88f)
                 .padding(horizontal = 16.dp, vertical = 11.dp),
             contentAlignment = Alignment.CenterStart,
         ) {
@@ -532,11 +486,16 @@ private fun ApuDiagnosticsVerdictPill(text: String, level: DiagnosticsLevel, che
 
 /** Стеклянный чип на тёмной шапке: подпись сверху, число крупно. */
 @Composable
-private fun ApuDiagnosticsGlassChip(label: String, value: String, alarm: Boolean = false) {
+private fun ApuDiagnosticsGlassChip(
+    label: String,
+    value: String,
+    alarm: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
     val shape = RoundedCornerShape(12.dp)
     val accent = if (alarm) diagnosticsLevelColor(DiagnosticsLevel.BAD) else DiagGold
     Column(
-        modifier = Modifier
+        modifier = modifier
             .clip(shape)
             .background(Color.White.copy(alpha = 0.12f))
             .border(1.dp, Color.White.copy(alpha = 0.20f), shape)
@@ -548,6 +507,7 @@ private fun ApuDiagnosticsGlassChip(label: String, value: String, alarm: Boolean
             style = MaterialTheme.typography.labelSmall,
             color = Color.White.copy(alpha = 0.66f),
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
         Text(
             value,
@@ -718,8 +678,7 @@ private fun ApuDiagnosticsLegendItem(level: DiagnosticsLevel, modifier: Modifier
 /** Разделитель: золотая нить, растворяющаяся к краю. */
 @Composable
 private fun ApuDiagnosticsDivider() {
-    // Нить золота, по которой пробегает свет: та же «аврора», но строкой.
-    val sweep = rememberSweep(periodMs = 3000)
+    // Спокойная золотая нить: подвижный блик оставлен только для нажатий.
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -732,20 +691,7 @@ private fun ApuDiagnosticsDivider() {
                         Color.Transparent,
                     ),
                 ),
-            )
-            .drawWithCache {
-                val band = size.width * 0.30f
-                val left = -band + (size.width + band) * sweep
-                val light = Brush.horizontalGradient(
-                    listOf(Color.Transparent, DiagGoldLight, Color.Transparent),
-                    startX = left,
-                    endX = left + band,
-                )
-                onDrawWithContent {
-                    drawContent()
-                    drawRect(light)
-                }
-            },
+            ),
     )
 }
 
@@ -767,6 +713,7 @@ fun ApuDiagnosticsReportCard(
     caption: String? = null,
 ) {
     val scroll = rememberScrollState()
+    val lineCount = remember(text) { text.count { it == '\n' } + 1 }
     val shape = RoundedCornerShape(18.dp)
     Box(
         modifier = modifier
@@ -808,7 +755,7 @@ fun ApuDiagnosticsReportCard(
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    "строк ${text.count { it == '\n' } + 1}",
+                    "строк $lineCount",
                     style = MaterialTheme.typography.labelMedium,
                     color = DiagConsoleMuted,
                     maxLines = 1,
@@ -902,7 +849,7 @@ fun ApuDiagnosticsEventList(
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    if (events.isEmpty()) "пусто" else "записей ${events.size}",
+                    if (events.isEmpty()) "пока нет" else "свежие сверху",
                     style = MaterialTheme.typography.labelMedium,
                     color = DiagConsoleMuted,
                     maxLines = 1,
@@ -1035,13 +982,13 @@ fun diagnosticsReportAnnotated(text: String): AnnotatedString = buildAnnotatedSt
 // Кнопки: объёмные, с блеском и откликом
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Назначение кнопки: золотая основная, стеклянная вторичная, тихая третья. */
-enum class DiagnosticsActionStyle { PRIMARY, GLASS, QUIET }
+/** Назначение кнопки: золотая основная, стеклянная вторичная, тихая третья, опасная красная. */
+enum class DiagnosticsActionStyle { PRIMARY, GLASS, QUIET, DANGER }
 
 /**
- * Кнопка окна «Логи»: золотая глянцевая (PRIMARY), стеклянная (GLASS) или
- * тихая (QUIET). Объём даёт мягкая тень, блеск — верхний блик, живость —
- * лёгкое сжатие при нажатии. Никакого stock Material: фон, рамка и блик наши.
+ * Общая объёмная кнопка APU. Стиль один для окна «Логи» и остальных разделов;
+ * compact раскладывает иконку над подписью — так длинные действия не обрезаются
+ * в узких колонках. content нужен для редких действий со сложным содержимым.
  */
 @Composable
 fun ApuDiagnosticsActionButton(
@@ -1051,23 +998,29 @@ fun ApuDiagnosticsActionButton(
     icon: ImageVector? = null,
     style: DiagnosticsActionStyle = DiagnosticsActionStyle.GLASS,
     enabled: Boolean = true,
+    compact: Boolean = false,
+    progress: Boolean = false,
+    content: (@Composable RowScope.() -> Unit)? = null,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    val emphatic = style == DiagnosticsActionStyle.PRIMARY || style == DiagnosticsActionStyle.DANGER
     val scale by animateFloatAsState(
         targetValue = if (pressed && enabled) 0.965f else 1f,
         animationSpec = tween(durationMillis = 110),
-        label = "diag-button-press",
+        label = "apu-button-press",
     )
-    // Тень живёт вместе с масштабом: нажатая кнопка «садится», отпущенная
-    // «поднимается». Это и есть выразительный объём, о котором просил владелец.
-    val baseLift = if (style == DiagnosticsActionStyle.PRIMARY) 13.dp else 6.dp
+    val baseLift = when (style) {
+        DiagnosticsActionStyle.PRIMARY -> 13.dp
+        DiagnosticsActionStyle.DANGER -> 11.dp
+        else -> 6.dp
+    }
     val lift by animateDpAsState(
         targetValue = if (pressed && enabled) baseLift - 5.dp else baseLift,
         animationSpec = tween(durationMillis = 110),
-        label = "diag-button-lift",
+        label = "apu-button-lift",
     )
-    val shape = RoundedCornerShape(if (style == DiagnosticsActionStyle.PRIMARY) 16.dp else 14.dp)
+    val shape = RoundedCornerShape(if (emphatic) 16.dp else 14.dp)
     val fill = when (style) {
         DiagnosticsActionStyle.PRIMARY -> Brush.linearGradient(
             colors = listOf(DiagGoldLight, DiagGold, DiagGoldDeep),
@@ -1084,48 +1037,106 @@ fun ApuDiagnosticsActionButton(
             start = Offset(0f, 0f),
             end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
         )
+        DiagnosticsActionStyle.DANGER -> Brush.linearGradient(
+            colors = listOf(Color(0xFFFFEEF0), Color(0xFFF8D8DC), Color(0xFFEAB5BD)),
+            start = Offset(0f, 0f),
+            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
+        )
     }
     val ink = when (style) {
         DiagnosticsActionStyle.PRIMARY -> DiagOnGold
         DiagnosticsActionStyle.GLASS -> ApuBubbleAccentColor
         DiagnosticsActionStyle.QUIET -> ApuBubbleMutedColor
+        DiagnosticsActionStyle.DANGER -> Color(0xFF721D2B)
     }
     val glow = when (style) {
         DiagnosticsActionStyle.PRIMARY -> DiagGold.copy(alpha = 0.55f)
+        DiagnosticsActionStyle.DANGER -> Color(0xFFA12D3A).copy(alpha = 0.40f)
         else -> Color(0xFF0A1018).copy(alpha = 0.28f)
     }
-    Row(
-        modifier = modifier
-            .graphicsLayer { scaleX = scale; scaleY = scale }
-            .diagnosticsLift(lift, shape, glow)
-            .clip(shape)
-            .background(fill)
-            .border(
-                width = 1.dp,
-                brush = Brush.linearGradient(
-                    listOf(
-                        if (style == DiagnosticsActionStyle.PRIMARY) Color.White.copy(alpha = 0.85f) else DiagGold.copy(alpha = 0.55f),
-                        DiagGoldDeep.copy(alpha = 0.35f),
-                    ),
+    val surface = modifier
+        .graphicsLayer { scaleX = scale; scaleY = scale }
+        .diagnosticsLift(lift, shape, glow)
+        .clip(shape)
+        .background(fill)
+        .border(
+            width = 1.dp,
+            brush = Brush.linearGradient(
+                listOf(
+                    if (style == DiagnosticsActionStyle.PRIMARY) Color.White.copy(alpha = 0.85f)
+                    else if (style == DiagnosticsActionStyle.DANGER) Color.White.copy(alpha = 0.78f)
+                    else DiagGold.copy(alpha = 0.55f),
+                    if (style == DiagnosticsActionStyle.DANGER) Color(0xFFA12D3A).copy(alpha = 0.42f)
+                    else DiagGoldDeep.copy(alpha = 0.35f),
                 ),
-                shape = shape,
-            )
-            .diagnosticsGloss(shape, intensity = if (style == DiagnosticsActionStyle.PRIMARY) 1f else 0.7f)
-            .clickableDiag(interaction, enabled, onClick)
-            .padding(horizontal = 16.dp, vertical = if (style == DiagnosticsActionStyle.PRIMARY) 12.dp else 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        icon?.let {
-            Icon(it, contentDescription = null, tint = ink, modifier = Modifier.size(18.dp))
-        }
-        Text(
-            label,
-            style = MaterialTheme.typography.labelLarge,
-            fontWeight = FontWeight.Bold,
-            color = ink.copy(alpha = if (enabled) 1f else 0.45f),
-            maxLines = 1,
+            ),
+            shape = shape,
         )
+        .diagnosticsGloss(shape, intensity = if (emphatic) 1f else 0.7f)
+        .clickableDiag(interaction, enabled, onClick)
+
+    CompositionLocalProvider(LocalContentColor provides ink.copy(alpha = if (enabled) 1f else 0.48f)) {
+        if (compact && content == null) {
+            Column(
+                modifier = surface
+                    .heightIn(min = 68.dp)
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                if (progress) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        color = ink,
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    icon?.let { Icon(it, contentDescription = null, tint = ink, modifier = Modifier.size(18.dp)) }
+                }
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = ink.copy(alpha = if (enabled) 1f else 0.48f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        } else {
+            Row(
+                modifier = surface
+                    .heightIn(min = 44.dp)
+                    .padding(horizontal = 14.dp, vertical = if (emphatic) 11.dp else 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = if (content == null) {
+                    Arrangement.spacedBy(8.dp)
+                } else {
+                    Arrangement.Center
+                },
+            ) {
+                if (content != null) {
+                    content()
+                } else {
+                    if (progress) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(17.dp),
+                            color = ink,
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        icon?.let { Icon(it, contentDescription = null, tint = ink, modifier = Modifier.size(18.dp)) }
+                    }
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = ink.copy(alpha = if (enabled) 1f else 0.48f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -1138,6 +1149,7 @@ private fun Modifier.clickableDiag(
     interactionSource = interaction,
     indication = null,
     enabled = enabled,
+    role = Role.Button,
     onClick = onClick,
 )
 

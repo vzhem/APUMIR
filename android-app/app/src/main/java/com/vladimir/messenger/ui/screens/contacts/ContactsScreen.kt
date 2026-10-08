@@ -52,6 +52,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.draw.clip
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.ApuPremiumCheckbox
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -193,17 +196,21 @@ fun ContactsScreen(
                         color = HintBubbleTextColor
                     )
                     Spacer(modifier = Modifier.height(16.dp))
-                    Button(onClick = onAddContactClick) {
+                    ApuPremiumContentButton(
+                        onClick = onAddContactClick,
+                        style = DiagnosticsActionStyle.PRIMARY,
+                    ) {
                         Icon(Icons.Default.Add, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("Добавить контакт")
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     // Пустой список - самое место, чтобы позвать первого друга.
-                    OutlinedButton(
+                    ApuPremiumContentButton(
                         onClick = {
                             showInviteShare = true
                         },
+                        style = DiagnosticsActionStyle.QUIET,
                     ) {
                         Icon(Icons.Default.Share, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
@@ -473,7 +480,7 @@ private fun InviteToGroupsDialog(
                         .clickable { attachApk = !attachApk }
                         .padding(horizontal = 4.dp),
                 ) {
-                    Checkbox(checked = attachApk, onCheckedChange = { attachApk = it })
+                    ApuPremiumCheckbox(checked = attachApk, onCheckedChange = { attachApk = it })
                     Text(
                         "Приложить установочный файл (APK)",
                         style = MaterialTheme.typography.bodySmall,
@@ -508,7 +515,7 @@ private fun InviteToGroupsDialog(
                                     .padding(horizontal = 4.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Checkbox(checked = checked, onCheckedChange = {
+                                ApuPremiumCheckbox(checked = checked, onCheckedChange = {
                                     if (checked) selected.remove(group.id)
                                     else selected.add(group.id)
                                 })
@@ -534,8 +541,9 @@ private fun InviteToGroupsDialog(
         },
         confirmButton = {
             Column(horizontalAlignment = Alignment.End) {
-                Button(
+                ApuPremiumContentButton(
                     onClick = { onSendInApp(selected.toList()) },
+                    style = DiagnosticsActionStyle.PRIMARY,
                     enabled = selected.isNotEmpty(),
                 ) {
                     Icon(Icons.Default.Send, contentDescription = null)

@@ -11,7 +11,6 @@ package com.vladimir.messenger.ui.screens.settings
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
@@ -51,7 +50,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
@@ -113,6 +111,9 @@ import com.vladimir.messenger.ui.theme.AppFontSizeHolder
 import com.vladimir.messenger.ui.theme.UsernameHolder
 import com.vladimir.messenger.ui.theme.WallpaperHolder
 import com.vladimir.messenger.util.QrCodeGenerator
+import com.vladimir.messenger.ui.components.ApuPremiumRadioButton
+import com.vladimir.messenger.ui.components.ApuPremiumSlider
+import com.vladimir.messenger.ui.components.ApuPremiumSwitch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -988,7 +989,7 @@ private fun SettingsTabContent(
                         title    = "Туннель через прокси",
                         subtitle = "Автовыбор лучшего прокси для соединений (любая сеть)",
                         trailingContent = {
-                            Switch(
+                            ApuPremiumSwitch(
                                 checked = uiState.proxyTunnelEnabled,
                                 onCheckedChange = viewModel::onProxyTunnelToggle,
                             )
@@ -1047,7 +1048,7 @@ private fun SettingsTabContent(
                                 .padding(horizontal = 16.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            RadioButton(
+                            ApuPremiumRadioButton(
                                 selected = swarmMode == mode,
                                 onClick = { SwarmSettings.set(context, mode) },
                             )
@@ -1104,7 +1105,7 @@ private fun SettingsTabContent(
                                 "документы и стикеры, текст и резервные копии, APK обновлений."
                         },
                         trailingContent = {
-                            Switch(
+                            ApuPremiumSwitch(
                                 checked = imServer,
                                 onCheckedChange = {
                                     com.vladimir.messenger.data.swarm.ServerMode.set(context, it)
@@ -1155,7 +1156,7 @@ private fun SettingsTabContent(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Slider(
+                        ApuPremiumSlider(
                             value = step.toFloat(),
                             onValueChange = {
                                 step = it.roundToInt().coerceIn(0, StoragePolicy.STEPS.lastIndex)
@@ -1437,13 +1438,11 @@ private fun SettingsTabContent(
             icon = { Icon(Icons.Default.Terminal, contentDescription = null) },
             title = { Text("Логи") },
             text = {
-                // Вся область прокручивается: на узком экране или крупном
-                // шрифте сводка и отчёт вместе выше диалога, а отдельная
-                // прокрутка у отчёта остаётся удобной для длинного текста.
+                // Диалог прокручивает сводку целиком; только длинный список и
+                // сырая консоль имеют собственные ограниченные области.
                 Column(
-                    modifier = Modifier
-                        .heightIn(max = 460.dp)
-                        .verticalScroll(rememberScrollState()),
+                    // ApuSettingsDialog уже даёт одну прокрутку всей области.
+                    // Вторая вложенная вертикальная прокрутка перехватывала жесты.
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     val statusLines = logsSnapshot?.statusLines.orEmpty()
@@ -1496,15 +1495,6 @@ private fun SettingsTabContent(
                     ApuDiagnosticsReportCard(
                         text = reportText.ifBlank { "Собираю безопасный отчёт…" },
                         maxHeight = 260.dp,
-                        // Когда и что собрано — подписью в шапке отчёта:
-                        // строка не отрывается от текста, к которому относится.
-                        caption = logsSnapshot?.let { snapshot ->
-                            "Собрано в ${DiagnosticsReport.clock(snapshot.createdAtMs)} · " +
-                                "версия ${snapshot.appVersion} · " +
-                                "записей журнала ${snapshot.journalSize} · " +
-                                "предупреждений ${snapshot.warnCount} · " +
-                                "ошибок ${snapshot.badCount}"
-                        },
                     )
                 }
             },
@@ -1527,6 +1517,7 @@ private fun SettingsTabContent(
                             icon = DiagnosticsActionIcons.Send,
                             modifier = Modifier.weight(1f),
                             style = DiagnosticsActionStyle.PRIMARY,
+                            compact = true,
                             onClick = {
                                 if (reportText.isNotBlank()) {
                                     AppShare.shareText(settingsContext, reportText, "Логи APU")
@@ -1539,6 +1530,7 @@ private fun SettingsTabContent(
                             label = "Скопировать",
                             icon = DiagnosticsActionIcons.Copy,
                             modifier = Modifier.weight(1f),
+                            compact = true,
                             onClick = {
                                 if (reportText.isNotBlank()) {
                                     mqttClipboard.setText(AnnotatedString(reportText))
@@ -1562,6 +1554,7 @@ private fun SettingsTabContent(
                             icon = DiagnosticsActionIcons.Refresh,
                             modifier = Modifier.weight(1f),
                             style = DiagnosticsActionStyle.QUIET,
+                            compact = true,
                             onClick = {
                                 transferLogsStage = TransferDiagnostics.STAGE_DEVICE
                                 transferLogsLoading = true
@@ -1572,6 +1565,7 @@ private fun SettingsTabContent(
                             label = "Закрыть",
                             modifier = Modifier.weight(1f),
                             style = DiagnosticsActionStyle.QUIET,
+                            compact = true,
                             onClick = { showTransferLogsDialog = false },
                         )
                     }

@@ -143,8 +143,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "ApuDiagnosticsPrivacyStrip(",
             "ApuDiagnosticsActionButton(",
             "DiagnosticsActionStyle.PRIMARY",
-            "caption = logsSnapshot?.let { snapshot ->",
-            "версия ${snapshot.appVersion}",
+            "compact = true,",
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, screen)
@@ -165,6 +164,15 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertEqual(actions.count("ApuDiagnosticsActionButton("), 4)
         self.assertEqual(actions.count("modifier = Modifier.weight(1f)"), 4)
         self.assertEqual(actions.count("horizontalArrangement = Arrangement.spacedBy(8.dp)"), 2)
+        self.assertEqual(actions.count("compact = true,"), 4)
+        dialog_start = screen.rindex("if (showTransferLogsDialog) {")
+        dialog_end = screen.index("muteScope?.let { scope ->", dialog_start)
+        dialog_block = screen[dialog_start:dialog_end]
+        text_block = dialog_block[dialog_block.index("text = {"):dialog_block.index("confirmButton = {")]
+        self.assertNotIn(".verticalScroll(", text_block)
+        self.assertNotIn("heightIn(max = 460.dp)", text_block)
+        self.assertNotIn("caption = ", text_block)
+        self.assertIn("Состояние APU", source(DIAG_UI))
         ui = source(DIAG_UI)
         self.assertIn("ApuSettingsCard(", ui)
         self.assertIn("ApuBubbleMutedColor", ui)
@@ -231,31 +239,31 @@ class DiagnosticsContractsTest(unittest.TestCase):
             with self.subTest(marker=marker, where="ApuDiagnosticsUi"):
                 self.assertIn(marker, ui)
 
-    def test_premium_polish_is_alive_and_cheap(self):
-        """Полировка 2026-10-07: блеск должен ДВИГАТЬСЯ, а не быть картинкой.
+    def test_premium_polish_is_static_until_interaction(self):
+        """Логи остаются премиальными, но не анимируют весь экран без нужды.
 
-        Владелец: «можешь ещё лучше сделать если сможешь». Взято ровно то, что
-        читается премиально и не стоит перерисовок: бегущая световая полоса
-        (одна анимация на элемент), золотая нить со светом, кольцо-эмблема со
-        «сварочной» волной и глубина нажатия у кнопок (тень живёт с масштабом).
+        Свет и глубина — в кэшируемом глянце, градиентной эмблеме и тени.
+        Единственное движение — короткий отклик на нажатие, а не бесконечные
+        переливы, которые отвлекают и тратят батарею.
         """
         ui = source(DIAG_UI)
         for marker in (
-            "fun rememberSweep(",
-            "infiniteRepeatable(",
             "Brush.sweepGradient(",
-            "Brush.radialGradient(",
             "animateDpAsState(",
-            "sweep = rememberSweep(",
-            "rotationZ = spin",
+            "animateFloatAsState(",
+            "collectIsPressedAsState()",
+            "drawWithCache",
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, ui)
-        # Движение не должно превратиться в поток перерисовок: бегущий блик
-        # живёт в drawWithCache, а кадры меняет только animation-core.
+        for marker in ("rememberInfiniteTransition(", "infiniteRepeatable(", "fun rememberSweep(", "rotationZ = spin"):
+            with self.subTest(marker=marker):
+                self.assertNotIn(marker, ui)
         gloss_start = ui.index("private fun Modifier.diagnosticsGloss(")
-        gloss_block = ui[gloss_start:ui.index("fun rememberSweep(", gloss_start)]
+        gloss_end = ui.index("private fun Modifier.diagnosticsLift(", gloss_start)
+        gloss_block = ui[gloss_start:gloss_end]
         self.assertIn("drawWithCache", gloss_block)
+        self.assertIn("onDrawWithContent", gloss_block)
 
     def test_lost_items_do_not_live_forever(self):
         """Владелец 2026-10-07: тяжёлое — сутки, текст и малое — неделя, и уборка.
@@ -384,6 +392,11 @@ class DiagnosticsContractsTest(unittest.TestCase):
         for stop in ("DiagGoldLight", "DiagGold", "DiagGoldDeep"):
             with self.subTest(button_stop=stop):
                 self.assertGreaterEqual(contrast(on_gold, palette(stop)), 4.5)
+
+        danger_ink = rgb("721D2B")
+        for danger_stop in ("FFFFEEF0", "FFEAB5BD"):
+            with self.subTest(danger_button_stop=danger_stop):
+                self.assertGreaterEqual(contrast(danger_ink, rgb(danger_stop)), 4.5)
 
         # 2) Тёмная консоль: светлый текст и яркие краски ошибок на её подложке.
         surface = palette("DiagConsoleSurface")

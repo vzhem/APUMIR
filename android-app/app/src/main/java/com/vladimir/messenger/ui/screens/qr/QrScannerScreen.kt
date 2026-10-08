@@ -55,6 +55,8 @@ import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.data.link.ShortShare
 import com.vladimir.messenger.util.OwnInvite
 import com.vladimir.messenger.util.QrCodeGenerator
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 /** Что показывает раздел QR прямо сейчас. */
 private enum class QrMode(val title: String) {
@@ -228,7 +230,10 @@ private fun ScanPane(onQrScanned: (String) -> Unit) {
                     )
                 }
                 Spacer(modifier = Modifier.height(16.dp))
-                Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
+                ApuPremiumContentButton(
+                    onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) },
+                    style = DiagnosticsActionStyle.PRIMARY,
+                ) {
                     Text("Разрешить камеру")
                 }
             }
@@ -329,19 +334,21 @@ private fun MyCodePane() {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Button(
+            ApuPremiumContentButton(
                 onClick = {
                     clipboard.setText(AnnotatedString(link))
                     copied = true
                 },
+                style = DiagnosticsActionStyle.PRIMARY,
                 modifier = Modifier.weight(1f),
             ) {
                 Icon(Icons.Default.ContentCopy, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
                 Text(if (copied) "Скопировано" else "Копировать")
             }
-            Button(
+            ApuPremiumContentButton(
                 onClick = { showInviteShare = true },
+                style = DiagnosticsActionStyle.PRIMARY,
                 modifier = Modifier.weight(1f),
             ) {
                 Icon(Icons.Default.Share, contentDescription = null)

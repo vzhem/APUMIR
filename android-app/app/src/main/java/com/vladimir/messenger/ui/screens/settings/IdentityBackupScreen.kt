@@ -30,14 +30,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -59,6 +56,8 @@ import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.ui.components.HintBubbleMutedColor
 import com.vladimir.messenger.ui.components.HintBubbleTextColor
 import com.vladimir.messenger.ui.components.swipeBack
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -216,13 +215,13 @@ fun IdentityBackupScreen(
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             Spacer(Modifier.height(12.dp))
-                            Button(
+                            ApuPremiumContentButton(
                                 onClick = { viewModel.save(nickname, password) },
+                                style = DiagnosticsActionStyle.PRIMARY,
                                 enabled = !state.busy &&
                                     nickname.isNotBlank() &&
                                     password.length >= MIN_PASSWORD &&
                                     password == repeat,
-                                shape = RoundedCornerShape(14.dp),
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 if (state.busy) {
@@ -270,11 +269,10 @@ fun IdentityBackupScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                             Spacer(Modifier.height(12.dp))
-                            OutlinedButton(
+                            ApuPremiumContentButton(
                                 onClick = { viewModel.restore(nickname, password) },
+                                style = DiagnosticsActionStyle.QUIET,
                                 enabled = !state.busy && nickname.isNotBlank() && password.isNotEmpty(),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.outlinedButtonColors(),
                                 modifier = Modifier.fillMaxWidth(),
                             ) { Text("Восстановить") }
                         }

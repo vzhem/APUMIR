@@ -33,6 +33,7 @@ import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import java.text.SimpleDateFormat
 import java.util.*
+import com.vladimir.messenger.ui.components.ApuPremiumFloatingActionButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -115,9 +116,11 @@ fun MtProxyListScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showAddDialog = true }) {
-                Icon(Icons.Default.Add, "Добавить прокси")
-            }
+            ApuPremiumFloatingActionButton(
+                onClick = { showAddDialog = true },
+                icon = Icons.Default.Add,
+                contentDescription = "Добавить прокси",
+            )
         }
     ) { padding ->
         if (uiState.isLoading) {

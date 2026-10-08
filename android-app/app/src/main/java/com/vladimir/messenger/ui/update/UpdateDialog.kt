@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -34,6 +33,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 @Composable
 fun UpdateDialog(
@@ -127,8 +128,9 @@ fun UpdateDialog(
                         enabled = !isDownloading,
                     )
                     Spacer(modifier = Modifier.height(0.dp))
-                    Button(
+                    ApuPremiumContentButton(
                         onClick = onDownloadClick,
+                        style = DiagnosticsActionStyle.PRIMARY,
                         enabled = !isDownloading,
                     ) {
                         Text(if (isDownloading) "Скачивается..." else "Обновить")

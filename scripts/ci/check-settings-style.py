@@ -62,6 +62,12 @@ class SettingsStyleTest(unittest.TestCase):
             "apuGoldBrush",
             "ApuPremiumIconTile",
             "ApuPremiumButton",
+            "ApuPremiumContentButton",
+            "ApuPremiumFloatingActionButton",
+            "ApuPremiumSwitch",
+            "ApuPremiumCheckbox",
+            "ApuPremiumRadioButton",
+            "ApuPremiumSlider",
             "ApuGoldInk",
         )
         missing = []
@@ -77,6 +83,42 @@ class SettingsStyleTest(unittest.TestCase):
                 if not re.search(r"^import\s+[\w.]*\." + name + r"\b", text, re.M):
                     missing.append(f"{path.relative_to(ui)}: {name}")
         self.assertEqual([], missing, "не импортированы: " + "; ".join(missing))
+
+    def test_stock_action_and_selection_controls_use_apu_components(self):
+        """No screen may quietly fall back to flat Material buttons or toggles."""
+        pattern = re.compile(
+            r"(?<![A-Za-z])(?:Button|OutlinedButton|FloatingActionButton|Switch|Checkbox|RadioButton|Slider)\s*\("
+        )
+        leftovers = []
+        for path in sorted(UI.rglob("*.kt")):
+            if path.name == "ApuPremiumControls.kt":
+                # This shared wrapper uses Material Slider only for its gesture
+                # engine; all colors and every call-site remain APU-controlled.
+                continue
+            text = path.read_text()
+            text = re.sub(r"/\*.*?\*/", " ", text, flags=re.S)
+            text = re.sub(r"//[^\n]*", " ", text)
+            for match in pattern.finditer(text):
+                line = text.count("\n", 0, match.start()) + 1
+                leftovers.append(f"{path.relative_to(UI)}:{line}")
+        self.assertEqual([], leftovers, "остались стандартные controls: " + ", ".join(leftovers))
+
+        controls = source("components/ApuPremiumControls.kt")
+        for marker in (
+            "fun ApuPremiumFloatingActionButton(",
+            "role = Role.Button",
+            "fun ApuPremiumSwitch(",
+            "role = Role.Switch",
+            "fun ApuPremiumCheckbox(",
+            "role = Role.Checkbox",
+            "fun ApuPremiumRadioButton(",
+            "role = Role.RadioButton",
+            "fun ApuPremiumSlider(",
+            "SliderDefaults.colors(",
+            "ApuGoldDeep",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, controls)
 
     def test_premium_style_is_one_palette_for_the_whole_app(self):
         """2026-10-07: «переделать всё приложение, чтобы был стиль как в логах».

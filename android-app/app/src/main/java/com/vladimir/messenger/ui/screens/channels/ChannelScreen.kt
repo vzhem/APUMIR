@@ -12,7 +12,6 @@ import com.vladimir.messenger.data.local.MessagePinPolicy
 // =============================================================================
 
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.material3.ButtonDefaults
 import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
 import com.vladimir.messenger.ui.components.ApuNotificationBadge
@@ -87,7 +86,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -128,6 +126,7 @@ import com.vladimir.messenger.util.InlineImage
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.vladimir.messenger.ui.components.ApuPremiumFloatingActionButton
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -272,9 +271,11 @@ fun ChannelScreen(
         },
         floatingActionButton = {
             if (uiState.canPost) {
-                FloatingActionButton(onClick = { showNewPost = true }) {
-                    Icon(Icons.Default.Add, contentDescription = "Новый пост")
-                }
+                ApuPremiumFloatingActionButton(
+                    onClick = { showNewPost = true },
+                    icon = Icons.Default.Add,
+                    contentDescription = "Новый пост",
+                )
             }
         },
     ) { padding ->
