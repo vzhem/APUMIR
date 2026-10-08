@@ -104,6 +104,10 @@ class SettingsStyleTest(unittest.TestCase):
         self.assertEqual([], leftovers, "остались стандартные controls: " + ", ".join(leftovers))
 
         controls = source("components/ApuPremiumControls.kt")
+        # graphicsLayer is a lowercase extension, so the uppercase unresolved-name
+        # scan cannot catch a wrong package import before Android compilation.
+        self.assertIn("import androidx.compose.ui.graphics.graphicsLayer", controls)
+        self.assertNotIn("import androidx.compose.ui.draw.graphicsLayer", controls)
         for marker in (
             "fun ApuPremiumFloatingActionButton(",
             "role = Role.Button",
