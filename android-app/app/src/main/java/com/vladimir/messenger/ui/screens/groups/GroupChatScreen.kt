@@ -9,6 +9,7 @@ package com.vladimir.messenger.ui.screens.groups
 // выбранной группы идут вертикальным списком, каждая в своём пузыре,
 // и у каждой — бейдж непрочитанных. Нажатие на тему открывает ленту.
 
+import com.vladimir.messenger.R
 import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
 import com.vladimir.messenger.ui.components.ApuNotificationBadge
@@ -349,7 +350,7 @@ fun GroupChatScreen(
                 val clipboard = peerClipboardCtx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                     as android.content.ClipboardManager
                 clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Узел", inspectedPeerId))
-                Toast.makeText(peerClipboardCtx, "Скопировано", Toast.LENGTH_SHORT).show()
+                Toast.makeText(peerClipboardCtx, peerClipboardCtx.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
             },
         )
     }
@@ -398,7 +399,7 @@ fun GroupChatScreen(
                         if (ok) {
                             fwdSent = true
                         } else {
-                            android.widget.Toast.makeText(fCtx, "Не удалось переслать", android.widget.Toast.LENGTH_SHORT).show()
+                            android.widget.Toast.makeText(fCtx, fCtx.getString(R.string.toast_forward_failed), android.widget.Toast.LENGTH_SHORT).show()
                         }
                     }
                 } else {
@@ -424,7 +425,7 @@ fun GroupChatScreen(
                         if (ok) {
                             fwdSent = true
                         } else {
-                            android.widget.Toast.makeText(fCtx, "Не удалось переслать", android.widget.Toast.LENGTH_SHORT).show()
+                            android.widget.Toast.makeText(fCtx, fCtx.getString(R.string.toast_forward_failed), android.widget.Toast.LENGTH_SHORT).show()
                         }
                     }
                 },
@@ -939,7 +940,7 @@ fun GroupChatScreen(
                                 val clipboard = selCtx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                                     as android.content.ClipboardManager
                                 clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Сообщения", combined))
-                                Toast.makeText(selCtx, "Скопировано ($selCount)", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(selCtx, selCtx.getString(R.string.toast_copied_count, selCount), Toast.LENGTH_SHORT).show()
                                 viewModel.clearMessageSelection()
                             },
                             modifier = Modifier.size(36.dp),
@@ -2072,7 +2073,7 @@ private fun MessageBubble(
                                 clipboard.setPrimaryClip(
                                     android.content.ClipData.newPlainText("Сообщение", message.content)
                                 )
-                                Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
                             })
                             if (!message.isFromMe) {
                                 add(ApuAction("Профиль и репутация", Icons.Filled.Person) { onOpenAuthorProfile() })
@@ -2144,7 +2145,7 @@ private fun MessageBubble(
                     clipboard.setPrimaryClip(
                         android.content.ClipData.newPlainText("Сообщение", message.content)
                     )
-                    Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
                 })
                 if (!message.isFromMe) {
                     add(ApuAction("Профиль и репутация", Icons.Filled.Person) { onOpenAuthorProfile() })

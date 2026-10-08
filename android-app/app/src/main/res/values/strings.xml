@@ -213,4 +213,14 @@
     <string name="translate_hint">Текст на другом языке переводится на язык приложения прямо на этом телефоне. Текст не отправляется на сервер. При первом переводе загружается языковой пакет (около 30 МБ).</string>
     <string name="chat_show_original">Показать оригинал</string>
     <string name="chat_show_translation">Показать перевод</string>
+    <!-- Всплывающие сообщения -->
+    <string name="toast_copied">Скопировано</string>
+    <string name="toast_forward_failed">Не удалось переслать</string>
+    <string name="toast_link_copied">Ссылка скопирована</string>
+    <string name="toast_collecting_peers">Собираю данные об абонентах...</string>
+    <string name="toast_gossip_started">Gossip запущен</string>
+    <string name="toast_gossip_failed">Ошибка запуска gossip</string>
+    <string name="toast_copied_count">Скопировано (%1$d)</string>
+    <string name="toast_download_failed">Не удалось начать скачивание: %1$s</string>
+    <string name="toast_wait_seconds">Подождите %1$d сек перед следующим запросом</string>
 </resources>

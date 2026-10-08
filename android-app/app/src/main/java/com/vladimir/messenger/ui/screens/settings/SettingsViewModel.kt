@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.R
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.RustBridge
@@ -387,7 +388,7 @@ class SettingsViewModel @Inject constructor(
                 }
             }
             .onFailure {
-                android.widget.Toast.makeText(context, "Не удалось начать скачивание: ${it.message}", android.widget.Toast.LENGTH_LONG).show()
+                android.widget.Toast.makeText(context, context.getString(R.string.toast_download_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
             }
     }
 
@@ -705,20 +706,20 @@ class SettingsViewModel @Inject constructor(
         // ащита от быстрых нажатий (debounce 5 секунд)
         if (elapsed < 5000L) {
             val waitSec = ((5000L - elapsed) / 1000.0).toInt() + 1
-            Toast.makeText(context, "одождите $waitSec сек перед следующим запросом", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.toast_wait_seconds, waitSec), Toast.LENGTH_SHORT).show()
             return
         }
         
         lastGossipTrigger = now
-        Toast.makeText(context, "Собираю данные об абонентах...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, context.getString(R.string.toast_collecting_peers), Toast.LENGTH_SHORT).show()
         
         viewModelScope.launch {
             val ok = withContext(Dispatchers.IO) { RustBridge.triggerGossipDiscovery() }
             android.util.Log.i("SettingsVM", "Gossip trigger result: $ok")
             if (ok) {
-                Toast.makeText(context, "Gossip запущен", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.toast_gossip_started), Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(context, "шибка запуска gossip", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.toast_gossip_failed), Toast.LENGTH_SHORT).show()
             }
             // ерезагрузить UI чтобы показать обновлённое количество пиров
             loadSettings()

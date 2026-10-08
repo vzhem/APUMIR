@@ -298,7 +298,7 @@ fun ChatDetailScreen(
                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
                     as ClipboardManager
                 clipboard.setPrimaryClip(ClipData.newPlainText("Узел", contactId))
-                Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
             },
         )
     }
@@ -900,7 +900,7 @@ fun ChatDetailScreen(
                             as ClipboardManager
                         val clip = ClipData.newPlainText("Сообщение", message.content)
                         clipboard.setPrimaryClip(clip)
-                        Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
                         showCopyDialog = null
                         resetSelection()
                     }
@@ -1016,7 +1016,7 @@ fun ChatDetailScreen(
                         if (ok) {
                             fwdSent = true
                         } else {
-                            Toast.makeText(fCtx, "Не удалось переслать", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(fCtx, fCtx.getString(R.string.toast_forward_failed), Toast.LENGTH_SHORT).show()
                         }
                     }
                 } else {
@@ -1042,7 +1042,7 @@ fun ChatDetailScreen(
                         if (ok) {
                             fwdSent = true
                         } else {
-                            Toast.makeText(fCtx, "Не удалось переслать", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(fCtx, fCtx.getString(R.string.toast_forward_failed), Toast.LENGTH_SHORT).show()
                         }
                     }
                 },

@@ -198,7 +198,7 @@ fun SettingsScreen(
                     onMyQr = { showMyQrDialog = true },
                     onCopyLink = {
                         clipboardManager.setText(AnnotatedString(uiState.inviteLink))
-                        android.widget.Toast.makeText(contextForToast, "Ссылка скопирована", android.widget.Toast.LENGTH_SHORT).show()
+                        android.widget.Toast.makeText(contextForToast, contextForToast.getString(R.string.toast_link_copied), android.widget.Toast.LENGTH_SHORT).show()
                     },
                     onUsername = { showUsernameDialog = true },
                     onEditName = { showNameDialog = true },

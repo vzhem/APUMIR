@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.channels
 
+import com.vladimir.messenger.R
 import androidx.compose.material3.HorizontalDivider
 import com.vladimir.messenger.data.local.MessagePinPolicy
 
@@ -444,7 +445,7 @@ fun ChannelScreen(
                             val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                                 as android.content.ClipboardManager
                             clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Узел", inspectedPeerId))
-                            Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
                         },
                     )
                 }
@@ -490,7 +491,7 @@ fun ChannelScreen(
                                     val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                                         as android.content.ClipboardManager
                                     clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Посты", combined))
-                                    Toast.makeText(context, "Скопировано ($selCount)", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, context.getString(R.string.toast_copied_count, selCount), Toast.LENGTH_SHORT).show()
                                     viewModel.clearPostSelection()
                                 },
                                 modifier = Modifier.size(36.dp),
@@ -777,7 +778,7 @@ fun ChannelScreen(
                         if (ok) {
                             fwdSent = true
                         } else {
-                            Toast.makeText(fCtx, "Не удалось переслать", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(fCtx, fCtx.getString(R.string.toast_forward_failed), Toast.LENGTH_SHORT).show()
                         }
                     }
                 } else {
@@ -803,7 +804,7 @@ fun ChannelScreen(
                         if (ok) {
                             fwdSent = true
                         } else {
-                            Toast.makeText(fCtx, "Не удалось переслать", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(fCtx, fCtx.getString(R.string.toast_forward_failed), Toast.LENGTH_SHORT).show()
                         }
                     }
                 },
