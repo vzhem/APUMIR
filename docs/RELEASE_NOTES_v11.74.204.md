@@ -1,4 +1,4 @@
-# APU v11.74.203 — фирменные элементы управления и удобные логи
+# APU v11.74.204 — фирменные элементы управления и удобные логи
 
 Кнопки и элементы выбора приведены к единому стилю APU, а окно «Логи» стало удобнее на небольших экранах.
 
@@ -7,4 +7,4 @@
 - В окне «Логи» действия «Отправить», «Скопировать», «Обновить» и «Закрыть» теперь помещаются на узком экране.
 - Сводка и полный отчёт стали проще для просмотра; правила приватности диагностики сохранены.
 
-[Скачать APK](https://github.com/vzhem/APUMIR/releases/download/v11.74.203/app-release.apk) · [SHA-256](https://github.com/vzhem/APUMIR/releases/download/v11.74.203/SHA256SUMS.txt)
+[Скачать APK](https://github.com/vzhem/APUMIR/releases/download/v11.74.204/app-release.apk) · [SHA-256](https://github.com/vzhem/APUMIR/releases/download/v11.74.204/SHA256SUMS.txt)
