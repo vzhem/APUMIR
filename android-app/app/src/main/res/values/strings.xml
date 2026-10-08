@@ -451,4 +451,19 @@
     <string name="channel_poll">Опрос к посту</string>
     <string name="channel_remove">Убрать</string>
     <string name="channel_attach_poll">Прикрепить опрос</string>
+    <!-- Групповой чат -->
+    <string name="group_chat_manage">Управление группой</string>
+    <string name="group_new_topic">Новая тема</string>
+    <string name="group_message_placeholder">Сообщение</string>
+    <string name="group_edit_topic">Редактирование темы</string>
+    <string name="group_search_requests">Поиск заявок</string>
+    <string name="group_no_requests">Заявок пока нет</string>
+    <string name="group_accept">Принять в группу</string>
+    <string name="group_topic_closed">Тема закрыта</string>
+    <string name="group_message_image">Картинка из сообщения</string>
+    <string name="group_reply">Ответить</string>
+    <string name="group_delete_for_me">Удалить только у себя</string>
+    <string name="group_pinned">Закреплено</string>
+    <string name="group_topic_name">Название темы</string>
+    <string name="group_cancel_reply">Отменить ответ</string>
 </resources>

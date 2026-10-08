@@ -9,6 +9,7 @@ package com.vladimir.messenger.ui.screens.groups
 // выбранной группы идут вертикальным списком, каждая в своём пузыре,
 // и у каждой — бейдж непрочитанных. Нажатие на тему открывает ленту.
 
+import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
 import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
@@ -676,7 +677,7 @@ fun GroupChatScreen(
                 },
                 navigationIcon = {
                     ApuTextAction(
-                        label = "Назад",
+                        label = stringResource(R.string.action_back),
                         onClick = {
 
                         if (hasTopics && showFeed) showFeed = false else onBackClick()
@@ -685,19 +686,19 @@ fun GroupChatScreen(
                 },
                 actions = {
                     IconButton(onClick = { onOpenAdmin(uiState.groupId) }) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Управление группой")
+                        Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.group_chat_manage))
                     }
                     // Действия группы/канала и уведомлений собраны в «три точки».
                     Box {
                         IconButton(onClick = { showTopMenu = true }) {
-                            Icon(Icons.Filled.MoreVert, contentDescription = "Ещё")
+                            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.chat_more))
                         }
                         ApuActionsMenu(
                             expanded = showTopMenu,
                             onDismiss = { showTopMenu = false },
                             actions = listOf(
                                 ApuAction(
-                                    title = if (notificationsMuted) "Включить уведомления" else "Отключить уведомления",
+                                    title = if (notificationsMuted) stringResource(R.string.menu_unmute) else stringResource(R.string.menu_mute),
                                     icon = if (notificationsMuted) {
                                         Icons.Default.NotificationsActive
                                     } else {
@@ -705,7 +706,7 @@ fun GroupChatScreen(
                                     },
                                     onClick = { showNotificationMuteDialog = true },
                                 ),
-                                ApuAction("Пригласить по QR коду", Icons.Filled.QrCode2) {
+                                ApuAction(stringResource(R.string.channel_invite_qr), Icons.Filled.QrCode2) {
                                     showQrInvite = true
                                 },
                             ),
@@ -799,7 +800,7 @@ fun GroupChatScreen(
                                         tint = Color(0xFF5A6472),
                                     )
                                     Spacer(Modifier.width(8.dp))
-                                    Text("Новая тема", color = Color(0xFF5A6472))
+                                    Text(stringResource(R.string.group_new_topic), color = Color(0xFF5A6472))
                                 }
                             }
                         }
@@ -886,7 +887,7 @@ fun GroupChatScreen(
                                         ) {
                                             Icon(
                                                 Icons.Filled.Close,
-                                                contentDescription = "Открепить",
+                                                contentDescription = stringResource(R.string.channel_unpin),
                                                 modifier = Modifier.size(16.dp),
                                             )
                                         }
@@ -920,7 +921,7 @@ fun GroupChatScreen(
                         ) {
                             Icon(
                                 Icons.Filled.Close,
-                                contentDescription = "Снять выделение",
+                                contentDescription = stringResource(R.string.channel_clear_selection),
                                 tint = ApuBubbleTextColor,
                             )
                         }
@@ -947,7 +948,7 @@ fun GroupChatScreen(
                         ) {
                             Icon(
                                 Icons.Filled.ContentCopy,
-                                contentDescription = "Скопировать выбранные",
+                                contentDescription = stringResource(R.string.channel_copy_selected),
                                 tint = ApuBubbleAccentColor,
                             )
                         }
@@ -957,7 +958,7 @@ fun GroupChatScreen(
                         ) {
                             Icon(
                                 Icons.Filled.Delete,
-                                contentDescription = "Удалить выбранные",
+                                contentDescription = stringResource(R.string.channel_delete_selected),
                                 tint = ApuSettingsDangerColor,
                             )
                         }
@@ -1117,7 +1118,7 @@ fun GroupChatScreen(
                         Text(GroupFileMarker.formatSize(staged.sizeBytes), style = MaterialTheme.typography.labelSmall, color = ApuBubbleMutedColor)
                     }
                     IconButton(onClick = { viewModel.clearStagedFile() }, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Filled.Close, contentDescription = "Убрать файл", modifier = Modifier.size(16.dp), tint = ApuBubbleMutedColor)
+                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.channel_remove_file), modifier = Modifier.size(16.dp), tint = ApuBubbleMutedColor)
                     }
                 }
             }
@@ -1252,7 +1253,7 @@ fun GroupChatScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .onFocusChanged { inputFocused = it.isFocused },
-                        placeholder = { Text("Сообщение") },
+                        placeholder = { Text(stringResource(R.string.group_message_placeholder)) },
                         minLines = 1,
                         maxLines = 6,
                     )
@@ -1322,8 +1323,8 @@ fun GroupChatScreen(
     if (showEditTopic && selectedTopic != null) {
         val topic = selectedTopic
         NewTopicDialog(
-            title = "Редактирование темы",
-            confirmLabel = "Сохранить",
+            title = stringResource(R.string.group_edit_topic),
+            confirmLabel = stringResource(R.string.admin_save),
             initialName = topic.name,
             initialIcon = topic.iconEmoji.ifBlank { TopicIconCatalog.DEFAULT },
             onDismiss = { showEditTopic = false },
@@ -1599,7 +1600,7 @@ private fun JoinRequestsSheet(
         ApuSearchField(
             value = query,
             onValueChange = onQuery,
-            placeholder = "Поиск заявок",
+            placeholder = stringResource(R.string.group_search_requests),
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(8.dp))
@@ -1610,7 +1611,7 @@ private fun JoinRequestsSheet(
         }
         if (filtered.isEmpty()) {
             Text(
-                if (requests.isEmpty()) "Заявок пока нет" else "Никого не нашли по «" + clean + "»",
+                if (requests.isEmpty()) stringResource(R.string.group_no_requests) else "Никого не нашли по «" + clean + "»",
                 color = Color(0xFF5A6472),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1676,9 +1677,9 @@ private fun JoinRequestRow(
                 onClick = { onDecide(request.nodeId, true) },
                 style = DiagnosticsActionStyle.PRIMARY,
             ) {
-                Text("Принять в группу")
+                Text(stringResource(R.string.group_accept))
             }
-            ApuTextAction(label = "Отклонить", onClick = { onDecide(request.nodeId, false) })
+            ApuTextAction(label = stringResource(R.string.admin_reject), onClick = { onDecide(request.nodeId, false) })
         }
     }
 }
@@ -1737,7 +1738,7 @@ private fun TopicBubble(topic: TopicSummary, onClick: () -> Unit) {
                         Spacer(Modifier.width(4.dp))
                         Icon(
                             Icons.Filled.Lock,
-                            contentDescription = "Тема закрыта",
+                            contentDescription = stringResource(R.string.group_topic_closed),
                             modifier = Modifier.size(12.dp),
                             tint = Color(0xFF5A6472),
                         )
@@ -2021,7 +2022,7 @@ private fun MessageBubble(
                     attachedBitmap != null -> {
                         androidx.compose.foundation.Image(
                             bitmap = attachedBitmap.asImageBitmap(),
-                            contentDescription = "Картинка из сообщения",
+                            contentDescription = stringResource(R.string.group_message_image),
                             contentScale = androidx.compose.ui.layout.ContentScale.FillWidth,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -2034,7 +2035,7 @@ private fun MessageBubble(
                     }
                     imageUrl != null -> ImagePreview(
                         model = imageUrl,
-                        contentDescription = "Картинка из сообщения",
+                        contentDescription = stringResource(R.string.group_message_image),
                         modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
                     )
                     // Пост из одних фотографий: сами фото - в ленте канала, а
@@ -2059,15 +2060,15 @@ private fun MessageBubble(
                         // Раунд 211: в точках карточки - весь функционал
                         // сообщения, как у текстовых пузырей.
                         messageActions = buildList {
-                            add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
+                            add(ApuAction(stringResource(R.string.channel_share_in_apu), Icons.Filled.Send) { onShareToApu() })
                             // р250: ответ - и в меню карточки файла (точки
                             // на вложении ведут в то же меню, что и пузырь).
-                            add(ApuAction("Ответить", Icons.AutoMirrored.Filled.Reply) { onReply() })
-                            add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
-                            add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
+                            add(ApuAction(stringResource(R.string.group_reply), Icons.AutoMirrored.Filled.Reply) { onReply() })
+                            add(ApuAction(stringResource(R.string.channel_add_reaction), Icons.Filled.EmojiEmotions) { showReactions = true })
+                            add(ApuAction(stringResource(R.string.channel_to_favorites), Icons.Filled.Star) { onSaveToFavorites() })
                             // Раунд 212 (аудит: в личке «Копировать всё» есть,
                             // тут не было) - текст сообщения в буфер обмена.
-                            add(ApuAction("Копировать текст", Icons.Filled.ContentCopy) {
+                            add(ApuAction(stringResource(R.string.channel_copy_text), Icons.Filled.ContentCopy) {
                                 val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                                     as android.content.ClipboardManager
                                 clipboard.setPrimaryClip(
@@ -2076,18 +2077,18 @@ private fun MessageBubble(
                                 Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
                             })
                             if (!message.isFromMe) {
-                                add(ApuAction("Профиль и репутация", Icons.Filled.Person) { onOpenAuthorProfile() })
+                                add(ApuAction(stringResource(R.string.channel_profile_reputation), Icons.Filled.Person) { onOpenAuthorProfile() })
                             }
                             add(
                                 ApuAction(
-                                    if (isSelected) "Снять выбор" else "Выбрать несколько",
+                                    if (isSelected) stringResource(R.string.channel_deselect) else stringResource(R.string.channel_select_many),
                                     Icons.Filled.CheckCircle,
                                 ) { onToggleSelect() }
                             )
                             if (canPin) {
                                 add(
                                     ApuAction(
-                                        if (message.isPinned) "Открепить" else "Закрепить",
+                                        if (message.isPinned) stringResource(R.string.channel_unpin) else stringResource(R.string.channel_pin),
                                         Icons.Filled.PushPin,
                                     ) { onTogglePin() }
                                 )
@@ -2095,13 +2096,13 @@ private fun MessageBubble(
                             if (canModerate || message.isFromMe) {
                                 add(
                                     ApuAction(
-                                        if (canModerate && !message.isFromMe) "Удалить и модерация…" else "Удалить…",
+                                        if (canModerate && !message.isFromMe) stringResource(R.string.channel_delete_moderate) else stringResource(R.string.channel_delete_ellipsis),
                                         Icons.Filled.Delete,
                                         destructive = true,
                                     ) { onDeleteForAll() }
                                 )
                             }
-                            add(ApuAction("Удалить только у себя", Icons.Filled.Delete, destructive = true) { onDeleteForMe() })
+                            add(ApuAction(stringResource(R.string.group_delete_for_me), Icons.Filled.Delete, destructive = true) { onDeleteForMe() })
                         },
                     )
                 }
@@ -2119,7 +2120,7 @@ private fun MessageBubble(
                     Text(time, style = MaterialTheme.typography.labelSmall, color = bubbleTextColor.copy(alpha = 0.65f))
                     if (message.isPinned) {
                         Spacer(Modifier.width(4.dp))
-                        Icon(Icons.Filled.PushPin, contentDescription = "Закреплено", modifier = Modifier.size(12.dp))
+                        Icon(Icons.Filled.PushPin, contentDescription = stringResource(R.string.group_pinned), modifier = Modifier.size(12.dp))
                     }
                 }
                 com.vladimir.messenger.ui.components.ReactionRow(
@@ -2133,13 +2134,13 @@ private fun MessageBubble(
             expanded = showMenu,
             onDismiss = { showMenu = false },
             actions = buildList {
-                add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
+                add(ApuAction(stringResource(R.string.channel_share_in_apu), Icons.Filled.Send) { onShareToApu() })
                 // р250: ответ - первым пунктом, как в привычных мессенджерах.
-                add(ApuAction("Ответить", Icons.AutoMirrored.Filled.Reply) { onReply() })
-                add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
-                add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
+                add(ApuAction(stringResource(R.string.group_reply), Icons.AutoMirrored.Filled.Reply) { onReply() })
+                add(ApuAction(stringResource(R.string.channel_add_reaction), Icons.Filled.EmojiEmotions) { showReactions = true })
+                add(ApuAction(stringResource(R.string.channel_to_favorites), Icons.Filled.Star) { onSaveToFavorites() })
                 // Раунд 212: копирование - как в личном чате («Копировать всё»).
-                add(ApuAction("Копировать текст", Icons.Filled.ContentCopy) {
+                add(ApuAction(stringResource(R.string.channel_copy_text), Icons.Filled.ContentCopy) {
                     val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                         as android.content.ClipboardManager
                     clipboard.setPrimaryClip(
@@ -2148,11 +2149,11 @@ private fun MessageBubble(
                     Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
                 })
                 if (!message.isFromMe) {
-                    add(ApuAction("Профиль и репутация", Icons.Filled.Person) { onOpenAuthorProfile() })
+                    add(ApuAction(stringResource(R.string.channel_profile_reputation), Icons.Filled.Person) { onOpenAuthorProfile() })
                 }
                 add(
                     ApuAction(
-                        if (isSelected) "Снять выбор" else "Выбрать несколько",
+                        if (isSelected) stringResource(R.string.channel_deselect) else stringResource(R.string.channel_select_many),
                         Icons.Filled.CheckCircle,
                     ) { onToggleSelect() }
                 )
@@ -2161,7 +2162,7 @@ private fun MessageBubble(
                 if (canPin) {
                     add(
                         ApuAction(
-                            if (message.isPinned) "Открепить" else "Закрепить",
+                            if (message.isPinned) stringResource(R.string.channel_unpin) else stringResource(R.string.channel_pin),
                             Icons.Filled.PushPin,
                         ) { onTogglePin() }
                     )
@@ -2170,13 +2171,13 @@ private fun MessageBubble(
                 if (canModerate || message.isFromMe) {
                     add(
                         ApuAction(
-                            if (canModerate && !message.isFromMe) "Удалить и модерация…" else "Удалить…",
+                            if (canModerate && !message.isFromMe) stringResource(R.string.channel_delete_moderate) else stringResource(R.string.channel_delete_ellipsis),
                             Icons.Filled.Delete,
                             destructive = true,
                         ) { onDeleteForAll() }
                     )
                 }
-                add(ApuAction("Удалить только у себя", Icons.Filled.Delete, destructive = true) { onDeleteForMe() })
+                add(ApuAction(stringResource(R.string.group_delete_for_me), Icons.Filled.Delete, destructive = true) { onDeleteForMe() })
             },
         )
         if (showReactions) {
@@ -2206,7 +2207,7 @@ private fun MessageBubble(
             IconButton(onClick = onTogglePin, modifier = Modifier.size(28.dp)) {
                 Icon(
                     Icons.Filled.PushPin,
-                    contentDescription = if (message.isPinned) "Открепить" else "Закрепить",
+                    contentDescription = if (message.isPinned) stringResource(R.string.channel_unpin) else stringResource(R.string.channel_pin),
                     modifier = Modifier.size(16.dp),
                 )
             }
@@ -2243,7 +2244,7 @@ private fun NewTopicDialog(
                 ApuBubbleField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Название темы") },
+                    label = { Text(stringResource(R.string.group_topic_name)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -2352,7 +2353,7 @@ private fun NewTopicDialog(
                 enabled = name.isNotBlank(),
             )
         },
-        dismissButton = { ApuTextAction(label = "Отмена", onClick = onDismiss) },
+        dismissButton = { ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss) },
     )
 }
 
@@ -2461,7 +2462,7 @@ private fun ReplyStrip(
         IconButton(onClick = onClear, modifier = Modifier.size(28.dp)) {
             Icon(
                 Icons.Filled.Close,
-                contentDescription = "Отменить ответ",
+                contentDescription = stringResource(R.string.group_cancel_reply),
                 modifier = Modifier.size(16.dp),
                 tint = ApuBubbleMutedColor,
             )

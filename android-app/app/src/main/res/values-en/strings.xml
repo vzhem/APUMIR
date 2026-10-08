@@ -442,4 +442,19 @@
     <string name="channel_poll">Poll for the post</string>
     <string name="channel_remove">Remove</string>
     <string name="channel_attach_poll">Attach poll</string>
+    <!-- Group chat -->
+    <string name="group_chat_manage">Manage group</string>
+    <string name="group_new_topic">New topic</string>
+    <string name="group_message_placeholder">Message</string>
+    <string name="group_edit_topic">Edit topic</string>
+    <string name="group_search_requests">Search requests</string>
+    <string name="group_no_requests">No requests yet</string>
+    <string name="group_accept">Accept into the group</string>
+    <string name="group_topic_closed">Topic closed</string>
+    <string name="group_message_image">Image from message</string>
+    <string name="group_reply">Reply</string>
+    <string name="group_delete_for_me">Delete for me only</string>
+    <string name="group_pinned">Pinned</string>
+    <string name="group_topic_name">Topic name</string>
+    <string name="group_cancel_reply">Cancel reply</string>
 </resources>
