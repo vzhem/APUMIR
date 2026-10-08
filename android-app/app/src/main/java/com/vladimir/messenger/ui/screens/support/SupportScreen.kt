@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.support
 
+import com.vladimir.messenger.R
+import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuSettingsCard
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
 
@@ -112,10 +114,10 @@ fun SupportScreen(
                         containerColor = Color.Transparent,
                         scrolledContainerColor = Color.Transparent,
                     ),
-                    title = { ApuSettingsHeader("Поддержать разработчика") },
+                    title = { ApuSettingsHeader(stringResource(R.string.support_title)) },
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                         }
                     },
                 )
@@ -129,42 +131,33 @@ fun SupportScreen(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     // ── 1. Зачем ──────────────────────────────────────────
-                    item { SectionTitle("Зачем нужны самостоятельные переводы") }
+                    item { SectionTitle(stringResource(R.string.support_why_title)) }
                     item {
                         // Фирменный пузырь-подсказка: как на других экранах
                         // настроек («Зачем это нужно»).
                         HintBubble {
                             Column {
                                 Text(
-                                    "APU бесплатный и без рекламы",
+                                    stringResource(R.string.support_free_title),
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.SemiBold,
                                     color = HintBubbleTextColor,
                                 )
                                 Spacer(Modifier.height(6.dp))
                                 Text(
-                                    "Внутри нет подписок, рекламы и продажи данных. " +
-                                        "Приложение распространяется напрямую, минуя " +
-                                        "магазины, - поэтому встроенных покупок нет, " +
-                                        "а каждый перевод доходит до разработчика " +
-                                        "целиком: магазин удерживал бы 15–30%. " +
-                                        "Самостоятельный перевод - самый выгодный " +
-                                        "для проекта способ, без посредников.",
+                                    stringResource(R.string.support_free_body),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = HintBubbleMutedColor,
                                 )
                                 Spacer(Modifier.height(6.dp))
                                 Text(
-                                    "На что идут переводы: релеи для связи в сложных " +
-                                        "сетях, хранение резервных копий, поиск гифок, " +
-                                        "работа над приложением.",
+                                    stringResource(R.string.support_use_body),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = HintBubbleMutedColor,
                                 )
                                 Spacer(Modifier.height(6.dp))
                                 Text(
-                                    "Поддержка добровольна и ни на что не влияет: " +
-                                        "все функции одинаковы у всех.",
+                                    stringResource(R.string.support_voluntary),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = HintBubbleMutedColor,
                                 )
@@ -173,31 +166,29 @@ fun SupportScreen(
                     }
 
                     // ── 2. Способы перевода ───────────────────────────────
-                    item { SectionTitle("Способы перевода") }
+                    item { SectionTitle(stringResource(R.string.support_ways_title)) }
                     if (uiState.loading) {
-                        item { DraftBubble("Загружаем способы…") }
+                        item { DraftBubble(stringResource(R.string.support_loading)) }
                     } else if (uiState.ways.isEmpty()) {
                         item {
                             // Черновое состояние: реквизиты ещё не опубликованы.
                             HintBubble {
                                 Column {
                                     Text(
-                                        "Список ещё настраивается",
+                                        stringResource(R.string.support_list_pending),
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.SemiBold,
                                         color = HintBubbleTextColor,
                                     )
                                     Spacer(Modifier.height(6.dp))
                                     Text(
-                                        "Это черновик раздела. Здесь появятся способы " +
-                                            "перевода, когда они будут добавлены в сервис.",
+                                        stringResource(R.string.support_draft_note),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = HintBubbleMutedColor,
                                     )
                                     Spacer(Modifier.height(6.dp))
                                     Text(
-                                        "Планируем: перевод по СБП, перевод на карту, " +
-                                            "криптопереводы для тех, кто вне России.",
+                                        stringResource(R.string.support_planned),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = HintBubbleMutedColor,
                                     )
@@ -223,11 +214,11 @@ fun SupportScreen(
                                         Spacer(Modifier.height(12.dp))
                                         // Золотой пузырь действия - фирменный стиль.
                                         ApuActionBubble(
-                                            label = "Скопировать",
+                                            label = stringResource(R.string.action_copy),
                                             icon = Icons.Default.ContentCopy,
                                             onClick = {
                                                 clipboard.setText(AnnotatedString(way.copyText))
-                                                toast = "Скопировано"
+                                                toast = context.getString(R.string.toast_copied)
                                             },
                                         )
                                     }
@@ -236,7 +227,7 @@ fun SupportScreen(
                         }
                         item {
                             Text(
-                                "Обновить список можно, закрыв и снова открыв этот экран.",
+                                stringResource(R.string.support_refresh_hint),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                             )
@@ -244,7 +235,7 @@ fun SupportScreen(
                     }
 
                     // ── 3. Ежемесячная поддержка ──────────────────────────
-                    item { SectionTitle("Поддерживать ежемесячно") }
+                    item { SectionTitle(stringResource(R.string.support_monthly_title)) }
                     item {
                         val reminder = uiState.reminder
                         ApuSettingsCard {
@@ -252,7 +243,7 @@ fun SupportScreen(
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
                                         Text(
-                                            "Напоминать о поддержке",
+                                            stringResource(R.string.support_remind),
                                             style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.SemiBold,
                                         )
@@ -271,7 +262,7 @@ fun SupportScreen(
                                 if (reminder.enabled) {
                                     Spacer(Modifier.height(12.dp))
                                     Text(
-                                        "Как часто напоминать",
+                                        stringResource(R.string.support_how_often),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -279,18 +270,18 @@ fun SupportScreen(
                                         FilterChip(
                                             selected = reminder.periodMonths == 1,
                                             onClick = { viewModel.setReminderPeriod(1) },
-                                            label = { Text("Раз в месяц") },
+                                            label = { Text(stringResource(R.string.support_every_month)) },
                                         )
                                         FilterChip(
                                             selected = reminder.periodMonths == 3,
                                             onClick = { viewModel.setReminderPeriod(3) },
-                                            label = { Text("Раз в 3 месяца") },
+                                            label = { Text(stringResource(R.string.support_every_3_months)) },
                                         )
                                     }
 
                                     Spacer(Modifier.height(12.dp))
                                     Text(
-                                        "День месяца: ${reminder.day}-е число",
+                                        stringResource(R.string.support_reminder_day, reminder.day),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -303,11 +294,11 @@ fun SupportScreen(
 
                                     // Золотой пузырь действия - фирменный стиль.
                                     ApuActionBubble(
-                                        label = "Показать пример напоминания",
+                                        label = stringResource(R.string.support_show_example),
                                         icon = Icons.Default.Favorite,
                                         onClick = {
                                             viewModel.sendTestNotification()
-                                            toast = "Пример отправлен в уведомления"
+                                            toast = context.getString(R.string.support_example_sent)
                                         },
                                     )
                                 }
@@ -320,18 +311,14 @@ fun SupportScreen(
                         HintBubble {
                             Column {
                                 Text(
-                                    "Безопасно",
+                                    stringResource(R.string.support_safe_title),
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.SemiBold,
                                     color = HintBubbleTextColor,
                                 )
                                 Spacer(Modifier.height(6.dp))
                                 Text(
-                                    "APU сам ничего не списывает и платёжных данных не " +
-                                        "хранит: напоминание - обычное локальное " +
-                                        "уведомление, никуда не ходит. Перевод вы делаете " +
-                                        "сами в своём банке; там же, если захотите, можно " +
-                                        "включить его регулярным (автоплатёж).",
+                                    stringResource(R.string.support_safe_body),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = HintBubbleMutedColor,
                                 )
@@ -342,8 +329,7 @@ fun SupportScreen(
                     // ── Подвал-пометка черновика ──────────────────────────
                     item {
                         Text(
-                            "Раздел в разработке (черновик). Личные данные разработчика " +
-                                "в приложении нигде не хранятся.",
+                            stringResource(R.string.support_dev_note),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
                         )

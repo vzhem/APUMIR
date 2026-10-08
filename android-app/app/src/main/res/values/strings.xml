@@ -274,4 +274,28 @@
     <string name="groups_direct_join">Вход сразу</string>
     <string name="groups_subscribe">Подписаться</string>
     <string name="groups_join_btn">Вступить</string>
+    <!-- Поддержка -->
+    <string name="support_dev_note">Раздел в разработке (черновик). Личные данные разработчика в приложении нигде не хранятся.</string>
+    <string name="support_safe_body">APU сам ничего не списывает и платёжных данных не хранит: напоминание - обычное локальное уведомление, никуда не ходит. Перевод вы делаете сами в своём банке; там же, если захотите, можно включить его регулярным (автоплатёж).</string>
+    <string name="support_safe_title">Безопасно</string>
+    <string name="support_example_sent">Пример отправлен в уведомления</string>
+    <string name="support_show_example">Показать пример напоминания</string>
+    <string name="support_reminder_day">День месяца: %1$d-е число</string>
+    <string name="support_every_3_months">Раз в 3 месяца</string>
+    <string name="support_every_month">Раз в месяц</string>
+    <string name="support_how_often">Как часто напоминать</string>
+    <string name="support_remind">Напоминать о поддержке</string>
+    <string name="support_monthly_title">Поддерживать ежемесячно</string>
+    <string name="support_refresh_hint">Обновить список можно, закрыв и снова открыв этот экран.</string>
+    <string name="support_planned">Планируем: перевод по СБП, перевод на карту, криптопереводы для тех, кто вне России.</string>
+    <string name="support_draft_note">Это черновик раздела. Здесь появятся способы перевода, когда они будут добавлены в сервис.</string>
+    <string name="support_list_pending">Список ещё настраивается</string>
+    <string name="support_loading">Загружаем способы…</string>
+    <string name="support_ways_title">Способы перевода</string>
+    <string name="support_voluntary">Поддержка добровольна и ни на что не влияет: все функции одинаковы у всех.</string>
+    <string name="support_use_body">На что идут переводы: релеи для связи в сложных сетях, хранение резервных копий, поиск гифок, работа над приложением.</string>
+    <string name="support_free_body">Внутри нет подписок, рекламы и продажи данных. Приложение распространяется напрямую, минуя магазины, - поэтому встроенных покупок нет, а каждый перевод доходит до разработчика целиком: магазин удерживал бы 15–30%. Самостоятельный перевод - самый выгодный для проекта способ, без посредников.</string>
+    <string name="support_free_title">APU бесплатный и без рекламы</string>
+    <string name="support_why_title">Зачем нужны самостоятельные переводы</string>
+    <string name="support_title">Поддержать разработчика</string>
 </resources>

@@ -265,4 +265,28 @@
     <string name="groups_direct_join">Join directly</string>
     <string name="groups_subscribe">Subscribe</string>
     <string name="groups_join_btn">Join</string>
+    <!-- Support -->
+    <string name="support_dev_note">This section is under development (draft). The developer’s personal data is not stored anywhere in the app.</string>
+    <string name="support_safe_body">APU does not charge anything and does not store payment data: the reminder is an ordinary local notification and goes nowhere. You make the transfer yourself in your bank; there too, if you want, you can set it up as a regular payment (auto-pay).</string>
+    <string name="support_safe_title">Safe</string>
+    <string name="support_example_sent">Sample sent to notifications</string>
+    <string name="support_show_example">Show a sample reminder</string>
+    <string name="support_reminder_day">Day of the month: %1$d</string>
+    <string name="support_every_3_months">Every 3 months</string>
+    <string name="support_every_month">Every month</string>
+    <string name="support_how_often">How often to remind</string>
+    <string name="support_remind">Remind me to support</string>
+    <string name="support_monthly_title">Support monthly</string>
+    <string name="support_refresh_hint">You can refresh the list by closing and reopening this screen.</string>
+    <string name="support_planned">Planned: bank transfer via SBP, card transfer, and crypto donations for people outside Russia.</string>
+    <string name="support_draft_note">This is a draft section. Donation options will appear here once they are added to the service.</string>
+    <string name="support_list_pending">The list is still being set up</string>
+    <string name="support_loading">Loading options…</string>
+    <string name="support_ways_title">Ways to donate</string>
+    <string name="support_voluntary">Support is voluntary and changes nothing: all features are the same for everyone.</string>
+    <string name="support_use_body">Donations go to: relays for connectivity on complex networks, storage of backups, GIF search, and work on the app.</string>
+    <string name="support_free_body">There are no subscriptions, ads, or data sales inside. The app is distributed directly, bypassing app stores, so there are no in-app purchases. Every donation reaches the developer in full: a store would keep 15–30%. A direct donation is the most effective way to support the project, with no middlemen.</string>
+    <string name="support_free_title">APU is free and ad-free</string>
+    <string name="support_why_title">Why voluntary donations matter</string>
+    <string name="support_title">Support the developer</string>
 </resources>
