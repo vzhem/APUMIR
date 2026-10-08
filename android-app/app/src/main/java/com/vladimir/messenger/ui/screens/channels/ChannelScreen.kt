@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.channels
 
+import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
 import androidx.compose.material3.HorizontalDivider
 import com.vladimir.messenger.data.local.MessagePinPolicy
@@ -228,7 +229,7 @@ fun ChannelScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                     }
                 },
                 actions = {
@@ -236,13 +237,13 @@ fun ChannelScreen(
                     // ссылки, заявки, статистика и разрешения.
                     if (uiState.canPost) {
                         IconButton(onClick = { onOpenAdmin(uiState.channelId) }) {
-                            Icon(Icons.Default.Settings, contentDescription = "Админ-кабинет")
+                            Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.channel_admin_cabinet))
                         }
                     }
                     // «Три точки» канала: пауза уведомлений и приглашение по QR.
                     Box {
                         IconButton(onClick = { showTopMenu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "Ещё")
+                            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.chat_more))
                         }
                         ApuActionsMenu(
                             expanded = showTopMenu,
@@ -250,9 +251,9 @@ fun ChannelScreen(
                             actions = listOf(
                                 ApuAction(
                                     title = if ((uiState.channel?.mutedUntilMs ?: 0L) > System.currentTimeMillis()) {
-                                        "Включить уведомления"
+                                        stringResource(R.string.menu_unmute)
                                     } else {
-                                        "Отключить уведомления"
+                                        stringResource(R.string.menu_mute)
                                     },
                                     icon = if ((uiState.channel?.mutedUntilMs ?: 0L) > System.currentTimeMillis()) {
                                         Icons.Default.NotificationsActive
@@ -261,7 +262,7 @@ fun ChannelScreen(
                                     },
                                     onClick = { showNotificationMuteDialog = true },
                                 ),
-                                ApuAction("Пригласить по QR коду", Icons.Filled.QrCode2) {
+                                ApuAction(stringResource(R.string.channel_invite_qr), Icons.Filled.QrCode2) {
                                     showQrInvite = true
                                 },
                             ),
@@ -275,7 +276,7 @@ fun ChannelScreen(
                 ApuPremiumFloatingActionButton(
                     onClick = { showNewPost = true },
                     icon = Icons.Default.Add,
-                    contentDescription = "Новый пост",
+                    contentDescription = stringResource(R.string.channel_new_post),
                 )
             }
         },
@@ -298,7 +299,7 @@ fun ChannelScreen(
                         .padding(24.dp),
                 ) {
                     Text(
-                        "Канал недоступен: вы в нём больше не состоите.",
+                        stringResource(R.string.channel_unavailable),
                         textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.bodyMedium,
                         color = HintBubbleTextColor,
@@ -314,9 +315,9 @@ fun ChannelScreen(
                 ) {
                     Text(
                         if (uiState.canPost) {
-                            "Постов пока нет. Нажмите «+», чтобы опубликовать первый."
+                            stringResource(R.string.channel_no_posts_hint)
                         } else {
-                            "В канале пока нет постов."
+                            stringResource(R.string.channel_empty)
                         },
                         textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.bodyMedium,
@@ -471,7 +472,7 @@ fun ChannelScreen(
                             ) {
                                 Icon(
                                     Icons.Filled.Close,
-                                    contentDescription = "Снять выделение",
+                                    contentDescription = stringResource(R.string.channel_clear_selection),
                                     tint = ApuBubbleTextColor,
                                 )
                             }
@@ -498,7 +499,7 @@ fun ChannelScreen(
                             ) {
                                 Icon(
                                     Icons.Filled.ContentCopy,
-                                    contentDescription = "Скопировать выбранные",
+                                    contentDescription = stringResource(R.string.channel_copy_selected),
                                     tint = ApuBubbleAccentColor,
                                 )
                             }
@@ -509,7 +510,7 @@ fun ChannelScreen(
                                 ) {
                                     Icon(
                                         Icons.Filled.Delete,
-                                        contentDescription = "Удалить выбранные",
+                                        contentDescription = stringResource(R.string.channel_delete_selected),
                                         tint = ApuSettingsDangerColor,
                                     )
                                 }
@@ -563,7 +564,7 @@ fun ChannelScreen(
                                         IconButton(onClick = { viewModel.togglePostPin(pinnedPost) }) {
                                             Icon(
                                                 androidx.compose.material.icons.Icons.Filled.Close,
-                                                contentDescription = "Открепить",
+                                                contentDescription = stringResource(R.string.channel_unpin),
                                                 modifier = Modifier.size(16.dp),
                                             )
                                         }
@@ -686,8 +687,8 @@ fun ChannelScreen(
     ) { uri -> uri?.let(viewModel::onFileSelected) }
     if (showNewPost) {
         PostEditorDialog(
-            title = "Новый пост",
-            confirmLabel = "Опубликовать",
+            title = stringResource(R.string.channel_new_post),
+            confirmLabel = stringResource(R.string.channel_publish),
             creating = uiState.creating,
             onDismiss = {
                 showNewPost = false
@@ -711,8 +712,8 @@ fun ChannelScreen(
     // не меняем - они уже разошлись по подписчикам отдельными пакетами.
     editingPost?.let { post ->
         PostEditorDialog(
-            title = "Изменить пост",
-            confirmLabel = "Сохранить",
+            title = stringResource(R.string.channel_edit_post),
+            confirmLabel = stringResource(R.string.admin_save),
             initialText = post.text,
             initialImages = post.images,
             imagesEditable = false,
@@ -943,7 +944,7 @@ private fun PostCard(
                     IconButton(onClick = onTogglePin, modifier = Modifier.size(28.dp)) {
                         Icon(
                             androidx.compose.material.icons.Icons.Filled.PushPin,
-                            contentDescription = if (post.isPinned) "Открепить" else "Закрепить",
+                            contentDescription = if (post.isPinned) stringResource(R.string.channel_unpin) else stringResource(R.string.channel_pin),
                             tint = if (post.isPinned) {
                                 ApuBubbleAccentColor
                             } else {
@@ -959,7 +960,7 @@ private fun PostCard(
                     IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
                         Icon(
                             Icons.Default.Edit,
-                            contentDescription = "Изменить пост",
+                            contentDescription = stringResource(R.string.channel_edit_post),
                             tint = ApuBubbleMutedColor,
                             modifier = Modifier.size(18.dp),
                         )
@@ -972,7 +973,7 @@ private fun PostCard(
                     IconButton(onClick = { showPostMenu = true }, modifier = Modifier.size(32.dp)) {
                         Icon(
                             Icons.Default.MoreVert,
-                            contentDescription = "Действия с постом",
+                            contentDescription = stringResource(R.string.channel_post_actions),
                             tint = ApuBubbleMutedColor,
                             modifier = Modifier.size(18.dp),
                         )
@@ -984,30 +985,30 @@ private fun PostCard(
                         actions = buildList {
                             // Раунд 212: пересылка поста внутрь APU - раньше
                             // был только системный «Поделиться» наружу.
-                            add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
-                            add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
-                            add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
-                            add(ApuAction("Поделиться…", Icons.Filled.Share) { onSharePost() })
-                            add(ApuAction(if (post.isPinned) "Открепить" else "Закрепить", Icons.Filled.PushPin) { onTogglePin() })
+                            add(ApuAction(stringResource(R.string.channel_share_in_apu), Icons.Filled.Send) { onShareToApu() })
+                            add(ApuAction(stringResource(R.string.channel_add_reaction), Icons.Filled.EmojiEmotions) { showReactions = true })
+                            add(ApuAction(stringResource(R.string.channel_to_favorites), Icons.Filled.Star) { onSaveToFavorites() })
+                            add(ApuAction(stringResource(R.string.channel_share_ellipsis), Icons.Filled.Share) { onSharePost() })
+                            add(ApuAction(if (post.isPinned) stringResource(R.string.channel_unpin) else stringResource(R.string.channel_pin), Icons.Filled.PushPin) { onTogglePin() })
                             if (post.title.isNotBlank() || post.text.isNotBlank()) {
-                                add(ApuAction("Копировать текст", Icons.Filled.ContentCopy) { selectPostText = true })
+                                add(ApuAction(stringResource(R.string.channel_copy_text), Icons.Filled.ContentCopy) { selectPostText = true })
                             }
                             if (!isAuthorMe && post.authorId.isNotBlank()) {
-                                add(ApuAction("Профиль и репутация", Icons.Filled.Person) { onOpenAuthorProfile() })
+                                add(ApuAction(stringResource(R.string.channel_profile_reputation), Icons.Filled.Person) { onOpenAuthorProfile() })
                             }
                             add(
                                 ApuAction(
-                                    if (isSelected) "Снять выбор" else "Выбрать несколько",
+                                    if (isSelected) stringResource(R.string.channel_deselect) else stringResource(R.string.channel_select_many),
                                     Icons.Filled.CheckCircle,
                                 ) { onToggleSelect() }
                             )
                             if (canEdit) {
-                                add(ApuAction("Изменить пост", Icons.Filled.Edit) { onEdit() })
+                                add(ApuAction(stringResource(R.string.channel_edit_post), Icons.Filled.Edit) { onEdit() })
                             }
                             if (canModerate || canEdit) {
                                 add(
                                     ApuAction(
-                                        if (canModerate && !isAuthorMe) "Удалить и модерация…" else "Удалить…",
+                                        if (canModerate && !isAuthorMe) stringResource(R.string.channel_delete_moderate) else stringResource(R.string.channel_delete_ellipsis),
                                         Icons.Filled.Delete,
                                         destructive = true,
                                     ) { onDeletePost() }
@@ -1029,7 +1030,7 @@ private fun PostCard(
             if (imageUrl != null) {
                 ImagePreview(
                     model = imageUrl,
-                    contentDescription = "Картинка к посту",
+                    contentDescription = stringResource(R.string.channel_post_image),
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 260.dp)
@@ -1049,16 +1050,16 @@ private fun PostCard(
                     state = fileCard,
                     isFromMe = fileCard.isFromMe,
                     messageActions = buildList {
-                        add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
-                        add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
-                        add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
-                        add(ApuAction("Поделиться", Icons.Filled.Send) { onSharePost() })
-                        add(ApuAction(if (post.isPinned) "Открепить" else "Закрепить", Icons.Filled.PushPin) { onTogglePin() })
+                        add(ApuAction(stringResource(R.string.channel_share_in_apu), Icons.Filled.Send) { onShareToApu() })
+                        add(ApuAction(stringResource(R.string.channel_add_reaction), Icons.Filled.EmojiEmotions) { showReactions = true })
+                        add(ApuAction(stringResource(R.string.channel_to_favorites), Icons.Filled.Star) { onSaveToFavorites() })
+                        add(ApuAction(stringResource(R.string.channel_share), Icons.Filled.Send) { onSharePost() })
+                        add(ApuAction(if (post.isPinned) stringResource(R.string.channel_unpin) else stringResource(R.string.channel_pin), Icons.Filled.PushPin) { onTogglePin() })
                         if (post.title.isNotBlank() || post.text.isNotBlank()) {
-                            add(ApuAction("Копировать текст", Icons.Filled.ContentCopy) { selectPostText = true })
+                            add(ApuAction(stringResource(R.string.channel_copy_text), Icons.Filled.ContentCopy) { selectPostText = true })
                         }
                         if (canEdit) {
-                            add(ApuAction("Изменить пост", Icons.Filled.Edit) { onEdit() })
+                            add(ApuAction(stringResource(R.string.channel_edit_post), Icons.Filled.Edit) { onEdit() })
                         }
                     },
                 )
@@ -1088,7 +1089,7 @@ private fun PostCard(
             ) {
                 Icon(
                     Icons.Default.Visibility,
-                    contentDescription = "Просмотры",
+                    contentDescription = stringResource(R.string.channel_views),
                     tint = ApuBubbleMutedColor,
                     modifier = Modifier.size(15.dp),
                 )
@@ -1103,7 +1104,7 @@ private fun PostCard(
                     Spacer(Modifier.width(12.dp))
                     Icon(
                         Icons.Default.Favorite,
-                        contentDescription = "Реакции",
+                        contentDescription = stringResource(R.string.channel_reactions),
                         tint = ApuBubbleMutedColor,
                         modifier = Modifier.size(15.dp),
                     )
@@ -1117,12 +1118,12 @@ private fun PostCard(
             }
             HorizontalDivider(modifier = Modifier.padding(top = 10.dp), color = ApuBubbleAccentColor.copy(alpha = 0.2f))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                ApuTextAction(label = "Реакция", onClick = { showReactions = true })
+                ApuTextAction(label = stringResource(R.string.channel_reaction), onClick = { showReactions = true })
                 ApuTextAction(
                     label = if (post.comments > 0) {
                             "Комментарии (${post.comments})"
                         } else {
-                            "Оставить комментарий"
+                            stringResource(R.string.channel_leave_comment)
                         },
                     onClick = onOpenComments,
                     modifier = Modifier.weight(1f),
@@ -1131,7 +1132,7 @@ private fun PostCard(
                 IconButton(onClick = onSharePost) {
                     Icon(
                         Icons.Default.Share,
-                        contentDescription = "Поделиться постом",
+                        contentDescription = stringResource(R.string.channel_share_post),
                         tint = ApuBubbleAccentColor,
                     )
                 }
@@ -1140,7 +1141,7 @@ private fun PostCard(
                 IconButton(onClick = onSaveToFavorites) {
                     Icon(
                         Icons.Default.BookmarkBorder,
-                        contentDescription = "В избранное",
+                        contentDescription = stringResource(R.string.channel_to_favorites),
                         tint = ApuBubbleAccentColor,
                     )
                 }
@@ -1190,7 +1191,7 @@ private fun PostGallery(images: List<String>, pending: Int) {
         if (single != null) {
             androidx.compose.foundation.Image(
                 bitmap = single.asImageBitmap(),
-                contentDescription = "Фото поста",
+                contentDescription = stringResource(R.string.channel_post_photo),
                 // Без contentScale картинка рисовалась в своих пикселях и
                 // висела крошечной посреди карточки: сжатие ужимает её до
                 // нескольких сотен точек по стороне. FillWidth растягивает
@@ -1328,7 +1329,7 @@ private fun PostEditorDialog(
                 ApuBubbleField(
                     value = text,
                     onValueChange = { text = it },
-                    label = { Text("Текст поста") },
+                    label = { Text(stringResource(R.string.channel_post_text)) },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
                 )
                 Spacer(Modifier.height(8.dp))
@@ -1363,7 +1364,7 @@ private fun PostEditorDialog(
                                     ) {
                                         Icon(
                                             Icons.Default.Close,
-                                            contentDescription = "Убрать фото",
+                                            contentDescription = stringResource(R.string.channel_remove_photo),
                                             tint = Color.White,
                                             modifier = Modifier.size(14.dp),
                                         )
@@ -1394,7 +1395,7 @@ private fun PostEditorDialog(
                     }
                 } else if (images.isNotEmpty()) {
                     Text(
-                        "Фотографии при правке не меняются",
+                        stringResource(R.string.channel_photos_locked),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -1428,13 +1429,13 @@ private fun PostEditorDialog(
                                 Text(GroupFileMarker.formatSize(stagedFile.sizeBytes), style = MaterialTheme.typography.labelSmall)
                             }
                             IconButton(onClick = onClearFile, modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Default.Close, contentDescription = "Убрать файл", modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.channel_remove_file), modifier = Modifier.size(16.dp))
                             }
                         }
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             ApuTextAction(
-                                label = "Прикрепить файл",
+                                label = stringResource(R.string.channel_attach_file),
                                 onClick = onPickFile,
                                 enabled = !preparingFile && !creating,
                             )
@@ -1452,12 +1453,12 @@ private fun PostEditorDialog(
                         Spacer(Modifier.height(6.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                "Опрос к посту",
+                                stringResource(R.string.channel_poll),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.weight(1f),
                             )
-                            ApuTextAction(label = "Убрать", onClick = { withPoll = false })
+                            ApuTextAction(label = stringResource(R.string.channel_remove), onClick = { withPoll = false })
                         }
                         com.vladimir.messenger.ui.components.PollDraftFields(
                             state = pollState,
@@ -1465,7 +1466,7 @@ private fun PostEditorDialog(
                         )
                     } else {
                         ApuTextAction(
-                            label = "Прикрепить опрос",
+                            label = stringResource(R.string.channel_attach_poll),
                             onClick = { withPoll = true },
                             enabled = !creating,
                         )
@@ -1490,7 +1491,7 @@ private fun PostEditorDialog(
             )
         },
         dismissButton = {
-            ApuTextAction(label = "Отмена", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
         },
     )
 }
