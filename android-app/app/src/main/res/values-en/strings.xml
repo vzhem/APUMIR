@@ -310,4 +310,8 @@
     <string name="rank_invite_body">Send a link to a friend. The invitation counts when they add you to their contacts and you exchange messages.</string>
     <string name="rank_grows_title">Your rank grows with invited friends</string>
     <string name="rank_benefits_title">Ranks and perks</string>
+    <!-- Согласие на языковой пакет -->
+    <string name="translate_consent_title">Download language pack?</string>
+    <string name="translate_consent_body">Translation needs Google language packs (about 30 MB per language). They download once, when text in a new language appears. Message text is not sent to any server.</string>
+    <string name="translate_consent_ok">Turn on and download</string>
 </resources>

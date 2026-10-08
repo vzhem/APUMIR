@@ -884,6 +884,7 @@ private fun SettingsTabContent(
                     val appLanguage by com.vladimir.messenger.ui.i18n.AppLanguageHolder.language
                         .collectAsStateWithLifecycle()
                     var showLanguageDialog by remember { mutableStateOf(false) }
+                    var showTranslateConsent by remember { mutableStateOf(false) }
                     SettingsItem(
                         icon = Icons.Default.Language,
                         title = stringResource(R.string.language_app),
@@ -913,7 +914,30 @@ private fun SettingsTabContent(
                         Switch(
                             checked = translateOn,
                             onCheckedChange = {
-                                com.vladimir.messenger.data.translate.TranslationSettings.set(context, it)
+                                if (it) {
+                                    // Включение только после согласия: пакеты весят около 30 МБ.
+                                    showTranslateConsent = true
+                                } else {
+                                    com.vladimir.messenger.data.translate.TranslationSettings.set(context, false)
+                                }
+                            },
+                        )
+                    }
+                    if (showTranslateConsent) {
+                        AlertDialog(
+                            onDismissRequest = { showTranslateConsent = false },
+                            title = { Text(stringResource(R.string.translate_consent_title)) },
+                            text = { Text(stringResource(R.string.translate_consent_body)) },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    com.vladimir.messenger.data.translate.TranslationSettings.set(context, true)
+                                    showTranslateConsent = false
+                                }) { Text(stringResource(R.string.translate_consent_ok)) }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { showTranslateConsent = false }) {
+                                    Text(stringResource(R.string.action_cancel))
+                                }
                             },
                         )
                     }

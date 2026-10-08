@@ -319,4 +319,8 @@
     <string name="rank_invite_body">Отправьте ссылку другу. Приглашение засчитается, когда он добавит вас в контакты и вы обменяетесь сообщениями.</string>
     <string name="rank_grows_title">Ранг растёт от приглашённых друзей</string>
     <string name="rank_benefits_title">Ранги и возможности</string>
+    <!-- Согласие на языковой пакет -->
+    <string name="translate_consent_title">Скачать языковой пакет?</string>
+    <string name="translate_consent_body">Для перевода нужны языковые пакеты Google (около 30 МБ на каждый язык). Они скачиваются один раз, когда встречается текст на новом языке. Текст сообщений при этом не отправляется на сервер.</string>
+    <string name="translate_consent_ok">Включить и скачать</string>
 </resources>
