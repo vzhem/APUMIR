@@ -409,4 +409,5 @@
     <string name="admin_links_hint">Ссылки создают и отзывают администраторы. Попросите ссылку у них или воспользуйтесь QR-кодом группы.</string>
     <string name="admin_delete_group_text">Группа, её темы, сообщения и ссылки-приглашения будут удалены у всех участников. Отменить это нельзя.</string>
     <string name="admin_delete_channel_text">Канал, его посты, комментарии и ссылки-приглашения будут удалены у всех подписчиков. Отменить это нельзя.</string>
+    <string name="chat_translate_now">Перевести</string>
 </resources>

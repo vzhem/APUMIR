@@ -155,12 +155,14 @@ fun MessageBubble(
                 val appLang by com.vladimir.messenger.ui.i18n.AppLanguageHolder.language
                     .collectAsStateWithLifecycle()
                 var showOriginal by remember(message.id) { mutableStateOf(false) }
+                // Ручной перевод одного сообщения кнопкой «Перевести», если авто-перевод выключен.
+                var manualRequested by remember(message.id) { mutableStateOf(false) }
                 val translation by produceState<com.vladimir.messenger.data.translate.MessageTranslation?>(
                     initialValue = null,
-                    message.id, displayContent, translateOn, appLang,
+                    message.id, displayContent, translateOn, appLang, manualRequested,
                 ) {
                     value = null
-                    if (translateOn && !message.isFromMe &&
+                    if ((translateOn || manualRequested) && !message.isFromMe &&
                         com.vladimir.messenger.data.translate.MessageTranslator.isTranslatableText(displayContent)
                     ) {
                         value = com.vladimir.messenger.data.translate.MessageTranslator
@@ -295,6 +297,19 @@ fun MessageBubble(
                         modifier = Modifier
                             .padding(top = 2.dp)
                             .clickable { showOriginal = !showOriginal },
+                    )
+                }
+                // Кнопка «Перевести» для входящего текста, когда авто-перевод выключен.
+                if (translation == null && !translateOn && !manualRequested && !message.isFromMe &&
+                    com.vladimir.messenger.data.translate.MessageTranslator.isTranslatableText(displayContent)
+                ) {
+                    Text(
+                        text = stringResource(R.string.chat_translate_now),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = textColor.copy(alpha = 0.7f),
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .clickable { manualRequested = true },
                     )
                 }
 

@@ -400,4 +400,5 @@
     <string name="admin_links_hint">Admins create and revoke links. Ask them for a link or use the group QR code.</string>
     <string name="admin_delete_group_text">The group, its topics, messages, and invitation links will be deleted for all members. This cannot be undone.</string>
     <string name="admin_delete_channel_text">The channel, its posts, comments, and invitation links will be deleted for all subscribers. This cannot be undone.</string>
+    <string name="chat_translate_now">Translate</string>
 </resources>
