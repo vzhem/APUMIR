@@ -1236,4 +1236,3 @@ private fun PermissionsTab(mask: Long, onToggle: (Long, Boolean) -> Unit) {
         }
     }
 }
-
