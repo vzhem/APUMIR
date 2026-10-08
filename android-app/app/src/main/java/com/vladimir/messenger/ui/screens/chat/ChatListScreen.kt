@@ -261,8 +261,10 @@ fun ChatListScreen(
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                     if (uiState.rankVip) {
+                                        // Полный знак «VIP» вместо одной звезды: у VIP
+                                        // в шапке должно быть видно сам статус.
                                         Spacer(Modifier.width(6.dp))
-                                        ApuVipBadge(compact = true)
+                                        ApuVipBadge()
                                     }
                                 }
                             }
