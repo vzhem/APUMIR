@@ -155,6 +155,16 @@ class DiagnosticsContractsTest(unittest.TestCase):
         for label in ("Отправить", "Скопировать", "Обновить", "Закрыть"):
             with self.subTest(label=label):
                 self.assertIn('label = "%s"' % label, logs_block)
+        # Все четыре действия должны уместиться на узком экране телефона.
+        # Если вернуть их в отдельные confirm/dismiss-слоты, общая строка
+        # AlertDialog сжимает основную кнопку «Отправить» до невидимого края.
+        actions_start = logs_block.index("confirmButton = {")
+        actions_end = logs_block.index("\n        )\n    }", actions_start)
+        actions = logs_block[actions_start:actions_end]
+        self.assertNotIn("dismissButton = {", actions)
+        self.assertEqual(actions.count("ApuDiagnosticsActionButton("), 4)
+        self.assertEqual(actions.count("modifier = Modifier.weight(1f)"), 4)
+        self.assertEqual(actions.count("horizontalArrangement = Arrangement.spacedBy(8.dp)"), 2)
         ui = source(DIAG_UI)
         self.assertIn("ApuSettingsCard(", ui)
         self.assertIn("ApuBubbleMutedColor", ui)

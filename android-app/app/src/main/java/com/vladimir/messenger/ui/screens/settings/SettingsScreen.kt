@@ -1509,60 +1509,75 @@ private fun SettingsTabContent(
                 }
             },
             confirmButton = {
-                // «Отправить» — системное меню Android: отчёт уезжает в
-                // Telegram/почту одной кнопкой, без ручного копирования.
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    // Кнопка всегда живая: если отчёт ещё собирается, она не
-                    // молчит, а говорит, что именно происходит.
-                    ApuDiagnosticsActionButton(
-                        label = "Отправить",
-                        icon = DiagnosticsActionIcons.Send,
-                        style = DiagnosticsActionStyle.PRIMARY,
-                        onClick = {
-                            if (reportText.isNotBlank()) {
-                                AppShare.shareText(settingsContext, reportText, "Логи APU")
-                            } else {
-                                apuDiagnosticsNothingYet(settingsContext, transferLogsStage)
-                            }
-                        },
-                    )
+                // На узком экране четыре кнопки в одной строке сжимались по
+                // ширине: «Отправить» исчезала за краем. Сетка 2×2 даёт всем
+                // действиям одинаковую ширину и оставляет главную кнопку первой.
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        // Кнопка всегда живая: при сборке отчёта объясняет,
+                        // что происходит, вместо того чтобы молчать.
+                        ApuDiagnosticsActionButton(
+                            label = "Отправить",
+                            icon = DiagnosticsActionIcons.Send,
+                            modifier = Modifier.weight(1f),
+                            style = DiagnosticsActionStyle.PRIMARY,
+                            onClick = {
+                                if (reportText.isNotBlank()) {
+                                    AppShare.shareText(settingsContext, reportText, "Логи APU")
+                                } else {
+                                    apuDiagnosticsNothingYet(settingsContext, transferLogsStage)
+                                }
+                            },
+                        )
+                        ApuDiagnosticsActionButton(
+                            label = "Скопировать",
+                            icon = DiagnosticsActionIcons.Copy,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                if (reportText.isNotBlank()) {
+                                    mqttClipboard.setText(AnnotatedString(reportText))
+                                    android.widget.Toast.makeText(
+                                        settingsContext,
+                                        "Логи скопированы",
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                } else {
+                                    apuDiagnosticsNothingYet(settingsContext, transferLogsStage)
+                                }
+                            },
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        ApuDiagnosticsActionButton(
+                            label = "Обновить",
+                            icon = DiagnosticsActionIcons.Refresh,
+                            modifier = Modifier.weight(1f),
+                            style = DiagnosticsActionStyle.QUIET,
+                            onClick = {
+                                transferLogsStage = TransferDiagnostics.STAGE_DEVICE
+                                transferLogsLoading = true
+                                transferLogsRefresh++
+                            },
+                        )
+                        ApuDiagnosticsActionButton(
+                            label = "Закрыть",
+                            modifier = Modifier.weight(1f),
+                            style = DiagnosticsActionStyle.QUIET,
+                            onClick = { showTransferLogsDialog = false },
+                        )
+                    }
                 }
             },
-            dismissButton = {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    ApuDiagnosticsActionButton(
-                        label = "Скопировать",
-                        icon = DiagnosticsActionIcons.Copy,
-                        onClick = {
-                            if (reportText.isNotBlank()) {
-                                mqttClipboard.setText(AnnotatedString(reportText))
-                                android.widget.Toast.makeText(
-                                    settingsContext,
-                                    "Логи скопированы",
-                                    android.widget.Toast.LENGTH_SHORT,
-                                ).show()
-                            } else {
-                                apuDiagnosticsNothingYet(settingsContext, transferLogsStage)
-                            }
-                        },
-                    )
-                    ApuDiagnosticsActionButton(
-                        label = "Обновить",
-                        icon = DiagnosticsActionIcons.Refresh,
-                        style = DiagnosticsActionStyle.QUIET,
-                        onClick = {
-                            transferLogsStage = TransferDiagnostics.STAGE_DEVICE
-                            transferLogsLoading = true
-                            transferLogsRefresh++
-                        },
-                    )
-                    ApuDiagnosticsActionButton(
-                        label = "Закрыть",
-                        style = DiagnosticsActionStyle.QUIET,
-                        onClick = { showTransferLogsDialog = false },
-                    )
-                }
-            },
+
         )
     }
 
