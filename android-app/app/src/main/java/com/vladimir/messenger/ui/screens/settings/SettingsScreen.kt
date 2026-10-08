@@ -228,13 +228,13 @@ fun SettingsScreen(
         }
         ApuSettingsDialog(
             onDismissRequest = { showNameDialog = false },
-            title = { Text("Ваше имя") },
+            title = { Text(stringResource(R.string.settings_name_title)) },
             text = {
                 ApuBubbleField(
                     value = nameValue,
                     onValueChange = { nameValue = it.take(50) },
-                    label = { Text("Имя") },
-                    placeholder = { Text("Имя Фамилия") },
+                    label = { Text(stringResource(R.string.settings_name_label)) },
+                    placeholder = { Text(stringResource(R.string.settings_name_placeholder)) },
                     singleLine = true,
                     supportingText = { Text("${nameValue.trim().length}/50") },
                     modifier = Modifier.fillMaxWidth(),
@@ -242,7 +242,7 @@ fun SettingsScreen(
             },
             confirmButton = {
                 ApuTextAction(
-                    label = "Сохранить",
+                    label = stringResource(R.string.action_save),
                     onClick = {
                         viewModel.onDisplayNameChanged(nameValue)
                         showNameDialog = false
@@ -251,7 +251,7 @@ fun SettingsScreen(
                 )
             },
             dismissButton = {
-                ApuTextAction(label = "Отмена", onClick = { showNameDialog = false })
+                ApuTextAction(label = stringResource(R.string.action_cancel), onClick = { showNameDialog = false })
             },
         )
     }
@@ -263,29 +263,29 @@ fun SettingsScreen(
         var usernameValue by remember { mutableStateOf(currentUsername.orEmpty()) }
         ApuSettingsDialog(
             onDismissRequest = { showUsernameDialog = false },
-            title = { Text("Ваш @никнейм") },
+            title = { Text(stringResource(R.string.settings_username_title)) },
             text = {
                 Column {
                     ApuBubbleField(
                         value = usernameValue,
                         onValueChange = { usernameValue = UsernameHolder.sanitize(it) },
-                        label = { Text("никнейм") },
-                        placeholder = { Text("никнейм") },
+                        label = { Text(stringResource(R.string.settings_username_label)) },
+                        placeholder = { Text(stringResource(R.string.settings_username_label)) },
                         prefix = { Text("@") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Латинские буквы, цифры и подчёркивание. " +
-                            "Короткое имя даёт короткую ссылку и крупный QR-код.",
+                        stringResource(R.string.settings_username_hint_1) +
+                            stringResource(R.string.settings_username_hint_2),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
             },
             confirmButton = {
                 ApuTextAction(
-                    label = "Сохранить",
+                    label = stringResource(R.string.action_save),
                     onClick = {
 
                     UsernameHolder.set(usernameContext, usernameValue)
@@ -296,7 +296,7 @@ fun SettingsScreen(
                 )
             },
             dismissButton = {
-                ApuTextAction(label = "Отмена", onClick = { showUsernameDialog = false })
+                ApuTextAction(label = stringResource(R.string.action_cancel), onClick = { showUsernameDialog = false })
             },
         )
     }
@@ -311,7 +311,7 @@ fun SettingsScreen(
 
         ApuSettingsDialog(
             onDismissRequest = { showMyQrDialog = false },
-            title = { Text("Мой QR-код") },
+            title = { Text(stringResource(R.string.settings_my_qr)) },
             text = {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -320,7 +320,7 @@ fun SettingsScreen(
                     if (qrBitmap != null) {
                         Image(
                             bitmap = qrBitmap.asImageBitmap(),
-                            contentDescription = "QR-код профиля",
+                            contentDescription = stringResource(R.string.settings_qr_desc),
                             modifier = Modifier.size(280.dp),
                         )
                         Spacer(modifier = Modifier.height(12.dp))
@@ -335,7 +335,7 @@ fun SettingsScreen(
                 }
             },
             confirmButton = {
-                ApuTextAction(label = "Закрыть", onClick = { showMyQrDialog = false })
+                ApuTextAction(label = stringResource(R.string.action_close), onClick = { showMyQrDialog = false })
             },
         )
     }
@@ -442,7 +442,7 @@ private fun ProfileTabContent(
                             ) {
                                 Icon(
                                     Icons.Default.PhotoCamera,
-                                    contentDescription = "Изменить аватар",
+                                    contentDescription = stringResource(R.string.settings_change_avatar),
                                     tint = Color.White,
                                     modifier = Modifier.size(16.dp),
                                 )
@@ -462,7 +462,7 @@ private fun ProfileTabContent(
                                 modifier = Modifier.weight(1f, fill = false),
                             )
                             Spacer(Modifier.width(8.dp))
-                            Icon(Icons.Default.Edit, contentDescription = "Изменить имя", tint = ApuBubbleAccentColor, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.settings_change_name), tint = ApuBubbleAccentColor, modifier = Modifier.size(18.dp))
                         }
                         Text(
                             if (myUsername.isNullOrBlank()) "Задать @никнейм" else "@$myUsername",
@@ -579,8 +579,8 @@ private fun ProfileTabContent(
                 SettingsCard {
                     SettingsItem(
                         icon = Icons.Default.Share,
-                        title = "Поделиться профилем",
-                        subtitle = "Отправить ссылку для добавления в контакты",
+                        title = stringResource(R.string.settings_share_profile),
+                        subtitle = stringResource(R.string.settings_share_profile_hint),
                         onClick = onShareProfile,
                     )
                 }
@@ -590,8 +590,8 @@ private fun ProfileTabContent(
                 SettingsCard {
                     SettingsItem(
                         icon = Icons.Default.EmojiEvents,
-                        title = "Ранги и возможности",
-                        subtitle = "Что открывается за подтверждённые приглашения",
+                        title = stringResource(R.string.settings_ranks),
+                        subtitle = stringResource(R.string.settings_ranks_hint),
                         onClick = onRankBenefits,
                     )
                 }
@@ -748,8 +748,8 @@ private fun SettingsTabContent(
                 SettingsCard {
                     SettingsItem(
                         icon = Icons.Default.Person,
-                        title = "Профиль",
-                        subtitle = "Имя, никнейм, мой QR-код и приглашения",
+                        title = stringResource(R.string.settings_item_profile),
+                        subtitle = stringResource(R.string.settings_item_profile_hint),
                         onClick = onProfileClick,
                     )
                 }
@@ -779,12 +779,12 @@ private fun SettingsTabContent(
                         )
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
-                                "Размер текста",
+                                stringResource(R.string.settings_font_size),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Text(
-                                "Меняется во всех личных чатах, группах, каналах и темах",
+                                stringResource(R.string.settings_font_size_hint),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -841,8 +841,8 @@ private fun SettingsTabContent(
                     }
                     SettingsItem(
                         icon = Icons.Default.Wallpaper,
-                        title = "Обои",
-                        subtitle = if (customWallpaper != null) "Своя картинка из галереи" else "Стандартные, в тон теме",
+                        title = stringResource(R.string.settings_wallpaper),
+                        subtitle = if (customWallpaper != null) stringResource(R.string.settings_wallpaper_custom) else "Стандартные, в тон теме",
                         onClick = { wallpaperPicker.launch("image/*") },
                     )
                     Row(
@@ -851,7 +851,7 @@ private fun SettingsTabContent(
                             .padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
                     ) {
                         ApuPremiumButton(
-                            label = "Из галереи",
+                            label = stringResource(R.string.settings_from_gallery),
                             icon = Icons.Default.PhotoLibrary,
                             onClick = { wallpaperPicker.launch("image/*") },
                         )
@@ -863,7 +863,7 @@ private fun SettingsTabContent(
                                 .padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
                         ) {
                             ApuPremiumButton(
-                                label = "Вернуть стандартные",
+                                label = stringResource(R.string.settings_reset_wallpaper),
                                 icon = Icons.Default.RestartAlt,
                                 style = DiagnosticsActionStyle.QUIET,
                                 onClick = { WallpaperHolder.set(context, null) },
@@ -965,20 +965,20 @@ private fun SettingsTabContent(
                 SettingsCard {
                     SettingsItem(
                         icon     = Icons.Default.Shield,
-                        title    = "Защита личности",
+                        title    = stringResource(R.string.settings_identity_protection),
                         // Самая дорогая потеря в мессенджере - оказаться для
                         // всех новым человеком после переустановки. Поэтому
                         // строка честно говорит, защищён человек или нет.
-                        subtitle = "Никнейм и пароль, чтобы вернуть себя после переустановки",
+                        subtitle = stringResource(R.string.settings_identity_protection_hint),
                         onClick  = onIdentityBackupClick,
                     )
                     ApuSettingsDivider()
                     SettingsItem(
                         icon     = Icons.Default.Save,
-                        title    = "Резервная копия",
+                        title    = stringResource(R.string.settings_backup),
                         // «Защита личности» возвращает только адрес и имя; здесь -
                         // всё: чаты, контакты, сообщества, ключи, ранг, настройки.
-                        subtitle = "Сохранить всё в файл и восстановить после переустановки",
+                        subtitle = stringResource(R.string.settings_backup_hint),
                         onClick  = onProfileBackupClick,
                     )
                     ApuSettingsDivider()
@@ -986,8 +986,8 @@ private fun SettingsTabContent(
                     // экран входа, где можно войти под другим логином.
                     SettingsItem(
                         icon     = Icons.Default.Logout,
-                        title    = "Выйти из APU",
-                        subtitle = "Выйти и войти под другим логином",
+                        title    = stringResource(R.string.settings_logout),
+                        subtitle = stringResource(R.string.settings_logout_hint),
                         onClick  = { showLogoutDialog = true },
                     )
                 }
@@ -998,7 +998,7 @@ private fun SettingsTabContent(
                 SettingsCard {
                     SettingsItem(
                         icon  = Icons.Default.Hub,
-                        title = "Статус соединения",
+                        title = stringResource(R.string.settings_connection_status),
                         subtitle = uiState.connectionStatus.displayName,
                         trailingContent = {
                             StatusDot(status = uiState.connectionStatus)
@@ -1017,21 +1017,21 @@ private fun SettingsTabContent(
                     ApuSettingsDivider()
                     SettingsItem(
                         icon     = Icons.Default.Public,
-                        title    = "Публичный IP",
-                        subtitle = uiState.publicIp ?: "Не удалось определить (нет сети?)",
+                        title    = stringResource(R.string.settings_public_ip),
+                        subtitle = uiState.publicIp ?: stringResource(R.string.settings_public_ip_unknown),
                     )
                     ApuSettingsDivider()
                     SettingsItem(
                         icon  = Icons.Default.RestartAlt,
-                        title = "Перезапустить сетевой движок",
-                        subtitle = "Пересоединиться со всеми пирами",
+                        title = stringResource(R.string.settings_restart_engine),
+                        subtitle = stringResource(R.string.settings_restart_engine_hint),
                         onClick = viewModel::onRestartEngine,
                     )
                     ApuSettingsDivider()
                     SettingsItem(
                         icon  = Icons.Default.Refresh,
-                        title = "Собрать данные об абонентах",
-                        subtitle = "Запустить поиск пиров по сети",
+                        title = stringResource(R.string.settings_collect_peers),
+                        subtitle = stringResource(R.string.settings_collect_peers_hint),
                         onClick = viewModel::onTriggerGossipDiscovery,
                     )
                     ApuSettingsDivider()
@@ -1039,15 +1039,15 @@ private fun SettingsTabContent(
                     // доходят сообщения: роль, партнёр, канал, недоотправленные.
                     SettingsItem(
                         icon     = Icons.Default.Refresh,
-                        title    = "Диагностика синхронизации",
-                        subtitle = "Роль устройства, партнёр, канал, недоотправленные",
+                        title    = stringResource(R.string.settings_sync_diag),
+                        subtitle = stringResource(R.string.settings_sync_diag_hint),
                         onClick  = { showMirrorDiag = true },
                     )
                     ApuSettingsDivider()
                     SettingsItem(
                         icon     = Icons.Default.VpnKey,
-                        title    = "Туннель через прокси",
-                        subtitle = "Автовыбор лучшего прокси для соединений (любая сеть)",
+                        title    = stringResource(R.string.settings_proxy_tunnel),
+                        subtitle = stringResource(R.string.settings_proxy_tunnel_hint),
                         trailingContent = {
                             ApuPremiumSwitch(
                                 checked = uiState.proxyTunnelEnabled,
@@ -1061,8 +1061,8 @@ private fun SettingsTabContent(
                     // концах экрана.
                     SettingsItem(
                         icon = Icons.Default.Dns,
-                        title = "Настроить прокси вручную",
-                        subtitle = "Свои серверы MTProto",
+                        title = stringResource(R.string.settings_proxy_manual),
+                        subtitle = stringResource(R.string.settings_proxy_manual_hint),
                         onClick = onMtProxyClick,
                     )
                 }
@@ -1076,15 +1076,15 @@ private fun SettingsTabContent(
                 SettingsCard {
                     SettingsItem(
                         icon     = Icons.Default.Delete,
-                        title    = "Остановить зависшие отправки",
-                        subtitle = "Отменяет незавершённые отправки и чистит их очереди",
+                        title    = stringResource(R.string.settings_stop_stuck),
+                        subtitle = stringResource(R.string.settings_stop_stuck_hint),
                         onClick  = viewModel::onCancelStalledTransfers,
                     )
                     ApuSettingsDivider()
                     SettingsItem(
                         icon     = Icons.Default.CleaningServices,
-                        title    = "Очистить завершённые",
-                        subtitle = "Освобождает место; сохранённые файлы остаются у вас",
+                        title    = stringResource(R.string.settings_clear_done),
+                        subtitle = stringResource(R.string.settings_clear_done_hint),
                         onClick  = viewModel::onPurgeCompletedTransfers,
                     )
                 }
@@ -1131,7 +1131,7 @@ private fun SettingsTabContent(
                     ApuSettingsDivider()
                     SettingsItem(
                         icon = Icons.Default.Groups,
-                        title = "Кому первому",
+                        title = stringResource(R.string.settings_seed_priority),
                         subtitle = "Сначала контактам, проверенным и стабильным узлам, " +
                             "потом всем остальным. В обычном и экономном режимах на " +
                             "мобильном интернете и при заряде ниже " +
@@ -1153,7 +1153,7 @@ private fun SettingsTabContent(
                         .collectAsStateWithLifecycle()
                     SettingsItem(
                         icon = Icons.Default.Storage,
-                        title = "Я сервер",
+                        title = stringResource(R.string.settings_i_am_server),
                         subtitle = if (imServer) {
                             "Включено: телефон хранит чужие файлы на хранении для контактов " +
                                 "не в сети, раздаёт файлы сообществ и обновления другим. " +
@@ -1282,7 +1282,7 @@ private fun SettingsTabContent(
                         icon     = Icons.Default.Dns,
                         // Адрес сервера не показываем (просьба владельца,
                         // 2026-09-19): в интерфейсе только нейтральное имя.
-                        title    = "Наш сервер",
+                        title    = stringResource(R.string.settings_our_server),
                         subtitle = uiState.serverStatus,
                     )
                     // Диагностика брокерной линии: режим (наш сервер или
@@ -1290,7 +1290,7 @@ private fun SettingsTabContent(
                     if (uiState.mqttLink.isNotBlank()) {
                         SettingsItem(
                             icon     = Icons.Default.NetworkCheck,
-                            title    = "Сообщения сети",
+                            title    = stringResource(R.string.settings_network_messages),
                             // Раунд 190: человекочитаемая строка; если разбор
                             // не удался - сырая, как раньше.
                             subtitle = uiState.mqttHuman.ifBlank { uiState.mqttLink },
@@ -1301,7 +1301,7 @@ private fun SettingsTabContent(
                     // и по кнопке (диалог ниже).
                     SettingsItem(
                         icon     = Icons.Default.CloudSync,
-                        title    = "Резервная копия адресов",
+                        title    = stringResource(R.string.settings_address_backup),
                         subtitle = uiState.addrBookLine.ifBlank { "…" },
                         onClick  = { showAddrBookDialog = true },
                     )
@@ -1315,8 +1315,8 @@ private fun SettingsTabContent(
                 SettingsCard {
                     SettingsItem(
                         icon     = Icons.Default.Sync,
-                        title    = "Перенос профиля на новое устройство",
-                        subtitle = "Подключённые телефоны синхронизируются сами",
+                        title    = stringResource(R.string.settings_profile_transfer),
+                        subtitle = stringResource(R.string.settings_profile_transfer_hint),
                         onClick  = { showSyncDialog = true },
                     )
                 }
@@ -1330,8 +1330,8 @@ private fun SettingsTabContent(
                 SettingsCard {
                     SettingsItem(
                         icon = Icons.Default.Description,
-                        title = "Логи",
-                        subtitle = "Скопировать безопасный отчёт о сети и передаче файлов",
+                        title = stringResource(R.string.settings_logs),
+                        subtitle = stringResource(R.string.settings_logs_hint),
                         onClick = { showTransferLogsDialog = true },
                     )
                 }
@@ -1344,13 +1344,13 @@ private fun SettingsTabContent(
                     // нет: список способов экран получает из нашего сервиса.
                     SettingsItem(
                         icon     = Icons.Default.Favorite,
-                        title    = "Поддержать разработчика",
-                        subtitle = "Переводом напрямую - без комиссий магазинов",
+                        title    = stringResource(R.string.settings_support_dev),
+                        subtitle = stringResource(R.string.settings_support_dev_hint),
                         onClick  = onSupportClick,
                     )
                     SettingsItem(
                         icon     = Icons.Default.Info,
-                        title    = "Версия",
+                        title    = stringResource(R.string.settings_version),
                         subtitle = "APU ${uiState.appVersion}",
                     )
                     // Какое ядро внутри: строку отдаёт само ядро, поэтому
@@ -1358,7 +1358,7 @@ private fun SettingsTabContent(
                     // lib.udl (первая функция после снятия заморозки).
                     SettingsItem(
                         icon     = Icons.Default.Memory,
-                        title    = "Ядро",
+                        title    = stringResource(R.string.settings_core),
                         subtitle = uiState.rustCoreVersion,
                     )
                 }
@@ -1379,7 +1379,7 @@ private fun SettingsTabContent(
         ApuSettingsDialog(
             onDismissRequest = { showLogoutDialog = false },
             icon = { Icon(Icons.Default.Logout, contentDescription = null) },
-            title = { Text("Выйти из APU?") },
+            title = { Text(stringResource(R.string.settings_logout_title)) },
             text = {
                 Text(
                     buildString {
@@ -1406,10 +1406,10 @@ private fun SettingsTabContent(
                 )
             },
             confirmButton = {
-                ApuTextAction(label = "Выйти", onClick = { viewModel.logout() }, danger = true)
+                ApuTextAction(label = stringResource(R.string.action_logout), onClick = { viewModel.logout() }, danger = true)
             },
             dismissButton = {
-                ApuTextAction(label = "Отмена", onClick = { showLogoutDialog = false })
+                ApuTextAction(label = stringResource(R.string.action_cancel), onClick = { showLogoutDialog = false })
             },
         )
     }
@@ -1417,7 +1417,7 @@ private fun SettingsTabContent(
     if (showAddrBookDialog) {
         ApuSettingsDialog(
             onDismissRequest = { showAddrBookDialog = false },
-            title = { Text("Резервная копия адресов") },
+            title = { Text(stringResource(R.string.settings_address_backup)) },
             text = {
                 Text(
                     (uiState.addrBookLine.ifBlank { "…" }) + "\n\n" +
@@ -1429,13 +1429,13 @@ private fun SettingsTabContent(
             },
             confirmButton = {
                 ApuTextAction(
-                    label = "Создать копию",
+                    label = stringResource(R.string.action_create_copy),
                     onClick = { viewModel.backupAddressBookNow() },
                 )
             },
             dismissButton = {
                 ApuTextAction(
-                    label = "Восстановить",
+                    label = stringResource(R.string.action_restore),
                     onClick = { viewModel.restoreAddressBookNow() },
                 )
             },
@@ -1464,11 +1464,11 @@ private fun SettingsTabContent(
         }
         ApuSettingsDialog(
             onDismissRequest = { showMqttDialog = false },
-            title = { Text("Сеть сообщений") },
+            title = { Text(stringResource(R.string.settings_network_dialog_title)) },
             text = { Text(mqttHumanText) },
             confirmButton = {
                 ApuTextAction(
-                    label = "Скопировать",
+                    label = stringResource(R.string.action_copy),
                     onClick = {
                     val forDiagnostics = listOf(uiState.mqttHuman, uiState.mqttLink)
                         .filter { it.isNotBlank() }
@@ -1479,7 +1479,7 @@ private fun SettingsTabContent(
                 )
             },
             dismissButton = {
-                ApuTextAction(label = "Закрыть", onClick = { showMqttDialog = false })
+                ApuTextAction(label = stringResource(R.string.action_close), onClick = { showMqttDialog = false })
             },
         )
     }
@@ -1496,7 +1496,7 @@ private fun SettingsTabContent(
         ApuSettingsDialog(
             onDismissRequest = { showTransferLogsDialog = false },
             icon = { Icon(Icons.Default.Terminal, contentDescription = null) },
-            title = { Text("Логи") },
+            title = { Text(stringResource(R.string.settings_logs)) },
             text = {
                 // Диалог прокручивает сводку целиком; только длинный список и
                 // сырая консоль имеют собственные ограниченные области.
@@ -1573,7 +1573,7 @@ private fun SettingsTabContent(
                         // Кнопка всегда живая: при сборке отчёта объясняет,
                         // что происходит, вместо того чтобы молчать.
                         ApuDiagnosticsActionButton(
-                            label = "Отправить",
+                            label = stringResource(R.string.action_send),
                             icon = DiagnosticsActionIcons.Send,
                             modifier = Modifier.weight(1f),
                             style = DiagnosticsActionStyle.PRIMARY,
@@ -1587,7 +1587,7 @@ private fun SettingsTabContent(
                             },
                         )
                         ApuDiagnosticsActionButton(
-                            label = "Скопировать",
+                            label = stringResource(R.string.action_copy),
                             icon = DiagnosticsActionIcons.Copy,
                             modifier = Modifier.weight(1f),
                             compact = true,
@@ -1610,7 +1610,7 @@ private fun SettingsTabContent(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         ApuDiagnosticsActionButton(
-                            label = "Обновить",
+                            label = stringResource(R.string.action_refresh),
                             icon = DiagnosticsActionIcons.Refresh,
                             modifier = Modifier.weight(1f),
                             style = DiagnosticsActionStyle.QUIET,
@@ -1622,7 +1622,7 @@ private fun SettingsTabContent(
                             },
                         )
                         ApuDiagnosticsActionButton(
-                            label = "Закрыть",
+                            label = stringResource(R.string.action_close),
                             modifier = Modifier.weight(1f),
                             style = DiagnosticsActionStyle.QUIET,
                             compact = true,
