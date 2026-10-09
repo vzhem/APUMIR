@@ -898,7 +898,7 @@ fun ChatDetailScreen(
                     ) {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
                             as ClipboardManager
-                        val clip = ClipData.newPlainText(stringResource(R.string.group_message_placeholder), message.content)
+                        val clip = ClipData.newPlainText(context.getString(R.string.group_message_placeholder), message.content)
                         clipboard.setPrimaryClip(clip)
                         Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
                         showCopyDialog = null
