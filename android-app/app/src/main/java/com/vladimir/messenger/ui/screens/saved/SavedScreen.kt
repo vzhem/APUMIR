@@ -254,8 +254,7 @@ fun SavedScreen(
                             Spacer(Modifier.height(12.dp))
                             Text(stringResource(R.string.sv_empty), style = MaterialTheme.typography.titleMedium)
                             Text(
-                                "Перешлите сюда файл, фото или пост из чата, " +
-                                    "группы или канала - и он останется у вас.",
+                                stringResource(R.string.sv_forward_hint),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = ApuBubbleMutedColor,
                                 textAlign = TextAlign.Center,

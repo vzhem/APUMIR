@@ -496,8 +496,7 @@ fun GroupsScreen(
             text = {
                 Column {
                     Text(
-                        "Покажите QR-код, если человек рядом: он отсканирует его и войдёт сразу. " +
-                            "Ссылку можно отправить кому угодно - по ней вход как обычно."
+                        stringResource(R.string.grp_qr_hint)
                     )
                     Spacer(Modifier.height(4.dp))
                     Row(
@@ -551,8 +550,7 @@ fun GroupsScreen(
             text = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        "Пусть собеседник откроет сканер QR на главном экране " +
-                            "и наведёт камеру. Он войдёт без подтверждения.",
+                        stringResource(R.string.grp_qr_wait),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Spacer(Modifier.height(12.dp))
@@ -620,8 +618,7 @@ fun GroupsScreen(
             title = { Text(stringResource(R.string.groups_create_unavailable)) },
             text = {
                 Text(
-                    "Создавать группы можно с ранга «Проводник» — это 10 квалифицированных " +
-                        "приглашённых. Вступать в группы по ссылке можно уже сейчас."
+                    stringResource(R.string.groups_create_rank)
                 )
             },
             confirmButton = { ApuTextAction(label = stringResource(R.string.groups_ok), onClick = { showRankHint = false }) },

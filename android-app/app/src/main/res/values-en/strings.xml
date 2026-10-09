@@ -794,4 +794,13 @@
     <string name="contacts_invite_title">Invite %1$s</string>
     <string name="contacts_nothing_found">Nothing found for “%1$s”</string>
     <string name="onb_pw_min">At least %1$d characters</string>
+    <!-- Пакет 26: длинные подсказки целиком (вынесено из экранов) -->
+    <string name="grp_qr_hint">Show the QR code if the person is nearby: they scan it and join right away. The link can be sent to anyone — it works the usual way.</string>
+    <string name="chats_no_channels">There are no channels yet. Create your own in the “Communities” section (the “+” button, the “This is a channel” switch) or join one by link.</string>
+    <string name="grp_qr_wait">Ask the other person to open the QR scanner on the main screen and point the camera at your code. They will join without confirmation.</string>
+    <string name="chats_create_hint">Create your own with the pencil button at the bottom right, or join someone else’s by invitation link</string>
+    <string name="groups_create_rank">Groups can be created starting from the “Explorer” rank — that takes 10 qualified invitees. Joining groups by link is available already.</string>
+    <string name="sv_forward_hint">Forward a file, photo or post from a chat, group or channel here — and it stays with you.</string>
+    <string name="sync_devices_find">Devices find each other automatically: the sender and the receiver only need the same nickname and password — no addresses to enter.</string>
+    <string name="sync_auto_every6">It looks for a copy in the background about every 6 hours. The first transfer asks for confirmation before any data is replaced.</string>
 </resources>

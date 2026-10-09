@@ -112,8 +112,7 @@ fun ProfileSyncDialog(
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    "Устройства находят себя сами: и отправителю, и приёмнику " +
-                        "достаточно одного ника и пароля - вводить адреса не нужно.",
+                    stringResource(R.string.sync_devices_find),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -155,8 +154,7 @@ fun ProfileSyncDialog(
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            "Раз в ~6 часов ищет копию в фоне. При первом переносе " +
-                                "спросит подтверждение перед заменой данных",
+                            stringResource(R.string.sync_auto_every6),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

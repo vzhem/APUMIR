@@ -496,8 +496,7 @@ fun ChatListScreen(
                 // цветовой гаммой») вместо сжатых текстовых кнопок.
                 Column {
                     Text(
-                        "Покажите QR-код, если человек рядом: он отсканирует его и войдёт сразу. " +
-                            "Ссылку можно отправить кому угодно - по ней вход как обычно."
+                        stringResource(R.string.grp_qr_hint)
                     )
                     Spacer(Modifier.height(14.dp))
                     InviteActionBubble(stringResource(R.string.groups_show_qr), filled = true) {
@@ -691,8 +690,7 @@ fun ChatListScreen(
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    "Пусть собеседник откроет сканер QR на главном экране " +
-                        "и наведёт камеру. Он войдёт без подтверждения.",
+                    stringResource(R.string.grp_qr_wait),
                     style = MaterialTheme.typography.bodyMedium,
                     color = ApuBubbleTextColor,
                 )
@@ -1090,8 +1088,7 @@ private fun SectionPage(
                         .padding(24.dp),
                 ) {
                     Text(
-                        "Каналов пока нет. Создайте свой в разделе «Сообщества» " +
-                            "(кнопка «+», переключатель «Это канал») или войдите по ссылке.",
+                        stringResource(R.string.chats_no_channels),
                         textAlign = TextAlign.Center,
                         style     = MaterialTheme.typography.bodyMedium,
                         color     = HintBubbleTextColor,
@@ -1162,8 +1159,7 @@ private fun SectionPage(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            "Создайте свою кнопкой с карандашом внизу справа " +
-                                "или войдите в чужую по ссылке-приглашению",
+                            stringResource(R.string.chats_create_hint),
                             style = MaterialTheme.typography.bodyMedium,
                             textAlign = TextAlign.Center,
                             color = HintBubbleMutedColor,
