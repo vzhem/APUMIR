@@ -1075,14 +1075,7 @@
     <string name="st_rating_label">rating</string>
     <string name="st_complaints_label">complaints</string>
     <string name="st_wallpaper_default">Default, matching the theme</string>
-    <string name="st_collecting">Collecting…</string>
     <string name="st_apk_hint">The name and version will be read from the file. We will check it (this APK is newer than the current version) and share it with everyone on an older version</string>
-    <string name="st_net_connected">Connected</string>
-    <string name="st_net_connecting">Connecting...</string>
-    <string name="st_net_relay">Via relay</string>
-    <string name="st_net_disconnected">No connection</string>
-    <string name="rb_promo_not_found">No such promo code. Check the spelling</string>
-    <string name="rb_promo_used">This promo code has already been used here</string>
     <string name="ps_no_name">no name</string>
     <string name="ipd_sticker_delete_msg">The sticker will disappear from your library and from the shared “From network” catalogue on all phones. Anyone who has already downloaded it will keep their copy.</string>
 </resources>

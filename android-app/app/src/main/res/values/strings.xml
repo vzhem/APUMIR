@@ -1084,14 +1084,7 @@
     <string name="st_rating_label">рейтинг</string>
     <string name="st_complaints_label">жалобы</string>
     <string name="st_wallpaper_default">Стандартные, в тон теме</string>
-    <string name="st_collecting">Собираю…</string>
     <string name="st_apk_hint">Имя и версия возьмутся из файла; проверим (это APK, версия новее текущей) и раздаём всем, у кого ниже версия</string>
-    <string name="st_net_connected">Подключен</string>
-    <string name="st_net_connecting">Подключение...</string>
-    <string name="st_net_relay">Через ретранслятор</string>
-    <string name="st_net_disconnected">Нет соединения</string>
-    <string name="rb_promo_not_found">Такого промокода нет - проверьте написание</string>
-    <string name="rb_promo_used">Этот промокод здесь уже использован</string>
     <string name="ps_no_name">без имени</string>
     <string name="ipd_sticker_delete_msg">Стикер исчезнет из вашей библиотеки и из общего каталога «Из сети» на всех телефонах. У тех, кто уже успел его скачать, копия останется.</string>
 </resources>

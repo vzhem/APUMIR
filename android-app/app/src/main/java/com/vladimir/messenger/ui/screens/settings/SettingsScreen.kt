@@ -1692,7 +1692,7 @@ private fun SettingsTabContent(
         // спрашивает ядро (JNI), и вызов при отрисовке окна давал «APU не
         // отвечает» ровно в тот момент, когда человек смотрит на диагностику
         // (скриншот владельца 30.09 21:20).
-        var syncText by remember { mutableStateOf(stringResource(R.string.st_collecting)) }
+        var syncText by remember { mutableStateOf("Собираю…") }
         LaunchedEffect(showMirrorDiag) {
             syncText = withContext(Dispatchers.IO) {
                 com.vladimir.messenger.data.mirror.MirrorHub.debugStatus()
@@ -2147,10 +2147,10 @@ private fun StatusDot(status: com.vladimir.messenger.data.repository.NetworkStat
 // Расширение для отображения статуса
 private val com.vladimir.messenger.data.repository.NetworkStatus.displayName: String
     get() = when (this) {
-        com.vladimir.messenger.data.repository.NetworkStatus.Connected    -> stringResource(R.string.st_net_connected)
-        com.vladimir.messenger.data.repository.NetworkStatus.Connecting   -> stringResource(R.string.st_net_connecting)
-        com.vladimir.messenger.data.repository.NetworkStatus.Degraded     -> stringResource(R.string.st_net_relay)
-        com.vladimir.messenger.data.repository.NetworkStatus.Disconnected -> stringResource(R.string.st_net_disconnected)
+        com.vladimir.messenger.data.repository.NetworkStatus.Connected    -> "Подключен"
+        com.vladimir.messenger.data.repository.NetworkStatus.Connecting   -> "Подключение..."
+        com.vladimir.messenger.data.repository.NetworkStatus.Degraded     -> "Через ретранслятор"
+        com.vladimir.messenger.data.repository.NetworkStatus.Disconnected -> "Нет соединения"
     }
 
 /**
