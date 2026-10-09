@@ -828,4 +828,29 @@
     <string name="diag_lines_count">%1$s lines</string>
     <string name="topic_comments_dash">Comments - %1$s</string>
     <string name="slow_wait_seconds">Wait %1$s s</string>
+    <!-- Пакет 31: сообщения резервной копии и восстановления (ViewModel) -->
+    <string name="bk_pw_short">Password must be at least %1$s characters.</string>
+    <string name="bk_building">Creating backup…</string>
+    <string name="bk_no_identity">The profile has not been created yet.</string>
+    <string name="bk_enter_pw">Enter the backup password.</string>
+    <string name="bk_opening">Opening backup…</string>
+    <string name="bk_wrong_pw">Wrong password.</string>
+    <string name="bk_not_backup">This is not an APU backup file.</string>
+    <string name="bk_truncated">The backup file is damaged or was not copied completely.</string>
+    <string name="bk_save_first">First save a backup to a file — that is the file that will be updated.</string>
+    <string name="bk_enabling">Turning on auto-update…</string>
+    <string name="bk_staged_missing">The prepared backup was not found. Choose the file again.</string>
+    <string name="bk_write_failed">Couldn’t write the backup: %1$s</string>
+    <string name="bk_read_failed">Couldn’t read the backup: %1$s</string>
+    <string name="bk_enable_failed">Couldn’t turn on: %1$s</string>
+    <string name="bk_auto_off">Auto-update is off.</string>
+    <string name="bk_storage_no_access">This storage gives no lasting access to the file — it can’t be updated automatically. Save the copy to the phone’s Files app or to an SD card.</string>
+    <string name="id_saved_ok">Done. Remember your nickname and password — only they will bring you back after a reinstall.</string>
+    <string name="id_check_input">Check your nickname and password: the password must be at least %1$s characters.</string>
+    <string name="id_saved_local">Saved on this phone. There is no server connection — we will send it later automatically.</string>
+    <string name="id_no_identity">Your identity has not been created yet — finish registration first.</string>
+    <string name="id_not_found">Nothing is saved under this nickname. Check the spelling.</string>
+    <string name="id_wrong_creds">The nickname or password did not match.</string>
+    <string name="id_no_network">No connection to the server. Try again later.</string>
+    <string name="id_restored">Identity restored. Restart the app so your contacts see you as before.</string>
 </resources>

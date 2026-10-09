@@ -837,4 +837,29 @@
     <string name="diag_lines_count">строк %1$s</string>
     <string name="topic_comments_dash">Комментарии - %1$s</string>
     <string name="slow_wait_seconds">Подождите %1$s с</string>
+    <!-- Пакет 31: сообщения резервной копии и восстановления (ViewModel) -->
+    <string name="bk_pw_short">Пароль не короче %1$s знаков.</string>
+    <string name="bk_building">Собираем копию…</string>
+    <string name="bk_no_identity">Профиль ещё не создан.</string>
+    <string name="bk_enter_pw">Введите пароль от копии.</string>
+    <string name="bk_opening">Открываем копию…</string>
+    <string name="bk_wrong_pw">Пароль не подошёл.</string>
+    <string name="bk_not_backup">Это не файл резервной копии APU.</string>
+    <string name="bk_truncated">Файл копии повреждён или скопирован не до конца.</string>
+    <string name="bk_save_first">Сначала сохраните копию в файл — обновляться будет именно он.</string>
+    <string name="bk_enabling">Включаем обновление…</string>
+    <string name="bk_staged_missing">Подготовленная копия не найдена. Выберите файл ещё раз.</string>
+    <string name="bk_write_failed">Не удалось записать копию: %1$s</string>
+    <string name="bk_read_failed">Не удалось прочитать копию: %1$s</string>
+    <string name="bk_enable_failed">Не удалось включить: %1$s</string>
+    <string name="bk_auto_off">Автообновление выключено.</string>
+    <string name="bk_storage_no_access">Это хранилище не даёт постоянного доступа к файлу — обновлять его автоматически нельзя. Сохраните копию в «Файлы» телефона или на карту памяти.</string>
+    <string name="id_saved_ok">Готово. Запомните никнейм и пароль - только они вернут вас после переустановки.</string>
+    <string name="id_check_input">Проверьте никнейм и пароль: пароль не короче %1$s знаков.</string>
+    <string name="id_saved_local">Сохранено на телефоне. Связи с сервером нет - отправим позже сами.</string>
+    <string name="id_no_identity">Личность ещё не создана - сначала завершите регистрацию.</string>
+    <string name="id_not_found">Под этим никнеймом ничего не сохранено. Проверьте написание.</string>
+    <string name="id_wrong_creds">Никнейм или пароль не подошли.</string>
+    <string name="id_no_network">Нет связи с сервером. Попробуйте позже.</string>
+    <string name="id_restored">Личность возвращена. Перезапустите приложение, чтобы собеседники снова увидели вас прежним.</string>
 </resources>

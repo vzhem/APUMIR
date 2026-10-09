@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.R
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -50,12 +51,12 @@ class IdentityBackupViewModel @Inject constructor(
                     it.copy(
                         busy = false,
                         protectedNickname = backup.protectedNickname(context),
-                        message = "Готово. Запомните никнейм и пароль - только они вернут вас после переустановки.",
+                        message = context.getString(R.string.id_saved_ok),
                         failed = false,
                     )
                 }
                 IdentityBackup.SaveResult.BadInput -> fail(
-                    "Проверьте никнейм и пароль: пароль не короче ${IdentityBackupMin.PASSWORD} знаков."
+                    context.getString(R.string.id_check_input, IdentityBackupMin.PASSWORD)
                 )
                 IdentityBackup.SaveResult.SavedLocally -> _uiState.update {
                     it.copy(
@@ -63,12 +64,12 @@ class IdentityBackupViewModel @Inject constructor(
                         protectedNickname = backup.protectedNickname(context),
                         // Не ошибка: пароль уже работает, просто вход с ДРУГОГО
                         // устройства станет возможен после досылки.
-                        message = "Сохранено на телефоне. Связи с сервером нет - отправим позже сами.",
+                        message = context.getString(R.string.id_saved_local),
                         failed = false,
                     )
                 }
                 IdentityBackup.SaveResult.NoIdentity -> fail(
-                    "Личность ещё не создана - сначала завершите регистрацию."
+                    context.getString(R.string.id_no_identity)
                 )
             }
         }
@@ -88,20 +89,19 @@ class IdentityBackupViewModel @Inject constructor(
                         it.copy(
                             busy = false,
                             protectedNickname = backup.protectedNickname(context),
-                            message = "Личность возвращена. Перезапустите приложение, чтобы " +
-                                "собеседники снова увидели вас прежним.",
+                            message = context.getString(R.string.id_restored),
                             failed = false,
                         )
                     }
                 }
                 IdentityBackup.RestoreResult.NotFound -> fail(
-                    "Под этим никнеймом ничего не сохранено. Проверьте написание."
+                    context.getString(R.string.id_not_found)
                 )
                 IdentityBackup.RestoreResult.WrongPassword -> fail(
-                    "Никнейм или пароль не подошли."
+                    context.getString(R.string.id_wrong_creds)
                 )
                 IdentityBackup.RestoreResult.NetworkFailed -> fail(
-                    "Нет связи с сервером. Попробуйте позже."
+                    context.getString(R.string.id_no_network)
                 )
             }
         }
