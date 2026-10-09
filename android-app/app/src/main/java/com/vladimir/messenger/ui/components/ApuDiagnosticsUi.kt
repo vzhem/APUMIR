@@ -476,7 +476,7 @@ private fun ApuDiagnosticsVerdictPill(text: String, level: DiagnosticsLevel, che
         if (checks > 0) {
             Spacer(Modifier.width(10.dp))
             Text(
-                "проверок $checks",
+                stringResource(R.string.diag_checks_count, checks),
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = Color.White.copy(alpha = 0.88f),
@@ -757,7 +757,7 @@ fun ApuDiagnosticsReportCard(
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    "строк $lineCount",
+                    stringResource(R.string.diag_lines_count, lineCount),
                     style = MaterialTheme.typography.labelMedium,
                     color = DiagConsoleMuted,
                     maxLines = 1,

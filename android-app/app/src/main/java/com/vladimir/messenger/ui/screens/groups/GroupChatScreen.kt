@@ -659,7 +659,7 @@ fun GroupChatScreen(
                                 // человек пришёл из ленты и должен видеть,
                                 // под чем он находится.
                                 when {
-                                    isChannel -> selectedTopicName?.let { "Комментарии - $it" }
+                                    isChannel -> selectedTopicName?.let { stringResource(R.string.topic_comments_dash, it) }
                                         ?: stringResource(R.string.stat_comments)
                                     // В теме: «Тема · группа», участники - на
                                     // списке тем, там они и нужны.
@@ -1269,7 +1269,7 @@ fun GroupChatScreen(
                 val canSend = (uiState.draft.isNotBlank() || uiState.stagedFile != null) &&
                     !uiState.sending && !uiState.isPreparingFile && slowWaitSeconds <= 0L
                 ApuTextAction(
-                    label = if (slowWaitSeconds > 0L) "Подождите $slowWaitSeconds с" else stringResource(R.string.action_send),
+                    label = if (slowWaitSeconds > 0L) stringResource(R.string.slow_wait_seconds, slowWaitSeconds) else stringResource(R.string.action_send),
                     onClick = {
 
                         viewModel.send(uiState.draft)

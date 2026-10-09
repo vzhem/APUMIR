@@ -832,4 +832,9 @@
     <string name="group_private_members">Частная группа - %1$s уч.</string>
     <string name="selected_count">Выбрано %1$s</string>
     <string name="admin_type_prompt">Введите: %1$s</string>
+    <!-- Пакет 30: счётчики диагностики и подписи групп -->
+    <string name="diag_checks_count">проверок %1$s</string>
+    <string name="diag_lines_count">строк %1$s</string>
+    <string name="topic_comments_dash">Комментарии - %1$s</string>
+    <string name="slow_wait_seconds">Подождите %1$s с</string>
 </resources>

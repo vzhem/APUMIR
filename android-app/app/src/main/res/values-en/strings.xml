@@ -823,4 +823,9 @@
     <string name="group_private_members">Private group · %1$s members</string>
     <string name="selected_count">Selected: %1$s</string>
     <string name="admin_type_prompt">Type: %1$s</string>
+    <!-- Пакет 30: счётчики диагностики и подписи групп -->
+    <string name="diag_checks_count">%1$s checks</string>
+    <string name="diag_lines_count">%1$s lines</string>
+    <string name="topic_comments_dash">Comments - %1$s</string>
+    <string name="slow_wait_seconds">Wait %1$s s</string>
 </resources>
