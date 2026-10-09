@@ -378,7 +378,7 @@ private fun StickerSection(
             title = { Text(stringResource(R.string.input_del_sticker_q)) },
             text = {
                 Text(
-                    "Стикер исчезнет из вашей библиотеки и из общего каталога «Из сети» на всех телефонах. У тех, кто уже успел его скачать, копия останется.",
+                    stringResource(R.string.ipd_sticker_delete_msg),
                 )
             },
             confirmButton = {

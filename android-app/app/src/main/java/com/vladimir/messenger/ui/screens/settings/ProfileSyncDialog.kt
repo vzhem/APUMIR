@@ -259,7 +259,7 @@ fun ProfileSyncDialog(
                     val created = SimpleDateFormat("d.MM.yyyy HH:mm", Locale.getDefault())
                         .format(Date(manifest.createdAtMs))
                     Text(
-                        "Копия готова: ${manifest.displayName.ifBlank { "без имени" }} от $created, " +
+                        "Копия готова: ${manifest.displayName.ifBlank { stringResource(R.string.ps_no_name) }} от $created, " +
                             "версия APU ${manifest.appVersionName}. Применить на этом устройстве? " +
                             stringResource(R.string.sync_replace_warn),
                         style = MaterialTheme.typography.bodySmall,

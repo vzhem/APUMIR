@@ -514,11 +514,11 @@ private fun PromoCodeCard(onRedeemed: () -> Unit) {
                             }
                             PromoCodes.Result.UNKNOWN -> {
                                 isError = true
-                                message = "Такого промокода нет - проверьте написание"
+                                message = stringResource(R.string.rb_promo_not_found)
                             }
                             PromoCodes.Result.ALREADY_USED -> {
                                 isError = true
-                                message = "Этот промокод здесь уже использован"
+                                message = stringResource(R.string.rb_promo_used)
                             }
                             PromoCodes.Result.LIMIT_REACHED -> {
                                 isError = true
