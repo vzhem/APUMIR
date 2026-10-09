@@ -872,4 +872,33 @@
     <string name="ps_fetch_check">Couldn’t fetch the backup: check the address, the code, and that both devices are on the same Wi-Fi network</string>
     <string name="ps_net_copy_info">The backup is on the APU network: a second device with the same nickname and password will find it and take it by itself. The copy disappears after pickup (or after a day).</string>
     <string name="ps_autosearch_on">Auto-search is on: the phone checks in the background by itself. Confirmation is needed only before data is replaced.</string>
+    <!-- Пакет 33: сообщения чата и стикеров (ViewModel) -->
+    <string name="cd_history_failed">Couldn’t read the chat history</string>
+    <string name="cd_notify_failed">Couldn’t change the notification settings</string>
+    <string name="cd_pin_failed">Couldn’t change the pin</string>
+    <string name="cd_msg_not_found">Message not found</string>
+    <string name="cd_send_error">Send error: %1$s</string>
+    <string name="cd_share_chooser">Share</string>
+    <string name="cd_share_failed">Couldn’t share</string>
+    <string name="cd_file_not_sent2">File not sent: %1$s</string>
+    <string name="cd_file_not_sent">File not sent: %1$s</string>
+    <string name="cd_sticker_not_sent">Sticker not sent: %1$s</string>
+    <string name="cd_sticker_lost">The sticker file is gone from the phone — there is nowhere to download it again from</string>
+    <string name="cd_sticker_loading">The sticker is loading from the network — we will send it right away</string>
+    <string name="cd_gif_too_big">It didn’t work: a GIF file up to 30 MB is needed</string>
+    <string name="cd_gif_added">Your GIF has been added — it is already in our network</string>
+    <string name="cd_peer_unavailable">The contact is unavailable — try again later</string>
+    <string name="cd_gif_link_sent">The link was sent — the GIF will be pulled from the network</string>
+    <string name="cd_asking_holders">Asking all holders on the network…</string>
+    <string name="cd_net_silent">The network is not responding yet — try again later</string>
+    <string name="cd_already_downloading">This sticker is already downloading</string>
+    <string name="cd_gif_nothing">Nothing found</string>
+    <string name="cd_gif_later">The GIF will be delivered when the contact comes online</string>
+    <string name="cd_saved_fav">Added to Favorites</string>
+    <string name="cd_already_saved">Already in Favorites</string>
+    <string name="cd_file_incomplete">The file has not been fully received yet</string>
+    <string name="cd_saved_as">Saved: %1$s</string>
+    <string name="cd_save_failed">Couldn’t save the file</string>
+    <string name="cd_no_contact">This person is not in the contacts on this phone</string>
+    <string name="cd_no_invite_link">There is no invitation link for this group</string>
 </resources>

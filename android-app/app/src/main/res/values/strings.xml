@@ -881,4 +881,33 @@
     <string name="ps_fetch_check">Не удалось забрать копию: проверьте адрес, код и что оба устройства в одной сети Wi-Fi</string>
     <string name="ps_net_copy_info">Копия в сети APU: второе устройство с тем же ником и паролем найдёт и заберёт её само. Копия исчезнет после забора (или через сутки).</string>
     <string name="ps_autosearch_on">Автопоиск включён: телефон проверяет сам в фоне. Подтверждение понадобится только перед заменой данных.</string>
+    <!-- Пакет 33: сообщения чата и стикеров (ViewModel) -->
+    <string name="cd_history_failed">Не удалось прочитать историю чата</string>
+    <string name="cd_notify_failed">Не удалось изменить уведомления</string>
+    <string name="cd_pin_failed">Не удалось изменить закреп</string>
+    <string name="cd_msg_not_found">Сообщение не найдено</string>
+    <string name="cd_send_error">Ошибка отправки: %1$s</string>
+    <string name="cd_share_chooser">Поделиться</string>
+    <string name="cd_share_failed">Не удалось поделиться</string>
+    <string name="cd_file_not_sent2">Файл не отправлен: %1$s</string>
+    <string name="cd_file_not_sent">Файл не отправлен: %1$s</string>
+    <string name="cd_sticker_not_sent">Стикер не отправлен: %1$s</string>
+    <string name="cd_sticker_lost">Файл стикера пропал с телефона - докачать его неоткуда</string>
+    <string name="cd_sticker_loading">Стикер подгружается из сети - сразу отправим</string>
+    <string name="cd_gif_too_big">Не вышло: нужен файл GIF до 30 МБ</string>
+    <string name="cd_gif_added">Своя гифка добавлена - уже в нашей сети</string>
+    <string name="cd_peer_unavailable">Собеседник недоступен - попробуйте позже</string>
+    <string name="cd_gif_link_sent">Ссылка отправлена - гифка подтянется из сети</string>
+    <string name="cd_asking_holders">Просим у всех держателей сети…</string>
+    <string name="cd_net_silent">Сеть пока не отвечает - попробуйте позже</string>
+    <string name="cd_already_downloading">Уже качаем этот стикер</string>
+    <string name="cd_gif_nothing">Ничего не нашлось</string>
+    <string name="cd_gif_later">Гифка будет доставлена, когда собеседник появится в сети</string>
+    <string name="cd_saved_fav">Добавлено в избранное</string>
+    <string name="cd_already_saved">Уже в избранном</string>
+    <string name="cd_file_incomplete">Файл ещё не получен полностью</string>
+    <string name="cd_saved_as">Сохранено: %1$s</string>
+    <string name="cd_save_failed">Не удалось сохранить файл</string>
+    <string name="cd_no_contact">Этого человека нет в контактах на этом телефоне</string>
+    <string name="cd_no_invite_link">Нет ссылки-приглашения для этой группы</string>
 </resources>
