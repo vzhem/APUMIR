@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.channels
 
+import com.vladimir.messenger.R
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -176,7 +177,7 @@ class ChannelViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             runCatching { groupRepository.setGroupMutedUntil(channelId, untilMs) }
                 .onFailure { error ->
-                    _uiState.update { it.copy(error = error.message ?: "Не удалось изменить уведомления") }
+                    _uiState.update { it.copy(error = error.message ?: appContext.getString(R.string.ch_notify_failed)) }
                 }
         }
     }
@@ -187,7 +188,7 @@ class ChannelViewModel @Inject constructor(
             val pinned = !post.isPinned
             val result = runCatching { chatRepository.setMessagePinned(post.messageId, pinned) }
                 .getOrElse { error ->
-                    _uiState.update { it.copy(error = error.message ?: "Не удалось изменить закреп") }
+                    _uiState.update { it.copy(error = error.message ?: appContext.getString(R.string.ch_pin_failed)) }
                     return@launch
                 }
             when (result) {
@@ -196,7 +197,7 @@ class ChannelViewModel @Inject constructor(
                 MessagePinMutation.SCOPE_CONFLICT ->
                     _uiState.update { it.copy(error = MessagePinPolicy.SCOPE_CONFLICT_MESSAGE) }
                 MessagePinMutation.NOT_FOUND ->
-                    _uiState.update { it.copy(error = "Пост уже недоступен") }
+                    _uiState.update { it.copy(error = appContext.getString(R.string.ch_post_gone)) }
                 MessagePinMutation.UPDATED,
                 MessagePinMutation.UNCHANGED -> {
                     // Закреп личный, поэтому не рассылаем его подписчикам
@@ -284,7 +285,7 @@ class ChannelViewModel @Inject constructor(
                 _uiState.update { it.copy(stagedFile = info) }
             } catch (e: Exception) {
                 android.util.Log.w("ChannelVM", "post file stage failed", e)
-                _uiState.update { it.copy(error = "Файл не приложен: ${e.message}") }
+                _uiState.update { it.copy(error = appContext.getString(R.string.ch_file_not_attached, e.message)) }
             } finally {
                 _uiState.update { it.copy(isPreparingFile = false) }
             }
@@ -303,7 +304,7 @@ class ChannelViewModel @Inject constructor(
         val info = post.file ?: return
         viewModelScope.launch {
             runCatching { groupFiles.request(channelId, post.messageId, info, post.authorId, manual = true) }
-                .onFailure { e -> _uiState.update { it.copy(error = "Не удалось запросить файл: ${e.message}") } }
+                .onFailure { e -> _uiState.update { it.copy(error = appContext.getString(R.string.ch_request_failed, e.message)) } }
         }
     }
 
@@ -326,7 +327,7 @@ class ChannelViewModel @Inject constructor(
         viewModelScope.launch {
             val ok = runCatching { fileTransferRouter.exportReceivedFile(transfer, target) }.getOrDefault(false)
             _uiState.update {
-                it.copy(error = if (ok) "Сохранено: ${transfer.displayName}" else "Не удалось сохранить файл")
+                it.copy(error = if (ok) appContext.getString(R.string.ch_saved_as, transfer.displayName) else appContext.getString(R.string.ch_save_failed))
             }
         }
     }
@@ -344,10 +345,10 @@ class ChannelViewModel @Inject constructor(
                     .setType(mediaType.ifBlank { "application/octet-stream" })
                     .putExtra(android.content.Intent.EXTRA_STREAM, uri)
                     .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                val chooser = android.content.Intent.createChooser(intent, "Поделиться")
+                val chooser = android.content.Intent.createChooser(intent, appContext.getString(R.string.ch_share_chooser))
                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 ctx.startActivity(chooser)
-            }.onFailure { e -> _uiState.update { it.copy(error = "Не удалось поделиться: ${e.message}") } }
+            }.onFailure { e -> _uiState.update { it.copy(error = appContext.getString(R.string.ch_share_error, e.message)) } }
         }
     }
 
@@ -372,7 +373,7 @@ class ChannelViewModel @Inject constructor(
             if (encoded.size < uris.size) {
                 val lost = uris.size - encoded.size
                 _uiState.update {
-                    it.copy(error = if (lost == 1) "Одну картинку не удалось прикрепить" else "Не удалось прикрепить картинок: $lost")
+                    it.copy(error = if (lost == 1) appContext.getString(R.string.ch_one_image_failed) else "Не удалось прикрепить картинок: $lost")
                 }
             }
             onReady(encoded)
@@ -554,7 +555,7 @@ class ChannelViewModel @Inject constructor(
                     groupRepository.sendMessage(channelId, topic.id, body, attached, poll = poll)
                         .onFailure { e ->
                             _uiState.update {
-                                it.copy(creating = false, error = e.message ?: "Не удалось опубликовать пост")
+                                it.copy(creating = false, error = e.message ?: appContext.getString(R.string.ch_publish_failed))
                             }
                         }
                         .onSuccess { _uiState.update { it.copy(stagedFile = null) } }
@@ -562,7 +563,7 @@ class ChannelViewModel @Inject constructor(
                 }
                 .onFailure { e ->
                     _uiState.update {
-                        it.copy(creating = false, error = e.message ?: "Не удалось создать пост")
+                        it.copy(creating = false, error = e.message ?: appContext.getString(R.string.ch_create_failed))
                     }
                 }
         }
@@ -575,14 +576,14 @@ class ChannelViewModel @Inject constructor(
     fun editPost(post: ChannelPost, newText: String) {
         val words = InlineImage.stripImage(newText)
         if (words.isEmpty() && post.images.isEmpty() && post.pendingPhotos == 0) {
-            _uiState.update { it.copy(error = "Пост не может быть пустым") }
+            _uiState.update { it.copy(error = appContext.getString(R.string.ch_post_empty)) }
             return
         }
         _uiState.update { it.copy(creating = true, error = null) }
         viewModelScope.launch {
             groupRepository.editMessage(channelId, post.messageId, words)
                 .onFailure { e ->
-                    _uiState.update { it.copy(creating = false, error = e.message ?: "Не удалось изменить пост") }
+                    _uiState.update { it.copy(creating = false, error = e.message ?: appContext.getString(R.string.ch_edit_failed)) }
                 }
                 .onSuccess { _uiState.update { it.copy(creating = false) } }
         }
@@ -603,7 +604,7 @@ class ChannelViewModel @Inject constructor(
                 ),
                 photos = post.images,
             )
-            _uiState.update { it.copy(error = "Добавлено в избранное") }
+            _uiState.update { it.copy(error = appContext.getString(R.string.ch_saved_fav)) }
         }
     }
 
@@ -615,9 +616,9 @@ class ChannelViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     error = when (result) {
-                        com.vladimir.messenger.data.repository.SaveResult.Saved -> "Добавлено в избранное"
-                        com.vladimir.messenger.data.repository.SaveResult.AlreadySaved -> "Уже в избранном"
-                        com.vladimir.messenger.data.repository.SaveResult.FileNotReady -> "Файл ещё не получен полностью"
+                        com.vladimir.messenger.data.repository.SaveResult.Saved -> appContext.getString(R.string.ch_saved_fav)
+                        com.vladimir.messenger.data.repository.SaveResult.AlreadySaved -> appContext.getString(R.string.ch_already_saved)
+                        com.vladimir.messenger.data.repository.SaveResult.FileNotReady -> appContext.getString(R.string.ch_file_incomplete)
                     },
                 )
             }
@@ -656,8 +657,8 @@ class ChannelViewModel @Inject constructor(
             } else {
                 com.vladimir.messenger.util.PhotoShare.buildTextIntent(text)
             }
-            if (!com.vladimir.messenger.util.PhotoShare.open(app, intent, "Поделиться постом")) {
-                _uiState.update { it.copy(error = "Не удалось поделиться") }
+            if (!com.vladimir.messenger.util.PhotoShare.open(app, intent, appContext.getString(R.string.ch_share_post_chooser))) {
+                _uiState.update { it.copy(error = appContext.getString(R.string.ch_share_failed)) }
             }
         }
     }

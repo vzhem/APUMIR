@@ -910,4 +910,24 @@
     <string name="cd_save_failed">Не удалось сохранить файл</string>
     <string name="cd_no_contact">Этого человека нет в контактах на этом телефоне</string>
     <string name="cd_no_invite_link">Нет ссылки-приглашения для этой группы</string>
+    <!-- Пакет 34: сообщения канала (ViewModel) -->
+    <string name="ch_notify_failed">Не удалось изменить уведомления</string>
+    <string name="ch_pin_failed">Не удалось изменить закреп</string>
+    <string name="ch_post_gone">Пост уже недоступен</string>
+    <string name="ch_file_not_attached">Файл не приложен: %1$s</string>
+    <string name="ch_request_failed">Не удалось запросить файл: %1$s</string>
+    <string name="ch_saved_as">Сохранено: %1$s</string>
+    <string name="ch_save_failed">Не удалось сохранить файл</string>
+    <string name="ch_share_chooser">Поделиться</string>
+    <string name="ch_share_error">Не удалось поделиться: %1$s</string>
+    <string name="ch_one_image_failed">Одну картинку не удалось прикрепить</string>
+    <string name="ch_post_empty">Пост не может быть пустым</string>
+    <string name="ch_publish_failed">Не удалось опубликовать пост</string>
+    <string name="ch_create_failed">Не удалось создать пост</string>
+    <string name="ch_edit_failed">Не удалось изменить пост</string>
+    <string name="ch_saved_fav">Добавлено в избранное</string>
+    <string name="ch_already_saved">Уже в избранном</string>
+    <string name="ch_file_incomplete">Файл ещё не получен полностью</string>
+    <string name="ch_share_failed">Не удалось поделиться</string>
+    <string name="ch_share_post_chooser">Поделиться постом</string>
 </resources>

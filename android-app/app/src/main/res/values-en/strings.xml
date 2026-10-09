@@ -901,4 +901,24 @@
     <string name="cd_save_failed">Couldn’t save the file</string>
     <string name="cd_no_contact">This person is not in the contacts on this phone</string>
     <string name="cd_no_invite_link">There is no invitation link for this group</string>
+    <!-- Пакет 34: сообщения канала (ViewModel) -->
+    <string name="ch_notify_failed">Couldn’t change the notification settings</string>
+    <string name="ch_pin_failed">Couldn’t change the pin</string>
+    <string name="ch_post_gone">This post is no longer available</string>
+    <string name="ch_file_not_attached">File not attached: %1$s</string>
+    <string name="ch_request_failed">Couldn’t request the file: %1$s</string>
+    <string name="ch_saved_as">Saved: %1$s</string>
+    <string name="ch_save_failed">Couldn’t save the file</string>
+    <string name="ch_share_chooser">Share</string>
+    <string name="ch_share_error">Couldn’t share: %1$s</string>
+    <string name="ch_one_image_failed">One image could not be attached</string>
+    <string name="ch_post_empty">A post can’t be empty</string>
+    <string name="ch_publish_failed">Couldn’t publish the post</string>
+    <string name="ch_create_failed">Couldn’t create the post</string>
+    <string name="ch_edit_failed">Couldn’t edit the post</string>
+    <string name="ch_saved_fav">Added to Favorites</string>
+    <string name="ch_already_saved">Already in Favorites</string>
+    <string name="ch_file_incomplete">The file has not been fully received yet</string>
+    <string name="ch_share_failed">Couldn’t share</string>
+    <string name="ch_share_post_chooser">Share post</string>
 </resources>
