@@ -532,4 +532,20 @@
     <string name="mtproxy_paste_hint">Вставьте прокси (один или несколько, каждый на новой строке):</string>
     <string name="mtproxy_paste_placeholder">Вставьте сюда...</string>
     <string name="mtproxy_import_btn">Импортировать</string>
+    <!-- Узлы сети -->
+    <string name="peer_nodes_title">Узлы сети</string>
+    <string name="peer_reset">Сбросить наблюдения</string>
+    <string name="peer_routing_title">Через кого идут данные</string>
+    <string name="peer_of_100">из 100</string>
+    <string name="peer_online">В сети</string>
+    <string name="peer_speed">Скорость обмена</string>
+    <string name="peer_no_data">нет данных</string>
+    <string name="peer_delivery">Доставка</string>
+    <string name="peer_direct">Прямая связь</string>
+    <string name="peer_yes">есть</string>
+    <string name="peer_only_via">только через других</string>
+    <string name="peer_relay_space">Место под пересылку</string>
+    <string name="peer_not_reported">не сообщал</string>
+    <string name="peer_empty_body">Наблюдений пока нет. Оценка появится сама, когда телефон побудет в сети и обменяется данными с другими.</string>
+    <string name="peer_routing_body">Сеть APU держится на самих телефонах. Чем чаще узел в сети, чем быстрее он принимает файлы и чем проще к нему подключиться напрямую, тем выше его оценка — и тем раньше ему уходят данные. Объявленное место под пересылку добавляет до 10 баллов — и только тем, кто бывает в сети.</string>
 </resources>

@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.R
+import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuSettingsCard
@@ -93,10 +95,10 @@ fun PeerRatingScreen(onBackClick: () -> Unit) {
                         containerColor = Color.Transparent,
                         scrolledContainerColor = Color.Transparent,
                     ),
-                    title = { ApuSettingsHeader("Узлы сети") },
+                    title = { ApuSettingsHeader(stringResource(R.string.peer_nodes_title)) },
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                         }
                     },
                     actions = {
@@ -104,7 +106,7 @@ fun PeerRatingScreen(onBackClick: () -> Unit) {
                             PeerRatingStore.clear(context)
                             reloadTick++
                         }) {
-                            Icon(Icons.Default.DeleteSweep, contentDescription = "Сбросить наблюдения")
+                            Icon(Icons.Default.DeleteSweep, contentDescription = stringResource(R.string.peer_reset))
                         }
                     },
                 )
@@ -121,19 +123,14 @@ fun PeerRatingScreen(onBackClick: () -> Unit) {
                         HintBubble {
                             Column {
                                 Text(
-                                    "Через кого идут данные",
+                                    stringResource(R.string.peer_routing_title),
                                     style = MaterialTheme.typography.titleSmall,
                                     color = HintBubbleTextColor,
                                     fontWeight = FontWeight.SemiBold,
                                 )
                                 Spacer(Modifier.height(6.dp))
                                 Text(
-                                    "Сеть APU держится на самих телефонах. Чем чаще узел в сети, " +
-                                        "чем быстрее он принимает файлы и чем проще к нему " +
-                                        "подключиться напрямую, тем выше его оценка — и тем " +
-                                        "раньше ему уходят данные. Объявленное место под " +
-                                        "пересылку добавляет до 10 баллов — и только тем, " +
-                                        "кто бывает в сети.",
+                                    stringResource(R.string.peer_routing_body),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = HintBubbleMutedColor,
                                 )
@@ -145,8 +142,7 @@ fun PeerRatingScreen(onBackClick: () -> Unit) {
                         item {
                             HintBubble {
                                 Text(
-                                    "Наблюдений пока нет. Оценка появится сама, когда телефон " +
-                                        "побудет в сети и обменяется данными с другими.",
+                                    stringResource(R.string.peer_empty_body),
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = HintBubbleTextColor,
                                 )
@@ -193,7 +189,7 @@ private fun PeerRatingCard(peer: PeerStats, nowMs: Long) {
                         color = ApuBubbleTextColor,
                     )
                     Text(
-                        "из 100",
+                        stringResource(R.string.peer_of_100),
                         style = MaterialTheme.typography.labelSmall,
                         color = ApuBubbleMutedColor,
                     )
@@ -206,36 +202,36 @@ private fun PeerRatingCard(peer: PeerStats, nowMs: Long) {
 
             Metric(
                 icon = Icons.Default.Schedule,
-                label = "В сети",
+                label = stringResource(R.string.peer_online),
                 value = percent(peer.availability),
             )
             Metric(
                 icon = Icons.Default.Bolt,
-                label = "Скорость обмена",
-                value = if (peer.bytesPerSecond > 0) speed(peer.bytesPerSecond) else "нет данных",
+                label = stringResource(R.string.peer_speed),
+                value = if (peer.bytesPerSecond > 0) speed(peer.bytesPerSecond) else stringResource(R.string.peer_no_data),
             )
             Metric(
                 icon = Icons.Default.CheckCircle,
-                label = "Доставка",
+                label = stringResource(R.string.peer_delivery),
                 value = if (peer.delivered + peer.failed > 0) {
                     percent(peer.reliability)
                 } else {
-                    "нет данных"
+                    stringResource(R.string.peer_no_data)
                 },
             )
             Metric(
                 icon = Icons.Default.Public,
-                label = "Прямая связь",
-                value = if (peer.hasPublicAddress) "есть" else "только через других",
+                label = stringResource(R.string.peer_direct),
+                value = if (peer.hasPublicAddress) stringResource(R.string.peer_yes) else stringResource(R.string.peer_only_via),
             )
             Metric(
                 icon = Icons.Default.Storage,
-                label = "Место под пересылку",
+                label = stringResource(R.string.peer_relay_space),
                 value = if (peer.offeredBytes > 0) {
                     com.vladimir.messenger.data.swarm.StoragePolicy.format(peer.offeredBytes) +
                         " (+%.1f)".format(peer.storageBonus)
                 } else {
-                    "не сообщал"
+                    stringResource(R.string.peer_not_reported)
                 },
             )
         }

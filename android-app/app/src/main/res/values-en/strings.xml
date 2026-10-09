@@ -523,4 +523,20 @@
     <string name="mtproxy_paste_hint">Paste proxies (one or several, one per line):</string>
     <string name="mtproxy_paste_placeholder">Paste here…</string>
     <string name="mtproxy_import_btn">Import</string>
+    <!-- Network nodes -->
+    <string name="peer_nodes_title">Network nodes</string>
+    <string name="peer_reset">Reset observations</string>
+    <string name="peer_routing_title">Who the data goes through</string>
+    <string name="peer_of_100">out of 100</string>
+    <string name="peer_online">Online</string>
+    <string name="peer_speed">Transfer speed</string>
+    <string name="peer_no_data">no data</string>
+    <string name="peer_delivery">Delivery</string>
+    <string name="peer_direct">Direct connection</string>
+    <string name="peer_yes">yes</string>
+    <string name="peer_only_via">only via others</string>
+    <string name="peer_relay_space">Relay capacity</string>
+    <string name="peer_not_reported">not reported</string>
+    <string name="peer_empty_body">No observations yet. The rating will appear by itself once the phone has been online and exchanged data with others.</string>
+    <string name="peer_routing_body">The APU network is held up by the phones themselves. The more often a node is online, the faster it accepts files and the easier it is to connect to directly, the higher its rating — and the sooner data is sent to it. A declared space for relaying adds up to 10 points, and only for those who are online.</string>
 </resources>
