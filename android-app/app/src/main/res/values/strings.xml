@@ -1087,4 +1087,10 @@
     <string name="st_apk_hint">Имя и версия возьмутся из файла; проверим (это APK, версия новее текущей) и раздаём всем, у кого ниже версия</string>
     <string name="ps_no_name">без имени</string>
     <string name="ipd_sticker_delete_msg">Стикер исчезнет из вашей библиотеки и из общего каталога «Из сети» на всех телефонах. У тех, кто уже успел его скачать, копия останется.</string>
+    <string name="sv_archive_open_failed">Не удалось открыть архив</string>
+    <string name="sv_add_file_failed">Не удалось добавить файл</string>
+    <string name="sv_download_send_hint">Скачать и отправить можно как обычно</string>
+    <string name="gc_files_forbidden">В этой группе участникам запрещено отправлять файлы</string>
+    <string name="gc_gif_not_downloaded">Гифка не скачалась</string>
+    <string name="gc_gif_not_saved">Гифка не сохранилась</string>
 </resources>

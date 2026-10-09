@@ -1078,4 +1078,10 @@
     <string name="st_apk_hint">The name and version will be read from the file. We will check it (this APK is newer than the current version) and share it with everyone on an older version</string>
     <string name="ps_no_name">no name</string>
     <string name="ipd_sticker_delete_msg">The sticker will disappear from your library and from the shared “From network” catalogue on all phones. Anyone who has already downloaded it will keep their copy.</string>
+    <string name="sv_archive_open_failed">Could not open the archive</string>
+    <string name="sv_add_file_failed">Could not add the file</string>
+    <string name="sv_download_send_hint">You can download and send it as usual</string>
+    <string name="gc_files_forbidden">Members are not allowed to send files in this group</string>
+    <string name="gc_gif_not_downloaded">The GIF did not download</string>
+    <string name="gc_gif_not_saved">The GIF was not saved</string>
 </resources>

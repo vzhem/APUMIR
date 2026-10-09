@@ -331,14 +331,14 @@ class GroupChatViewModel @Inject constructor(
             !byRank ->
                 "Отправка файлов, фото и видео открывается с ранга «Круг друзей» — " +
                     "это 3 подтверждённых приглашения. Сейчас подтверждено: $qualified."
-            !byGroup -> "В этой группе участникам запрещено отправлять файлы"
+            !byGroup -> appContext.getString(R.string.gc_files_forbidden)
             else -> ""
         }
         _uiState.update { it.copy(canAttach = byRank && byGroup, attachLockedHint = hint) }
     }
 
     fun onAttachLocked() {
-        _uiState.update { it.copy(error = it.attachLockedHint.ifBlank { "Вложения недоступны" }) }
+        _uiState.update { it.copy(error = it.attachLockedHint.ifBlank { appContext.getString(R.string.grp_attach_unavailable) }) }
     }
 
     /**
@@ -403,14 +403,14 @@ class GroupChatViewModel @Inject constructor(
                             gifLoading = false,
                             gifError = null,
                             gifNotice = "Сервер перегружен — показываю сохранённые гифки. " +
-                                "Скачать и отправить можно как обычно",
+                                appContext.getString(R.string.sv_download_send_hint),
                             gifItems = cached.first,
                             gifNext = "",
                         )
                         more -> state.copy(
                             gifLoading = false,
                             gifError = null,
-                            gifNotice = "Сервер перегружен — «Ещё» пока недоступно",
+                            gifNotice = appContext.getString(R.string.cd_gif_more_unavailable),
                             gifNext = "",
                         )
                         else -> state.copy(
@@ -618,8 +618,8 @@ class GroupChatViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     swarmStatus = when (holder) {
-                        null -> "Сеть пока не отвечает - попробуйте позже"
-                        "" -> "Уже качаем этот стикер"
+                        null -> appContext.getString(R.string.cd_net_silent)
+                        "" -> appContext.getString(R.string.cd_already_downloading)
                         else -> "Качается с $holder - сейчас отправим"
                     },
                 )
@@ -660,8 +660,8 @@ class GroupChatViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     swarmStatus = when (holder) {
-                        null -> "Сеть пока не отвечает - попробуйте позже"
-                        "" -> "Уже качаем этот стикер"
+                        null -> appContext.getString(R.string.cd_net_silent)
+                        "" -> appContext.getString(R.string.cd_already_downloading)
                         else -> "Просили: $holder"
                     },
                 )
@@ -815,8 +815,8 @@ class GroupChatViewModel @Inject constructor(
                 it.copy(
                     swarmStatus = when (result) {
                         com.vladimir.messenger.data.repository.SaveResult.Saved -> appContext.getString(R.string.gc_saved_fav)
-                        com.vladimir.messenger.data.repository.SaveResult.AlreadySaved -> "Уже в избранном"
-                        com.vladimir.messenger.data.repository.SaveResult.FileNotReady -> "Файл ещё не получен полностью"
+                        com.vladimir.messenger.data.repository.SaveResult.AlreadySaved -> appContext.getString(R.string.cd_already_saved)
+                        com.vladimir.messenger.data.repository.SaveResult.FileNotReady -> appContext.getString(R.string.cd_file_incomplete)
                     },
                 )
             }
@@ -854,12 +854,12 @@ class GroupChatViewModel @Inject constructor(
                 if (sha == null) {
                     val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         botApi.downloadGif(item.gif)
-                    } ?: throw IllegalStateException("Гифка не скачалась")
+                    } ?: throw IllegalStateException(appContext.getString(R.string.gc_gif_not_downloaded))
                     val added = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         com.vladimir.messenger.data.gif.GifLibrary.add(
                             appContext, bytes, item.id, lastGifQuery, "gif_" + item.id + ".gif",
                         )
-                    } ?: throw IllegalStateException("Гифка не сохранилась")
+                    } ?: throw IllegalStateException(appContext.getString(R.string.gc_gif_not_saved))
                     sha = added.sha256
                 }
                 onDone()
@@ -1306,7 +1306,7 @@ class GroupChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             runCatching { groupRepository.setGroupMutedUntil(groupId, untilMs) }
                 .onFailure { error ->
-                    _uiState.update { it.copy(error = error.message ?: "Не удалось изменить уведомления") }
+                    _uiState.update { it.copy(error = error.message ?: appContext.getString(R.string.cd_notify_failed)) }
                 }
         }
     }
@@ -1768,7 +1768,7 @@ class GroupChatViewModel @Inject constructor(
         return if (!ref.isGroup) {
             val chat = chatRepository.forwardChatByContact(ref.id)
             if (chat == null) {
-                com.vladimir.messenger.util.ForwardMarker.Open.Missing("Этого человека нет в контактах на этом телефоне")
+                com.vladimir.messenger.util.ForwardMarker.Open.Missing(appContext.getString(R.string.cd_no_contact))
             } else {
                 com.vladimir.messenger.util.ForwardMarker.Open.Chat(chat.id, chat.contactName, chat.contactId)
             }
@@ -1788,7 +1788,7 @@ class GroupChatViewModel @Inject constructor(
                         )
                     )
                 } else {
-                    com.vladimir.messenger.util.ForwardMarker.Open.Missing("Нет ссылки-приглашения для этой группы")
+                    com.vladimir.messenger.util.ForwardMarker.Open.Missing(appContext.getString(R.string.cd_no_invite_link))
                 }
             } else {
                 com.vladimir.messenger.util.ForwardMarker.Open.Group(group.id, ref.topicId.takeIf { it.isNotBlank() })

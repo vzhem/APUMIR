@@ -340,7 +340,7 @@ class SavedViewModel @Inject constructor(
             }
             _uiState.update {
                 val text = if (summary == null) {
-                    "Не удалось открыть архив"
+                    appContext.getString(R.string.sv_archive_open_failed)
                 } else {
                     "Добавлено стикеров: " + summary.first + " из " + summary.second
                 }
@@ -408,7 +408,7 @@ class SavedViewModel @Inject constructor(
                 it.copy(
                     message = when {
                         saved != null -> "Добавлено в избранное: $saved"
-                        else -> "Не удалось добавить файл"
+                        else -> appContext.getString(R.string.sv_add_file_failed)
                     },
                 )
             }
@@ -546,14 +546,14 @@ class SavedViewModel @Inject constructor(
                             gifLoading = false,
                             gifError = null,
                             gifNotice = "Сервер перегружен — показываю сохранённые гифки. " +
-                                "Скачать и отправить можно как обычно",
+                                appContext.getString(R.string.sv_download_send_hint),
                             gifItems = cached.first,
                             gifNext = "",
                         )
                         more -> state.copy(
                             gifLoading = false,
                             gifError = null,
-                            gifNotice = "Сервер перегружен — «Ещё» пока недоступно",
+                            gifNotice = appContext.getString(R.string.cd_gif_more_unavailable),
                             gifNext = "",
                         )
                         else -> state.copy(
