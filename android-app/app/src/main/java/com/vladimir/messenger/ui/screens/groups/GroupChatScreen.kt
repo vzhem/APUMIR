@@ -350,7 +350,7 @@ fun GroupChatScreen(
             onCopyId = {
                 val clipboard = peerClipboardCtx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                     as android.content.ClipboardManager
-                clipboard.setPrimaryClip(android.content.ClipData.newPlainText(stringResource(R.string.grp_node), inspectedPeerId))
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText(peerClipboardCtx.getString(R.string.grp_node), inspectedPeerId))
                 Toast.makeText(peerClipboardCtx, peerClipboardCtx.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
             },
         )
@@ -571,7 +571,7 @@ fun GroupChatScreen(
                 if (index < 0) {
                     android.widget.Toast.makeText(
                         quoteCtx,
-                        stringResource(R.string.grp_not_loaded),
+                        quoteCtx.getString(R.string.grp_not_loaded),
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
                     return
@@ -2072,7 +2072,7 @@ private fun MessageBubble(
                                 val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                                     as android.content.ClipboardManager
                                 clipboard.setPrimaryClip(
-                                    android.content.ClipData.newPlainText(stringResource(R.string.group_message_placeholder), message.content)
+                                    android.content.ClipData.newPlainText(context.getString(R.string.group_message_placeholder), message.content)
                                 )
                                 Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
                             })
@@ -2144,7 +2144,7 @@ private fun MessageBubble(
                     val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                         as android.content.ClipboardManager
                     clipboard.setPrimaryClip(
-                        android.content.ClipData.newPlainText(stringResource(R.string.group_message_placeholder), message.content)
+                        android.content.ClipData.newPlainText(context.getString(R.string.group_message_placeholder), message.content)
                     )
                     Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
                 })
