@@ -1603,6 +1603,8 @@ private fun SettingsTabContent(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
+                        val logsTitle = stringResource(R.string.settings_logs_title)
+                        val logsCopied = stringResource(R.string.settings_logs_copied)
                         // Кнопка всегда живая: при сборке отчёта объясняет,
                         // что происходит, вместо того чтобы молчать.
                         ApuDiagnosticsActionButton(
@@ -1613,7 +1615,7 @@ private fun SettingsTabContent(
                             compact = true,
                             onClick = {
                                 if (reportText.isNotBlank()) {
-                                    AppShare.shareText(settingsContext, reportText, stringResource(R.string.settings_logs_title))
+                                    AppShare.shareText(settingsContext, reportText, logsTitle)
                                 } else {
                                     apuDiagnosticsNothingYet(settingsContext, transferLogsStage)
                                 }
@@ -1629,7 +1631,7 @@ private fun SettingsTabContent(
                                     mqttClipboard.setText(AnnotatedString(reportText))
                                     android.widget.Toast.makeText(
                                         settingsContext,
-                                        stringResource(R.string.settings_logs_copied),
+                                        logsCopied,
                                         android.widget.Toast.LENGTH_SHORT,
                                     ).show()
                                 } else {
