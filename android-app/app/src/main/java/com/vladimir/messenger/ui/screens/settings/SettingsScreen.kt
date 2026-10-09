@@ -1990,6 +1990,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
             }
         }
         // Принятые APK: «раздать полученный» (сценарий: APK переслан с ПК).
+        val shareReceivedTitle = stringResource(R.string.settings_share_received)
         receivedApks.forEach { apk ->
             SettingsItem(
                 icon    = Icons.Default.InsertDriveFile,
@@ -2002,7 +2003,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
                 },
                 onClick = {
                     markTarget = MarkTarget(
-                        title        = stringResource(R.string.settings_share_received),
+                        title        = shareReceivedTitle,
                         versionGuess = apk.versionGuess ?: "",
                         transferId   = apk.transferId,
                     )
