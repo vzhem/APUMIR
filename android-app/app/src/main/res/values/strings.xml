@@ -1129,4 +1129,11 @@
     <string name="sp_send_link_hint">Отправьте другу ссылку. Если APU уже установлен — откроется добавление контакта. Если нет — отправьте также ссылку на APK.</string>
     <string name="sp_when_opened_hint">Когда друг откроет ссылку, APU покажет ваш профиль и предложит добавить контакт. Если приложение не установлено, отправьте другу также ссылку на APK или сам APK-файл.</string>
     <string name="topic_icon_label">Значок темы: %1$s</string>
+    <string name="cdv_text_unlimited">Текстовые сообщения доступны без ограничений.</string>
+    <string name="cdv_source_not_found">Исходное сообщение не найдено</string>
+    <string name="cdv_retry_own_only">Можно повторить только свой файл</string>
+    <string name="cdv_file_not_pending">Файл уже доставлен или больше не ожидает отправки</string>
+    <string name="cdv_chat_unavailable">Чат недоступен</string>
+    <string name="cdv_no_key">У контакта нет ключа для передачи файлов</string>
+    <string name="cdv_status_changed">Статус файла изменился: он уже мог быть подтверждён</string>
 </resources>

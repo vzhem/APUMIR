@@ -452,7 +452,7 @@ class ChatDetailViewModel @Inject constructor(
                 } else {
                     "Отправка файлов, фото и видео открывается с ранга «Круг друзей» — " +
                         "это 3 подтверждённых приглашения. Сейчас подтверждено: $qualified. " +
-                        "Текстовые сообщения доступны без ограничений."
+                        appContext.getString(R.string.cdv_text_unlimited)
                 },
             )
         }
@@ -832,18 +832,18 @@ class ChatDetailViewModel @Inject constructor(
             try {
                 claimEngineForMediaIfNeeded()
                 val message = chatRepository.getMessageById(messageId)
-                    ?: error("Исходное сообщение не найдено")
-                check(message.isFromMe) { "Можно повторить только свой файл" }
+                    ?: error(appContext.getString(R.string.cdv_source_not_found))
+                check(message.isFromMe) { appContext.getString(R.string.cdv_retry_own_only) }
                 check(
                     message.status == com.vladimir.messenger.domain.model.MessageStatus.LOCAL_FILE ||
                         message.status == com.vladimir.messenger.domain.model.MessageStatus.FILE_EXPIRED
-                ) { "Файл уже доставлен или больше не ожидает отправки" }
+                ) { appContext.getString(R.string.cdv_file_not_pending) }
                 val chat = chatRepository.getChatById(message.chatId)
-                    ?: error("Чат недоступен")
+                    ?: error(appContext.getString(R.string.cdv_chat_unavailable))
                 val recipientId = chat.contactId
-                check(recipientId.startsWith("pk_")) { "У контакта нет ключа для передачи файлов" }
+                check(recipientId.startsWith("pk_")) { appContext.getString(R.string.cdv_no_key) }
                 check(chatRepository.markOutgoingFileRequeued(messageId)) {
-                    "Статус файла изменился: он уже мог быть подтверждён"
+                    appContext.getString(R.string.cdv_status_changed)
                 }
                 fileTransferRouter.retryOutgoingFile(
                     source = uri,
@@ -877,10 +877,10 @@ class ChatDetailViewModel @Inject constructor(
                 // р245: с телефона-зеркала сначала забираем движок у активного.
                 claimEngineForMediaIfNeeded()
                 val chat = chatRepository.getChatById(chatId)
-                    ?: error("Чат недоступен")
+                    ?: error(appContext.getString(R.string.cdv_chat_unavailable))
                 val recipientId = chat.contactId
                 targetRecipientId = recipientId
-                check(recipientId.startsWith("pk_")) { "У контакта нет ключа для передачи файлов" }
+                check(recipientId.startsWith("pk_")) { appContext.getString(R.string.cdv_no_key) }
                 val messageId = UUID.randomUUID().toString()
                 val prepared = filePreparation.prepare(
                     source = uri,
@@ -1128,10 +1128,10 @@ class ChatDetailViewModel @Inject constructor(
             try {
                 // р245: с телефона-зеркала сначала забираем движок (как и файл).
                 claimEngineForMediaIfNeeded()
-                val chat = chatRepository.getChatById(chatId) ?: error("Чат недоступен")
+                val chat = chatRepository.getChatById(chatId) ?: error(appContext.getString(R.string.cdv_chat_unavailable))
                 val recipientId = chat.contactId
                 targetRecipientId = recipientId
-                check(recipientId.startsWith("pk_")) { "У контакта нет ключа для передачи файлов" }
+                check(recipientId.startsWith("pk_")) { appContext.getString(R.string.cdv_no_key) }
                 val messageId = UUID.randomUUID().toString()
                 // Раунд 166/170: честный тип и имя - на карточке и в
                 // уведомлениях «Стикер.webp»/«Стикер.webm», не sha-строка.
@@ -1372,7 +1372,7 @@ class ChatDetailViewModel @Inject constructor(
      * хранителей из каталога сети.
      */
     private suspend fun sendGifRefInternal(sha256: String) {
-        val chat = chatRepository.getChatById(chatId) ?: error("Чат недоступен")
+        val chat = chatRepository.getChatById(chatId) ?: error(appContext.getString(R.string.cdv_chat_unavailable))
         val recipientId = chat.contactId
         val messageId = UUID.randomUUID().toString()
         // р245: это устройство без сети (зеркало)? Тогда ссылку отправляет

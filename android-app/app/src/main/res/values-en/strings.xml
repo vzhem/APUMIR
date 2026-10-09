@@ -1120,4 +1120,11 @@
     <string name="sp_send_link_hint">Send your friend the link. If APU is already installed, it opens adding a contact. If not, also send the APK link.</string>
     <string name="sp_when_opened_hint">When your friend opens the link, APU shows your profile and offers to add a contact. If the app is not installed, also send your friend the APK link or the APK file itself.</string>
     <string name="topic_icon_label">Topic icon: %1$s</string>
+    <string name="cdv_text_unlimited">Text messages are available without limits.</string>
+    <string name="cdv_source_not_found">The original message was not found</string>
+    <string name="cdv_retry_own_only">You can only retry your own file</string>
+    <string name="cdv_file_not_pending">The file has already been delivered or is no longer waiting to be sent</string>
+    <string name="cdv_chat_unavailable">Chat is unavailable</string>
+    <string name="cdv_no_key">The contact has no key for file transfer</string>
+    <string name="cdv_status_changed">The file status has changed. It may already have been confirmed</string>
 </resources>
