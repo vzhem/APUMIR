@@ -547,7 +547,7 @@ fun ChatDetailScreen(
                                     // Раунд 128/170: гифки и стикеры ходят ТИХО -
                                     // служебную передачу байтов в ленте не показываем.
                                     !it.mediaType.equals("image/gif", ignoreCase = true) &&
-                                    !it.displayName.startsWith(context.getString(R.string.sv_sticker))
+                                    !it.displayName.startsWith(com.vladimir.messenger.data.file.STICKER_FILE_PREFIX)
                             }
                             .map { transfer ->
                                 ChatRow(

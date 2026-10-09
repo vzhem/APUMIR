@@ -1016,7 +1016,7 @@ fun GroupChatScreen(
                     val st = cardState
                     val stickerCard = card
                     if (st != null && stickerCard != null && !message.isFromMe &&
-                        stickerCard.displayName.startsWith(stringResource(R.string.sv_sticker)) &&
+                        stickerCard.displayName.startsWith(com.vladimir.messenger.data.file.STICKER_FILE_PREFIX) &&
                         st.transfer == null && !st.pending
                     ) {
                         LaunchedEffect(stickerCard.sha256) {

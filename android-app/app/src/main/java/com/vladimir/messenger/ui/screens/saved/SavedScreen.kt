@@ -546,7 +546,7 @@ private fun SavedItemBubble(
             item.mediaType.equals("video/webm", ignoreCase = true) ||
             item.fileName.lowercase().endsWith(".webp") ||
             item.fileName.lowercase().endsWith(".webm") ||
-            item.fileName.startsWith(stringResource(R.string.sv_sticker))
+            item.fileName.startsWith(com.vladimir.messenger.data.file.STICKER_FILE_PREFIX)
         )
 
     ApuBubble(

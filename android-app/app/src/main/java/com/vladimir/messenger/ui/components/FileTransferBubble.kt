@@ -83,7 +83,7 @@ fun FileTransferBubble(
         // Раунд 169/170: стикер (webp и видео-webm) парит в чате - без
         // подложки пузыря; остаётся только анимированная картинка.
         val stickerFloat = previewFile != null && (
-            transfer.displayName.startsWith(stringResource(R.string.sv_sticker), ignoreCase = true) ||
+            transfer.displayName.startsWith(com.vladimir.messenger.data.file.STICKER_FILE_PREFIX, ignoreCase = true) ||
                 transfer.displayName.lowercase().endsWith(".webp")
             )
         val contentColor = if (stickerFloat) MaterialTheme.colorScheme.onBackground else bubbleTextColor
@@ -111,7 +111,7 @@ fun FileTransferBubble(
                 }
             }
             // Раунд 170: стикер - и webp, и видео-webm (генераторы стикеров).
-            val isSticker = transfer.displayName.startsWith(stringResource(R.string.sv_sticker), ignoreCase = true) ||
+            val isSticker = transfer.displayName.startsWith(com.vladimir.messenger.data.file.STICKER_FILE_PREFIX, ignoreCase = true) ||
                 transfer.displayName.lowercase().endsWith(".webp") ||
                 transfer.displayName.lowercase().endsWith(".webm")
             val isImage = transfer.mediaType.startsWith("image/") || isSticker
