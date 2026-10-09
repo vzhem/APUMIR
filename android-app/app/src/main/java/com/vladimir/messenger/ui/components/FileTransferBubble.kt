@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
@@ -81,7 +83,7 @@ fun FileTransferBubble(
         // Раунд 169/170: стикер (webp и видео-webm) парит в чате - без
         // подложки пузыря; остаётся только анимированная картинка.
         val stickerFloat = previewFile != null && (
-            transfer.displayName.startsWith("Стикер", ignoreCase = true) ||
+            transfer.displayName.startsWith(stringResource(R.string.sv_sticker), ignoreCase = true) ||
                 transfer.displayName.lowercase().endsWith(".webp")
             )
         val contentColor = if (stickerFloat) MaterialTheme.colorScheme.onBackground else bubbleTextColor
@@ -109,7 +111,7 @@ fun FileTransferBubble(
                 }
             }
             // Раунд 170: стикер - и webp, и видео-webm (генераторы стикеров).
-            val isSticker = transfer.displayName.startsWith("Стикер", ignoreCase = true) ||
+            val isSticker = transfer.displayName.startsWith(stringResource(R.string.sv_sticker), ignoreCase = true) ||
                 transfer.displayName.lowercase().endsWith(".webp") ||
                 transfer.displayName.lowercase().endsWith(".webm")
             val isImage = transfer.mediaType.startsWith("image/") || isSticker
@@ -233,7 +235,7 @@ fun FileTransferBubble(
                         ) {
                             Icon(
                                 imageVector = androidx.compose.material.icons.Icons.Default.MoreVert,
-                                contentDescription = "Действия с изображением",
+                                contentDescription = stringResource(R.string.ft_image_actions),
                                 tint = Color.White,
                                 modifier = Modifier
                                     .size(28.dp)
@@ -258,7 +260,7 @@ fun FileTransferBubble(
                         ) {
                             if (onSaveClick != null) {
                                 androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text("Сохранить в папку") },
+                                    text = { Text(stringResource(R.string.ft_save_folder)) },
                                     onClick = {
                                         imageMenuOpen.value = false
                                         onSaveClick()
@@ -267,7 +269,7 @@ fun FileTransferBubble(
                             }
                             if (onShareClick != null) {
                                 androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text("Поделиться") },
+                                    text = { Text(stringResource(R.string.admin_share)) },
                                     onClick = {
                                         imageMenuOpen.value = false
                                         onShareClick()
@@ -276,7 +278,7 @@ fun FileTransferBubble(
                             }
                             if (onSaveToFavorites != null) {
                                 androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text("В избранное") },
+                                    text = { Text(stringResource(R.string.chat_to_saved)) },
                                     onClick = {
                                         imageMenuOpen.value = false
                                         onSaveToFavorites()
@@ -355,15 +357,15 @@ fun FileTransferBubble(
             if (!(previewBitmap != null && isImage) &&
                 transfer.state == "COMPLETE" && transfer.direction == "INCOMING" && onSaveClick != null
             ) {
-                ApuTextAction(label = "Сохранить в папку", onClick = onSaveClick)
+                ApuTextAction(label = stringResource(R.string.ft_save_folder), onClick = onSaveClick)
             }
             // У документов и видео превью нет, меню картинки тоже - поэтому
             // «В избранное» выносим отдельной кнопкой.
             if (!(previewBitmap != null && isImage) && onSaveToFavorites != null) {
-                ApuTextAction(label = "В избранное", onClick = onSaveToFavorites)
+                ApuTextAction(label = stringResource(R.string.chat_to_saved), onClick = onSaveToFavorites)
             }
             if (isFromMe && onRetry != null) {
-                ApuTextAction(label = "Повторить отправку", onClick = onRetry)
+                ApuTextAction(label = stringResource(R.string.ft_retry), onClick = onRetry)
             }
         }
     }

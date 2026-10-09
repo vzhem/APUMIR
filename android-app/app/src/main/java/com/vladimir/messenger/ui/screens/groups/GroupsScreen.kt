@@ -687,7 +687,7 @@ private fun GroupRow(
                 // в общем списке они неразличимы.
                 Text(
                     buildString {
-                        append(if (group.isChannel) "Канал" else "Группа")
+                        append(if (group.isChannel) stringResource(R.string.contacts_channel) else stringResource(R.string.contacts_group))
                         append(if (group.isPublic) " · публичная" else " · частная")
                     },
                     style = MaterialTheme.typography.labelMedium,

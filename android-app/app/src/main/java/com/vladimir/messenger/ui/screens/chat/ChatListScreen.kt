@@ -500,7 +500,7 @@ fun ChatListScreen(
                             "Ссылку можно отправить кому угодно - по ней вход как обычно."
                     )
                     Spacer(Modifier.height(14.dp))
-                    InviteActionBubble("Показать QR-код", filled = true) {
+                    InviteActionBubble(stringResource(R.string.groups_show_qr), filled = true) {
                         val chosen = group
                         inviteChoice = null
                         viewModel.prepareQrGroupInvite(chosen.id) { title, link ->
@@ -508,13 +508,13 @@ fun ChatListScreen(
                         }
                     }
                     Spacer(Modifier.height(8.dp))
-                    InviteActionBubble("Отправить ссылку", filled = true) {
+                    InviteActionBubble(stringResource(R.string.groups_send_link), filled = true) {
                         val chosen = group
                         inviteChoice = null
                         groupLinkShare = chosen
                     }
                     Spacer(Modifier.height(8.dp))
-                    InviteActionBubble("Отправить в APU", filled = true) {
+                    InviteActionBubble(stringResource(R.string.contacts_send_in_apu), filled = true) {
                         val chosen = group
                         inviteChoice = null
                         inviteApu = chosen
@@ -539,10 +539,10 @@ fun ChatListScreen(
             viewModel.groupMemberIdsOnce(grp.id) { memberIds = it }
         }
         ApuPremiumDialog(
-            title = "Кому отправить",
+            title = stringResource(R.string.chat_send_to),
             onDismiss = { if (!sending) inviteApu = null },
             confirmLabel = if (selected.isNotEmpty()) {
-                if (sending) "Отправляем…" else "Отправить"
+                if (sending) stringResource(R.string.chat_sending) else stringResource(R.string.action_send)
             } else {
                 null
             },
@@ -565,8 +565,8 @@ fun ChatListScreen(
                 Column {
                     val list = contacts
                     when {
-                        list == null -> Text("Загрузка…")
-                        list.isEmpty() -> Text("Пока нет личных чатов - сначала добавьте контакты.")
+                        list == null -> Text(stringResource(R.string.action_loading))
+                        list.isEmpty() -> Text(stringResource(R.string.chat_no_personal))
                         else -> {
                             Text(
                                 "Выбрано: ${selected.size} из $maxPick",
@@ -649,7 +649,7 @@ fun ChatListScreen(
                                         }
                                         Spacer(Modifier.width(10.dp))
                                         Text(
-                                            c.contactName.ifBlank { "Без имени" },
+                                            c.contactName.ifBlank { stringResource(R.string.chat_no_name) },
                                             modifier = Modifier.weight(1f),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
@@ -663,7 +663,7 @@ fun ChatListScreen(
                                         if (inGroup) {
                                             Text(
                                                 // Раунд 163: каналу - честное «уже в канале».
-                                                if (grp.isChannel) "уже в канале" else "уже в группе",
+                                                if (grp.isChannel) stringResource(R.string.chat_already_channel) else stringResource(R.string.chat_already_group),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = Color(0xFF9AA3AF),
                                                 maxLines = 1,
@@ -684,7 +684,7 @@ fun ChatListScreen(
         ApuPremiumDialog(
             title = title,
             onDismiss = { qrInvite = null },
-            confirmLabel = "Готово",
+            confirmLabel = stringResource(R.string.action_done),
             onConfirm = { qrInvite = null },
             confirmStyle = DiagnosticsActionStyle.GLASS,
             dismissLabel = null,
@@ -708,9 +708,9 @@ fun ChatListScreen(
     // Подтверждение удаления чата.
     confirmDeleteChat?.let { chat ->
         ApuPremiumDialog(
-            title = "Удалить чат?",
+            title = stringResource(R.string.chat_delete_q),
             onDismiss = { confirmDeleteChat = null },
-            confirmLabel = "Удалить",
+            confirmLabel = stringResource(R.string.action_delete),
             onConfirm = {
                 viewModel.deleteChat(chat.id)
                 confirmDeleteChat = null
@@ -727,9 +727,9 @@ fun ChatListScreen(
     // Подтверждение очистки переписки.
     confirmClearChat?.let { chat ->
         ApuPremiumDialog(
-            title = "Очистить переписку?",
+            title = stringResource(R.string.chat_clear_q),
             onDismiss = { confirmClearChat = null },
-            confirmLabel = "Очистить",
+            confirmLabel = stringResource(R.string.chat_clear),
             onConfirm = {
                 viewModel.clearChatHistory(chat.id)
                 confirmClearChat = null
@@ -750,14 +750,14 @@ fun ChatListScreen(
         ApuPremiumDialog(
             title = when {
                 owner -> "Удалить $what?"
-                group.isChannel -> "Отписаться от канала?"
-                else -> "Выйти из группы?"
+                group.isChannel -> stringResource(R.string.groups_unsubscribe_channel_q)
+                else -> stringResource(R.string.groups_leave_group_q)
             },
             onDismiss = { confirmGroup = null },
             confirmLabel = when {
-                owner -> "Удалить"
-                group.isChannel -> "Отписаться"
-                else -> "Выйти"
+                owner -> stringResource(R.string.action_delete)
+                group.isChannel -> stringResource(R.string.menu_unsubscribe)
+                else -> stringResource(R.string.action_logout)
             },
             onConfirm = {
                 if (owner) viewModel.deleteGroup(group.id) else viewModel.leaveGroup(group.id)
@@ -784,14 +784,14 @@ fun ChatListScreen(
     // Раунд 200: перед отправкой приглашения спрашиваем про APK.
     if (showInviteShare) {
         InviteAttachDialog(
-            title = "Пригласить в APU",
+            title = stringResource(R.string.chat_invite_apu),
             onDismiss = { showInviteShare = false },
             onShare = { attach ->
                 showInviteShare = false
                 val link = runCatching { OwnInvite.link(context) }.getOrNull()
                 if (link.isNullOrBlank()) {
                     android.widget.Toast.makeText(
-                        context, "Личность ещё не создана",
+                        context, context.getString(R.string.chat_no_identity),
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
                 } else {
@@ -808,7 +808,7 @@ fun ChatListScreen(
     if (groupLinkShare != null) {
         val chosenGroup = groupLinkShare!!
         InviteAttachDialog(
-            title = if (chosenGroup.isChannel) "Пригласить в канал" else "Пригласить в сообщество",
+            title = if (chosenGroup.isChannel) stringResource(R.string.menu_invite_channel) else stringResource(R.string.menu_invite_community),
             onDismiss = { groupLinkShare = null },
             onShare = { attach ->
                 groupLinkShare = null

@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 
@@ -68,7 +70,7 @@ fun ProfileSyncDialog(
             viewModel.stopShare()
             onDismiss()
         } },
-        title = { Text("Перенос профиля на новое устройство") },
+        title = { Text(stringResource(R.string.settings_profile_transfer)) },
         text = {
             Column(
                 // ApuSettingsDialog уже ограничивает высоту и прокручивает текст.
@@ -90,14 +92,14 @@ fun ProfileSyncDialog(
                     value = ui.password,
                     onValueChange = viewModel::onPasswordChange,
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Пароль из «Защиты личности» (одинаковый на обоих)") },
+                    label = { Text(stringResource(R.string.sync_pw_hint)) },
                     singleLine = true,
                     visualTransformation = PasswordVisualTransformation(),
                 )
                 // Раунд 256: пароль подставлен из входа - вводить ничего не надо.
                 if (ui.passwordAuto) {
                     Text(
-                        "Пароль подставлен автоматически из входа в аккаунт.",
+                        stringResource(R.string.sync_pw_auto),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                     )
@@ -105,7 +107,7 @@ fun ProfileSyncDialog(
 
                 // ── Через сеть APU: любые сети, находят себя сами ───────
                 Text(
-                    "Через сеть APU - любые сети (Wi-Fi и мобильный интернет)",
+                    stringResource(R.string.sync_via_apu),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -116,13 +118,13 @@ fun ProfileSyncDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 ApuActionBubble(
-                    label = if (ui.busy) "Синхронизируем…" else "Отправить копию в сеть APU",
+                    label = if (ui.busy) stringResource(R.string.sync_syncing) else stringResource(R.string.sync_send_copy),
                     icon = Icons.Default.CloudSync,
                     onClick = { viewModel.netUpload() },
                 )
                 if (ui.netSent) {
                     Text(
-                        "Копия ждёт второе устройство и исчезнет после забора.",
+                        stringResource(R.string.sync_wait_note),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.SemiBold,
@@ -140,7 +142,7 @@ fun ProfileSyncDialog(
                     val mine = ProfileSyncNet.isOwnDevice(meta, ui.myDeviceId, ui.myAccountNodeId)
                     if (!mine) {
                         ApuTextAction(
-                            label = "Забрать копию по паролю",
+                            label = stringResource(R.string.sync_fetch_pw),
                             onClick = viewModel::netFetchAndStage,
                         )
                     }
@@ -148,7 +150,7 @@ fun ProfileSyncDialog(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            "Автоматически искать копию",
+                            stringResource(R.string.sync_auto_search),
                             style = MaterialTheme.typography.bodySmall,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -178,13 +180,13 @@ fun ProfileSyncDialog(
 
                 // ── Wi-Fi напрямую: без интернета ────────────────────────
                 Text(
-                    "По Wi-Fi напрямую - без интернета",
+                    stringResource(R.string.sync_wifi_direct),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
                 if (!ui.sharing) {
                     ApuActionBubble(
-                        label = if (ui.busy) "Готовим копию…" else "Передать на другое устройство",
+                        label = if (ui.busy) stringResource(R.string.sync_preparing) else stringResource(R.string.sync_transfer),
                         icon = Icons.Default.Wifi,
                         onClick = { viewModel.startShare() },
                     )
@@ -206,7 +208,7 @@ fun ProfileSyncDialog(
                                     ) {
                                         Image(
                                             bitmap = it.asImageBitmap(),
-                                            contentDescription = "QR передачи копии",
+                                            contentDescription = stringResource(R.string.sync_qr),
                                             modifier = Modifier.size(200.dp),
                                         )
                                     }
@@ -214,7 +216,7 @@ fun ProfileSyncDialog(
                             }
                         }
                         Text(
-                            "Или введите на другом устройстве:",
+                            stringResource(R.string.sync_or_enter),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -224,29 +226,29 @@ fun ProfileSyncDialog(
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            "Ожидаем приёмник… копия отдаётся один раз.",
+                            stringResource(R.string.sync_waiting),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        ApuTextAction(label = "Отменить передачу", onClick = viewModel::stopShare)
+                        ApuTextAction(label = stringResource(R.string.sync_cancel_transfer), onClick = viewModel::stopShare)
                     }
                 }
                 ApuBubbleField(
                     value = ui.pullAddress,
                     onValueChange = viewModel::onPullAddressChange,
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Адрес с экрана телефона (192.168.х.х:48126)") },
+                    label = { Text(stringResource(R.string.sync_addr_hint)) },
                     singleLine = true,
                 )
                 ApuBubbleField(
                     value = ui.pullToken,
                     onValueChange = viewModel::onPullTokenChange,
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Код (8 знаков)") },
+                    label = { Text(stringResource(R.string.sync_code)) },
                     singleLine = true,
                 )
                 ApuActionBubble(
-                    label = if (ui.busy) "Забираем копию…" else "Забрать копию с телефона",
+                    label = if (ui.busy) stringResource(R.string.sync_fetching) else stringResource(R.string.sync_fetch),
                     icon = Icons.Default.CloudDownload,
                     onClick = { viewModel.pullAndStage() },
                 )
@@ -261,12 +263,12 @@ fun ProfileSyncDialog(
                     Text(
                         "Копия готова: ${manifest.displayName.ifBlank { "без имени" }} от $created, " +
                             "версия APU ${manifest.appVersionName}. Применить на этом устройстве? " +
-                            "Текущие данные будут заменены.",
+                            stringResource(R.string.sync_replace_warn),
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.SemiBold,
                     )
                     ApuActionBubble(
-                        label = if (ui.restarting) "Перезапускаем…" else "Применить и перезапустить",
+                        label = if (ui.restarting) stringResource(R.string.sync_restarting) else stringResource(R.string.sync_apply),
                         icon = Icons.Default.RestartAlt,
                         onClick = {
                             viewModel.confirmAndExit {
@@ -274,7 +276,7 @@ fun ProfileSyncDialog(
                             }
                         },
                     )
-                    ApuTextAction(label = "Не применять", onClick = viewModel::discardStaged)
+                    ApuTextAction(label = stringResource(R.string.sync_dont_apply), onClick = viewModel::discardStaged)
                 }
 
                 ui.message?.let { message ->
@@ -290,7 +292,7 @@ fun ProfileSyncDialog(
         },
         confirmButton = {
             ApuTextAction(
-                label = "Закрыть",
+                label = stringResource(R.string.action_close),
                 onClick = {
                     viewModel.stopShare()
                     onDismiss()

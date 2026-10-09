@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // INPUTPANEDIALOG.KT - единая панель ввода (раунд 138)
 // =============================================================================
@@ -162,21 +164,21 @@ fun InputPanelDialog(
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     SectionPill(
                         icon = "😀",
-                        label = "Эмодзи",
+                        label = stringResource(R.string.input_emoji),
                         selected = section == SECTION_EMOJI,
                         onClick = { section = SECTION_EMOJI },
                         modifier = Modifier.weight(1f),
                     )
                     SectionPill(
                         icon = "🎞",
-                        label = "Гиф",
+                        label = stringResource(R.string.input_gif),
                         selected = section == SECTION_GIF,
                         onClick = { section = SECTION_GIF },
                         modifier = Modifier.weight(1f),
                     )
                     SectionPill(
                         icon = "🧩",
-                        label = "Стикеры",
+                        label = stringResource(R.string.sv_stickers),
                         selected = section == SECTION_STICKERS,
                         onClick = { section = SECTION_STICKERS },
                         modifier = Modifier.weight(1f),
@@ -373,7 +375,7 @@ private fun StickerSection(
     if (removeCandidate != null) {
         ApuSettingsDialog(
             onDismissRequest = { removeCandidate = null },
-            title = { Text("Удалить стикер?") },
+            title = { Text(stringResource(R.string.input_del_sticker_q)) },
             text = {
                 Text(
                     "Стикер исчезнет из вашей библиотеки и из общего каталога «Из сети» на всех телефонах. У тех, кто уже успел его скачать, копия останется.",
@@ -381,7 +383,7 @@ private fun StickerSection(
             },
             confirmButton = {
                 ApuTextAction(
-                    label = "Удалить",
+                    label = stringResource(R.string.action_delete),
                     onClick = {
                         val entry = removeCandidate
                         removeCandidate = null
@@ -391,7 +393,7 @@ private fun StickerSection(
                 )
             },
             dismissButton = {
-                ApuTextAction(label = "Отмена", onClick = { removeCandidate = null })
+                ApuTextAction(label = stringResource(R.string.action_cancel), onClick = { removeCandidate = null })
             },
         )
     }
@@ -422,9 +424,9 @@ private fun StickerSection(
     val myStart = 3 + maxOf(recents.size, 1)
     val swarmStart = myStart + 1 + stickers.size
     val groups = listOf(
-        Triple("🕘", "Недавние", recentsStart),
-        Triple("📦", "Мои", myStart),
-        Triple("🕸", "Из сети", swarmStart),
+        Triple("🕘", stringResource(R.string.input_recent), recentsStart),
+        Triple("📦", stringResource(R.string.input_mine), myStart),
+        Triple("🕸", stringResource(R.string.input_from_net), swarmStart),
     )
     val current by remember {
         derivedStateOf {
@@ -470,7 +472,7 @@ private fun StickerSection(
                 Text("+", fontSize = 22.sp, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    "Добавить стикер из телефона (картинка)",
+                    stringResource(R.string.input_add_sticker),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -489,7 +491,7 @@ private fun StickerSection(
                 Text("+", fontSize = 22.sp, color = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    "Добавить альбом стикеров (.zip)",
+                    stringResource(R.string.input_add_album),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -497,7 +499,7 @@ private fun StickerSection(
         }
         item(key = "hr", span = { GridItemSpan(maxLineSpan) }) {
             Text(
-                "Недавние",
+                stringResource(R.string.input_recent),
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -507,7 +509,7 @@ private fun StickerSection(
         if (recents.isEmpty()) {
             item(key = "hr-empty", span = { GridItemSpan(maxLineSpan) }) {
                 Text(
-                    "Пока пусто - отправленные стикеры появятся здесь.",
+                    stringResource(R.string.input_empty_recent),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 4.dp),
@@ -521,7 +523,7 @@ private fun StickerSection(
             onRetryFetchSticker = onRetryFetchSticker)
         item(key = "hm", span = { GridItemSpan(maxLineSpan) }) {
             Text(
-                "Мои стикеры",
+                stringResource(R.string.input_my_stickers),
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -534,7 +536,7 @@ private fun StickerSection(
             onRetryFetchSticker = onRetryFetchSticker)
         item(key = "hs", span = { GridItemSpan(maxLineSpan) }) {
             Text(
-                "Из сети",
+                stringResource(R.string.input_from_net),
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -554,7 +556,7 @@ private fun StickerSection(
         if (swarm.isEmpty()) {
             item(key = "hs-empty", span = { GridItemSpan(maxLineSpan) }) {
                 Text(
-                    "Пока пусто. Добавьте стикер на любом телефоне - он появится здесь на всех и будет храниться в сети.",
+                    stringResource(R.string.input_empty_net),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 4.dp),
