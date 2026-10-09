@@ -9,6 +9,8 @@ package com.vladimir.messenger.ui.screens.onboarding
 //   3. ShowInvite — QR-код + текстовая ссылка для первого контакта
 // =============================================================================
 
+import com.vladimir.messenger.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
@@ -163,7 +165,7 @@ private fun EnterNameStep(
 
         // Две вкладки: новичок и тот, кто уже был зарегистрирован.
         ApuTabBar(
-            titles = listOf("Новый профиль", "Я уже зарегистрирован"),
+            titles = listOf(stringResource(R.string.onb_new_profile), stringResource(R.string.onb_already_registered)),
             selectedIndex = if (state.restoreMode) 1 else 0,
             offsetFraction = 0f,
             onSelect = { onRestoreModeChanged(it == 1) },
@@ -174,9 +176,9 @@ private fun EnterNameStep(
         HintBubble(modifier = Modifier.fillMaxWidth()) {
             Text(
                 text = if (state.restoreMode) {
-                    "Введите никнейм и пароль, которые задавали раньше — вернётся ваш прежний профиль со всеми контактами и рангом."
+                    stringResource(R.string.onb_restore_hint)
                 } else {
-                    "Никнейм и пароль понадобятся, чтобы вернуть себя после переустановки. Запомните их."
+                    stringResource(R.string.onb_keep_credentials)
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
@@ -191,8 +193,8 @@ private fun EnterNameStep(
             ApuBubbleField(
                 value    = state.displayName,
                 onValueChange = onNameChanged,
-                label    = { Text("Ваше имя") },
-                placeholder = { Text("Имя Фамилия") },
+                label    = { Text(stringResource(R.string.onb_your_name)) },
+                placeholder = { Text(stringResource(R.string.onb_name_placeholder)) },
                 singleLine = true,
                 isError  = state.nameError != null,
                 supportingText = {
@@ -215,13 +217,13 @@ private fun EnterNameStep(
         ApuBubbleField(
             value    = state.nickname,
             onValueChange = onNicknameChanged,
-            label    = { Text("Никнейм") },
-            placeholder = { Text("ваш_никнейм") },
+            label    = { Text(stringResource(R.string.identity_nickname)) },
+            placeholder = { Text(stringResource(R.string.onb_nickname_placeholder)) },
             singleLine = true,
             isError  = state.nicknameError != null,
             supportingText = {
                 Text(
-                    state.nicknameError ?: "Латиница, цифры и подчёркивание, минимум 3 знака",
+                    state.nicknameError ?: stringResource(R.string.onb_nickname_rule),
                     color = if (state.nicknameError != null) {
                         MaterialTheme.colorScheme.error
                     } else {
@@ -239,14 +241,14 @@ private fun EnterNameStep(
         ApuBubbleField(
             value    = state.password,
             onValueChange = onPasswordChanged,
-            label    = { Text("Пароль") },
+            label    = { Text(stringResource(R.string.identity_password)) },
             singleLine = true,
             isError  = state.passwordError != null,
             visualTransformation = PasswordVisualTransformation(),
             supportingText = {
                 Text(
                     state.passwordError
-                        ?: if (state.restoreMode) "Тот, что задавали раньше"
+                        ?: if (state.restoreMode) stringResource(R.string.onb_password_old)
                         else "Минимум $MIN_PASSWORD_LENGTH знаков",
                     color = if (state.passwordError != null) {
                         MaterialTheme.colorScheme.error
@@ -274,13 +276,13 @@ private fun EnterNameStep(
             ApuBubbleField(
                 value    = state.passwordRepeat,
                 onValueChange = onPasswordRepeatChanged,
-                label    = { Text("Подтвердите пароль") },
+                label    = { Text(stringResource(R.string.onb_confirm_password)) },
                 singleLine = true,
                 isError  = mismatch,
                 visualTransformation = PasswordVisualTransformation(),
                 supportingText = {
                     if (mismatch) {
-                        Text("Пароли не совпадают", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.backup_passwords_mismatch), color = MaterialTheme.colorScheme.error)
                     }
                 },
                 leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
@@ -308,7 +310,7 @@ private fun EnterNameStep(
             Icon(Icons.Default.Key, contentDescription = null)
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                if (state.restoreMode) "Войти" else "Создать профиль",
+                if (state.restoreMode) stringResource(R.string.onb_sign_in) else stringResource(R.string.onb_create_profile),
                 style = MaterialTheme.typography.titleMedium,
             )
         }
@@ -328,7 +330,7 @@ private fun EnterNameStep(
             ) {
                 Icon(Icons.Default.Restore, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Восстановить из файла резервной копии")
+                Text(stringResource(R.string.onb_restore_from_file))
             }
         }
 
@@ -347,8 +349,7 @@ private fun EnterNameStep(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Пароль не покидает телефон: ключи запираются прямо здесь. " +
-                        "Ни телефонного номера, ни почты — только вы и ваши контакты.",
+                    text = stringResource(R.string.onb_privacy_body),
                     style = MaterialTheme.typography.bodySmall,
                     color = ApuBubbleMutedColor,
                 )
@@ -397,7 +398,7 @@ private fun GeneratingStep() {
         Spacer(modifier = Modifier.height(32.dp))
 
         Text(
-            text      = "Генерация ключей",
+            text      = stringResource(R.string.onb_generating),
             style     = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
         )
@@ -406,10 +407,10 @@ private fun GeneratingStep() {
 
         // Описание процесса
         val steps = listOf(
-            "Создаём ключ подписи...",
-            "Создаём ключ обмена...",
-            "Готовим ваш узел сети...",
-            "Сохраняем в защищённое хранилище...",
+            stringResource(R.string.onb_step_sign),
+            stringResource(R.string.onb_step_exchange),
+            stringResource(R.string.onb_step_node),
+            stringResource(R.string.onb_step_store),
         )
         var currentStep by remember { mutableIntStateOf(0) }
         LaunchedEffect(Unit) {
@@ -464,7 +465,7 @@ private fun ShowInviteStep(
 
         ApuPremiumIconTile(
             icon = Icons.Default.CheckCircle,
-            contentDescription = "Профиль создан",
+            contentDescription = stringResource(R.string.onb_profile_created_cd),
             size = 48.dp,
             corner = 15.dp,
         )
@@ -472,7 +473,7 @@ private fun ShowInviteStep(
         Spacer(modifier = Modifier.height(12.dp))
 
         Text(
-            text      = "Профиль создан!",
+            text      = stringResource(R.string.onb_profile_created),
             style     = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
         )
@@ -491,7 +492,7 @@ private fun ShowInviteStep(
         Spacer(modifier = Modifier.height(24.dp))
 
         Text(
-            text  = "Поделитесь QR-кодом или ссылкой, чтобы добавить первый контакт",
+            text  = stringResource(R.string.onb_share_hint),
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
             color = ApuBubbleMutedColor,
@@ -508,7 +509,7 @@ private fun ShowInviteStep(
             ) {
                 Image(
                     bitmap = bitmap.asImageBitmap(),
-                    contentDescription = "QR-код для добавления контакта",
+                    contentDescription = stringResource(R.string.onb_qr_cd),
                     modifier = Modifier.fillMaxSize().padding(12.dp),
                 )
             }
@@ -538,7 +539,7 @@ private fun ShowInviteStep(
                 Spacer(modifier = Modifier.width(8.dp))
                 Icon(
                     imageVector = if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
-                    contentDescription = "Скопировать",
+                    contentDescription = stringResource(R.string.action_copy),
                     tint = if (copied) ApuBubbleAccentColor else ApuBubbleMutedColor,
                 )
             }
@@ -555,14 +556,14 @@ private fun ShowInviteStep(
         ApuBubbleCard(modifier = Modifier.fillMaxWidth(), premium = 5.dp) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
-                    text = "Вас пригласили в APU?",
+                    text = stringResource(R.string.onb_invited_question),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = ApuBubbleTextColor,
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Вставьте сообщение от друга целиком — контакт добавится сам, и приглашение другу засчитается.",
+                    text = stringResource(R.string.onb_paste_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = ApuBubbleMutedColor,
                 )
@@ -570,7 +571,7 @@ private fun ShowInviteStep(
                 ApuBubbleField(
                     value = joinText,
                     onValueChange = { joinText = it },
-                    label = { Text("Ссылка или сообщение от друга") },
+                    label = { Text(stringResource(R.string.onb_link_or_message)) },
                     minLines = 2,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -581,7 +582,7 @@ private fun ShowInviteStep(
                     enabled = joinValid,
                     modifier = Modifier.fillMaxWidth().height(46.dp),
                 ) {
-                    Text("Добавить пригласившего")
+                    Text(stringResource(R.string.onb_add_inviter))
                 }
             }
         }
@@ -596,7 +597,7 @@ private fun ShowInviteStep(
                 .height(52.dp),
         ) {
             Text(
-                "Начать общение",
+                stringResource(R.string.onb_start_chatting),
                 style = MaterialTheme.typography.titleMedium,
             )
             Spacer(modifier = Modifier.width(8.dp))

@@ -486,4 +486,33 @@
     <string name="identity_restore_body">Введите никнейм и пароль, которые задавали раньше. Приложение перезапустится под вашим прежним адресом.</string>
     <string name="identity_key_body">Пароль никуда не отправляется. Ключ запирается прямо здесь, на телефоне, поэтому прочитать его не может никто.</string>
     <string name="identity_why_body">Если удалить и поставить приложение заново, вы станете для собеседников новым человеком: пропадут ранг, приглашения и переписка. Задайте никнейм и пароль — и сможете вернуть себя на любом телефоне.</string>
+    <!-- Знакомство -->
+    <string name="onb_new_profile">Новый профиль</string>
+    <string name="onb_already_registered">Я уже зарегистрирован</string>
+    <string name="onb_restore_hint">Введите никнейм и пароль, которые задавали раньше — вернётся ваш прежний профиль со всеми контактами и рангом.</string>
+    <string name="onb_keep_credentials">Никнейм и пароль понадобятся, чтобы вернуть себя после переустановки. Запомните их.</string>
+    <string name="onb_your_name">Ваше имя</string>
+    <string name="onb_name_placeholder">Имя Фамилия</string>
+    <string name="onb_nickname_placeholder">ваш_никнейм</string>
+    <string name="onb_nickname_rule">Латиница, цифры и подчёркивание, минимум 3 знака</string>
+    <string name="onb_password_old">Тот, что задавали раньше</string>
+    <string name="onb_confirm_password">Подтвердите пароль</string>
+    <string name="onb_sign_in">Войти</string>
+    <string name="onb_create_profile">Создать профиль</string>
+    <string name="onb_restore_from_file">Восстановить из файла резервной копии</string>
+    <string name="onb_generating">Генерация ключей</string>
+    <string name="onb_step_sign">Создаём ключ подписи...</string>
+    <string name="onb_step_exchange">Создаём ключ обмена...</string>
+    <string name="onb_step_node">Готовим ваш узел сети...</string>
+    <string name="onb_step_store">Сохраняем в защищённое хранилище...</string>
+    <string name="onb_profile_created_cd">Профиль создан</string>
+    <string name="onb_profile_created">Профиль создан!</string>
+    <string name="onb_share_hint">Поделитесь QR-кодом или ссылкой, чтобы добавить первый контакт</string>
+    <string name="onb_qr_cd">QR-код для добавления контакта</string>
+    <string name="onb_invited_question">Вас пригласили в APU?</string>
+    <string name="onb_paste_hint">Вставьте сообщение от друга целиком — контакт добавится сам, и приглашение другу засчитается.</string>
+    <string name="onb_link_or_message">Ссылка или сообщение от друга</string>
+    <string name="onb_add_inviter">Добавить пригласившего</string>
+    <string name="onb_start_chatting">Начать общение</string>
+    <string name="onb_privacy_body">Пароль не покидает телефон: ключи запираются прямо здесь. Ни телефонного номера, ни почты — только вы и ваши контакты.</string>
 </resources>

@@ -477,4 +477,33 @@
     <string name="identity_restore_body">Enter the nickname and password you set before. The app will restart under your previous address.</string>
     <string name="identity_key_body">The password is not sent anywhere. The key is locked right here on the phone, so no one can read it.</string>
     <string name="identity_why_body">If you delete the app and install it again, you become a new person to your contacts: your rank, invitations, and chats disappear. Set a nickname and a password, and you can restore yourself on any phone.</string>
+    <!-- Onboarding -->
+    <string name="onb_new_profile">New profile</string>
+    <string name="onb_already_registered">I already have an account</string>
+    <string name="onb_restore_hint">Enter the nickname and password you used before — your previous profile, with all contacts and rank, will come back.</string>
+    <string name="onb_keep_credentials">You will need the nickname and password to restore yourself after reinstalling. Remember them.</string>
+    <string name="onb_your_name">Your name</string>
+    <string name="onb_name_placeholder">First Last</string>
+    <string name="onb_nickname_placeholder">your_nickname</string>
+    <string name="onb_nickname_rule">Latin letters, digits, and underscores, at least 3 characters</string>
+    <string name="onb_password_old">The one you set before</string>
+    <string name="onb_confirm_password">Confirm password</string>
+    <string name="onb_sign_in">Sign in</string>
+    <string name="onb_create_profile">Create profile</string>
+    <string name="onb_restore_from_file">Restore from a backup file</string>
+    <string name="onb_generating">Generating keys</string>
+    <string name="onb_step_sign">Creating the signing key…</string>
+    <string name="onb_step_exchange">Creating the exchange key…</string>
+    <string name="onb_step_node">Preparing your network node…</string>
+    <string name="onb_step_store">Saving to secure storage…</string>
+    <string name="onb_profile_created_cd">Profile created</string>
+    <string name="onb_profile_created">Profile created!</string>
+    <string name="onb_share_hint">Share a QR code or link to add your first contact</string>
+    <string name="onb_qr_cd">QR code for adding a contact</string>
+    <string name="onb_invited_question">Were you invited to APU?</string>
+    <string name="onb_paste_hint">Paste your friend’s message in full — the contact is added automatically, and the invitation counts for your friend.</string>
+    <string name="onb_link_or_message">Link or message from a friend</string>
+    <string name="onb_add_inviter">Add the person who invited you</string>
+    <string name="onb_start_chatting">Start chatting</string>
+    <string name="onb_privacy_body">Your password never leaves the phone: the keys are locked right here. No phone number and no email — only you and your contacts.</string>
 </resources>
