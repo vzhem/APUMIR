@@ -515,4 +515,21 @@
     <string name="onb_add_inviter">Добавить пригласившего</string>
     <string name="onb_start_chatting">Начать общение</string>
     <string name="onb_privacy_body">Пароль не покидает телефон: ключи запираются прямо здесь. Ни телефонного номера, ни почты — только вы и ваши контакты.</string>
+    <!-- MTProto прокси -->
+    <string name="mtproxy_title">MTProto прокси</string>
+    <string name="mtproxy_actions">Действия с прокси</string>
+    <string name="mtproxy_import">Импорт прокси</string>
+    <string name="mtproxy_collect">Собрать прокси из каналов</string>
+    <string name="mtproxy_check_all">Проверить все</string>
+    <string name="mtproxy_clean_dead">Очистить мёртвые</string>
+    <string name="mtproxy_add_cd">Добавить прокси</string>
+    <string name="mtproxy_none">Нет прокси</string>
+    <string name="mtproxy_none_hint">Добавьте вручную или импортируйте из буфера</string>
+    <string name="mtproxy_check">Проверить</string>
+    <string name="mtproxy_formats">Поддерживаемые форматы:</string>
+    <string name="mtproxy_proxy">Прокси</string>
+    <string name="mtproxy_add_btn">Добавить</string>
+    <string name="mtproxy_paste_hint">Вставьте прокси (один или несколько, каждый на новой строке):</string>
+    <string name="mtproxy_paste_placeholder">Вставьте сюда...</string>
+    <string name="mtproxy_import_btn">Импортировать</string>
 </resources>

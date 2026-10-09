@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.mtproxy
 
+import com.vladimir.messenger.R
+import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuAction
 import com.vladimir.messenger.ui.components.ApuActionsMenu
 import com.vladimir.messenger.ui.components.ApuBubbleField
@@ -72,40 +74,40 @@ fun MtProxyListScreen(
                     // Прокрутка НЕ должна красить панель: под ней обои APU.
                     scrolledContainerColor = Color.Transparent,
                 ),
-                title = { ApuSettingsHeader("MTProto прокси") },
+                title = { ApuSettingsHeader(stringResource(R.string.mtproxy_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(Icons.Default.ArrowBack, "Назад")
+                        Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back))
                     }
                 },
                 actions = {
                     Box {
                         IconButton(onClick = { showActionsMenu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "Действия с прокси")
+                            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.mtproxy_actions))
                         }
                         ApuActionsMenu(
                             expanded = showActionsMenu,
                             onDismiss = { showActionsMenu = false },
                             actions = listOf(
                                 ApuAction(
-                                    title = "Импорт прокси",
+                                    title = stringResource(R.string.mtproxy_import),
                                     icon = Icons.Default.ContentPaste,
                                     onClick = { showImportDialog = true },
                                 ),
                                 ApuAction(
-                                    title = "Собрать прокси из каналов",
+                                    title = stringResource(R.string.mtproxy_collect),
                                     icon = Icons.Default.Download,
                                     enabled = !uiState.isCollecting,
                                     onClick = { viewModel.collectNow() },
                                 ),
                                 ApuAction(
-                                    title = "Проверить все",
+                                    title = stringResource(R.string.mtproxy_check_all),
                                     icon = Icons.Default.Refresh,
                                     enabled = !uiState.isChecking,
                                     onClick = { viewModel.checkAllAndPickBest() },
                                 ),
                                 ApuAction(
-                                    title = "Очистить мёртвые",
+                                    title = stringResource(R.string.mtproxy_clean_dead),
                                     icon = Icons.Default.CleaningServices,
                                     onClick = { viewModel.cleanupDead() },
                                 ),
@@ -119,7 +121,7 @@ fun MtProxyListScreen(
             ApuPremiumFloatingActionButton(
                 onClick = { showAddDialog = true },
                 icon = Icons.Default.Add,
-                contentDescription = "Добавить прокси",
+                contentDescription = stringResource(R.string.mtproxy_add_cd),
             )
         }
     ) { padding ->
@@ -148,11 +150,11 @@ fun MtProxyListScreen(
                         )
                         Spacer(Modifier.height(16.dp))
                         Text(
-                            "Нет прокси",
+                            stringResource(R.string.mtproxy_none),
                             style = MaterialTheme.typography.titleMedium
                         )
                         Text(
-                            "Добавьте вручную или импортируйте из буфера",
+                            stringResource(R.string.mtproxy_none_hint),
                             style = MaterialTheme.typography.bodySmall,
                             color = ApuBubbleMutedColor,
                         )
@@ -277,13 +279,13 @@ private fun MtProxyCard(
             }
 
             IconButton(onClick = onCheck) {
-                Icon(Icons.Default.Refresh, contentDescription = "Проверить")
+                Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.mtproxy_check))
             }
 
             IconButton(onClick = onDelete) {
                 Icon(
                     Icons.Default.Delete,
-                    contentDescription = "Удалить",
+                    contentDescription = stringResource(R.string.action_delete),
                     tint = MaterialTheme.colorScheme.error
                 )
             }
@@ -300,11 +302,11 @@ private fun AddProxyDialog(
 
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { ApuSettingsHeader("Добавить прокси") },
+        title = { ApuSettingsHeader(stringResource(R.string.mtproxy_add_cd)) },
         text = {
             Column {
                 Text(
-                    "Поддерживаемые форматы:",
+                    stringResource(R.string.mtproxy_formats),
                     style = MaterialTheme.typography.bodySmall
                 )
                 Text(
@@ -321,7 +323,7 @@ private fun AddProxyDialog(
                 ApuBubbleField(
                     value = input,
                     onValueChange = { input = it },
-                    label = { Text("Прокси") },
+                    label = { Text(stringResource(R.string.mtproxy_proxy)) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = false,
                     minLines = 3,
@@ -330,13 +332,13 @@ private fun AddProxyDialog(
         },
         confirmButton = {
             ApuTextAction(
-                label = "Добавить",
+                label = stringResource(R.string.mtproxy_add_btn),
                 onClick = { onConfirm(input) },
                 enabled = input.isNotBlank(),
             )
         },
         dismissButton = {
-            ApuTextAction(label = "Отмена", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
         }
     )
 }
@@ -350,16 +352,16 @@ private fun ImportProxyDialog(
 
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { ApuSettingsHeader("Импорт прокси") },
+        title = { ApuSettingsHeader(stringResource(R.string.mtproxy_import)) },
         text = {
             Column {
                 Text(
-                    "Вставьте прокси (один или несколько, каждый на новой строке):",
+                    stringResource(R.string.mtproxy_paste_hint),
                     style = MaterialTheme.typography.bodySmall
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Поддерживаемые форматы:",
+                    stringResource(R.string.mtproxy_formats),
                     style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold
                 )
@@ -387,8 +389,8 @@ private fun ImportProxyDialog(
                 ApuBubbleField(
                     value = input,
                     onValueChange = { input = it },
-                    label = { Text("Прокси") },
-                    placeholder = { Text("Вставьте сюда...") },
+                    label = { Text(stringResource(R.string.mtproxy_proxy)) },
+                    placeholder = { Text(stringResource(R.string.mtproxy_paste_placeholder)) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 150.dp),
@@ -399,13 +401,13 @@ private fun ImportProxyDialog(
         },
         confirmButton = {
             ApuTextAction(
-                label = "Импортировать",
+                label = stringResource(R.string.mtproxy_import_btn),
                 onClick = { onConfirm(input) },
                 enabled = input.isNotBlank(),
             )
         },
         dismissButton = {
-            ApuTextAction(label = "Отмена", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
         }
     )
 }

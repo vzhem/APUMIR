@@ -506,4 +506,21 @@
     <string name="onb_add_inviter">Add the person who invited you</string>
     <string name="onb_start_chatting">Start chatting</string>
     <string name="onb_privacy_body">Your password never leaves the phone: the keys are locked right here. No phone number and no email — only you and your contacts.</string>
+    <!-- MTProto proxy -->
+    <string name="mtproxy_title">MTProto proxy</string>
+    <string name="mtproxy_actions">Proxy actions</string>
+    <string name="mtproxy_import">Import proxies</string>
+    <string name="mtproxy_collect">Collect proxies from channels</string>
+    <string name="mtproxy_check_all">Check all</string>
+    <string name="mtproxy_clean_dead">Remove dead proxies</string>
+    <string name="mtproxy_add_cd">Add proxy</string>
+    <string name="mtproxy_none">No proxies</string>
+    <string name="mtproxy_none_hint">Add one manually or import from the clipboard</string>
+    <string name="mtproxy_check">Check</string>
+    <string name="mtproxy_formats">Supported formats:</string>
+    <string name="mtproxy_proxy">Proxy</string>
+    <string name="mtproxy_add_btn">Add</string>
+    <string name="mtproxy_paste_hint">Paste proxies (one or several, one per line):</string>
+    <string name="mtproxy_paste_placeholder">Paste here…</string>
+    <string name="mtproxy_import_btn">Import</string>
 </resources>
