@@ -350,7 +350,7 @@ fun GroupChatScreen(
             onCopyId = {
                 val clipboard = peerClipboardCtx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                     as android.content.ClipboardManager
-                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Узел", inspectedPeerId))
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText(stringResource(R.string.grp_node), inspectedPeerId))
                 Toast.makeText(peerClipboardCtx, peerClipboardCtx.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
             },
         )
@@ -519,8 +519,8 @@ fun GroupChatScreen(
     val muteTargetName = when {
         muteTopicId != null && isChannel -> "Комментарии к «${selectedTopicName ?: "публикации"}»"
         muteTopicId != null -> "Тема «${selectedTopicName ?: "группы"}»"
-        isChannel -> uiState.group?.title ?: "Канал"
-        else -> uiState.group?.title ?: "Группа"
+        isChannel -> uiState.group?.title ?: stringResource(R.string.contacts_channel)
+        else -> uiState.group?.title ?: stringResource(R.string.contacts_group)
     }
     val notificationsMuted = muteUntilMs > System.currentTimeMillis()
     // Системный жест «Назад» (смахивание от края экрана, в т.ч. справа
@@ -571,7 +571,7 @@ fun GroupChatScreen(
                 if (index < 0) {
                     android.widget.Toast.makeText(
                         quoteCtx,
-                        "Сообщения нет в загруженной части ветки",
+                        stringResource(R.string.grp_not_loaded),
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
                     return
@@ -646,7 +646,7 @@ fun GroupChatScreen(
                                 if (topicHeader && selectedTopic != null) {
                                     selectedTopic.name
                                 } else {
-                                    uiState.group?.title ?: "Группа"
+                                    uiState.group?.title ?: stringResource(R.string.contacts_group)
                                 },
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF1E2430),
@@ -660,10 +660,10 @@ fun GroupChatScreen(
                                 // под чем он находится.
                                 when {
                                     isChannel -> selectedTopicName?.let { "Комментарии - $it" }
-                                        ?: "Комментарии"
+                                        ?: stringResource(R.string.stat_comments)
                                     // В теме: «Тема · группа», участники - на
                                     // списке тем, там они и нужны.
-                                    topicHeader -> "Тема · " + (uiState.group?.title ?: "Группа")
+                                    topicHeader -> "Тема · " + (uiState.group?.title ?: stringResource(R.string.contacts_group))
                                     else -> (uiState.group?.memberCount ?: 0).toString() + " участн."
                                 },
                                 style = MaterialTheme.typography.bodySmall,
@@ -823,7 +823,7 @@ fun GroupChatScreen(
                             Icon(Icons.Filled.PushPin, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                "Закреплённые" +
+                                stringResource(R.string.grp_pinned) +
                                     (pinnedTopicName?.let { " · $it" }.orEmpty()) +
                                     " (" + uiState.pinned.size + "/" +
                                     com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE + ")",
@@ -940,7 +940,7 @@ fun GroupChatScreen(
                                     .joinToString("\n\n") { it.content }
                                 val clipboard = selCtx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                                     as android.content.ClipboardManager
-                                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Сообщения", combined))
+                                clipboard.setPrimaryClip(android.content.ClipData.newPlainText(selCtx.getString(R.string.stat_messages), combined))
                                 Toast.makeText(selCtx, selCtx.getString(R.string.toast_copied_count, selCount), Toast.LENGTH_SHORT).show()
                                 viewModel.clearMessageSelection()
                             },
@@ -1016,7 +1016,7 @@ fun GroupChatScreen(
                     val st = cardState
                     val stickerCard = card
                     if (st != null && stickerCard != null && !message.isFromMe &&
-                        stickerCard.displayName.startsWith("Стикер") &&
+                        stickerCard.displayName.startsWith(stringResource(R.string.sv_sticker)) &&
                         st.transfer == null && !st.pending
                     ) {
                         LaunchedEffect(stickerCard.sha256) {
@@ -1199,7 +1199,7 @@ fun GroupChatScreen(
                     val replyTarget = uiState.replyTo
                     if (replyTarget != null) {
                         val replyAuthor = if (replyTarget.isFromMe) {
-                            uiState.me?.displayName?.takeIf { it.isNotBlank() } ?: "Вы"
+                            uiState.me?.displayName?.takeIf { it.isNotBlank() } ?: stringResource(R.string.grp_you)
                         } else {
                             senderNames[replyTarget.senderId]?.takeIf { it.isNotBlank() }
                                 ?: ("Участник " + replyTarget.senderId.takeLast(4))
@@ -1225,7 +1225,7 @@ fun GroupChatScreen(
                                 } else {
                                     Icon(
                                         Icons.Filled.AttachFile,
-                                        contentDescription = if (uiState.canAttach) "Прикрепить файл" else "Вложения недоступны",
+                                        contentDescription = if (uiState.canAttach) stringResource(R.string.chat_attach_file) else stringResource(R.string.grp_attach_unavailable),
                                         tint = if (uiState.canAttach) Color(0xFF5A6472) else Color(0xFF9AA3AF),
                                     )
                                 }
@@ -1269,7 +1269,7 @@ fun GroupChatScreen(
                 val canSend = (uiState.draft.isNotBlank() || uiState.stagedFile != null) &&
                     !uiState.sending && !uiState.isPreparingFile && slowWaitSeconds <= 0L
                 ApuTextAction(
-                    label = if (slowWaitSeconds > 0L) "Подождите $slowWaitSeconds с" else "Отправить",
+                    label = if (slowWaitSeconds > 0L) "Подождите $slowWaitSeconds с" else stringResource(R.string.action_send),
                     onClick = {
 
                         viewModel.send(uiState.draft)
@@ -2072,7 +2072,7 @@ private fun MessageBubble(
                                 val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                                     as android.content.ClipboardManager
                                 clipboard.setPrimaryClip(
-                                    android.content.ClipData.newPlainText("Сообщение", message.content)
+                                    android.content.ClipData.newPlainText(stringResource(R.string.group_message_placeholder), message.content)
                                 )
                                 Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
                             })
@@ -2144,7 +2144,7 @@ private fun MessageBubble(
                     val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                         as android.content.ClipboardManager
                     clipboard.setPrimaryClip(
-                        android.content.ClipData.newPlainText("Сообщение", message.content)
+                        android.content.ClipData.newPlainText(stringResource(R.string.group_message_placeholder), message.content)
                     )
                     Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
                 })
@@ -2220,8 +2220,8 @@ private fun NewTopicDialog(
     onDismiss: () -> Unit,
     onCreate: (String, String) -> Unit,
     // Раунд 260: тот же диалог работает и как «Редактирование темы».
-    title: String = "Новая тема",
-    confirmLabel: String = "Создать",
+    title: String = stringResource(R.string.group_new_topic),
+    confirmLabel: String = stringResource(R.string.chat_create),
     initialName: String = "",
     initialIcon: String = TopicIconCatalog.DEFAULT,
 ) {
@@ -2278,7 +2278,7 @@ private fun NewTopicDialog(
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     // Раунд 258: без упоминаний чужих мессенджеров в интерфейсе.
-                    listOf("Эмодзи" to true, "Живые" to false)
+                    listOf(stringResource(R.string.input_emoji) to true, stringResource(R.string.grp_animated) to false)
                         .forEach { (label, mode) ->
                             val sel = emojiMode == mode
                             Text(
@@ -2401,7 +2401,7 @@ private fun QuoteBlock(
         Spacer(Modifier.width(6.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                author.ifBlank { "Сообщение" },
+                author.ifBlank { stringResource(R.string.group_message_placeholder) },
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary,
@@ -2409,7 +2409,7 @@ private fun QuoteBlock(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text.ifBlank { "Вложение" },
+                text.ifBlank { stringResource(R.string.grp_attachment) },
                 style = MaterialTheme.typography.bodySmall,
                 color = color.copy(alpha = 0.85f),
                 maxLines = 2,
@@ -2452,7 +2452,7 @@ private fun ReplyStrip(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text.ifBlank { "Вложение" },
+                text.ifBlank { stringResource(R.string.grp_attachment) },
                 style = MaterialTheme.typography.bodySmall,
                 color = ApuBubbleTextColor,
                 maxLines = 1,

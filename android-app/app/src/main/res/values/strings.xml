@@ -777,4 +777,12 @@
     <string name="fwd_pick_post">Выберите пост</string>
     <string name="fwd_pick_topic">Выберите тему</string>
     <string name="fwd_sent">✓ Отправлено</string>
+    <!-- Пакет 23: групповой чат (вынесено из экрана) -->
+    <string name="grp_node">Узел</string>
+    <string name="grp_not_loaded">Сообщения нет в загруженной части ветки</string>
+    <string name="grp_pinned">Закреплённые</string>
+    <string name="grp_you">Вы</string>
+    <string name="grp_attach_unavailable">Вложения недоступны</string>
+    <string name="grp_animated">Живые</string>
+    <string name="grp_attachment">Вложение</string>
 </resources>

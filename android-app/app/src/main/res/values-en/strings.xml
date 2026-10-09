@@ -768,4 +768,12 @@
     <string name="fwd_pick_post">Choose a post</string>
     <string name="fwd_pick_topic">Choose a topic</string>
     <string name="fwd_sent">✓ Sent</string>
+    <!-- Пакет 23: групповой чат (вынесено из экрана) -->
+    <string name="grp_node">Node</string>
+    <string name="grp_not_loaded">This message is not in the loaded part of the thread</string>
+    <string name="grp_pinned">Pinned</string>
+    <string name="grp_you">You</string>
+    <string name="grp_attach_unavailable">Attachments are unavailable</string>
+    <string name="grp_animated">Animated</string>
+    <string name="grp_attachment">Attachment</string>
 </resources>
