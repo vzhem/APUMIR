@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // GROUPFILECARD.KT - карточка файла сообщества (рой, этапы 9-10)
 // =============================================================================
@@ -283,7 +285,7 @@ fun GroupFileCard(
             // Кнопка «Скачать»: пока файл не просили и он не идёт.
             if (!isFromMe && transfer == null && !state.pending) {
                 IconButton(onClick = state.onDownload, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Filled.Download, contentDescription = "Скачать", tint = ApuBubbleAccentColor)
+                    Icon(Icons.Filled.Download, contentDescription = stringResource(R.string.gf_download_cd), tint = ApuBubbleAccentColor)
                 }
             }
         }
@@ -318,7 +320,7 @@ fun GroupFileCard(
         }
         if (transfer != null && (transfer.state == "FAILED" || state.stalled) && !isFromMe) {
             ApuTextAction(
-                label = if (state.stalled) "Спросить у другого" else "Скачать снова",
+                label = if (state.stalled) stringResource(R.string.gf_ask_other) else stringResource(R.string.gf_download_again),
                 onClick = state.onDownload,
             )
         }
@@ -342,7 +344,7 @@ fun GroupFileCard(
             ) {
                 Icon(
                     Icons.Filled.MoreVert,
-                    contentDescription = "Действия",
+                    contentDescription = stringResource(R.string.sv_actions),
                     tint = ApuBubbleAccentColor,
                     modifier = Modifier.size(20.dp),
                 )
@@ -358,14 +360,14 @@ fun GroupFileCard(
                 ) {
                     val save = state.onSave
                     if (save != null) {
-                        ApuActionBubble("Сохранить в папку", Icons.Filled.Save) {
+                        ApuActionBubble(stringResource(R.string.ft_save_folder), Icons.Filled.Save) {
                             showActions = false
                             save()
                         }
                     }
                     val share = state.onShare
                     if (share != null) {
-                        ApuActionBubble("Поделиться", Icons.Filled.Share) {
+                        ApuActionBubble(stringResource(R.string.admin_share), Icons.Filled.Share) {
                             showActions = false
                             share()
                         }
@@ -374,7 +376,7 @@ fun GroupFileCard(
                     if (favorite != null) {
                         // Раунд 211: у карточки в сообществе теперь и действия
                         // сообщения; файловое различаем подписью, как в личке.
-                        ApuActionBubble("Файл в избранное", Icons.Filled.Star) {
+                        ApuActionBubble(stringResource(R.string.chat_file_to_saved), Icons.Filled.Star) {
                             showActions = false
                             favorite()
                         }

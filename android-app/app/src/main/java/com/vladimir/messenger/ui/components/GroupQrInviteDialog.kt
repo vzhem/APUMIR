@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // GROUPQRINVITEDIALOG.KT — «Пригласить по QR коду» (раунд 213)
 // =============================================================================
@@ -49,7 +51,7 @@ fun GroupQrInviteDialog(
 ) {
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Пригласить по QR коду") },
+        title = { Text(stringResource(R.string.channel_invite_qr)) },
         text = {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -85,12 +87,12 @@ fun GroupQrInviteDialog(
                             if (bitmap != null) {
                                 Image(
                                     bitmap = bitmap.asImageBitmap(),
-                                    contentDescription = "QR-код приглашения",
+                                    contentDescription = stringResource(R.string.admin_qr_desc),
                                     modifier = Modifier.size(250.dp),
                                 )
                             } else {
                                 Text(
-                                    "QR недоступен",
+                                    stringResource(R.string.admin_qr_unavailable),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Color(0xFF1E2430),
                                 )
@@ -121,7 +123,7 @@ fun GroupQrInviteDialog(
             }
         },
         confirmButton = {
-            ApuTextAction(label = "Закрыть", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_close), onClick = onDismiss)
         },
     )
 }

@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import android.content.Context
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -117,13 +119,13 @@ fun AvatarPickerDialog(
                     Spacer(Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Выберите аватар",
+                            text = stringResource(R.string.av_choose_title),
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                             color = ApuBubbleTextColor,
                         )
                         Text(
-                            text = "Готовый образ или ваша фотография",
+                            text = stringResource(R.string.av_subtitle),
                             style = MaterialTheme.typography.bodySmall,
                             color = ApuBubbleMutedColor,
                         )
@@ -162,13 +164,13 @@ fun AvatarPickerDialog(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     AvatarSourceButton(
-                        label = "Снять фото",
+                        label = stringResource(R.string.av_take_photo),
                         icon = Icons.Default.PhotoCamera,
                         onClick = onTakePhoto,
                         modifier = Modifier.weight(1f),
                     )
                     AvatarSourceButton(
-                        label = "Из галереи",
+                        label = stringResource(R.string.settings_from_gallery),
                         icon = Icons.Default.Image,
                         onClick = onPickGallery,
                         modifier = Modifier.weight(1f),
@@ -180,7 +182,7 @@ fun AvatarPickerDialog(
                     style = DiagnosticsActionStyle.QUIET,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Отмена", fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.action_cancel), fontWeight = FontWeight.SemiBold)
                 }
             }
         }

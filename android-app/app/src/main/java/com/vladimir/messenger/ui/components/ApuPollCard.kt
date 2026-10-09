@@ -296,7 +296,7 @@ fun PollDraftFields(
         ApuBubbleField(
             value = state.question,
             onValueChange = { state.question = it },
-            label = { Text("Вопрос") },
+            label = { Text(stringResource(R.string.poll_question_label)) },
             modifier = Modifier.fillMaxWidth(),
             maxLines = 3,
         )
@@ -315,14 +315,14 @@ fun PollDraftFields(
         }
         if (state.options.size < GroupWire.MAX_POLL_OPTIONS) {
             ApuTextAction(
-                label = "+ Добавить вариант",
+                label = stringResource(R.string.poll_add_option),
                 onClick = { state.options.add("") },
                 modifier = Modifier.align(Alignment.Start),
             )
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "Анонимный",
+                stringResource(R.string.poll_anonymous),
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -330,7 +330,7 @@ fun PollDraftFields(
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "Несколько вариантов",
+                stringResource(R.string.poll_multi),
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -361,13 +361,13 @@ fun CreatePollDialog(
 
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Новый опрос") },
+        title = { Text(stringResource(R.string.poll_new_title)) },
         text = {
             PollDraftFields(state = state, problem = problem)
         },
         confirmButton = {
             ApuTextAction(
-                label = "Создать",
+                label = stringResource(R.string.chat_create),
                 onClick = {
                     val issue = state.problem()
                     if (issue != null) {

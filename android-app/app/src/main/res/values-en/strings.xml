@@ -1049,4 +1049,16 @@
     <string name="nm_duration">For how long?</string>
     <string name="nm_manual">Turn on manually</string>
     <string name="nm_auto">Turns on automatically</string>
+    <string name="gf_download_cd">Download</string>
+    <string name="gf_ask_other">Ask someone else</string>
+    <string name="gf_download_again">Download again</string>
+    <string name="pp_show_addr">Show node address</string>
+    <string name="poll_question_label">Question</string>
+    <string name="poll_add_option">+ Add option</string>
+    <string name="poll_anonymous">Anonymous</string>
+    <string name="poll_multi">Multiple choice</string>
+    <string name="poll_new_title">New poll</string>
+    <string name="av_choose_title">Choose an avatar</string>
+    <string name="av_subtitle">A ready-made avatar or your own photo</string>
+    <string name="av_take_photo">Take photo</string>
 </resources>

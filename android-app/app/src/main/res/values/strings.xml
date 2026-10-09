@@ -1058,4 +1058,16 @@
     <string name="nm_duration">На какой срок?</string>
     <string name="nm_manual">Включить вручную</string>
     <string name="nm_auto">Включатся автоматически</string>
+    <string name="gf_download_cd">Скачать</string>
+    <string name="gf_ask_other">Спросить у другого</string>
+    <string name="gf_download_again">Скачать снова</string>
+    <string name="pp_show_addr">Показать адрес узла</string>
+    <string name="poll_question_label">Вопрос</string>
+    <string name="poll_add_option">+ Добавить вариант</string>
+    <string name="poll_anonymous">Анонимный</string>
+    <string name="poll_multi">Несколько вариантов</string>
+    <string name="poll_new_title">Новый опрос</string>
+    <string name="av_choose_title">Выберите аватар</string>
+    <string name="av_subtitle">Готовый образ или ваша фотография</string>
+    <string name="av_take_photo">Снять фото</string>
 </resources>

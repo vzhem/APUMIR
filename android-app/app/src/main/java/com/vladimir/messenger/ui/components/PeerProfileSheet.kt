@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -96,7 +98,7 @@ fun PeerProfileSheet(
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            ApuTextAction(label = "Закрыть", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_close), onClick = onDismiss)
         },
         title = null,
         text = {
@@ -315,7 +317,7 @@ fun PeerProfileSheet(
                 if (contactId.isNotBlank()) {
                     var idShown by remember { mutableStateOf(false) }
                     if (!idShown) {
-                        ApuTextAction(label = "Показать адрес узла", onClick = { idShown = true })
+                        ApuTextAction(label = stringResource(R.string.pp_show_addr), onClick = { idShown = true })
                     } else {
                         Box(
                             modifier = Modifier
@@ -353,7 +355,7 @@ fun PeerProfileSheet(
                                 if (onCopyId != null) {
                                     Icon(
                                         Icons.Default.ContentCopy,
-                                        contentDescription = "Скопировать",
+                                        contentDescription = stringResource(R.string.action_copy),
                                         tint = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(18.dp),
                                     )
@@ -371,14 +373,14 @@ fun PeerProfileSheet(
                     ) {
                         if (onCall != null) {
                             ApuTextAction(
-                                label = "Позвонить",
+                                label = stringResource(R.string.menu_call),
                                 onClick = onCall,
                                 icon = Icons.Default.Call,
                             )
                         }
                         if (onRename != null) {
                             ApuTextAction(
-                                label = "Переименовать",
+                                label = stringResource(R.string.chat_rename),
                                 onClick = onRename,
                                 icon = Icons.Default.Edit,
                             )
