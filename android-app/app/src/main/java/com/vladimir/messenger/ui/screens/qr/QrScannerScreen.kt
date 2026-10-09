@@ -89,10 +89,10 @@ fun QrScannerScreen(
                     // Прокрутка НЕ должна красить панель: под ней обои APU.
                     scrolledContainerColor = Color.Transparent,
                     ),
-                    title = { Text("QR-код") },
+                    title = { Text(stringResource(R.string.qr_title)) },
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
-                            Icon(Icons.Default.ArrowBack, "Назад")
+                            Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back))
                         }
                     },
                 )
@@ -211,7 +211,7 @@ private fun ScanPane(onQrScanned: (String) -> Unit) {
                     .padding(16.dp),
             ) {
                 Text(
-                    text = "Наведите камеру на QR-код собеседника",
+                    text = stringResource(R.string.qr_scan_hint),
                     style = MaterialTheme.typography.titleSmall,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
@@ -227,7 +227,7 @@ private fun ScanPane(onQrScanned: (String) -> Unit) {
             ) {
                 ApuBubble {
                     Text(
-                        text = "Чтобы прочитать чужой код, разрешите APU пользоваться камерой.",
+                        text = stringResource(R.string.qr_camera_needed),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -236,7 +236,7 @@ private fun ScanPane(onQrScanned: (String) -> Unit) {
                     onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) },
                     style = DiagnosticsActionStyle.PRIMARY,
                 ) {
-                    Text("Разрешить камеру")
+                    Text(stringResource(R.string.qr_allow_camera))
                 }
             }
         }
@@ -301,7 +301,7 @@ private fun MyCodePane() {
 
         Image(
             bitmap = bitmap.asImageBitmap(),
-            contentDescription = "Мой QR-код",
+            contentDescription = stringResource(R.string.settings_my_qr),
             contentScale = ContentScale.Fit,
             modifier = Modifier
                 .fillMaxWidth()
@@ -313,7 +313,7 @@ private fun MyCodePane() {
 
         ApuBubble {
             Text(
-                displayName.ifBlank { "Мой профиль" },
+                displayName.ifBlank { stringResource(R.string.section_my_profile) },
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -345,7 +345,7 @@ private fun MyCodePane() {
             ) {
                 Icon(Icons.Default.ContentCopy, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text(if (copied) "Скопировано" else "Копировать")
+                Text(if (copied) stringResource(R.string.toast_copied) else stringResource(R.string.share_copy_btn))
             }
             ApuPremiumContentButton(
                 onClick = { showInviteShare = true },
@@ -354,7 +354,7 @@ private fun MyCodePane() {
             ) {
                 Icon(Icons.Default.Share, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Поделиться")
+                Text(stringResource(R.string.admin_share))
             }
         }
 
@@ -364,7 +364,7 @@ private fun MyCodePane() {
     // Раунд 200: перед отправкой приглашения спрашиваем про APK.
     if (showInviteShare) {
         com.vladimir.messenger.ui.components.InviteAttachDialog(
-            title = "Пригласить в APU",
+            title = stringResource(R.string.chat_invite_apu),
             onDismiss = { showInviteShare = false },
             onShare = { attach ->
                 showInviteShare = false

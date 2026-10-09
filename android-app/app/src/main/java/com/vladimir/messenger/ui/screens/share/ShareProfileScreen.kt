@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.share
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import com.vladimir.messenger.ui.components.ApuSettingsCard
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
 
@@ -57,10 +59,10 @@ fun ShareProfileScreen(
                     // Прокрутка НЕ должна красить панель: под ней обои APU.
                     scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                 ),
-                title = { ApuSettingsHeader("Поделиться профилем") },
+                title = { ApuSettingsHeader(stringResource(R.string.settings_share_profile)) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.action_back))
                     }
                 }
             )
@@ -101,7 +103,7 @@ fun ShareProfileScreen(
             if (qrBitmap != null) {
                 Image(
                     bitmap = qrBitmap.asImageBitmap(),
-                    contentDescription = "QR-код профиля",
+                    contentDescription = stringResource(R.string.settings_qr_desc),
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
                         .size(208.dp)
@@ -141,7 +143,7 @@ fun ShareProfileScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        "Ссылка для добавления (рекомендуется):",
+                        stringResource(R.string.sp_link_recommended),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -155,9 +157,9 @@ fun ShareProfileScreen(
 
                     Text(
                         if (uiState.alternativeLink.contains("/s/")) {
-                            "Короткая ссылка для других мессенджеров:"
+                            stringResource(R.string.sp_short_link)
                         } else {
-                            "Дополнительная ссылка для профиля:"
+                            stringResource(R.string.sp_extra_link)
                         },
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -171,7 +173,7 @@ fun ShareProfileScreen(
                     Spacer(Modifier.height(8.dp))
 
                     Text(
-                        "Если APU не установлен:",
+                        stringResource(R.string.sp_not_installed),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -197,7 +199,7 @@ fun ShareProfileScreen(
                 ) {
                     Icon(Icons.Default.ContentCopy, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text(if (copied) "Скопировано!" else "Копировать")
+                    Text(if (copied) stringResource(R.string.sp_copied_excl) else stringResource(R.string.share_copy_btn))
                 }
 
                 ApuPremiumContentButton(
@@ -227,7 +229,7 @@ fun ShareProfileScreen(
                 ) {
                     Icon(Icons.Default.Share, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Поделиться")
+                    Text(stringResource(R.string.admin_share))
                 }
             }
 
@@ -240,8 +242,8 @@ fun ShareProfileScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(
-                    if (uiState.alternativeLink.contains("/s/")) "Скопировать короткую ссылку"
-                    else "Скопировать Telegram-ссылку"
+                    if (uiState.alternativeLink.contains("/s/")) stringResource(R.string.sp_copy_short)
+                    else stringResource(R.string.sp_copy_tg)
                 )
             }
 

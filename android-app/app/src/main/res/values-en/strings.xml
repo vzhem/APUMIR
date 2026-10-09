@@ -1016,4 +1016,37 @@
     <!-- Пакет 40: сообщения ключа получателя и гифок (ViewModel) -->
     <string name="cd_key_pending">The recipient’s key is not pinned yet. The request was sent — try again in a couple of minutes.</string>
     <string name="cd_gif_not_sent">GIF not sent: %1$s</string>
+    <string name="ac_invite_hint">Paste the link your contact sent you.</string>
+    <string name="ac_link_placeholder">Paste a link or key</string>
+    <string name="ac_name_label">Contact name (optional)</string>
+    <string name="ac_name_placeholder">For example, Anna</string>
+    <string name="ac_find_title">Find by @username</string>
+    <string name="ac_find_hint">We only search for names that have already appeared on the APU network.</string>
+    <string name="ac_username_placeholder">@username</string>
+    <string name="ac_searching">Searching the APU network…</string>
+    <string name="ac_scan_qr">Scan QR code</string>
+    <string name="ac_scan_hint">Quickly add someone next to you</string>
+    <string name="ac_open_scanner">Open scanner</string>
+    <string name="sp_link_recommended">Link to add (recommended):</string>
+    <string name="sp_short_link">Short link for other messengers:</string>
+    <string name="sp_extra_link">Additional profile link:</string>
+    <string name="sp_not_installed">If APU is not installed:</string>
+    <string name="sp_copied_excl">Copied!</string>
+    <string name="share_copy_btn">Copy</string>
+    <string name="sp_copy_short">Copy short link</string>
+    <string name="sp_copy_tg">Copy Telegram link</string>
+    <string name="rc_title">Rename contact</string>
+    <string name="rc_edit_label">Editing contact</string>
+    <string name="rc_contact_fallback">Contact</string>
+    <string name="rc_data_title">Contact details</string>
+    <string name="rc_data_hint">Save a clear name and username for quick search.</string>
+    <string name="rc_name_label">Contact name</string>
+    <string name="rc_name_placeholder">For example, Anna</string>
+    <string name="qr_title">QR code</string>
+    <string name="qr_scan_hint">Point the camera at the contact’s QR code</string>
+    <string name="qr_camera_needed">To read someone else’s code, allow APU to use the camera.</string>
+    <string name="qr_allow_camera">Allow camera</string>
+    <string name="nm_duration">For how long?</string>
+    <string name="nm_manual">Turn on manually</string>
+    <string name="nm_auto">Turns on automatically</string>
 </resources>

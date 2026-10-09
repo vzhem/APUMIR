@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -45,7 +47,7 @@ fun NotificationMuteDialog(
         },
         title = {
             Text(
-                "Отключить уведомления",
+                stringResource(R.string.menu_mute),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -61,7 +63,7 @@ fun NotificationMuteDialog(
                     color = ApuBubbleMutedColor,
                 )
                 Text(
-                    "На какой срок?",
+                    stringResource(R.string.nm_duration),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                     color = ApuBubbleTextColor,
@@ -72,9 +74,9 @@ fun NotificationMuteDialog(
                     ApuPremiumChoiceRow(
                         title = duration.label,
                         subtitle = if (duration == NotificationMuteDuration.FOREVER) {
-                            "Включить вручную"
+                            stringResource(R.string.nm_manual)
                         } else {
-                            "Включатся автоматически"
+                            stringResource(R.string.nm_auto)
                         },
                         selected = false,
                         onClick = { onSelectUntil(duration.deadlineFrom(nowMs)) },
@@ -88,7 +90,7 @@ fun NotificationMuteDialog(
                         modifier = Modifier.padding(top = 4.dp),
                     )
                     ApuTextAction(
-                        label = "Включить уведомления",
+                        label = stringResource(R.string.menu_unmute),
                         onClick = onTurnOn,
                         modifier = Modifier.fillMaxWidth(),
                         icon = Icons.Default.NotificationsActive,
@@ -98,7 +100,7 @@ fun NotificationMuteDialog(
         },
         confirmButton = {
             ApuTextAction(
-                label = "Отменить",
+                label = stringResource(R.string.call_cancel),
                 onClick = onDismiss,
             )
         },

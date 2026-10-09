@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.contacts
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // ADDCONTACTSCREEN.KT
 // =============================================================================
@@ -117,12 +119,12 @@ fun AddContactScreen(
                         // Прокрутка не должна красить панель: под ней обои APU.
                         scrolledContainerColor = Color.Transparent,
                     ),
-                    title = { Text("Добавить контакт", fontWeight = FontWeight.Bold) },
+                    title = { Text(stringResource(R.string.chat_add_contact), fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Назад",
+                                contentDescription = stringResource(R.string.action_back),
                             )
                         }
                     },
@@ -145,14 +147,14 @@ fun AddContactScreen(
                 ) {
                     ApuAddContactSectionHeader(
                         icon = Icons.Default.Link,
-                        title = "Ссылка-приглашение",
-                        subtitle = "Вставьте ссылку, которую вам прислал собеседник.",
+                        title = stringResource(R.string.chat_invite_link_label),
+                        subtitle = stringResource(R.string.ac_invite_hint),
                     )
                     ApuFormTextField(
                         value = uiState.inviteLink,
                         onValueChange = viewModel::onInviteLinkChanged,
-                        label = "Ссылка",
-                        placeholder = "Вставьте ссылку или ключ",
+                        label = stringResource(R.string.groups_link),
+                        placeholder = stringResource(R.string.ac_link_placeholder),
                         isError = uiState.error != null,
                         supportingText = uiState.error,
                         leadingIcon = {
@@ -166,8 +168,8 @@ fun AddContactScreen(
                     ApuFormTextField(
                         value = uiState.displayName,
                         onValueChange = viewModel::onDisplayNameChanged,
-                        label = "Имя контакта (необязательно)",
-                        placeholder = "Например, Анна",
+                        label = stringResource(R.string.ac_name_label),
+                        placeholder = stringResource(R.string.ac_name_placeholder),
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Default.Person,
@@ -191,7 +193,7 @@ fun AddContactScreen(
                         } else {
                             Icon(Icons.Default.PersonAdd, contentDescription = null)
                             Spacer(Modifier.width(8.dp))
-                            Text("Добавить контакт", fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.chat_add_contact), fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -203,13 +205,13 @@ fun AddContactScreen(
                 ) {
                     ApuAddContactSectionHeader(
                         icon = Icons.Default.Search,
-                        title = "Найти по @никнейму",
-                        subtitle = "Ищем только имена, которые уже встречались в сети APU.",
+                        title = stringResource(R.string.ac_find_title),
+                        subtitle = stringResource(R.string.ac_find_hint),
                     )
                     ApuSearchField(
                         value = uiState.nickQuery,
                         onValueChange = viewModel::onNickQueryChanged,
-                        placeholder = "@никнейм",
+                        placeholder = stringResource(R.string.ac_username_placeholder),
                         modifier = Modifier.fillMaxWidth(),
                     )
                     if (uiState.nickSearching) {
@@ -221,7 +223,7 @@ fun AddContactScreen(
                             )
                             Spacer(Modifier.width(8.dp))
                             Text(
-                                text = "Ищем в сети APU…",
+                                text = stringResource(R.string.ac_searching),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = ApuBubbleMutedColor,
                             )
@@ -269,7 +271,7 @@ fun AddContactScreen(
                                 )
                             }
                             ApuTextAction(
-                                label = "Добавить",
+                                label = stringResource(R.string.mtproxy_add_btn),
                                 onClick = { viewModel.onAddByNicknameClicked(entry) },
                                 enabled = !uiState.isLoading,
                             )
@@ -311,19 +313,19 @@ fun AddContactScreen(
                         Spacer(Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Сканировать QR-код",
+                                text = stringResource(R.string.ac_scan_qr),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                text = "Быстро добавьте человека рядом с вами",
+                                text = stringResource(R.string.ac_scan_hint),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = ApuBubbleMutedColor,
                             )
                         }
                         Icon(
                             imageVector = Icons.Default.KeyboardArrowRight,
-                            contentDescription = "Открыть сканер",
+                            contentDescription = stringResource(R.string.ac_open_scanner),
                             tint = ApuBubbleAccentColor,
                         )
                     }

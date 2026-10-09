@@ -1025,4 +1025,37 @@
     <!-- Пакет 40: сообщения ключа получателя и гифок (ViewModel) -->
     <string name="cd_key_pending">Ключ получателя ещё не закреплён. Отправил запрос — попробуйте снова через пару минут.</string>
     <string name="cd_gif_not_sent">Гифка не отправлена: %1$s</string>
+    <string name="ac_invite_hint">Вставьте ссылку, которую вам прислал собеседник.</string>
+    <string name="ac_link_placeholder">Вставьте ссылку или ключ</string>
+    <string name="ac_name_label">Имя контакта (необязательно)</string>
+    <string name="ac_name_placeholder">Например, Анна</string>
+    <string name="ac_find_title">Найти по @никнейму</string>
+    <string name="ac_find_hint">Ищем только имена, которые уже встречались в сети APU.</string>
+    <string name="ac_username_placeholder">@никнейм</string>
+    <string name="ac_searching">Ищем в сети APU…</string>
+    <string name="ac_scan_qr">Сканировать QR-код</string>
+    <string name="ac_scan_hint">Быстро добавьте человека рядом с вами</string>
+    <string name="ac_open_scanner">Открыть сканер</string>
+    <string name="sp_link_recommended">Ссылка для добавления (рекомендуется):</string>
+    <string name="sp_short_link">Короткая ссылка для других мессенджеров:</string>
+    <string name="sp_extra_link">Дополнительная ссылка для профиля:</string>
+    <string name="sp_not_installed">Если APU не установлен:</string>
+    <string name="sp_copied_excl">Скопировано!</string>
+    <string name="share_copy_btn">Копировать</string>
+    <string name="sp_copy_short">Скопировать короткую ссылку</string>
+    <string name="sp_copy_tg">Скопировать Telegram-ссылку</string>
+    <string name="rc_title">Переименовать контакт</string>
+    <string name="rc_edit_label">Редактирование контакта</string>
+    <string name="rc_contact_fallback">Контакт</string>
+    <string name="rc_data_title">Данные контакта</string>
+    <string name="rc_data_hint">Сохраните понятное имя и никнейм для быстрого поиска.</string>
+    <string name="rc_name_label">Имя контакта</string>
+    <string name="rc_name_placeholder">Например, Анна</string>
+    <string name="qr_title">QR-код</string>
+    <string name="qr_scan_hint">Наведите камеру на QR-код собеседника</string>
+    <string name="qr_camera_needed">Чтобы прочитать чужой код, разрешите APU пользоваться камерой.</string>
+    <string name="qr_allow_camera">Разрешить камеру</string>
+    <string name="nm_duration">На какой срок?</string>
+    <string name="nm_manual">Включить вручную</string>
+    <string name="nm_auto">Включатся автоматически</string>
 </resources>

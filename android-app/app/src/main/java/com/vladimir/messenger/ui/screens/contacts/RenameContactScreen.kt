@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.contacts
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -94,7 +96,7 @@ fun RenameContactScreen(
                     ),
                     title = {
                         Text(
-                            text = "Переименовать контакт",
+                            text = stringResource(R.string.rc_title),
                             fontWeight = FontWeight.Bold,
                         )
                     },
@@ -102,7 +104,7 @@ fun RenameContactScreen(
                         IconButton(onClick = onBackClick) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Назад",
+                                contentDescription = stringResource(R.string.action_back),
                             )
                         }
                     },
@@ -162,12 +164,12 @@ private fun RenameContactContent(
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Редактирование контакта",
+                        text = stringResource(R.string.rc_edit_label),
                         style = MaterialTheme.typography.labelLarge,
                         color = ApuBubbleMutedColor,
                     )
                     Text(
-                        text = uiState.currentName.ifBlank { "Контакт" },
+                        text = uiState.currentName.ifBlank { stringResource(R.string.rc_contact_fallback) },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
@@ -198,12 +200,12 @@ private fun RenameContactContent(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(
-                    text = "Данные контакта",
+                    text = stringResource(R.string.rc_data_title),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = "Сохраните понятное имя и никнейм для быстрого поиска.",
+                    text = stringResource(R.string.rc_data_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = ApuBubbleMutedColor,
                 )
@@ -212,8 +214,8 @@ private fun RenameContactContent(
             ApuFormTextField(
                 value = uiState.newName,
                 onValueChange = onNewNameChanged,
-                label = "Имя контакта",
-                placeholder = "Например, Анна",
+                label = stringResource(R.string.rc_name_label),
+                placeholder = stringResource(R.string.rc_name_placeholder),
                 isError = uiState.error != null,
                 supportingText = uiState.error,
             )
@@ -221,7 +223,7 @@ private fun RenameContactContent(
             ApuFormTextField(
                 value = uiState.newUsername.trimStart('@'),
                 onValueChange = onNewUsernameChanged,
-                label = "Никнейм",
+                label = stringResource(R.string.identity_nickname),
                 placeholder = "nickname",
                 leadingIcon = {
                     Text(
@@ -248,7 +250,7 @@ private fun RenameContactContent(
                 } else {
                     Icon(Icons.Default.Check, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("Сохранить", fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.action_save), fontWeight = FontWeight.SemiBold)
                 }
             }
         }
