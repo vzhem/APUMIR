@@ -1070,4 +1070,14 @@
     <string name="av_choose_title">Выберите аватар</string>
     <string name="av_subtitle">Готовый образ или ваша фотография</string>
     <string name="av_take_photo">Снять фото</string>
+    <string name="gif_catalog_title">Гифки</string>
+    <string name="gif_delete_title">Удалить гифку?</string>
+    <string name="gif_search_placeholder">Поиск: котики, привет…</string>
+    <string name="gif_find_cd">Найти</string>
+    <string name="gif_own_btn">+ Своя</string>
+    <string name="gif_network_cd">гифка сети</string>
+    <string name="gif_placeholder_label">гифка</string>
+    <string name="diag_events_label">событий</string>
+    <string name="diag_warn_label">предупр.</string>
+    <string name="diag_errors_label">ошибок</string>
 </resources>

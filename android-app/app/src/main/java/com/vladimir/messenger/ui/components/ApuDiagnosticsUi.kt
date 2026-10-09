@@ -359,10 +359,10 @@ fun ApuDiagnosticsHero(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                ApuDiagnosticsGlassChip("событий", journalSize.toString(), modifier = Modifier.weight(1f))
-                ApuDiagnosticsGlassChip("предупр.", warnCount.toString(), modifier = Modifier.weight(1f))
+                ApuDiagnosticsGlassChip(stringResource(R.string.diag_events_label), journalSize.toString(), modifier = Modifier.weight(1f))
+                ApuDiagnosticsGlassChip(stringResource(R.string.diag_warn_label), warnCount.toString(), modifier = Modifier.weight(1f))
                 ApuDiagnosticsGlassChip(
-                    "ошибок",
+                    stringResource(R.string.diag_errors_label),
                     badCount.toString(),
                     alarm = badCount > 0,
                     modifier = Modifier.weight(1f),

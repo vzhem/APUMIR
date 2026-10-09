@@ -98,7 +98,7 @@ fun GifCatalogDialog(
 ) {
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Гифки") },
+        title = { Text(stringResource(R.string.gif_catalog_title)) },
         text = {
             GifCatalogBody(
                 myGifs = myGifs,
@@ -119,7 +119,7 @@ fun GifCatalogDialog(
             )
         },
         confirmButton = {
-            ApuTextAction(label = "Закрыть", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_close), onClick = onDismiss)
         },
     )
 }
@@ -156,7 +156,7 @@ fun GifCatalogBody(
     if (removeCandidate != null) {
         ApuSettingsDialog(
             onDismissRequest = { removeCandidate = null },
-            title = { Text("Удалить гифку?") },
+            title = { Text(stringResource(R.string.gif_delete_title)) },
             text = {
                 Text(
                     "Гифка исчезнет из вашей библиотеки и из общего каталога сети на всех телефонах. У тех, кто уже успел её скачать, копия останется.",
@@ -164,7 +164,7 @@ fun GifCatalogBody(
             },
             confirmButton = {
                 ApuTextAction(
-                    label = "Удалить",
+                    label = stringResource(R.string.action_delete),
                     onClick = {
                         val entry = removeCandidate
                         removeCandidate = null
@@ -174,7 +174,7 @@ fun GifCatalogBody(
                 )
             },
             dismissButton = {
-                ApuTextAction(label = "Отмена", onClick = { removeCandidate = null })
+                ApuTextAction(label = stringResource(R.string.action_cancel), onClick = { removeCandidate = null })
             },
         )
     }
@@ -198,11 +198,11 @@ fun GifCatalogBody(
             ApuSearchField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = "Поиск: котики, привет…",
+                placeholder = stringResource(R.string.gif_search_placeholder),
                 modifier = Modifier.weight(1f),
                 trailing = {
                     IconButton(onClick = { onSearch(query) }) {
-                        Icon(Icons.Filled.Search, contentDescription = "Найти")
+                        Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.gif_find_cd))
                     }
                 },
             )
@@ -210,7 +210,7 @@ fun GifCatalogBody(
             val pickOwnGif = androidx.activity.compose.rememberLauncherForActivityResult(
                 androidx.activity.result.contract.ActivityResultContracts.GetContent(),
             ) { uri -> if (uri != null) onAddOwnGif(uri) }
-            ApuTextAction(label = "+ Своя", onClick = { pickOwnGif.launch("image/gif") })
+            ApuTextAction(label = stringResource(R.string.gif_own_btn), onClick = { pickOwnGif.launch("image/gif") })
         }
         Spacer(Modifier.height(8.dp))
 
@@ -345,12 +345,12 @@ fun GifCatalogBody(
                         if (shown != null) {
                             AsyncImage(
                                 model = shown,
-                                contentDescription = "гифка сети",
+                                contentDescription = stringResource(R.string.gif_network_cd),
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                             )
                         } else {
-                            PlaceholderCell(label = "гифка")
+                            PlaceholderCell(label = stringResource(R.string.gif_placeholder_label))
                         }
                         NetDot(Modifier.align(Alignment.TopEnd))
                     }
@@ -394,7 +394,7 @@ fun GifCatalogBody(
             } else if (next.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))
                 ApuTextAction(
-                    label = "Ещё",
+                    label = stringResource(R.string.chat_more),
                     onClick = onMore,
                     modifier = Modifier.align(Alignment.CenterHorizontally),
                 )

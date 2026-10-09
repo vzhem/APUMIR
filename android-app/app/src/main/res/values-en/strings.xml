@@ -1061,4 +1061,14 @@
     <string name="av_choose_title">Choose an avatar</string>
     <string name="av_subtitle">A ready-made avatar or your own photo</string>
     <string name="av_take_photo">Take photo</string>
+    <string name="gif_catalog_title">GIFs</string>
+    <string name="gif_delete_title">Delete GIF?</string>
+    <string name="gif_search_placeholder">Search: cats, hello…</string>
+    <string name="gif_find_cd">Search</string>
+    <string name="gif_own_btn">+ My own</string>
+    <string name="gif_network_cd">network GIF</string>
+    <string name="gif_placeholder_label">GIF</string>
+    <string name="diag_events_label">events</string>
+    <string name="diag_warn_label">warn.</string>
+    <string name="diag_errors_label">errors</string>
 </resources>
