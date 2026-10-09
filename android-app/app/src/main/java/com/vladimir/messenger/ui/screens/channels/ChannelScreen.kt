@@ -210,7 +210,7 @@ fun ChannelScreen(
                             }
                             Column(Modifier.weight(1f, fill = false)) {
                                 Text(
-                                    uiState.channel?.title ?: "Канал",
+                                    uiState.channel?.title ?: stringResource(R.string.contacts_channel),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     fontWeight = FontWeight.SemiBold,
@@ -445,7 +445,7 @@ fun ChannelScreen(
                         onCopyId = {
                             val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                                 as android.content.ClipboardManager
-                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Узел", inspectedPeerId))
+                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText(context.getString(R.string.grp_node), inspectedPeerId))
                             Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
                         },
                     )
@@ -491,7 +491,7 @@ fun ChannelScreen(
                                         .joinToString("\n\n") { listOf(it.title, it.text).filter { s -> s.isNotBlank() }.joinToString("\n") }
                                     val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                                         as android.content.ClipboardManager
-                                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Посты", combined))
+                                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText(context.getString(R.string.ch_posts), combined))
                                     Toast.makeText(context, context.getString(R.string.toast_copied_count, selCount), Toast.LENGTH_SHORT).show()
                                     viewModel.clearPostSelection()
                                 },
@@ -555,7 +555,7 @@ fun ChannelScreen(
                                         },
                                     ) {
                                         Text(
-                                            (pinnedPost.title.ifBlank { "Пост" }) + " - " + pinnedPost.text.take(60),
+                                            (pinnedPost.title.ifBlank { stringResource(R.string.ch_post) }) + " - " + pinnedPost.text.take(60),
                                             style = MaterialTheme.typography.bodySmall,
                                             maxLines = 2,
                                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -814,7 +814,7 @@ fun ChannelScreen(
     }
     if (showNotificationMuteDialog) {
         NotificationMuteDialog(
-            targetName = uiState.channel?.title ?: "Канал",
+            targetName = uiState.channel?.title ?: stringResource(R.string.contacts_channel),
             mutedUntilMs = uiState.channel?.mutedUntilMs ?: 0L,
             onSelectUntil = { untilMs ->
                 viewModel.setNotificationsMutedUntil(untilMs)
@@ -1209,7 +1209,7 @@ private fun PostGallery(images: List<String>, pending: Int) {
     }
     if (images.isEmpty()) {
         Text(
-            if (pending == 1) "Фото ещё загружается…" else "Фото ещё загружаются…",
+            if (pending == 1) stringResource(R.string.ch_photo_loading) else stringResource(R.string.ch_photos_loading),
             style = MaterialTheme.typography.labelSmall,
             color = ApuBubbleMutedColor,
             modifier = Modifier.padding(top = 8.dp),
@@ -1378,7 +1378,7 @@ private fun PostEditorDialog(
                 if (imagesEditable) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         ApuTextAction(
-                            label = if (images.isEmpty()) "Прикрепить фото" else "Ещё фото (${images.size}/${InlineImage.MAX_PHOTOS})",
+                            label = if (images.isEmpty()) stringResource(R.string.ch_attach_photo) else "Ещё фото (${images.size}/${InlineImage.MAX_PHOTOS})",
                             onClick = { picker.launch("image/*") },
                             enabled = !preparing && !creating && images.size < InlineImage.MAX_PHOTOS,
                         )

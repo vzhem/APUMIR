@@ -297,7 +297,7 @@ fun ChatDetailScreen(
             onCopyId = {
                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
                     as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("Узел", contactId))
+                clipboard.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.grp_node), contactId))
                 Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
             },
         )
@@ -432,7 +432,7 @@ fun ChatDetailScreen(
                 text         = uiState.inputText,
                 onTextChange = viewModel::onInputTextChanged,
                 onSend       = viewModel::onSendMessage,
-                replyAuthor  = uiState.replyTo?.replyAuthor?.ifBlank { if (uiState.replyTo?.isFromMe == true) "Вы" else contactName },
+                replyAuthor  = uiState.replyTo?.replyAuthor?.ifBlank { if (uiState.replyTo?.isFromMe == true) stringResource(R.string.grp_you) else contactName },
                 replyText    = uiState.replyTo?.content.orEmpty(),
                 onClearReply = viewModel::clearReply,
                 isSending    = uiState.isSending,
@@ -547,7 +547,7 @@ fun ChatDetailScreen(
                                     // Раунд 128/170: гифки и стикеры ходят ТИХО -
                                     // служебную передачу байтов в ленте не показываем.
                                     !it.mediaType.equals("image/gif", ignoreCase = true) &&
-                                    !it.displayName.startsWith("Стикер")
+                                    !it.displayName.startsWith(context.getString(R.string.sv_sticker))
                             }
                             .map { transfer ->
                                 ChatRow(
@@ -870,7 +870,7 @@ fun ChatDetailScreen(
                     val previewText = remember(message.id) {
                         val stripped = com.vladimir.messenger.util.ForwardMarker.stripHeader(message.content)
                         when {
-                            com.vladimir.messenger.data.gif.GifLibrary.isGifRef(stripped) -> "Гифка"
+                            com.vladimir.messenger.data.gif.GifLibrary.isGifRef(stripped) -> context.getString(R.string.cd_gif)
                             else -> com.vladimir.messenger.util.GroupFileMarker.parse(stripped)
                                 ?.let { com.vladimir.messenger.util.GroupFileMarker.caption(it) }
                                 ?: stripped
@@ -898,7 +898,7 @@ fun ChatDetailScreen(
                     ) {
                         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE)
                             as ClipboardManager
-                        val clip = ClipData.newPlainText("Сообщение", message.content)
+                        val clip = ClipData.newPlainText(stringResource(R.string.group_message_placeholder), message.content)
                         clipboard.setPrimaryClip(clip)
                         Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
                         showCopyDialog = null

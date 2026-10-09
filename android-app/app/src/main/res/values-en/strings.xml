@@ -776,4 +776,15 @@
     <string name="grp_attach_unavailable">Attachments are unavailable</string>
     <string name="grp_animated">Animated</string>
     <string name="grp_attachment">Attachment</string>
+    <!-- Пакет 24: канал, сообщения, прокси (вынесено из экранов) -->
+    <string name="ch_posts">Posts</string>
+    <string name="ch_post">Post</string>
+    <string name="ch_photo_loading">Photo is still loading…</string>
+    <string name="ch_photos_loading">Photos are still loading…</string>
+    <string name="ch_attach_photo">Attach photo</string>
+    <string name="cd_gif">GIF</string>
+    <string name="mb_download_apu">Download APU</string>
+    <string name="mb_invite_communities">Invitation to communities</string>
+    <string name="mtp_active">● Active</string>
+    <string name="mtp_unchecked">? Not checked</string>
 </resources>

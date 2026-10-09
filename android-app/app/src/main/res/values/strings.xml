@@ -785,4 +785,15 @@
     <string name="grp_attach_unavailable">Вложения недоступны</string>
     <string name="grp_animated">Живые</string>
     <string name="grp_attachment">Вложение</string>
+    <!-- Пакет 24: канал, сообщения, прокси (вынесено из экранов) -->
+    <string name="ch_posts">Посты</string>
+    <string name="ch_post">Пост</string>
+    <string name="ch_photo_loading">Фото ещё загружается…</string>
+    <string name="ch_photos_loading">Фото ещё загружаются…</string>
+    <string name="ch_attach_photo">Прикрепить фото</string>
+    <string name="cd_gif">Гифка</string>
+    <string name="mb_download_apu">Скачать APU</string>
+    <string name="mb_invite_communities">Приглашение в сообщества</string>
+    <string name="mtp_active">● Активный</string>
+    <string name="mtp_unchecked">? Не проверен</string>
 </resources>

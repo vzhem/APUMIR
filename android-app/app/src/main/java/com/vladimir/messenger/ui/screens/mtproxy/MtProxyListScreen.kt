@@ -231,9 +231,9 @@ private fun MtProxyCard(
     }
 
     val statusText = when {
-        proxy.isActive -> "● Активный"
+        proxy.isActive -> stringResource(R.string.mtp_active)
         proxy.failCount >= 3 -> "✗ Нерабочий (${proxy.failCount} fail)"
-        proxy.lastCheck == 0L -> "? Не проверен"
+        proxy.lastCheck == 0L -> stringResource(R.string.mtp_unchecked)
         else -> "✓ Рабочий (${proxy.successCount})"
     }
 

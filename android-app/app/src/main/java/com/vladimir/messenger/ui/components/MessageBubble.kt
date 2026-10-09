@@ -222,7 +222,7 @@ fun MessageBubble(
                 } else if (imageUrl != null) {
                     ImagePreview(
                         model = imageUrl,
-                        contentDescription = "Картинка из сообщения",
+                        contentDescription = stringResource(R.string.group_message_image),
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = 240.dp)
@@ -352,7 +352,7 @@ fun MessageBubble(
                         modifier = Modifier.align(Alignment.End),
                     ) {
                         Text(
-                            "Повторить отправку",
+                            stringResource(R.string.ft_retry),
                             style = MaterialTheme.typography.labelSmall,
                             color = textColor,
                         )
@@ -468,7 +468,7 @@ private fun ContactInviteCardView(
         ) {
             Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text("Добавить контакт")
+            Text(stringResource(R.string.chat_add_contact))
         }
     }
 }
@@ -508,7 +508,7 @@ private fun GroupInviteCardView(
         ) {
             Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text(if (card.isChannel) "Подписаться" else "Вступить")
+            Text(if (card.isChannel) stringResource(R.string.groups_subscribe) else stringResource(R.string.groups_join_btn))
         }
         card.apkLink?.let { apk ->
             Spacer(Modifier.height(8.dp))
@@ -518,7 +518,7 @@ private fun GroupInviteCardView(
             ) {
                 Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Скачать APU")
+                Text(stringResource(R.string.mb_download_apu))
             }
         }
     }
@@ -539,7 +539,7 @@ private fun MultiInviteCardView(
 ) {
     Column {
         Text(
-            text = "Приглашение в сообщества",
+            text = stringResource(R.string.mb_invite_communities),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
             color = textColor,
@@ -547,13 +547,13 @@ private fun MultiInviteCardView(
         Spacer(Modifier.height(8.dp))
         card.items.forEach { item ->
             Text(
-                text = item.title.ifBlank { if (item.isChannel) "Канал" else "Группа" },
+                text = item.title.ifBlank { if (item.isChannel) stringResource(R.string.contacts_channel) else stringResource(R.string.contacts_group) },
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
                 color = textColor,
             )
             Text(
-                text = if (item.isChannel) "Канал" else "Группа",
+                text = if (item.isChannel) stringResource(R.string.contacts_channel) else stringResource(R.string.contacts_group),
                 style = MaterialTheme.typography.bodySmall,
                 color = textColor.copy(alpha = 0.7f),
             )
@@ -564,7 +564,7 @@ private fun MultiInviteCardView(
             ) {
                 Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text(if (item.isChannel) "Подписаться" else "Вступить")
+                Text(if (item.isChannel) stringResource(R.string.groups_subscribe) else stringResource(R.string.groups_join_btn))
             }
             Spacer(Modifier.height(8.dp))
         }
@@ -575,7 +575,7 @@ private fun MultiInviteCardView(
             ) {
                 Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Скачать APU")
+                Text(stringResource(R.string.mb_download_apu))
             }
         }
     }
