@@ -853,4 +853,23 @@
     <string name="id_wrong_creds">The nickname or password did not match.</string>
     <string name="id_no_network">No connection to the server. Try again later.</string>
     <string name="id_restored">Identity restored. Restart the app so your contacts see you as before.</string>
+    <!-- Пакет 32: сообщения переноса профиля (ViewModel) -->
+    <string name="ps_create_profile_first">Create a profile first</string>
+    <string name="ps_pw_short">The password is too short — at least %1$s characters are needed</string>
+    <string name="ps_too_big">The backup is %1$s MB — over the APU network limit (24 MB without media)</string>
+    <string name="ps_send_failed">Couldn’t send: %1$s</string>
+    <string name="ps_none_on_net">There is no backup on the APU network — send it from the phone that has the data</string>
+    <string name="ps_other_pw">The backup is protected with a different password — enter the password from the main device</string>
+    <string name="ps_fetch_failed">Couldn’t fetch: %1$s</string>
+    <string name="ps_auto_off">Auto-check is off</string>
+    <string name="ps_cant_build">Can’t create the backup: you need a password of at least 8 characters and a created profile</string>
+    <string name="ps_no_wifi">No Wi-Fi network: connect both devices to the same network</string>
+    <string name="ps_ready">The backup is ready: give the address and code to the receiving device</string>
+    <string name="ps_enter_addr">Enter the address like 192.168.1.5:48126 and the code from the phone screen</string>
+    <string name="ps_wrong_pw">Wrong backup password</string>
+    <string name="ps_cant_open">Couldn’t open the backup</string>
+    <string name="ps_staged_missing">The prepared backup was not found — download it again</string>
+    <string name="ps_fetch_check">Couldn’t fetch the backup: check the address, the code, and that both devices are on the same Wi-Fi network</string>
+    <string name="ps_net_copy_info">The backup is on the APU network: a second device with the same nickname and password will find it and take it by itself. The copy disappears after pickup (or after a day).</string>
+    <string name="ps_autosearch_on">Auto-search is on: the phone checks in the background by itself. Confirmation is needed only before data is replaced.</string>
 </resources>

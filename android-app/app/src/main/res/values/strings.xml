@@ -862,4 +862,23 @@
     <string name="id_wrong_creds">Никнейм или пароль не подошли.</string>
     <string name="id_no_network">Нет связи с сервером. Попробуйте позже.</string>
     <string name="id_restored">Личность возвращена. Перезапустите приложение, чтобы собеседники снова увидели вас прежним.</string>
+    <!-- Пакет 32: сообщения переноса профиля (ViewModel) -->
+    <string name="ps_create_profile_first">Сначала создайте профиль</string>
+    <string name="ps_pw_short">Пароль короткий - нужно минимум %1$s знаков</string>
+    <string name="ps_too_big">Копия %1$s МБ - больше лимита сети APU (24 МБ без медиа)</string>
+    <string name="ps_send_failed">Не удалось отправить: %1$s</string>
+    <string name="ps_none_on_net">В сети APU копии нет - отправьте её с телефона с данными</string>
+    <string name="ps_other_pw">Копия защищена другим паролем - введите пароль с основного устройства</string>
+    <string name="ps_fetch_failed">Не удалось забрать: %1$s</string>
+    <string name="ps_auto_off">Авто-проверка выключена</string>
+    <string name="ps_cant_build">Копию не собрать: нужен пароль от 8 знаков и созданный профиль</string>
+    <string name="ps_no_wifi">Нет Wi-Fi сети: подключите оба устройства к одной сети</string>
+    <string name="ps_ready">Копия готова: отдайте адрес и код устройству-приёмнику</string>
+    <string name="ps_enter_addr">Введите адрес вида 192.168.1.5:48126 и код с экрана телефона</string>
+    <string name="ps_wrong_pw">Неверный пароль копии</string>
+    <string name="ps_cant_open">Копию не удалось открыть</string>
+    <string name="ps_staged_missing">Подготовленная копия не найдена - скачайте ещё раз</string>
+    <string name="ps_fetch_check">Не удалось забрать копию: проверьте адрес, код и что оба устройства в одной сети Wi-Fi</string>
+    <string name="ps_net_copy_info">Копия в сети APU: второе устройство с тем же ником и паролем найдёт и заберёт её само. Копия исчезнет после забора (или через сутки).</string>
+    <string name="ps_autosearch_on">Автопоиск включён: телефон проверяет сам в фоне. Подтверждение понадобится только перед заменой данных.</string>
 </resources>
