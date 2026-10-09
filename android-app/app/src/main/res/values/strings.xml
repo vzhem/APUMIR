@@ -976,4 +976,28 @@
     <string name="gc_choose_topic">Выберите тему</string>
     <string name="gc_poll_needs">Нужны вопрос и хотя бы два варианта ответа</string>
     <string name="gc_saved_fav">Добавлено в избранное</string>
+    <!-- Пакет 37: сообщения онбординга и MTProto-прокси (ViewModel) -->
+    <string name="ob_enter_nick">Введите свой никнейм</string>
+    <string name="ob_enter_pw">Введите пароль</string>
+    <string name="ob_name_min2">Имя должно быть минимум 2 символа</string>
+    <string name="ob_name_max50">Имя не должно превышать 50 символов</string>
+    <string name="ob_nick_min3">Никнейм минимум 3 знака</string>
+    <string name="ob_pw_min2">Пароль минимум %1$s знаков</string>
+    <string name="ob_pw_mismatch">Пароли не совпадают</string>
+    <string name="ob_nick_taken">Этот никнейм уже занят, выберите другой</string>
+    <string name="ob_profile_error">Ошибка создания профиля: %1$s</string>
+    <string name="mp_manual_rank">Ручные прокси открываются с ранга Первый связной (1 друг)</string>
+    <string name="mp_added">Прокси добавлен</string>
+    <string name="mp_bad_format">Ошибка: неверный формат</string>
+    <string name="mp_clipboard_empty">Буфер обмена пуст или недоступен. Вставьте вручную через кнопку +</string>
+    <string name="mp_imported">Импортировано прокси: %1$s</string>
+    <string name="mp_clipboard_none">Не найдено прокси в буфере. Проверьте формат (tg://, socks5://, http://)</string>
+    <string name="mp_selected">Прокси выбран как активный</string>
+    <string name="mp_deleted">Прокси удалён</string>
+    <string name="mp_auto_rank">Автовыбор прокси открывается с ранга Проводник (10 друзей)</string>
+    <string name="mp_collect_rank">Автосбор прокси открывается с ранга Проводник (10 друзей)</string>
+    <string name="mp_collecting">Собираем прокси...</string>
+    <string name="mp_error">Ошибка: %1$s</string>
+    <string name="mp_checked">Проверено: %1$s/%2$s работают</string>
+    <string name="mp_found_added">Найдено %1$s, добавлено %2$s. Чистим пул...</string>
 </resources>

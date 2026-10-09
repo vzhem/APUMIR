@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.mtproxy
 
+import com.vladimir.messenger.R
 import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
@@ -64,15 +65,15 @@ class MtProxyViewModel @Inject constructor(
 
     fun addProxy(input: String) {
         if (!manualProxyEntitled()) {
-            _uiState.update { it.copy(message = "Ручные прокси открываются с ранга Первый связной (1 друг)") }
+            _uiState.update { it.copy(message = context.getString(R.string.mp_manual_rank)) }
             return
         }
         viewModelScope.launch {
             val id = repo.addFromString(input, source = "MANUAL")
             if (id != null) {
-                _uiState.update { it.copy(message = "Прокси добавлен") }
+                _uiState.update { it.copy(message = context.getString(R.string.mp_added)) }
             } else {
-                _uiState.update { it.copy(message = "Ошибка: неверный формат") }
+                _uiState.update { it.copy(message = context.getString(R.string.mp_bad_format)) }
             }
         }
     }
@@ -80,7 +81,7 @@ class MtProxyViewModel @Inject constructor(
     fun importFromClipboard(clipboardText: String?) {
         if (clipboardText.isNullOrBlank()) {
             _uiState.update {
-                it.copy(message = "Буфер обмена пуст или недоступен. Вставьте вручную через кнопку +")
+                it.copy(message = context.getString(R.string.mp_clipboard_empty))
             }
             return
         }
@@ -88,10 +89,10 @@ class MtProxyViewModel @Inject constructor(
         viewModelScope.launch {
             val count = repo.importMultiple(clipboardText, source = "IMPORT")
             if (count > 0) {
-                _uiState.update { it.copy(message = "Импортировано прокси: $count") }
+                _uiState.update { it.copy(message = context.getString(R.string.mp_imported, count)) }
             } else {
                 _uiState.update {
-                    it.copy(message = "Не найдено прокси в буфере. Проверьте формат (tg://, socks5://, http://)")
+                    it.copy(message = context.getString(R.string.mp_clipboard_none))
                 }
             }
         }
@@ -115,19 +116,19 @@ class MtProxyViewModel @Inject constructor(
 
     fun setActive(id: String) {
         if (!manualProxyEntitled()) {
-            _uiState.update { it.copy(message = "Ручные прокси открываются с ранга Первый связной (1 друг)") }
+            _uiState.update { it.copy(message = context.getString(R.string.mp_manual_rank)) }
             return
         }
         viewModelScope.launch {
             repo.setActive(id)
-            _uiState.update { it.copy(message = "Прокси выбран как активный") }
+            _uiState.update { it.copy(message = context.getString(R.string.mp_selected)) }
         }
     }
 
     fun delete(id: String) {
         viewModelScope.launch {
             repo.delete(id)
-            _uiState.update { it.copy(message = "Прокси удалён") }
+            _uiState.update { it.copy(message = context.getString(R.string.mp_deleted)) }
         }
     }
 
@@ -169,7 +170,7 @@ class MtProxyViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     isChecking = false,
-                    message = "Проверено: $ok/${results.size} работают"
+                    message = context.getString(R.string.mp_checked, ok, results.size)
                 )
             }
         }
@@ -177,7 +178,7 @@ class MtProxyViewModel @Inject constructor(
 
     fun checkAllAndPickBest() {
         if (!automaticProxyEntitled()) {
-            _uiState.update { it.copy(message = "Автовыбор прокси открывается с ранга Проводник (10 друзей)") }
+            _uiState.update { it.copy(message = context.getString(R.string.mp_auto_rank)) }
             return
         }
         viewModelScope.launch {
@@ -195,17 +196,17 @@ class MtProxyViewModel @Inject constructor(
 
     fun collectNow() {
         if (!automaticProxyEntitled()) {
-            _uiState.update { it.copy(message = "Автосбор прокси открывается с ранга Проводник (10 друзей)") }
+            _uiState.update { it.copy(message = context.getString(R.string.mp_collect_rank)) }
             return
         }
         viewModelScope.launch {
-            _uiState.update { it.copy(isCollecting = true, message = "Собираем прокси...") }
+            _uiState.update { it.copy(isCollecting = true, message = context.getString(R.string.mp_collecting)) }
             try {
                 val results = scraper.collectAll()
                 val totalAdded = results.sumOf { it.added }
                 val totalParsed = results.sumOf { it.parsed }
 
-                _uiState.update { it.copy(message = "Найдено $totalParsed, добавлено $totalAdded. Чистим пул...") }
+                _uiState.update { it.copy(message = context.getString(R.string.mp_found_added, totalParsed, totalAdded)) }
 
                 // 1. Удалить старые (> 7 дней без success)
                 val stale = repo.cleanupStale(7)
@@ -221,7 +222,7 @@ class MtProxyViewModel @Inject constructor(
                 _uiState.update { it.copy(isCollecting = false, message = msg) }
             } catch (e: Exception) {
                 _uiState.update {
-                    it.copy(isCollecting = false, message = "Ошибка: ${e.message}")
+                    it.copy(isCollecting = false, message = context.getString(R.string.mp_error, e.message))
                 }
             }
         }

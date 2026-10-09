@@ -967,4 +967,28 @@
     <string name="gc_choose_topic">Choose a topic</string>
     <string name="gc_poll_needs">A question and at least two answer options are needed</string>
     <string name="gc_saved_fav">Added to Favorites</string>
+    <!-- Пакет 37: сообщения онбординга и MTProto-прокси (ViewModel) -->
+    <string name="ob_enter_nick">Enter your nickname</string>
+    <string name="ob_enter_pw">Enter a password</string>
+    <string name="ob_name_min2">The name must be at least 2 characters</string>
+    <string name="ob_name_max50">The name must not exceed 50 characters</string>
+    <string name="ob_nick_min3">The nickname must be at least 3 characters</string>
+    <string name="ob_pw_min2">The password must be at least %1$s characters</string>
+    <string name="ob_pw_mismatch">Passwords do not match</string>
+    <string name="ob_nick_taken">This nickname is already taken — choose another</string>
+    <string name="ob_profile_error">Couldn’t create the profile: %1$s</string>
+    <string name="mp_manual_rank">Manual proxies unlock at the “First Connector” rank (1 friend)</string>
+    <string name="mp_added">Proxy added</string>
+    <string name="mp_bad_format">Error: wrong format</string>
+    <string name="mp_clipboard_empty">The clipboard is empty or unavailable. Paste it manually with the + button</string>
+    <string name="mp_imported">Proxies imported: %1$s</string>
+    <string name="mp_clipboard_none">No proxies found in the clipboard. Check the format (tg://, socks5://, http://)</string>
+    <string name="mp_selected">Proxy selected as active</string>
+    <string name="mp_deleted">Proxy deleted</string>
+    <string name="mp_auto_rank">Auto-select unlocks at the “Explorer” rank (10 friends)</string>
+    <string name="mp_collect_rank">Auto-collect unlocks at the “Explorer” rank (10 friends)</string>
+    <string name="mp_collecting">Collecting proxies...</string>
+    <string name="mp_error">Error: %1$s</string>
+    <string name="mp_checked">Checked: %1$s/%2$s working</string>
+    <string name="mp_found_added">Found %1$s, added %2$s. Cleaning the pool...</string>
 </resources>

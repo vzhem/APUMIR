@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.onboarding
 
+import com.vladimir.messenger.R
 // =============================================================================
 // ONBOARDINGVIEWMODEL.KT
 // =============================================================================
@@ -154,11 +155,11 @@ class OnboardingViewModel @Inject constructor(
         val state = _uiState.value
         val nick = state.nickname.trim().trimStart('@')
         if (nick.isBlank()) {
-            _uiState.update { it.copy(nicknameError = "Введите свой никнейм") }
+            _uiState.update { it.copy(nicknameError = appContext.getString(R.string.ob_enter_nick)) }
             return
         }
         if (state.password.isEmpty()) {
-            _uiState.update { it.copy(passwordError = "Введите пароль") }
+            _uiState.update { it.copy(passwordError = appContext.getString(R.string.ob_enter_pw)) }
             return
         }
         viewModelScope.launch {
@@ -204,25 +205,25 @@ class OnboardingViewModel @Inject constructor(
 
         // Валидация
         if (name.length < 2) {
-            _uiState.update { it.copy(nameError = "Имя должно быть минимум 2 символа") }
+            _uiState.update { it.copy(nameError = appContext.getString(R.string.ob_name_min2)) }
             return
         }
         if (name.length > 50) {
-            _uiState.update { it.copy(nameError = "Имя не должно превышать 50 символов") }
+            _uiState.update { it.copy(nameError = appContext.getString(R.string.ob_name_max50)) }
             return
         }
         if (nick.length < 3) {
-            _uiState.update { it.copy(nicknameError = "Никнейм минимум 3 знака") }
+            _uiState.update { it.copy(nicknameError = appContext.getString(R.string.ob_nick_min3)) }
             return
         }
         if (state.password.length < MIN_PASSWORD_LENGTH) {
             _uiState.update {
-                it.copy(passwordError = "Пароль минимум $MIN_PASSWORD_LENGTH знаков")
+                it.copy(passwordError = appContext.getString(R.string.ob_pw_min2, MIN_PASSWORD_LENGTH))
             }
             return
         }
         if (state.password != state.passwordRepeat) {
-            _uiState.update { it.copy(passwordError = "Пароли не совпадают") }
+            _uiState.update { it.copy(passwordError = appContext.getString(R.string.ob_pw_mismatch)) }
             return
         }
 
@@ -245,7 +246,7 @@ class OnboardingViewModel @Inject constructor(
                             it.copy(
                                 step = OnboardingStep.EnterName,
                                 isLoading = false,
-                                nicknameError = "Этот никнейм уже занят, выберите другой",
+                                nicknameError = appContext.getString(R.string.ob_nick_taken),
                             )
                         }
                         return@onSuccess
@@ -294,7 +295,7 @@ class OnboardingViewModel @Inject constructor(
                     _uiState.update { it.copy(
                         step      = OnboardingStep.EnterName,
                         isLoading = false,
-                        error     = "Ошибка создания профиля: ${e.message}"
+                        error     = appContext.getString(R.string.ob_profile_error, e.message)
                     )}
                 }
         }
