@@ -150,6 +150,7 @@ import com.vladimir.messenger.ui.components.ImagePreview
 import com.vladimir.messenger.ui.components.TopicEmojiCatalog
 import com.vladimir.messenger.ui.components.TopicEmojiPicker
 import com.vladimir.messenger.ui.components.TopicIconCatalog
+import com.vladimir.messenger.ui.components.topicIconName
 import com.vladimir.messenger.ui.components.TopicIconView
 import com.vladimir.messenger.util.ImageLinkDetector
 import java.text.SimpleDateFormat
@@ -2271,7 +2272,7 @@ private fun NewTopicDialog(
                     }
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "Значок темы: " + TopicIconCatalog.describe(icon),
+                        androidx.compose.ui.res.stringResource(com.vladimir.messenger.R.string.topic_icon_label, topicIconName(icon)),
                         style = MaterialTheme.typography.titleSmall,
                         color = Color(0xFF5A6472),
                     )

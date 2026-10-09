@@ -52,4 +52,106 @@
         <item>Crown</item>
         <item>Gamepad</item>
     </string-array>
+    <string-array name="topic_icon_names">
+        <item>Bubble</item>
+        <item>Lightning</item>
+        <item>Microphone</item>
+        <item>Arrow up</item>
+        <item>Cool glasses</item>
+        <item>Exclamation</item>
+        <item>Note</item>
+        <item>Calendar</item>
+        <item>Folder</item>
+        <item>Magnifier</item>
+        <item>Horn</item>
+        <item>Flame</item>
+        <item>Heart</item>
+        <item>Question</item>
+        <item>Growth</item>
+        <item>Decline</item>
+        <item>Crystal</item>
+        <item>Money bag</item>
+        <item>Banknotes with wings</item>
+        <item>Coin</item>
+        <item>Exchange</item>
+        <item>Gamepad</item>
+        <item>Laptop</item>
+        <item>Phone</item>
+        <item>Car</item>
+        <item>House</item>
+        <item>Heart with arrow</item>
+        <item>Confetti popper</item>
+        <item>Double exclamation</item>
+        <item>Trophy</item>
+        <item>Checkered flag</item>
+        <item>Movie</item>
+        <item>Musical note</item>
+        <item>Sun</item>
+        <item>Books</item>
+        <item>Crown</item>
+        <item>Soccer ball</item>
+        <item>Basketball</item>
+        <item>TV</item>
+        <item>Eyes</item>
+        <item>Lips</item>
+        <item>Strawberry</item>
+        <item>Lipstick</item>
+        <item>Heel</item>
+        <item>Airplane</item>
+        <item>Suitcase</item>
+        <item>Island</item>
+        <item>Sun behind cloud</item>
+        <item>Unicorn</item>
+        <item>Shopping bags</item>
+        <item>Handbag</item>
+        <item>Cart</item>
+        <item>Little train</item>
+        <item>Yacht</item>
+        <item>Mountains</item>
+        <item>Tent</item>
+        <item>Robot</item>
+        <item>Disco ball</item>
+        <item>Ticket</item>
+        <item>Pirate flag</item>
+        <item>Ballot</item>
+        <item>Graduation cap</item>
+        <item>Telescope</item>
+        <item>Microscope</item>
+        <item>Notes</item>
+        <item>Moon</item>
+        <item>Dancer</item>
+        <item>Dancer 2</item>
+        <item>Helmet</item>
+        <item>Briefcase</item>
+        <item>Test tube</item>
+        <item>Family</item>
+        <item>Baby</item>
+        <item>Bank</item>
+        <item>Abacus</item>
+        <item>Printer</item>
+        <item>Police officer</item>
+        <item>Stethoscope</item>
+        <item>Capsule</item>
+        <item>Syringe</item>
+        <item>Soap</item>
+        <item>ID card</item>
+        <item>Lunch</item>
+        <item>Fish</item>
+        <item>Palette</item>
+        <item>Masks</item>
+        <item>Top hat</item>
+        <item>Crystal ball</item>
+        <item>Cocktail</item>
+        <item>Cake</item>
+        <item>Coffee</item>
+        <item>Sushi</item>
+        <item>Burger</item>
+        <item>Pizza</item>
+        <item>Virus</item>
+        <item>Star</item>
+        <item>Ball</item>
+        <item>Drop</item>
+        <item>Flower</item>
+        <item>Gear</item>
+    </string-array>
 </resources>

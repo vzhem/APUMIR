@@ -55,33 +55,7 @@ object TopicIconCatalog {
         "coffee", "sushi", "burger", "pizza", "virus", "star", "ball", "drop", "flower", "gear",
     )
 
-    val names = mapOf(
-        "chat" to "Пузырёк", "bolt" to "Молния", "mic" to "Микрофон", "top" to "Стрелка вверх",
-        "cool" to "Крутые очки", "bang" to "Вослицание", "memo" to "Записка", "calendar" to "Календарь",
-        "folder" to "Папка", "search" to "Лупа", "horn" to "Горн", "flame" to "Огонёк",
-        "heart" to "Сердце", "ask" to "Вопрос", "chartup" to "Рост", "chartdown" to "Спад",
-        "gem" to "Кристалл", "moneybag" to "Мешок денег", "wings" to "Купюры с крыльями", "coin" to "Монета",
-        "exchange" to "Обмен", "pad" to "Геймпад", "laptop" to "Ноутбук", "phone" to "Телефон",
-        "car" to "Машина", "house" to "Дом", "heartarrow" to "Сердце со стрелой", "party" to "Хлопушка",
-        "bang2" to "Два восклицания", "trophy" to "Кубок", "checkflag" to "Финишный флаг", "clapper" to "Кино",
-        "note" to "Нота", "sun" to "Солнце", "books" to "Книги", "crown" to "Корона",
-        "soccer" to "Мяч", "basket" to "Баскетбол", "tv" to "Телевизор", "eyes" to "Глаза",
-        "lips" to "Губы", "strawberry" to "Клубника", "lipstick" to "Помада", "heel" to "Туфелька",
-        "plane" to "Самолёт", "case" to "Чемодан", "island" to "Остров", "suncloud" to "Солнце за тучей",
-        "unicorn" to "Единорог", "shops" to "Пакеты", "handbag" to "Сумочка", "cart" to "Корзина",
-        "train" to "Паровозик", "boat" to "Яхта", "mountain" to "Горы", "tent" to "Палатка",
-        "robot" to "Робот", "disco" to "Диско-шар", "ticket" to "Билет", "pirate" to "Пиратский флаг",
-        "ballot" to "Голосование", "gradcap" to "Фуражка выпуска", "telescope" to "Телескоп", "microscope" to "Микроскоп",
-        "notes2" to "Ноты", "moon" to "Месяц", "dancer" to "Танцор", "dancer2" to "Танцовщица",
-        "helmet" to "Каска", "briefcase" to "Портфель", "tube" to "Пробирка", "family" to "Семья",
-        "baby" to "Малыш", "bank" to "Банк", "abacus" to "Счёты", "printer" to "Принтер",
-        "police" to "Полицейский", "steth" to "Стетоскоп", "pill" to "Капсула", "syringe" to "Шприц",
-        "soap" to "Мыло", "idcard" to "Карточка", "plate" to "Обед", "fish" to "Рыбка",
-        "palette" to "Палитра", "masks" to "Маски", "tophat" to "Цилиндр", "crystal" to "Хрустальный шар",
-        "cocktail" to "Коктейль", "cake" to "Торт", "coffee" to "Кофе", "sushi" to "Суши",
-        "burger" to "Бургер", "pizza" to "Пицца", "virus" to "Вирус", "star" to "Звезда",
-        "ball" to "Мячик", "drop" to "Капля", "flower" to "Цветок", "gear" to "Шестерёнка",
-    )
+
 
     const val DEFAULT = "chat"
 
@@ -106,7 +80,7 @@ object TopicIconCatalog {
 
     fun isKnown(kind: String): Boolean = normalize(kind) != null
 
-    fun describe(kind: String): String = names[normalize(kind)] ?: kind
+    fun indexOf(kind: String): Int = kinds.indexOf(normalize(kind) ?: kind)
 }
 
 /** Значок темы: код из каталога - анимацией, эмодзи старых тем - текстом. */
@@ -1591,3 +1565,11 @@ private val DRAWERS: Map<String, DrawScope.(Float) -> Unit> = mapOf(
         }
     },
 )
+
+/** Название темы для показа: берётся из строкового ресурса по позиции в [TopicIconCatalog.kinds]. */
+@androidx.compose.runtime.Composable
+fun topicIconName(kind: String): String {
+    val names = androidx.compose.ui.res.stringArrayResource(com.vladimir.messenger.R.array.topic_icon_names)
+    val i = TopicIconCatalog.indexOf(kind)
+    return names.getOrElse(i) { kind }
+}

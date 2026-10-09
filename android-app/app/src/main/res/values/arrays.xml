@@ -52,4 +52,106 @@
         <item>Корона</item>
         <item>Геймпад</item>
     </string-array>
+    <string-array name="topic_icon_names">
+        <item>Пузырёк</item>
+        <item>Молния</item>
+        <item>Микрофон</item>
+        <item>Стрелка вверх</item>
+        <item>Крутые очки</item>
+        <item>Восклицание</item>
+        <item>Записка</item>
+        <item>Календарь</item>
+        <item>Папка</item>
+        <item>Лупа</item>
+        <item>Горн</item>
+        <item>Огонёк</item>
+        <item>Сердце</item>
+        <item>Вопрос</item>
+        <item>Рост</item>
+        <item>Спад</item>
+        <item>Кристалл</item>
+        <item>Мешок денег</item>
+        <item>Купюры с крыльями</item>
+        <item>Монета</item>
+        <item>Обмен</item>
+        <item>Геймпад</item>
+        <item>Ноутбук</item>
+        <item>Телефон</item>
+        <item>Машина</item>
+        <item>Дом</item>
+        <item>Сердце со стрелой</item>
+        <item>Хлопушка</item>
+        <item>Два восклицания</item>
+        <item>Кубок</item>
+        <item>Финишный флаг</item>
+        <item>Кино</item>
+        <item>Нота</item>
+        <item>Солнце</item>
+        <item>Книги</item>
+        <item>Корона</item>
+        <item>Мяч</item>
+        <item>Баскетбол</item>
+        <item>Телевизор</item>
+        <item>Глаза</item>
+        <item>Губы</item>
+        <item>Клубника</item>
+        <item>Помада</item>
+        <item>Туфелька</item>
+        <item>Самолёт</item>
+        <item>Чемодан</item>
+        <item>Остров</item>
+        <item>Солнце за тучей</item>
+        <item>Единорог</item>
+        <item>Пакеты</item>
+        <item>Сумочка</item>
+        <item>Корзина</item>
+        <item>Паровозик</item>
+        <item>Яхта</item>
+        <item>Горы</item>
+        <item>Палатка</item>
+        <item>Робот</item>
+        <item>Диско-шар</item>
+        <item>Билет</item>
+        <item>Пиратский флаг</item>
+        <item>Голосование</item>
+        <item>Фуражка выпуска</item>
+        <item>Телескоп</item>
+        <item>Микроскоп</item>
+        <item>Ноты</item>
+        <item>Месяц</item>
+        <item>Танцор</item>
+        <item>Танцовщица</item>
+        <item>Каска</item>
+        <item>Портфель</item>
+        <item>Пробирка</item>
+        <item>Семья</item>
+        <item>Малыш</item>
+        <item>Банк</item>
+        <item>Счёты</item>
+        <item>Принтер</item>
+        <item>Полицейский</item>
+        <item>Стетоскоп</item>
+        <item>Капсула</item>
+        <item>Шприц</item>
+        <item>Мыло</item>
+        <item>Карточка</item>
+        <item>Обед</item>
+        <item>Рыбка</item>
+        <item>Палитра</item>
+        <item>Маски</item>
+        <item>Цилиндр</item>
+        <item>Хрустальный шар</item>
+        <item>Коктейль</item>
+        <item>Торт</item>
+        <item>Кофе</item>
+        <item>Суши</item>
+        <item>Бургер</item>
+        <item>Пицца</item>
+        <item>Вирус</item>
+        <item>Звезда</item>
+        <item>Мячик</item>
+        <item>Капля</item>
+        <item>Цветок</item>
+        <item>Шестерёнка</item>
+    </string-array>
 </resources>
