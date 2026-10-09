@@ -466,4 +466,24 @@
     <string name="group_pinned">Закреплено</string>
     <string name="group_topic_name">Название темы</string>
     <string name="group_cancel_reply">Отменить ответ</string>
+    <!-- Защита личности -->
+    <string name="identity_title">Защита личности</string>
+    <string name="identity_why">Зачем это нужно</string>
+    <string name="identity_protected">Личность защищена</string>
+    <string name="identity_unprotected">Личность не защищена</string>
+    <string name="identity_reinstall_warning">Переустановка приложения сотрёт вас безвозвратно</string>
+    <string name="identity_change_password">Сменить пароль</string>
+    <string name="identity_set_password">Задать пароль</string>
+    <string name="identity_change_hint">Менять можно сколько угодно — адрес и переписка останутся прежними.</string>
+    <string name="identity_nickname">Никнейм</string>
+    <string name="identity_password">Пароль</string>
+    <string name="identity_repeat_password">Пароль ещё раз</string>
+    <string name="identity_passwords_mismatch">Пароли не совпадают</string>
+    <string name="identity_enter_nickname">Введите никнейм</string>
+    <string name="identity_repeat_error">Повторите пароль без ошибок</string>
+    <string name="identity_restore_title">Вернуть свою личность</string>
+    <string name="identity_restore">Восстановить</string>
+    <string name="identity_restore_body">Введите никнейм и пароль, которые задавали раньше. Приложение перезапустится под вашим прежним адресом.</string>
+    <string name="identity_key_body">Пароль никуда не отправляется. Ключ запирается прямо здесь, на телефоне, поэтому прочитать его не может никто.</string>
+    <string name="identity_why_body">Если удалить и поставить приложение заново, вы станете для собеседников новым человеком: пропадут ранг, приглашения и переписка. Задайте никнейм и пароль — и сможете вернуть себя на любом телефоне.</string>
 </resources>

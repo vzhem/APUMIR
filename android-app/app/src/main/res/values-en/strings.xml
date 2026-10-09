@@ -457,4 +457,24 @@
     <string name="group_pinned">Pinned</string>
     <string name="group_topic_name">Topic name</string>
     <string name="group_cancel_reply">Cancel reply</string>
+    <!-- Identity protection -->
+    <string name="identity_title">Identity protection</string>
+    <string name="identity_why">Why you need this</string>
+    <string name="identity_protected">Identity is protected</string>
+    <string name="identity_unprotected">Identity is not protected</string>
+    <string name="identity_reinstall_warning">Reinstalling the app will erase you permanently</string>
+    <string name="identity_change_password">Change password</string>
+    <string name="identity_set_password">Set password</string>
+    <string name="identity_change_hint">You can change it as often as you like: your address and chats stay the same.</string>
+    <string name="identity_nickname">Nickname</string>
+    <string name="identity_password">Password</string>
+    <string name="identity_repeat_password">Repeat password</string>
+    <string name="identity_passwords_mismatch">Passwords do not match</string>
+    <string name="identity_enter_nickname">Enter a nickname</string>
+    <string name="identity_repeat_error">Repeat the password without errors</string>
+    <string name="identity_restore_title">Restore your identity</string>
+    <string name="identity_restore">Restore</string>
+    <string name="identity_restore_body">Enter the nickname and password you set before. The app will restart under your previous address.</string>
+    <string name="identity_key_body">The password is not sent anywhere. The key is locked right here on the phone, so no one can read it.</string>
+    <string name="identity_why_body">If you delete the app and install it again, you become a new person to your contacts: your rank, invitations, and chats disappear. Set a nickname and a password, and you can restore yourself on any phone.</string>
 </resources>

@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.R
+import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuSettingsCard
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
@@ -84,10 +86,10 @@ fun IdentityBackupScreen(
                         containerColor = Color.Transparent,
                         scrolledContainerColor = Color.Transparent,
                     ),
-                    title = { ApuSettingsHeader("Защита личности") },
+                    title = { ApuSettingsHeader(stringResource(R.string.identity_title)) },
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                         }
                     },
                 )
@@ -106,24 +108,20 @@ fun IdentityBackupScreen(
                     HintBubble {
                         Column {
                             Text(
-                                "Зачем это нужно",
+                                stringResource(R.string.identity_why),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = HintBubbleTextColor,
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                "Если удалить и поставить приложение заново, вы станете для " +
-                                    "собеседников новым человеком: пропадут ранг, приглашения и " +
-                                    "переписка. Задайте никнейм и пароль — и сможете вернуть себя " +
-                                    "на любом телефоне.",
+                                stringResource(R.string.identity_why_body),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = HintBubbleMutedColor,
                             )
                             Spacer(Modifier.height(6.dp))
                             Text(
-                                "Пароль никуда не отправляется. Ключ запирается прямо здесь, " +
-                                    "на телефоне, поэтому прочитать его не может никто.",
+                                stringResource(R.string.identity_key_body),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = HintBubbleMutedColor,
                             )
@@ -135,14 +133,14 @@ fun IdentityBackupScreen(
                     ApuSettingsCard {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                if (state.protectedNickname != null) "Личность защищена" else "Личность не защищена",
+                                if (state.protectedNickname != null) stringResource(R.string.identity_protected) else stringResource(R.string.identity_unprotected),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
                                 state.protectedNickname?.let { "Никнейм для восстановления: @$it" }
-                                    ?: "Переустановка приложения сотрёт вас безвозвратно",
+                                    ?: stringResource(R.string.identity_reinstall_warning),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -154,13 +152,13 @@ fun IdentityBackupScreen(
                     ApuSettingsCard {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                if (state.protectedNickname != null) "Сменить пароль" else "Задать пароль",
+                                if (state.protectedNickname != null) stringResource(R.string.identity_change_password) else stringResource(R.string.identity_set_password),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                "Менять можно сколько угодно — адрес и переписка останутся прежними.",
+                                stringResource(R.string.identity_change_hint),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -168,7 +166,7 @@ fun IdentityBackupScreen(
                             ApuBubbleField(
                                 value = nickname,
                                 onValueChange = { nickname = it },
-                                label = { Text("Никнейм") },
+                                label = { Text(stringResource(R.string.identity_nickname)) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                             )
@@ -176,7 +174,7 @@ fun IdentityBackupScreen(
                             ApuBubbleField(
                                 value = password,
                                 onValueChange = { password = it },
-                                label = { Text("Пароль") },
+                                label = { Text(stringResource(R.string.identity_password)) },
                                 singleLine = true,
                                 visualTransformation = PasswordVisualTransformation(),
                                 isError = password.isNotEmpty() && password.length < MIN_PASSWORD,
@@ -200,14 +198,14 @@ fun IdentityBackupScreen(
                             ApuBubbleField(
                                 value = repeat,
                                 onValueChange = { repeat = it },
-                                label = { Text("Пароль ещё раз") },
+                                label = { Text(stringResource(R.string.identity_repeat_password)) },
                                 singleLine = true,
                                 visualTransformation = PasswordVisualTransformation(),
                                 isError = repeat.isNotEmpty() && repeat != password,
                                 supportingText = {
                                     if (repeat.isNotEmpty() && repeat != password) {
                                         Text(
-                                            "Пароли не совпадают",
+                                            stringResource(R.string.identity_passwords_mismatch),
                                             color = MaterialTheme.colorScheme.error,
                                         )
                                     }
@@ -230,15 +228,15 @@ fun IdentityBackupScreen(
                                         strokeWidth = 2.dp,
                                     )
                                 } else {
-                                    Text("Сохранить")
+                                    Text(stringResource(R.string.admin_save))
                                 }
                             }
                             // Явно называем недостающее: тёмная кнопка без
                             // объяснения выглядит как поломка приложения.
                             val blocker = when {
-                                nickname.isBlank() -> "Введите никнейм"
+                                nickname.isBlank() -> stringResource(R.string.identity_enter_nickname)
                                 password.length < MIN_PASSWORD -> "Пароль минимум $MIN_PASSWORD знаков"
-                                password != repeat -> "Повторите пароль без ошибок"
+                                password != repeat -> stringResource(R.string.identity_repeat_error)
                                 else -> null
                             }
                             if (blocker != null) {
@@ -257,14 +255,13 @@ fun IdentityBackupScreen(
                     ApuSettingsCard {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                "Вернуть свою личность",
+                                stringResource(R.string.identity_restore_title),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                "Введите никнейм и пароль, которые задавали раньше. Приложение " +
-                                    "перезапустится под вашим прежним адресом.",
+                                stringResource(R.string.identity_restore_body),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -274,7 +271,7 @@ fun IdentityBackupScreen(
                                 style = DiagnosticsActionStyle.QUIET,
                                 enabled = !state.busy && nickname.isNotBlank() && password.isNotEmpty(),
                                 modifier = Modifier.fillMaxWidth(),
-                            ) { Text("Восстановить") }
+                            ) { Text(stringResource(R.string.identity_restore)) }
                         }
                     }
                 }
