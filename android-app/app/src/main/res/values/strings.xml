@@ -819,4 +819,12 @@
     <string name="avatar_crop_hint">Двигайте фото пальцем и приближайте щипком. В аватар попадёт то, что видно в круге.</string>
     <string name="gif_blue_dot">синяя точка - гифка уже в нашей сети: придёт с телефонов своих, внешний каталог не тратится</string>
     <string name="username_taken_body">Ваш @никнейм оказался занят пользователем, который зарегистрировался раньше. Задайте себе новый никнейм.</string>
+    <!-- Пакет 28: подсказки ответа, черновика, опроса и модерации -->
+    <string name="reply_to_author">Ответ %1$s</string>
+    <string name="contact_draft_prefix">Черновик: %1$s</string>
+    <string name="poll_option_n">Вариант %1$s</string>
+    <string name="mod_delete_all_from">Удалить всё от %1$s</string>
+    <string name="mod_block_author">Заблокировать %1$s</string>
+    <string name="mod_perm_count">Разрешено: %1$s из %2$s</string>
+    <string name="mod_continue_extras">Продолжить (+%1$s)</string>
 </resources>

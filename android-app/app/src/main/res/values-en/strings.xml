@@ -810,4 +810,12 @@
     <string name="avatar_crop_hint">Drag the photo with your finger and pinch to zoom. Whatever is visible in the circle becomes your avatar.</string>
     <string name="gif_blue_dot">blue dot — the GIF is already in our network: it comes from your contacts’ phones, the external catalog is not used</string>
     <string name="username_taken_body">Your @username is taken by a user who registered earlier. Choose a new username.</string>
+    <!-- Пакет 28: подсказки ответа, черновика, опроса и модерации -->
+    <string name="reply_to_author">Reply to %1$s</string>
+    <string name="contact_draft_prefix">Draft: %1$s</string>
+    <string name="poll_option_n">Option %1$s</string>
+    <string name="mod_delete_all_from">Delete everything from %1$s</string>
+    <string name="mod_block_author">Block %1$s</string>
+    <string name="mod_perm_count">Allowed: %1$s of %2$s</string>
+    <string name="mod_continue_extras">Continue (+%1$s)</string>
 </resources>

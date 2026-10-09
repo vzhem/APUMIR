@@ -306,7 +306,7 @@ fun PollDraftFields(
                 ApuBubbleField(
                     value = text,
                     onValueChange = { state.options[index] = it },
-                    label = { Text("Вариант ${index + 1}") },
+                    label = { Text(stringResource(R.string.poll_option_n, index + 1)) },
                     modifier = Modifier.weight(1f),
                     singleLine = true,
                 )

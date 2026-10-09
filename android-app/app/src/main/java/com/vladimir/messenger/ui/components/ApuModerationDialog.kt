@@ -370,7 +370,7 @@ fun ApuMessageModerationDialog(
                                 )
                             }
                             ApuModerationOptionRow(
-                                title = "Удалить всё от $displayAuthor",
+                                title = stringResource(R.string.mod_delete_all_from, displayAuthor),
                                 subtitle = "Стереть все сообщения автора в $communityWord у всех",
                                 checked = deleteAllFromAuthor,
                                 badgeText = "${authorMessageCount.coerceAtLeast(1)} сообщ.",
@@ -392,7 +392,7 @@ fun ApuMessageModerationDialog(
                                 )
                             }
                             ApuModerationOptionRow(
-                                title = "Заблокировать $displayAuthor",
+                                title = stringResource(R.string.mod_block_author, displayAuthor),
                                 subtitle = "Исключить из ${if (isChannel) "канала" else "группы"} и запретить отправку",
                                 checked = blockAuthor,
                                 danger = true,
@@ -455,7 +455,7 @@ fun ApuMessageModerationDialog(
                                     color = ApuBubbleTextColor,
                                 )
                                 Text(
-                                    text = "Разрешено: $enabledPermCount из $totalEntries",
+                                    text = stringResource(R.string.mod_perm_count, enabledPermCount, totalEntries),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = ApuBubbleMutedColor,
                                 )
@@ -560,7 +560,7 @@ fun ApuMessageModerationDialog(
             ) {
                 Text(
                     text = if (selectedExtras > 0) {
-                        "Продолжить (+$selectedExtras)"
+                        stringResource(R.string.mod_continue_extras, selectedExtras)
                     } else {
                         stringResource(R.string.ui_continue)
                     },

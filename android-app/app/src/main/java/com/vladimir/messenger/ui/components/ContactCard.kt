@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // CONTACTCARD.KT — Карточка контакта / чата в списке
 // =============================================================================
@@ -171,7 +173,7 @@ fun ContactCard(
             // как в больших мессенджерах: сразу видно, что текст не отправлен.
             if (draftText.isNotEmpty()) {
                 Text(
-                    text     = "Черновик: $draftText",
+                    text     = stringResource(R.string.contact_draft_prefix, draftText),
                     style    = MaterialTheme.typography.bodySmall,
                     color    = Color(0xFFC62828),
                     maxLines = 1,
