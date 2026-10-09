@@ -363,7 +363,7 @@ fun ProfileBackupScreen(
                                 enabled = canCreate,
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
-                                if (state.busy && state.busyText.startsWith("Собираем")) {
+                                if (state.busy && state.busyKind == BusyKind.BUILDING) {
                                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                                     Spacer(Modifier.width(8.dp))
                                     Text(state.busyText)
@@ -584,7 +584,7 @@ fun ProfileBackupScreen(
                                 enabled = !state.busy && restorePassword.isNotEmpty(),
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
-                                if (state.busy && state.busyText.startsWith("Открываем")) {
+                                if (state.busy && state.busyKind == BusyKind.OPENING) {
                                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                                     Spacer(Modifier.width(8.dp))
                                     Text(state.busyText)

@@ -25,10 +25,14 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+enum class BusyKind { NONE, BUILDING, OPENING, ENABLING }
+
 data class ProfileBackupUiState(
     val busy: Boolean = false,
     /** Что сейчас делаем - подпись под индикатором. */
     val busyText: String = "",
+    /** Код текущего действия: экран смотрит на него, а не на текст (текст зависит от языка). */
+    val busyKind: BusyKind = BusyKind.NONE,
     val message: String? = null,
     val failed: Boolean = false,
     /** Сколько весят полученные файлы - чтобы человек решил, класть ли их в копию. */
@@ -166,7 +170,7 @@ class ProfileBackupViewModel @Inject constructor(
             fail(context.getString(R.string.bk_pw_short, BackupCipher.MIN_PASSWORD_LENGTH))
             return
         }
-        _uiState.update { it.copy(busy = true, busyText = context.getString(R.string.bk_building), message = null, failed = false) }
+        _uiState.update { it.copy(busy = true, busyKind = BusyKind.BUILDING, busyText = context.getString(R.string.bk_building), message = null, failed = false) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 backup.create(target, password.toCharArray(), includeReceived)
@@ -205,7 +209,7 @@ class ProfileBackupViewModel @Inject constructor(
             fail(context.getString(R.string.bk_enter_pw))
             return
         }
-        _uiState.update { it.copy(busy = true, busyText = context.getString(R.string.bk_opening), message = null, failed = false) }
+        _uiState.update { it.copy(busy = true, busyKind = BusyKind.OPENING, busyText = context.getString(R.string.bk_opening), message = null, failed = false) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { backup.stage(source, password.toCharArray()) }
             when (result) {
@@ -237,7 +241,7 @@ class ProfileBackupViewModel @Inject constructor(
             return
         }
         if (_uiState.value.busy) return
-        _uiState.update { it.copy(busy = true, busyText = context.getString(R.string.bk_enabling), message = null, failed = false) }
+        _uiState.update { it.copy(busy = true, busyKind = BusyKind.ENABLING, busyText = context.getString(R.string.bk_enabling), message = null, failed = false) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 BackupSchedule.enable(context, target, password.toCharArray(), includeReceived, period)
@@ -276,7 +280,7 @@ class ProfileBackupViewModel @Inject constructor(
      */
     fun enableAutoUpdateFor(target: Uri, password: String, includeReceived: Boolean, period: BackupSchedule.Period) {
         if (_uiState.value.busy) return
-        _uiState.update { it.copy(busy = true, busyText = context.getString(R.string.bk_enabling), message = null, failed = false) }
+        _uiState.update { it.copy(busy = true, busyKind = BusyKind.ENABLING, busyText = context.getString(R.string.bk_enabling), message = null, failed = false) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 BackupSchedule.enable(context, target, password.toCharArray(), includeReceived, period)
