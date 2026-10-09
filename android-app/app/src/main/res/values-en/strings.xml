@@ -991,4 +991,21 @@
     <string name="mp_error">Error: %1$s</string>
     <string name="mp_checked">Checked: %1$s/%2$s working</string>
     <string name="mp_found_added">Found %1$s, added %2$s. Cleaning the pool...</string>
+    <!-- Пакет 38: уведомления администрирования групп (ViewModel) -->
+    <string name="ga_stats_failed">Couldn’t update the statistics</string>
+    <string name="ga_member_added">Member added</string>
+    <string name="ga_request_declined">Request declined</string>
+    <string name="ga_link_created">Link created</string>
+    <string name="ga_link_revoked">Link revoked</string>
+    <string name="ga_link_deleted">Link deleted</string>
+    <string name="ga_public">The group is public</string>
+    <string name="ga_private">The group is private</string>
+    <string name="ga_topics_on">Topics enabled</string>
+    <string name="ga_slow_off">Slow mode is off</string>
+    <string name="ga_image_read">Couldn’t read the image</string>
+    <string name="ga_avatar_updated">Group avatar updated</string>
+    <string name="ga_member_removed">Member removed</string>
+    <string name="ga_ownership_moved">Ownership transferred</string>
+    <string name="ga_now_owner">You are now the group owner</string>
+    <string name="ga_saved">Saved</string>
 </resources>

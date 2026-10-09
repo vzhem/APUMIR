@@ -1000,4 +1000,21 @@
     <string name="mp_error">Ошибка: %1$s</string>
     <string name="mp_checked">Проверено: %1$s/%2$s работают</string>
     <string name="mp_found_added">Найдено %1$s, добавлено %2$s. Чистим пул...</string>
+    <!-- Пакет 38: уведомления администрирования групп (ViewModel) -->
+    <string name="ga_stats_failed">Не удалось обновить статистику</string>
+    <string name="ga_member_added">Участник добавлен</string>
+    <string name="ga_request_declined">Заявка отклонена</string>
+    <string name="ga_link_created">Ссылка создана</string>
+    <string name="ga_link_revoked">Ссылка отозвана</string>
+    <string name="ga_link_deleted">Ссылка удалена</string>
+    <string name="ga_public">Группа публичная</string>
+    <string name="ga_private">Группа частная</string>
+    <string name="ga_topics_on">Темы включены</string>
+    <string name="ga_slow_off">Медленный режим выключен</string>
+    <string name="ga_image_read">Не удалось прочитать картинку</string>
+    <string name="ga_avatar_updated">Аватар группы обновлён</string>
+    <string name="ga_member_removed">Участник исключён</string>
+    <string name="ga_ownership_moved">Владение передано</string>
+    <string name="ga_now_owner">Вы теперь владелец группы</string>
+    <string name="ga_saved">Сохранено</string>
 </resources>
