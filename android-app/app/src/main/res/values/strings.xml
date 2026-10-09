@@ -930,4 +930,16 @@
     <string name="ch_file_incomplete">Файл ещё не получен полностью</string>
     <string name="ch_share_failed">Не удалось поделиться</string>
     <string name="ch_share_post_chooser">Поделиться постом</string>
+    <!-- Пакет 35: сообщения настроек (ViewModel) -->
+    <string name="st_open_failed">Не удалось открыть файл</string>
+    <string name="st_read_error">Ошибка чтения: %1$s</string>
+    <string name="st_error">Ошибка: %1$s</string>
+    <string name="st_install_failed">Не удалось запустить установку: %1$s</string>
+    <string name="st_no_updates">Обновлений не найдено (соседей в сети нет или они на этой же версии)</string>
+    <string name="st_saving">Сохраняю…</string>
+    <string name="st_failed_msg">Не получилось: %1$s</string>
+    <string name="st_asking_swarm">Спрашиваю рой…</string>
+    <string name="st_cancelled_n">Остановлено зависших отправок: %1$s</string>
+    <string name="st_cleanup_failed">Не удалось выполнить очистку</string>
+    <string name="st_purged_n">Очищено завершённых передач: %1$s</string>
 </resources>

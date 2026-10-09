@@ -921,4 +921,16 @@
     <string name="ch_file_incomplete">The file has not been fully received yet</string>
     <string name="ch_share_failed">Couldn’t share</string>
     <string name="ch_share_post_chooser">Share post</string>
+    <!-- Пакет 35: сообщения настроек (ViewModel) -->
+    <string name="st_open_failed">Couldn’t open the file</string>
+    <string name="st_read_error">Read error: %1$s</string>
+    <string name="st_error">Error: %1$s</string>
+    <string name="st_install_failed">Couldn’t start the installation: %1$s</string>
+    <string name="st_no_updates">No updates found (there are no neighbors on the network or they are on the same version)</string>
+    <string name="st_saving">Saving…</string>
+    <string name="st_failed_msg">Didn’t work: %1$s</string>
+    <string name="st_asking_swarm">Asking the swarm…</string>
+    <string name="st_cancelled_n">Stopped stuck sends: %1$s</string>
+    <string name="st_cleanup_failed">Couldn’t complete the cleanup</string>
+    <string name="st_purged_n">Cleared completed transfers: %1$s</string>
 </resources>

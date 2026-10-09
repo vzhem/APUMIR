@@ -234,11 +234,11 @@ class SettingsViewModel @Inject constructor(
             val prepared = withContext(Dispatchers.IO) {
                 val temp = runCatching {
                     java.io.File.createTempFile("apu_pick_", ".apk", context.cacheDir)
-                }.getOrNull() ?: return@withContext quick.copy(error = "Не удалось открыть файл")
+                }.getOrNull() ?: return@withContext quick.copy(error = context.getString(R.string.st_open_failed))
                 try {
                     context.contentResolver.openInputStream(uri)?.use { input ->
                         temp.outputStream().use { output -> input.copyTo(output) }
-                    } ?: return@withContext quick.copy(error = "Не удалось открыть файл")
+                    } ?: return@withContext quick.copy(error = context.getString(R.string.st_open_failed))
                     // Версия — из самого APK; если архив не читается — из имени.
                     val version = runCatching {
                         context.packageManager.getPackageArchiveInfo(temp.absolutePath, 0)?.versionName
@@ -247,7 +247,7 @@ class SettingsViewModel @Inject constructor(
                     quick.copy(version = version, tempPath = temp.absolutePath)
                 } catch (error: Exception) {
                     temp.delete()
-                    quick.copy(error = "Ошибка чтения: ${error.message}")
+                    quick.copy(error = context.getString(R.string.st_read_error, error.message))
                 }
             }
             prepared.error?.let { message ->
@@ -286,7 +286,7 @@ class SettingsViewModel @Inject constructor(
     fun onMarkReceivedApkAsUpdate(transferId: String, version: String) {
         viewModelScope.launch {
             val result = runCatching { apkSeeder.markReceivedApkAsSeed(transferId, version, autoReseed = true) }
-                .getOrElse { "Ошибка: ${it.message}" }
+                .getOrElse { context.getString(R.string.st_error, it.message) }
             toastIf(result)
         }
     }
@@ -320,7 +320,7 @@ class SettingsViewModel @Inject constructor(
     fun onInstallUpdate() {
         viewModelScope.launch {
             val result = runCatching { apkSeeder.installReady() }
-                .getOrElse { "Не удалось запустить установку: ${it.message}" }
+                .getOrElse { context.getString(R.string.st_install_failed, it.message) }
             toastIf(result)
         }
     }
@@ -356,7 +356,7 @@ class SettingsViewModel @Inject constructor(
                 neighbors > 0 ->
                     "Соседи раздают новую версию — кнопка «Скачать» в карточке"
                 asked > 0 -> "Спрошено у $asked соседей; новых объявлений пока нет"
-                else -> "Обновлений не найдено (соседей в сети нет или они на этой же версии)"
+                else -> context.getString(R.string.st_no_updates)
             }
             android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
         }
@@ -505,9 +505,9 @@ class SettingsViewModel @Inject constructor(
     /** Кнопка «Создать копию» (диалог карточки «Сервер»). */
     fun backupAddressBookNow() {
         viewModelScope.launch {
-            _uiState.update { it.copy(addrBookMessage = "Сохраняю…") }
+            _uiState.update { it.copy(addrBookMessage = context.getString(R.string.st_saving)) }
             val result = runCatching { addressBookBackup.backupNow() }
-                .getOrElse { "Не получилось: ${it.message}" }
+                .getOrElse { context.getString(R.string.st_failed_msg, it.message) }
             _uiState.update { it.copy(addrBookMessage = result) }
             refreshAddrBookLine()
         }
@@ -516,9 +516,9 @@ class SettingsViewModel @Inject constructor(
     /** Кнопка «Восстановить» (диалог карточки «Сервер»). */
     fun restoreAddressBookNow() {
         viewModelScope.launch {
-            _uiState.update { it.copy(addrBookMessage = "Спрашиваю рой…") }
+            _uiState.update { it.copy(addrBookMessage = context.getString(R.string.st_asking_swarm)) }
             val result = runCatching { addressBookBackup.restoreNowForce() }
-                .getOrElse { "Не получилось: ${it.message}" }
+                .getOrElse { context.getString(R.string.st_failed_msg, it.message) }
             _uiState.update { it.copy(addrBookMessage = result) }
             refreshAddrBookLine()
         }
@@ -533,7 +533,7 @@ class SettingsViewModel @Inject constructor(
     fun onCancelStalledTransfers() {
         viewModelScope.launch {
             val cancelled = runCatching { fileTransferRouter.cancelStalledOutgoing() }.getOrDefault(-1)
-            val message = if (cancelled >= 0) "Остановлено зависших отправок: $cancelled" else "Не удалось выполнить очистку"
+            val message = if (cancelled >= 0) context.getString(R.string.st_cancelled_n, cancelled) else context.getString(R.string.st_cleanup_failed)
             android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
         }
     }
@@ -545,7 +545,7 @@ class SettingsViewModel @Inject constructor(
     fun onPurgeCompletedTransfers() {
         viewModelScope.launch {
             val purged = runCatching { fileTransferRouter.purgeCompletedTransfers() }.getOrDefault(-1)
-            val message = if (purged >= 0) "Очищено завершённых передач: $purged" else "Не удалось выполнить очистку"
+            val message = if (purged >= 0) context.getString(R.string.st_purged_n, purged) else context.getString(R.string.st_cleanup_failed)
             android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
         }
     }
