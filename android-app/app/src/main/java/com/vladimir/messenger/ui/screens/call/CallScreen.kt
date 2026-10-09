@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.call
 
+import com.vladimir.messenger.R
+import androidx.compose.ui.res.stringResource
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -161,7 +163,7 @@ fun CallScreen(
                 )
                 if (state.phase == CallStateMachine.Phase.ACTIVE && state.recovering) {
                     Text(
-                        "Восстановление соединения…",
+                        stringResource(R.string.call_reconnecting),
                         color = MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall,
                     )
@@ -169,9 +171,9 @@ fun CallScreen(
                 if (state.phase == CallStateMachine.Phase.ACTIVE && state.slowTransport) {
                     Text(
                         when {
-                            state.viaUdp -> "Через интернет — прямое соединение"
-                            state.viaBroker -> "Через интернет — сжатый звук, возможна задержка"
-                            else -> "Медленный канал — собеседник не в одной Wi-Fi сети"
+                            state.viaUdp -> stringResource(R.string.call_via_direct)
+                            state.viaBroker -> stringResource(R.string.call_via_broker)
+                            else -> stringResource(R.string.call_slow_link)
                         },
                         color = ApuBubbleMutedColor,
                         style = MaterialTheme.typography.bodySmall,
@@ -246,17 +248,17 @@ private fun CallButtons(
             CallStateMachine.Phase.INCOMING -> {
                 RoundCallButton(
                     background = MaterialTheme.colorScheme.error,
-                    description = "Отклонить",
+                    description = stringResource(R.string.call_decline),
                     onClick = onRed,
                 ) {
-                    Icon(Icons.Default.CallEnd, "Отклонить", tint = Color.White)
+                    Icon(Icons.Default.CallEnd, stringResource(R.string.call_decline), tint = Color.White)
                 }
                 RoundCallButton(
                     background = Color(0xFF2E9E4F),
-                    description = "Принять",
+                    description = stringResource(R.string.call_accept),
                     onClick = onAccept,
                 ) {
-                    Icon(Icons.Default.Call, "Принять", tint = Color.White)
+                    Icon(Icons.Default.Call, stringResource(R.string.call_accept), tint = Color.White)
                 }
             }
 
@@ -264,32 +266,32 @@ private fun CallButtons(
                 RoundCallButton(
                     background = if (state.muted) MaterialTheme.colorScheme.error
                     else Color(0xFFF5F7FA).copy(alpha = 0.95f),
-                    description = if (state.muted) "Включить микрофон" else "Выключить микрофон",
+                    description = if (state.muted) stringResource(R.string.call_mic_on) else stringResource(R.string.call_mic_off),
                     onClick = onMute,
                 ) {
                     Icon(
                         if (state.muted) Icons.Default.MicOff else Icons.Default.Mic,
-                        if (state.muted) "Включить микрофон" else "Выключить микрофон",
+                        if (state.muted) stringResource(R.string.call_mic_on) else stringResource(R.string.call_mic_off),
                         tint = if (state.muted) Color.White else ApuBubbleMutedColor,
                     )
                 }
                 RoundCallButton(
                     background = MaterialTheme.colorScheme.error,
-                    description = "Завершить",
+                    description = stringResource(R.string.call_end),
                     onClick = onRed,
                     big = true,
                 ) {
-                    Icon(Icons.Default.CallEnd, "Завершить", tint = Color.White)
+                    Icon(Icons.Default.CallEnd, stringResource(R.string.call_end), tint = Color.White)
                 }
                 RoundCallButton(
                     background = if (state.speaker) MaterialTheme.colorScheme.primary
                     else Color(0xFFF5F7FA).copy(alpha = 0.95f),
-                    description = if (state.speaker) "Громкая связь выкл" else "Громкая связь",
+                    description = if (state.speaker) stringResource(R.string.call_speaker_off) else stringResource(R.string.call_speaker),
                     onClick = onSpeaker,
                 ) {
                     Icon(
                         Icons.Default.VolumeUp,
-                        "Громкая связь",
+                        stringResource(R.string.call_speaker),
                         tint = if (state.speaker) MaterialTheme.colorScheme.onPrimary
                         else ApuBubbleMutedColor,
                     )
@@ -301,11 +303,11 @@ private fun CallButtons(
                 if (state.phase != CallStateMachine.Phase.ENDED) {
                     RoundCallButton(
                         background = MaterialTheme.colorScheme.error,
-                        description = "Отменить",
+                        description = stringResource(R.string.call_cancel),
                         onClick = onRed,
                         big = true,
                     ) {
-                        Icon(Icons.Default.CallEnd, "Отменить", tint = Color.White)
+                        Icon(Icons.Default.CallEnd, stringResource(R.string.call_cancel), tint = Color.White)
                     }
                 }
             }

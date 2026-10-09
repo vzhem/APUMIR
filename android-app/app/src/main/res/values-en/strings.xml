@@ -593,4 +593,37 @@
     <string name="backup_pw_erased">The password above was cleared — enter it again, it is needed for updates</string>
     <string name="backup_reenable_hint">Save a copy to a file — or turn updates on again using a file that already exists: one found below or picked in the file manager. You will need that file\'s password.</string>
     <string name="backup_file_schedule_hint">The phone will overwrite this file on a schedule. The password of this exact file is needed.</string>
+    <!-- Модерация, звонки и опросы (вынесено из компонентов) -->
+    <string name="mod_member">Member</string>
+    <string name="mod_delete_post">Delete post?</string>
+    <string name="mod_delete_one">Delete 1 message?</string>
+    <string name="mod_your_message">Your message</string>
+    <string name="mod_profile">Profile</string>
+    <string name="mod_delete_for_all">Delete for everyone</string>
+    <string name="mod_delete_local_body">The message will be deleted on this device only.</string>
+    <string name="mod_more_actions">More actions</string>
+    <string name="mod_anti_rating">Profile anti-rating (spam)</string>
+    <string name="mod_anti_rating_body">A report: several reports at once temporarily lower the node’s reputation and its priority in the swarm</string>
+    <string name="mod_restrict">Restrict user permissions</string>
+    <string name="ui_continue">Continue</string>
+    <string name="call_reconnecting">Reconnecting…</string>
+    <string name="call_via_direct">Over the internet — direct connection</string>
+    <string name="call_via_broker">Over the internet — compressed audio, a delay is possible</string>
+    <string name="call_slow_link">Slow link — the other person is not on the same Wi-Fi network</string>
+    <string name="call_decline">Decline</string>
+    <string name="call_accept">Accept</string>
+    <string name="call_mic_on">Unmute microphone</string>
+    <string name="call_mic_off">Mute microphone</string>
+    <string name="call_end">End</string>
+    <string name="call_speaker_off">Speaker off</string>
+    <string name="call_speaker">Speaker</string>
+    <string name="call_cancel">Cancel call</string>
+    <string name="poll_anon">Poll · anonymous</string>
+    <string name="poll_label">Poll</string>
+    <string name="poll_closed">Poll closed</string>
+    <string name="poll_close">Close poll</string>
+    <string name="poll_your_choice">Your choice</string>
+    <string name="poll_member">Member</string>
+    <string name="poll_and_others">and others</string>
+    <string name="mod_author">Author</string>
 </resources>

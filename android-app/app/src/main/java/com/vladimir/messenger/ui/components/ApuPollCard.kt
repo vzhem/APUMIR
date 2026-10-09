@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import com.vladimir.messenger.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -80,7 +82,7 @@ fun ApuPollCard(
             )
             Spacer(Modifier.width(6.dp))
             Text(
-                if (poll.anonymous) "Опрос · анонимный" else "Опрос",
+                if (poll.anonymous) stringResource(R.string.poll_anon) else stringResource(R.string.poll_label),
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = ApuBubbleAccentColor,
@@ -89,7 +91,7 @@ fun ApuPollCard(
                 Spacer(Modifier.width(6.dp))
                 Icon(
                     Icons.Filled.Lock,
-                    contentDescription = "Опрос закрыт",
+                    contentDescription = stringResource(R.string.poll_closed),
                     modifier = Modifier.size(14.dp),
                     tint = ApuBubbleMutedColor,
                 )
@@ -124,19 +126,20 @@ fun ApuPollCard(
                 modifier = Modifier.weight(1f),
             )
             if (canClose && !poll.closed) {
-                ApuTextAction(label = "Закрыть опрос", onClick = onClose)
+                ApuTextAction(label = stringResource(R.string.poll_close), onClick = onClose)
             }
         }
         // Кто как проголосовал: только в открытом опросе, и только тех, чей
         // голос уже доехал до этого телефона.
         if (!poll.anonymous && poll.voters.isNotEmpty()) {
+            val memberLabel = stringResource(R.string.poll_member)
             val names = poll.voters
                 .filter { it.choices.isNotEmpty() }
                 .take(3)
-                .joinToString(", ") { it.name.ifBlank { "Участник " + it.nodeId.takeLast(4) } }
+                .joinToString(", ") { it.name.ifBlank { memberLabel + " " + it.nodeId.takeLast(4) } }
             if (names.isNotBlank()) {
                 Text(
-                    names + if (poll.voters.size > 3) " и другие" else "",
+                    names + if (poll.voters.size > 3) " " + stringResource(R.string.poll_and_others) else "",
                     style = MaterialTheme.typography.labelSmall,
                     color = ApuBubbleMutedColor,
                     maxLines = 1,
@@ -201,7 +204,7 @@ private fun PollOptionRow(
                 Spacer(Modifier.width(4.dp))
                 Icon(
                     Icons.Filled.CheckCircle,
-                    contentDescription = "Ваш выбор",
+                    contentDescription = stringResource(R.string.poll_your_choice),
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.primary,
                 )
@@ -376,7 +379,7 @@ fun CreatePollDialog(
             )
         },
         dismissButton = {
-            ApuTextAction(label = "Отмена", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
         },
     )
 }

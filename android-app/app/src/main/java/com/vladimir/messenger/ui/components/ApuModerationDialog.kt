@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import com.vladimir.messenger.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -222,7 +224,7 @@ fun ApuMessageModerationDialog(
     onConfirm: (ApuModerationResult) -> Unit,
 ) {
     val displayAuthor = authorName.trim().ifBlank {
-        if (authorId.isNotBlank()) "*${authorId.takeLast(4)}" else "Участник"
+        if (authorId.isNotBlank()) "*${authorId.takeLast(4)}" else stringResource(R.string.mod_member)
     }
     var deleteForAll by remember(canDeleteForAll, isAuthorMe) {
         mutableStateOf(canDeleteForAll || isAuthorMe)
@@ -239,8 +241,8 @@ fun ApuMessageModerationDialog(
 
     val titleText = when {
         selectedMessageCount > 1 -> "Удалить $selectedMessageCount сообщ.?"
-        isChannelPost -> "Удалить публикацию?"
-        else -> "Удалить 1 сообщение?"
+        isChannelPost -> stringResource(R.string.mod_delete_post)
+        else -> stringResource(R.string.mod_delete_one)
     }
     val communityWord = if (isChannel) "канале" else "группе"
     val showAuthorActions = authorId.isNotBlank() && !isAuthorMe
@@ -298,14 +300,14 @@ fun ApuMessageModerationDialog(
                                 )
                             }
                             Text(
-                                text = if (isAuthorMe) "Ваше сообщение" else "Автор • *${authorId.takeLast(6)}",
+                                text = if (isAuthorMe) stringResource(R.string.mod_your_message) else stringResource(R.string.mod_author) + " • *${authorId.takeLast(6)}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = ApuBubbleMutedColor,
                             )
                         }
                         if (onOpenAuthorProfile != null) {
                             Text(
-                                text = "Профиль",
+                                text = stringResource(R.string.mod_profile),
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = ApuBubbleLinkColor,
@@ -326,7 +328,7 @@ fun ApuMessageModerationDialog(
                 if (canDeleteForAll || isAuthorMe) {
                     ApuSettingsCard {
                         ApuModerationOptionRow(
-                            title = "Удалить у всех участников",
+                            title = stringResource(R.string.mod_delete_for_all),
                             subtitle = "Сообщение исчезнет на всех устройствах в $communityWord",
                             checked = deleteForAll,
                             onToggle = { deleteForAll = !deleteForAll },
@@ -334,22 +336,22 @@ fun ApuMessageModerationDialog(
                     }
                 } else {
                     Text(
-                        text = "Сообщение будет удалено только на этом устройстве.",
+                        text = stringResource(R.string.mod_delete_local_body),
                         style = MaterialTheme.typography.bodySmall,
                         color = ApuBubbleMutedColor,
                     )
                 }
 
                 if (showMoreActions) {
-                    ApuSettingsSectionTitle("Ещё действия")
+                    ApuSettingsSectionTitle(stringResource(R.string.mod_more_actions))
                     ApuSettingsCard {
                         var hasPreviousRow = false
 
                         // 1. Анти-рейтинг профилю (жалоба / спам)
                         if (showAuthorActions) {
                             ApuModerationOptionRow(
-                                title = "Анти-рейтинг профилю (спам)",
-                                subtitle = "Жалоба: просядет несколько жалоб сразу — репутация и приоритет в рое временно понизятся",
+                                title = stringResource(R.string.mod_anti_rating),
+                                subtitle = stringResource(R.string.mod_anti_rating_body),
                                 checked = giveAntiRating,
                                 danger = true,
                                 badgeText = if (alreadyHasMyAnti) "Уже \uD83D\uDC4E" else "\uD83D\uDC4E +1",
@@ -447,7 +449,7 @@ fun ApuMessageModerationDialog(
                             Spacer(Modifier.width(12.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "Ограничить права пользователя",
+                                    text = stringResource(R.string.mod_restrict),
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.SemiBold,
                                     color = ApuBubbleTextColor,
@@ -560,14 +562,14 @@ fun ApuMessageModerationDialog(
                     text = if (selectedExtras > 0) {
                         "Продолжить (+$selectedExtras)"
                     } else {
-                        "Продолжить"
+                        stringResource(R.string.ui_continue)
                     },
                     fontWeight = FontWeight.SemiBold,
                 )
             }
         },
         dismissButton = {
-            ApuTextAction(label = "Отмена", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
         },
     )
 }

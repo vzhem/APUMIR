@@ -602,4 +602,37 @@
     <string name="backup_pw_erased">Пароль в поле выше стёрт — введите его снова, он нужен для обновлений</string>
     <string name="backup_reenable_hint">Сохраните копию в файл — или включите обновление заново на уже готовом файле: найденном ниже либо выбранном в проводнике. Понадобится пароль этого файла.</string>
     <string name="backup_file_schedule_hint">Телефон будет перезаписывать этот файл по расписанию. Нужен пароль именно этого файла.</string>
+    <!-- Модерация, звонки и опросы (вынесено из компонентов) -->
+    <string name="mod_member">Участник</string>
+    <string name="mod_delete_post">Удалить публикацию?</string>
+    <string name="mod_delete_one">Удалить 1 сообщение?</string>
+    <string name="mod_your_message">Ваше сообщение</string>
+    <string name="mod_profile">Профиль</string>
+    <string name="mod_delete_for_all">Удалить у всех участников</string>
+    <string name="mod_delete_local_body">Сообщение будет удалено только на этом устройстве.</string>
+    <string name="mod_more_actions">Ещё действия</string>
+    <string name="mod_anti_rating">Анти-рейтинг профилю (спам)</string>
+    <string name="mod_anti_rating_body">Жалоба: просядет несколько жалоб сразу — репутация и приоритет в рое временно понизятся</string>
+    <string name="mod_restrict">Ограничить права пользователя</string>
+    <string name="ui_continue">Продолжить</string>
+    <string name="call_reconnecting">Восстановление соединения…</string>
+    <string name="call_via_direct">Через интернет — прямое соединение</string>
+    <string name="call_via_broker">Через интернет — сжатый звук, возможна задержка</string>
+    <string name="call_slow_link">Медленный канал — собеседник не в одной Wi-Fi сети</string>
+    <string name="call_decline">Отклонить</string>
+    <string name="call_accept">Принять</string>
+    <string name="call_mic_on">Включить микрофон</string>
+    <string name="call_mic_off">Выключить микрофон</string>
+    <string name="call_end">Завершить</string>
+    <string name="call_speaker_off">Громкая связь выкл</string>
+    <string name="call_speaker">Громкая связь</string>
+    <string name="call_cancel">Отменить</string>
+    <string name="poll_anon">Опрос · анонимный</string>
+    <string name="poll_label">Опрос</string>
+    <string name="poll_closed">Опрос закрыт</string>
+    <string name="poll_close">Закрыть опрос</string>
+    <string name="poll_your_choice">Ваш выбор</string>
+    <string name="poll_member">Участник</string>
+    <string name="poll_and_others">и другие</string>
+    <string name="mod_author">Автор</string>
 </resources>
