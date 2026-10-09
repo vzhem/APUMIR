@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // BUBBLEMENU.KT — меню «три точки» внутри пузыря списка
 // =============================================================================
@@ -62,7 +64,7 @@ fun BubbleOverflowMenu(
     ) {
         Icon(
             Icons.Default.MoreVert,
-            contentDescription = "Меню",
+            contentDescription = stringResource(R.string.bm_menu),
             tint = Color(0xFF5A6472),
             modifier = Modifier.size(20.dp),
         )

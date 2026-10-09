@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // PHOTOVIEWER.KT — фото на весь экран: щипок увеличивает, палец двигает
 // =============================================================================
@@ -131,7 +133,7 @@ fun PhotoViewer(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Закрыть", tint = Color.White)
+                        Icon(Icons.Default.Close, contentDescription = stringResource(R.string.action_close), tint = Color.White)
                     }
                     if (photos.size > 1) {
                         Text(
@@ -289,7 +291,7 @@ private fun ZoomablePhoto(
         } else if (bitmap != null) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
-                contentDescription = "Фото",
+                contentDescription = stringResource(R.string.pv_photo),
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .fillMaxSize()

@@ -188,7 +188,7 @@ private fun RenameContactContent(
             }
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "Измените имя, под которым этот человек отображается в ваших чатах и контактах.",
+                text = stringResource(R.string.rc_hint_chat),
                 style = MaterialTheme.typography.bodySmall,
                 color = ApuBubbleMutedColor,
             )

@@ -325,7 +325,7 @@ private fun MyCodePane() {
                 )
             }
             Text(
-                "Покажите этот код собеседнику: камера телефона добавит вас в контакты, а если у него ещё нет APU - по этому же коду он скачает приложение.",
+                stringResource(R.string.qr_show_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = ApuBubbleMutedColor,
             )

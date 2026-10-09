@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
@@ -25,7 +27,7 @@ fun SelectTextDialog(
 ) {
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Выделите нужное") },
+        title = { Text(stringResource(R.string.std_select_hint)) },
         text = {
             SelectionContainer {
                 Text(
@@ -38,7 +40,7 @@ fun SelectTextDialog(
             }
         },
         confirmButton = {
-            ApuTextAction(label = "Готово", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_done), onClick = onDismiss)
         },
     )
 }

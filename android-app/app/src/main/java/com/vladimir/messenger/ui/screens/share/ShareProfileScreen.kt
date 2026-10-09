@@ -125,7 +125,7 @@ fun ShareProfileScreen(
             )
 
             Text(
-                text = "Отправьте другу ссылку. Если APU уже установлен — откроется добавление контакта. Если нет — отправьте также ссылку на APK.",
+                text = stringResource(R.string.sp_send_link_hint),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -250,7 +250,7 @@ fun ShareProfileScreen(
             Spacer(Modifier.height(16.dp))
 
             Text(
-                "Когда друг откроет ссылку, APU покажет ваш профиль и предложит добавить контакт. Если приложение не установлено, отправьте другу также ссылку на APK или сам APK-файл.",
+                stringResource(R.string.sp_when_opened_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // APUACTIONMENU.KT — единое меню «три точки» (раунд 211)
 // =============================================================================
@@ -156,7 +158,7 @@ fun ApuMenuDots(
     ) {
         Icon(
             imageVector = Icons.Default.MoreVert,
-            contentDescription = "Действия",
+            contentDescription = stringResource(R.string.sv_actions),
             tint = Color.White,
             modifier = Modifier.size(18.dp),
         )

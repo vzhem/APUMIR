@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // MYAVATAR.KT
 // =============================================================================
@@ -69,7 +71,7 @@ fun MyAvatar(
             if (shown != null) {
                 Image(
                     bitmap = shown.asImageBitmap(),
-                    contentDescription = "Аватар",
+                    contentDescription = stringResource(R.string.settings_avatar),
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
                 )

@@ -205,7 +205,7 @@ fun ContactCard(
             ) {
                 Icon(
                     Icons.Default.Share,
-                    contentDescription = "Поделиться контактом",
+                    contentDescription = stringResource(R.string.menu_share_contact),
                     tint = Color(0xFF5A6472),
                     modifier = Modifier.size(18.dp),
                 )
@@ -235,7 +235,7 @@ fun ContactCard(
                     Spacer(modifier = Modifier.width(4.dp))
                     Icon(
                         imageVector = Icons.Filled.PushPin,
-                        contentDescription = "Закреплено в главном списке",
+                        contentDescription = stringResource(R.string.chat_pinned_desc),
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(15.dp),
                     )

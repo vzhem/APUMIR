@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -51,7 +53,7 @@ fun ApuPremiumDialog(
     onConfirm: (() -> Unit)? = null,
     confirmEnabled: Boolean = true,
     confirmStyle: DiagnosticsActionStyle = DiagnosticsActionStyle.PRIMARY,
-    dismissLabel: String? = "Отмена",
+    dismissLabel: String? = stringResource(R.string.action_cancel),
     onDismissClick: (() -> Unit)? = null,
     dismissEnabled: Boolean = true,
     properties: DialogProperties = DialogProperties(),
@@ -141,7 +143,7 @@ fun ApuPremiumNoticeDialog(
     title: String,
     message: String,
     onDismiss: () -> Unit,
-    confirmLabel: String = "Понятно",
+    confirmLabel: String = stringResource(R.string.groups_ok),
     icon: ImageVector? = null,
 ) {
     ApuPremiumDialog(

@@ -282,7 +282,7 @@ fun AddContactScreen(
                         uiState.nickResults.isEmpty()
                     ) {
                         Text(
-                            text = "Никого не нашли. Проверьте написание никнейма или попросите ссылку-приглашение.",
+                            text = stringResource(R.string.ac_nobody_found),
                             style = MaterialTheme.typography.bodySmall,
                             color = ApuBubbleMutedColor,
                         )

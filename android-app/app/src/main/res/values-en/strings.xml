@@ -1109,4 +1109,14 @@
     <string name="gqr_group_no_link">The invitation is unavailable: the group has no permanent link yet. Create one in group management, on the “Links” tab.</string>
     <string name="gqr_channel_hint">Show this code to your contact: any QR scanner will open the invitation. You can subscribe to the channel. If your contact does not have APU yet, they will be offered to download and install the app there.</string>
     <string name="gqr_group_hint">Show this code to your contact: any QR scanner will open the invitation. You can join the group. If your contact does not have APU yet, they will be offered to download and install the app there.</string>
+    <string name="bm_menu">Menu</string>
+    <string name="ip_load_failed">Image failed to load</string>
+    <string name="pv_photo">Photo</string>
+    <string name="std_select_hint">Select what you need</string>
+    <string name="splash_core_cd">APU digital core and network servers</string>
+    <string name="ac_nobody_found">Nobody found. Check the spelling of the username or ask for an invite link.</string>
+    <string name="rc_hint_chat">Change the name this person is shown under in your chats and contacts.</string>
+    <string name="qr_show_hint">Show this code to your contact. The phone camera will add you to contacts, and if they do not have APU yet, they can download the app with this same code.</string>
+    <string name="sp_send_link_hint">Send your friend the link. If APU is already installed, it opens adding a contact. If not, also send the APK link.</string>
+    <string name="sp_when_opened_hint">When your friend opens the link, APU shows your profile and offers to add a contact. If the app is not installed, also send your friend the APK link or the APK file itself.</string>
 </resources>
