@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="avatar_preset_labels">
+        <item>Fox</item>
+        <item>Whale</item>
+        <item>Cat</item>
+        <item>Owl</item>
+        <item>Koi carp</item>
+        <item>Butterfly</item>
+        <item>Penguin</item>
+        <item>Turtle</item>
+        <item>Rabbit</item>
+        <item>Dragonfly</item>
+        <item>Mountains</item>
+        <item>Cactus</item>
+        <item>Mushroom</item>
+        <item>Sprout</item>
+        <item>Flower</item>
+        <item>Comet</item>
+        <item>Rain cloud</item>
+        <item>Volcano</item>
+        <item>Snowflake</item>
+        <item>Spruce</item>
+        <item>Rocket</item>
+        <item>Satellite</item>
+        <item>Telescope</item>
+        <item>Ringed planet</item>
+        <item>Astronaut helmet</item>
+        <item>Headphones</item>
+        <item>Vinyl record</item>
+        <item>Guitar</item>
+        <item>Piano</item>
+        <item>Microphone</item>
+        <item>Camera</item>
+        <item>Palette</item>
+        <item>Book</item>
+        <item>Pencil</item>
+        <item>Paper plane</item>
+        <item>Coffee</item>
+        <item>Ramen</item>
+        <item>Cupcake</item>
+        <item>Avocado</item>
+        <item>Strawberry</item>
+        <item>Hot air balloon</item>
+        <item>Sailboat</item>
+        <item>Airplane</item>
+        <item>Train</item>
+        <item>Bicycle</item>
+        <item>Compass</item>
+        <item>Hourglass</item>
+        <item>Key</item>
+        <item>Crown</item>
+        <item>Gamepad</item>
+    </string-array>
+</resources>

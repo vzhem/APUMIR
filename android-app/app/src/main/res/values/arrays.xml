@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="avatar_preset_labels">
+        <item>Лиса</item>
+        <item>Кит</item>
+        <item>Кот</item>
+        <item>Сова</item>
+        <item>Карп кои</item>
+        <item>Бабочка</item>
+        <item>Пингвин</item>
+        <item>Черепаха</item>
+        <item>Кролик</item>
+        <item>Стрекоза</item>
+        <item>Горы</item>
+        <item>Кактус</item>
+        <item>Гриб</item>
+        <item>Росток</item>
+        <item>Цветок</item>
+        <item>Комета</item>
+        <item>Дождевое облако</item>
+        <item>Вулкан</item>
+        <item>Снежинка</item>
+        <item>Ель</item>
+        <item>Ракета</item>
+        <item>Спутник</item>
+        <item>Телескоп</item>
+        <item>Планета с кольцами</item>
+        <item>Шлем космонавта</item>
+        <item>Наушники</item>
+        <item>Виниловая пластинка</item>
+        <item>Гитара</item>
+        <item>Пианино</item>
+        <item>Микрофон</item>
+        <item>Фотоаппарат</item>
+        <item>Палитра</item>
+        <item>Книга</item>
+        <item>Карандаш</item>
+        <item>Бумажный самолётик</item>
+        <item>Кофе</item>
+        <item>Рамен</item>
+        <item>Кекс</item>
+        <item>Авокадо</item>
+        <item>Клубника</item>
+        <item>Воздушный шар</item>
+        <item>Парусник</item>
+        <item>Самолёт</item>
+        <item>Поезд</item>
+        <item>Велосипед</item>
+        <item>Компас</item>
+        <item>Песочные часы</item>
+        <item>Ключ</item>
+        <item>Корона</item>
+        <item>Геймпад</item>
+    </string-array>
+</resources>
