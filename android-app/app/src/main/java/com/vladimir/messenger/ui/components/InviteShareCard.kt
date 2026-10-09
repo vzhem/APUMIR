@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // INVITESHARECARD.KT — один и тот же блок «поделиться приглашением» везде
 // =============================================================================
@@ -53,11 +55,11 @@ fun InviteShareCard(
         if (qrBitmap != null) {
             Image(
                 bitmap = qrBitmap.asImageBitmap(),
-                contentDescription = "QR-код приглашения",
+                contentDescription = stringResource(R.string.admin_qr_desc),
                 modifier = Modifier.size(qrSizeDp.dp),
             )
         } else {
-            Text("QR недоступен", style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.admin_qr_unavailable), style = MaterialTheme.typography.bodySmall)
         }
 
         Spacer(Modifier.height(12.dp))
@@ -80,7 +82,7 @@ fun InviteShareCard(
         ) {
             ApuPremiumCheckbox(checked = attachApk, onCheckedChange = { attachApk = it })
             Text(
-                "Приложить установочный файл (APK)",
+                stringResource(R.string.contacts_attach_apk),
                 style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
             )
         }
@@ -90,7 +92,7 @@ fun InviteShareCard(
                 onClick = { clipboard.setText(AnnotatedString(link)) },
                 style = DiagnosticsActionStyle.QUIET,
             ) {
-                Text("Копировать")
+                Text(stringResource(R.string.share_copy_btn))
             }
             // Наружу - короткой https-ссылкой (кликабельна везде); QR выше
             // остаётся прежней ссылкой, сканер разбирает её без сети.
@@ -98,7 +100,7 @@ fun InviteShareCard(
                 onClick = { ShortShare.shareInvite(context, displayName, link, attachApk) },
                 style = DiagnosticsActionStyle.PRIMARY,
             ) {
-                Text("Поделиться")
+                Text(stringResource(R.string.admin_share))
             }
         }
     }

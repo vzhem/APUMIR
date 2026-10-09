@@ -1093,4 +1093,18 @@
     <string name="gc_files_forbidden">В этой группе участникам запрещено отправлять файлы</string>
     <string name="gc_gif_not_downloaded">Гифка не скачалась</string>
     <string name="gc_gif_not_saved">Гифка не сохранилась</string>
+    <string name="upd_available">Доступно обновление</string>
+    <string name="upd_whats_new">Что нового:</string>
+    <string name="upd_downloading">Скачивание обновления…</string>
+    <string name="upd_later">Позже</string>
+    <string name="upd_downloading_short">Скачивается…</string>
+    <string name="ucd_title">Имя занято</string>
+    <string name="ucd_rules">Латинские буквы, цифры и подчёркивание.</string>
+    <string name="iad_title">Отправьте приглашение удобным способом</string>
+    <string name="iad_hint">Ссылка на приглашение будет добавлена к сообщению. При желании приложите APK, чтобы получатель мог установить APU сразу.</string>
+    <string name="iad_attach_apk">Приложить установочный файл</string>
+    <string name="iad_apk_size">APK около 40 МБ — удобно, если у получателя ещё нет APU.</string>
+    <string name="nsb_disconnected">Нет соединения</string>
+    <string name="nsb_connecting">Подключение...</string>
+    <string name="nsb_relay">Через ретранслятор</string>
 </resources>

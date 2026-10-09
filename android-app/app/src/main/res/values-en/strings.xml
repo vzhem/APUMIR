@@ -1084,4 +1084,18 @@
     <string name="gc_files_forbidden">Members are not allowed to send files in this group</string>
     <string name="gc_gif_not_downloaded">The GIF did not download</string>
     <string name="gc_gif_not_saved">The GIF was not saved</string>
+    <string name="upd_available">Update available</string>
+    <string name="upd_whats_new">What’s new:</string>
+    <string name="upd_downloading">Downloading the update…</string>
+    <string name="upd_later">Later</string>
+    <string name="upd_downloading_short">Downloading…</string>
+    <string name="ucd_title">Name is taken</string>
+    <string name="ucd_rules">Latin letters, digits and underscores.</string>
+    <string name="iad_title">Send the invitation any way you like</string>
+    <string name="iad_hint">The invite link will be added to the message. Optionally attach the APK so the recipient can install APU right away.</string>
+    <string name="iad_attach_apk">Attach the installer file</string>
+    <string name="iad_apk_size">The APK is about 40 MB. Handy if the recipient does not have APU yet.</string>
+    <string name="nsb_disconnected">No connection</string>
+    <string name="nsb_connecting">Connecting...</string>
+    <string name="nsb_relay">Via relay</string>
 </resources>

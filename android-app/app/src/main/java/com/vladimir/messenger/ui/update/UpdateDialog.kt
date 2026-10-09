@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.update
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,7 +39,7 @@ fun UpdateDialog(
         },
         title = {
             Text(
-                "Доступно обновление",
+                stringResource(R.string.upd_available),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -55,7 +57,7 @@ fun UpdateDialog(
 
                 if (releaseInfo.releaseNotes.isNotBlank()) {
                     Text(
-                        "Что нового:",
+                        stringResource(R.string.upd_whats_new),
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -67,7 +69,7 @@ fun UpdateDialog(
 
                 if (isDownloading) {
                     Text(
-                        "Скачивание обновления…",
+                        stringResource(R.string.upd_downloading),
                         style = MaterialTheme.typography.bodySmall,
                         color = ApuBubbleMutedColor,
                     )
@@ -78,13 +80,13 @@ fun UpdateDialog(
             null
         } else ({
             ApuTextAction(
-                label = "Позже",
+                label = stringResource(R.string.upd_later),
                 onClick = onDismissClick,
             )
         }),
         confirmButton = {
             ApuPremiumButton(
-                label = if (isDownloading) "Скачивается…" else "Обновить",
+                label = if (isDownloading) stringResource(R.string.upd_downloading_short) else stringResource(R.string.action_refresh),
                 onClick = onDownloadClick,
                 style = DiagnosticsActionStyle.PRIMARY,
                 enabled = !isDownloading,

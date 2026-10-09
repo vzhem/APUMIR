@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // NETWORKSTATUSBAR.KT — Полоска статуса соединения
 // =============================================================================
@@ -49,17 +51,17 @@ fun NetworkStatusBar(
             NetworkStatus.Disconnected -> Triple(
                 StatusOffline,
                 Icons.Default.SignalWifiOff,
-                "Нет соединения"
+                stringResource(R.string.nsb_disconnected)
             )
             NetworkStatus.Connecting -> Triple(
                 StatusConnecting,
                 Icons.Default.CloudOff,
-                "Подключение..."
+                stringResource(R.string.nsb_connecting)
             )
             NetworkStatus.Degraded -> Triple(
                 StatusDegraded,
                 Icons.Default.SyncProblem,
-                "Через ретранслятор"
+                stringResource(R.string.nsb_relay)
             )
             NetworkStatus.Connected -> Triple(
                 Color.Transparent,
@@ -98,7 +100,7 @@ fun NetworkStatusBar(
                 color = Color.White,
             )
 
-            // Анимированные точки для "Подключение..."
+            // Анимированные точки для stringResource(R.string.nsb_connecting)
             if (status == NetworkStatus.Connecting) {
                 AnimatedDots()
             }

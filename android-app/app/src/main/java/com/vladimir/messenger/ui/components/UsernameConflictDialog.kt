@@ -34,7 +34,7 @@ fun UsernameConflictDialog() {
     ApuSettingsDialog(
         // Диалог обязателен: без имени профиль не участвует в роевом реестре.
         onDismissRequest = { },
-        title = { Text("Имя занято") },
+        title = { Text(stringResource(R.string.ucd_title)) },
         text = {
             Column {
                 Text(
@@ -44,22 +44,22 @@ fun UsernameConflictDialog() {
                 ApuBubbleField(
                     value = usernameValue,
                     onValueChange = { usernameValue = UsernameHolder.sanitize(it) },
-                    label = { Text("никнейм") },
-                    placeholder = { Text("никнейм") },
+                    label = { Text(stringResource(R.string.settings_username_label)) },
+                    placeholder = { Text(stringResource(R.string.settings_username_label)) },
                     prefix = { Text("@") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Латинские буквы, цифры и подчёркивание.",
+                    stringResource(R.string.ucd_rules),
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
         },
         confirmButton = {
             ApuTextAction(
-                label = "Сохранить",
+                label = stringResource(R.string.action_save),
                 onClick = {
                     UsernameHolder.set(context, usernameValue)
                     UsernameHolder.clearConflict(context)
