@@ -254,11 +254,9 @@ fun ProfileBackupScreen(
                                 Spacer(Modifier.height(8.dp))
                                 Text(
                                     if (state.hasIdentity) {
-                                        "Приложение закроется; откройте его снова - и профиль будет " +
-                                            "заменён на этот. Нынешние чаты на этом телефоне пропадут."
+                                        stringResource(R.string.backup_restart_replace)
                                     } else {
-                                        "Приложение закроется; откройте его снова - и вы войдёте " +
-                                            "в восстановленный профиль."
+                                        stringResource(R.string.backup_restart_new)
                                     },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -266,7 +264,7 @@ fun ProfileBackupScreen(
                                 Spacer(Modifier.height(12.dp))
                                 if (state.restarting) {
                                     Text(
-                                        "Закрываемся… Откройте APU снова.",
+                                        stringResource(R.string.backup_restarting),
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.SemiBold,
                                     )
@@ -316,9 +314,9 @@ fun ProfileBackupScreen(
                                 supportingText = {
                                     Text(
                                         if (password.isNotEmpty() && password.length < BackupCipher.MIN_PASSWORD_LENGTH) {
-                                            "Ещё ${BackupCipher.MIN_PASSWORD_LENGTH - password.length} знак(ов)"
+                                            stringResource(R.string.backup_pw_more, BackupCipher.MIN_PASSWORD_LENGTH - password.length)
                                         } else {
-                                            "Минимум ${BackupCipher.MIN_PASSWORD_LENGTH} знаков"
+                                            stringResource(R.string.backup_pw_min, BackupCipher.MIN_PASSWORD_LENGTH)
                                         },
                                     )
                                 },
@@ -345,9 +343,9 @@ fun ProfileBackupScreen(
                                     Text(stringResource(R.string.backup_attach_received), style = MaterialTheme.typography.bodyMedium)
                                     Text(
                                         if (state.receivedBytes > 0) {
-                                            "Сейчас это ${ProfileBackupViewModel.humanBytes(state.receivedBytes)}; без них копия меньше"
+                                            stringResource(R.string.backup_received_now, ProfileBackupViewModel.humanBytes(state.receivedBytes))
                                         } else {
-                                            "Полученных файлов пока нет"
+                                            stringResource(R.string.backup_no_received)
                                         },
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -374,8 +372,8 @@ fun ProfileBackupScreen(
                                 }
                             }
                             val blocker = when {
-                                password.length < BackupCipher.MIN_PASSWORD_LENGTH -> "Пароль минимум ${BackupCipher.MIN_PASSWORD_LENGTH} знаков"
-                                password != repeat -> "Повторите пароль без ошибок"
+                                password.length < BackupCipher.MIN_PASSWORD_LENGTH -> stringResource(R.string.backup_pw_min_error, BackupCipher.MIN_PASSWORD_LENGTH)
+                                password != repeat -> stringResource(R.string.backup_repeat_error)
                                 else -> null
                             }
                             if (blocker != null) {
@@ -472,7 +470,7 @@ fun ProfileBackupScreen(
                                     if (password.length < BackupCipher.MIN_PASSWORD_LENGTH) {
                                         Spacer(Modifier.height(6.dp))
                                         Text(
-                                            "Пароль в поле выше стёрт — введите его снова, он нужен для обновлений",
+                                            stringResource(R.string.backup_pw_erased),
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -484,7 +482,7 @@ fun ProfileBackupScreen(
                                     // нового сохранения: нашли/выбрали файл,
                                     // ввели его пароль.
                                     Text(
-                                        "Сохраните копию в файл — или включите обновление заново на уже " +                                            "готовом файле: найденном ниже либо выбранном в проводнике. " +                                            "Понадобится пароль этого файла.",
+                                        stringResource(R.string.backup_reenable_hint),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -626,7 +624,7 @@ fun ProfileBackupScreen(
                     Text(target.name, style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "Телефон будет перезаписывать этот файл по расписанию. " +                            "Нужен пароль именно этого файла.",
+                        stringResource(R.string.backup_file_schedule_hint),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

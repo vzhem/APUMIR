@@ -580,4 +580,17 @@
     <string name="settings_space_body">How much space the phone gives to data in transit: file chunks, other people’s files stored for contacts who are offline, and what waits for offline nodes. Here the phone acts as a server: the more space you give, the higher your rating with other nodes (up to +10 out of 100, and only while you are online).</string>
     <string name="settings_relay_off">Off — subscriber mode: NEW files from others are not accepted for storage, and heavy ones (pictures, videos, GIFs, large files) are not relayed to others. Light and essential traffic is carried by everyone: small documents and stickers, text and backups, update APKs.</string>
     <string name="settings_relay_on">The phone stores other people’s files for contacts who are offline, shares files of communities and updates with others. The more phone-servers there are, the faster the network is.</string>
+    <!-- Резервная копия профиля (вынесено из ProfileBackupScreen) -->
+    <string name="backup_restart_replace">The app will close; reopen it and the profile will be replaced with this one. Current chats on this phone will be lost.</string>
+    <string name="backup_restart_new">The app will close; reopen it and you will sign in to the restored profile.</string>
+    <string name="backup_restarting">Closing… Open APU again.</string>
+    <string name="backup_pw_more">%1$d more character(s)</string>
+    <string name="backup_pw_min">At least %1$d characters</string>
+    <string name="backup_received_now">Right now this is %1$s; without them the copy is smaller</string>
+    <string name="backup_no_received">No received files yet</string>
+    <string name="backup_pw_min_error">Password must be at least %1$d characters</string>
+    <string name="backup_repeat_error">Re-enter the password without errors</string>
+    <string name="backup_pw_erased">The password above was cleared — enter it again, it is needed for updates</string>
+    <string name="backup_reenable_hint">Save a copy to a file — or turn updates on again using a file that already exists: one found below or picked in the file manager. You will need that file\'s password.</string>
+    <string name="backup_file_schedule_hint">The phone will overwrite this file on a schedule. The password of this exact file is needed.</string>
 </resources>
