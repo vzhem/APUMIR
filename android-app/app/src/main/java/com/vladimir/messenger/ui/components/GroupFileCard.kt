@@ -289,25 +289,35 @@ fun GroupFileCard(
                 }
             }
         }
-        val status = when {
-            isFromMe -> if (state.seeded > 0) "Получили: ${state.seeded}" else "Участники запросят файл у вас"
-            complete -> "Получено ✓"
-            state.stalled -> "Раздающий не отвечает (${transfer!!.completedChunks}/${transfer.chunkCount})"
+        val statusKind = when {
+            isFromMe -> if (state.seeded > 0) GfStatus.SEEDED else GfStatus.WAIT_REQUESTS
+            complete -> GfStatus.DONE
+            state.stalled -> GfStatus.STALLED
             transfer != null -> when (transfer.state) {
-                "FAILED" -> "Ошибка приёма — нажмите «Скачать» ещё раз"
-                "OFFERED", "TRANSFERRING", "VERIFYING" ->
-                    "Приём… ${transfer.completedChunks}/${transfer.chunkCount}"
-                else -> "Ожидание…"
+                "FAILED" -> GfStatus.FAILED
+                "OFFERED", "TRANSFERRING", "VERIFYING" -> GfStatus.RECEIVING
+                else -> GfStatus.WAITING
             }
-            state.pending -> "Запрошено, ждём раздающего…"
-            else -> ""
+            state.pending -> GfStatus.PENDING
+            else -> GfStatus.NONE
+        }
+        val status = when (statusKind) {
+            GfStatus.SEEDED -> stringResource(R.string.gf_status_seeded, state.seeded)
+            GfStatus.WAIT_REQUESTS -> stringResource(R.string.gf_status_wait_requests)
+            GfStatus.DONE -> stringResource(R.string.gf_status_done)
+            GfStatus.STALLED -> stringResource(R.string.gf_status_stalled, transfer?.completedChunks ?: 0, transfer?.chunkCount ?: 0)
+            GfStatus.FAILED -> stringResource(R.string.gf_status_failed)
+            GfStatus.RECEIVING -> stringResource(R.string.gf_status_receiving, transfer?.completedChunks ?: 0, transfer?.chunkCount ?: 0)
+            GfStatus.WAITING -> stringResource(R.string.gf_status_waiting)
+            GfStatus.PENDING -> stringResource(R.string.gf_status_pending)
+            GfStatus.NONE -> ""
         }
         // С картинкой на месте служебные строки не нужны: «Получено ✓»
         // очевидно, остальное покажем, только пока что-то идёт не так.
         val statusVisible = when {
-            !hasPreview -> status.isNotEmpty()
-            isFromMe -> status.startsWith("Получили") || status.startsWith("Раздающ")
-            else -> status.contains("…") || status.startsWith("Ошибка") || status.startsWith("Раздающ")
+            !hasPreview -> statusKind != GfStatus.NONE
+            isFromMe -> statusKind == GfStatus.SEEDED
+            else -> statusKind in setOf(GfStatus.RECEIVING, GfStatus.WAITING, GfStatus.PENDING, GfStatus.FAILED, GfStatus.STALLED)
         }
         if (statusVisible) {
             Text(status, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp), color = fileTextColor.copy(alpha = 0.75f))
@@ -407,3 +417,6 @@ fun fileIconFor(mediaType: String): ImageVector = when {
     mediaType == "application/pdf" -> Icons.Filled.Description
     else -> Icons.Filled.InsertDriveFile
 }
+
+/** Состояние строки статуса файла группы. Логика работает с кодами, а не с текстом (текст зависит от языка). */
+private enum class GfStatus { SEEDED, WAIT_REQUESTS, DONE, STALLED, FAILED, RECEIVING, WAITING, PENDING, NONE }

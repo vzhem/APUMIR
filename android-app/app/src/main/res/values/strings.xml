@@ -1136,4 +1136,12 @@
     <string name="cdv_chat_unavailable">Чат недоступен</string>
     <string name="cdv_no_key">У контакта нет ключа для передачи файлов</string>
     <string name="cdv_status_changed">Статус файла изменился: он уже мог быть подтверждён</string>
+    <string name="gf_status_seeded">Получили: %1$d</string>
+    <string name="gf_status_wait_requests">Участники запросят файл у вас</string>
+    <string name="gf_status_done">Получено ✓</string>
+    <string name="gf_status_stalled">Раздающий не отвечает (%1$d/%2$d)</string>
+    <string name="gf_status_failed">Ошибка приёма — нажмите «Скачать» ещё раз</string>
+    <string name="gf_status_receiving">Приём… %1$d/%2$d</string>
+    <string name="gf_status_waiting">Ожидание…</string>
+    <string name="gf_status_pending">Запрошено, ждём раздающего…</string>
 </resources>

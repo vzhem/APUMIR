@@ -1127,4 +1127,12 @@
     <string name="cdv_chat_unavailable">Chat is unavailable</string>
     <string name="cdv_no_key">The contact has no key for file transfer</string>
     <string name="cdv_status_changed">The file status has changed. It may already have been confirmed</string>
+    <string name="gf_status_seeded">Received by %1$d</string>
+    <string name="gf_status_wait_requests">Members will request the file from you</string>
+    <string name="gf_status_done">Received ✓</string>
+    <string name="gf_status_stalled">The sender is not responding (%1$d/%2$d)</string>
+    <string name="gf_status_failed">Receive error. Tap “Download” again</string>
+    <string name="gf_status_receiving">Receiving… %1$d/%2$d</string>
+    <string name="gf_status_waiting">Waiting…</string>
+    <string name="gf_status_pending">Requested, waiting for the sender…</string>
 </resources>
