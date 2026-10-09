@@ -491,7 +491,7 @@ class SettingsViewModel @Inject constructor(
                         android.text.format.DateFormat.getDateFormat(context)
                             .format(java.util.Date(at)) + "."
                 } else {
-                    "Копии на сервере ещё нет."
+                    context.getString(R.string.st_no_server_copy)
                 }
             )
             append(" Копия делается сама.")

@@ -491,7 +491,7 @@ class ChatDetailViewModel @Inject constructor(
                 runCatching { groupRepository.expandLink(link) }.getOrNull()
             }
             if (expanded == null) {
-                _inviteStatus.value = "Нет связи с сервисом APU - попробуйте позже"
+                _inviteStatus.value = appContext.getString(R.string.cd_no_service)
                 return@launch
             }
             val outcome = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -505,7 +505,7 @@ class ChatDetailViewModel @Inject constructor(
                     "Заявка отправлена: " + outcome.title
                 is com.vladimir.messenger.data.group.JoinOutcome.Failed ->
                     "Не удалось войти: " + outcome.reason
-                null -> "Не удалось войти - попробуйте позже"
+                null -> appContext.getString(R.string.cd_join_failed2)
             }
         }
     }
@@ -962,7 +962,7 @@ class ChatDetailViewModel @Inject constructor(
                         more -> state.copy(
                             gifLoading = false,
                             gifError = null,
-                            gifNotice = "Сервер перегружен — «Ещё» пока недоступно",
+                            gifNotice = appContext.getString(R.string.cd_gif_more_unavailable),
                             gifNext = "",
                         )
                         else -> state.copy(

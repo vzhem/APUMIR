@@ -1008,4 +1008,9 @@
     <string name="ga_ownership_moved">Ownership transferred</string>
     <string name="ga_now_owner">You are now the group owner</string>
     <string name="ga_saved">Saved</string>
+    <!-- Пакет 39: оставшиеся сообщения чата и настроек (ViewModel) -->
+    <string name="cd_no_service">No connection to the APU service — try again later</string>
+    <string name="cd_join_failed2">Couldn’t join — try again later</string>
+    <string name="cd_gif_more_unavailable">The server is overloaded — “More” is not available yet</string>
+    <string name="st_no_server_copy">There is no copy on the server yet.</string>
 </resources>

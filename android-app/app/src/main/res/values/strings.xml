@@ -1017,4 +1017,9 @@
     <string name="ga_ownership_moved">Владение передано</string>
     <string name="ga_now_owner">Вы теперь владелец группы</string>
     <string name="ga_saved">Сохранено</string>
+    <!-- Пакет 39: оставшиеся сообщения чата и настроек (ViewModel) -->
+    <string name="cd_no_service">Нет связи с сервисом APU - попробуйте позже</string>
+    <string name="cd_join_failed2">Не удалось войти - попробуйте позже</string>
+    <string name="cd_gif_more_unavailable">Сервер перегружен — «Ещё» пока недоступно</string>
+    <string name="st_no_server_copy">Копии на сервере ещё нет.</string>
 </resources>
