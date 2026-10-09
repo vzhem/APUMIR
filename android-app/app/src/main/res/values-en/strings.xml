@@ -787,4 +787,11 @@
     <string name="mb_invite_communities">Invitation to communities</string>
     <string name="mtp_active">● Active</string>
     <string name="mtp_unchecked">\? Not checked</string>
+    <!-- Пакет 25: контакты и онбординг, строки с подстановками -->
+    <string name="contacts_sort_desc">Sort: %1$s</string>
+    <string name="contacts_none_found">No one found for “%1$s”</string>
+    <string name="contacts_remove_body">“%1$s” will be removed from your contacts.</string>
+    <string name="contacts_invite_title">Invite %1$s</string>
+    <string name="contacts_nothing_found">Nothing found for “%1$s”</string>
+    <string name="onb_pw_min">At least %1$d characters</string>
 </resources>

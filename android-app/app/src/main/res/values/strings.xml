@@ -796,4 +796,11 @@
     <string name="mb_invite_communities">Приглашение в сообщества</string>
     <string name="mtp_active">● Активный</string>
     <string name="mtp_unchecked">\? Не проверен</string>
+    <!-- Пакет 25: контакты и онбординг, строки с подстановками -->
+    <string name="contacts_sort_desc">Сортировка: %1$s</string>
+    <string name="contacts_none_found">Никого не нашли по запросу «%1$s»</string>
+    <string name="contacts_remove_body">«%1$s» будет удалён из списка контактов.</string>
+    <string name="contacts_invite_title">Пригласить %1$s</string>
+    <string name="contacts_nothing_found">Ничего не нашли по запросу «%1$s»</string>
+    <string name="onb_pw_min">Минимум %1$d знаков</string>
 </resources>

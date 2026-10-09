@@ -122,7 +122,7 @@ fun ContactsScreen(
                         IconButton(onClick = { sortMenuExpanded = true }) {
                             Icon(
                                 Icons.Default.SortByAlpha,
-                                contentDescription = "Сортировка: ${sortOrder.title}",
+                                contentDescription = stringResource(R.string.contacts_sort_desc, sortOrder.title),
                             )
                         }
                         ContactSortMenu(
@@ -173,7 +173,7 @@ fun ContactsScreen(
                     // ночной теме голый текст не читался.
                     HintBubble {
                         Text(
-                            "Никого не нашли по запросу «$query»",
+                            stringResource(R.string.contacts_none_found, query),
                             style = MaterialTheme.typography.bodyMedium,
                             color = HintBubbleTextColor,
                             textAlign = TextAlign.Center,
@@ -302,7 +302,7 @@ fun ContactsScreen(
         ApuSettingsDialog(
             onDismissRequest = { confirmDelete = null },
             title = { Text(stringResource(R.string.contacts_delete_title)) },
-            text = { Text("«${contact.displayName}» будет удалён из списка контактов.") },
+            text = { Text(stringResource(R.string.contacts_remove_body, contact.displayName)) },
             confirmButton = {
                 ApuTextAction(
                     label = stringResource(R.string.action_delete),
@@ -465,7 +465,7 @@ private fun InviteToGroupsDialog(
 
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Пригласить $contactName") },
+        title = { Text(stringResource(R.string.contacts_invite_title, contactName)) },
         text = {
             Column(Modifier.fillMaxWidth()) {
                 ApuSearchField(
@@ -496,7 +496,7 @@ private fun InviteToGroupsDialog(
                     )
                 } else if (shown.isEmpty()) {
                     Text(
-                        "Ничего не нашли по запросу «$query»",
+                        stringResource(R.string.contacts_nothing_found, query),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 } else {

@@ -249,7 +249,7 @@ private fun EnterNameStep(
                 Text(
                     state.passwordError
                         ?: if (state.restoreMode) stringResource(R.string.onb_password_old)
-                        else "Минимум $MIN_PASSWORD_LENGTH знаков",
+                        else stringResource(R.string.onb_pw_min, MIN_PASSWORD_LENGTH),
                     color = if (state.passwordError != null) {
                         MaterialTheme.colorScheme.error
                     } else {
