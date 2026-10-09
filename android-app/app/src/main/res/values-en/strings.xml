@@ -786,5 +786,5 @@
     <string name="mb_download_apu">Download APU</string>
     <string name="mb_invite_communities">Invitation to communities</string>
     <string name="mtp_active">● Active</string>
-    <string name="mtp_unchecked">? Not checked</string>
+    <string name="mtp_unchecked">\? Not checked</string>
 </resources>

@@ -795,5 +795,5 @@
     <string name="mb_download_apu">Скачать APU</string>
     <string name="mb_invite_communities">Приглашение в сообщества</string>
     <string name="mtp_active">● Активный</string>
-    <string name="mtp_unchecked">? Не проверен</string>
+    <string name="mtp_unchecked">\? Не проверен</string>
 </resources>
