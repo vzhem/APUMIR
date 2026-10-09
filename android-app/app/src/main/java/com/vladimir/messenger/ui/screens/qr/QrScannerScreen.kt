@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.qr
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // QRSCANNERSCREEN.KT — раздел QR: сканировать чужой код или показать свой
 // =============================================================================
@@ -286,8 +288,7 @@ private fun MyCodePane() {
         if (maybeLink == null || bitmap == null) {
             ApuBubble {
                 Text(
-                    "Код появится, когда профиль будет готов. Откройте приложение " +
-                        "чуть позже — ключи ещё создаются.",
+                    stringResource(R.string.qr_not_ready),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }

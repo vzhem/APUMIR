@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -409,8 +411,7 @@ fun GifCatalogBody(
             )
             Spacer(Modifier.width(6.dp))
             Text(
-                "синяя точка - гифка уже в нашей сети: придёт с телефонов " +
-                    "своих, внешний каталог не тратится",
+                stringResource(R.string.gif_blue_dot),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

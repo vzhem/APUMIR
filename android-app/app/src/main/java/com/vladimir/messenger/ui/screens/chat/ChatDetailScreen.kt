@@ -1315,9 +1315,7 @@ private fun MessageInputBar(
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                 ) {
                     Text(
-                        text = "Сообщения от собеседника не открываются: у него осталась прежняя " +
-                            "копия вашего ключа (переустановка или восстановление профиля). " +
-                            "Пусть он заново отсканирует ваш QR-код — «Мой QR» в профиле.",
+                        text = stringResource(R.string.chat_peer_key_stale),
                         style = MaterialTheme.typography.bodySmall,
                         color = ApuGoldInk,
                     )
@@ -1353,9 +1351,7 @@ private fun MessageInputBar(
                         .padding(horizontal = 12.dp, vertical = 10.dp),
                 ) {
                     Text(
-                        text = "Это ваш собственный узел — собеседника здесь нет. " +
-                            "Устройства одного аккаунта синхронизируются сами " +
-                            "(Настройки → «Диагностика синхронизации»).",
+                        text = stringResource(R.string.chat_own_node),
                         style = MaterialTheme.typography.bodySmall,
                         color = Color(0xFF1E2430),
                     )

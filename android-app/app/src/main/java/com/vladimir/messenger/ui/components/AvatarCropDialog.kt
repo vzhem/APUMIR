@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -64,8 +66,7 @@ fun AvatarCropDialog(
         text = {
             Column {
                 Text(
-                    "Двигайте фото пальцем и приближайте щипком. В аватар попадёт то, " +
-                        "что видно в круге.",
+                    stringResource(R.string.avatar_crop_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // USERNAMECONFLICTDIALOG.KT
 // =============================================================================
@@ -36,8 +38,7 @@ fun UsernameConflictDialog() {
         text = {
             Column {
                 Text(
-                    "Ваш @никнейм оказался занят пользователем, который " +
-                        "зарегистрировался раньше. Задайте себе новый никнейм."
+                    stringResource(R.string.username_taken_body)
                 )
                 Spacer(Modifier.height(12.dp))
                 ApuBubbleField(
