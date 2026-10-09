@@ -701,7 +701,7 @@ private fun DeleteGroupDialog(
                 ApuBubbleField(
                     value = typed,
                     onValueChange = { typed = it },
-                    label = { Text("Введите: $expected") },
+                    label = { Text(stringResource(R.string.admin_type_prompt, expected)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )

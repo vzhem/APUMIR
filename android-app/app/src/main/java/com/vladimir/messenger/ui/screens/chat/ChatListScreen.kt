@@ -1676,7 +1676,7 @@ private fun GroupCard(
             )
             if (draftText.isNotEmpty()) {
                 Text(
-                    text = "Черновик: $draftText",
+                    text = stringResource(R.string.contact_draft_prefix, draftText),
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color(0xFFC62828),
                     maxLines = 1,
@@ -1687,9 +1687,9 @@ private fun GroupCard(
                     // Раунд 155: без служебных строк (гифки/стикеры).
                     text = com.vladimir.messenger.util.ChatPreviews.human(group.preview)
                         ?: if (group.isPublic) {
-                        "Публичная группа - ${group.memberCount} уч."
+                        stringResource(R.string.group_public_members, group.memberCount)
                     } else {
-                        "Частная группа - ${group.memberCount} уч."
+                        stringResource(R.string.group_private_members, group.memberCount)
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color(0xFF5A6472),

@@ -927,7 +927,7 @@ fun GroupChatScreen(
                         }
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "Выбрано $selCount",
+                            text = stringResource(R.string.selected_count, selCount),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = ApuBubbleTextColor,
@@ -2444,7 +2444,7 @@ private fun ReplyStrip(
         Spacer(Modifier.width(8.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                "Ответ $author",
+                stringResource(R.string.reply_to_author, author),
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary,

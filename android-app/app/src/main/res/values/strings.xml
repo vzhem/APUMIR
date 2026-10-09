@@ -827,4 +827,9 @@
     <string name="mod_block_author">Заблокировать %1$s</string>
     <string name="mod_perm_count">Разрешено: %1$s из %2$s</string>
     <string name="mod_continue_extras">Продолжить (+%1$s)</string>
+    <!-- Пакет 29: подписи чатов, групп и администрирования -->
+    <string name="group_public_members">Публичная группа - %1$s уч.</string>
+    <string name="group_private_members">Частная группа - %1$s уч.</string>
+    <string name="selected_count">Выбрано %1$s</string>
+    <string name="admin_type_prompt">Введите: %1$s</string>
 </resources>

@@ -818,4 +818,9 @@
     <string name="mod_block_author">Block %1$s</string>
     <string name="mod_perm_count">Allowed: %1$s of %2$s</string>
     <string name="mod_continue_extras">Continue (+%1$s)</string>
+    <!-- Пакет 29: подписи чатов, групп и администрирования -->
+    <string name="group_public_members">Public group · %1$s members</string>
+    <string name="group_private_members">Private group · %1$s members</string>
+    <string name="selected_count">Selected: %1$s</string>
+    <string name="admin_type_prompt">Type: %1$s</string>
 </resources>
