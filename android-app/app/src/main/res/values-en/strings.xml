@@ -1094,7 +1094,7 @@
     <string name="iad_title">Send the invitation any way you like</string>
     <string name="iad_hint">The invite link will be added to the message. Optionally attach the APK so the recipient can install APU right away.</string>
     <string name="iad_attach_apk">Attach the installer file</string>
-    <string name="iad_apk_size">The APK is about 40 MB. Handy if the recipient does not have APU yet.</string>
+    <string name="iad_apk_size">The APK file. Handy if the recipient does not have APU yet.</string>
     <string name="nsb_disconnected">No connection</string>
     <string name="nsb_connecting">Connecting...</string>
     <string name="nsb_relay">Via relay</string>
