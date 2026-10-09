@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,7 +33,7 @@ fun ShareContactChooserDialog(
 ) {
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Кому отправить") },
+        title = { Text(stringResource(R.string.chat_send_to)) },
         text = {
             Column {
                 Text(
@@ -42,7 +44,7 @@ fun ShareContactChooserDialog(
                 Spacer(Modifier.height(8.dp))
                 if (contacts.isEmpty()) {
                     Text(
-                        "Пока нет других абонентов - добавьте ещё кого-нибудь и попробуйте снова.",
+                        stringResource(R.string.scd_no_others),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 } else {
@@ -80,7 +82,7 @@ fun ShareContactChooserDialog(
         },
         confirmButton = {},
         dismissButton = {
-            ApuTextAction(label = "Отмена", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
         },
     )
 }

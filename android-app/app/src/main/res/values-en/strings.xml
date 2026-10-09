@@ -1098,4 +1098,15 @@
     <string name="nsb_disconnected">No connection</string>
     <string name="nsb_connecting">Connecting...</string>
     <string name="nsb_relay">Via relay</string>
+    <string name="splash_tagline_core">Digital communication core</string>
+    <string name="splash_subtitle_network">APU · member network</string>
+    <string name="splash_connecting">Core is connecting…</string>
+    <string name="avc_area">Avatar area</string>
+    <string name="gifref_loading">GIF from our network, loading…</string>
+    <string name="mr_remove">Remove reaction</string>
+    <string name="scd_no_others">There are no other contacts yet. Add someone and try again.</string>
+    <string name="gqr_channel_no_link">The invitation is unavailable: the channel has no permanent link yet. Create one in channel management, on the “Links” tab.</string>
+    <string name="gqr_group_no_link">The invitation is unavailable: the group has no permanent link yet. Create one in group management, on the “Links” tab.</string>
+    <string name="gqr_channel_hint">Show this code to your contact: any QR scanner will open the invitation. You can subscribe to the channel. If your contact does not have APU yet, they will be offered to download and install the app there.</string>
+    <string name="gqr_group_hint">Show this code to your contact: any QR scanner will open the invitation. You can join the group. If your contact does not have APU yet, they will be offered to download and install the app there.</string>
 </resources>

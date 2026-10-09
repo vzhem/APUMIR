@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // GIFREFCARD.KT - карточка-ссылка на гифку в чате (раунд 128)
 // =============================================================================
@@ -97,7 +99,7 @@ fun GifRefCard(
             // Гифка на месте - живёт и анимирует, как обычная гифка в чате.
             AsyncImage(
                 model = shownFile,
-                contentDescription = "Гифка",
+                contentDescription = stringResource(R.string.cd_gif),
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -117,7 +119,7 @@ fun GifRefCard(
                 CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = ApuBubbleAccentColor)
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "гифка из нашей сети - загружается…",
+                    stringResource(R.string.gifref_loading),
                     style = MaterialTheme.typography.labelSmall,
                     color = ApuBubbleMutedColor,
                     textAlign = TextAlign.Center,
@@ -139,7 +141,7 @@ fun GifRefCard(
             ) {
                 Icon(
                     imageVector = Icons.Default.MoreVert,
-                    contentDescription = "Действия",
+                    contentDescription = stringResource(R.string.sv_actions),
                     tint = Color.White,
                     modifier = Modifier.size(20.dp),
                 )

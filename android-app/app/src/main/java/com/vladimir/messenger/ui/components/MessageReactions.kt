@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
@@ -169,7 +171,7 @@ fun ReactionPickerDialog(
 ) {
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Реакция") },
+        title = { Text(stringResource(R.string.channel_reaction)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 ReactionPalette.EMOJI.chunked(PICKER_COLUMNS).forEachIndexed { rowIndex, line ->
@@ -187,10 +189,10 @@ fun ReactionPickerDialog(
             }
         },
         confirmButton = {
-            ApuTextAction(label = "Закрыть", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_close), onClick = onDismiss)
         },
         dismissButton = if (myEmoji != null && onRemove != null) {
-            { ApuTextAction(label = "Убрать реакцию", onClick = onRemove) }
+            { ApuTextAction(label = stringResource(R.string.mr_remove), onClick = onRemove) }
         } else {
             null
         },

@@ -62,7 +62,7 @@ fun AvatarCropDialog(
 
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Область аватара") },
+        title = { Text(stringResource(R.string.avc_area)) },
         text = {
             Column {
                 Text(
@@ -118,7 +118,7 @@ fun AvatarCropDialog(
         },
         confirmButton = {
             ApuTextAction(
-                label = "Готово",
+                label = stringResource(R.string.action_done),
                 onClick = {
                 val cropped = cropVisibleArea(source, scale, offsetX, offsetY, viewportPx)
                 onConfirm(cropped)
@@ -126,7 +126,7 @@ fun AvatarCropDialog(
             )
         },
         dismissButton = {
-            ApuTextAction(label = "Отмена", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
         },
     )
 }

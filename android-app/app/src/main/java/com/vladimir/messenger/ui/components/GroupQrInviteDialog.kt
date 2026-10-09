@@ -67,9 +67,9 @@ fun GroupQrInviteDialog(
                     link == null -> {
                         Text(
                             if (isChannel) {
-                                "Приглашение недоступно: у канала ещё нет бессрочной ссылки. Создайте её в управлении каналом, вкладка «Ссылки»."
+                                stringResource(R.string.gqr_channel_no_link)
                             } else {
-                                "Приглашение недоступно: у группы ещё нет бессрочной ссылки. Создайте её в управлении группой, вкладка «Ссылки»."
+                                stringResource(R.string.gqr_group_no_link)
                             },
                             style = MaterialTheme.typography.bodyMedium,
                         )
@@ -101,9 +101,9 @@ fun GroupQrInviteDialog(
                         Spacer(Modifier.height(10.dp))
                         Text(
                             if (isChannel) {
-                                "Покажите этот код собеседнику: любой сканер QR откроет приглашение - можно подписаться на канал. Если у собеседника ещё нет APU, там же предложат скачать и установить приложение."
+                                stringResource(R.string.gqr_channel_hint)
                             } else {
-                                "Покажите этот код собеседнику: любой сканер QR откроет приглашение - можно войти в группу. Если у собеседника ещё нет APU, там же предложат скачать и установить приложение."
+                                stringResource(R.string.gqr_group_hint)
                             },
                             style = MaterialTheme.typography.bodySmall,
                             textAlign = TextAlign.Center,

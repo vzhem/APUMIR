@@ -1107,4 +1107,15 @@
     <string name="nsb_disconnected">Нет соединения</string>
     <string name="nsb_connecting">Подключение...</string>
     <string name="nsb_relay">Через ретранслятор</string>
+    <string name="splash_tagline_core">Цифровое ядро связи</string>
+    <string name="splash_subtitle_network">APU · сеть участников</string>
+    <string name="splash_connecting">Ядро подключается…</string>
+    <string name="avc_area">Область аватара</string>
+    <string name="gifref_loading">гифка из нашей сети - загружается…</string>
+    <string name="mr_remove">Убрать реакцию</string>
+    <string name="scd_no_others">Пока нет других абонентов - добавьте ещё кого-нибудь и попробуйте снова.</string>
+    <string name="gqr_channel_no_link">Приглашение недоступно: у канала ещё нет бессрочной ссылки. Создайте её в управлении каналом, вкладка «Ссылки».</string>
+    <string name="gqr_group_no_link">Приглашение недоступно: у группы ещё нет бессрочной ссылки. Создайте её в управлении группой, вкладка «Ссылки».</string>
+    <string name="gqr_channel_hint">Покажите этот код собеседнику: любой сканер QR откроет приглашение - можно подписаться на канал. Если у собеседника ещё нет APU, там же предложат скачать и установить приложение.</string>
+    <string name="gqr_group_hint">Покажите этот код собеседнику: любой сканер QR откроет приглашение - можно войти в группу. Если у собеседника ещё нет APU, там же предложат скачать и установить приложение.</string>
 </resources>

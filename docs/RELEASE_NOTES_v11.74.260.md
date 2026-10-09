@@ -1,5 +1,5 @@
-# APU v11.74.259 — Экраны приглашений, реакций, аватара и заставки на английском
+# APU v11.74.260 — Экраны приглашений, реакций, аватара и заставки на английском
 
 Заставка, обрезка аватара, реакции, отправка контакта, приглашения группы и канала переведены. Исправлена подпись в окне отправки приглашения: в ней больше не указан устаревший размер APK.
 
-[Скачать APK](https://github.com/vzhem/APUMIR/releases/download/v11.74.259/app-release.apk) · [SHA-256](https://github.com/vzhem/APUMIR/releases/download/v11.74.259/SHA256SUMS.txt)
+[Скачать APK](https://github.com/vzhem/APUMIR/releases/download/v11.74.260/app-release.apk) · [SHA-256](https://github.com/vzhem/APUMIR/releases/download/v11.74.260/SHA256SUMS.txt)
