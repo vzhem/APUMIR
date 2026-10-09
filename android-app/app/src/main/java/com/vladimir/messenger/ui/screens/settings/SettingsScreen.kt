@@ -184,7 +184,7 @@ fun SettingsScreen(
                         },
                         navigationIcon = {
                             IconButton(onClick = onBackClick) {
-                                Icon(Icons.Default.ArrowBack, "Назад")
+                                Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back))
                             }
                         },
                     )
@@ -465,7 +465,7 @@ private fun ProfileTabContent(
                             Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.settings_change_name), tint = ApuBubbleAccentColor, modifier = Modifier.size(18.dp))
                         }
                         Text(
-                            if (myUsername.isNullOrBlank()) "Задать @никнейм" else "@$myUsername",
+                            if (myUsername.isNullOrBlank()) stringResource(R.string.settings_set_username) else "@$myUsername",
                             style = MaterialTheme.typography.bodyMedium,
                             color = ApuBubbleAccentColor,
                             fontWeight = FontWeight.SemiBold,
@@ -521,7 +521,7 @@ private fun ProfileTabContent(
                             if (uiState.antiRatingWarning) {
                                 Spacer(Modifier.height(6.dp))
                                 Text(
-                                    "⚠️ Всплеск жалоб: репутация и приоритет узла временно понижены.",
+                                    stringResource(R.string.settings_complaints_spike),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = ApuSettingsDangerColor,
                                 )
@@ -544,10 +544,10 @@ private fun ProfileTabContent(
                         }
                         Spacer(Modifier.height(14.dp))
                         val actions = listOf(
-                            Triple("Мой QR", Icons.Default.QrCode, onMyQr),
-                            Triple("Ссылка", Icons.Default.ContentCopy, onCopyLink),
-                            Triple("Никнейм", Icons.Default.AlternateEmail, onUsername),
-                            Triple("Аватар", Icons.Default.AccountCircle, { showAvatarPicker = true }),
+                            Triple(stringResource(R.string.settings_my_qr), Icons.Default.QrCode, onMyQr),
+                            Triple(stringResource(R.string.groups_link), Icons.Default.ContentCopy, onCopyLink),
+                            Triple(stringResource(R.string.identity_nickname), Icons.Default.AlternateEmail, onUsername),
+                            Triple(stringResource(R.string.settings_avatar), Icons.Default.AccountCircle, { showAvatarPicker = true }),
                         )
                         val fontScale = LocalDensity.current.fontScale
                         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
@@ -565,7 +565,7 @@ private fun ProfileTabContent(
                         if (avatarUri != null) {
                             Spacer(Modifier.height(6.dp))
                             ApuTextAction(
-                                label = "Убрать аватар",
+                                label = stringResource(R.string.settings_remove_avatar),
                                 onClick = { AvatarHolder.set(context, null) },
                             )
                         }
@@ -1061,7 +1061,7 @@ private fun SettingsTabContent(
                         // Было «Подключено пиров» - слово из документации, а не
                         // из речи. Теперь это вход в подробности: кто держит
                         // сеть и через кого данные идут первыми.
-                        title    = "Узлы сети",
+                        title    = stringResource(R.string.peer_nodes_title),
                         subtitle = "${uiState.connectedPeers} на связи - открыть оценку",
                         onClick  = onPeerRatingClick,
                     )
@@ -1168,7 +1168,7 @@ private fun SettingsTabContent(
                                 Text(mode.title, style = MaterialTheme.typography.bodyLarge)
                                 Text(
                                     if (mode == SwarmMode.UNLIMITED) {
-                                        "Раздаёт на полную и на мобильном интернете, и при низком заряде"
+                                        stringResource(R.string.settings_swarm_full)
                                     } else {
                                         "до ${limits.maxPacketsPerMinute} пакетов в минуту, " +
                                             "${limits.maxConcurrentSends} одновременно"
@@ -1206,14 +1206,9 @@ private fun SettingsTabContent(
                         icon = Icons.Default.Storage,
                         title = stringResource(R.string.settings_i_am_server),
                         subtitle = if (imServer) {
-                            "Включено: телефон хранит чужие файлы на хранении для контактов " +
-                                "не в сети, раздаёт файлы сообществ и обновления другим. " +
-                                "Чем больше телефонов-серверов, тем быстрее сеть."
+                            stringResource(R.string.settings_relay_on)
                         } else {
-                            "Выключено - режим абонента: НОВОЕ чужое на хранение не принимается, " +
-                                "тяжёлое (картинки, видео, гифки, большие файлы) другим не " +
-                                "пересылается. Лёгкое и нужное для связи несут все: маленькие " +
-                                "документы и стикеры, текст и резервные копии, APK обновлений."
+                            stringResource(R.string.settings_relay_off)
                         },
                         trailingContent = {
                             ApuPremiumSwitch(
@@ -1250,11 +1245,7 @@ private fun SettingsTabContent(
                     SettingsItem(
                         icon = Icons.Default.Storage,
                         title = "Место под пересылку: ${StoragePolicy.format(StoragePolicy.stepBytes(step))}",
-                        subtitle = "Сколько места телефон отдаёт под данные в пути: куски " +
-                            "файлов, чужие файлы на хранении для контактов, которые сейчас " +
-                            "не в сети, и то, что ждёт узлов не в сети. Телефон здесь и есть " +
-                            "сервер: чем больше места вы даёте, тем выше ваш рейтинг у " +
-                            "других узлов (до +10 из 100, и только пока вы бываете в сети).",
+                        subtitle = stringResource(R.string.settings_space_body),
                     )
                     Row(
                         modifier = Modifier
@@ -1290,7 +1281,7 @@ private fun SettingsTabContent(
                     val used = usage
                     Text(
                         if (used == null) {
-                            "Считаю занятое место…"
+                            stringResource(R.string.settings_counting_space)
                         } else {
                             "Занято сейчас: ${StoragePolicy.format(used.total)} " +
                                 "(куски файлов ${StoragePolicy.format(used.chunkBytes)}" +
@@ -1435,17 +1426,12 @@ private fun SettingsTabContent(
                 Text(
                     buildString {
                         append(
-                            "Чаты, контакты и ключи на этом телефоне будут стёрты. " +
-                                "Приложение откроет экран входа - войдите под другим " +
-                                "логином или создайте новый профиль.",
+                            stringResource(R.string.settings_logout_body),
                         )
                         append("\n\n")
                         if (nick.isNullOrBlank()) {
                             append(
-                                "ВНИМАНИЕ: «Защита личности» не настроена. Вернуться в " +
-                                    "текущий профиль после выхода будет НЕЛЬЗЯ. Если хотите " +
-                                    "сохранить его - отмените выход и задайте никнейм и пароль " +
-                                    "в «Защита личности».",
+                                stringResource(R.string.settings_logout_warning),
                             )
                         } else {
                             append(
@@ -1473,8 +1459,7 @@ private fun SettingsTabContent(
                 Text(
                     (uiState.addrBookLine.ifBlank { "…" }) + "\n\n" +
                         uiState.addrBookMessage.ifBlank {
-                            "Копия шифруется вашим ключом: сервер хранит её, но прочитать не может. " +
-                                "При переустановке приложения и восстановлении личности адреса вернутся сами."
+                            stringResource(R.string.settings_backup_note)
                         }
                 )
             },
@@ -1568,7 +1553,7 @@ private fun SettingsTabContent(
                     // Ход работ и ошибка говорятся словами — окно никогда не
                     // молчит пустым экраном.
                     val stageLine = when {
-                        transferLogsLoading -> transferLogsStage ?: "Собираю безопасный отчёт…"
+                        transferLogsLoading -> transferLogsStage ?: stringResource(R.string.settings_collecting_report)
                         transferLogsError != null -> transferLogsError
                         else -> null
                     }
@@ -1584,8 +1569,7 @@ private fun SettingsTabContent(
                         )
                         if (transferLogsLoading && transferLogsSlow) {
                             Text(
-                                "сбор идёт дольше обычного — что-то в телефоне занято; " +
-                                    "«Обновить» запустит заново",
+                                stringResource(R.string.settings_slow_collect),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = ApuBubbleMutedColor,
                             )
@@ -1599,12 +1583,10 @@ private fun SettingsTabContent(
                     // Обещание приватности — тёмной стеклянной полосой со щитом:
                     // его читают, а не пролистывают.
                     ApuDiagnosticsPrivacyStrip(
-                        "Отчёт содержит состояние сети, ядра, брокера и передач. Чаты, имена " +
-                            "файлов, ключи, ciphertext, адреса и contact ID в него не попадают — " +
-                            "его можно копировать и присылать целиком.",
+                        stringResource(R.string.settings_report_info),
                     )
                     ApuDiagnosticsReportCard(
-                        text = reportText.ifBlank { "Собираю безопасный отчёт…" },
+                        text = reportText.ifBlank { stringResource(R.string.settings_collecting_report) },
                         maxHeight = 260.dp,
                     )
                 }
@@ -1631,7 +1613,7 @@ private fun SettingsTabContent(
                             compact = true,
                             onClick = {
                                 if (reportText.isNotBlank()) {
-                                    AppShare.shareText(settingsContext, reportText, "Логи APU")
+                                    AppShare.shareText(settingsContext, reportText, stringResource(R.string.settings_logs_title))
                                 } else {
                                     apuDiagnosticsNothingYet(settingsContext, transferLogsStage)
                                 }
@@ -1647,7 +1629,7 @@ private fun SettingsTabContent(
                                     mqttClipboard.setText(AnnotatedString(reportText))
                                     android.widget.Toast.makeText(
                                         settingsContext,
-                                        "Логи скопированы",
+                                        stringResource(R.string.settings_logs_copied),
                                         android.widget.Toast.LENGTH_SHORT,
                                     ).show()
                                 } else {
@@ -1716,16 +1698,15 @@ private fun SettingsTabContent(
         }
         ApuSettingsDialog(
             onDismissRequest = { showMirrorDiag = false },
-            title = { Text("Синхронизация устройств") },
+            title = { Text(stringResource(R.string.settings_sync_devices)) },
             text = {
                 Text(
-                    syncText + "\n\nЕсли недоотправленных много, а партнёр виден - " +
-                        "подождите минуту: строка уйдёт сама, когда связь восстановится.",
+                    syncText + stringResource(R.string.settings_sync_hint),
                 )
             },
             confirmButton = {
                 ApuTextAction(
-                    label = "Скопировать",
+                    label = stringResource(R.string.action_copy),
                     onClick = {
 
                     mqttClipboard.setText(
@@ -1736,7 +1717,7 @@ private fun SettingsTabContent(
                 )
             },
             dismissButton = {
-                ApuTextAction(label = "Закрыть", onClick = { showMirrorDiag = false })
+                ApuTextAction(label = stringResource(R.string.settings_close), onClick = { showMirrorDiag = false })
             },
         )
     }
@@ -1766,9 +1747,9 @@ private fun ThemeModeChoices(selected: ThemeMode, onSelect: (ThemeMode) -> Unit)
                         val checked = selected == mode
                         val shape = RoundedCornerShape(14.dp)
                         val label = when (mode) {
-                            ThemeMode.SYSTEM -> "Авто"
-                            ThemeMode.LIGHT -> "День"
-                            ThemeMode.DARK -> "Ночь"
+                            ThemeMode.SYSTEM -> stringResource(R.string.settings_theme_auto)
+                            ThemeMode.LIGHT -> stringResource(R.string.settings_theme_day)
+                            ThemeMode.DARK -> stringResource(R.string.settings_theme_night)
                         }
                         val icon = when (mode) {
                             ThemeMode.SYSTEM -> Icons.Default.BrightnessAuto
@@ -1816,7 +1797,7 @@ private fun ThemeModeChoices(selected: ThemeMode, onSelect: (ThemeMode) -> Unit)
                 }
             }
             Text(
-                if (selected == ThemeMode.SYSTEM) "Тема меняется вместе с настройками телефона" else "Выбрано: ${selected.title.lowercase()}",
+                if (selected == ThemeMode.SYSTEM) stringResource(R.string.settings_theme_follows) else "Выбрано: ${selected.title.lowercase()}",
                 style = MaterialTheme.typography.bodySmall,
                 color = ApuBubbleMutedColor,
             )
@@ -1899,8 +1880,8 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
             ApuSettingsDivider()
             SettingsItem(
                 icon    = Icons.Default.Close,
-                title   = "Остановить раздачу",
-                subtitle = "Убрать объявление и локальную копию",
+                title   = stringResource(R.string.settings_stop_sharing),
+                subtitle = stringResource(R.string.settings_stop_sharing_hint),
                 onClick = viewModel::onStopUpdateSeed,
             )
         }
@@ -1926,7 +1907,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
             ApuSettingsDivider()
             SettingsItem(
                 icon    = Icons.Default.Close,
-                title   = "Остановить приём",
+                title   = stringResource(R.string.settings_stop_receiving),
                 onClick = viewModel::onCancelUpdateDownload,
             )
         }
@@ -1941,7 +1922,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
             ApuSettingsDivider()
             SettingsItem(
                 icon    = Icons.Default.Close,
-                title   = "Остановить приём",
+                title   = stringResource(R.string.settings_stop_receiving),
                 onClick = viewModel::onCancelPatchDownload,
             )
         }
@@ -1965,14 +1946,14 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         val best = offers.firstOrNull()
         if (officialNow != null && best != null && download == null && patchDownload == null && ready == null) {
             Text(
-                "Обновление найдено в двух местах — выберите, откуда скачать:",
+                stringResource(R.string.settings_update_two_places),
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
             )
             SettingsItem(
                 icon    = Icons.Default.CloudDownload,
                 title   = "С официального сайта v" + officialNow.version.removePrefix("v"),
-                subtitle = "Через интернет (GitHub); файл сам встанет в этот раздел",
+                subtitle = stringResource(R.string.settings_via_internet),
                 onClick = viewModel::onDownloadOfficialRelease,
             )
             SettingsItem(
@@ -2001,7 +1982,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
                 SettingsItem(
                     icon    = Icons.Default.CloudDownload,
                     title   = "Скачать официальный v" + rel.version.removePrefix("v"),
-                    subtitle = "С GitHub; файл сам встанет в этот раздел и начнёт раздаваться",
+                    subtitle = stringResource(R.string.settings_from_github),
                     onClick = viewModel::onDownloadOfficialRelease,
                 )
             }
@@ -2019,7 +2000,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
                 },
                 onClick = {
                     markTarget = MarkTarget(
-                        title        = "Раздать полученный APK",
+                        title        = stringResource(R.string.settings_share_received),
                         versionGuess = apk.versionGuess ?: "",
                         transferId   = apk.transferId,
                     )
@@ -2029,7 +2010,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         // Пометить файл (с ПК / из проводника): имя и версия читаются сами.
         SettingsItem(
             icon    = Icons.Default.FileOpen,
-            title   = "Отметить APK как обновление",
+            title   = stringResource(R.string.settings_mark_apk),
             subtitle = "Имя и версия возьмутся из файла; проверим (это APK, версия новее текущей) и раздаём всем, у кого ниже версия",
             onClick = { apkPicker.launch(arrayOf("application/vnd.android.package-archive")) },
         )
@@ -2038,8 +2019,8 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         ApuSettingsDivider()
         SettingsItem(
             icon    = Icons.Default.Refresh,
-            title   = if (checking) "Проверяю…" else "Проверить новую версию",
-            subtitle = "Спросит соседей в сети и посмотрит официальный релиз",
+            title   = if (checking) stringResource(R.string.settings_checking) else stringResource(R.string.settings_check_version),
+            subtitle = stringResource(R.string.settings_check_hint),
             onClick = if (checking) null else viewModel::onCheckForUpdates,
         )
     }
@@ -2060,7 +2041,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
     apkPick?.let { pick ->
         if (pick.error == null) {
             ApkVersionDialog(
-                title          = "Раздавать этот файл как обновление?",
+                title          = stringResource(R.string.settings_share_update_q),
                 fileName       = pick.displayName,
                 sizeText       = StoragePolicy.format(pick.sizeBytes),
                 initialVersion = pick.version ?: "",
@@ -2111,15 +2092,14 @@ private fun ApkVersionDialog(
                 if (reading) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        "Читаю версию из файла…",
+                        stringResource(R.string.settings_reading_version),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
-                    "Числовая версия, например 11.70.29. Должна быть новее текущей — иначе файл не станет обновлением. " +
-                        "Обычно она уже подставлена из файла.",
+                    stringResource(R.string.settings_version_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -2128,20 +2108,20 @@ private fun ApkVersionDialog(
                     value        = version,
                     onValueChange = { version = it },
                     singleLine = true,
-                    label      = { Text("Версия") },
+                    label      = { Text(stringResource(R.string.settings_version_label)) },
                     modifier   = Modifier.fillMaxWidth(),
                 )
             }
         },
         confirmButton = {
             ApuTextAction(
-                label = "Раздавать",
+                label = stringResource(R.string.settings_share_btn),
                 onClick = { onConfirm(version) },
                 enabled = !reading && version.isNotBlank(),
             )
         },
         dismissButton = {
-            ApuTextAction(label = "Отмена", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
         },
     )
 }
