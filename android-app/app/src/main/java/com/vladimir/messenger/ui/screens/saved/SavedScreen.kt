@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.saved
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // SAVEDSCREEN.KT — «Избранное»: личное хранилище абонента
 // =============================================================================
@@ -170,8 +172,9 @@ fun SavedScreen(
     LaunchedEffect(uiState.pendingExport) {
         uiState.pendingExport?.let { exportPicker.launch(it.displayName) }
     }
+    val fileFallbackName = stringResource(R.string.sv_file_lc)
     LaunchedEffect(uiState.pendingLocalExport) {
-        uiState.pendingLocalExport?.let { exportPicker.launch(it.fileName.ifBlank { "файл" }) }
+        uiState.pendingLocalExport?.let { exportPicker.launch(it.fileName.ifBlank { fileFallbackName }) }
     }
 
     Box(
@@ -211,10 +214,10 @@ fun SavedScreen(
                     // Прокрутка НЕ должна красить панель: под ней обои APU.
                     scrolledContainerColor = Color.Transparent,
                     ),
-                    title = { Text("Избранное", fontWeight = FontWeight.Bold) },
+                    title = { Text(stringResource(R.string.chat_saved), fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
-                            Icon(Icons.Default.ArrowBack, contentDescription = "Назад")
+                            Icon(Icons.Default.ArrowBack, contentDescription = stringResource(R.string.action_back))
                         }
                     },
                 )
@@ -223,7 +226,7 @@ fun SavedScreen(
                 ApuPremiumFloatingActionButton(
                     onClick = { showAddMenu = true },
                     icon = Icons.Default.Add,
-                    contentDescription = "Добавить",
+                    contentDescription = stringResource(R.string.mtproxy_add_btn),
                 )
             },
         ) { padding ->
@@ -249,7 +252,7 @@ fun SavedScreen(
                                 tint = ApuBubbleMutedColor,
                             )
                             Spacer(Modifier.height(12.dp))
-                            Text("В избранном пусто", style = MaterialTheme.typography.titleMedium)
+                            Text(stringResource(R.string.sv_empty), style = MaterialTheme.typography.titleMedium)
                             Text(
                                 "Перешлите сюда файл, фото или пост из чата, " +
                                     "группы или канала - и он останется у вас.",
@@ -337,26 +340,26 @@ fun SavedScreen(
         // (владелец: «красивые пузыри горизонтальные в нашем стиле»).
         ApuSettingsDialog(
             onDismissRequest = { showAddMenu = false },
-            title = { Text("Добавить в избранное") },
+            title = { Text(stringResource(R.string.sv_add)) },
             text = {
                 Column {
-                    SavedAddBubble("Файл с телефона") {
+                    SavedAddBubble(stringResource(R.string.sv_file_phone)) {
                         showAddMenu = false
                         docPicker.launch(arrayOf("*/*"))
                     }
                     Spacer(Modifier.height(8.dp))
-                    SavedAddBubble("Гифка с телефона") {
+                    SavedAddBubble(stringResource(R.string.sv_gif_phone)) {
                         showAddMenu = false
                         gifPicker.launch("image/gif")
                     }
                     Spacer(Modifier.height(8.dp))
-                    SavedAddBubble("Из каталога гифок") {
+                    SavedAddBubble(stringResource(R.string.sv_gif_catalog)) {
                         showAddMenu = false
                         viewModel.onGifCatalogOpened()
                         showGifCatalog = true
                     }
                     Spacer(Modifier.height(8.dp))
-                    SavedAddBubble("Свои гифки") {
+                    SavedAddBubble(stringResource(R.string.sv_gif_own)) {
                         showAddMenu = false
                         viewModel.onGifCatalogOpened()
                         viewModel.setGifTab("swarm")
@@ -364,19 +367,19 @@ fun SavedScreen(
                     }
                     Spacer(Modifier.height(8.dp))
                     // Раунд 163: стикеры из библиотеки - в избранное.
-                    SavedAddBubble("Стикеры") {
+                    SavedAddBubble(stringResource(R.string.sv_stickers)) {
                         showAddMenu = false
                         showStickerPicker = true
                     }
                     Spacer(Modifier.height(8.dp))
-                    SavedAddBubble("Заметка") {
+                    SavedAddBubble(stringResource(R.string.sv_note)) {
                         showAddMenu = false
                         showNoteDialog = true
                     }
                 }
             },
             confirmButton = {
-                ApuTextAction(label = "Закрыть", onClick = { showAddMenu = false })
+                ApuTextAction(label = stringResource(R.string.action_close), onClick = { showAddMenu = false })
             },
         )
     }
@@ -390,23 +393,23 @@ fun SavedScreen(
         }
         ApuSettingsDialog(
             onDismissRequest = { showStickerPicker = false },
-            title = { Text("Выберите стикер") },
+            title = { Text(stringResource(R.string.sv_pick_sticker)) },
             text = {
                 Column {
                     // Раунд 164: добавить свои - по одному или альбомом .zip.
-                    SavedAddBubble("Добавить стикер (.webp, .png…)") {
+                    SavedAddBubble(stringResource(R.string.sv_add_sticker)) {
                         stickerPicker.launch("image/*")
                     }
                     Spacer(Modifier.height(6.dp))
-                    SavedAddBubble("Добавить альбом (.zip)") {
+                    SavedAddBubble(stringResource(R.string.sv_add_album)) {
                         stickerZipPicker.launch("*/*")
                     }
                     Spacer(Modifier.height(10.dp))
                     val list = stickers
                     when {
-                        list == null -> Text("Загрузка…")
+                        list == null -> Text(stringResource(R.string.action_loading))
                         list.isEmpty() -> Text(
-                            "Библиотека пуста - добавьте свои стикеры кнопками выше."
+                            stringResource(R.string.sv_lib_empty)
                         )
                     else -> {
                         androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
@@ -452,7 +455,7 @@ fun SavedScreen(
             },
             confirmButton = {},
             dismissButton = {
-                ApuTextAction(label = "Закрыть", onClick = { showStickerPicker = false })
+                ApuTextAction(label = stringResource(R.string.action_close), onClick = { showStickerPicker = false })
             },
         )
     }
@@ -491,20 +494,20 @@ fun SavedScreen(
     confirmDelete?.let { item ->
         ApuSettingsDialog(
             onDismissRequest = { confirmDelete = null },
-            title = { Text("Убрать из избранного?") },
+            title = { Text(stringResource(R.string.sv_remove_q)) },
             text = {
                 Text(
                     if (item.kind == SavedItemsRepository.KIND_FILE) {
                         // Важно объяснить: файл останется в чате, пропадёт только ссылка.
-                        "Запись пропадёт из избранного. Сам файл в чате останется."
+                        stringResource(R.string.sv_remove_body)
                     } else {
-                        "Запись пропадёт из избранного."
+                        stringResource(R.string.sv_remove_short)
                     }
                 )
             },
             confirmButton = {
                 ApuTextAction(
-                    label = "Убрать",
+                    label = stringResource(R.string.channel_remove),
                     onClick = {
                     viewModel.delete(item.id)
                     confirmDelete = null
@@ -512,7 +515,7 @@ fun SavedScreen(
                 )
             },
             dismissButton = {
-                ApuTextAction(label = "Отмена", onClick = { confirmDelete = null })
+                ApuTextAction(label = stringResource(R.string.action_cancel), onClick = { confirmDelete = null })
             },
         )
     }
@@ -544,7 +547,7 @@ private fun SavedItemBubble(
             item.mediaType.equals("video/webm", ignoreCase = true) ||
             item.fileName.lowercase().endsWith(".webp") ||
             item.fileName.lowercase().endsWith(".webm") ||
-            item.fileName.startsWith("Стикер")
+            item.fileName.startsWith(stringResource(R.string.sv_sticker))
         )
 
     ApuBubble(
@@ -689,7 +692,7 @@ private fun SavedItemBubble(
                 IconButton(onClick = { showRowMenu = true }, modifier = Modifier.size(34.dp)) {
                     Icon(
                         Icons.Default.MoreVert,
-                        contentDescription = "Действия",
+                        contentDescription = stringResource(R.string.sv_actions),
                         modifier = Modifier.size(18.dp),
                         tint = ApuBubbleMutedColor,
                     )
@@ -700,14 +703,14 @@ private fun SavedItemBubble(
                     onDismiss = { showRowMenu = false },
                     actions = buildList {
                         if (isFile) {
-                            add(ApuAction("Сохранить в телефон", Icons.Filled.Download) { onExport() })
+                            add(ApuAction(stringResource(R.string.sv_save_phone), Icons.Filled.Download) { onExport() })
                         }
-                        add(ApuAction("Поделиться", Icons.Filled.Share) { onShare() })
+                        add(ApuAction(stringResource(R.string.admin_share), Icons.Filled.Share) { onShare() })
                         if (onOpenOrigin != null) {
-                            add(ApuAction("Перейти к оригиналу", Icons.Filled.OpenInNew) { onOpenOrigin?.invoke() })
+                            add(ApuAction(stringResource(R.string.sv_goto_original), Icons.Filled.OpenInNew) { onOpenOrigin?.invoke() })
                         }
-                        add(ApuAction(if (item.isPinned) "Открепить" else "Закрепить", Icons.Filled.PushPin) { onTogglePin() })
-                        add(ApuAction("Убрать из избранного", Icons.Filled.Delete, destructive = true) { onDelete() })
+                        add(ApuAction(if (item.isPinned) stringResource(R.string.menu_unpin) else stringResource(R.string.menu_pin), Icons.Filled.PushPin) { onTogglePin() })
+                        add(ApuAction(stringResource(R.string.sv_unsave), Icons.Filled.Delete, destructive = true) { onDelete() })
                     },
                 )
             }
@@ -716,7 +719,7 @@ private fun SavedItemBubble(
                 IconButton(onClick = onShare, modifier = Modifier.size(34.dp)) {
                     Icon(
                         Icons.Default.Share,
-                        contentDescription = "Поделиться",
+                        contentDescription = stringResource(R.string.admin_share),
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -725,14 +728,14 @@ private fun SavedItemBubble(
                 IconButton(onClick = onExport, modifier = Modifier.size(34.dp)) {
                     Icon(
                         Icons.Default.Download,
-                        contentDescription = "Сохранить в телефон",
+                        contentDescription = stringResource(R.string.sv_save_phone),
                         modifier = Modifier.size(18.dp),
                     )
                 }
                 IconButton(onClick = onShare, modifier = Modifier.size(34.dp)) {
                     Icon(
                         Icons.Default.Share,
-                        contentDescription = "Поделиться",
+                        contentDescription = stringResource(R.string.admin_share),
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -741,7 +744,7 @@ private fun SavedItemBubble(
                 IconButton(onClick = onOpenOrigin, modifier = Modifier.size(34.dp)) {
                     Icon(
                         Icons.Default.OpenInNew,
-                        contentDescription = "Перейти к оригиналу",
+                        contentDescription = stringResource(R.string.sv_goto_original),
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -750,7 +753,7 @@ private fun SavedItemBubble(
             IconButton(onClick = onTogglePin, modifier = Modifier.size(34.dp)) {
                 Icon(
                     Icons.Default.PushPin,
-                    contentDescription = if (item.isPinned) "Открепить" else "Закрепить",
+                    contentDescription = if (item.isPinned) stringResource(R.string.menu_unpin) else stringResource(R.string.menu_pin),
                     modifier = Modifier.size(18.dp),
                     tint = if (item.isPinned) MaterialTheme.colorScheme.primary
                            else ApuBubbleMutedColor,
@@ -759,7 +762,7 @@ private fun SavedItemBubble(
             IconButton(onClick = onDelete, modifier = Modifier.size(34.dp)) {
                 Icon(
                     Icons.Default.Delete,
-                    contentDescription = "Убрать из избранного",
+                    contentDescription = stringResource(R.string.sv_unsave),
                     modifier = Modifier.size(18.dp),
                     tint = MaterialTheme.colorScheme.error,
                 )
@@ -773,25 +776,25 @@ private fun NoteDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
     var text by remember { mutableStateOf("") }
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Заметка себе") },
+        title = { Text(stringResource(R.string.sv_note_self)) },
         text = {
             ApuBubbleField(
                 value = text,
                 onValueChange = { text = it },
-                label = { Text("Текст") },
+                label = { Text(stringResource(R.string.sv_text)) },
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 3,
             )
         },
         confirmButton = {
             ApuTextAction(
-                label = "Сохранить",
+                label = stringResource(R.string.action_save),
                 onClick = { onSave(text) },
                 enabled = text.isNotBlank(),
             )
         },
         dismissButton = {
-            ApuTextAction(label = "Отмена", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
         },
     )
 }
@@ -847,7 +850,7 @@ private fun SavedPinnedBar(
             )
             Spacer(Modifier.width(6.dp))
             Text(
-                "Закреплённое",
+                stringResource(R.string.sv_pinned),
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary,
@@ -865,7 +868,7 @@ private fun SavedPinnedBar(
             ) {
                 Text(
                     text = if (item.kind == SavedItemsRepository.KIND_FILE) {
-                        item.fileName.ifBlank { "Файл" }
+                        item.fileName.ifBlank { stringResource(R.string.sv_file) }
                     } else {
                         item.text.replace("\n", " ").take(80)
                     },
@@ -877,7 +880,7 @@ private fun SavedPinnedBar(
                 IconButton(onClick = { onUnpin(item) }, modifier = Modifier.size(30.dp)) {
                     Icon(
                         Icons.Default.Close,
-                        contentDescription = "Открепить",
+                        contentDescription = stringResource(R.string.menu_unpin),
                         modifier = Modifier.size(16.dp),
                         tint = ApuBubbleMutedColor,
                     )
@@ -953,7 +956,7 @@ private fun SavedInputBar(
                     ) {
                         if (inputState.text.isEmpty()) {
                             Text(
-                                "Заметка или сообщение себе...",
+                                stringResource(R.string.sv_note_hint),
                                 color = Color(0xFF5A6472),
                                 style = MaterialTheme.typography.bodyLarge,
                             )
@@ -973,7 +976,7 @@ private fun SavedInputBar(
         // загорается сразу при первом символе, без задержки на рекомпозицию.
         val canSend = inputState.text.isNotBlank()
         ApuTextAction(
-            label = "Отправить",
+            label = stringResource(R.string.action_send),
             onClick = onSend,
             enabled = canSend,
             modifier = Modifier.fillMaxWidth(),
