@@ -173,7 +173,7 @@ fun GroupAdminScreen(
                     ApuHeaderBubble {
                         Text(
                             uiState.group?.title
-                                ?: if (uiState.group?.isChannel == true) "Канал" else "Группа",
+                                ?: if (uiState.group?.isChannel == true) stringResource(R.string.contacts_channel) else stringResource(R.string.contacts_group),
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -489,7 +489,7 @@ private fun OverviewTab(
                 Text(
                     if (slowModeSeconds > 0) {
                         "Участники пишут не чаще одного сообщения в ${slowModeLabel(slowModeSeconds)}. " +
-                            "Администраторы и владелец - без паузы."
+                            stringResource(R.string.admin_no_pause)
                     } else {
                         stringResource(R.string.admin_slow_off)
                     },

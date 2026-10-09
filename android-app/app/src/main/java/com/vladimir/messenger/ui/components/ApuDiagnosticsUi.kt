@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // APUDIAGNOSTICSUI.KT — окно «Логи»: премиальный вид в стиле современных
 // мессенджеров (переработка 2026-10-07 по замечанию владельца: «как то всё по
@@ -330,7 +332,7 @@ fun ApuDiagnosticsHero(
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Состояние APU",
+                        stringResource(R.string.diag_state_title),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Black,
                         color = Color.White,
@@ -340,7 +342,7 @@ fun ApuDiagnosticsHero(
                         appVersion?.takeIf { it.isNotBlank() },
                     ).joinToString(" · ")
                     Text(
-                        subtitle.ifBlank { "Отчёт о состоянии сети и передач" },
+                        subtitle.ifBlank { stringResource(R.string.diag_report_desc) },
                         style = MaterialTheme.typography.labelMedium,
                         color = Color.White.copy(alpha = 0.72f),
                         maxLines = 1,
@@ -349,7 +351,7 @@ fun ApuDiagnosticsHero(
                 }
             }
             ApuDiagnosticsVerdictPill(
-                text = if (collecting) "СОБИРАЮ ОТЧЁТ…" else diagnosticsVerdictText(level),
+                text = if (collecting) stringResource(R.string.diag_collecting) else diagnosticsVerdictText(level),
                 level = level,
                 checks = lines.size,
             )
@@ -539,7 +541,7 @@ fun ApuDiagnosticsStatusCard(
         ) {
             if (lines.isEmpty()) {
                 Text(
-                    "Проверки ещё не собраны: откройте «Логи» снова через пару секунд.",
+                    stringResource(R.string.diag_checks_pending),
                     style = MaterialTheme.typography.bodySmall,
                     color = ApuBubbleMutedColor,
                 )
@@ -748,7 +750,7 @@ fun ApuDiagnosticsReportCard(
                 ApuDiagnosticsTrafficLights()
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    "Полный отчёт",
+                    stringResource(R.string.diag_full_report),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
@@ -842,14 +844,14 @@ fun ApuDiagnosticsEventList(
                 )
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    "Журнал событий",
+                    stringResource(R.string.diag_event_log),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    if (events.isEmpty()) "пока нет" else "свежие сверху",
+                    if (events.isEmpty()) stringResource(R.string.diag_none_yet) else stringResource(R.string.diag_newest_first),
                     style = MaterialTheme.typography.labelMedium,
                     color = DiagConsoleMuted,
                     maxLines = 1,
@@ -857,7 +859,7 @@ fun ApuDiagnosticsEventList(
             }
             if (events.isEmpty()) {
                 Text(
-                    "В этой сессии событий ещё не было — журнал наполнится по ходу работы.",
+                    stringResource(R.string.diag_no_events),
                     style = MaterialTheme.typography.bodySmall,
                     color = DiagConsoleMuted,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),

@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -66,7 +68,7 @@ private fun ForwardLoading() {
     ) {
         CircularProgressIndicator(modifier = Modifier.size(28.dp))
         Text(
-            "Загрузка…",
+            stringResource(R.string.action_loading),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -83,7 +85,7 @@ fun ForwardChooserDialog(
 ) {
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Поделиться в APU") },
+        title = { Text(stringResource(R.string.chat_share_in_apu)) },
         text = {
             if (loading) {
                 ForwardLoading()
@@ -100,13 +102,13 @@ fun ForwardChooserDialog(
                 ) {
                     if (friends.isEmpty() && groups.isEmpty() && channels.isEmpty()) {
                         Text(
-                            "Некому переслать: нет друзей, групп и каналов.",
+                            stringResource(R.string.fwd_nobody),
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
                     if (friends.isNotEmpty()) {
                         Text(
-                            "Друзья",
+                            stringResource(R.string.fwd_friends),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                         )
@@ -116,7 +118,7 @@ fun ForwardChooserDialog(
                     }
                     if (groups.isNotEmpty()) {
                         Text(
-                            "Группы",
+                            stringResource(R.string.inbox_groups),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(top = 8.dp),
@@ -127,7 +129,7 @@ fun ForwardChooserDialog(
                     }
                     if (channels.isNotEmpty()) {
                         Text(
-                            "Каналы",
+                            stringResource(R.string.inbox_channels),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(top = 8.dp),
@@ -140,7 +142,7 @@ fun ForwardChooserDialog(
             }
         },
         confirmButton = {
-            ApuTextAction(label = "Отмена", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
         },
     )
 }
@@ -157,7 +159,7 @@ fun ForwardTopicPickerDialog(
 ) {
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (isChannel) "Выберите пост" else "Выберите тему") },
+        title = { Text(if (isChannel) stringResource(R.string.fwd_pick_post) else stringResource(R.string.fwd_pick_topic)) },
         text = {
             Column(
                 modifier = Modifier
@@ -187,7 +189,7 @@ fun ForwardTopicPickerDialog(
             }
         },
         confirmButton = {
-            ApuTextAction(label = "Отмена", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
         },
     )
 }
@@ -209,7 +211,7 @@ fun ForwardSentOverlay(visible: Boolean, onTimeout: () -> Unit) {
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            "✓ Отправлено",
+            stringResource(R.string.fwd_sent),
             color = androidx.compose.ui.graphics.Color.White,
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.titleMedium,

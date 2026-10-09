@@ -760,4 +760,21 @@
     <string name="ft_image_actions">Действия с изображением</string>
     <string name="ft_save_folder">Сохранить в папку</string>
     <string name="ft_retry">Повторить отправку</string>
+    <!-- Пакет 22: администрирование групп, диагностика, пересылка (вынесено из экранов) -->
+    <string name="admin_no_pause">Администраторы и владелец - без паузы.</string>
+    <string name="action_search">Поиск</string>
+    <string name="diag_state_title">Состояние APU</string>
+    <string name="diag_report_desc">Отчёт о состоянии сети и передач</string>
+    <string name="diag_collecting">СОБИРАЮ ОТЧЁТ…</string>
+    <string name="diag_checks_pending">Проверки ещё не собраны: откройте «Логи» снова через пару секунд.</string>
+    <string name="diag_full_report">Полный отчёт</string>
+    <string name="diag_event_log">Журнал событий</string>
+    <string name="diag_none_yet">пока нет</string>
+    <string name="diag_newest_first">свежие сверху</string>
+    <string name="diag_no_events">В этой сессии событий ещё не было — журнал наполнится по ходу работы.</string>
+    <string name="fwd_nobody">Некому переслать: нет друзей, групп и каналов.</string>
+    <string name="fwd_friends">Друзья</string>
+    <string name="fwd_pick_post">Выберите пост</string>
+    <string name="fwd_pick_topic">Выберите тему</string>
+    <string name="fwd_sent">✓ Отправлено</string>
 </resources>

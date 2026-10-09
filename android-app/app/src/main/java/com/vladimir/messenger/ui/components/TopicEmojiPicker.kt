@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // TOPICEMOJIPICKER.KT — выбор значка темы, как в Telegram (раунд 247)
 // =============================================================================
@@ -227,7 +229,7 @@ fun TopicEmojiPicker(
         ApuBubbleField(
             value = query,
             onValueChange = { query = it },
-            label = { Text("Поиск") },
+            label = { Text(stringResource(R.string.action_search)) },
             leadingIcon = {
                 Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp))
             },

@@ -751,4 +751,21 @@
     <string name="ft_image_actions">Image actions</string>
     <string name="ft_save_folder">Save to folder</string>
     <string name="ft_retry">Retry sending</string>
+    <!-- Пакет 22: администрирование групп, диагностика, пересылка (вынесено из экранов) -->
+    <string name="admin_no_pause">Admins and the owner are exempt from the pause.</string>
+    <string name="action_search">Search</string>
+    <string name="diag_state_title">APU status</string>
+    <string name="diag_report_desc">Report on the state of the network and transfers</string>
+    <string name="diag_collecting">COLLECTING REPORT…</string>
+    <string name="diag_checks_pending">Checks have not been collected yet: open “Logs” again in a couple of seconds.</string>
+    <string name="diag_full_report">Full report</string>
+    <string name="diag_event_log">Event log</string>
+    <string name="diag_none_yet">none yet</string>
+    <string name="diag_newest_first">newest first</string>
+    <string name="diag_no_events">There are no events in this session yet — the log will fill up as the app runs.</string>
+    <string name="fwd_nobody">Nobody to forward to: there are no friends, groups or channels.</string>
+    <string name="fwd_friends">Friends</string>
+    <string name="fwd_pick_post">Choose a post</string>
+    <string name="fwd_pick_topic">Choose a topic</string>
+    <string name="fwd_sent">✓ Sent</string>
 </resources>
