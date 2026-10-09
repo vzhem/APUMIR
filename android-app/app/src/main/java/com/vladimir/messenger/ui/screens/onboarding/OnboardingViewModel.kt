@@ -182,11 +182,11 @@ class OnboardingViewModel @Inject constructor(
                     }
                 }
                 com.vladimir.messenger.data.security.IdentityBackup.RestoreResult.NotFound ->
-                    fail("Под этим никнеймом ничего не сохранено. Проверьте написание.")
+                    fail(appContext.getString(R.string.id_not_found))
                 com.vladimir.messenger.data.security.IdentityBackup.RestoreResult.WrongPassword ->
-                    fail("Никнейм или пароль не подошли.")
+                    fail(appContext.getString(R.string.id_wrong_creds))
                 com.vladimir.messenger.data.security.IdentityBackup.RestoreResult.NetworkFailed ->
-                    fail("Нет связи с сервером. Попробуйте позже.")
+                    fail(appContext.getString(R.string.id_no_network))
             }
         }
     }

@@ -955,7 +955,7 @@ class ChatDetailViewModel @Inject constructor(
                             gifLoading = false,
                             gifError = null,
                             gifNotice = "Сервер перегружен — показываю сохранённые гифки. " +
-                                "Скачать и отправить можно как обычно",
+                                appContext.getString(R.string.sv_download_send_hint),
                             gifItems = cached.first,
                             gifNext = "",
                         )
@@ -967,7 +967,7 @@ class ChatDetailViewModel @Inject constructor(
                         )
                         else -> state.copy(
                             gifLoading = false,
-                            gifError = "Каталог гиф недоступен: сервер перегружен. Это временно — попробуйте позже",
+                            gifError = appContext.getString(R.string.sv_gif_catalog_down),
                         )
                     }
                 } else {
@@ -1516,12 +1516,12 @@ class ChatDetailViewModel @Inject constructor(
                 if (sha == null) {
                     val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         botApi.downloadGif(item.gif)
-                    } ?: error("Гифка не скачалась")
+                    } ?: error(appContext.getString(R.string.gc_gif_not_downloaded))
                     val added = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         com.vladimir.messenger.data.gif.GifLibrary.add(
                             appContext, bytes, item.id, lastGifQuery, "gif_" + item.id + ".gif",
                         )
-                    } ?: error("Гифка не сохранилась")
+                    } ?: error(appContext.getString(R.string.gc_gif_not_saved))
                     sha = added.sha256
                 }
                 sendGifRefInternal(sha)

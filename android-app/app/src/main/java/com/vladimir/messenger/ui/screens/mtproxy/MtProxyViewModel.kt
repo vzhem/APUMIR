@@ -141,7 +141,7 @@ class MtProxyViewModel @Inject constructor(
                     message = if (deleted > 0) {
                         "Удалено нерабочих: $deleted (добавленные вручную не тронуты)"
                     } else {
-                        "Нерабочих не нашлось"
+                        context.getString(R.string.mpv_none_found)
                     }
                 )
             }
@@ -187,7 +187,7 @@ class MtProxyViewModel @Inject constructor(
             val msg = if (best != null) {
                 "Лучший прокси выбран: ${best.proxy.host}:${best.proxy.port} (${best.latencyMs}ms)"
             } else {
-                "Нет рабочих прокси"
+                context.getString(R.string.mpv_no_working)
             }
             _uiState.update { it.copy(isChecking = false, message = msg) }
         }

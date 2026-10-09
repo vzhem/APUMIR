@@ -1135,4 +1135,6 @@
     <string name="gf_status_receiving">Receiving… %1$d/%2$d</string>
     <string name="gf_status_waiting">Waiting…</string>
     <string name="gf_status_pending">Requested, waiting for the sender…</string>
+    <string name="mpv_none_found">No broken proxies found</string>
+    <string name="mpv_no_working">No working proxies</string>
 </resources>
