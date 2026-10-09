@@ -910,7 +910,7 @@ class ChatDetailViewModel @Inject constructor(
                     // recipient can pin us and reply; durable transport delivers it when online.
                     targetRecipientId?.let { fileTransferRouter.requestExchangeBinding(it) }
                     _uiState.update {
-                        it.copy(error = "Ключ получателя ещё не закреплён. Отправил запрос — попробуйте снова через пару минут.")
+                        it.copy(error = appContext.getString(R.string.cd_key_pending))
                     }
                 } else {
                     _uiState.update { it.copy(error = appContext.getString(R.string.cd_file_not_sent, e.message)) }
@@ -1527,7 +1527,7 @@ class ChatDetailViewModel @Inject constructor(
                 sendGifRefInternal(sha)
             } catch (e: Exception) {
                 android.util.Log.w("ChatDetailVM", "gif attach failed", e)
-                _uiState.update { it.copy(error = "Гифка не отправлена: " + e.message.orEmpty()) }
+                _uiState.update { it.copy(error = appContext.getString(R.string.cd_gif_not_sent, e.message.orEmpty())) }
             } finally {
                 _uiState.update { it.copy(isPreparingFile = false) }
             }

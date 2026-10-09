@@ -1013,4 +1013,7 @@
     <string name="cd_join_failed2">Couldn’t join — try again later</string>
     <string name="cd_gif_more_unavailable">The server is overloaded — “More” is not available yet</string>
     <string name="st_no_server_copy">There is no copy on the server yet.</string>
+    <!-- Пакет 40: сообщения ключа получателя и гифок (ViewModel) -->
+    <string name="cd_key_pending">The recipient’s key is not pinned yet. The request was sent — try again in a couple of minutes.</string>
+    <string name="cd_gif_not_sent">GIF not sent: %1$s</string>
 </resources>

@@ -1022,4 +1022,7 @@
     <string name="cd_join_failed2">Не удалось войти - попробуйте позже</string>
     <string name="cd_gif_more_unavailable">Сервер перегружен — «Ещё» пока недоступно</string>
     <string name="st_no_server_copy">Копии на сервере ещё нет.</string>
+    <!-- Пакет 40: сообщения ключа получателя и гифок (ViewModel) -->
+    <string name="cd_key_pending">Ключ получателя ещё не закреплён. Отправил запрос — попробуйте снова через пару минут.</string>
+    <string name="cd_gif_not_sent">Гифка не отправлена: %1$s</string>
 </resources>
