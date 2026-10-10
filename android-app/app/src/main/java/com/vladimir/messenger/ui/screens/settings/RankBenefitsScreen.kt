@@ -508,17 +508,17 @@ private fun PromoCodeCard(onRedeemed: () -> Unit) {
                         when (PromoCodes.redeem(context, code)) {
                             PromoCodes.Result.APPLIED -> {
                                 isError = false
-                                message = "Промокод принят: +${PromoCodes.BONUS_PER_CODE} к рангу"
+                                message = context.getString(R.string.rb_promo_applied, PromoCodes.BONUS_PER_CODE)
                                 code = ""
                                 onRedeemed()
                             }
                             PromoCodes.Result.UNKNOWN -> {
                                 isError = true
-                                message = "Такого промокода нет - проверьте написание"
+                                message = context.getString(R.string.rb_promo_unknown)
                             }
                             PromoCodes.Result.ALREADY_USED -> {
                                 isError = true
-                                message = "Этот промокод здесь уже использован"
+                                message = context.getString(R.string.rb_promo_used)
                             }
                             PromoCodes.Result.LIMIT_REACHED -> {
                                 isError = true

@@ -343,17 +343,18 @@ private fun RoundCallButton(
     }
 }
 
+@Composable
 private fun statusText(
     state: com.vladimir.messenger.data.call.CallManager.CallUiState,
     nowMs: Long,
 ): String = when (state.phase) {
     CallStateMachine.Phase.IDLE -> ""
-    CallStateMachine.Phase.OFFERING -> "Вызов…"
-    CallStateMachine.Phase.RINGING -> "Гудки…"
-    CallStateMachine.Phase.INCOMING -> "Входящий звонок"
-    CallStateMachine.Phase.CONNECTING -> "Соединение…"
+    CallStateMachine.Phase.OFFERING -> stringResource(R.string.cst_offering)
+    CallStateMachine.Phase.RINGING -> stringResource(R.string.cst_ringing)
+    CallStateMachine.Phase.INCOMING -> stringResource(R.string.cst_incoming)
+    CallStateMachine.Phase.CONNECTING -> stringResource(R.string.cst_connecting)
     CallStateMachine.Phase.ACTIVE -> formatElapsed(state.connectedAtMs, nowMs)
-    CallStateMachine.Phase.ENDED -> state.endText.ifBlank { "Завершён" }
+    CallStateMachine.Phase.ENDED -> state.endText.ifBlank { stringResource(R.string.cst_ended) }
 }
 
 private fun formatElapsed(connectedAtMs: Long, nowMs: Long): String {

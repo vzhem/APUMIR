@@ -379,6 +379,7 @@ private fun iconFor(mediaType: String): ImageVector = when {
     else -> Icons.Default.InsertDriveFile
 }
 
+@Composable
 private fun stateLabel(
     transfer: FileTransferEntity,
     messageStatus: com.vladimir.messenger.domain.model.MessageStatus?,
@@ -386,7 +387,7 @@ private fun stateLabel(
     if (transfer.direction == "OUTGOING" &&
         messageStatus == com.vladimir.messenger.domain.model.MessageStatus.FILE_EXPIRED
     ) {
-        return "Срок хранения истёк"
+        return stringResource(R.string.fsl_expired_storage)
     }
     val ofChunks = if (transfer.chunkCount > 0) {
         " ${transfer.completedChunks}/${transfer.chunkCount}"
@@ -397,38 +398,38 @@ private fun stateLabel(
     // отправитель повторит, как только владелец подвинет ползунок или
     // очистит завершённые.
     if (transfer.state != "FAILED" && transfer.errorCode == "NO_SPACE") {
-        return "Нет места под пересылку — увеличьте его в настройках$ofChunks"
+        return stringResource(R.string.fsl_no_space, ofChunks)
     }
     return when (transfer.state) {
-        "PREPARING" -> "Подготовка…"
-        "PREPARED" -> "В очереди (дождётся получателя)"
-        "OFFERED" -> "Входящий файл…"
+        "PREPARING" -> stringResource(R.string.fsl_preparing)
+        "PREPARED" -> stringResource(R.string.fsl_queued)
+        "OFFERED" -> stringResource(R.string.fsl_incoming)
         "TRANSFERRING" -> if (transfer.direction == "OUTGOING") {
-            "Передача…$ofChunks"
+            stringResource(R.string.fsl_sending, ofChunks)
         } else if (transfer.custodianNodeId.isNotBlank()) {
-            "Приём от хранителя…$ofChunks"
+            stringResource(R.string.fsl_recv_custodian, ofChunks)
         } else {
-            "Приём…$ofChunks"
+            stringResource(R.string.fsl_recv, ofChunks)
         }
-        "VERIFYING" -> "Проверка…"
-        "SENT" -> "Отправлено, ждём подтверждение"
-        "COMPLETE" -> if (transfer.direction == "OUTGOING") "Доставлено ✓" else "Сохранено ✓"
-        "FAILED" -> "Ошибка (${transfer.errorCode ?: "неизвестно"})"
-        "EXPIRED" -> "Срок истёк"
-        "CANCELLED" -> "Передача отменена"
+        "VERIFYING" -> stringResource(R.string.fsl_verifying)
+        "SENT" -> stringResource(R.string.fsl_sent_wait)
+        "COMPLETE" -> if (transfer.direction == "OUTGOING") stringResource(R.string.fsl_delivered) else stringResource(R.string.fsl_saved)
+        "FAILED" -> stringResource(R.string.fsl_error, transfer.errorCode ?: stringResource(R.string.fsl_unknown))
+        "EXPIRED" -> stringResource(R.string.fsl_expired)
+        "CANCELLED" -> stringResource(R.string.fsl_cancelled)
         "WAITING_RECIPIENT" -> if (transfer.custodianNodeId.isNotBlank()) {
-            "У хранителя, ждём получателя онлайн"
+            stringResource(R.string.fsl_keeper_wait)
         } else {
-            "Ждём получателя онлайн"
+            stringResource(R.string.fsl_wait_online)
         }
         // Файл лежит у третьего телефона (этап 7 роя): получатель заберёт
         // его, даже если отправитель выйдет из сети.
         "CUSTODIED" -> {
             val holders = transfer.custodianNodeId.split(',').count { it.isNotBlank() }
             if (holders > 1) {
-                "На хранении у $holders телефонов, получатель заберёт при появлении"
+                stringResource(R.string.fsl_custody_many, holders)
             } else {
-                "Передано на хранение, получатель заберёт при появлении"
+                stringResource(R.string.fsl_custody_one)
             }
         }
         else -> transfer.state
