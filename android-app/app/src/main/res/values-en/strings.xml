@@ -1258,4 +1258,19 @@
     <string name="emoji_cat_food">Food</string>
     <string name="mqtt_path_auto">The route is chosen automatically: first a direct one, and if the network blocks it, through a backup channel, then back again. Nothing to tap.</string>
     <string name="mqtt_broker_note">The “Our server” check and the message broker are separate connections. If the broker did not answer, the app retries the connection by itself; there is no need to send a copy of the profile.</string>
+    <string name="gc_slow_admin">Slow mode: members write no more than one message every %1$s (admins have no pause)</string>
+    <string name="gc_slow_member">Slow mode: no more than one message every %1$s</string>
+    <string name="unit_gb">%1$.1f GB</string>
+    <string name="unit_mb">%1$.1f MB</string>
+    <string name="unit_kb">%1$.0f KB</string>
+    <string name="unit_b">%1$d B</string>
+    <string name="sync_net_copy">APU has a copy on the network from %1$s, %2$s.</string>
+    <string name="presence_online">Online</string>
+    <string name="presence_unknown">Last activity is unknown</string>
+    <string name="presence_today_tpl">Last seen today at %1$s</string>
+    <string name="presence_yesterday_tpl">Last seen yesterday at %1$s</string>
+    <string name="presence_date_tpl">Last seen %1$s</string>
+    <string name="presence_pattern_time">HH:mm</string>
+    <string name="presence_pattern_date">d MMMM \'at\' HH:mm</string>
+    <string name="presence_pattern_date_year">d MMMM yyyy \'at\' HH:mm</string>
 </resources>

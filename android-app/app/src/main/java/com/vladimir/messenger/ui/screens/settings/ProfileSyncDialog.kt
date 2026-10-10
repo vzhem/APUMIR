@@ -128,9 +128,11 @@ fun ProfileSyncDialog(
                 }
                 ui.netMeta?.let { meta ->
                     Text(
-                        "В сети APU есть копия от " +
-                            SimpleDateFormat("d.MM HH:mm", Locale.getDefault()).format(Date(meta.timeMs)) +
-                            ", ${humanBytes(meta.sizeBytes)}.",
+                        stringResource(
+                            R.string.sync_net_copy,
+                            SimpleDateFormat("d.MM HH:mm", Locale.getDefault()).format(Date(meta.timeMs)),
+                            humanBytes(meta.sizeBytes),
+                        ),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.SemiBold,
@@ -298,7 +300,8 @@ fun ProfileSyncDialog(
     )
 }
 
+@Composable
 private fun humanBytes(bytes: Long): String = when {
-    bytes >= 1L shl 20 -> String.format(java.util.Locale.US, "%.1f МБ", bytes / (1024.0 * 1024))
-    else -> String.format(java.util.Locale.US, "%.0f КБ", bytes / 1024.0)
+    bytes >= 1L shl 20 -> stringResource(R.string.unit_mb, bytes / (1024.0 * 1024))
+    else -> stringResource(R.string.unit_kb, bytes / 1024.0)
 }

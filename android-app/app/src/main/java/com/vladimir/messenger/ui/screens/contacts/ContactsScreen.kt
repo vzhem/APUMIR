@@ -249,6 +249,7 @@ fun ContactsScreen(
                             presenceLabel = contactPresenceLabel(
                                 isOnline = contact.isOnline,
                                 lastSeenAtMs = contact.lastSeenAtMs,
+                                labels = presenceLabels(),
                             ),
                             menuActions = listOf(
                                 BubbleMenuAction(

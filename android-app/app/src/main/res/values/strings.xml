@@ -1267,4 +1267,19 @@
     <string name="emoji_cat_food">Еда</string>
     <string name="mqtt_path_auto">Путь выбирается сам: сначала прямой, если сеть его не пропускает — через обходной канал, и потом обратно. Нажимать ничего не нужно.</string>
     <string name="mqtt_broker_note">Проверка «Наш сервер» и брокер сообщений — разные соединения. Если брокер не ответил, приложение повторяет подключение само; отправлять копию профиля не нужно.</string>
+    <string name="gc_slow_admin">Медленный режим: участники пишут не чаще одного сообщения в %1$s (администраторы - без паузы)</string>
+    <string name="gc_slow_member">Медленный режим: не чаще одного сообщения в %1$s</string>
+    <string name="unit_gb">%1$.1f ГБ</string>
+    <string name="unit_mb">%1$.1f МБ</string>
+    <string name="unit_kb">%1$.0f КБ</string>
+    <string name="unit_b">%1$d Б</string>
+    <string name="sync_net_copy">В сети APU есть копия от %1$s, %2$s.</string>
+    <string name="presence_online">В сети</string>
+    <string name="presence_unknown">Последняя активность неизвестна</string>
+    <string name="presence_today_tpl">Был(а) сегодня в %1$s</string>
+    <string name="presence_yesterday_tpl">Был(а) вчера в %1$s</string>
+    <string name="presence_date_tpl">Был(а) %1$s</string>
+    <string name="presence_pattern_time">HH:mm</string>
+    <string name="presence_pattern_date">d MMMM \'в\' HH:mm</string>
+    <string name="presence_pattern_date_year">d MMMM yyyy \'в\' HH:mm</string>
 </resources>

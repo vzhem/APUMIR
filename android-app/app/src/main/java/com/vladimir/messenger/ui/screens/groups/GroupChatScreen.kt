@@ -2475,18 +2475,19 @@ private fun ReplyStrip(
  * Подпись под полем ввода, когда в группе включён медленный режим: человек
  * должен понимать, почему «Отправить» не нажимается.
  */
+@Composable
 private fun slowModeHint(seconds: Int, role: String?): String {
     val label = when (seconds) {
-        10 -> "10 секунд"
-        30 -> "30 секунд"
-        60 -> "1 минуту"
-        300 -> "5 минут"
-        900 -> "15 минут"
-        else -> "$seconds с"
+        10 -> stringResource(R.string.pause_10s)
+        30 -> stringResource(R.string.pause_30s)
+        60 -> stringResource(R.string.pause_1m)
+        300 -> stringResource(R.string.pause_5m)
+        900 -> stringResource(R.string.pause_15m)
+        else -> stringResource(R.string.pause_secs, seconds)
     }
     return if (com.vladimir.messenger.data.group.GroupRole.isAdminOrOwner(role.orEmpty())) {
-        "Медленный режим: участники пишут не чаще одного сообщения в $label (администраторы - без паузы)"
+        stringResource(R.string.gc_slow_admin, label)
     } else {
-        "Медленный режим: не чаще одного сообщения в $label"
+        stringResource(R.string.gc_slow_member, label)
     }
 }

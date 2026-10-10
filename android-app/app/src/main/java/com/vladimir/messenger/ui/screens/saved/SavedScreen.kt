@@ -798,11 +798,12 @@ private fun NoteDialog(onDismiss: () -> Unit, onSave: (String) -> Unit) {
     )
 }
 
+@Composable
 private fun formatSize(bytes: Long): String = when {
-    bytes >= 1024L * 1024 * 1024 -> String.format(Locale.getDefault(), "%.1f ГБ", bytes / 1024.0 / 1024 / 1024)
-    bytes >= 1024L * 1024 -> String.format(Locale.getDefault(), "%.1f МБ", bytes / 1024.0 / 1024)
-    bytes >= 1024L -> String.format(Locale.getDefault(), "%.0f КБ", bytes / 1024.0)
-    else -> "$bytes Б"
+    bytes >= 1024L * 1024 * 1024 -> stringResource(R.string.unit_gb, bytes / 1024.0 / 1024 / 1024)
+    bytes >= 1024L * 1024 -> stringResource(R.string.unit_mb, bytes / 1024.0 / 1024)
+    bytes >= 1024L -> stringResource(R.string.unit_kb, bytes / 1024.0)
+    else -> stringResource(R.string.unit_b, bytes)
 }
 
 /**
