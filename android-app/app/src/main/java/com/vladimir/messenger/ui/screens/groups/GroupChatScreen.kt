@@ -1865,7 +1865,10 @@ private fun MessageBubble(
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp))
     }
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        // Свайп для ответа - по всей строке, а не только по пузырю.
+        modifier = Modifier
+            .fillMaxWidth()
+            .swipeToReply { onReply() },
         horizontalArrangement = if (message.isFromMe) Arrangement.End else Arrangement.Start,
     ) {
         if (selectionMode) {
@@ -1900,7 +1903,6 @@ private fun MessageBubble(
         ApuBubbleCard(
             modifier = Modifier
                 .widthIn(max = 300.dp)
-                .swipeToReply { onReply() }
                 .combinedClickable(
                     // В режиме выбора клик отмечает сообщение; иначе - реакции / меню действий.
                     onClick = { if (selectionMode) onToggleSelect() else showReactions = true },

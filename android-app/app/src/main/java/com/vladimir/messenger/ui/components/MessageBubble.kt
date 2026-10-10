@@ -88,7 +88,10 @@ fun MessageBubble(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 2.dp),
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+            // Свайп ловим по всей строке, а не только по пузырю: короткое
+            // сообщение из одного знака иначе почти не захватить.
+            .swipeToReply(enabled = onReply != null) { onReply?.invoke() },
         horizontalArrangement = if (isOwn) Arrangement.End else Arrangement.Start,
     ) {
         // Раунд 211: «три точки» рядом с пузырём (те же, что у картинок и
@@ -107,7 +110,6 @@ fun MessageBubble(
                     color = if (isOwn) messenger.messageBubbleOwn else messenger.messageBubbleOther,
                     shape = if (isOwn) OwnBubbleShape else OtherBubbleShape,
                 )
-                .swipeToReply(enabled = onReply != null) { onReply?.invoke() }
                 .combinedClickable(
                     onClick = onTap,
                     onLongClick = { onLongClick?.invoke() }
