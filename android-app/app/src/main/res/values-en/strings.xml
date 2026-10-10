@@ -1273,4 +1273,19 @@
     <string name="presence_pattern_time">HH:mm</string>
     <string name="presence_pattern_date">d MMMM \'at\' HH:mm</string>
     <string name="presence_pattern_date_year">d MMMM yyyy \'at\' HH:mm</string>
+    <string name="msg_yesterday">Yesterday</string>
+    <string name="net_status_connected">Connected</string>
+    <string name="period_daily">every day</string>
+    <string name="period_weekly">once a week</string>
+    <string name="period_monthly">once a month</string>
+    <string name="backup_period_label">Schedule: %1$s</string>
+    <string name="backup_enable_period">Turn on: %1$s</string>
+    <string name="backup_will_update">The file will be updated %1$s. The password stays the same; it is kept in the phone’s secure storage.</string>
+    <string name="backup_auto_enabled">Auto-update is on: the file will be overwritten %1$s.</string>
+    <string name="backup_file_label">File: %1$s</string>
+    <string name="backup_with_received">, including received files</string>
+    <string name="backup_without_received">, without received files</string>
+    <string name="backup_last_update">Last update: %1$s (%2$s)</string>
+    <string name="backup_first_update">First update — about %1$d days after turning it on</string>
+    <string name="backup_next_update">Next: around %1$s</string>
 </resources>

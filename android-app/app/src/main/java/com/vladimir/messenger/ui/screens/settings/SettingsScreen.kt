@@ -1050,7 +1050,7 @@ private fun SettingsTabContent(
                     SettingsItem(
                         icon  = Icons.Default.Hub,
                         title = stringResource(R.string.settings_connection_status),
-                        subtitle = uiState.connectionStatus.displayName,
+                        subtitle = uiState.connectionStatus.displayName(),
                         trailingContent = {
                             StatusDot(status = uiState.connectionStatus)
                         }
@@ -2143,13 +2143,15 @@ private fun StatusDot(status: com.vladimir.messenger.data.repository.NetworkStat
 }
 
 // Расширение для отображения статуса
-private val com.vladimir.messenger.data.repository.NetworkStatus.displayName: String
-    get() = when (this) {
-        com.vladimir.messenger.data.repository.NetworkStatus.Connected    -> "Подключен"
-        com.vladimir.messenger.data.repository.NetworkStatus.Connecting   -> "Подключение..."
-        com.vladimir.messenger.data.repository.NetworkStatus.Degraded     -> "Через ретранслятор"
-        com.vladimir.messenger.data.repository.NetworkStatus.Disconnected -> "Нет соединения"
+@Composable
+private fun com.vladimir.messenger.data.repository.NetworkStatus.displayName(): String = stringResource(
+    when (this) {
+        com.vladimir.messenger.data.repository.NetworkStatus.Connected    -> R.string.net_status_connected
+        com.vladimir.messenger.data.repository.NetworkStatus.Connecting   -> R.string.nsb_connecting
+        com.vladimir.messenger.data.repository.NetworkStatus.Degraded     -> R.string.nsb_relay
+        com.vladimir.messenger.data.repository.NetworkStatus.Disconnected -> R.string.nsb_disconnected
     }
+)
 
 /**
  * Отчёт ещё собирается: кнопка не молчит, а объясняет, где именно идёт сбор.

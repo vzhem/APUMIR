@@ -187,7 +187,7 @@ class ProfileBackupViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             busy = false,
-                            message = if (result.receivedFiles > 0) context.getString(R.string.bk_saved_files, humanBytes(result.bytes), result.receivedFiles) else context.getString(R.string.bk_saved, humanBytes(result.bytes)),
+                            message = if (result.receivedFiles > 0) context.getString(R.string.bk_saved_files, humanBytes(context, result.bytes), result.receivedFiles) else context.getString(R.string.bk_saved, humanBytes(context, result.bytes)),
                             failed = false,
                             lastSaved = target,
                             schedule = schedule,
@@ -248,8 +248,7 @@ class ProfileBackupViewModel @Inject constructor(
                     it.copy(
                         busy = false,
                         schedule = schedule,
-                        message = "Файл будет обновляться ${period.title}. Пароль тот же; " +
-                            "он хранится в защищённом хранилище телефона.",
+                        message = context.getString(R.string.backup_will_update, period.localizedTitle(context)),
                         failed = false,
                     )
                 }
@@ -287,7 +286,7 @@ class ProfileBackupViewModel @Inject constructor(
                     it.copy(
                         busy = false,
                         schedule = schedule,
-                        message = "Автообновление включено: файл будет перезаписываться ${period.title}.",
+                        message = context.getString(R.string.backup_auto_enabled, period.localizedTitle(context)),
                         failed = false,
                     )
                 }
@@ -370,11 +369,20 @@ class ProfileBackupViewModel @Inject constructor(
     }
 
     companion object {
-        fun humanBytes(bytes: Long): String = when {
-            bytes >= 1L shl 30 -> String.format(Locale.US, "%.1f ГБ", bytes / (1024.0 * 1024 * 1024))
-            bytes >= 1L shl 20 -> String.format(Locale.US, "%.1f МБ", bytes / (1024.0 * 1024))
-            bytes >= 1L shl 10 -> String.format(Locale.US, "%.0f КБ", bytes / 1024.0)
-            else -> "$bytes Б"
+        fun humanBytes(context: Context, bytes: Long): String = when {
+            bytes >= 1L shl 30 -> context.getString(R.string.unit_gb, bytes / (1024.0 * 1024 * 1024))
+            bytes >= 1L shl 20 -> context.getString(R.string.unit_mb, bytes / (1024.0 * 1024))
+            bytes >= 1L shl 10 -> context.getString(R.string.unit_kb, bytes / 1024.0)
+            else -> context.getString(R.string.unit_b, bytes)
         }
     }
 }
+
+/** Название периода на языке приложения (для сообщений и подписей). */
+internal fun BackupSchedule.Period.localizedTitle(context: Context): String = context.getString(
+    when (this) {
+        BackupSchedule.Period.DAILY -> R.string.period_daily
+        BackupSchedule.Period.WEEKLY -> R.string.period_weekly
+        BackupSchedule.Period.MONTHLY -> R.string.period_monthly
+    }
+)

@@ -1282,4 +1282,19 @@
     <string name="presence_pattern_time">HH:mm</string>
     <string name="presence_pattern_date">d MMMM \'в\' HH:mm</string>
     <string name="presence_pattern_date_year">d MMMM yyyy \'в\' HH:mm</string>
+    <string name="msg_yesterday">Вчера</string>
+    <string name="net_status_connected">Подключён</string>
+    <string name="period_daily">каждый день</string>
+    <string name="period_weekly">раз в неделю</string>
+    <string name="period_monthly">раз в месяц</string>
+    <string name="backup_period_label">Период: %1$s</string>
+    <string name="backup_enable_period">Включить: %1$s</string>
+    <string name="backup_will_update">Файл будет обновляться %1$s. Пароль тот же; он хранится в защищённом хранилище телефона.</string>
+    <string name="backup_auto_enabled">Автообновление включено: файл будет перезаписываться %1$s.</string>
+    <string name="backup_file_label">Файл: %1$s</string>
+    <string name="backup_with_received">, с полученными файлами</string>
+    <string name="backup_without_received">, без полученных файлов</string>
+    <string name="backup_last_update">Последнее обновление: %1$s (%2$s)</string>
+    <string name="backup_first_update">Первое обновление — примерно через %1$d дн. после включения</string>
+    <string name="backup_next_update">Следующее: около %1$s</string>
 </resources>

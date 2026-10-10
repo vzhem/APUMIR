@@ -343,7 +343,7 @@ fun ProfileBackupScreen(
                                     Text(stringResource(R.string.backup_attach_received), style = MaterialTheme.typography.bodyMedium)
                                     Text(
                                         if (state.receivedBytes > 0) {
-                                            stringResource(R.string.backup_received_now, ProfileBackupViewModel.humanBytes(state.receivedBytes))
+                                            stringResource(R.string.backup_received_now, ProfileBackupViewModel.humanBytes(activityContext, state.receivedBytes))
                                         } else {
                                             stringResource(R.string.backup_no_received)
                                         },
@@ -402,18 +402,21 @@ fun ProfileBackupScreen(
                             )
                             Spacer(Modifier.height(4.dp))
                             if (schedule != null && schedule.enabled) {
-                                val fmt = SimpleDateFormat("d MMMM, HH:mm", Locale.forLanguageTag("ru"))
+                                val fmt = SimpleDateFormat("d MMMM, HH:mm", Locale.getDefault())
                                 Text(
-                                    "Файл: ${schedule.targetName}\n" +
-                                        "Период: ${schedule.period.title}" +
-                                        (if (schedule.includeReceived) ", с полученными файлами" else ", без полученных файлов") +
+                                    activityContext.getString(R.string.backup_file_label, schedule.targetName) + "\n" +
+                                        activityContext.getString(R.string.backup_period_label, schedule.period.localizedTitle(activityContext)) +
+                                        (if (schedule.includeReceived) activityContext.getString(R.string.backup_with_received) else activityContext.getString(R.string.backup_without_received)) +
                                         (if (schedule.lastOkAtMs > 0) {
-                                            "\nПоследнее обновление: ${fmt.format(Date(schedule.lastOkAtMs))} " +
-                                                "(${ProfileBackupViewModel.humanBytes(schedule.lastOkBytes)})"
+                                            "\n" + activityContext.getString(
+                                                R.string.backup_last_update,
+                                                fmt.format(Date(schedule.lastOkAtMs)),
+                                                ProfileBackupViewModel.humanBytes(activityContext, schedule.lastOkBytes),
+                                            )
                                         } else {
-                                            "\nПервое обновление - примерно через ${schedule.period.days} дн. после включения"
+                                            "\n" + activityContext.getString(R.string.backup_first_update, schedule.period.days.toInt())
                                         }) +
-                                        (if (schedule.nextDueAtMs > 0) "\nСледующее: около ${fmt.format(Date(schedule.nextDueAtMs))}" else "") +
+                                        (if (schedule.nextDueAtMs > 0) "\n" + activityContext.getString(R.string.backup_next_update, fmt.format(Date(schedule.nextDueAtMs))) else "") +
                                         (scheduleError?.let { "\nПоследняя попытка не удалась: $it" } ?: ""),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = if (scheduleError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -466,7 +469,7 @@ fun ProfileBackupScreen(
                                         style = DiagnosticsActionStyle.PRIMARY,
                                         enabled = !state.busy && password.length >= BackupCipher.MIN_PASSWORD_LENGTH,
                                         modifier = Modifier.fillMaxWidth(),
-                                    ) { Text("Включить: ${autoPeriod.title}") }
+                                    ) { Text(stringResource(R.string.backup_enable_period, autoPeriod.localizedTitle(activityContext))) }
                                     if (password.length < BackupCipher.MIN_PASSWORD_LENGTH) {
                                         Spacer(Modifier.height(6.dp))
                                         Text(
@@ -570,7 +573,7 @@ fun ProfileBackupScreen(
                                         modifier = Modifier.fillMaxWidth(),
                                     ) {
                                         Text(
-                                            fb.name + " · " + ProfileBackupViewModel.humanBytes(fb.size),
+                                            fb.name + " · " + ProfileBackupViewModel.humanBytes(activityContext, fb.size),
                                             maxLines = 1,
                                         )
                                     }

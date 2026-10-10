@@ -320,12 +320,13 @@ fun MessageBubble(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.End,
                 ) {
+                    val yesterdayLabel = stringResource(R.string.msg_yesterday)
                     Text(
                         // Раунд 184 (аудит-5): SimpleDateFormat+Calendar создавались
                         // заново на каждую перерисовку каждого пузыря. remember
                         // кэширует результат; часовой маркер - «Вчера» обновится.
-                        text = remember(message.timestamp, System.currentTimeMillis() / 3_600_000L) {
-                            formatMessageTime(message.timestamp)
+                        text = remember(message.timestamp, yesterdayLabel, System.currentTimeMillis() / 3_600_000L) {
+                            formatMessageTime(message.timestamp, yesterdayLabel)
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = if (isOwn) messenger.messageBubbleOwnText.copy(alpha = 0.7f)
@@ -421,7 +422,7 @@ private fun MessageStatusIcon(status: MessageStatus, tint: Color) {
     )
 }
 
-private fun formatMessageTime(timestamp: Long): String {
+private fun formatMessageTime(timestamp: Long, yesterdayLabel: String): String {
     val date = Date(timestamp)
     val today = Calendar.getInstance().apply {
         set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
@@ -431,7 +432,7 @@ private fun formatMessageTime(timestamp: Long): String {
     }
     return when {
         timestamp > today.timeInMillis -> SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)
-        timestamp > yesterday.timeInMillis -> "Вчера"
+        timestamp > yesterday.timeInMillis -> yesterdayLabel
         else -> SimpleDateFormat("d MMM", Locale("ru")).format(date)
     }
 }
