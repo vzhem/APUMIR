@@ -1315,4 +1315,41 @@
         <item quantity="one">Need at least %d answer option</item>
         <item quantity="other">Need at least %d answer options</item>
     </plurals>
+    <string name="word_channel_acc">the channel</string>
+    <string name="word_group_acc">the group</string>
+    <string name="invite_title">Invite to %1$s</string>
+    <string name="confirm_delete_title">Delete %1$s?</string>
+    <string name="sent_count">Sent: %1$d</string>
+    <string name="sent_failed">Sent: %1$d, failed: %2$d</string>
+    <string name="selected_of">Selected: %1$d of %2$d</string>
+    <string name="chat_delete_body">The chat with “%1$s” and all its messages will be deleted from this phone.</string>
+    <string name="chat_clear_body">Messages in the chat with “%1$s” will be deleted. The chat itself will stay.</string>
+    <string name="grp_del_channel_body">“%1$s” will be deleted for all subscribers.</string>
+    <string name="grp_del_group_body">“%1$s” will be deleted for all members.</string>
+    <string name="grp_del_channel_all">“%1$s” and all its posts will be deleted for all subscribers.</string>
+    <string name="grp_del_group_all">“%1$s” and all its messages will be deleted for all members.</string>
+    <string name="grp_unsub_channel_body">You will stop receiving posts from the channel “%1$s”.</string>
+    <string name="grp_leave_body">You will stop receiving messages from “%1$s”.</string>
+    <string name="grp_leave_group_body">You will stop receiving messages from the group “%1$s”.</string>
+    <string name="members_count_short">%1$d members</string>
+    <string name="topics_tag">topics</string>
+    <string name="grp_public">public</string>
+    <string name="grp_private">private</string>
+    <string name="member_fallback">Member %1$s</string>
+    <string name="mute_fallback_post">post</string>
+    <string name="mute_fallback_group">group</string>
+    <string name="comments_to_topic">Comments on “%1$s”</string>
+    <string name="topic_label_tpl">Topic “%1$s”</string>
+    <string name="topic_in_group">Topic · %1$s</string>
+    <string name="show_more_n">Show %1$d more</string>
+    <string name="no_requests_found">No one found for “%1$s”</string>
+    <string name="photo_count_label">Photos: %1$d</string>
+    <string name="join_req_suffix">to join</string>
+    <string name="typing_one">%1$s is typing…</string>
+    <string name="typing_two">%1$s and %2$s are typing…</string>
+    <string name="typing_many">%1$s, %2$s and %3$d more are typing…</string>
+    <plurals name="join_requests">
+        <item quantity="one">%1$d request</item>
+        <item quantity="other">%1$d requests</item>
+    </plurals>
 </resources>

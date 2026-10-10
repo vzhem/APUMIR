@@ -486,13 +486,13 @@ fun GroupsScreen(
 
     // Как приглашать: показываем QR или отправляем ссылку.
     inviteChoice?.let { group ->
-        val what = if (group.isChannel) "канал" else "группу"
+        val what = if (group.isChannel) stringResource(R.string.word_channel_acc) else stringResource(R.string.word_group_acc)
         // Раунд 198: получателя ссылки может не быть с APU - по умолчанию
         // прикладываем установочный APK; галочка позволяет не таскать 40 МБ.
         var attachApk by remember { mutableStateOf(true) }
         ApuSettingsDialog(
             onDismissRequest = { inviteChoice = null },
-            title = { Text("Пригласить в $what") },
+            title = { Text(stringResource(R.string.invite_title, what)) },
             text = {
                 Column {
                     Text(
@@ -566,13 +566,13 @@ fun GroupsScreen(
     // Подтверждение выхода или удаления.
     confirmLeave?.let { group ->
         val owner = group.myRole == GroupRole.OWNER
-        val what = if (group.isChannel) "канал" else "группу"
+        val what = if (group.isChannel) stringResource(R.string.word_channel_acc) else stringResource(R.string.word_group_acc)
         ApuSettingsDialog(
             onDismissRequest = { confirmLeave = null },
             title = {
                 Text(
                     when {
-                        owner -> "Удалить $what?"
+                        owner -> stringResource(R.string.confirm_delete_title, what)
                         group.isChannel -> stringResource(R.string.groups_unsubscribe_channel_q)
                         else -> stringResource(R.string.groups_leave_group_q)
                     }
@@ -582,13 +582,13 @@ fun GroupsScreen(
                 Text(
                     when {
                         owner && group.isChannel ->
-                            "«${group.title}» и все посты будут удалены у всех подписчиков."
+                            stringResource(R.string.grp_del_channel_all, group.title)
                         owner ->
-                            "«${group.title}» и вся переписка будут удалены у всех участников."
+                            stringResource(R.string.grp_del_group_all, group.title)
                         group.isChannel ->
-                            "Вы перестанете получать посты канала «${group.title}»."
+                            stringResource(R.string.grp_unsub_channel_body, group.title)
                         else ->
-                            "Вы перестанете получать сообщения группы «${group.title}»."
+                            stringResource(R.string.grp_leave_group_body, group.title)
                     }
                 )
             },
@@ -685,7 +685,7 @@ private fun GroupRow(
                 Text(
                     buildString {
                         append(if (group.isChannel) stringResource(R.string.contacts_channel) else stringResource(R.string.contacts_group))
-                        append(if (group.isPublic) " · публичная" else " · частная")
+                        append(" · ").append(if (group.isPublic) stringResource(R.string.grp_public) else stringResource(R.string.grp_private))
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = ApuBubbleAccentColor,
@@ -693,9 +693,8 @@ private fun GroupRow(
                 )
                 Text(
                     buildString {
-                        append(group.memberCount)
-                        append(" участн.")
-                        if (group.topicsEnabled) append(" • темы")
+                        append(stringResource(R.string.members_count_short, group.memberCount))
+                        if (group.topicsEnabled) append(" • ").append(stringResource(R.string.topics_tag))
                         // Раунд 156: без служебных строк (гифки/стикеры).
                         group.lastMessagePreview?.let {
                             append(" • ").append(

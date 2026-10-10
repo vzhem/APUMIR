@@ -485,9 +485,9 @@ fun ChatListScreen(
     }
 
     inviteChoice?.let { group ->
-        val what = if (group.isChannel) "канал" else "группу"
+        val what = if (group.isChannel) stringResource(R.string.word_channel_acc) else stringResource(R.string.word_group_acc)
         ApuPremiumDialog(
-            title = "Пригласить в $what",
+            title = stringResource(R.string.invite_title, what),
             onDismiss = { inviteChoice = null },
             dismissLabel = null,
         ) {
@@ -554,7 +554,7 @@ fun ChatListScreen(
                     inviteApu = null
                     android.widget.Toast.makeText(
                         context,
-                        if (failed == 0) "Отправлено: $sent" else "Отправлено: $sent, не удалось: $failed",
+                        if (failed == 0) context.getString(R.string.sent_count, sent) else context.getString(R.string.sent_failed, sent, failed),
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
                 }
@@ -568,7 +568,7 @@ fun ChatListScreen(
                         list.isEmpty() -> Text(stringResource(R.string.chat_no_personal))
                         else -> {
                             Text(
-                                "Выбрано: ${selected.size} из $maxPick",
+                                stringResource(R.string.selected_of, selected.size, maxPick),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color(0xFF5A6472),
                             )
@@ -715,7 +715,7 @@ fun ChatListScreen(
             },
         ) {
             Text(
-                "Чат с «${chat.contactName}» и вся переписка будут удалены на этом телефоне.",
+                stringResource(R.string.chat_delete_body, chat.contactName),
                 style = MaterialTheme.typography.bodyMedium,
                 color = ApuBubbleTextColor,
             )
@@ -734,7 +734,7 @@ fun ChatListScreen(
             },
         ) {
             Text(
-                "Сообщения чата с «${chat.contactName}» будут удалены, сам чат останется.",
+                stringResource(R.string.chat_clear_body, chat.contactName),
                 style = MaterialTheme.typography.bodyMedium,
                 color = ApuBubbleTextColor,
             )
@@ -744,10 +744,10 @@ fun ChatListScreen(
     // Подтверждение выхода/удаления группы или канала.
     confirmGroup?.let { group ->
         val owner = group.myRole == GroupRole.OWNER
-        val what = if (group.isChannel) "канал" else "группу"
+        val what = if (group.isChannel) stringResource(R.string.word_channel_acc) else stringResource(R.string.word_group_acc)
         ApuPremiumDialog(
             title = when {
-                owner -> "Удалить $what?"
+                owner -> stringResource(R.string.confirm_delete_title, what)
                 group.isChannel -> stringResource(R.string.groups_unsubscribe_channel_q)
                 else -> stringResource(R.string.groups_leave_group_q)
             },
@@ -764,10 +764,10 @@ fun ChatListScreen(
         ) {
             Text(
                 when {
-                    owner && group.isChannel -> "«${group.title}» будет удалён у всех подписчиков."
-                    owner -> "«${group.title}» будет удалён у всех участников."
-                    group.isChannel -> "Вы перестанете получать посты канала «${group.title}»."
-                    else -> "Вы перестанете получать сообщения «${group.title}»."
+                    owner && group.isChannel -> stringResource(R.string.grp_del_channel_body, group.title)
+                    owner -> stringResource(R.string.grp_del_group_body, group.title)
+                    group.isChannel -> stringResource(R.string.grp_unsub_channel_body, group.title)
+                    else -> stringResource(R.string.grp_leave_body, group.title)
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = ApuBubbleTextColor,

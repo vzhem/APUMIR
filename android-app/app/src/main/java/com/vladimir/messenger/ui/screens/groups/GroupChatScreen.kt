@@ -327,7 +327,7 @@ fun GroupChatScreen(
         val isSelfPeer = uiState.me?.nodeId == inspectedPeerId
         val peerClipboardCtx = androidx.compose.ui.platform.LocalContext.current
         PeerProfileSheet(
-            name = uiState.inspectedPeerName.ifBlank { "Участник " + inspectedPeerId.takeLast(4) },
+            name = uiState.inspectedPeerName.ifBlank { stringResource(R.string.member_fallback, inspectedPeerId.takeLast(4)) },
             contactId = inspectedPeerId,
             isOnline = true,
             // Элита в группе: знак и кольцо в карточке участника тоже.
@@ -519,8 +519,8 @@ fun GroupChatScreen(
         else uiState.group?.mutedUntilMs ?: 0L
     }
     val muteTargetName = when {
-        muteTopicId != null && isChannel -> "Комментарии к «${selectedTopicName ?: "публикации"}»"
-        muteTopicId != null -> "Тема «${selectedTopicName ?: "группы"}»"
+        muteTopicId != null && isChannel -> stringResource(R.string.comments_to_topic, selectedTopicName ?: stringResource(R.string.mute_fallback_post))
+        muteTopicId != null -> stringResource(R.string.topic_label_tpl, selectedTopicName ?: stringResource(R.string.mute_fallback_group))
         isChannel -> uiState.group?.title ?: stringResource(R.string.contacts_channel)
         else -> uiState.group?.title ?: stringResource(R.string.contacts_group)
     }
@@ -665,8 +665,8 @@ fun GroupChatScreen(
                                         ?: stringResource(R.string.stat_comments)
                                     // В теме: «Тема · группа», участники - на
                                     // списке тем, там они и нужны.
-                                    topicHeader -> "Тема · " + (uiState.group?.title ?: stringResource(R.string.contacts_group))
-                                    else -> (uiState.group?.memberCount ?: 0).toString() + " участн."
+                                    topicHeader -> stringResource(R.string.topic_in_group, uiState.group?.title ?: stringResource(R.string.contacts_group))
+                                    else -> stringResource(R.string.members_count_short, uiState.group?.memberCount ?: 0)
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color(0xFF5A6472),
@@ -986,7 +986,7 @@ fun GroupChatScreen(
                 if (isChannel && uiState.moreComments > 0) {
                     item(key = "more-comments") {
                         ApuTextAction(
-                            label = "Показать ещё " + uiState.moreComments,
+                            label = stringResource(R.string.show_more_n, uiState.moreComments),
                             onClick = { viewModel.loadOlderComments() },
                             modifier = Modifier.fillMaxWidth(),
                         )
@@ -1026,7 +1026,7 @@ fun GroupChatScreen(
                         }
                     }
                     val resolvedSenderName = senderNames[message.senderId]?.takeIf { it.isNotBlank() }
-                        ?: "Участник " + message.senderId.takeLast(4)
+                        ?: stringResource(R.string.member_fallback, message.senderId.takeLast(4))
                     MessageBubble(
                         message = message,
                         senderName = resolvedSenderName,
@@ -1558,7 +1558,7 @@ private fun JoinRequestsBanner(count: Int, expanded: Boolean, onClick: () -> Uni
         Text("👥", fontSize = 18.sp)
         Spacer(Modifier.width(8.dp))
         Text(
-            requestsLabel(count) + " на вступление",
+            requestsLabel(androidx.compose.ui.platform.LocalContext.current, count) + " " + stringResource(R.string.join_req_suffix),
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.primary,
         )
@@ -1613,7 +1613,7 @@ private fun JoinRequestsSheet(
         }
         if (filtered.isEmpty()) {
             Text(
-                if (requests.isEmpty()) stringResource(R.string.group_no_requests) else "Никого не нашли по «" + clean + "»",
+                if (requests.isEmpty()) stringResource(R.string.group_no_requests) else stringResource(R.string.no_requests_found, clean),
                 color = Color(0xFF5A6472),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1687,11 +1687,8 @@ private fun JoinRequestRow(
 }
 
 /** «1 заявка / 2 заявки / 28 заявок». */
-private fun requestsLabel(count: Int): String = when {
-    count % 10 == 1 && count % 100 != 11 -> "$count заявка"
-    count % 10 in 2..4 && count % 100 !in 12..14 -> "$count заявки"
-    else -> "$count заявок"
-}
+private fun requestsLabel(context: android.content.Context, count: Int): String =
+    context.resources.getQuantityString(R.plurals.join_requests, count, count)
 
 /** Раунд 143: «1 сообщение / 3 сообщения / 653 сообщения / 5 сообщений». */
 @Composable
@@ -2044,7 +2041,7 @@ private fun MessageBubble(
                     bodyText.isBlank() &&
                         com.vladimir.messenger.util.InlineImage.photoCount(message.content) > 0 ->
                         Text(
-                            "Фото: " + com.vladimir.messenger.util.InlineImage.photoCount(message.content),
+                            stringResource(R.string.photo_count_label, com.vladimir.messenger.util.InlineImage.photoCount(message.content)),
                             color = bubbleTextColor.copy(alpha = 0.7f),
                         )
                     bodyText.isBlank() && fileCard != null -> Unit
@@ -2359,11 +2356,12 @@ private fun NewTopicDialog(
 }
 
 /** р249: подпись индикатора «печатает…» в группе (1, 2 или больше человек). */
+@Composable
 private fun groupTypingLabel(names: List<String>): String = when (names.size) {
     0 -> ""
-    1 -> "${names[0]} печатает…"
-    2 -> "${names[0]} и ${names[1]} печатают…"
-    else -> "${names[0]}, ${names[1]} и ещё ${names.size - 2} печатают…"
+    1 -> stringResource(R.string.typing_one, names[0])
+    2 -> stringResource(R.string.typing_two, names[0], names[1])
+    else -> stringResource(R.string.typing_many, names[0], names[1], names.size - 2)
 }
 
 // =============================================================================
