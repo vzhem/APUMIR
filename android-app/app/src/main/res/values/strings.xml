@@ -1515,4 +1515,6 @@
     <string name="speed_unit_kb">КБ/с</string>
     <string name="speed_unit_b">Б/с</string>
     <string name="settings_server_checking">проверяю…</string>
+    <string name="admin_delete_word">УДАЛИТЬ</string>
+    <string name="mod_author_fallback">Участник %1$s</string>
 </resources>

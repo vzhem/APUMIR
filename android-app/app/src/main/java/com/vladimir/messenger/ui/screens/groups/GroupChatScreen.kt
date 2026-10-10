@@ -261,7 +261,7 @@ fun GroupChatScreen(
         val targetMember = uiState.members.firstOrNull { it.nodeId == targetAuthorId }
         val targetAuthorName = senderNames[targetAuthorId]?.takeIf { it.isNotBlank() }
             ?: targetMember?.displayName?.takeIf { it.isNotBlank() }
-            ?: ("Участник " + targetAuthorId.takeLast(4))
+            ?: stringResource(R.string.mod_author_fallback, targetAuthorId.takeLast(4))
         val isAuthorMe = primaryMsg.isFromMe || (uiState.me?.nodeId != null && uiState.me?.nodeId == targetAuthorId)
         val isAuthorOwner = (uiState.group?.ownerId != null && uiState.group?.ownerId == targetAuthorId) ||
             targetMember?.role == com.vladimir.messenger.data.group.GroupRole.OWNER

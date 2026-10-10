@@ -1502,4 +1502,6 @@ The file is not on this phone</string>
     <string name="speed_unit_kb">KB/s</string>
     <string name="speed_unit_b">B/s</string>
     <string name="settings_server_checking">checking…</string>
+    <string name="admin_delete_word">DELETE</string>
+    <string name="mod_author_fallback">Member %1$s</string>
 </resources>

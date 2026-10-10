@@ -684,7 +684,7 @@ private fun DeleteGroupDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
-    val expected = expectedTitle.trim().ifBlank { "УДАЛИТЬ" }
+    val expected = expectedTitle.trim().ifBlank { stringResource(R.string.admin_delete_word) }
     var typed by remember { mutableStateOf("") }
 
     ApuSettingsDialog(
