@@ -488,7 +488,7 @@ private fun OverviewTab(
                 Text(stringResource(R.string.admin_slow_mode), fontWeight = FontWeight.Medium)
                 Text(
                     if (slowModeSeconds > 0) {
-                        "Участники пишут не чаще одного сообщения в ${slowModeLabel(slowModeSeconds)}. " +
+                        stringResource(R.string.admin_slow_note, slowModeLabel(slowModeSeconds)) + " " +
                             stringResource(R.string.admin_no_pause)
                     } else {
                         stringResource(R.string.admin_slow_off)
@@ -651,24 +651,26 @@ private fun OverviewTab(
 }
 
 /** р250: подпись выбранной паузы словами (для пояснения в настройках). */
+@Composable
 private fun slowModeLabel(seconds: Int): String = when (seconds) {
-    10 -> "10 секунд"
-    30 -> "30 секунд"
-    60 -> "1 минуту"
-    300 -> "5 минут"
-    900 -> "15 минут"
-    else -> "$seconds с"
+    10 -> stringResource(R.string.pause_10s)
+    30 -> stringResource(R.string.pause_30s)
+    60 -> stringResource(R.string.pause_1m)
+    300 -> stringResource(R.string.pause_5m)
+    900 -> stringResource(R.string.pause_15m)
+    else -> stringResource(R.string.pause_secs, seconds)
 }
 
 /** р250: короткая подпись на кнопке выбора паузы. */
+@Composable
 private fun slowModeShort(seconds: Int): String = when (seconds) {
-    0 -> "Выкл"
-    10 -> "10 с"
-    30 -> "30 с"
-    60 -> "1 мин"
-    300 -> "5 мин"
-    900 -> "15 мин"
-    else -> "$seconds с"
+    0 -> stringResource(R.string.pause_off)
+    10 -> stringResource(R.string.pause_short_10s)
+    30 -> stringResource(R.string.pause_short_30s)
+    60 -> stringResource(R.string.pause_short_1m)
+    300 -> stringResource(R.string.pause_short_5m)
+    900 -> stringResource(R.string.pause_short_15m)
+    else -> stringResource(R.string.pause_secs, seconds)
 }
 
 /**
@@ -850,9 +852,7 @@ private fun AdminsTab(
             title = { Text(stringResource(R.string.admin_transfer_q)) },
             text = {
                 Text(
-                    "«${target.displayName.ifBlank { target.nodeId }}» станет владельцем группы. " +
-                        "Вы останетесь администратором со всеми правами. Отменить передачу нельзя - " +
-                        "новый владелец сам решит, кому передавать дальше."
+                    stringResource(R.string.ga_owner_transfer_note, target.displayName.ifBlank { target.nodeId })
                 )
             },
             confirmButton = {

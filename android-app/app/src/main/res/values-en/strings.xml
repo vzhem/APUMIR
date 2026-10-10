@@ -1183,4 +1183,23 @@
     <string name="ga_tab_stats">Statistics</string>
     <string name="ga_tab_permissions">Permissions</string>
     <string name="settings_theme_chosen">Selected: %1$s</string>
+    <string name="pause_10s">10 seconds</string>
+    <string name="pause_30s">30 seconds</string>
+    <string name="pause_1m">1 minute</string>
+    <string name="pause_5m">5 minutes</string>
+    <string name="pause_15m">15 minutes</string>
+    <string name="pause_secs">%1$d s</string>
+    <string name="pause_off">Off</string>
+    <string name="pause_short_10s">10 s</string>
+    <string name="pause_short_30s">30 s</string>
+    <string name="pause_short_1m">1 min</string>
+    <string name="pause_short_5m">5 min</string>
+    <string name="pause_short_15m">15 min</string>
+    <string name="admin_slow_note">Members can write no more often than one message every %1$s.</string>
+    <string name="ga_owner_transfer_note">“%1$s” will become the group owner. You will remain an administrator with all rights. The transfer cannot be undone — the new owner decides whom to pass it on to.</string>
+    <string name="qr_mode_scan">Scan</string>
+    <string name="qr_mode_mine">My code</string>
+    <string name="font_size_small">Small</string>
+    <string name="font_size_standard">Standard</string>
+    <string name="font_size_large">Large</string>
 </resources>

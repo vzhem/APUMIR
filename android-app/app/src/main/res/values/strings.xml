@@ -1192,4 +1192,23 @@
     <string name="ga_tab_stats">Статистика</string>
     <string name="ga_tab_permissions">Разрешения</string>
     <string name="settings_theme_chosen">Выбрано: %1$s</string>
+    <string name="pause_10s">10 секунд</string>
+    <string name="pause_30s">30 секунд</string>
+    <string name="pause_1m">1 минуту</string>
+    <string name="pause_5m">5 минут</string>
+    <string name="pause_15m">15 минут</string>
+    <string name="pause_secs">%1$d с</string>
+    <string name="pause_off">Выкл</string>
+    <string name="pause_short_10s">10 с</string>
+    <string name="pause_short_30s">30 с</string>
+    <string name="pause_short_1m">1 мин</string>
+    <string name="pause_short_5m">5 мин</string>
+    <string name="pause_short_15m">15 мин</string>
+    <string name="admin_slow_note">Участники пишут не чаще одного сообщения в %1$s.</string>
+    <string name="ga_owner_transfer_note">«%1$s» станет владельцем группы. Вы останетесь администратором со всеми правами. Отменить передачу нельзя — новый владелец сам решит, кому передавать дальше.</string>
+    <string name="qr_mode_scan">Сканировать</string>
+    <string name="qr_mode_mine">Мой код</string>
+    <string name="font_size_small">Мелкий</string>
+    <string name="font_size_standard">Стандартный</string>
+    <string name="font_size_large">Крупный</string>
 </resources>

@@ -806,7 +806,7 @@ private fun SettingsTabContent(
                                                 onClick = { AppFontSizeHolder.set(context, option) },
                                                 label = {
                                                     Text(
-                                                        option.title,
+                                                        stringResource(option.labelRes),
                                                         maxLines = 1,
                                                         overflow = TextOverflow.Ellipsis,
                                                     )

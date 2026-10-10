@@ -61,9 +61,9 @@ import com.vladimir.messenger.ui.components.ApuPremiumContentButton
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 /** Что показывает раздел QR прямо сейчас. */
-private enum class QrMode(val title: String) {
-    Scan("Сканировать"),
-    Mine("Мой код"),
+private enum class QrMode(@androidx.annotation.StringRes val titleRes: Int) {
+    Scan(R.string.qr_mode_scan),
+    Mine(R.string.qr_mode_mine),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -126,7 +126,7 @@ fun QrScannerScreen(
                                     contentDescription = null,
                                 )
                             },
-                            label = { Text(item.title) },
+                            label = { Text(stringResource(item.titleRes)) },
                         )
                     }
                 }
