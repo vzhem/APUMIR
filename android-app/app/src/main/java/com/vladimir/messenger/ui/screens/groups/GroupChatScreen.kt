@@ -1204,7 +1204,7 @@ fun GroupChatScreen(
                             uiState.me?.displayName?.takeIf { it.isNotBlank() } ?: stringResource(R.string.grp_you)
                         } else {
                             senderNames[replyTarget.senderId]?.takeIf { it.isNotBlank() }
-                                ?: ("Участник " + replyTarget.senderId.takeLast(4))
+                                ?: stringResource(R.string.name_member_fallback, replyTarget.senderId.takeLast(4))
                         }
                         ReplyStrip(
                             author = replyAuthor,

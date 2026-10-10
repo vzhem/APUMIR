@@ -1508,4 +1508,11 @@
     <string name="ab_copy_from">Копия на сервере от %1$s, %2$s.</string>
     <string name="ab_self_copy">Копия делается сама.</string>
     <string name="ab_other_copies">Копий на других телефонах: %1$s.</string>
+    <string name="stat_day_desc">%1$s: %2$s %3$s, авторов %4$s</string>
+    <string name="stat_unit_posts">публикаций</string>
+    <string name="stat_unit_messages">сообщений</string>
+    <string name="speed_unit_mb">МБ/с</string>
+    <string name="speed_unit_kb">КБ/с</string>
+    <string name="speed_unit_b">Б/с</string>
+    <string name="settings_server_checking">проверяю…</string>
 </resources>

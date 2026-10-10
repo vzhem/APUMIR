@@ -208,7 +208,7 @@ private fun PeerRatingCard(peer: PeerStats, nowMs: Long) {
             Metric(
                 icon = Icons.Default.Bolt,
                 label = stringResource(R.string.peer_speed),
-                value = if (peer.bytesPerSecond > 0) speed(peer.bytesPerSecond) else stringResource(R.string.peer_no_data),
+                value = if (peer.bytesPerSecond > 0) speed(androidx.compose.ui.platform.LocalContext.current, peer.bytesPerSecond) else stringResource(R.string.peer_no_data),
             )
             Metric(
                 icon = Icons.Default.CheckCircle,
@@ -272,8 +272,8 @@ private fun Metric(
 
 private fun percent(value: Double): String = (value * 100).toInt().toString() + "%"
 
-private fun speed(bytesPerSecond: Long): String = when {
-    bytesPerSecond >= 1024 * 1024 -> (bytesPerSecond / (1024 * 1024)).toString() + " МБ/с"
-    bytesPerSecond >= 1024 -> (bytesPerSecond / 1024).toString() + " КБ/с"
-    else -> bytesPerSecond.toString() + " Б/с"
+private fun speed(context: android.content.Context, bytesPerSecond: Long): String = when {
+    bytesPerSecond >= 1024 * 1024 -> (bytesPerSecond / (1024 * 1024)).toString() + " " + context.getString(R.string.speed_unit_mb)
+    bytesPerSecond >= 1024 -> (bytesPerSecond / 1024).toString() + " " + context.getString(R.string.speed_unit_kb)
+    else -> bytesPerSecond.toString() + " " + context.getString(R.string.speed_unit_b)
 }

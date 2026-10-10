@@ -242,7 +242,7 @@ fun ProfileBackupScreen(
                                     fontWeight = FontWeight.SemiBold,
                                 )
                                 Spacer(Modifier.height(4.dp))
-                                val made = SimpleDateFormat("d MMMM yyyy, HH:mm", Locale.forLanguageTag("ru"))
+                                val made = SimpleDateFormat("d MMMM yyyy, HH:mm", Locale.getDefault())
                                     .format(Date(manifest.createdAtMs))
                                 Text(
                                     activityContext.getString(R.string.pb_profile, manifest.displayName) +

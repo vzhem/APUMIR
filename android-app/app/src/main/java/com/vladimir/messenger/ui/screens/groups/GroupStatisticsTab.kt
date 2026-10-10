@@ -224,14 +224,13 @@ private fun StatisticsActivity(groupId: String, days: List<GroupStatDay>, isChan
                     animationSpec = tween(350),
                     label = "dailyStatisticsBar",
                 )
+                val dayDesc = stringResource(R.string.stat_day_desc, longDay(day.dayKey), stringResource(if (isChannel) R.string.stat_unit_posts else R.string.stat_unit_messages), day.messageCount.toString(), day.senderCount.toString())
                 Column(
                     Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(10.dp))
                         .background(if (chosen) StatisticsGold.copy(alpha = 0.14f) else Color.Transparent)
                         .clickable(role = Role.Button, onClick = { selectedKey = day.dayKey })
                         .semantics {
-                            contentDescription = "${longDay(day.dayKey)}: " +
-                                (if (isChannel) "публикаций" else "сообщений") +
-                                " ${day.messageCount}, авторов ${day.senderCount}"
+                            contentDescription = dayDesc
                         }
                         .padding(horizontal = 2.dp, vertical = 6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,

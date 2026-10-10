@@ -1495,4 +1495,11 @@ The file is not on this phone</string>
     <string name="ab_copy_from">Server copy from %1$s, %2$s.</string>
     <string name="ab_self_copy">Copies are made automatically.</string>
     <string name="ab_other_copies">Copies on other phones: %1$s.</string>
+    <string name="stat_day_desc">%1$s: %2$s %3$s, authors %4$s</string>
+    <string name="stat_unit_posts">posts</string>
+    <string name="stat_unit_messages">messages</string>
+    <string name="speed_unit_mb">MB/s</string>
+    <string name="speed_unit_kb">KB/s</string>
+    <string name="speed_unit_b">B/s</string>
+    <string name="settings_server_checking">checking…</string>
 </resources>

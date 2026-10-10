@@ -1313,7 +1313,7 @@ private fun SettingsTabContent(
                         // Адрес сервера не показываем (просьба владельца,
                         // 2026-09-19): в интерфейсе только нейтральное имя.
                         title    = stringResource(R.string.settings_our_server),
-                        subtitle = uiState.serverStatus,
+                        subtitle = uiState.serverStatus.ifEmpty { stringResource(R.string.settings_server_checking) },
                     )
                     // Диагностика брокерной линии: режим (наш сервер или
                     // запасные), давность ConnAck, последняя ошибка.
