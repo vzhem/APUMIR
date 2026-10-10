@@ -150,7 +150,7 @@ class GroupsViewModel @Inject constructor(
                     it.copy(
                         creating = false,
                         createError = e.message
-                            ?: if (isChannel) "Не удалось создать канал" else "Не удалось создать группу",
+                            ?: if (isChannel) appContext.getString(R.string.groups_create_channel_failed) else appContext.getString(R.string.groups_create_group_failed),
                     )
                 }
             }
@@ -275,7 +275,7 @@ class GroupsViewModel @Inject constructor(
                     )
                 }
                 is JoinOutcome.Failed -> _uiState.update {
-                    it.copy(joining = false, joinMessage = "Не удалось войти: " + outcome.reason)
+                    it.copy(joining = false, joinMessage = appContext.getString(R.string.groups_join_failed, outcome.reason))
                 }
             }
         }

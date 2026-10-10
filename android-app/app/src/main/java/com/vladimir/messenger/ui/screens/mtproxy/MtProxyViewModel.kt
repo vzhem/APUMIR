@@ -139,7 +139,7 @@ class MtProxyViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     message = if (deleted > 0) {
-                        "Удалено нерабочих: $deleted (добавленные вручную не тронуты)"
+                        context.getString(R.string.mpv_removed_dead, deleted)
                     } else {
                         context.getString(R.string.mpv_none_found)
                     }
@@ -185,7 +185,7 @@ class MtProxyViewModel @Inject constructor(
             _uiState.update { it.copy(isChecking = true) }
             val best = healthChecker.checkAllAndPickBest()
             val msg = if (best != null) {
-                "Лучший прокси выбран: ${best.proxy.host}:${best.proxy.port} (${best.latencyMs}ms)"
+                context.getString(R.string.mpv_best_chosen, "${best.proxy.host}:${best.proxy.port}", best.latencyMs.toString())
             } else {
                 context.getString(R.string.mpv_no_working)
             }
@@ -218,7 +218,7 @@ class MtProxyViewModel @Inject constructor(
                 val dead = repo.cleanupDead()
 
                 val total = repo.getAll().size
-                val msg = "Добавлено: $totalAdded. Удалено: ${stale}cтарых, ${excess}лишних, ${dead}мёртвых. В пуле: $total"
+                val msg = context.getString(R.string.mpv_added_summary, totalAdded, stale, excess, dead, total)
                 _uiState.update { it.copy(isCollecting = false, message = msg) }
             } catch (e: Exception) {
                 _uiState.update {

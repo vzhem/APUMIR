@@ -373,7 +373,7 @@ class ChannelViewModel @Inject constructor(
             if (encoded.size < uris.size) {
                 val lost = uris.size - encoded.size
                 _uiState.update {
-                    it.copy(error = if (lost == 1) appContext.getString(R.string.ch_one_image_failed) else "Не удалось прикрепить картинок: $lost")
+                    it.copy(error = if (lost == 1) appContext.getString(R.string.ch_one_image_failed) else appContext.getString(R.string.ch_images_partial_failed, lost))
                 }
             }
             onReady(encoded)

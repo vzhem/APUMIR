@@ -1382,4 +1382,17 @@
     <string name="size_label_tpl">Size: %1$s</string>
     <string name="report_collecting_tpl">Report in progress: %1$s</string>
     <string name="report_still_collecting">The report is still being collected — tap “%1$s”</string>
+    <string name="mpv_removed_dead">Removed dead proxies: %1$d (manually added ones were not touched)</string>
+    <string name="mpv_best_chosen">Best proxy selected: %1$s (%2$sms)</string>
+    <string name="mpv_added_summary">Added: %1$d. Removed: %2$d old, %3$d extra, %4$d dead. In pool: %5$d</string>
+    <string name="groups_create_channel_failed">Couldn’t create the channel</string>
+    <string name="groups_create_group_failed">Couldn’t create the group</string>
+    <string name="groups_join_failed">Couldn’t join: %1$s</string>
+    <string name="ch_images_partial_failed">Couldn’t attach images: %1$d</string>
+    <string name="contact_sent_ok">Contact sent: %1$s</string>
+    <string name="contact_send_failed">Couldn’t send the contact</string>
+    <string name="sync_copy_handed">Copy handed over</string>
+    <string name="sync_transfer_failed">Transfer failed: %1$s</string>
+    <string name="sync_cancelled">cancelled</string>
+    <string name="sync_newer_app">This copy was made by a newer APU version (%1$s) — update this device first</string>
 </resources>

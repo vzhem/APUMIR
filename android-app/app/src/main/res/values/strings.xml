@@ -1395,4 +1395,17 @@
     <string name="size_label_tpl">Размер: %1$s</string>
     <string name="report_collecting_tpl">Отчёт собирается: %1$s</string>
     <string name="report_still_collecting">Отчёт ещё собирается — нажмите «%1$s»</string>
+    <string name="mpv_removed_dead">Удалено нерабочих: %1$d (добавленные вручную не тронуты)</string>
+    <string name="mpv_best_chosen">Лучший прокси выбран: %1$s (%2$sms)</string>
+    <string name="mpv_added_summary">Добавлено: %1$d. Удалено: %2$d старых, %3$d лишних, %4$d мёртвых. В пуле: %5$d</string>
+    <string name="groups_create_channel_failed">Не удалось создать канал</string>
+    <string name="groups_create_group_failed">Не удалось создать группу</string>
+    <string name="groups_join_failed">Не удалось войти: %1$s</string>
+    <string name="ch_images_partial_failed">Не удалось прикрепить картинок: %1$d</string>
+    <string name="contact_sent_ok">Контакт отправлен: %1$s</string>
+    <string name="contact_send_failed">Не удалось отправить контакт</string>
+    <string name="sync_copy_handed">Копия передана</string>
+    <string name="sync_transfer_failed">Передача не удалась: %1$s</string>
+    <string name="sync_cancelled">отмена</string>
+    <string name="sync_newer_app">Копия сделана более новой версией APU (%1$s) - сначала обновите это устройство</string>
 </resources>

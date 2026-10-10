@@ -301,7 +301,7 @@ class ProfileSyncViewModel @Inject constructor(
                 onDone = { served, reason ->
                     stopShare()
                     _uiState.value = _uiState.value.copy(
-                        message = if (served) "Копия передана" else "Передача не удалась: ${reason ?: "отмена"}",
+                        message = if (served) context.getString(R.string.sync_copy_handed) else context.getString(R.string.sync_transfer_failed, reason ?: context.getString(R.string.sync_cancelled)),
                         failed = !served,
                     )
                 },
@@ -384,7 +384,7 @@ class ProfileSyncViewModel @Inject constructor(
                 backup.discardStaged()
                 _uiState.value = _uiState.value.copy(
                     busy = false,
-                    message = "Копия сделана более новой версией APU (${staged.appVersion}) - сначала обновите это устройство",
+                    message = context.getString(R.string.sync_newer_app, staged.appVersion),
                     failed = true,
                 )
             }

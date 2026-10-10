@@ -864,7 +864,7 @@ class ChatListViewModel @Inject constructor(
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 android.widget.Toast.makeText(
                     appContext,
-                    if (ok) "Контакт отправлен: " + toName else "Не удалось отправить контакт",
+                    if (ok) appContext.getString(R.string.contact_sent_ok, toName) else appContext.getString(R.string.contact_send_failed),
                     android.widget.Toast.LENGTH_SHORT,
                 ).show()
             }
