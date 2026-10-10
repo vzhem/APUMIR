@@ -1264,4 +1264,5 @@
     <string name="emoji_cat_symbols">Символы</string>
     <string name="mirror_collecting">Собираю…</string>
     <string name="pps_anti_rating_note">Отметок анти-рейтинга у профиля: %1$d. Одиночные жалобы рейтинг не понижают — значение имеет только резкий рост.</string>
+    <string name="emoji_cat_food">Еда</string>
 </resources>
