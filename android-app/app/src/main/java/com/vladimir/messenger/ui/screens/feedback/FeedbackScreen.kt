@@ -35,9 +35,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -69,12 +72,11 @@ fun FeedbackScreen(onBackClick: () -> Unit) {
     var attachLogs by rememberSaveable { mutableStateOf(true) }
     var busy by remember { mutableStateOf(false) }
     // Скриншоты храним путями к копиям в кэше, чтобы они переживали поворот экрана.
-    var shots by rememberSaveable(
-        saver = listSaver<List<File>, String>(
-            save = { list -> list.map { it.path } },
-            restore = { paths -> paths.map { File(it) }.toMutableList() },
-        ),
-    ) { mutableStateOf(listOf<File>()) }
+    val shotsSaver = listSaver<SnapshotStateList<File>, String>(
+        save = { list -> list.map { it.path } },
+        restore = { paths -> paths.map { File(it) }.toMutableStateList() },
+    )
+    val shots = rememberSaveable(saver = shotsSaver) { mutableStateListOf<File>() }
 
     val pickShots = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris: List<Uri> ->
         if (uris.isEmpty()) return@rememberLauncherForActivityResult
@@ -82,7 +84,7 @@ fun FeedbackScreen(onBackClick: () -> Unit) {
             busy = true
             val room = FeedbackMail.MAX_SCREENSHOTS - shots.size
             val copied = uris.take(room).mapNotNull { FeedbackMail.copyScreenshot(context, it) }
-            shots = shots + copied
+            shots.addAll(copied)
             busy = false
             if (copied.size < uris.take(room).size) {
                 Toast.makeText(context, context.getString(R.string.feedback_shot_failed), Toast.LENGTH_LONG).show()
@@ -160,7 +162,7 @@ fun FeedbackScreen(onBackClick: () -> Unit) {
                         IconButton(
                             enabled = !busy,
                             onClick = {
-                                shots = shots.filterNot { it == file }
+                                shots.remove(file)
                                 file.delete()
                             },
                         ) {

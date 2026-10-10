@@ -134,6 +134,8 @@ fun SettingsScreen(
     onIdentityBackupClick: () -> Unit = {},
     /** Раунд 219: «Поддержать разработчика» (черновик). */
     onSupportClick: () -> Unit = {},
+    /** «Написать разработчику»: открывает экран обратной связи. */
+    onFeedbackClick: () -> Unit = {},
     /** Полная копия профиля в файл (чаты, контакты, ключи) и восстановление из него. */
     onProfileBackupClick: () -> Unit = {},
     /**
@@ -219,6 +221,7 @@ fun SettingsScreen(
                     onProfileBackupClick = onProfileBackupClick,
                     onProfileClick = onProfileClick,
                     onSupportClick = onSupportClick,
+                    onFeedbackClick = onFeedbackClick,
                 )
             }
         }
