@@ -52,6 +52,7 @@ import com.vladimir.messenger.ui.screens.settings.ProfileBackupScreen
 import com.vladimir.messenger.ui.screens.settings.PeerRatingScreen
 import com.vladimir.messenger.ui.screens.settings.RankBenefitsScreen
 import com.vladimir.messenger.ui.screens.support.SupportScreen
+import com.vladimir.messenger.ui.screens.feedback.FeedbackScreen
 import com.vladimir.messenger.ui.screens.mtproxy.MtProxyListScreen
 import com.vladimir.messenger.ui.screens.share.ShareProfileScreen
 import com.vladimir.messenger.ui.screens.qr.QrScannerScreen
@@ -132,6 +133,9 @@ sealed class Screen(val route: String) {
 
     /** Раунд 219: «Поддержать разработчика» (черновик; реквизиты - из сервиса). */
     data object Support : Screen("support")
+
+    /** «Написать разработчику»: письмо с логами и скриншотом экрана. */
+    data object Feedback : Screen("feedback")
 
     // Избранное - личное хранилище абонента
     data object Saved : Screen("saved")
@@ -586,6 +590,7 @@ fun MessengerNavGraph(
                 onIdentityBackupClick = { navController.navigate(Screen.IdentityBackup.route) },
                 onProfileBackupClick = { navController.navigate(Screen.ProfileBackup.route) },
                 onSupportClick = { navController.navigate(Screen.Support.route) },
+                onFeedbackClick = { navController.navigate(Screen.Feedback.route) },
             )
         }
 
@@ -598,6 +603,7 @@ fun MessengerNavGraph(
                 showProfile = true,
                 onBackClick = { navController.popBackStack() },
                 onSupportClick = { navController.navigate(Screen.Support.route) },
+                onFeedbackClick = { navController.navigate(Screen.Feedback.route) },
                 onShareProfileClick = { navController.navigate(Screen.ShareProfile.route) },
                 onMtProxyClick = { navController.navigate(Screen.MtProxy.route) },
                 onRankBenefitsClick = { navController.navigate(Screen.RankBenefits.route) },
@@ -624,6 +630,10 @@ fun MessengerNavGraph(
         // Раунд 219: «Поддержать разработчика» (черновик).
         composable(route = Screen.Support.route) {
             SupportScreen(onBackClick = { navController.popBackStack() })
+        }
+
+        composable(route = Screen.Feedback.route) {
+            FeedbackScreen(onBackClick = { navController.popBackStack() })
         }
 
         // ------------------------------------------------------------------

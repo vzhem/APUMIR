@@ -1517,4 +1517,20 @@
     <string name="settings_server_checking">проверяю…</string>
     <string name="admin_delete_word">УДАЛИТЬ</string>
     <string name="mod_author_fallback">Участник %1$s</string>
+    <string name="settings_feedback">Написать разработчику</string>
+    <string name="settings_feedback_hint">Ошибка или пожелание: письмо с логами и скриншотом</string>
+    <string name="feedback_title">Написать разработчику</string>
+    <string name="feedback_intro">Опишите, что случилось или что стоит улучшить. Письмо откроется в почтовом приложении телефона, отправить его нужно будет вам самим.</string>
+    <string name="feedback_to">Кому: %1$s</string>
+    <string name="feedback_text_label">Описание</string>
+    <string name="feedback_text_hint">Что произошло, где и чего вы ждали. Или что улучшить.</string>
+    <string name="feedback_attach">Прикрепить логи и скриншот экрана</string>
+    <string name="feedback_attach_hint">Логи без переписок и ключей. Скриншот — экран, с которого вы открыли этот раздел. Снимите галочку, если на экране что-то личное.</string>
+    <string name="feedback_no_shot">Скриншот не удалось снять, в письмо попадут только логи.</string>
+    <string name="feedback_send">Отправить письмо</string>
+    <string name="feedback_collecting">Собираю логи…</string>
+    <string name="feedback_logs_failed">Логи не успели собраться — письмо откроется без них</string>
+    <string name="feedback_no_mail">На телефоне нет почтового приложения</string>
+    <string name="feedback_subject">APU %1$s — отзыв</string>
+    <string name="feedback_body_meta">Версия APU: %1$s\nAndroid: %2$s, %3$s</string>
 </resources>

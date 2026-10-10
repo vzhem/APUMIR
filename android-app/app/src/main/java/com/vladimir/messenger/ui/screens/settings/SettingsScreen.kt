@@ -660,6 +660,8 @@ private fun SettingsTabContent(
     onProfileClick: () -> Unit = {},
     /** Раунд 219: «Поддержать разработчика» (черновик). */
     onSupportClick: () -> Unit = {},
+    /** «Написать разработчику»: открывает экран обратной связи. */
+    onFeedbackClick: () -> Unit = {},
 ) {
     // Диалог «Сеть сообщений» и буфер обмена для «Скопировать» в нём —
     // локальные для этого экрана.
@@ -1372,6 +1374,15 @@ private fun SettingsTabContent(
                 SettingsCard {
                     // Раунд 219: «Поддержать разработчика». Реквизитов в коде
                     // нет: список способов экран получает из нашего сервиса.
+                    SettingsItem(
+                        icon     = Icons.Default.Email,
+                        title    = stringResource(R.string.settings_feedback),
+                        subtitle = stringResource(R.string.settings_feedback_hint),
+                        // Снимок экрана делаем до перехода: на нём то, с чем возникла проблема.
+                        onClick  = {
+                            com.vladimir.messenger.util.FeedbackMail.captureScreen(settingsContext) { onFeedbackClick() }
+                        },
+                    )
                     SettingsItem(
                         icon     = Icons.Default.Favorite,
                         title    = stringResource(R.string.settings_support_dev),
