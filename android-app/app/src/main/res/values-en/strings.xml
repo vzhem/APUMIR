@@ -1245,4 +1245,7 @@
     <string name="gif_empty_hint">Nothing here yet. Tap search to find GIFs in the external catalog; downloaded ones are kept in our network. Add your own GIF with the “+ Own” button. Phone catalogs sync automatically: the longer you use it, the bigger the set without any external source.</string>
     <string name="pinned_count">Pinned (%1$d/%2$d)</string>
     <string name="fwd_from_label">↩ Forwarded from “%1$s”</string>
+    <string name="svm_server_unavailable">unavailable — swarm is using backup brokers</string>
+    <string name="bk_saved_files">Backup saved (%1$s, files: %2$d). Remember the password: the file cannot be opened without it.</string>
+    <string name="bk_saved">Backup saved (%1$s). Remember the password: the file cannot be opened without it.</string>
 </resources>

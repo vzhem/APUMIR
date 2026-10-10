@@ -923,7 +923,7 @@ class GroupChatViewModel @Inject constructor(
                     .setType(mediaType.ifBlank { "application/octet-stream" })
                     .putExtra(android.content.Intent.EXTRA_STREAM, uri)
                     .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                val chooser = android.content.Intent.createChooser(intent, "Поделиться")
+                val chooser = android.content.Intent.createChooser(intent, appContext.getString(R.string.admin_share))
                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 ctx.startActivity(chooser)
             }.onFailure { e -> _uiState.update { it.copy(error = appContext.getString(R.string.gc_share_error, e.message)) } }

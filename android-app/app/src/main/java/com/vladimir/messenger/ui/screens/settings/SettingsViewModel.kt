@@ -468,7 +468,7 @@ class SettingsViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     serverStatus = when {
-                        health == null -> "недоступен — рой на запасных брокерах"
+                        health == null -> context.getString(R.string.svm_server_unavailable)
                         health < 400 -> "доступен, ответ за ${health} мс"
                         else -> " отвечает с ошибкой ($health)"
                     },

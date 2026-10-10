@@ -187,9 +187,7 @@ class ProfileBackupViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             busy = false,
-                            message = "Копия сохранена (${humanBytes(result.bytes)}" +
-                                (if (result.receivedFiles > 0) ", файлов: ${result.receivedFiles}" else "") +
-                                "). Запомните пароль: без него файл не открыть.",
+                            message = if (result.receivedFiles > 0) context.getString(R.string.bk_saved_files, humanBytes(result.bytes), result.receivedFiles) else context.getString(R.string.bk_saved, humanBytes(result.bytes)),
                             failed = false,
                             lastSaved = target,
                             schedule = schedule,
