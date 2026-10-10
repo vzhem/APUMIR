@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.contacts
 
+import com.vladimir.messenger.R
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -129,7 +130,7 @@ class AddContactViewModel @Inject constructor(
                 _uiState.update { it.copy(isLoading = false) }
                 if (full == null || full == pasted) {
                     _uiState.update {
-                        it.copy(error = "Не удалось открыть ссылку: нет связи с сервисом APU. Попробуйте позже.")
+                        it.copy(error = appContext.getString(R.string.acvm_link_failed))
                     }
                 } else {
                     addContactFromLink(full)

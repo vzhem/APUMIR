@@ -691,7 +691,7 @@ class ChatListViewModel @Inject constructor(
                 InboxPinMutation.NOT_FOUND -> withContext(Dispatchers.Main) {
                     android.widget.Toast.makeText(
                         appContext,
-                        "Эта беседа больше недоступна",
+                        appContext.getString(R.string.clv_chat_unavailable),
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
                 }

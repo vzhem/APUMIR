@@ -340,7 +340,7 @@ fun PeerProfileSheet(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        "Адрес узла - нужен только для разбора неполадок",
+                                        stringResource(R.string.pps_node_address_hint),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = Color(0xFF5A6472),
                                     )

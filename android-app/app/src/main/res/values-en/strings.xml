@@ -1147,4 +1147,10 @@
     <string name="ga_slow_5m">5 minutes</string>
     <string name="ga_slow_15m">15 minutes</string>
     <string name="ga_seconds_short">%1$d s</string>
+    <string name="cvm_invite_sent">Invitation sent</string>
+    <string name="cvm_invite_failed">Couldn\'t send the invitation</string>
+    <string name="acvm_link_failed">Couldn\'t open the link: no connection to the APU service. Try again later.</string>
+    <string name="chv_post_clip_label">APU post</string>
+    <string name="clv_chat_unavailable">This chat is no longer available</string>
+    <string name="pps_node_address_hint">Node address: only needed to troubleshoot problems</string>
 </resources>

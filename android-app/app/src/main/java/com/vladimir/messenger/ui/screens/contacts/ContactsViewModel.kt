@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.contacts
 
+import com.vladimir.messenger.R
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -218,9 +219,9 @@ class ContactsViewModel @Inject constructor(
                 chatRepository.sendMessage(chat.id, contactId, text).isSuccess
             }
             _toast.value = if (ok) {
-                "Приглашение отправлено"
+                appContext.getString(R.string.cvm_invite_sent)
             } else {
-                "Не удалось отправить приглашение"
+                appContext.getString(R.string.cvm_invite_failed)
             }
         }
     }

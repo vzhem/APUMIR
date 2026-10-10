@@ -1156,4 +1156,10 @@
     <string name="ga_slow_5m">5 минут</string>
     <string name="ga_slow_15m">15 минут</string>
     <string name="ga_seconds_short">%1$d с</string>
+    <string name="cvm_invite_sent">Приглашение отправлено</string>
+    <string name="cvm_invite_failed">Не удалось отправить приглашение</string>
+    <string name="acvm_link_failed">Не удалось открыть ссылку: нет связи с сервисом APU. Попробуйте позже.</string>
+    <string name="chv_post_clip_label">Пост APU</string>
+    <string name="clv_chat_unavailable">Эта беседа больше недоступна</string>
+    <string name="pps_node_address_hint">Адрес узла - нужен только для разбора неполадок</string>
 </resources>

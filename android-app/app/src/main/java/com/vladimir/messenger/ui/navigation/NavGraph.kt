@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.navigation
 
+import com.vladimir.messenger.R
 // =============================================================================
 // NAVGRAPH.KT вЂ” РќР°РІРёРіР°С†РёРѕРЅРЅС‹Р№ РіСЂР°С„ РїСЂРёР»РѕР¶РµРЅРёСЏ
 // =============================================================================
@@ -891,7 +892,7 @@ fun MessengerNavGraph(
                             if (full == null || full == qrContent) {
                                 Toast.makeText(
                                     scanContext,
-                                    "Не удалось открыть ссылку: нет связи с сервисом APU. Попробуйте позже.",
+                                    scanContext.getString(R.string.acvm_link_failed),
                                     Toast.LENGTH_LONG,
                                 ).show()
                                 navController.popBackStack()

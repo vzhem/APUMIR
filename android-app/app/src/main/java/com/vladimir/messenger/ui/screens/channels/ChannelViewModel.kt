@@ -648,7 +648,7 @@ class ChannelViewModel @Inject constructor(
             }
             // Полный текст - в буфер обмена: если мессенджер урежет подпись,
             // человек вставит его одним нажатием.
-            com.vladimir.messenger.util.PhotoShare.copyToClipboard(app, "Пост APU", text)
+            com.vladimir.messenger.util.PhotoShare.copyToClipboard(app, appContext.getString(R.string.chv_post_clip_label), text)
             val intent = if (uri != null) {
                 com.vladimir.messenger.util.PhotoShare.buildImageIntent(
                     uri,
