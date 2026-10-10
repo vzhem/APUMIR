@@ -1692,7 +1692,8 @@ private fun SettingsTabContent(
         // спрашивает ядро (JNI), и вызов при отрисовке окна давал «APU не
         // отвечает» ровно в тот момент, когда человек смотрит на диагностику
         // (скриншот владельца 30.09 21:20).
-        var syncText by remember { mutableStateOf("Собираю…") }
+        val collectingText = stringResource(R.string.mirror_collecting)
+        var syncText by remember { mutableStateOf(collectingText) }
         LaunchedEffect(showMirrorDiag) {
             syncText = withContext(Dispatchers.IO) {
                 com.vladimir.messenger.data.mirror.MirrorHub.debugStatus()

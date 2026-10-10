@@ -303,7 +303,7 @@ private fun EmojiSection(onEmoji: (String) -> Unit) {
         }
     }
     SubPillRow(
-        pills = categories.map { SubPill(icon = it.icon, label = it.name) },
+        pills = categories.map { SubPill(icon = it.icon, label = stringResource(it.nameRes)) },
         current = current,
         onSelect = { k -> scope.launch { gridState.scrollToItem(starts[k]) } },
     )
@@ -319,7 +319,7 @@ private fun EmojiSection(onEmoji: (String) -> Unit) {
         categories.forEachIndexed { k, category ->
             item(key = "h$k", span = { GridItemSpan(maxLineSpan) }) {
                 Text(
-                    category.name,
+                    stringResource(category.nameRes),
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

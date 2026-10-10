@@ -1257,4 +1257,11 @@
     <string name="svm_server_unavailable">недоступен — рой на запасных брокерах</string>
     <string name="bk_saved_files">Копия сохранена (%1$s, файлов: %2$d). Запомните пароль: без него файл не открыть.</string>
     <string name="bk_saved">Копия сохранена (%1$s). Запомните пароль: без него файл не открыть.</string>
+    <string name="emoji_cat_smileys">Смайлы</string>
+    <string name="emoji_cat_gestures">Жесты</string>
+    <string name="emoji_cat_animals">Животные</string>
+    <string name="emoji_cat_activities">Активности</string>
+    <string name="emoji_cat_symbols">Символы</string>
+    <string name="mirror_collecting">Собираю…</string>
+    <string name="pps_anti_rating_note">Отметок анти-рейтинга у профиля: %1$d. Одиночные жалобы рейтинг не понижают — значение имеет только резкий рост.</string>
 </resources>

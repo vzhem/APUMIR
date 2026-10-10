@@ -293,8 +293,7 @@ fun PeerProfileSheet(
                                 "⚠️ За короткое время пришло много жалоб (всего: $antiRatingCount)." +
                                     " Репутация и приоритет узла в рое временно понижены." + clock
                             } else {
-                                "Отметок анти-рейтинга у профиля: $antiRatingCount. " +
-                                    "Одиночные жалобы рейтинг не понижают — значение имеет только резкий рост."
+                                stringResource(R.string.pps_anti_rating_note, antiRatingCount)
                             },
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Medium,

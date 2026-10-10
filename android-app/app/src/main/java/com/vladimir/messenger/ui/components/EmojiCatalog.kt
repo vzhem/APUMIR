@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.components
 
+import com.vladimir.messenger.R
 /**
  * Каталог эмодзи для единой панели ввода (раунд 138): компактный набор
  * частых эмодзи, разбитый на категории. Категория - иконка для пузыря
@@ -11,13 +12,13 @@ object EmojiCatalog {
     data class Category(
         /** Иконка пузыря раздела. */
         val icon: String,
-        val name: String,
+        @androidx.annotation.StringRes val nameRes: Int,
         val emojis: List<String>,
     )
 
     val categories: List<Category> = listOf(
         Category(
-            "😀", "Смайлы",
+            "😀", R.string.emoji_cat_smileys,
             listOf(
                 "😀", "😃", "😄", "😁", "😆", "😅", "🤣", "😂", "🙂", "🙃",
                 "😉", "😊", "😇", "🥰", "😍", "🤩", "😘", "😗", "😚", "😙",
@@ -32,7 +33,7 @@ object EmojiCatalog {
             ),
         ),
         Category(
-            "👋", "Жесты",
+            "👋", R.string.emoji_cat_gestures,
             listOf(
                 "👋", "🤚", "🖐", "✋", "🖖", "👌", "🤌", "🤏", "✌", "🤞",
                 "🤟", "🤘", "🤙", "👈", "👉", "👆", "🖕", "👇", "☝", "👍",
@@ -43,7 +44,7 @@ object EmojiCatalog {
             ),
         ),
         Category(
-            "🐶", "Животные",
+            "🐶", R.string.emoji_cat_animals,
             listOf(
                 "🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐯",
                 "🦁", "🐮", "🐷", "🐸", "🐵", "🙈", "🙉", "🙊", "🐒", "🐔",
@@ -72,7 +73,7 @@ object EmojiCatalog {
             ),
         ),
         Category(
-            "⚽", "Активности",
+            "⚽", R.string.emoji_cat_activities,
             listOf(
                 "⚽", "🏀", "🏈", "⚾", "🥎", "🎾", "🏐", "🏉", "🥏", "🎱",
                 "🪀", "🏓", "🏸", "🏒", "🥍", "🏏", "🥅", "⛳", "🪁", "🏹",
@@ -84,7 +85,7 @@ object EmojiCatalog {
             ),
         ),
         Category(
-            "❤️", "Символы",
+            "❤️", R.string.emoji_cat_symbols,
             listOf(
                 "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "🤎", "💔",
                 "❣", "💕", "💞", "💓", "💗", "💖", "💘", "💝", "💟", "☮",
