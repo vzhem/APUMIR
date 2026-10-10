@@ -1202,4 +1202,14 @@
     <string name="font_size_small">Small</string>
     <string name="font_size_standard">Standard</string>
     <string name="font_size_large">Large</string>
+    <string name="diag_verdict_bad">ERRORS FOUND</string>
+    <string name="diag_verdict_warn">WARNINGS FOUND</string>
+    <string name="diag_verdict_ok">ALL GOOD</string>
+    <string name="diag_lvl_ok">OK</string>
+    <string name="diag_lvl_info">info</string>
+    <string name="diag_lvl_warn">attention</string>
+    <string name="diag_lvl_bad">problem</string>
+    <string name="poll_nobody_voted">Nobody has voted yet</string>
+    <string name="gc_no_messages">No messages</string>
+    <string name="gc_more_messages">↓  More: %1$s</string>
 </resources>

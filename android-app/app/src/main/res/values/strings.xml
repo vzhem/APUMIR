@@ -1211,4 +1211,14 @@
     <string name="font_size_small">Мелкий</string>
     <string name="font_size_standard">Стандартный</string>
     <string name="font_size_large">Крупный</string>
+    <string name="diag_verdict_bad">ЕСТЬ ОШИБКИ</string>
+    <string name="diag_verdict_warn">ЕСТЬ ПРЕДУПРЕЖДЕНИЯ</string>
+    <string name="diag_verdict_ok">ВСЁ В ПОРЯДКЕ</string>
+    <string name="diag_lvl_ok">порядок</string>
+    <string name="diag_lvl_info">справка</string>
+    <string name="diag_lvl_warn">внимание</string>
+    <string name="diag_lvl_bad">поломка</string>
+    <string name="poll_nobody_voted">Пока никто не голосовал</string>
+    <string name="gc_no_messages">Нет сообщений</string>
+    <string name="gc_more_messages">↓  Ещё %1$s</string>
 </resources>

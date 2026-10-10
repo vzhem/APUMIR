@@ -155,11 +155,12 @@ private fun diagnosticsLevelGradient(level: DiagnosticsLevel): List<Color> = whe
 }
 
 /** Слова для легенды: у каждого цвета на сводке есть понятное название. */
+@Composable
 private fun diagnosticsLevelLabel(level: DiagnosticsLevel): String = when (level) {
-    DiagnosticsLevel.OK -> "порядок"
-    DiagnosticsLevel.INFO -> "справка"
-    DiagnosticsLevel.WARN -> "внимание"
-    DiagnosticsLevel.BAD -> "поломка"
+    DiagnosticsLevel.OK -> stringResource(R.string.diag_lvl_ok)
+    DiagnosticsLevel.INFO -> stringResource(R.string.diag_lvl_info)
+    DiagnosticsLevel.WARN -> stringResource(R.string.diag_lvl_warn)
+    DiagnosticsLevel.BAD -> stringResource(R.string.diag_lvl_bad)
 }
 
 /** Общий уровень по строкам: сначала поломки, потом внимание, иначе порядок. */
@@ -169,11 +170,12 @@ private fun diagnosticsWorstLevel(lines: List<DiagnosticsLine>): DiagnosticsLeve
     else -> DiagnosticsLevel.OK
 }
 
+@Composable
 private fun diagnosticsVerdictText(level: DiagnosticsLevel): String = when (level) {
-    DiagnosticsLevel.BAD -> "ЕСТЬ ОШИБКИ"
-    DiagnosticsLevel.WARN -> "ЕСТЬ ПРЕДУПРЕЖДЕНИЯ"
-    DiagnosticsLevel.INFO -> "ВСЁ В ПОРЯДКЕ"
-    DiagnosticsLevel.OK -> "ВСЁ В ПОРЯДКЕ"
+    DiagnosticsLevel.BAD -> stringResource(R.string.diag_verdict_bad)
+    DiagnosticsLevel.WARN -> stringResource(R.string.diag_verdict_warn)
+    DiagnosticsLevel.INFO -> stringResource(R.string.diag_verdict_ok)
+    DiagnosticsLevel.OK -> stringResource(R.string.diag_verdict_ok)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

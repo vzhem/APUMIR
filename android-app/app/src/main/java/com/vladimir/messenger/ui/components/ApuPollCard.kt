@@ -1,6 +1,7 @@
 package com.vladimir.messenger.ui.components
 
 import com.vladimir.messenger.R
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -223,19 +224,17 @@ private fun PollOptionRow(
     }
 }
 
+@Composable
 private fun pollVotersLabel(poll: PollSummary): String {
+    val res = LocalContext.current.resources
     val count = poll.totalVoters
-    if (count == 0) return "Пока никто не голосовал"
-    val word = when {
-        count % 10 == 1 && count % 100 != 11 -> "человек"
-        count % 10 in 2..4 && count % 100 !in 12..14 -> "человека"
-        else -> "человек"
-    }
+    if (count == 0) return stringResource(R.string.poll_nobody_voted)
+    val people = res.getQuantityString(R.plurals.poll_voters_count, count, count)
     val votes = poll.totalVotes
     return if (poll.multiChoice && votes != count) {
-        "$count $word · $votes голосов"
+        "$people · " + res.getQuantityString(R.plurals.poll_votes_count, votes, votes)
     } else {
-        "$count $word"
+        people
     }
 }
 

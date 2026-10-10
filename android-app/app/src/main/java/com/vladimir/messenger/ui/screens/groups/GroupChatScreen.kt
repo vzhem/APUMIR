@@ -11,6 +11,7 @@ package com.vladimir.messenger.ui.screens.groups
 
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
+import androidx.compose.ui.platform.LocalContext
 import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
 import com.vladimir.messenger.ui.components.ApuNotificationBadge
@@ -1145,7 +1146,7 @@ fun GroupChatScreen(
             if (feedRemaining > 0) {
                 val lastIndex = (if (uiState.moreComments > 0) 1 else 0) + uiState.messages.size - 1
                 Text(
-                    "↓  Ещё " + messagesLabel(feedRemaining),
+                    stringResource(R.string.gc_more_messages, messagesLabel(feedRemaining)),
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
@@ -1693,11 +1694,10 @@ private fun requestsLabel(count: Int): String = when {
 }
 
 /** Раунд 143: «1 сообщение / 3 сообщения / 653 сообщения / 5 сообщений». */
+@Composable
 private fun messagesLabel(count: Int): String = when {
-    count <= 0 -> "Нет сообщений"
-    count % 10 == 1 && count % 100 != 11 -> "$count сообщение"
-    count % 10 in 2..4 && count % 100 !in 12..14 -> "$count сообщения"
-    else -> "$count сообщений"
+    count <= 0 -> stringResource(R.string.gc_no_messages)
+    else -> LocalContext.current.resources.getQuantityString(R.plurals.gc_messages_count, count, count)
 }
 
 @Composable
