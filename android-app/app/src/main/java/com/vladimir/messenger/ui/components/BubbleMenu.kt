@@ -35,10 +35,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 /** Тип пузыря: подпись под именем и логика меню. */
-enum class BubbleKind(val label: String) {
-    Personal("личный чат"),
-    Group("группа"),
-    Channel("канал"),
+enum class BubbleKind(@androidx.annotation.StringRes val labelRes: Int) {
+    Personal(R.string.bubble_kind_personal),
+    Group(R.string.bubble_kind_group),
+    Channel(R.string.bubble_kind_channel),
 }
 
 /** Пункт меню «⋮» в пузыре. */

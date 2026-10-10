@@ -122,7 +122,7 @@ fun ContactsScreen(
                         IconButton(onClick = { sortMenuExpanded = true }) {
                             Icon(
                                 Icons.Default.SortByAlpha,
-                                contentDescription = stringResource(R.string.contacts_sort_desc, sortOrder.title),
+                                contentDescription = stringResource(R.string.contacts_sort_desc, stringResource(sortOrder.titleRes)),
                             )
                         }
                         ContactSortMenu(
@@ -412,12 +412,12 @@ private fun ContactSortMenu(
                 text = {
                     Column {
                         Text(
-                            text = order.title,
+                            text = stringResource(order.titleRes),
                             style = MaterialTheme.typography.bodyLarge,
                             color = ApuBubbleTextColor,
                         )
                         Text(
-                            text = order.description,
+                            text = stringResource(order.descRes),
                             style = MaterialTheme.typography.bodySmall,
                             color = ApuBubbleMutedColor,
                         )

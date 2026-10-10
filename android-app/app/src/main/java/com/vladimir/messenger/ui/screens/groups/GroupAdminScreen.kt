@@ -102,14 +102,14 @@ import com.vladimir.messenger.ui.components.ApuPremiumSwitch
  * Обычному участнику показываются только «Обзор» (без полей редактирования) и
  * «Участники»: раньше он видел все вкладки и мог создавать и удалять ссылки.
  */
-private enum class AdminTab(val title: String) {
-    Overview("Обзор"),
-    Admins("Администраторы"),
-    Members("Участники"),
-    Requests("Заявки"),
-    Invites("Ссылки"),
-    Stats("Статистика"),
-    Permissions("Разрешения"),
+private enum class AdminTab(@androidx.annotation.StringRes val titleRes: Int) {
+    Overview(R.string.ga_tab_overview),
+    Admins(R.string.ga_tab_admins),
+    Members(R.string.ga_tab_members),
+    Requests(R.string.ga_tab_requests),
+    Invites(R.string.ga_tab_invites),
+    Stats(R.string.ga_tab_stats),
+    Permissions(R.string.ga_tab_permissions),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -202,7 +202,7 @@ fun GroupAdminScreen(
             }
 
             ApuTabBar(
-                titles = visibleTabs.map { it.title },
+                titles = visibleTabs.map { stringResource(it.titleRes) },
                 selectedIndex = pagerState.currentPage,
                 offsetFraction = pagerState.currentPageOffsetFraction,
                 onSelect = { index -> pagerScope.launch { pagerState.animateScrollToPage(index) } },

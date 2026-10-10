@@ -1175,4 +1175,21 @@
     <string name="st_dl_v">Скачать v%1$s</string>
     <string name="st_dl_official_only">Скачать официальный v%1$s</string>
     <string name="psd_auto_sync_note">Уже настроенные телефоны с одним профилем синхронизируются сами в фоне — ничего нажимать не нужно. Это окно только для разового переноса или восстановления нового телефона. Данные не заменяются без подтверждения.</string>
+    <string name="bubble_kind_personal">личный чат</string>
+    <string name="bubble_kind_group">группа</string>
+    <string name="bubble_kind_channel">канал</string>
+    <string name="cs_sort_last_title">По последней активности</string>
+    <string name="cs_sort_last_desc">Недавно заходившие выше</string>
+    <string name="cs_sort_alpha_title">По алфавиту</string>
+    <string name="cs_sort_alpha_desc">От А до Я</string>
+    <string name="cs_sort_online_title">Сначала в сети</string>
+    <string name="cs_sort_online_desc">Доступные контакты выше</string>
+    <string name="ga_tab_overview">Обзор</string>
+    <string name="ga_tab_admins">Администраторы</string>
+    <string name="ga_tab_members">Участники</string>
+    <string name="ga_tab_requests">Заявки</string>
+    <string name="ga_tab_invites">Ссылки</string>
+    <string name="ga_tab_stats">Статистика</string>
+    <string name="ga_tab_permissions">Разрешения</string>
+    <string name="settings_theme_chosen">Выбрано: %1$s</string>
 </resources>

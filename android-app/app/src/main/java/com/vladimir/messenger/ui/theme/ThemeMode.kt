@@ -1,15 +1,16 @@
 package com.vladimir.messenger.ui.theme
 
+import com.vladimir.messenger.R
 import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /** Выбор темы в настройках: день, ночь или как в системе. */
-enum class ThemeMode(val storedValue: String, val title: String) {
-    SYSTEM("system", "Авто (как в системе)"),
-    LIGHT("light", "День"),
-    DARK("dark", "Ночь"),
+enum class ThemeMode(val storedValue: String, @androidx.annotation.StringRes val labelRes: Int) {
+    SYSTEM("system", R.string.settings_theme_auto),
+    LIGHT("light", R.string.settings_theme_day),
+    DARK("dark", R.string.settings_theme_night),
     ;
 
     companion object {

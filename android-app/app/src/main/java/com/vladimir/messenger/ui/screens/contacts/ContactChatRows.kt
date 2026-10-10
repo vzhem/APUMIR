@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.contacts
 
+import com.vladimir.messenger.R
 import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.domain.model.Contact
 
@@ -16,15 +17,15 @@ data class ContactChatRow(
 
 /** Sort orders offered by the Contacts address book. */
 enum class ContactSortOrder(
-    val title: String,
-    val description: String,
+    @androidx.annotation.StringRes val titleRes: Int,
+    @androidx.annotation.StringRes val descRes: Int,
 ) {
     /** Most recently observed contacts first; contacts online now always lead. */
-    LAST_ACTIVITY("По последней активности", "Недавно заходившие выше"),
+    LAST_ACTIVITY(R.string.cs_sort_last_title, R.string.cs_sort_last_desc),
     /** Localized name order, useful for finding a known person in a long book. */
-    ALPHABETICAL("По алфавиту", "От А до Я"),
+    ALPHABETICAL(R.string.cs_sort_alpha_title, R.string.cs_sort_alpha_desc),
     /** Handy when the next action is to write or call somebody now. */
-    ONLINE_FIRST("Сначала в сети", "Доступные контакты выше");
+    ONLINE_FIRST(R.string.cs_sort_online_title, R.string.cs_sort_online_desc);
 
     companion object {
         fun fromStored(value: String?): ContactSortOrder =

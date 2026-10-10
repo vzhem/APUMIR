@@ -1166,4 +1166,21 @@
     <string name="st_dl_v">Download v%1$s</string>
     <string name="st_dl_official_only">Download official v%1$s</string>
     <string name="psd_auto_sync_note">Phones that already share one profile sync by themselves in the background — nothing to tap. This window is only for a one-time transfer or restoring a new phone. Data is never replaced without confirmation.</string>
+    <string name="bubble_kind_personal">private chat</string>
+    <string name="bubble_kind_group">group</string>
+    <string name="bubble_kind_channel">channel</string>
+    <string name="cs_sort_last_title">Last activity</string>
+    <string name="cs_sort_last_desc">Recently active contacts first</string>
+    <string name="cs_sort_alpha_title">Alphabetical</string>
+    <string name="cs_sort_alpha_desc">From A to Z</string>
+    <string name="cs_sort_online_title">Online first</string>
+    <string name="cs_sort_online_desc">Available contacts first</string>
+    <string name="ga_tab_overview">Overview</string>
+    <string name="ga_tab_admins">Admins</string>
+    <string name="ga_tab_members">Members</string>
+    <string name="ga_tab_requests">Requests</string>
+    <string name="ga_tab_invites">Links</string>
+    <string name="ga_tab_stats">Statistics</string>
+    <string name="ga_tab_permissions">Permissions</string>
+    <string name="settings_theme_chosen">Selected: %1$s</string>
 </resources>

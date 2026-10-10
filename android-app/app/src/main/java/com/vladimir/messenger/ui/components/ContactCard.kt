@@ -156,7 +156,7 @@ fun ContactCard(
             // В адресной книге важнее статус присутствия, чем техническая
             // подпись «личный чат». В остальных списках остаётся тип пузыря.
             Text(
-                text     = presenceLabel ?: kind.label,
+                text     = presenceLabel ?: stringResource(kind.labelRes),
                 style    = MaterialTheme.typography.labelSmall,
                 color    = if (presenceLabel != null && chat.isContactOnline) {
                     StatusOnline

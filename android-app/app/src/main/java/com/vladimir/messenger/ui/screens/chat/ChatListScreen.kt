@@ -1669,7 +1669,7 @@ private fun GroupCard(
             }
             // Подпись пузыря — как у личных чатов: сразу видно, что это.
             Text(
-                text = if (group.isChannel) BubbleKind.Channel.label else BubbleKind.Group.label,
+                text = if (group.isChannel) stringResource(BubbleKind.Channel.labelRes) else stringResource(BubbleKind.Group.labelRes),
                 style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFF5A6472),
                 maxLines = 1,

@@ -1799,7 +1799,7 @@ private fun ThemeModeChoices(selected: ThemeMode, onSelect: (ThemeMode) -> Unit)
                 }
             }
             Text(
-                if (selected == ThemeMode.SYSTEM) stringResource(R.string.settings_theme_follows) else "Выбрано: ${selected.title.lowercase()}",
+                if (selected == ThemeMode.SYSTEM) stringResource(R.string.settings_theme_follows) else stringResource(R.string.settings_theme_chosen, stringResource(selected.labelRes).lowercase()),
                 style = MaterialTheme.typography.bodySmall,
                 color = ApuBubbleMutedColor,
             )
