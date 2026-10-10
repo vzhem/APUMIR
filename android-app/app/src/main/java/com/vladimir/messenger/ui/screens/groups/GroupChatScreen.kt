@@ -161,6 +161,8 @@ import java.util.Locale
 import com.vladimir.messenger.ui.components.ApuPremiumContentButton
 import com.vladimir.messenger.ui.components.ApuPremiumButton
 import com.vladimir.messenger.ui.components.ApuPremiumChip
+import com.vladimir.messenger.ui.components.ApuHeaderButton
+import com.vladimir.messenger.ui.components.apuGoldBrush
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -681,23 +683,27 @@ fun GroupChatScreen(
                     }
                 },
                 navigationIcon = {
-                    ApuTextAction(
-                        label = stringResource(R.string.action_back),
-                        onClick = {
-
-                        if (hasTopics && showFeed) showFeed = false else onBackClick()
-                    },
+                    ApuHeaderButton(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.action_back),
+                        onClick = { if (hasTopics && showFeed) showFeed = false else onBackClick() },
+                        modifier = Modifier.padding(start = 4.dp),
                     )
                 },
                 actions = {
-                    IconButton(onClick = { onOpenAdmin(uiState.groupId) }) {
-                        Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.group_chat_manage))
-                    }
+                    ApuHeaderButton(
+                        icon = Icons.Filled.Settings,
+                        contentDescription = stringResource(R.string.group_chat_manage),
+                        onClick = { onOpenAdmin(uiState.groupId) },
+                    )
+                    Spacer(Modifier.width(6.dp))
                     // Действия группы/канала и уведомлений собраны в «три точки».
                     Box {
-                        IconButton(onClick = { showTopMenu = true }) {
-                            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.chat_more))
-                        }
+                        ApuHeaderButton(
+                            icon = Icons.Filled.MoreVert,
+                            contentDescription = stringResource(R.string.chat_more),
+                            onClick = { showTopMenu = true },
+                        )
                         ApuActionsMenu(
                             expanded = showTopMenu,
                             onDismiss = { showTopMenu = false },
@@ -1521,19 +1527,20 @@ private fun TopicRail(
 /** Кружок темы: её эмодзи, открытая тема обведена золотым. */
 @Composable
 private fun TopicRailIcon(topic: TopicSummary, selected: Boolean) {
+    // Выбранная тема: золотое кольцо и подъём, остальные - белое стекло.
     Box(
         modifier = Modifier
             .size(52.dp)
+            .apuPremiumLift(if (selected) 5.dp else 2.dp, CircleShape)
+            .apuBubbleSurface(color = Color.White.copy(alpha = 0.92f), shape = CircleShape)
             .then(
                 if (selected) {
-                    Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                    Modifier.border(2.dp, apuGoldBrush(), CircleShape)
                 } else {
                     Modifier
                 }
             )
-            .padding(2.dp)
-            .clip(CircleShape)
-            .background(Color(0xFFE8EEF5)),
+            .padding(2.dp),
         contentAlignment = Alignment.Center,
     ) {
         TopicIconView(
@@ -1923,6 +1930,8 @@ private fun MessageBubble(
             backgroundColor = if (message.isFromMe) messenger.messageBubbleOwn else messenger.messageBubbleOther,
             contentColor = bubbleTextColor,
             transparent = stickerFloat,
+            // Объём пузыря, как в премиальных мессенджерах (стикеры остаются без фона).
+            premium = if (stickerFloat) null else 3.dp,
         ) {
             Column(modifier = Modifier.padding(8.dp)) {
                 if (!message.isFromMe) {
