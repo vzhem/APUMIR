@@ -117,6 +117,13 @@ import com.vladimir.messenger.ui.theme.AppFontSize
 import com.vladimir.messenger.ui.theme.AppFontSizeHolder
 import com.vladimir.messenger.ui.theme.UsernameHolder
 import com.vladimir.messenger.ui.theme.WallpaperHolder
+import com.vladimir.messenger.ui.theme.WallpaperTint
+import com.vladimir.messenger.ui.theme.WallpaperTintHolder
+import com.vladimir.messenger.ui.theme.LocalAppDarkTheme
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.semantics.semantics
 import com.vladimir.messenger.util.QrCodeGenerator
 import com.vladimir.messenger.ui.components.ApuPremiumRadioButton
 import com.vladimir.messenger.ui.components.ApuPremiumSlider
@@ -871,6 +878,49 @@ private fun SettingsTabContent(
                                 onClick = { WallpaperHolder.set(context, null) },
                             )
                         }
+                    }
+
+                    // Цветовая гамма подложки: 10 вариантов. Своя картинка важнее гаммы.
+                    ApuSettingsDivider()
+                    val wallpaperTint by WallpaperTintHolder.tint.collectAsStateWithLifecycle()
+                    val tintDark = LocalAppDarkTheme.current
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            stringResource(R.string.settings_tint_title),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            stringResource(R.string.settings_tint_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            WallpaperTint.entries.forEach { option ->
+                                WallpaperTintSwatch(
+                                    option = option,
+                                    dark = tintDark,
+                                    selected = wallpaperTint == option,
+                                    name = stringResource(option.labelRes),
+                                    onClick = { WallpaperTintHolder.set(context, option) },
+                                )
+                            }
+                        }
+                        Text(
+                            stringResource(wallpaperTint.labelRes),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = ApuBubbleAccentColor,
+                        )
                     }
                 }
             }
@@ -2132,4 +2182,44 @@ private fun apuDiagnosticsNothingYet(context: android.content.Context, stage: St
         ?.let { context.getString(R.string.report_collecting_tpl, it) }
         ?: context.getString(R.string.report_still_collecting, context.getString(R.string.action_refresh))
     android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_SHORT).show()
+}
+
+/** Образец гаммы подложки: круг с её градиентом для текущей темы; выбранный — золотое кольцо. */
+@Composable
+private fun WallpaperTintSwatch(
+    option: WallpaperTint,
+    dark: Boolean,
+    selected: Boolean,
+    name: String,
+    onClick: () -> Unit,
+) {
+    val circle = CircleShape
+    // «Классическая» показывает сам рисунок APU: его средние цвета дня и ночи.
+    val fill = if (option == WallpaperTint.CLASSIC) {
+        if (dark) Brush.verticalGradient(listOf(Color(0xFF080D0C), Color(0xFF0A1210)))
+        else Brush.verticalGradient(listOf(Color(0xFFB5D0AA), Color(0xFFD0DEB7)))
+    } else {
+        Brush.verticalGradient(option.colorsFor(dark))
+    }
+    Column(
+        modifier = Modifier
+            .width(64.dp)
+            .clickable(role = androidx.compose.ui.semantics.Role.RadioButton, onClick = onClick)
+            .semantics { contentDescription = name },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .apuPremiumLift(if (selected) 6.dp else 3.dp, circle, ApuGold.copy(alpha = 0.35f))
+                .clip(circle)
+                .background(fill)
+                .border(if (selected) 3.dp else 1.dp, if (selected) ApuGold else Color.White.copy(alpha = 0.6f), circle),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected) {
+                Icon(Icons.Default.Check, contentDescription = null, tint = if (dark) ApuGold else ApuGoldInk, modifier = Modifier.size(22.dp))
+            }
+        }
+    }
 }

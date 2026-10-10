@@ -416,6 +416,7 @@ class MainActivity : ComponentActivity() {
         com.vladimir.messenger.data.translate.TranslationSettings.init(this)
         AppFontSizeHolder.init(this)
         WallpaperHolder.init(this)
+        com.vladimir.messenger.ui.theme.WallpaperTintHolder.init(this)
         com.vladimir.messenger.data.swarm.SwarmSettings.init(this)
         com.vladimir.messenger.data.swarm.StorageSettings.init(this)
         com.vladimir.messenger.data.swarm.ServerMode.init(this)
