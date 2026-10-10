@@ -1240,4 +1240,9 @@
     <string name="rb_promo_applied">Promo code accepted: +%1$d to your rank</string>
     <string name="rb_promo_unknown">No such promo code. Check the spelling</string>
     <string name="rb_promo_used">This promo code has already been used here</string>
+    <string name="qr_identity_not_ready">Your identity has not been created yet</string>
+    <string name="gif_delete_text">The GIF will disappear from your library and from the shared network catalog on all phones. Those who already downloaded it will keep their copy.</string>
+    <string name="gif_empty_hint">Nothing here yet. Tap search to find GIFs in the external catalog; downloaded ones are kept in our network. Add your own GIF with the “+ Own” button. Phone catalogs sync automatically: the longer you use it, the bigger the set without any external source.</string>
+    <string name="pinned_count">Pinned (%1$d/%2$d)</string>
+    <string name="fwd_from_label">↩ Forwarded from “%1$s”</string>
 </resources>

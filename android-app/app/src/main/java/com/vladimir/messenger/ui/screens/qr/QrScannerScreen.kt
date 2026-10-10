@@ -371,7 +371,7 @@ private fun MyCodePane() {
                 val link = maybeLink
                 if (link.isNullOrBlank()) {
                     android.widget.Toast.makeText(
-                        context, "Личность ещё не создана",
+                        context, context.getString(R.string.qr_identity_not_ready),
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
                 } else {

@@ -535,8 +535,7 @@ fun ChannelScreen(
                                 )
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    "Закреплённые (" + uiState.pinnedPostIds.size + "/" +
-                                        com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE + ")",
+                                    stringResource(R.string.pinned_count, uiState.pinnedPostIds.size, com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE),
                                     fontWeight = FontWeight.Medium,
                                 )
                             }

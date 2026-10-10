@@ -585,8 +585,7 @@ fun ChatDetailScreen(
                                     )
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        "Закреплённые (" + uiState.pinned.size + "/" +
-                                            com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE + ")",
+                                        stringResource(R.string.pinned_count, uiState.pinned.size, com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE),
                                         fontWeight = FontWeight.Medium,
                                     )
                                 }
@@ -731,7 +730,7 @@ fun ChatDetailScreen(
                                     val fwdLabel = fwdSource?.label
                                         ?: com.vladimir.messenger.util.ForwardMarker.plainHeaderLabel(message.content)
                                     Text(
-                                        "↩ Переслано из «" + fwdLabel + "»",
+                                        stringResource(R.string.fwd_from_label, fwdLabel),
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = FontWeight.SemiBold,
                                         textDecoration = TextDecoration.Underline,

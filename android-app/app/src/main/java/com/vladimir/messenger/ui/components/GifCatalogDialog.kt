@@ -159,7 +159,7 @@ fun GifCatalogBody(
             title = { Text(stringResource(R.string.gif_delete_title)) },
             text = {
                 Text(
-                    "Гифка исчезнет из вашей библиотеки и из общего каталога сети на всех телефонах. У тех, кто уже успел её скачать, копия останется.",
+                    stringResource(R.string.gif_delete_text),
                 )
             },
             confirmButton = {
@@ -243,10 +243,7 @@ fun GifCatalogBody(
         val nothingAtAll = myCells.isEmpty() && peerCells.isEmpty() && items.isEmpty() && error == null
         if (nothingAtAll) {
             Text(
-                "Пока пусто. Нажмите поиск - гифки из внешнего каталога; " +
-                    "скачанные оседают в нашей сети. Свою гифку добавьте кнопкой «+ Своя». " +
-                    "Каталоги телефонов обмениваются автоматически: чем дольше пользуетесь, " +
-                    "тем больше набор без внешнего ресурса.",
+                stringResource(R.string.gif_empty_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,

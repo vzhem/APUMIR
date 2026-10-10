@@ -1959,7 +1959,7 @@ private fun MessageBubble(
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                     ) {
                         Text(
-                            "↩ Переслано из «" + fwdLabel + "»",
+                            stringResource(R.string.fwd_from_label, fwdLabel),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             textDecoration = TextDecoration.Underline,
