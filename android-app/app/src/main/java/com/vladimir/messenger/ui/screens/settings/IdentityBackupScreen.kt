@@ -139,7 +139,7 @@ fun IdentityBackupScreen(
                             )
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                state.protectedNickname?.let { "Никнейм для восстановления: @$it" }
+                                state.protectedNickname?.let { stringResource(R.string.identity_nick_hint, it) }
                                     ?: stringResource(R.string.identity_reinstall_warning),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -181,9 +181,9 @@ fun IdentityBackupScreen(
                                 supportingText = {
                                     Text(
                                         if (password.isNotEmpty() && password.length < MIN_PASSWORD) {
-                                            "Ещё ${MIN_PASSWORD - password.length} знак(ов)"
+                                            stringResource(R.string.identity_chars_left, MIN_PASSWORD - password.length)
                                         } else {
-                                            "Минимум $MIN_PASSWORD знаков"
+                                            stringResource(R.string.identity_min_chars, MIN_PASSWORD)
                                         },
                                         color = if (password.isNotEmpty() && password.length < MIN_PASSWORD) {
                                             MaterialTheme.colorScheme.error
@@ -235,7 +235,7 @@ fun IdentityBackupScreen(
                             // объяснения выглядит как поломка приложения.
                             val blocker = when {
                                 nickname.isBlank() -> stringResource(R.string.identity_enter_nickname)
-                                password.length < MIN_PASSWORD -> "Пароль минимум $MIN_PASSWORD знаков"
+                                password.length < MIN_PASSWORD -> stringResource(R.string.identity_password_min, MIN_PASSWORD)
                                 password != repeat -> stringResource(R.string.identity_repeat_error)
                                 else -> null
                             }

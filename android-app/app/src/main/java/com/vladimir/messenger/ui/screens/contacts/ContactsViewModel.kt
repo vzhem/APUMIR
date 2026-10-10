@@ -199,7 +199,7 @@ class ContactsViewModel @Inject constructor(
                     sharedUsername = shared.username,
                 )
             }.getOrDefault(false)
-            _toast.value = if (ok) "Контакт отправлен: " + toName else "Не удалось отправить контакт"
+            _toast.value = if (ok) appContext.getString(R.string.contact_sent_ok, toName) else appContext.getString(R.string.contact_send_failed)
         }
     }
 

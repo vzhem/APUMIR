@@ -195,7 +195,7 @@ fun PeerProfileSheet(
                             } else {
                                 Icons.Filled.FavoriteBorder
                             },
-                            contentDescription = if (heartMine) "Убрать сердечко" else "Поставить сердечко",
+                            contentDescription = stringResource(if (heartMine) R.string.pps_heart_remove else R.string.pps_heart_add),
                             tint = HeartColor,
                             modifier = Modifier.size(20.dp),
                         )

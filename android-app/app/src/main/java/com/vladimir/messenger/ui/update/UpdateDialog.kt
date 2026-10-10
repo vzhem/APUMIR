@@ -50,7 +50,7 @@ fun UpdateDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "Версия: ${releaseInfo.version}",
+                    stringResource(R.string.update_version_tpl, releaseInfo.version),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )

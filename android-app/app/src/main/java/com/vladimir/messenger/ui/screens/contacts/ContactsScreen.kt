@@ -532,7 +532,7 @@ private fun InviteToGroupsDialog(
                                     )
                                     Text(
                                         (if (group.isChannel) stringResource(R.string.contacts_channel) else stringResource(R.string.contacts_group)) +
-                                            " • участников: ${group.memberCount}",
+                                            " • " + stringResource(R.string.contacts_members_tpl, group.memberCount),
                                         style = MaterialTheme.typography.bodySmall,
                                     )
                                 }

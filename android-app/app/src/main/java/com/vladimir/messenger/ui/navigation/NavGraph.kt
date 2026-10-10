@@ -863,7 +863,7 @@ fun MessengerNavGraph(
                     else -> {
                         Toast.makeText(
                             scanContext,
-                            "Это не ссылка APU: " + qrContent.take(64),
+                            scanContext.getString(R.string.qr_not_apu, qrContent.take(64)),
                             Toast.LENGTH_LONG,
                         ).show()
                         navController.popBackStack()

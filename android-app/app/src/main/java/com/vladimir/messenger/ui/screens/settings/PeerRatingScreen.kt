@@ -176,7 +176,7 @@ private fun PeerRatingCard(peer: PeerStats, nowMs: Long) {
                         overflow = TextOverflow.Ellipsis,
                     )
                     ApuSettingsChip(
-                        text = peer.tier(nowMs) + " узел",
+                        text = stringResource(R.string.peer_node_suffix, peer.tier(nowMs)),
                         highlighted = false,
                         modifier = Modifier.padding(top = 4.dp),
                     )

@@ -661,7 +661,7 @@ private fun SavedItemBubble(
                 if (bitmap != null) {
                     Image(
                         bitmap = bitmap.asImageBitmap(),
-                        contentDescription = "Фото ${index + 1} из ${photos.size}",
+                        contentDescription = stringResource(R.string.saved_photo_of, index + 1, photos.size),
                         contentScale = ContentScale.FillWidth,
                         modifier = Modifier
                             .fillMaxWidth()

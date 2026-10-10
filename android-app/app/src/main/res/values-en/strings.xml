@@ -1433,4 +1433,23 @@
     <string name="cdv_asked_by">Requested by: %1$s</string>
     <string name="cdv_files_locked">Sending files, photos and videos opens at the “Circle of friends” rank — that takes 3 confirmed invitations. Confirmed so far: %1$d.</string>
     <string name="cdv_gif_not_sent">GIF not sent: %1$s</string>
+    <string name="peer_node_suffix">%1$s node</string>
+    <string name="identity_nick_hint">Nickname for recovery: @%1$s</string>
+    <string name="identity_chars_left">%1$d more character(s)</string>
+    <string name="identity_min_chars">At least %1$d characters</string>
+    <string name="identity_password_min">Password must be at least %1$d characters</string>
+    <string name="mtp_shown_tpl">Showing the top %1$d of %2$d in the pool</string>
+    <string name="mtp_dead_tpl">✗ Not working (%1$d fail)</string>
+    <string name="mtp_ok_tpl">✓ Working (%1$d)</string>
+    <string name="mtp_source_tpl">Source: %1$s | %2$s</string>
+    <string name="ps_address_tpl">Address: %1$s\nCode: %2$s</string>
+    <string name="ps_copy_ready">Copy ready: %1$s from %2$s, APU version %3$s. Apply it on this device?</string>
+    <string name="contacts_members_tpl">members: %1$d</string>
+    <string name="saved_photo_of">Photo %1$d of %2$d</string>
+    <string name="pps_heart_remove">Remove heart</string>
+    <string name="pps_heart_add">Give a heart</string>
+    <string name="update_version_tpl">Version: %1$s</string>
+    <string name="qr_not_apu">This is not an APU link: %1$s</string>
+    <string name="contact_add_failed">Couldn’t add</string>
+    <string name="contact_rename_failed">Couldn’t rename</string>
 </resources>

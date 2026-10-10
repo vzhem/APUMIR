@@ -96,7 +96,7 @@ class AddContactViewModel @Inject constructor(
                     } else {
                         Log.e(TAG, "add by nickname failed", error)
                         _uiState.update {
-                            it.copy(isLoading = false, error = error.message ?: "Не удалось добавить")
+                            it.copy(isLoading = false, error = error.message ?: appContext.getString(R.string.contact_add_failed))
                         }
                     }
                 }

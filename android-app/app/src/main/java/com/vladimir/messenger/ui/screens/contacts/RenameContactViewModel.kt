@@ -96,7 +96,7 @@ class RenameContactViewModel @Inject constructor(
                 }
                 .onFailure { e ->
                     Log.e(TAG, "Rename failed", e)
-                    _uiState.update { it.copy(isLoading = false, error = e.message ?: "Не удалось переименовать") }
+                    _uiState.update { it.copy(isLoading = false, error = e.message ?: appContext.getString(R.string.contact_rename_failed)) }
                 }
         }
     }

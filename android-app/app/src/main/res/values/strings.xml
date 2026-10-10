@@ -1446,4 +1446,23 @@
     <string name="cdv_asked_by">Просили: %1$s</string>
     <string name="cdv_files_locked">Отправка файлов, фото и видео открывается с ранга «Круг друзей» — это 3 подтверждённых приглашения. Сейчас подтверждено: %1$d.</string>
     <string name="cdv_gif_not_sent">Гифка не отправлена: %1$s</string>
+    <string name="peer_node_suffix">%1$s узел</string>
+    <string name="identity_nick_hint">Никнейм для восстановления: @%1$s</string>
+    <string name="identity_chars_left">Ещё %1$d знак(ов)</string>
+    <string name="identity_min_chars">Минимум %1$d знаков</string>
+    <string name="identity_password_min">Пароль минимум %1$d знаков</string>
+    <string name="mtp_shown_tpl">Показаны %1$d лучших из %2$d в пуле</string>
+    <string name="mtp_dead_tpl">✗ Нерабочий (%1$d fail)</string>
+    <string name="mtp_ok_tpl">✓ Рабочий (%1$d)</string>
+    <string name="mtp_source_tpl">Источник: %1$s | %2$s</string>
+    <string name="ps_address_tpl">Адрес: %1$s\nКод: %2$s</string>
+    <string name="ps_copy_ready">Копия готова: %1$s от %2$s, версия APU %3$s. Применить на этом устройстве?</string>
+    <string name="contacts_members_tpl">участников: %1$d</string>
+    <string name="saved_photo_of">Фото %1$d из %2$d</string>
+    <string name="pps_heart_remove">Убрать сердечко</string>
+    <string name="pps_heart_add">Поставить сердечко</string>
+    <string name="update_version_tpl">Версия: %1$s</string>
+    <string name="qr_not_apu">Это не ссылка APU: %1$s</string>
+    <string name="contact_add_failed">Не удалось добавить</string>
+    <string name="contact_rename_failed">Не удалось переименовать</string>
 </resources>

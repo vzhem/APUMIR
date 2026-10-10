@@ -172,7 +172,7 @@ fun MtProxyListScreen(
                 if (uiState.totalInPool > uiState.proxies.size) {
                     item(key = "pool-count") {
                         Text(
-                            "Показаны ${uiState.proxies.size} лучших из ${uiState.totalInPool} в пуле",
+                            stringResource(R.string.mtp_shown_tpl, uiState.proxies.size, uiState.totalInPool),
                             style = MaterialTheme.typography.bodySmall,
                             color = ApuBubbleMutedColor,
                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
@@ -232,9 +232,9 @@ private fun MtProxyCard(
 
     val statusText = when {
         proxy.isActive -> stringResource(R.string.mtp_active)
-        proxy.failCount >= 3 -> "✗ Нерабочий (${proxy.failCount} fail)"
+        proxy.failCount >= 3 -> stringResource(R.string.mtp_dead_tpl, proxy.failCount)
         proxy.lastCheck == 0L -> stringResource(R.string.mtp_unchecked)
-        else -> "✓ Рабочий (${proxy.successCount})"
+        else -> stringResource(R.string.mtp_ok_tpl, proxy.successCount)
     }
 
     ApuBubble {
@@ -270,7 +270,7 @@ private fun MtProxyCard(
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
                 Text(
-                    "Источник: ${proxy.source} | ${formatDate(proxy.addedAt)}",
+                    stringResource(R.string.mtp_source_tpl, proxy.source, formatDate(proxy.addedAt)),
                     style = MaterialTheme.typography.labelSmall,
                     color = ApuBubbleMutedColor,
                     maxLines = 1,

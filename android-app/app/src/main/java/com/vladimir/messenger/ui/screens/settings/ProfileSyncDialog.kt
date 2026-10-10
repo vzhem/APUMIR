@@ -218,7 +218,7 @@ fun ProfileSyncDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
-                            "Адрес: ${address.humanAddress}\nКод: ${address.token}",
+                            stringResource(R.string.ps_address_tpl, address.humanAddress, address.token),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -258,9 +258,7 @@ fun ProfileSyncDialog(
                     val created = SimpleDateFormat("d.MM.yyyy HH:mm", Locale.getDefault())
                         .format(Date(manifest.createdAtMs))
                     Text(
-                        "Копия готова: ${manifest.displayName.ifBlank { stringResource(R.string.ps_no_name) }} от $created, " +
-                            "версия APU ${manifest.appVersionName}. Применить на этом устройстве? " +
-                            stringResource(R.string.sync_replace_warn),
+                        stringResource(R.string.ps_copy_ready, manifest.displayName.ifBlank { stringResource(R.string.ps_no_name) }, created, manifest.appVersionName) + " " + stringResource(R.string.sync_replace_warn),
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.SemiBold,
                     )
