@@ -1365,4 +1365,34 @@
         <item quantity="many">%1$d заявок</item>
         <item quantity="other">%1$d заявок</item>
     </plurals>
+    <string name="diag_report_failed">сбор отчёта не завершился (%1$s) — нажмите «%2$s»</string>
+    <string name="peer_nodes_online_tpl">%1$d на связи - открыть оценку</string>
+    <string name="swarm_limits_tpl">до %1$d пакетов в минуту, %2$d одновременно</string>
+    <string name="settings_seed_priority_body">Сначала контактам, проверенным и стабильным узлам, потом всем остальным. В обычном и экономном режимах на мобильном интернете и при заряде ниже %1$d %% темп вдвое ниже.</string>
+    <string name="settings_forward_space_title">Место под пересылку: %1$s</string>
+    <string name="space_used_head">Занято сейчас: %1$s (куски файлов %2$s</string>
+    <string name="space_held">, из них чужих на хранении %1$s</string>
+    <string name="space_received">, принятые файлы %1$s, </string>
+    <string name="space_group_files">мои файлы для раздачи в сообществах %1$s, </string>
+    <string name="space_queue">очередь сообщений %1$s). </string>
+    <string name="space_free_tail">Свободно на телефоне: %1$s; последние %2$s не занимаются никогда.</string>
+    <string name="profile_return_hint">Вернуться в текущий профиль можно в любой момент: на экране входа вкладка «Я уже зарегистрирован», никнейм @%1$s и ваш пароль.</string>
+    <string name="seed_preparing_tpl">Готовлю раздачу обновления v%1$s</string>
+    <string name="seed_sharing_tpl">Раздаю обновление v%1$s</string>
+    <string name="seed_subtitle_tpl">%1$s, %2$s; получили: %3$s</string>
+    <string name="update_to_tpl">Обновить до v%1$s</string>
+    <string name="ready_subtitle_tpl">%1$s, %2$s; уже раздаётся соседям</string>
+    <string name="receiving_tpl">Принимаю v%1$s</string>
+    <string name="receiving_progress_tpl">%1$s из %2$s; кусками от %3$d сосед(ей)</string>
+    <string name="receiving_compact_tpl">Принимаю v%1$s (компактно)</string>
+    <string name="receiving_patch_tpl">%1$s из %2$s — качаем только разницу версий</string>
+    <string name="patch_offer_tpl">Патч %1$s от %2$d сосед(ей) — только разница версий</string>
+    <string name="pieces_offer_tpl">Кусками от %1$d сосед(ей) — без интернета</string>
+    <string name="offers_many_tpl">Раздают %1$d соседа; %2$s</string>
+    <string name="offer_one_tpl">Раздаёт сосед; %1$s</string>
+    <string name="received_apk_tpl">Получен, %1$s</string>
+    <string name="apk_version_suffix">, версия %1$s</string>
+    <string name="size_label_tpl">Размер: %1$s</string>
+    <string name="report_collecting_tpl">Отчёт собирается: %1$s</string>
+    <string name="report_still_collecting">Отчёт ещё собирается — нажмите «%1$s»</string>
 </resources>

@@ -1352,4 +1352,34 @@
         <item quantity="one">%1$d request</item>
         <item quantity="other">%1$d requests</item>
     </plurals>
+    <string name="diag_report_failed">report collection did not finish (%1$s) — tap “%2$s”</string>
+    <string name="peer_nodes_online_tpl">%1$d connected - open rating</string>
+    <string name="swarm_limits_tpl">up to %1$d packets per minute, %2$d at a time</string>
+    <string name="settings_seed_priority_body">Contacts, verified and stable nodes go first, then everyone else. In normal and economy modes on mobile data, and when the battery is below %1$d %%, the pace is halved.</string>
+    <string name="settings_forward_space_title">Space for forwarding: %1$s</string>
+    <string name="space_used_head">In use now: %1$s (file chunks %2$s</string>
+    <string name="space_held">, of which others’ data held here %1$s</string>
+    <string name="space_received">, received files %1$s, </string>
+    <string name="space_group_files">my files shared in communities %1$s, </string>
+    <string name="space_queue">message queue %1$s). </string>
+    <string name="space_free_tail">Free on the phone: %1$s; the last %2$s is never used.</string>
+    <string name="profile_return_hint">You can return to the current profile at any time: on the sign-in screen, open the “I’m already registered” tab and use your nickname @%1$s and your password.</string>
+    <string name="seed_preparing_tpl">Preparing to share update v%1$s</string>
+    <string name="seed_sharing_tpl">Sharing update v%1$s</string>
+    <string name="seed_subtitle_tpl">%1$s, %2$s; received by: %3$s</string>
+    <string name="update_to_tpl">Update to v%1$s</string>
+    <string name="ready_subtitle_tpl">%1$s, %2$s; already shared with nearby devices</string>
+    <string name="receiving_tpl">Receiving v%1$s</string>
+    <string name="receiving_progress_tpl">%1$s of %2$s; in pieces from %3$d peers</string>
+    <string name="receiving_compact_tpl">Receiving v%1$s (compact)</string>
+    <string name="receiving_patch_tpl">%1$s of %2$s — downloading only the version difference</string>
+    <string name="patch_offer_tpl">Patch %1$s from %2$d peers — only the version difference</string>
+    <string name="pieces_offer_tpl">In pieces from %1$d peers — without internet</string>
+    <string name="offers_many_tpl">%1$d peers are sharing; %2$s</string>
+    <string name="offer_one_tpl">A peer is sharing; %1$s</string>
+    <string name="received_apk_tpl">Received, %1$s</string>
+    <string name="apk_version_suffix">, version %1$s</string>
+    <string name="size_label_tpl">Size: %1$s</string>
+    <string name="report_collecting_tpl">Report in progress: %1$s</string>
+    <string name="report_still_collecting">The report is still being collected — tap “%1$s”</string>
 </resources>

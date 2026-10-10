@@ -704,8 +704,7 @@ private fun SettingsTabContent(
                 // что случилось, и предлагаем повторить. Быстрая часть отчёта
                 // при этом остаётся на экране — она уже собрана.
                 transferLogsStage = null
-                transferLogsError = "сбор отчёта не завершился (" +
-                    failure.javaClass.simpleName + ") — нажмите «Обновить»"
+                transferLogsError = settingsContext.getString(R.string.diag_report_failed, failure.javaClass.simpleName, settingsContext.getString(R.string.action_refresh))
             } finally {
                 transferLogsLoading = false
             }
@@ -1062,7 +1061,7 @@ private fun SettingsTabContent(
                         // из речи. Теперь это вход в подробности: кто держит
                         // сеть и через кого данные идут первыми.
                         title    = stringResource(R.string.peer_nodes_title),
-                        subtitle = "${uiState.connectedPeers} на связи - открыть оценку",
+                        subtitle = stringResource(R.string.peer_nodes_online_tpl, uiState.connectedPeers),
                         onClick  = onPeerRatingClick,
                     )
                     ApuSettingsDivider()
@@ -1170,8 +1169,7 @@ private fun SettingsTabContent(
                                     if (mode == SwarmMode.UNLIMITED) {
                                         stringResource(R.string.settings_swarm_full)
                                     } else {
-                                        "до ${limits.maxPacketsPerMinute} пакетов в минуту, " +
-                                            "${limits.maxConcurrentSends} одновременно"
+                                        stringResource(R.string.swarm_limits_tpl, limits.maxPacketsPerMinute, limits.maxConcurrentSends)
                                     },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1183,10 +1181,7 @@ private fun SettingsTabContent(
                     SettingsItem(
                         icon = Icons.Default.Groups,
                         title = stringResource(R.string.settings_seed_priority),
-                        subtitle = "Сначала контактам, проверенным и стабильным узлам, " +
-                            "потом всем остальным. В обычном и экономном режимах на " +
-                            "мобильном интернете и при заряде ниже " +
-                            "${SwarmPolicy.LOW_BATTERY_PERCENT} % темп вдвое ниже.",
+                        subtitle = stringResource(R.string.settings_seed_priority_body, SwarmPolicy.LOW_BATTERY_PERCENT),
                     )
                 }
             }
@@ -1244,7 +1239,7 @@ private fun SettingsTabContent(
                     }
                     SettingsItem(
                         icon = Icons.Default.Storage,
-                        title = "Место под пересылку: ${StoragePolicy.format(StoragePolicy.stepBytes(step))}",
+                        title = stringResource(R.string.settings_forward_space_title, StoragePolicy.format(StoragePolicy.stepBytes(step))),
                         subtitle = stringResource(R.string.settings_space_body),
                     )
                     Row(
@@ -1283,14 +1278,7 @@ private fun SettingsTabContent(
                         if (used == null) {
                             stringResource(R.string.settings_counting_space)
                         } else {
-                            "Занято сейчас: ${StoragePolicy.format(used.total)} " +
-                                "(куски файлов ${StoragePolicy.format(used.chunkBytes)}" +
-                                (if (held > 0L) ", из них чужих на хранении ${StoragePolicy.format(held)}" else "") +
-                                ", принятые файлы ${StoragePolicy.format(used.receivedBytes)}, " +
-                                (if (used.groupFileBytes > 0L) "мои файлы для раздачи в сообществах ${StoragePolicy.format(used.groupFileBytes)}, " else "") +
-                                "очередь сообщений ${StoragePolicy.format(used.relayBytes)}). " +
-                                "Свободно на телефоне: ${StoragePolicy.format(free)}; последние " +
-                                "${StoragePolicy.format(StoragePolicy.FREE_RESERVE_BYTES)} не занимаются никогда."
+                            stringResource(R.string.space_used_head, StoragePolicy.format(used.total), StoragePolicy.format(used.chunkBytes)) + (if (held > 0L) stringResource(R.string.space_held, StoragePolicy.format(held)) else "") + stringResource(R.string.space_received, StoragePolicy.format(used.receivedBytes)) + (if (used.groupFileBytes > 0L) stringResource(R.string.space_group_files, StoragePolicy.format(used.groupFileBytes)) else "") + stringResource(R.string.space_queue, StoragePolicy.format(used.relayBytes)) + stringResource(R.string.space_free_tail, StoragePolicy.format(free), StoragePolicy.format(StoragePolicy.FREE_RESERVE_BYTES))
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1435,8 +1423,7 @@ private fun SettingsTabContent(
                             )
                         } else {
                             append(
-                                "Вернуться в текущий профиль можно в любой момент: на экране " +
-                                    "входа вкладка «Я уже зарегистрирован», никнейм @$nick и ваш пароль.",
+                                stringResource(R.string.profile_return_hint, nick),
                             )
                         }
                     },
@@ -1870,12 +1857,8 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         seed?.let { s ->
             SettingsItem(
                 icon    = Icons.Default.Share,
-                title   = if (s.preparing) {
-                    "Готовлю раздачу обновления v${s.version}"
-                } else {
-                    "Раздаю обновление v${s.version}"
-                },
-                subtitle = "${s.name}, ${StoragePolicy.format(s.sizeBytes)}; получили: ${s.served}",
+                title   = if (s.preparing) { stringResource(R.string.seed_preparing_tpl, s.version) } else { stringResource(R.string.seed_sharing_tpl, s.version) },
+                subtitle = stringResource(R.string.seed_subtitle_tpl, s.name, StoragePolicy.format(s.sizeBytes), s.served),
             )
             ApuSettingsDivider()
             SettingsItem(
@@ -1891,8 +1874,8 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         ready?.let { r ->
             SettingsItem(
                 icon    = Icons.Default.SystemUpdate,
-                title   = "Обновить до v${r.version}",
-                subtitle = "${r.name}, ${StoragePolicy.format(r.sizeBytes)}; уже раздаётся соседям",
+                title   = stringResource(R.string.update_to_tpl, r.version),
+                subtitle = stringResource(R.string.ready_subtitle_tpl, r.name, StoragePolicy.format(r.sizeBytes)),
                 onClick = viewModel::onInstallUpdate,
             )
         }
@@ -1900,9 +1883,8 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         download?.let { d ->
             SettingsItem(
                 icon    = Icons.Default.Download,
-                title   = "Принимаю v${d.version}",
-                subtitle = StoragePolicy.format(d.receivedBytes) + " из " + StoragePolicy.format(d.totalBytes) +
-                    "; кусками от " + offers.size.coerceAtLeast(1).toString() + " сосед(ей)",
+                title   = stringResource(R.string.receiving_tpl, d.version),
+                subtitle = stringResource(R.string.receiving_progress_tpl, StoragePolicy.format(d.receivedBytes), StoragePolicy.format(d.totalBytes), offers.size.coerceAtLeast(1)),
             )
             ApuSettingsDivider()
             SettingsItem(
@@ -1915,9 +1897,8 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         patchDownload?.let { pd ->
             SettingsItem(
                 icon    = Icons.Default.Download,
-                title   = "Принимаю v${pd.version} (компактно)",
-                subtitle = StoragePolicy.format(pd.receivedBytes) + " из " + StoragePolicy.format(pd.totalBytes) +
-                    " — качаем только разницу версий",
+                title   = stringResource(R.string.receiving_compact_tpl, pd.version),
+                subtitle = stringResource(R.string.receiving_patch_tpl, StoragePolicy.format(pd.receivedBytes), StoragePolicy.format(pd.totalBytes)),
             )
             ApuSettingsDivider()
             SettingsItem(
@@ -1933,8 +1914,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
             SettingsItem(
                 icon    = Icons.Default.Download,
                 title   = stringResource(R.string.st_dl_patch_title, patchBest.toVersion),
-                subtitle = "Патч " + StoragePolicy.format(patchBest.sizeBytes) +
-                    " от " + patchOffers.size.coerceAtLeast(1).toString() + " сосед(ей) — только разница версий",
+                subtitle = stringResource(R.string.patch_offer_tpl, StoragePolicy.format(patchBest.sizeBytes), patchOffers.size.coerceAtLeast(1)),
                 onClick = { viewModel.onDownloadPatchFrom(patchBest.nodeId) },
             )
         }
@@ -1959,7 +1939,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
             SettingsItem(
                 icon    = Icons.Default.Download,
                 title   = stringResource(R.string.st_dl_net_v, best.version),
-                subtitle = "Кусками от " + offers.size + " сосед(ей) — без интернета",
+                subtitle = stringResource(R.string.pieces_offer_tpl, offers.size),
                 onClick = { viewModel.onDownloadUpdateFrom(best.nodeId) },
             )
         } else {
@@ -1970,9 +1950,9 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
                     icon    = Icons.Default.Download,
                     title   = stringResource(R.string.st_dl_v, best.version),
                     subtitle = if (offers.size > 1) {
-                        "Раздают " + offers.size + " соседа; " + StoragePolicy.format(best.sizeBytes)
+                        stringResource(R.string.offers_many_tpl, offers.size, StoragePolicy.format(best.sizeBytes))
                     } else {
-                        "Раздаёт сосед; " + StoragePolicy.format(best.sizeBytes)
+                        stringResource(R.string.offer_one_tpl, StoragePolicy.format(best.sizeBytes))
                     },
                     onClick = { viewModel.onDownloadUpdateFrom(best.nodeId) },
                 )
@@ -1994,10 +1974,8 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
                 icon    = Icons.Default.InsertDriveFile,
                 title   = apk.displayName,
                 subtitle = buildString {
-                    append("Получен, ")
-                    append(StoragePolicy.format(apk.sizeBytes))
-                    apk.versionGuess?.let { append(", версия ")
-                        append(it) }
+                    append(stringResource(R.string.received_apk_tpl, StoragePolicy.format(apk.sizeBytes)))
+                    apk.versionGuess?.let { append(stringResource(R.string.apk_version_suffix, it)) }
                 },
                 onClick = {
                     markTarget = MarkTarget(
@@ -2085,7 +2063,7 @@ private fun ApkVersionDialog(
                 }
                 if (sizeText != null) {
                     Text(
-                        "Размер: " + sizeText,
+                        stringResource(R.string.size_label_tpl, sizeText),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -2160,7 +2138,7 @@ private fun com.vladimir.messenger.data.repository.NetworkStatus.displayName(): 
  */
 private fun apuDiagnosticsNothingYet(context: android.content.Context, stage: String?) {
     val text = stage?.takeIf { it.isNotBlank() }
-        ?.let { "Отчёт собирается: $it" }
-        ?: "Отчёт ещё собирается — нажмите «Обновить»"
+        ?.let { context.getString(R.string.report_collecting_tpl, it) }
+        ?: context.getString(R.string.report_still_collecting, context.getString(R.string.action_refresh))
     android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_SHORT).show()
 }
