@@ -1256,4 +1256,6 @@
     <string name="mirror_collecting">Collecting…</string>
     <string name="pps_anti_rating_note">Anti-rating marks on this profile: %1$d. Single complaints do not lower the rating — only a sharp rise matters.</string>
     <string name="emoji_cat_food">Food</string>
+    <string name="mqtt_path_auto">The route is chosen automatically: first a direct one, and if the network blocks it, through a backup channel, then back again. Nothing to tap.</string>
+    <string name="mqtt_broker_note">The “Our server” check and the message broker are separate connections. If the broker did not answer, the app retries the connection by itself; there is no need to send a copy of the profile.</string>
 </resources>

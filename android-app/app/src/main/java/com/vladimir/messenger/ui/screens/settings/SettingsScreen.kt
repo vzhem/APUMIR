@@ -1486,13 +1486,10 @@ private fun SettingsTabContent(
             if (uiState.mqttHuman.isNotBlank()) {
                 append(uiState.mqttHuman)
                 append("\n\n")
-                append("Путь выбирается сам: сначала прямой, если сеть его ")
-                append("не пропускает — через обходной канал, и потом обратно. ")
-                append("Нажимать ничего не нужно.")
+                append(stringResource(R.string.mqtt_path_auto))
                 if (uiState.mqttLink.contains(", ошибка ")) {
-                    append("\n\nПроверка «Наш сервер» и брокер сообщений — разные ")
-                    append("соединения. Если брокер не ответил, приложение повторяет ")
-                    append("подключение само; отправлять копию профиля не нужно.")
+                    append("\n\n")
+                    append(stringResource(R.string.mqtt_broker_note))
                 }
             } else {
                 append(uiState.mqttLink)

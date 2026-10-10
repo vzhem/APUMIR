@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.groups
 
+import com.vladimir.messenger.R
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.group.GroupRepository
@@ -43,6 +44,7 @@ data class GroupsUiState(
 @HiltViewModel
 class GroupsViewModel @Inject constructor(
     private val groupRepository: GroupRepository,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(GroupsUiState())
@@ -247,7 +249,7 @@ class GroupsViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         joining = false,
-                        joinMessage = "Не удалось открыть ссылку: нет связи с сервисом APU. Попробуйте позже.",
+                        joinMessage = appContext.getString(R.string.acvm_link_failed),
                     )
                 }
                 return@launch
