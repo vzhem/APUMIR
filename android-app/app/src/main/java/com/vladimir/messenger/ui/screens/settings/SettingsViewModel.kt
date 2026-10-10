@@ -354,7 +354,7 @@ class SettingsViewModel @Inject constructor(
                 release != null ->
                     "Есть новая версия v${release.version.removePrefix("v")} на официальном сайте — кнопка в карточке"
                 neighbors > 0 ->
-                    "Соседи раздают новую версию — кнопка «Скачать» в карточке"
+                    context.getString(R.string.st_neighbors_offer)
                 asked > 0 -> "Спрошено у $asked соседей; новых объявлений пока нет"
                 else -> context.getString(R.string.st_no_updates)
             }
@@ -375,14 +375,13 @@ class SettingsViewModel @Inject constructor(
                     // Раунд 132: дифф-патч - скачали разницу, установщик уже открыт.
                     android.widget.Toast.makeText(
                         context,
-                        "Обновление скачано компактно (только разница версий) - установщик открыт",
+                        context.getString(R.string.st_update_delta_done),
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
                 } else {
                     android.widget.Toast.makeText(
                         context,
-                        "Скачивание началось. Когда файл скачается, он сам появится в «Обновлениях» — " +
-                            "установка и раздача соседям начнутся сами",
+                        context.getString(R.string.st_download_started),
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
                 }

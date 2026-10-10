@@ -224,9 +224,7 @@ class ProfileBackupViewModel @Inject constructor(
                 ProfileBackup.StageResult.WrongPassword -> fail(context.getString(R.string.bk_wrong_pw))
                 ProfileBackup.StageResult.NotBackupFile -> fail(context.getString(R.string.bk_not_backup))
                 is ProfileBackup.StageResult.TooNew -> fail(
-                    "Копия сделана более новой версией приложения" +
-                        (if (result.appVersion.isNotBlank()) " (${result.appVersion})" else "") +
-                        ". Сначала обновите APU.",
+                    if (result.appVersion.isNotBlank()) context.getString(R.string.bk_too_new_ver, result.appVersion) else context.getString(R.string.bk_too_new),
                 )
                 ProfileBackup.StageResult.Truncated -> fail(context.getString(R.string.bk_truncated))
                 is ProfileBackup.StageResult.Failed -> fail(context.getString(R.string.bk_read_failed, result.reason))
@@ -330,7 +328,7 @@ class ProfileBackupViewModel @Inject constructor(
     fun runAutoNow() {
         viewModelScope.launch(Dispatchers.IO) {
             BackupSchedule.runNow(context)
-            _uiState.update { it.copy(message = "Обновление запущено в фоне; итог появится здесь через минуту-другую.", failed = false) }
+            _uiState.update { it.copy(message = context.getString(R.string.bk_update_bg), failed = false) }
         }
     }
 

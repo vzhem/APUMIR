@@ -110,7 +110,7 @@ class SavedViewModel @Inject constructor(
                     .putExtra(android.content.Intent.EXTRA_STREAM, uri)
                     .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 appContext.startActivity(
-                    android.content.Intent.createChooser(intent, "Поделиться")
+                    android.content.Intent.createChooser(intent, appContext.getString(R.string.admin_share))
                         .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             }.onFailure {
@@ -165,7 +165,7 @@ class SavedViewModel @Inject constructor(
                     .putExtra(android.content.Intent.EXTRA_STREAM, uri)
                     .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 appContext.startActivity(
-                    android.content.Intent.createChooser(intent, "Поделиться")
+                    android.content.Intent.createChooser(intent, appContext.getString(R.string.admin_share))
                         .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             }.onFailure {
@@ -186,7 +186,7 @@ class SavedViewModel @Inject constructor(
                     com.vladimir.messenger.util.PhotoShare.writeShareImage(appContext, item.photoList(), item.id)
                 }.getOrNull()
             }
-            com.vladimir.messenger.util.PhotoShare.copyToClipboard(appContext, "Пост APU", item.text)
+            com.vladimir.messenger.util.PhotoShare.copyToClipboard(appContext, appContext.getString(R.string.chv_post_clip_label), item.text)
             val intent = when {
                 uri != null -> com.vladimir.messenger.util.PhotoShare.buildImageIntent(
                     uri,
@@ -198,7 +198,7 @@ class SavedViewModel @Inject constructor(
                     return@launch
                 }
             }
-            if (!com.vladimir.messenger.util.PhotoShare.open(appContext, intent, "Поделиться")) {
+            if (!com.vladimir.messenger.util.PhotoShare.open(appContext, intent, appContext.getString(R.string.admin_share))) {
                 _uiState.update { st -> st.copy(message = appContext.getString(R.string.sv_share_failed)) }
             }
         }

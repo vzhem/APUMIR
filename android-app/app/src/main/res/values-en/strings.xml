@@ -1153,4 +1153,10 @@
     <string name="chv_post_clip_label">APU post</string>
     <string name="clv_chat_unavailable">This chat is no longer available</string>
     <string name="pps_node_address_hint">Node address: only needed to troubleshoot problems</string>
+    <string name="bk_too_new">This backup was made by a newer app version. Update APU first.</string>
+    <string name="bk_too_new_ver">This backup was made by a newer app version (%1$s). Update APU first.</string>
+    <string name="bk_update_bg">The update has started in the background; the result will appear here in a minute or two.</string>
+    <string name="st_neighbors_offer">Neighbours are sharing a new version — tap “Download” on the card</string>
+    <string name="st_update_delta_done">Update downloaded compactly (only the version difference) — installer opened</string>
+    <string name="st_download_started">Download started. When the file is ready it will appear under “Updates” by itself — installation and sharing with neighbours will start automatically</string>
 </resources>

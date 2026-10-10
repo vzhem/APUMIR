@@ -1162,4 +1162,10 @@
     <string name="chv_post_clip_label">Пост APU</string>
     <string name="clv_chat_unavailable">Эта беседа больше недоступна</string>
     <string name="pps_node_address_hint">Адрес узла - нужен только для разбора неполадок</string>
+    <string name="bk_too_new">Копия сделана более новой версией приложения. Сначала обновите APU.</string>
+    <string name="bk_too_new_ver">Копия сделана более новой версией приложения (%1$s). Сначала обновите APU.</string>
+    <string name="bk_update_bg">Обновление запущено в фоне; итог появится здесь через минуту-другую.</string>
+    <string name="st_neighbors_offer">Соседи раздают новую версию — кнопка «Скачать» в карточке</string>
+    <string name="st_update_delta_done">Обновление скачано компактно (только разница версий) - установщик открыт</string>
+    <string name="st_download_started">Скачивание началось. Когда файл скачается, он сам появится в «Обновлениях» — установка и раздача соседям начнутся сами</string>
 </resources>
