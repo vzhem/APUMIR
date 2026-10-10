@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 
 import com.vladimir.messenger.R
@@ -409,9 +410,13 @@ fun ApuSettingsDialog(
     Dialog(onDismissRequest = onDismissRequest, properties = properties) {
         ApuSettingsPalette {
             val shape = RoundedCornerShape(22.dp)
+            // Окно не выше экрана: при повороте или низком экране кнопки остаются
+            // видимыми, а длинный текст прокручивается внутри окна.
+            val maxCard = (LocalConfiguration.current.screenHeightDp.dp - 48.dp).coerceAtLeast(240.dp)
             Column(
                 modifier = modifier
                     .fillMaxWidth()
+                    .heightIn(max = maxCard)
                     .apuPremiumLift(14.dp, shape, ApuPremiumShadowColor)
                     .clip(shape)
                     .background(Color(0xFFF7F9FC).copy(alpha = 0.98f))
@@ -451,7 +456,7 @@ fun ApuSettingsDialog(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 420.dp)
+                            .weight(1f, fill = false)
                             .verticalScroll(rememberScrollState()),
                     ) {
                         CompositionLocalProvider(LocalContentColor provides ApuBubbleTextColor) { text() }

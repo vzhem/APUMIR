@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
 import androidx.compose.foundation.background
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -66,9 +68,12 @@ fun ApuPremiumDialog(
 ) {
     Dialog(onDismissRequest = onDismiss, properties = properties) {
         val shape = RoundedCornerShape(22.dp)
+        // Окно не выше экрана: кнопки остаются видимыми при любом повороте.
+        val maxCard = (LocalConfiguration.current.screenHeightDp.dp - 48.dp).coerceAtLeast(240.dp)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .heightIn(max = maxCard)
                 // Мягкая тень + глянец ПОД содержимым: текст и значки чёткие.
                 .apuPremiumLift(14.dp, shape, ApuPremiumShadowColor)
                 .clip(shape)
@@ -103,7 +108,7 @@ fun ApuPremiumDialog(
                 }
             }
             Spacer(Modifier.size(12.dp))
-            Column(content = content)
+            Column(modifier = Modifier.weight(1f, fill = false), content = content)
             if (confirmLabel != null || dismissLabel != null) {
                 Spacer(Modifier.size(16.dp))
                 Row(
