@@ -61,7 +61,7 @@
     <string name="chat_add_contact">Add contact</string>
     <string name="chat_saved">Favorites</string>
     <string name="chat_saved_subtitle">Personal storage</string>
-    <string name="chat_saved_hint">Notes, files and forwarded messages</string>
+    <string name="chat_saved_hint">Notes, files and forwards</string>
     <string name="chat_role_owner">owner</string>
     <string name="chat_role_admin">admin</string>
     <string name="chat_pinned_desc">Pinned to the main list</string>
@@ -714,7 +714,7 @@
     <string name="chat_clear_q">Clear conversation?</string>
     <string name="chat_clear">Clear</string>
     <string name="chat_no_identity">Your identity has not been created yet</string>
-    <string name="sync_pw_hint">Password from “Identity protection” (the same on both devices)</string>
+    <string name="sync_pw_hint">From “Identity protection” — same on both devices</string>
     <string name="sync_pw_auto">The password was filled in automatically from your account sign-in.</string>
     <string name="sync_via_apu">Over the APU network — any network (Wi-Fi or mobile data)</string>
     <string name="sync_syncing">Syncing…</string>
@@ -755,7 +755,7 @@
     <string name="admin_no_pause">Admins and the owner are exempt from the pause.</string>
     <string name="action_search">Search</string>
     <string name="diag_state_title">APU status</string>
-    <string name="diag_report_desc">Report on the state of the network and transfers</string>
+    <string name="diag_report_desc">Network and transfer status report</string>
     <string name="diag_collecting">COLLECTING REPORT…</string>
     <string name="diag_checks_pending">Checks have not been collected yet: open “Logs” again in a couple of seconds.</string>
     <string name="diag_full_report">Full report</string>
@@ -1353,7 +1353,7 @@
         <item quantity="other">%1$d requests</item>
     </plurals>
     <string name="diag_report_failed">report collection did not finish (%1$s) — tap “%2$s”</string>
-    <string name="peer_nodes_online_tpl">%1$d connected - open rating</string>
+    <string name="peer_nodes_online_tpl">%1$d connected — open rating</string>
     <string name="swarm_limits_tpl">up to %1$d packets per minute, %2$d at a time</string>
     <string name="settings_seed_priority_body">Contacts, verified and stable nodes go first, then everyone else. In normal and economy modes on mobile data, and when the battery is below %1$d %%, the pace is halved.</string>
     <string name="settings_forward_space_title">Space for forwarding: %1$s</string>
