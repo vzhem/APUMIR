@@ -521,8 +521,7 @@ private fun PromoCodeCard(onRedeemed: () -> Unit) {
                             }
                             PromoCodes.Result.LIMIT_REACHED -> {
                                 isError = true
-                                message = "Промокодами набран предел: " +
-                                    "${PromoCodes.MAX_PROMO_BONUS}"
+                                message = context.getString(R.string.rb_promo_limit, PromoCodes.MAX_PROMO_BONUS.toString())
                             }
                         }
                     },

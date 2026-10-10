@@ -766,7 +766,7 @@ fun ChannelScreen(
             fTopics = viewModel.forwardTopics(picked.id)
             fTopicsLoading = false
         }
-        val sourceLabel = uiState.channel?.title?.takeIf { it.isNotBlank() } ?: "канал"
+        val sourceLabel = uiState.channel?.title?.takeIf { it.isNotBlank() } ?: stringResource(R.string.fwd_default_channel)
         com.vladimir.messenger.ui.components.ForwardChooserDialog(
             targets = fTargets,
             loading = fLoading,
@@ -1300,6 +1300,7 @@ private fun PostEditorDialog(
     val pollState = remember { com.vladimir.messenger.ui.components.PollDraftState() }
     var pollProblem by remember { mutableStateOf<String?>(null) }
 
+    val pickerCtx = LocalContext.current
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
     ) { uris ->
@@ -1307,7 +1308,7 @@ private fun PostEditorDialog(
             val room = (InlineImage.MAX_PHOTOS - images.size).coerceAtLeast(0)
             val taken = uris.take(room)
             overflowHint = if (uris.size > room) {
-                "К посту можно приложить не больше ${InlineImage.MAX_PHOTOS} фото"
+                pickerCtx.getString(R.string.ch_overflow_photos, InlineImage.MAX_PHOTOS.toString())
             } else {
                 null
             }

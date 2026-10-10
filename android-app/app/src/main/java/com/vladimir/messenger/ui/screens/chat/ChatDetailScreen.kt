@@ -777,7 +777,7 @@ fun ChatDetailScreen(
                                         } else {
                                             Text(
                                                 com.vladimir.messenger.util.GroupFileMarker.caption(fwdFile) +
-                                                    "\nфайла нет на этом телефоне",
+                                                    stringResource(R.string.fwd_file_missing_line),
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 color = if (message.isFromMe)
                                                     com.vladimir.messenger.ui.theme.LocalMessengerColors.current.messageBubbleOwnText
@@ -1003,7 +1003,7 @@ fun ChatDetailScreen(
             fTopics = viewModel.forwardTopics(picked.id)
             fTopicsLoading = false
         }
-        val sourceLabel = contactName.ifBlank { "чат" }
+        val sourceLabel = contactName.ifBlank { stringResource(R.string.fwd_default_chat) }
         com.vladimir.messenger.ui.components.ForwardChooserDialog(
             targets = fTargets,
             loading = fLoading,

@@ -263,8 +263,8 @@ private fun StatisticsActivity(groupId: String, days: List<GroupStatDay>, isChan
         ) {
             Text(longDay(selected.dayKey), fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
             Column(horizontalAlignment = Alignment.End) {
-                Text((if (isChannel) "Публикации: " else "Сообщения: ") + count(selected.messageCount), fontSize = 13.sp)
-                Text("Авторов: ${count(selected.senderCount)}", fontSize = 12.sp, color = ApuBubbleMutedColor)
+                Text(if (isChannel) stringResource(R.string.stat_posts_count, count(selected.messageCount)) else stringResource(R.string.stat_messages_count, count(selected.messageCount)), fontSize = 13.sp)
+                Text(stringResource(R.string.stat_authors_count, count(selected.senderCount)), fontSize = 12.sp, color = ApuBubbleMutedColor)
             }
         }
         val total = days.sumOf { it.messageCount.toLong() }
@@ -298,7 +298,7 @@ private fun StatisticsRanking(stats: GroupStats, topics: List<TopicSummary>, isC
                 StatisticsRankRow(
                     rank = i + 1,
                     title = byId[post.topicId]?.name?.takeIf { it.isNotBlank() } ?: stringResource(R.string.stat_post),
-                    details = "${count(post.viewCount)} просмотров · ${count(post.commentCount)} комментариев",
+                    details = stringResource(R.string.stat_post_details, count(post.viewCount), count(post.commentCount)),
                     value = count(post.viewCount),
                     fraction = post.viewCount.toFloat() / max,
                     icon = null,
@@ -306,7 +306,7 @@ private fun StatisticsRanking(stats: GroupStats, topics: List<TopicSummary>, isC
             }
             if (sorted.size > 5) {
                 ApuTextAction(
-                    label = if (expanded) stringResource(R.string.stat_collapse) else "Все публикации · ${count(sorted.size)}",
+                    label = if (expanded) stringResource(R.string.stat_collapse) else stringResource(R.string.stat_all_posts, count(sorted.size)),
                     onClick = { expanded = !expanded },
                 )
             }
@@ -321,7 +321,7 @@ private fun StatisticsRanking(stats: GroupStats, topics: List<TopicSummary>, isC
                 StatisticsRankRow(
                     rank = i + 1,
                     title = topic?.name?.takeIf { it.isNotBlank() } ?: stringResource(R.string.stat_no_topic),
-                    details = if (entry.value > 0) "${decimal(share * 100.0)}% сообщений группы" else stringResource(R.string.stat_no_messages),
+                    details = if (entry.value > 0) stringResource(R.string.stat_share_of_messages, decimal(share * 100.0)) else stringResource(R.string.stat_no_messages),
                     value = count(entry.value),
                     fraction = share,
                     icon = topic?.iconEmoji?.ifBlank { TopicIconCatalog.DEFAULT } ?: TopicIconCatalog.DEFAULT,
@@ -329,7 +329,7 @@ private fun StatisticsRanking(stats: GroupStats, topics: List<TopicSummary>, isC
             }
             if (sorted.size > 5) {
                 ApuTextAction(
-                    label = if (expanded) stringResource(R.string.stat_collapse) else "Все темы · ${count(sorted.size)}",
+                    label = if (expanded) stringResource(R.string.stat_collapse) else stringResource(R.string.stat_all_topics, count(sorted.size)),
                     onClick = { expanded = !expanded },
                 )
             }

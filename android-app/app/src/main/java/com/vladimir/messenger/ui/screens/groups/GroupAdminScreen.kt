@@ -748,9 +748,9 @@ private fun AdminsTab(
                         val silentDays = (ownership.silenceMs ?: 0L) / (24L * 60 * 60 * 1000)
                         Text(
                             if (ownership.noAdmins) {
-                                "Владелец не выходил на связь $silentDays дн., администраторов в группе нет."
+                                stringResource(R.string.ga_owner_silent_no_admins, silentDays.toInt())
                             } else {
-                                "Владелец не выходил на связь $silentDays дн."
+                                stringResource(R.string.ga_owner_silent, silentDays.toInt())
                             },
                             style = MaterialTheme.typography.bodyMedium,
                         )
@@ -1140,10 +1140,10 @@ private fun InviteCard(
                     Spacer(Modifier.height(4.dp))
                     Text(
                         buildString {
-                            append(if (invite.requestApproval) "по заявке" else "вход сразу")
-                            append(" • использований: ").append(invite.useCount)
+                            append(if (invite.requestApproval) stringResource(R.string.ga_invite_request) else stringResource(R.string.ga_invite_direct))
+                            append(stringResource(R.string.ga_invite_uses)).append(invite.useCount)
                             if (invite.maxUses > 0) append("/").append(invite.maxUses)
-                            if (invite.revoked) append(" • отозвана")
+                            if (invite.revoked) append(stringResource(R.string.ga_invite_revoked))
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = ApuBubbleMutedColor,

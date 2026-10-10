@@ -1461,4 +1461,32 @@
     <string name="svm_health_ok">available, responded in %1$d ms</string>
     <string name="svm_health_error">responds with an error (%1$d)</string>
     <string name="ps_need_password">Enter your password from “Identity protection” once (at least %1$d characters); it is stored only in the phone’s secure storage.</string>
+    <string name="pb_profile">Profile: %1$s</string>
+    <string name="pb_made">
+Made: %1$s, version %2$s</string>
+    <string name="pb_with_received">
+With received files: %1$s</string>
+    <string name="pb_last_failed">
+Last attempt failed: %1$s</string>
+    <string name="pb_auto_stopped">Auto-update stopped: %1$s</string>
+    <string name="pb_update_to">Update: %1$s</string>
+    <string name="stat_posts_count">Posts: %1$s</string>
+    <string name="stat_messages_count">Messages: %1$s</string>
+    <string name="stat_authors_count">Authors: %1$s</string>
+    <string name="stat_post_details">Views: %1$s · comments: %2$s</string>
+    <string name="stat_all_posts">All posts · %1$s</string>
+    <string name="stat_all_topics">All topics · %1$s</string>
+    <string name="stat_share_of_messages">%1$s%% of group messages</string>
+    <string name="ga_owner_silent_no_admins">The owner has not been online for %1$d days, and the group has no admins.</string>
+    <string name="ga_owner_silent">The owner has not been online for %1$d days.</string>
+    <string name="ga_invite_request">by request</string>
+    <string name="ga_invite_direct">direct join</string>
+    <string name="ga_invite_uses"> • uses: </string>
+    <string name="ga_invite_revoked"> • revoked</string>
+    <string name="fwd_file_missing_line">
+The file is not on this phone</string>
+    <string name="fwd_default_chat">chat</string>
+    <string name="fwd_default_channel">channel</string>
+    <string name="ch_overflow_photos">You can attach up to %1$s photos to a post</string>
+    <string name="rb_promo_limit">Promo codes have reached the limit: %1$s</string>
 </resources>

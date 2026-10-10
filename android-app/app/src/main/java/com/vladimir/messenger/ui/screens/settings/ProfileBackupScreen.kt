@@ -245,10 +245,10 @@ fun ProfileBackupScreen(
                                 val made = SimpleDateFormat("d MMMM yyyy, HH:mm", Locale.forLanguageTag("ru"))
                                     .format(Date(manifest.createdAtMs))
                                 Text(
-                                    "Профиль: ${manifest.displayName}" +
+                                    activityContext.getString(R.string.pb_profile, manifest.displayName) +
                                         (if (manifest.nickname.isNotBlank()) " (@${manifest.nickname})" else "") +
-                                        "\nСделана: $made, версия ${manifest.appVersionName}" +
-                                        (if (manifest.includesReceived) "\nС полученными файлами: ${manifest.receivedFiles}" else ""),
+                                        activityContext.getString(R.string.pb_made, made, manifest.appVersionName) +
+                                        (if (manifest.includesReceived) activityContext.getString(R.string.pb_with_received, manifest.receivedFiles.toString()) else ""),
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                                 Spacer(Modifier.height(8.dp))
@@ -417,7 +417,7 @@ fun ProfileBackupScreen(
                                             "\n" + activityContext.getString(R.string.backup_first_update, schedule.period.days.toInt())
                                         }) +
                                         (if (schedule.nextDueAtMs > 0) "\n" + activityContext.getString(R.string.backup_next_update, fmt.format(Date(schedule.nextDueAtMs))) else "") +
-                                        (scheduleError?.let { "\nПоследняя попытка не удалась: $it" } ?: ""),
+                                        (scheduleError?.let { activityContext.getString(R.string.pb_last_failed, it) } ?: ""),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = if (scheduleError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -445,7 +445,7 @@ fun ProfileBackupScreen(
                             } else {
                                 if (scheduleError != null) {
                                     Text(
-                                        "Автообновление остановлено: $scheduleError",
+                                        activityContext.getString(R.string.pb_auto_stopped, scheduleError),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.error,
                                     )
@@ -513,7 +513,7 @@ fun ProfileBackupScreen(
                                                 enabled = !state.busy,
                                                 modifier = Modifier.fillMaxWidth(),
                                             ) {
-                                                Text("Обновлять: " + fb.name, maxLines = 1)
+                                                Text(activityContext.getString(R.string.pb_update_to, fb.name), maxLines = 1)
                                             }
                                             Spacer(Modifier.height(6.dp))
                                         }
