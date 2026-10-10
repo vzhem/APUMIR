@@ -124,6 +124,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import com.vladimir.messenger.util.QrCodeGenerator
 import com.vladimir.messenger.ui.components.ApuPremiumRadioButton
 import com.vladimir.messenger.ui.components.ApuPremiumSlider

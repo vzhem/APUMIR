@@ -14,11 +14,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
-import androidx.compose.ui.graphics.graphicsLayer
 import com.vladimir.messenger.ui.theme.WallpaperTint
 import com.vladimir.messenger.ui.theme.WallpaperTintHolder
 import androidx.compose.ui.graphics.asImageBitmap
@@ -73,7 +71,7 @@ fun ChatWallpaper() {
                 )
             } else {
                 // Гамма: градиент задаёт цвет, рисунок APU накладывается поверх
-                // как серая деталь (умножение на свету, свечение в ночи).
+                // как серая деталь, полупрозрачная и без цветового сдвига.
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -82,10 +80,8 @@ fun ChatWallpaper() {
                 Image(
                     painter = painterResource(drawable),
                     contentDescription = null,
-                    modifier = Modifier.fillMaxSize().graphicsLayer {
-                        alpha = 0.35f
-                        blendMode = if (dark) BlendMode.Screen else BlendMode.Multiply
-                    },
+                    modifier = Modifier.fillMaxSize(),
+                    alpha = 0.35f,
                     colorFilter = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }),
                     contentScale = ContentScale.Crop,
                 )
