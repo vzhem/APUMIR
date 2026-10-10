@@ -1665,7 +1665,7 @@ private fun JoinRequestRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "подал(а) заявку " + topicTimeLabel(request.requestedAtMs),
+                    stringResource(R.string.grp_request_submitted, topicTimeLabel(request.requestedAtMs)),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF5A6472),
                     maxLines = 1,

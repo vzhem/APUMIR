@@ -481,21 +481,18 @@ class SettingsViewModel @Inject constructor(
         val at = addressBookBackup.lastBackupAtMs()
         val count = addressBookBackup.localEntryCount()
         val line = buildString {
-            append("В телефоне: ${count} адресов. ")
+            append(context.getString(R.string.ab_in_phone, count.toString()) + " ")
             append(
                 if (at > 0) {
-                    "Копия на сервере от " + android.text.format.DateFormat.getTimeFormat(context)
-                        .format(java.util.Date(at)) + ", " +
-                        android.text.format.DateFormat.getDateFormat(context)
-                            .format(java.util.Date(at)) + "."
+                    context.getString(R.string.ab_copy_from, android.text.format.DateFormat.getTimeFormat(context).format(java.util.Date(at)), android.text.format.DateFormat.getDateFormat(context).format(java.util.Date(at)))
                 } else {
                     context.getString(R.string.st_no_server_copy)
                 }
             )
-            append(" Копия делается сама.")
+            append(" " + context.getString(R.string.ab_self_copy))
             // Раунд 126 (владелец): без лимита - просто число сохранивших.
             val fresh = addressBookSwarm.freshAckCount()
-            append(" Копий на других телефонах: $fresh.")
+            append(" " + context.getString(R.string.ab_other_copies, fresh.toString()))
         }
         _uiState.update { it.copy(addrBookLine = line) }
     }

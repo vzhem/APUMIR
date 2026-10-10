@@ -1489,4 +1489,10 @@ The file is not on this phone</string>
     <string name="fwd_default_channel">channel</string>
     <string name="ch_overflow_photos">You can attach up to %1$s photos to a post</string>
     <string name="rb_promo_limit">Promo codes have reached the limit: %1$s</string>
+    <string name="name_member_fallback">Member %1$s</string>
+    <string name="grp_request_submitted">submitted a request %1$s</string>
+    <string name="ab_in_phone">On the phone: %1$s addresses.</string>
+    <string name="ab_copy_from">Server copy from %1$s, %2$s.</string>
+    <string name="ab_self_copy">Copies are made automatically.</string>
+    <string name="ab_other_copies">Copies on other phones: %1$s.</string>
 </resources>

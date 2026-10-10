@@ -1502,4 +1502,10 @@
     <string name="fwd_default_channel">канал</string>
     <string name="ch_overflow_photos">К посту можно приложить не больше %1$s фото</string>
     <string name="rb_promo_limit">Промокодами набран предел: %1$s</string>
+    <string name="name_member_fallback">Участник %1$s</string>
+    <string name="grp_request_submitted">подал(а) заявку %1$s</string>
+    <string name="ab_in_phone">В телефоне: %1$s адресов.</string>
+    <string name="ab_copy_from">Копия на сервере от %1$s, %2$s.</string>
+    <string name="ab_self_copy">Копия делается сама.</string>
+    <string name="ab_other_copies">Копий на других телефонах: %1$s.</string>
 </resources>

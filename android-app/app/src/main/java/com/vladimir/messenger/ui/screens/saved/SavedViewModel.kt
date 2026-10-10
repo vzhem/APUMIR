@@ -545,7 +545,7 @@ class SavedViewModel @Inject constructor(
                         cached != null -> state.copy(
                             gifLoading = false,
                             gifError = null,
-                            gifNotice = "Сервер перегружен — показываю сохранённые гифки. " +
+                            gifNotice = appContext.getString(R.string.gif_server_busy) + " " +
                                 appContext.getString(R.string.sv_download_send_hint),
                             gifItems = cached.first,
                             gifNext = "",

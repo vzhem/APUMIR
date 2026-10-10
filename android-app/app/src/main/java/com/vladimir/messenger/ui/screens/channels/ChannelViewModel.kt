@@ -442,7 +442,7 @@ class ChannelViewModel @Inject constructor(
                         pendingPhotos = (promised - images.size).coerceAtLeast(0),
                         authorId = first.senderId,
                         authorName = names[first.senderId]?.takeIf { it.isNotBlank() }
-                            ?: "Участник " + first.senderId.takeLast(4),
+                            ?: appContext.getString(R.string.name_member_fallback, first.senderId.takeLast(4)),
                         timeMs = first.timestamp,
                         comments = (texts.size - 1).coerceAtLeast(0),
                         // Непрочитанные комментарии: счётчик темы ведёт
