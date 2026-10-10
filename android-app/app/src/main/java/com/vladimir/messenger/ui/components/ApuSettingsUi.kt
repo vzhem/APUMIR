@@ -469,10 +469,14 @@ fun ApuSettingsDialog(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (dismissButton != null) {
-                        dismissButton()
+                        CompositionLocalProvider(LocalApuDialogButtonRole provides DialogButtonRole.DISMISS) {
+                            dismissButton()
+                        }
                         Spacer(modifier = Modifier.width(8.dp))
                     }
-                    confirmButton()
+                    CompositionLocalProvider(LocalApuDialogButtonRole provides DialogButtonRole.CONFIRM) {
+                        confirmButton()
+                    }
                 }
             }
         }

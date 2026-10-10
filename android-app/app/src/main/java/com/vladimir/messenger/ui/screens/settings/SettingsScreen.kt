@@ -9,6 +9,7 @@ package com.vladimir.messenger.ui.screens.settings
 // =============================================================================
 
 import com.vladimir.messenger.ui.components.ApuPremiumChip
+import com.vladimir.messenger.ui.components.ApuPremiumIconTile
 import com.vladimir.messenger.ui.components.ApuPremiumDialog
 import com.vladimir.messenger.ui.components.ApuPremiumChoiceRow
 import androidx.compose.foundation.layout.fillMaxSize
@@ -1398,7 +1399,7 @@ private fun SettingsTabContent(
         val nick = uiState.protectedNick
         ApuSettingsDialog(
             onDismissRequest = { showLogoutDialog = false },
-            icon = { Icon(Icons.Default.Logout, contentDescription = null) },
+            icon = { ApuPremiumIconTile(icon = Icons.Default.Logout, size = 34.dp, corner = 10.dp) },
             title = { Text(stringResource(R.string.settings_logout_title)) },
             text = {
                 Text(

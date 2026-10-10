@@ -318,3 +318,5 @@ password-auto и imePadding. `ApuSettingsLayoutTest` — реальные Kotlin
 Контрактные тесты `check-settings-style.py` (4 падения), `check-diagnostics-report.py`
 и `check-chat-style.py` падали и до этих правок: они ждут старые тексты и литералы
 `label = "…"`. Их нужно обновить отдельно, по сути это устаревшие ожидания.
+
+- Кнопки подтверждения и отмены в `ApuSettingsDialog` рисуются как `ApuPremiumButton` (подтверждение — золотая, отмена — тихая, опасная — красная). Работает через `LocalApuDialogButtonRole`, которое задаёт окно; `ApuTextAction` внутри окна делает это сам.

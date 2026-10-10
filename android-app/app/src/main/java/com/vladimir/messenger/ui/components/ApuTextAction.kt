@@ -35,6 +35,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -63,6 +64,41 @@ fun ApuTextAction(
     enabled: Boolean = true,
     danger: Boolean = false,
     icon: ImageVector? = null,
+) {
+    // Внутри окна (кнопки подтверждения/отмены) — та же объёмная кнопка APU,
+    // что и везде: подтверждение золотое, опасное красное, отмена тихая.
+    val role = LocalApuDialogButtonRole.current
+    if (role != null) {
+        ApuPremiumButton(
+            label = label,
+            onClick = onClick,
+            modifier = modifier,
+            icon = icon,
+            style = when {
+                danger -> DiagnosticsActionStyle.DANGER
+                role == DialogButtonRole.CONFIRM -> DiagnosticsActionStyle.PRIMARY
+                else -> DiagnosticsActionStyle.QUIET
+            },
+            enabled = enabled,
+        )
+    } else {
+        ApuTextActionFlat(label, onClick, modifier, enabled, danger, icon)
+    }
+}
+
+/** Роль кнопки внутри окна: подтверждение или отмена. Задаёт само окно. */
+enum class DialogButtonRole { CONFIRM, DISMISS }
+
+val LocalApuDialogButtonRole = compositionLocalOf<DialogButtonRole?> { null }
+
+@Composable
+private fun ApuTextActionFlat(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier,
+    enabled: Boolean,
+    danger: Boolean,
+    icon: ImageVector?,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
