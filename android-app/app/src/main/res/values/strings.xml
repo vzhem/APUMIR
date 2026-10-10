@@ -1465,4 +1465,13 @@
     <string name="qr_not_apu">Это не ссылка APU: %1$s</string>
     <string name="contact_add_failed">Не удалось добавить</string>
     <string name="contact_rename_failed">Не удалось переименовать</string>
+    <string name="sv_saved_as">Сохранено: %1$s</string>
+    <string name="sv_stickers_added">Добавлено стикеров: %1$d из %2$d</string>
+    <string name="sv_added_fav">Добавлено в избранное: %1$s</string>
+    <string name="st_found_two">Найдено в двух местах: официальный сайт v%1$s и %2$d сосед(ей) по сети — выберите в карточке, откуда скачать</string>
+    <string name="st_new_version_official">Есть новая версия v%1$s на официальном сайте — кнопка в карточке</string>
+    <string name="st_asked_neighbors">Спрошено у %1$d соседей; новых объявлений пока нет</string>
+    <string name="svm_health_ok">доступен, ответ за %1$d мс</string>
+    <string name="svm_health_error">отвечает с ошибкой (%1$d)</string>
+    <string name="ps_need_password">Один раз введите пароль из «Защиты личности» (не короче %1$d знаков); он хранится только в защищённом хранилище телефона.</string>
 </resources>

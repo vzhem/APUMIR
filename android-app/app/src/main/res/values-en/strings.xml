@@ -1452,4 +1452,13 @@
     <string name="qr_not_apu">This is not an APU link: %1$s</string>
     <string name="contact_add_failed">Couldn’t add</string>
     <string name="contact_rename_failed">Couldn’t rename</string>
+    <string name="sv_saved_as">Saved: %1$s</string>
+    <string name="sv_stickers_added">Stickers added: %1$d of %2$d</string>
+    <string name="sv_added_fav">Added to favorites: %1$s</string>
+    <string name="st_found_two">Found in two places: the official website v%1$s and %2$d peer(s) on the network — choose where to download from in the card</string>
+    <string name="st_new_version_official">A new version v%1$s is on the official website — use the button in the card</string>
+    <string name="st_asked_neighbors">Asked %1$d peers; no new announcements yet</string>
+    <string name="svm_health_ok">available, responded in %1$d ms</string>
+    <string name="svm_health_error">responds with an error (%1$d)</string>
+    <string name="ps_need_password">Enter your password from “Identity protection” once (at least %1$d characters); it is stored only in the phone’s secure storage.</string>
 </resources>

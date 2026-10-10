@@ -243,8 +243,7 @@ class ProfileSyncViewModel @Inject constructor(
             _uiState.value = _uiState.value.copy(
                 autoEnabled = ok,
                 netMessage = if (ok) context.getString(R.string.ps_autosearch_on)
-                else "Один раз введите пароль из «Защиты личности» (не короче " +
-                    "${BackupCipher.MIN_PASSWORD_LENGTH} знаков); он хранится только в защищённом хранилище телефона.",
+                else context.getString(R.string.ps_need_password, BackupCipher.MIN_PASSWORD_LENGTH),
                 netFailed = !ok,
             )
         } else {

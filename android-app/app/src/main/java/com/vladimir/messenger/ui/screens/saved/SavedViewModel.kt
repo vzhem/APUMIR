@@ -240,7 +240,7 @@ class SavedViewModel @Inject constructor(
                     }.getOrDefault(false)
                 }
                 _uiState.update {
-                    it.copy(message = if (ok) "Сохранено: " + localItem.fileName else appContext.getString(R.string.sv_save_failed))
+                    it.copy(message = if (ok) appContext.getString(R.string.sv_saved_as, localItem.fileName) else appContext.getString(R.string.sv_save_failed))
                 }
             }
             return
@@ -254,7 +254,7 @@ class SavedViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     message = if (ok) {
-                        "Сохранено: " + transfer.displayName
+                        appContext.getString(R.string.sv_saved_as, transfer.displayName)
                     } else {
                         appContext.getString(R.string.sv_save_failed)
                     },
@@ -342,7 +342,7 @@ class SavedViewModel @Inject constructor(
                 val text = if (summary == null) {
                     appContext.getString(R.string.sv_archive_open_failed)
                 } else {
-                    "Добавлено стикеров: " + summary.first + " из " + summary.second
+                    appContext.getString(R.string.sv_stickers_added, summary.first, summary.second)
                 }
                 it.copy(message = text)
             }
@@ -407,7 +407,7 @@ class SavedViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     message = when {
-                        saved != null -> "Добавлено в избранное: $saved"
+                        saved != null -> appContext.getString(R.string.sv_added_fav, saved)
                         else -> appContext.getString(R.string.sv_add_file_failed)
                     },
                 )

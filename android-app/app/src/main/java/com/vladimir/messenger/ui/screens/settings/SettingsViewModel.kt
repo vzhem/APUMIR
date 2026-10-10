@@ -349,13 +349,12 @@ class SettingsViewModel @Inject constructor(
             val neighbors = apkOffers.value.size
             val message = when {
                 release != null && neighbors > 0 ->
-                    "Найдено в двух местах: официальный сайт v${release.version.removePrefix("v")} " +
-                        "и $neighbors сосед(ей) по сети — выберите в карточке, откуда скачать"
+                    context.getString(R.string.st_found_two, release.version.removePrefix("v"), neighbors)
                 release != null ->
-                    "Есть новая версия v${release.version.removePrefix("v")} на официальном сайте — кнопка в карточке"
+                    context.getString(R.string.st_new_version_official, release.version.removePrefix("v"))
                 neighbors > 0 ->
                     context.getString(R.string.st_neighbors_offer)
-                asked > 0 -> "Спрошено у $asked соседей; новых объявлений пока нет"
+                asked > 0 -> context.getString(R.string.st_asked_neighbors, asked)
                 else -> context.getString(R.string.st_no_updates)
             }
             android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
@@ -469,8 +468,8 @@ class SettingsViewModel @Inject constructor(
                 it.copy(
                     serverStatus = when {
                         health == null -> context.getString(R.string.svm_server_unavailable)
-                        health < 400 -> "доступен, ответ за ${health} мс"
-                        else -> " отвечает с ошибкой ($health)"
+                        health < 400 -> context.getString(R.string.svm_health_ok, health)
+                        else -> " " + context.getString(R.string.svm_health_error, health)
                     },
                 )
             }

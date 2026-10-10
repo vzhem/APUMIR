@@ -329,8 +329,7 @@ class GroupChatViewModel @Inject constructor(
             (me?.isBanned != true && GroupPermissions.has(mask, GroupPermissions.Member.SEND_MEDIA))
         val hint = when {
             !byRank ->
-                "Отправка файлов, фото и видео открывается с ранга «Круг друзей» — " +
-                    "это 3 подтверждённых приглашения. Сейчас подтверждено: $qualified."
+                appContext.getString(R.string.cdv_files_locked, qualified)
             !byGroup -> appContext.getString(R.string.gc_files_forbidden)
             else -> ""
         }
@@ -402,8 +401,7 @@ class GroupChatViewModel @Inject constructor(
                         cached != null -> state.copy(
                             gifLoading = false,
                             gifError = null,
-                            gifNotice = "Сервер перегружен — показываю сохранённые гифки. " +
-                                appContext.getString(R.string.sv_download_send_hint),
+                            gifNotice = appContext.getString(R.string.gif_server_busy) + " " + appContext.getString(R.string.sv_download_send_hint),
                             gifItems = cached.first,
                             gifNext = "",
                         )
@@ -620,7 +618,7 @@ class GroupChatViewModel @Inject constructor(
                     swarmStatus = when (holder) {
                         null -> appContext.getString(R.string.cd_net_silent)
                         "" -> appContext.getString(R.string.cd_already_downloading)
-                        else -> "Качается с $holder - сейчас отправим"
+                        else -> appContext.getString(R.string.cdv_downloading_from, holder)
                     },
                 )
             }
@@ -662,7 +660,7 @@ class GroupChatViewModel @Inject constructor(
                     swarmStatus = when (holder) {
                         null -> appContext.getString(R.string.cd_net_silent)
                         "" -> appContext.getString(R.string.cd_already_downloading)
-                        else -> "Просили: $holder"
+                        else -> appContext.getString(R.string.cdv_asked_by, holder)
                     },
                 )
             }
