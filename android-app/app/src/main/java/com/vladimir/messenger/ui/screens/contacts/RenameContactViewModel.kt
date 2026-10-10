@@ -1,11 +1,14 @@
 package com.vladimir.messenger.ui.screens.contacts
 
+import com.vladimir.messenger.R
+import android.content.Context
 import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.repository.ContactRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,6 +29,7 @@ data class RenameContactUiState(
 @HiltViewModel
 class RenameContactViewModel @Inject constructor(
     private val contactRepository: ContactRepository,
+    @ApplicationContext private val appContext: Context,
     savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -66,11 +70,11 @@ class RenameContactViewModel @Inject constructor(
         val contactId = _uiState.value.contactId
 
         if (newName.isBlank()) {
-            _uiState.update { it.copy(error = "Имя не может быть пустым") }
+            _uiState.update { it.copy(error = appContext.getString(R.string.rc_name_empty)) }
             return
         }
         if (contactId.isBlank()) {
-            _uiState.update { it.copy(error = "Не найден идентификатор контакта") }
+            _uiState.update { it.copy(error = appContext.getString(R.string.rc_contact_id_missing)) }
             return
         }
 

@@ -1137,4 +1137,14 @@
     <string name="gf_status_pending">Requested, waiting for the sender…</string>
     <string name="mpv_none_found">No broken proxies found</string>
     <string name="mpv_no_working">No working proxies</string>
+    <string name="rc_name_empty">The name cannot be empty</string>
+    <string name="rc_contact_id_missing">The contact ID was not found</string>
+    <string name="ga_sent_to_members">Sent to members: %1$d</string>
+    <string name="ga_slow_mode_notice">Slow mode: one message per %1$s</string>
+    <string name="ga_slow_10s">10 seconds</string>
+    <string name="ga_slow_30s">30 seconds</string>
+    <string name="ga_slow_1m">minute</string>
+    <string name="ga_slow_5m">5 minutes</string>
+    <string name="ga_slow_15m">15 minutes</string>
+    <string name="ga_seconds_short">%1$d s</string>
 </resources>

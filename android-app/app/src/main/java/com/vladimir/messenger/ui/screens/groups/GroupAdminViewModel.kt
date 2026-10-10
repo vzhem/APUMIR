@@ -215,7 +215,7 @@ class GroupAdminViewModel @Inject constructor(
             groupRepository.resyncMembers(groupId)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
                 .onSuccess { count ->
-                    _uiState.update { it.copy(notice = "Отправлено участникам: $count") }
+                    _uiState.update { it.copy(notice = appContext.getString(R.string.ga_sent_to_members, count)) }
                 }
         }
     }
@@ -294,7 +294,7 @@ class GroupAdminViewModel @Inject constructor(
                             notice = if (seconds <= 0) {
                                 appContext.getString(R.string.ga_slow_off)
                             } else {
-                                "Медленный режим: одно сообщение в ${secondsWords(seconds)}"
+                                appContext.getString(R.string.ga_slow_mode_notice, secondsWords(seconds))
                             },
                         )
                     }
@@ -303,12 +303,12 @@ class GroupAdminViewModel @Inject constructor(
     }
 
     private fun secondsWords(seconds: Int): String = when (seconds) {
-        10 -> "10 секунд"
-        30 -> "30 секунд"
-        60 -> "минуту"
-        300 -> "5 минут"
-        900 -> "15 минут"
-        else -> "$seconds с"
+        10 -> appContext.getString(R.string.ga_slow_10s)
+        30 -> appContext.getString(R.string.ga_slow_30s)
+        60 -> appContext.getString(R.string.ga_slow_1m)
+        300 -> appContext.getString(R.string.ga_slow_5m)
+        900 -> appContext.getString(R.string.ga_slow_15m)
+        else -> appContext.getString(R.string.ga_seconds_short, seconds)
     }
 
     fun updateProfile(title: String, about: String) {

@@ -1146,4 +1146,14 @@
     <string name="gf_status_pending">Запрошено, ждём раздающего…</string>
     <string name="mpv_none_found">Нерабочих не нашлось</string>
     <string name="mpv_no_working">Нет рабочих прокси</string>
+    <string name="rc_name_empty">Имя не может быть пустым</string>
+    <string name="rc_contact_id_missing">Не найден идентификатор контакта</string>
+    <string name="ga_sent_to_members">Отправлено участникам: %1$d</string>
+    <string name="ga_slow_mode_notice">Медленный режим: одно сообщение в %1$s</string>
+    <string name="ga_slow_10s">10 секунд</string>
+    <string name="ga_slow_30s">30 секунд</string>
+    <string name="ga_slow_1m">минуту</string>
+    <string name="ga_slow_5m">5 минут</string>
+    <string name="ga_slow_15m">15 минут</string>
+    <string name="ga_seconds_short">%1$d с</string>
 </resources>
