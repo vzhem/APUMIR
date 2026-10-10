@@ -571,7 +571,7 @@
     <string name="settings_version_label">Version</string>
     <string name="settings_share_btn">Share</string>
     <string name="settings_version_hint">A numeric version, for example 11.70.29. It must be newer than the current one, otherwise the file will not become an update. Usually it is already filled in from the file.</string>
-    <string name="settings_sync_hint">If many messages are unsent and the partner is visible — wait a minute: the line will go by itself when the connection is restored.</string>
+    <string name="settings_sync_hint">\n\nIf many messages are unsent and the partner is visible — wait a minute: the queue will clear by itself when the connection is restored.</string>
     <string name="settings_report_info">The report contains the state of the network, core, broker, and transfers. Chats, file names, keys, ciphertext, addresses, and contact IDs are not included — you can copy it and send it as a whole.</string>
     <string name="settings_slow_collect">The collection is taking longer than usual — something on the phone is busy; “Refresh” will start it again</string>
     <string name="settings_backup_note">The copy is encrypted with your key: the server stores it but cannot read it. When you reinstall the app and restore your identity, your addresses come back automatically.</string>
@@ -1156,9 +1156,9 @@
     <string name="bk_too_new">This backup was made by a newer app version. Update APU first.</string>
     <string name="bk_too_new_ver">This backup was made by a newer app version (%1$s). Update APU first.</string>
     <string name="bk_update_bg">The update has started in the background; the result will appear here in a minute or two.</string>
-    <string name="st_neighbors_offer">Neighbours are sharing a new version — tap “Download” on the card</string>
+    <string name="st_neighbors_offer">Neighbors are sharing a new version — tap “Download” on the card</string>
     <string name="st_update_delta_done">Update downloaded compactly (only the version difference) — installer opened</string>
-    <string name="st_download_started">Download started. When the file is ready it will appear under “Updates” by itself — installation and sharing with neighbours will start automatically</string>
+    <string name="st_download_started">Download started. When the file is ready it will appear under “Updates” by itself — installation and sharing with neighbors will start automatically</string>
     <string name="apc_anon_note">An anonymous poll shows only numbers: who voted how is not visible to anyone.</string>
     <string name="st_dl_patch_title">Download compactly v%1$s</string>
     <string name="st_dl_official_v">From the official site v%1$s</string>
@@ -1429,7 +1429,7 @@
     <string name="cdv_join_failed">Couldn’t join: %1$s</string>
     <string name="cdv_retry_failed">Couldn’t resend: %1$s</string>
     <string name="gif_server_busy">The server is overloaded — showing saved GIFs.</string>
-    <string name="cdv_downloading_from">Downloading from %1$s - will send now</string>
+    <string name="cdv_downloading_from">Downloading from %1$s — will send now</string>
     <string name="cdv_asked_by">Requested by: %1$s</string>
     <string name="cdv_files_locked">Sending files, photos and videos opens at the “Circle of friends” rank — that takes 3 confirmed invitations. Confirmed so far: %1$d.</string>
     <string name="cdv_gif_not_sent">GIF not sent: %1$s</string>
