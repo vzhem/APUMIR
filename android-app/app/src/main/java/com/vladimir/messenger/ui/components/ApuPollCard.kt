@@ -274,10 +274,10 @@ class PollDraftState {
     }
 
     /** Что не так с черновиком; null - всё в порядке. */
-    fun problem(): String? {
-        if (question.isBlank()) return "Вопрос не может быть пустым"
+    fun problem(context: android.content.Context): String? {
+        if (question.isBlank()) return context.getString(R.string.poll_problem_question)
         if (filledOptions().size < GroupWire.MIN_POLL_OPTIONS) {
-            return "Нужно хотя бы ${GroupWire.MIN_POLL_OPTIONS} варианта ответа"
+            return context.resources.getQuantityString(R.plurals.poll_min_options, GroupWire.MIN_POLL_OPTIONS, GroupWire.MIN_POLL_OPTIONS)
         }
         return null
     }
@@ -368,7 +368,7 @@ fun CreatePollDialog(
             ApuTextAction(
                 label = stringResource(R.string.chat_create),
                 onClick = {
-                    val issue = state.problem()
+                    val issue = state.problem(LocalContext.current)
                     if (issue != null) {
                         problem = issue
                         return@ApuTextAction

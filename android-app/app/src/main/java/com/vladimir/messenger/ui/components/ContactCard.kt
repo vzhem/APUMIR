@@ -184,7 +184,7 @@ fun ContactCard(
                     // Раунд 155: служебные строки (гифки/стикеры) -
                     // человеческими подписями.
                     text      = com.vladimir.messenger.util.ChatPreviews.human(chat.lastMessage)
-                        ?: "Нет сообщений",
+                        ?: stringResource(R.string.contact_no_messages),
                     style     = MaterialTheme.typography.bodySmall,
                     color     = Color(0xFF5A6472),
                     maxLines  = 1,

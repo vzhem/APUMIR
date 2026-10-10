@@ -1480,7 +1480,7 @@ private fun PostEditorDialog(
                     val draft = if (withPoll) pollState.draft() else null
 
                     if (withPoll && draft == null) {
-                        pollProblem = pollState.problem()
+                        pollProblem = pollState.problem(LocalContext.current)
                         return@ApuTextAction
                     }
                     onConfirm(text, images, draft)

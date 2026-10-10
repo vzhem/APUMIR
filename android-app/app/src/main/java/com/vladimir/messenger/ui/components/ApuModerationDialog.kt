@@ -240,11 +240,11 @@ fun ApuMessageModerationDialog(
     }
 
     val titleText = when {
-        selectedMessageCount > 1 -> "Удалить $selectedMessageCount сообщ.?"
+        selectedMessageCount > 1 -> stringResource(R.string.mod_delete_n_msgs, selectedMessageCount)
         isChannelPost -> stringResource(R.string.mod_delete_post)
         else -> stringResource(R.string.mod_delete_one)
     }
-    val communityWord = if (isChannel) "канале" else "группе"
+    val communityWord = stringResource(if (isChannel) R.string.mod_word_channel_loc else R.string.mod_word_group_loc)
     val showAuthorActions = authorId.isNotBlank() && !isAuthorMe
     val showMoreActions = showAuthorActions || canModerate
 
@@ -329,7 +329,7 @@ fun ApuMessageModerationDialog(
                     ApuSettingsCard {
                         ApuModerationOptionRow(
                             title = stringResource(R.string.mod_delete_for_all),
-                            subtitle = "Сообщение исчезнет на всех устройствах в $communityWord",
+                            subtitle = stringResource(R.string.mod_sub_vanish, communityWord),
                             checked = deleteForAll,
                             onToggle = { deleteForAll = !deleteForAll },
                         )
@@ -354,7 +354,7 @@ fun ApuMessageModerationDialog(
                                 subtitle = stringResource(R.string.mod_anti_rating_body),
                                 checked = giveAntiRating,
                                 danger = true,
-                                badgeText = if (alreadyHasMyAnti) "Уже \uD83D\uDC4E" else "\uD83D\uDC4E +1",
+                                badgeText = if (alreadyHasMyAnti) stringResource(R.string.mod_badge_already) + " \uD83D\uDC4E" else "\uD83D\uDC4E +1",
                                 onToggle = { giveAntiRating = !giveAntiRating },
                             )
                             hasPreviousRow = true
@@ -371,9 +371,9 @@ fun ApuMessageModerationDialog(
                             }
                             ApuModerationOptionRow(
                                 title = stringResource(R.string.mod_delete_all_from, displayAuthor),
-                                subtitle = "Стереть все сообщения автора в $communityWord у всех",
+                                subtitle = stringResource(R.string.mod_sub_erase_author, communityWord),
                                 checked = deleteAllFromAuthor,
-                                badgeText = "${authorMessageCount.coerceAtLeast(1)} сообщ.",
+                                badgeText = stringResource(R.string.mod_badge_msgs, authorMessageCount.coerceAtLeast(1)),
                                 onToggle = {
                                     deleteAllFromAuthor = !deleteAllFromAuthor
                                     if (deleteAllFromAuthor) deleteForAll = true
@@ -393,7 +393,7 @@ fun ApuMessageModerationDialog(
                             }
                             ApuModerationOptionRow(
                                 title = stringResource(R.string.mod_block_author, displayAuthor),
-                                subtitle = "Исключить из ${if (isChannel) "канала" else "группы"} и запретить отправку",
+                                subtitle = stringResource(R.string.mod_sub_kick, stringResource(if (isChannel) R.string.mod_word_channel_gen else R.string.mod_word_group_gen)),
                                 checked = blockAuthor,
                                 danger = true,
                                 onToggle = { blockAuthor = !blockAuthor },
@@ -411,8 +411,8 @@ fun ApuMessageModerationDialog(
                                 )
                             }
                             ApuModerationOptionRow(
-                                title = "Удалить все сообщения в $communityWord",
-                                subtitle = "Полная очистка всей истории в $communityWord у всех",
+                                title = stringResource(R.string.mod_title_delete_all, communityWord),
+                                subtitle = stringResource(R.string.mod_sub_wipe_all, communityWord),
                                 checked = deleteAllInGroup,
                                 danger = true,
                                 onToggle = {

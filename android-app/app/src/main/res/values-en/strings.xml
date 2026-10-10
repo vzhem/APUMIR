@@ -1288,4 +1288,31 @@
     <string name="backup_last_update">Last update: %1$s (%2$s)</string>
     <string name="backup_first_update">First update — about %1$d days after turning it on</string>
     <string name="backup_next_update">Next: around %1$s</string>
+    <string name="mod_delete_n_msgs">Delete %1$d messages?</string>
+    <string name="mod_word_channel_loc">channel</string>
+    <string name="mod_word_group_loc">group</string>
+    <string name="mod_word_channel_gen">channel</string>
+    <string name="mod_word_group_gen">group</string>
+    <string name="mod_sub_vanish">The message will disappear on all devices in the %1$s</string>
+    <string name="mod_badge_already">Already</string>
+    <string name="mod_badge_msgs">%1$d msgs</string>
+    <string name="mod_sub_kick">Remove from the %1$s and block posting</string>
+    <string name="mod_sub_erase_author">Erase all of the author’s messages in the %1$s for everyone</string>
+    <string name="mod_title_delete_all">Delete all messages in the %1$s</string>
+    <string name="mod_sub_wipe_all">Completely wipe the entire history in the %1$s for everyone</string>
+    <string name="mute_on">Notifications are on</string>
+    <string name="mute_forever">Notifications are off forever</string>
+    <string name="mute_until">Off until %1$s</string>
+    <string name="fwd_no_posts">No posts in “%1$s” yet.</string>
+    <string name="fwd_no_topics">No topics in “%1$s” yet.</string>
+    <string name="poll_problem_question">The question can’t be empty</string>
+    <string name="a11y_open">Unlocked</string>
+    <string name="a11y_still_locked">Still locked</string>
+    <string name="share_contact_hint">The selected person will get the link to the contact “%1$s” and can add them in one tap.</string>
+    <string name="contact_no_messages">No messages</string>
+    <string name="sticker_cd">Sticker</string>
+    <plurals name="poll_min_options">
+        <item quantity="one">Need at least %d answer option</item>
+        <item quantity="other">Need at least %d answer options</item>
+    </plurals>
 </resources>

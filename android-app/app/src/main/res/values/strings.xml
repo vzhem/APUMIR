@@ -1297,4 +1297,33 @@
     <string name="backup_last_update">Последнее обновление: %1$s (%2$s)</string>
     <string name="backup_first_update">Первое обновление — примерно через %1$d дн. после включения</string>
     <string name="backup_next_update">Следующее: около %1$s</string>
+    <string name="mod_delete_n_msgs">Удалить %1$d сообщ.?</string>
+    <string name="mod_word_channel_loc">канале</string>
+    <string name="mod_word_group_loc">группе</string>
+    <string name="mod_word_channel_gen">канала</string>
+    <string name="mod_word_group_gen">группы</string>
+    <string name="mod_sub_vanish">Сообщение исчезнет на всех устройствах в %1$s</string>
+    <string name="mod_badge_already">Уже</string>
+    <string name="mod_badge_msgs">%1$d сообщ.</string>
+    <string name="mod_sub_kick">Исключить из %1$s и запретить отправку</string>
+    <string name="mod_sub_erase_author">Стереть все сообщения автора в %1$s у всех</string>
+    <string name="mod_title_delete_all">Удалить все сообщения в %1$s</string>
+    <string name="mod_sub_wipe_all">Полная очистка всей истории в %1$s у всех</string>
+    <string name="mute_on">Уведомления включены</string>
+    <string name="mute_forever">Уведомления отключены навсегда</string>
+    <string name="mute_until">Отключены до %1$s</string>
+    <string name="fwd_no_posts">В «%1$s» пока нет постов.</string>
+    <string name="fwd_no_topics">В «%1$s» пока нет тем.</string>
+    <string name="poll_problem_question">Вопрос не может быть пустым</string>
+    <string name="a11y_open">Открыто</string>
+    <string name="a11y_still_locked">Ещё закрыто</string>
+    <string name="share_contact_hint">Ссылку контакта «%1$s» получит выбранный абонент - он сможет добавить его в один тап.</string>
+    <string name="contact_no_messages">Нет сообщений</string>
+    <string name="sticker_cd">Стикер</string>
+    <plurals name="poll_min_options">
+        <item quantity="one">Нужен хотя бы %d вариант ответа</item>
+        <item quantity="few">Нужно хотя бы %d варианта ответа</item>
+        <item quantity="many">Нужно хотя бы %d вариантов ответа</item>
+        <item quantity="other">Нужно хотя бы %d вариантов ответа</item>
+    </plurals>
 </resources>

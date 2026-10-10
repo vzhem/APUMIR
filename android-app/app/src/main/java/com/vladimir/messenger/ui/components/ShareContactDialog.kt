@@ -37,7 +37,7 @@ fun ShareContactChooserDialog(
         text = {
             Column {
                 Text(
-                    "Ссылку контакта «$sharedName» получит выбранный абонент - он сможет добавить его в один тап.",
+                    stringResource(R.string.share_contact_hint, sharedName),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

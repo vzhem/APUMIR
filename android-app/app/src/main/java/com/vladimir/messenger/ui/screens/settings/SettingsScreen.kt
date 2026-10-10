@@ -1000,7 +1000,7 @@ private fun SettingsTabContent(
                             icon = icon,
                             title = scope.title,
                             subtitle = if (untilMs > notificationMuteNowMs) {
-                                notificationMuteStatus(untilMs, notificationMuteNowMs)
+                                notificationMuteStatus(LocalContext.current, untilMs, notificationMuteNowMs)
                             } else {
                                 scope.description
                             },

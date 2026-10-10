@@ -173,9 +173,9 @@ fun ForwardTopicPickerDialog(
                 } else if (topics.isEmpty()) {
                     Text(
                         if (isChannel) {
-                            "В «" + targetTitle + "» пока нет постов."
+                            stringResource(R.string.fwd_no_posts, targetTitle)
                         } else {
-                            "В «" + targetTitle + "» пока нет тем."
+                            stringResource(R.string.fwd_no_topics, targetTitle)
                         },
                         style = MaterialTheme.typography.bodyMedium,
                     )

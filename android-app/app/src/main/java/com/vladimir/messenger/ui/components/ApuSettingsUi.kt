@@ -1,5 +1,9 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+
+import com.vladimir.messenger.R
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -274,7 +278,7 @@ fun ApuSettingsFeatureRow(
     ) {
         ApuPremiumIconTile(
             icon = if (available) Icons.Default.Check else Icons.Default.Lock,
-            contentDescription = if (available) "Открыто" else "Ещё закрыто",
+            contentDescription = if (available) stringResource(R.string.a11y_open) else stringResource(R.string.a11y_still_locked),
             size = 26.dp,
             corner = 8.dp,
             lift = 3.dp,

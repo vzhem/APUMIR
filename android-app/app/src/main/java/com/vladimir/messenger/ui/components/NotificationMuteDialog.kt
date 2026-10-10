@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.platform.LocalContext
+
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
 import androidx.compose.foundation.layout.Arrangement
@@ -85,7 +87,7 @@ fun NotificationMuteDialog(
 
                 if (isMuted) {
                     ApuSettingsChip(
-                        text = notificationMuteStatus(mutedUntilMs, nowMs),
+                        text = notificationMuteStatus(LocalContext.current, mutedUntilMs, nowMs),
                         highlighted = false,
                         modifier = Modifier.padding(top = 4.dp),
                     )
@@ -109,18 +111,19 @@ fun NotificationMuteDialog(
 
 /** Короткий статус для списка настроек и диалога отключения. */
 fun notificationMuteStatus(
+    context: android.content.Context,
     mutedUntilMs: Long,
     nowMs: Long = System.currentTimeMillis(),
 ): String {
-    if (mutedUntilMs <= nowMs) return "Уведомления включены"
-    if (mutedUntilMs == Long.MAX_VALUE) return "Уведомления отключены навсегда"
+    if (mutedUntilMs <= nowMs) return context.getString(R.string.mute_on)
+    if (mutedUntilMs == Long.MAX_VALUE) return context.getString(R.string.mute_forever)
     val locale = Locale.getDefault()
     val until = Date(mutedUntilMs)
     val today = SimpleDateFormat("yyyyMMdd", locale).format(Date(nowMs))
     val targetDay = SimpleDateFormat("yyyyMMdd", locale).format(until)
     return if (today == targetDay) {
-        "Отключены до ${SimpleDateFormat("HH:mm", locale).format(until)}"
+        context.getString(R.string.mute_until, SimpleDateFormat("HH:mm", locale).format(until))
     } else {
-        "Отключены до ${SimpleDateFormat("dd.MM, HH:mm", locale).format(until)}"
+        context.getString(R.string.mute_until, SimpleDateFormat("dd.MM, HH:mm", locale).format(until))
     }
 }
