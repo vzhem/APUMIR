@@ -1289,6 +1289,7 @@ private fun PostEditorDialog(
     onPickFile: (() -> Unit)? = null,
     onClearFile: () -> Unit = {},
 ) {
+    val pollContext = LocalContext.current
     var text by remember { mutableStateOf(initialText) }
     // Уже сжатые картинки (base64) по порядку.
     var images by remember { mutableStateOf(initialImages) }
@@ -1480,7 +1481,7 @@ private fun PostEditorDialog(
                     val draft = if (withPoll) pollState.draft() else null
 
                     if (withPoll && draft == null) {
-                        pollProblem = pollState.problem(LocalContext.current)
+                        pollProblem = pollState.problem(pollContext)
                         return@ApuTextAction
                     }
                     onConfirm(text, images, draft)

@@ -357,6 +357,7 @@ fun CreatePollDialog(
 ) {
     val state = remember { PollDraftState() }
     var problem by remember { mutableStateOf<String?>(null) }
+    val pollContext = LocalContext.current
 
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
@@ -368,7 +369,7 @@ fun CreatePollDialog(
             ApuTextAction(
                 label = stringResource(R.string.chat_create),
                 onClick = {
-                    val issue = state.problem(LocalContext.current)
+                    val issue = state.problem(pollContext)
                     if (issue != null) {
                         problem = issue
                         return@ApuTextAction
