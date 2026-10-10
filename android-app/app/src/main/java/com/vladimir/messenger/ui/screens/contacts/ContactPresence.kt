@@ -30,9 +30,9 @@ internal data class PresenceLabels(
         val RUSSIAN = PresenceLabels(
             online = "В сети",
             unknown = "Последняя активность неизвестна",
-            today = "Был(а) сегодня в %1$s",
-            yesterday = "Был(а) вчера в %1$s",
-            date = "Был(а) %1$s",
+            today = "Был(а) сегодня в %1\$s",
+            yesterday = "Был(а) вчера в %1\$s",
+            date = "Был(а) %1\$s",
             timePattern = "HH:mm",
             datePattern = "d MMMM 'в' HH:mm",
             dateYearPattern = "d MMMM yyyy 'в' HH:mm",
