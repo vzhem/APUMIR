@@ -44,7 +44,21 @@ enum class WallpaperTint(
 
     fun colorsFor(isDark: Boolean): List<Color> = if (isDark) dark else light
 
+    /**
+     * Цвет, которым окрашивается рисунок APU. Яркость берётся у самого рисунка,
+     * поэтому линии и контраст совпадают с исходной подложкой; цвет задаёт
+     * оттенок. null — рисунок показываем как есть (дневная классика).
+     */
+    fun paintFor(isDark: Boolean): Color? = when {
+        this == CLASSIC -> if (isDark) NIGHT_NAVY else null
+        isDark -> dark[0]
+        else -> light[1]
+    }
+
     companion object {
+        /** Ночная пара палитры логов (ApuPremium): тёмно-синяя. */
+        val NIGHT_NAVY = Color(0xFF16233A)
+
         fun fromStored(value: String?): WallpaperTint =
             entries.firstOrNull { it.storedValue == value } ?: CLASSIC
     }

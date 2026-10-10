@@ -159,6 +159,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.ApuPremiumButton
+import com.vladimir.messenger.ui.components.ApuPremiumChip
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -977,7 +979,17 @@ fun GroupChatScreen(
                 // Раунд 151: лента сжимается над клавиатурой (edge-to-edge:
                 // окно само не сжимается - переписка пряталась за пузырями
                 // ввода; запас 200dp снизу отводит место под пузыри).
-                modifier = Modifier.weight(1f).fillMaxWidth().imePadding(),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .imePadding()
+                    .padding(horizontal = 4.dp)
+                    // Лёгкая подложка под пузырями: рисунок обоев мягко проступает
+                    // сквозь полупрозрачную основу, текст читается ровнее.
+                    .apuBubbleSurface(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.22f),
+                        shape = RoundedCornerShape(22.dp),
+                    ),
                 // Раунд 147: снизу запас под оверлей поля ввода.
                 contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 200.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -1233,8 +1245,9 @@ fun GroupChatScreen(
                                     )
                                 }
                             }
-                            ApuTextAction(
+                            ApuPremiumChip(
                                 label = "GIF",
+                                selected = false,
                                 onClick = {
                                     if (uiState.canAttach) {
                                         showGifCatalog = true
@@ -1271,12 +1284,10 @@ fun GroupChatScreen(
                 val slowWaitSeconds = (uiState.slowModeWaitMs + 999L) / 1000L
                 val canSend = (uiState.draft.isNotBlank() || uiState.stagedFile != null) &&
                     !uiState.sending && !uiState.isPreparingFile && slowWaitSeconds <= 0L
-                ApuTextAction(
+                ApuPremiumButton(
                     label = if (slowWaitSeconds > 0L) stringResource(R.string.slow_wait_seconds, slowWaitSeconds) else stringResource(R.string.action_send),
-                    onClick = {
-
-                        viewModel.send(uiState.draft)
-                    },
+                    onClick = { viewModel.send(uiState.draft) },
+                    style = DiagnosticsActionStyle.PRIMARY,
                     enabled = canSend,
                     modifier = Modifier.fillMaxWidth(),
                 )

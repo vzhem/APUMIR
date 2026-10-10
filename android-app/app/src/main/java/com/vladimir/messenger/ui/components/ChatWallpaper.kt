@@ -14,9 +14,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.ColorMatrix
 import com.vladimir.messenger.ui.theme.WallpaperTint
 import com.vladimir.messenger.ui.theme.WallpaperTintHolder
 import androidx.compose.ui.graphics.asImageBitmap
@@ -62,30 +61,17 @@ fun ChatWallpaper() {
             val dark = LocalAppDarkTheme.current
             val tint by WallpaperTintHolder.tint.collectAsState()
             val drawable = if (dark) R.drawable.chat_wallpaper_dark else R.drawable.chat_wallpaper_light
-            if (tint == WallpaperTint.CLASSIC) {
-                Image(
-                    painter = painterResource(drawable),
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Crop,
-                )
-            } else {
-                // Гамма: градиент задаёт цвет, рисунок APU накладывается поверх
-                // как серая деталь, полупрозрачная и без цветового сдвига.
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Brush.verticalGradient(tint.colorsFor(dark))),
-                )
-                Image(
-                    painter = painterResource(drawable),
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    alpha = 0.35f,
-                    colorFilter = ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) }),
-                    contentScale = ContentScale.Crop,
-                )
-            }
+            // Рисунок APU окрашивается оттенком гаммы: его яркость сохраняется, поэтому
+            // линии по контрасту такие же, как на дневной подложке. Дневная классика
+            // показывается как есть; ночная классика — тёмно-синяя (палитра логов).
+            val paint = tint.paintFor(dark)
+            Image(
+                painter = painterResource(drawable),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                colorFilter = paint?.let { ColorFilter.tint(it, BlendMode.Color) },
+                contentScale = ContentScale.Crop,
+            )
         }
         // Лёгкая вуаль в тон темы: подложка прозрачнее, текст и панели читаются.
         androidx.compose.foundation.layout.Box(

@@ -2197,7 +2197,7 @@ private fun WallpaperTintSwatch(
     val circle = CircleShape
     // «Классическая» показывает сам рисунок APU: его средние цвета дня и ночи.
     val fill = if (option == WallpaperTint.CLASSIC) {
-        if (dark) Brush.verticalGradient(listOf(Color(0xFF080D0C), Color(0xFF0A1210)))
+        if (dark) Brush.verticalGradient(listOf(Color(0xFF16233A), Color(0xFF0A1018)))
         else Brush.verticalGradient(listOf(Color(0xFFB5D0AA), Color(0xFFD0DEB7)))
     } else {
         Brush.verticalGradient(option.colorsFor(dark))
