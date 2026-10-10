@@ -151,7 +151,7 @@ fun PeerProfileSheet(
                     )
                 }
                 Text(
-                    if (isOnline) "в сети" else "не в сети",
+                    stringResource(if (isOnline) R.string.pps_online_short else R.string.pps_offline_short),
                     style = MaterialTheme.typography.labelMedium,
                     color = if (isOnline) {
                         MaterialTheme.colorScheme.primary
@@ -285,13 +285,12 @@ fun PeerProfileSheet(
                         Text(
                             text = if (isWarning) {
                                 val clock = if (antiRatingUntilMs > 0) {
-                                    " Предупреждение временное — примерно до " +
-                                        warningClockTime(antiRatingUntilMs) + "."
+                                    " " + stringResource(R.string.pps_warn_until, warningClockTime(antiRatingUntilMs))
                                 } else {
-                                    " Предупреждение временное."
+                                    " " + stringResource(R.string.pps_warn_temp)
                                 }
-                                "⚠️ За короткое время пришло много жалоб (всего: $antiRatingCount)." +
-                                    " Репутация и приоритет узла в рое временно понижены." + clock
+                                stringResource(R.string.pps_warn_head, antiRatingCount) +
+                                    " " + stringResource(R.string.pps_warn_tail) + clock
                             } else {
                                 stringResource(R.string.pps_anti_rating_note, antiRatingCount)
                             },

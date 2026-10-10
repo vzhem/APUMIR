@@ -338,7 +338,7 @@ fun FileTransferBubble(
                         val remaining = transfer.totalBytes - transfer.transferredBytes
                         val etaSec = remaining / bytesPerSec
                         Text(
-                            "${formatSpeed(bytesPerSec)} · осталось ~${formatEta(etaSec)}",
+                            stringResource(R.string.transfer_speed_eta_tpl, formatSpeed(androidx.compose.ui.platform.LocalContext.current, bytesPerSec), formatEta(androidx.compose.ui.platform.LocalContext.current, etaSec)),
                             style = MaterialTheme.typography.labelSmall,
                             color = contentColor.copy(alpha = 0.7f),
                         )
@@ -436,16 +436,16 @@ private fun stateLabel(
     }
 }
 
-private fun formatSpeed(bytesPerSec: Long): String = when {
-    bytesPerSec >= 1024 * 1024 -> "%.1f МБ/с".format(bytesPerSec / (1024.0 * 1024.0))
-    bytesPerSec >= 1024 -> "%.0f КБ/с".format(bytesPerSec / 1024.0)
-    else -> "$bytesPerSec Б/с"
+private fun formatSpeed(context: android.content.Context, bytesPerSec: Long): String = when {
+    bytesPerSec >= 1024 * 1024 -> context.getString(R.string.speed_mb_s, bytesPerSec / (1024.0 * 1024.0))
+    bytesPerSec >= 1024 -> context.getString(R.string.speed_kb_s, bytesPerSec / 1024.0)
+    else -> context.getString(R.string.speed_b_s, bytesPerSec)
 }
 
-private fun formatEta(seconds: Long): String = when {
-    seconds >= 3600 -> "${seconds / 3600} ч ${seconds % 3600 / 60} мин"
-    seconds >= 60 -> "${seconds / 60} мин ${seconds % 60} с"
-    else -> "$seconds с"
+private fun formatEta(context: android.content.Context, seconds: Long): String = when {
+    seconds >= 3600 -> context.getString(R.string.eta_h_m, seconds / 3600, seconds % 3600 / 60)
+    seconds >= 60 -> context.getString(R.string.eta_m_s, seconds / 60, seconds % 60)
+    else -> context.getString(R.string.eta_s, seconds)
 }
 
 private fun transferProgress(transfer: FileTransferEntity): Float? = when {

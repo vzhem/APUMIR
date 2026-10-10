@@ -450,9 +450,7 @@ class ChatDetailViewModel @Inject constructor(
                 attachmentsLockedHint = if (allowed) {
                     ""
                 } else {
-                    "Отправка файлов, фото и видео открывается с ранга «Круг друзей» — " +
-                        "это 3 подтверждённых приглашения. Сейчас подтверждено: $qualified. " +
-                        appContext.getString(R.string.cdv_text_unlimited)
+                    appContext.getString(R.string.cdv_files_locked, qualified) + " " + appContext.getString(R.string.cdv_text_unlimited)
                 },
             )
         }
@@ -499,12 +497,11 @@ class ChatDetailViewModel @Inject constructor(
             }
             _inviteStatus.value = when (outcome) {
                 is com.vladimir.messenger.data.group.JoinOutcome.Joined ->
-                    if (outcome.isChannel) "Вы подписались: " + outcome.title
-                    else "Вы вступили: " + outcome.title
+                    if (outcome.isChannel) appContext.getString(R.string.cdv_joined_channel, outcome.title) else appContext.getString(R.string.cdv_joined_group, outcome.title)
                 is com.vladimir.messenger.data.group.JoinOutcome.RequestSent ->
-                    "Заявка отправлена: " + outcome.title
+                    appContext.getString(R.string.cdv_request_sent, outcome.title)
                 is com.vladimir.messenger.data.group.JoinOutcome.Failed ->
-                    "Не удалось войти: " + outcome.reason
+                    appContext.getString(R.string.cdv_join_failed, outcome.reason)
                 null -> appContext.getString(R.string.cd_join_failed2)
             }
         }
@@ -797,7 +794,7 @@ class ChatDetailViewModel @Inject constructor(
         viewModelScope.launch {
             chatRepository.retryOutgoingMessage(message.id)
                 .onFailure { error ->
-                    _uiState.update { it.copy(error = "Повторить отправку не удалось: ${error.message.orEmpty()}") }
+                    _uiState.update { it.copy(error = appContext.getString(R.string.cdv_retry_failed, error.message.orEmpty())) }
                 }
         }
     }
@@ -954,8 +951,7 @@ class ChatDetailViewModel @Inject constructor(
                         cached != null -> state.copy(
                             gifLoading = false,
                             gifError = null,
-                            gifNotice = "Сервер перегружен — показываю сохранённые гифки. " +
-                                appContext.getString(R.string.sv_download_send_hint),
+                            gifNotice = appContext.getString(R.string.gif_server_busy) + " " + appContext.getString(R.string.sv_download_send_hint),
                             gifItems = cached.first,
                             gifNext = "",
                         )
@@ -1206,7 +1202,7 @@ class ChatDetailViewModel @Inject constructor(
                     swarmStatus = when (holder) {
                         null -> appContext.getString(R.string.cd_net_silent)
                         "" -> appContext.getString(R.string.cd_already_downloading)
-                        else -> "Качается с $holder - сейчас отправим"
+                        else -> appContext.getString(R.string.cdv_downloading_from, holder)
                     },
                 )
             }
@@ -1249,7 +1245,7 @@ class ChatDetailViewModel @Inject constructor(
                     swarmStatus = when (holder) {
                         null -> appContext.getString(R.string.cd_net_silent)
                         "" -> appContext.getString(R.string.cd_already_downloading)
-                        else -> "Просили: $holder"
+                        else -> appContext.getString(R.string.cdv_asked_by, holder)
                     },
                 )
             }
@@ -1360,7 +1356,7 @@ class ChatDetailViewModel @Inject constructor(
             } catch (e: Exception) {
                 val message = e.message.orEmpty()
                 _uiState.update {
-                    it.copy(error = if (message.contains("недоступен")) appContext.getString(R.string.cd_peer_unavailable) else "Гифка не отправлена: $message")
+                    it.copy(error = if (message.contains("недоступен")) appContext.getString(R.string.cd_peer_unavailable) else appContext.getString(R.string.cdv_gif_not_sent, message))
                 }
             }
         }

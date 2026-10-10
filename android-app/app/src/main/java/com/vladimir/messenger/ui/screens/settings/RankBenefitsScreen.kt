@@ -180,7 +180,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                                         }
                                     }
                                     Text(
-                                        "Подтверждённых друзей: $earned",
+                                        stringResource(R.string.rank_confirmed_friends, earned),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = HintBubbleMutedColor,
                                     )
@@ -204,7 +204,7 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                                 ) {
                                     ApuVipBadge()
                                     Text(
-                                        "До VIP осталось приглашений: $toVip",
+                                        stringResource(R.string.rank_to_vip, toVip),
                                         style = MaterialTheme.typography.bodySmall,
                                         fontWeight = FontWeight.Medium,
                                     )
@@ -217,9 +217,9 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
-                                    ApuSettingsChip("промокод +$promoBonus")
+                                    ApuSettingsChip(stringResource(R.string.rank_promo_chip, promoBonus))
                                     Text(
-                                        "Всего к рангу: $qualified",
+                                        stringResource(R.string.rank_total_qualified, qualified),
                                         style = MaterialTheme.typography.bodySmall,
                                         fontWeight = FontWeight.Medium,
                                     )
@@ -236,12 +236,12 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                                 Spacer(Modifier.height(2.dp))
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
-                                        "До ранга «${ahead.rankName}»",
+                                        stringResource(R.string.rank_ahead, ahead.rankName),
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.Medium,
                                         modifier = Modifier.weight(1f),
                                     )
-                                    ApuSettingsChip("осталось $needed", highlighted = false)
+                                    ApuSettingsChip(stringResource(R.string.rank_needed_chip, needed), highlighted = false)
                                 }
                                 ApuSettingsProgress(fraction = taken.toFloat() / span.toFloat())
                                 // Что именно откроет следующий ранг - списком, а не
@@ -387,7 +387,7 @@ private fun RankTierCard(
                     }
                     if (!reached) {
                         Text(
-                            "Нужно приглашений: ${tier.minimumQualifiedReferrals}",
+                            stringResource(R.string.rank_need_invites, tier.minimumQualifiedReferrals),
                             style = MaterialTheme.typography.bodySmall,
                             color = HintBubbleMutedColor,
                         )
@@ -474,8 +474,7 @@ private fun PromoCodeCard(onRedeemed: () -> Unit) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             IconTitleRow(icon = Icons.Default.Redeem, title = stringResource(R.string.rank_promo))
             Text(
-                "Есть промокод? Введите его - и к рангу прибавится " +
-                    "${PromoCodes.BONUS_PER_CODE} подтверждённых друзей.",
+                stringResource(R.string.rank_promo_hint, PromoCodes.BONUS_PER_CODE),
                 style = MaterialTheme.typography.bodySmall,
                 color = HintBubbleMutedColor,
             )

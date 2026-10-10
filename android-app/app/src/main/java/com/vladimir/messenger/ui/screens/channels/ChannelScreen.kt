@@ -217,7 +217,7 @@ fun ChannelScreen(
                                     color = ApuBubbleTextColor,
                                 )
                                 Text(
-                                    "Подписчиков: ${uiState.channel?.memberCount ?: 0}",
+                                    stringResource(R.string.ch_subscribers_tpl, uiState.channel?.memberCount ?: 0),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = ApuBubbleMutedColor,
                                     maxLines = 1,
@@ -354,8 +354,8 @@ fun ChannelScreen(
                     val targetAuthorId = if (distinctAuthors.size == 1) distinctAuthors.first() else primaryPost.authorId
                     val targetMember = uiState.members.firstOrNull { it.nodeId == targetAuthorId }
                     val targetAuthorName = primaryPost.authorName.ifBlank {
-                        targetMember?.displayName?.ifBlank { "Участник " + targetAuthorId.takeLast(4) }
-                            ?: ("Участник " + targetAuthorId.takeLast(4))
+                        targetMember?.displayName?.ifBlank { stringResource(R.string.member_fallback, targetAuthorId.takeLast(4)) }
+                            ?: stringResource(R.string.member_fallback, targetAuthorId.takeLast(4))
                     }
                     val isAuthorMe = uiState.myId.isNotBlank() && uiState.myId == targetAuthorId
                     val isAuthorOwner = (uiState.channel?.ownerId != null && uiState.channel?.ownerId == targetAuthorId) ||
@@ -420,7 +420,7 @@ fun ChannelScreen(
                 if (!inspectedPeerId.isNullOrBlank()) {
                     val isSelfPeer = uiState.myId.isNotBlank() && uiState.myId == inspectedPeerId
                     PeerProfileSheet(
-                        name = uiState.inspectedPeerName.ifBlank { "Участник " + inspectedPeerId.takeLast(4) },
+                        name = uiState.inspectedPeerName.ifBlank { stringResource(R.string.member_fallback, inspectedPeerId.takeLast(4)) },
                         contactId = inspectedPeerId,
                         isOnline = true,
                         // Элита: знак и кольцо в карточке автора.
@@ -478,7 +478,7 @@ fun ChannelScreen(
                             }
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                text = "Выбрано $selCount",
+                                text = stringResource(R.string.ch_selected_n, selCount),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = ApuBubbleTextColor,
@@ -1120,7 +1120,7 @@ private fun PostCard(
                 ApuTextAction(label = stringResource(R.string.channel_reaction), onClick = { showReactions = true })
                 ApuTextAction(
                     label = if (post.comments > 0) {
-                            "Комментарии (${post.comments})"
+                            stringResource(R.string.ch_comments_tpl, post.comments)
                         } else {
                             stringResource(R.string.channel_leave_comment)
                         },
@@ -1234,7 +1234,7 @@ private fun PostGallery(images: List<String>, pending: Int) {
                 if (bitmap != null) {
                     androidx.compose.foundation.Image(
                         bitmap = bitmap.asImageBitmap(),
-                        contentDescription = "Фото поста ${page + 1} из ${images.size}",
+                        contentDescription = stringResource(R.string.ch_post_photo_of, page + 1, images.size),
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
                             .fillMaxSize()
@@ -1248,7 +1248,7 @@ private fun PostGallery(images: List<String>, pending: Int) {
         Text(
             buildString {
                 append(pagerState.currentPage + 1).append('/').append(images.size)
-                if (pending > 0) append(" · ещё ").append(pending)
+                if (pending > 0) append(" ").append(stringResource(R.string.pager_more_tpl, pending))
             },
             style = MaterialTheme.typography.labelSmall,
             color = Color.White,
@@ -1347,7 +1347,7 @@ private fun PostEditorDialog(
                                 if (thumb != null) {
                                     androidx.compose.foundation.Image(
                                         bitmap = thumb.asImageBitmap(),
-                                        contentDescription = "Фото ${index + 1}",
+                                        contentDescription = stringResource(R.string.ch_photo_index, index + 1),
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier.fillMaxSize(),
                                     )
@@ -1378,7 +1378,7 @@ private fun PostEditorDialog(
                 if (imagesEditable) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         ApuTextAction(
-                            label = if (images.isEmpty()) stringResource(R.string.ch_attach_photo) else "Ещё фото (${images.size}/${InlineImage.MAX_PHOTOS})",
+                            label = if (images.isEmpty()) stringResource(R.string.ch_attach_photo) else stringResource(R.string.ch_more_photos, images.size, InlineImage.MAX_PHOTOS),
                             onClick = { picker.launch("image/*") },
                             enabled = !preparing && !creating && images.size < InlineImage.MAX_PHOTOS,
                         )
