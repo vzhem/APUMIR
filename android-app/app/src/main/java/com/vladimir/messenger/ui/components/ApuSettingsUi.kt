@@ -410,9 +410,12 @@ fun ApuSettingsDialog(
     Dialog(onDismissRequest = onDismissRequest, properties = properties) {
         ApuSettingsPalette {
             val shape = RoundedCornerShape(22.dp)
-            // Окно не выше экрана: при повороте или низком экране кнопки остаются
-            // видимыми, а длинный текст прокручивается внутри окна.
+            // Окно не выше экрана. Когда содержимое выше (длинный текст, поворот
+            // в альбомный режим, крупный шрифт), прокручивается ВСЯ карточка:
+            // заголовок, текст и кнопки. Раньше текст получал «остаток» высоты, а
+            // кнопки уходили за нижний край и их не было видно.
             val maxCard = (LocalConfiguration.current.screenHeightDp.dp - 48.dp).coerceAtLeast(240.dp)
+            val cardScroll = rememberScrollState()
             Column(
                 modifier = modifier
                     .fillMaxWidth()
@@ -422,7 +425,8 @@ fun ApuSettingsDialog(
                     .background(Color(0xFFF7F9FC).copy(alpha = 0.98f))
                     .border(1.dp, ApuGold.copy(alpha = 0.45f), shape)
                     .apuPremiumGloss(shape, intensity = 0.5f, topFraction = 0.35f)
-                    .padding(16.dp),
+                    .padding(16.dp)
+                    .verticalScroll(cardScroll),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (icon != null) {
@@ -451,16 +455,7 @@ fun ApuSettingsDialog(
                 }
                 if (text != null) {
                     Spacer(modifier = Modifier.size(12.dp))
-                    // Длинные тексты (правила, подтверждения) прокручиваются:
-                    // окно не растягивается выше экрана.
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f, fill = false)
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        CompositionLocalProvider(LocalContentColor provides ApuBubbleTextColor) { text() }
-                    }
+                    CompositionLocalProvider(LocalContentColor provides ApuBubbleTextColor) { text() }
                 }
                 Spacer(modifier = Modifier.size(16.dp))
                 Row(
