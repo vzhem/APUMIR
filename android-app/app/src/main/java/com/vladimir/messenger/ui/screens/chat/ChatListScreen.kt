@@ -294,9 +294,10 @@ fun ChatListScreen(
                                     onDismissRequest = { menuOpen = false },
                                     // Скруглённый пузырь и чуть больше воздуха:
                                     // меню в одном стиле с остальными пузырями APU.
-                                    shape = RoundedCornerShape(20.dp),
-                                    tonalElevation = 3.dp,
-                                    shadowElevation = 8.dp,
+                                    shape = RoundedCornerShape(22.dp),
+                                    containerColor = com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor,
+                                    tonalElevation = 0.dp,
+                                    shadowElevation = 12.dp,
                                 ) {
                                     // «Мой QR-код» и «Поделиться приглашением»
                                     // убраны: раздел QR (значок в шапке) уже
