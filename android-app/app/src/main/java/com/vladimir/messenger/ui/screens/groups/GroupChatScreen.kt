@@ -685,7 +685,7 @@ fun GroupChatScreen(
                 },
                 navigationIcon = {
                     ApuHeaderButton(
-                        icon = ArrowBack,
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = stringResource(R.string.action_back),
                         onClick = { if (hasTopics && showFeed) showFeed = false else onBackClick() },
                         modifier = Modifier.padding(start = 4.dp),
