@@ -1934,7 +1934,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         if (patchBest != null && download == null && patchDownload == null && ready == null) {
             SettingsItem(
                 icon    = Icons.Default.Download,
-                title   = "Скачать компактно v" + patchBest.toVersion,
+                title   = stringResource(R.string.st_dl_patch_title, patchBest.toVersion),
                 subtitle = "Патч " + StoragePolicy.format(patchBest.sizeBytes) +
                     " от " + patchOffers.size.coerceAtLeast(1).toString() + " сосед(ей) — только разница версий",
                 onClick = { viewModel.onDownloadPatchFrom(patchBest.nodeId) },
@@ -1954,13 +1954,13 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
             )
             SettingsItem(
                 icon    = Icons.Default.CloudDownload,
-                title   = "С официального сайта v" + officialNow.version.removePrefix("v"),
+                title   = stringResource(R.string.st_dl_official_v, officialNow.version.removePrefix("v")),
                 subtitle = stringResource(R.string.settings_via_internet),
                 onClick = viewModel::onDownloadOfficialRelease,
             )
             SettingsItem(
                 icon    = Icons.Default.Download,
-                title   = "По сети v" + best.version,
+                title   = stringResource(R.string.st_dl_net_v, best.version),
                 subtitle = "Кусками от " + offers.size + " сосед(ей) — без интернета",
                 onClick = { viewModel.onDownloadUpdateFrom(best.nodeId) },
             )
@@ -1970,7 +1970,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
             if (best != null && download == null && patchDownload == null && ready == null) {
                 SettingsItem(
                     icon    = Icons.Default.Download,
-                    title   = "Скачать v" + best.version,
+                    title   = stringResource(R.string.st_dl_v, best.version),
                     subtitle = if (offers.size > 1) {
                         "Раздают " + offers.size + " соседа; " + StoragePolicy.format(best.sizeBytes)
                     } else {
@@ -1983,7 +1983,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
             official?.let { rel ->
                 SettingsItem(
                     icon    = Icons.Default.CloudDownload,
-                    title   = "Скачать официальный v" + rel.version.removePrefix("v"),
+                    title   = stringResource(R.string.st_dl_official_only, rel.version.removePrefix("v")),
                     subtitle = stringResource(R.string.settings_from_github),
                     onClick = viewModel::onDownloadOfficialRelease,
                 )

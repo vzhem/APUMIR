@@ -80,10 +80,7 @@ fun ProfileSyncDialog(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "Уже настроенные телефоны с одним профилем синхронизируются " +
-                        "сами в фоне — ничего нажимать не нужно. Это окно только " +
-                        "для разового переноса или восстановления нового телефона. " +
-                        "Данные не заменяются без подтверждения.",
+                    stringResource(R.string.psd_auto_sync_note),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

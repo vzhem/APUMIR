@@ -1168,4 +1168,11 @@
     <string name="st_neighbors_offer">Соседи раздают новую версию — кнопка «Скачать» в карточке</string>
     <string name="st_update_delta_done">Обновление скачано компактно (только разница версий) - установщик открыт</string>
     <string name="st_download_started">Скачивание началось. Когда файл скачается, он сам появится в «Обновлениях» — установка и раздача соседям начнутся сами</string>
+    <string name="apc_anon_note">Анонимный опрос показывает только числа: кто как проголосовал, не видно никому.</string>
+    <string name="st_dl_patch_title">Скачать компактно v%1$s</string>
+    <string name="st_dl_official_v">С официального сайта v%1$s</string>
+    <string name="st_dl_net_v">По сети v%1$s</string>
+    <string name="st_dl_v">Скачать v%1$s</string>
+    <string name="st_dl_official_only">Скачать официальный v%1$s</string>
+    <string name="psd_auto_sync_note">Уже настроенные телефоны с одним профилем синхронизируются сами в фоне — ничего нажимать не нужно. Это окно только для разового переноса или восстановления нового телефона. Данные не заменяются без подтверждения.</string>
 </resources>

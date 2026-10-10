@@ -337,7 +337,7 @@ fun PollDraftFields(
             ApuPremiumSwitch(checked = state.multiChoice, onCheckedChange = { state.multiChoice = it })
         }
         Text(
-            "Анонимный опрос показывает только числа: кто как проголосовал, не видно никому.",
+            stringResource(R.string.apc_anon_note),
             style = MaterialTheme.typography.labelSmall,
             color = ApuBubbleMutedColor,
         )

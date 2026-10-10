@@ -1159,4 +1159,11 @@
     <string name="st_neighbors_offer">Neighbours are sharing a new version — tap “Download” on the card</string>
     <string name="st_update_delta_done">Update downloaded compactly (only the version difference) — installer opened</string>
     <string name="st_download_started">Download started. When the file is ready it will appear under “Updates” by itself — installation and sharing with neighbours will start automatically</string>
+    <string name="apc_anon_note">An anonymous poll shows only numbers: who voted how is not visible to anyone.</string>
+    <string name="st_dl_patch_title">Download compactly v%1$s</string>
+    <string name="st_dl_official_v">From the official site v%1$s</string>
+    <string name="st_dl_net_v">Over the network v%1$s</string>
+    <string name="st_dl_v">Download v%1$s</string>
+    <string name="st_dl_official_only">Download official v%1$s</string>
+    <string name="psd_auto_sync_note">Phones that already share one profile sync by themselves in the background — nothing to tap. This window is only for a one-time transfer or restoring a new phone. Data is never replaced without confirmation.</string>
 </resources>
