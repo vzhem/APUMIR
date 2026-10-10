@@ -1,19 +1,11 @@
 package com.vladimir.messenger.util
 
-import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.Context
-import android.content.ContextWrapper
 import android.content.Intent
-import android.graphics.Bitmap
 import android.net.Uri
-import android.os.Build
-import android.os.Handler
-import android.os.Looper
-import android.view.PixelCopy
 import androidx.core.content.FileProvider
-import com.vladimir.messenger.BuildConfig
 import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -21,7 +13,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * Письмо разработчику: текст, логи и скриншот экрана, с которого открыт раздел.
+ * Письмо разработчику: текст, логи и скриншоты, которые человек выбрал сам
+ * из галереи (баг или пожелание может касаться любого экрана).
  *
  * Письмо формирует почтовое приложение телефона; сама программа ничего не
  * отправляет в сеть. Вложения лежат в кэше приложения и отдаются через
@@ -31,73 +24,37 @@ object FeedbackMail {
     /** ЗАГЛУШКА: заменить на адрес разработчика до публикации. */
     const val EMAIL = "feedback@example.com"
 
+    /** Сколько скриншотов можно приложить к одному письму. */
+    const val MAX_SCREENSHOTS = 10
+
     private const val DIR = "feedback"
     private const val LOGS_TIMEOUT_MS = 60_000L
 
-    /** Скриншот, снятый в момент нажатия «Написать разработчику». */
-    @Volatile
-    var pendingScreenshot: File? = null
-
     private fun dir(context: Context): File = File(context.cacheDir, DIR).apply { mkdirs() }
 
-    private fun findActivity(context: Context): Activity? {
-        var current: Context? = context
-        while (current is ContextWrapper) {
-            if (current is Activity) return current
-            current = current.baseContext
-        }
-        return null
-    }
-
     /**
-     * Снимает текущий экран окна. Вызывается до перехода на экран обратной
-     * связи, поэтому на снимке тот экран, с которого человек открыл раздел.
-     * При ошибке (например, защищённый от съёмки экран) [onDone] всё равно
-     * вызывается, а вложение просто не добавляется.
+     * Копирует изображение, выбранное в галерее, в кэш приложения.
+     * Возвращает null, если файл не удалось прочитать.
      */
-    fun captureScreen(context: Context, onDone: () -> Unit) {
-        pendingScreenshot = null
-        val activity = findActivity(context)
-        if (activity == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            onDone()
-            return
-        }
-        val window = activity.window
-        val view = window.decorView
-        val width = view.width
-        val height = view.height
-        if (width <= 0 || height <= 0) {
-            onDone()
-            return
-        }
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    suspend fun copyScreenshot(context: Context, uri: Uri): File? = withContext(Dispatchers.IO) {
         try {
-            PixelCopy.request(
-                window,
-                bitmap,
-                { result ->
-                    if (result == PixelCopy.SUCCESS) {
-                        pendingScreenshot = saveScreenshot(activity, bitmap)
-                    }
-                    bitmap.recycle()
-                    onDone()
-                },
-                Handler(Looper.getMainLooper()),
-            )
-        } catch (e: IllegalArgumentException) {
-            bitmap.recycle()
-            onDone()
+            val ext = context.contentResolver.getType(uri)
+                ?.substringAfter('/', "png")
+                ?.takeIf { it.isNotBlank() && it.all { c -> c.isLetterOrDigit() } }
+                ?: "png"
+            val file = File(dir(context), "apu-shot-${System.nanoTime()}.$ext")
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                file.outputStream().use { input.copyTo(it) }
+            } ?: return@withContext null
+            file
+        } catch (e: Exception) {
+            null
         }
     }
 
-    private fun saveScreenshot(context: Context, bitmap: Bitmap): File? = try {
-        // Старые снимки удаляем: в кэше должен быть один последний.
+    /** Удаляет временные файлы вложений, когда письмо уже не нужно. */
+    fun clearAttachments(context: Context) {
         dir(context).listFiles()?.forEach { it.delete() }
-        val file = File(dir(context), "apu-screen-${System.currentTimeMillis()}.png")
-        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 90, it) }
-        file
-    } catch (e: Exception) {
-        null
     }
 
     /**

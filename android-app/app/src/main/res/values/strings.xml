@@ -1524,13 +1524,18 @@
     <string name="feedback_to">Кому: %1$s</string>
     <string name="feedback_text_label">Описание</string>
     <string name="feedback_text_hint">Что произошло, где и чего вы ждали. Или что улучшить.</string>
-    <string name="feedback_attach">Прикрепить логи и скриншот экрана</string>
-    <string name="feedback_attach_hint">Логи без переписок и ключей. Скриншот — экран, с которого вы открыли этот раздел. Снимите галочку, если на экране что-то личное.</string>
-    <string name="feedback_no_shot">Скриншот не удалось снять, в письмо попадут только логи.</string>
+    <string name="feedback_attach">Прикрепить логи</string>
+    <string name="feedback_attach_hint">Логи без переписок и ключей. Помогают найти причину ошибки.</string>
     <string name="feedback_send">Отправить письмо</string>
     <string name="feedback_collecting">Собираю логи…</string>
     <string name="feedback_logs_failed">Логи не успели собраться — письмо откроется без них</string>
     <string name="feedback_no_mail">На телефоне нет почтового приложения</string>
     <string name="feedback_subject">APU %1$s — отзыв</string>
     <string name="feedback_body_meta">Версия APU: %1$s\nAndroid: %2$s, %3$s</string>
+    <string name="feedback_shots_title">Скриншоты</string>
+    <string name="feedback_shots_hint">Если что-то не так, сделайте скриншот (или возьмите готовый) и выберите здесь. Можно добавить несколько, с любых экранов.</string>
+    <string name="feedback_add_shots">Выбрать скриншоты из галереи</string>
+    <string name="feedback_shot_item">Скриншот %1$d</string>
+    <string name="feedback_shot_remove">Убрать скриншот</string>
+    <string name="feedback_shot_failed">Не все файлы удалось прикрепить</string>
 </resources>

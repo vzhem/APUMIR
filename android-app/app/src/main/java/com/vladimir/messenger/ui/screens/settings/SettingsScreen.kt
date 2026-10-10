@@ -1378,10 +1378,7 @@ private fun SettingsTabContent(
                         icon     = Icons.Default.Email,
                         title    = stringResource(R.string.settings_feedback),
                         subtitle = stringResource(R.string.settings_feedback_hint),
-                        // Снимок экрана делаем до перехода: на нём то, с чем возникла проблема.
-                        onClick  = {
-                            com.vladimir.messenger.util.FeedbackMail.captureScreen(settingsContext) { onFeedbackClick() }
-                        },
+                        onClick  = onFeedbackClick,
                     )
                     SettingsItem(
                         icon     = Icons.Default.Favorite,

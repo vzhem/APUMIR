@@ -1,7 +1,10 @@
 package com.vladimir.messenger.ui.screens.feedback
 
+import android.net.Uri
 import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,8 +20,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -26,11 +30,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -52,22 +56,38 @@ import java.io.File
 import kotlinx.coroutines.launch
 
 /**
- * «Написать разработчику»: описание, одна галочка для логов и скриншота,
- * одна кнопка - письмо открывается в почтовом приложении.
+ * «Написать разработчику»: описание, галочка для логов, скриншоты, которые
+ * человек выбирает сам из галереи, и одна кнопка - письмо открывается в
+ * почтовом приложении.
  */
 @Composable
 fun FeedbackScreen(onBackClick: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var text by rememberSaveable { mutableStateOf("") }
-    var attach by rememberSaveable { mutableStateOf(true) }
+    var attachLogs by rememberSaveable { mutableStateOf(true) }
     var busy by remember { mutableStateOf(false) }
-    // Снимок сделан в момент открытия раздела - экран с проблемой.
-    val screenshot = remember { FeedbackMail.pendingScreenshot }
-    DisposableEffect(Unit) {
-        onDispose { FeedbackMail.pendingScreenshot = null }
-    }
+    // Скриншоты храним путями к копиям в кэше, чтобы они переживали поворот экрана.
+    var shots by rememberSaveable(
+        saver = listSaver<List<File>, String>(
+            save = { list -> list.map { it.path } },
+            restore = { paths -> paths.map { File(it) }.toMutableList() },
+        ),
+    ) { mutableStateOf(listOf<File>()) }
 
+    val pickShots = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris: List<Uri> ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        scope.launch {
+            busy = true
+            val room = FeedbackMail.MAX_SCREENSHOTS - shots.size
+            val copied = uris.take(room).mapNotNull { FeedbackMail.copyScreenshot(context, it) }
+            shots = shots + copied
+            busy = false
+            if (copied.size < uris.take(room).size) {
+                Toast.makeText(context, context.getString(R.string.feedback_shot_failed), Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -117,14 +137,55 @@ fun FeedbackScreen(onBackClick: () -> Unit) {
                     minLines = 6,
                     enabled = !busy,
                 )
+
+                Text(
+                    stringResource(R.string.feedback_shots_title),
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    stringResource(R.string.feedback_shots_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                shots.forEachIndexed { index, file ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            stringResource(R.string.feedback_shot_item, index + 1),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(
+                            enabled = !busy,
+                            onClick = {
+                                shots = shots.filterNot { it == file }
+                                file.delete()
+                            },
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.feedback_shot_remove))
+                        }
+                    }
+                }
+                ApuPremiumContentButton(
+                    onClick = { pickShots.launch("image/*") },
+                    style = DiagnosticsActionStyle.GLASS,
+                    enabled = !busy && shots.size < FeedbackMail.MAX_SCREENSHOTS,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.feedback_add_shots))
+                }
+
+                Spacer(Modifier.height(4.dp))
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable(enabled = !busy) { attach = !attach }
+                        .clickable(enabled = !busy) { attachLogs = !attachLogs }
                         .padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    ApuPremiumCheckbox(checked = attach, onCheckedChange = { attach = it })
+                    ApuPremiumCheckbox(checked = attachLogs, onCheckedChange = { attachLogs = it })
                     Spacer(Modifier.width(6.dp))
                     Text(
                         stringResource(R.string.feedback_attach),
@@ -136,21 +197,14 @@ fun FeedbackScreen(onBackClick: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                if (attach && screenshot == null) {
-                    Text(
-                        stringResource(R.string.feedback_no_shot),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
                 Spacer(Modifier.height(4.dp))
                 ApuPremiumContentButton(
                     onClick = {
                         scope.launch {
                             busy = true
                             val files = mutableListOf<File>()
-                            if (attach) {
-                                screenshot?.let { files += it }
+                            files += shots
+                            if (attachLogs) {
                                 val logs = FeedbackMail.writeLogs(context)
                                 if (logs != null) {
                                     files += logs

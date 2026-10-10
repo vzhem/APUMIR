@@ -1511,13 +1511,18 @@ The file is not on this phone</string>
     <string name="feedback_to">To: %1$s</string>
     <string name="feedback_text_label">Description</string>
     <string name="feedback_text_hint">What happened, where, and what you expected. Or what to improve.</string>
-    <string name="feedback_attach">Attach logs and a screenshot</string>
-    <string name="feedback_attach_hint">Logs without chats or keys. The screenshot is the screen you opened this section from. Uncheck it if that screen shows something private.</string>
-    <string name="feedback_no_shot">The screenshot could not be taken; only logs will be attached.</string>
+    <string name="feedback_attach">Attach logs</string>
+    <string name="feedback_attach_hint">Logs without chats or keys. They help find the cause of a problem.</string>
     <string name="feedback_send">Send email</string>
     <string name="feedback_collecting">Collecting logs…</string>
     <string name="feedback_logs_failed">The logs were not ready in time; the email will open without them</string>
     <string name="feedback_no_mail">There is no mail app on this phone</string>
     <string name="feedback_subject">APU %1$s — feedback</string>
     <string name="feedback_body_meta">APU version: %1$s\nAndroid: %2$s, %3$s</string>
+    <string name="feedback_shots_title">Screenshots</string>
+    <string name="feedback_shots_hint">If something is wrong, take a screenshot (or use one you already have) and pick it here. You can add several, from any screen.</string>
+    <string name="feedback_add_shots">Choose screenshots from gallery</string>
+    <string name="feedback_shot_item">Screenshot %1$d</string>
+    <string name="feedback_shot_remove">Remove screenshot</string>
+    <string name="feedback_shot_failed">Some files could not be attached</string>
 </resources>
