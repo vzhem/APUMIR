@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.saved
 
+import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
 // =============================================================================
@@ -234,7 +235,7 @@ fun SavedScreen(
                 uiState.isLoading -> Box(
                     modifier = Modifier.fillMaxSize().padding(padding),
                     contentAlignment = Alignment.Center,
-                ) { CircularProgressIndicator() }
+                ) { ApuPremiumSpinner() }
 
                 uiState.items.isEmpty() -> Box(
                     modifier = Modifier.fillMaxSize().padding(padding),

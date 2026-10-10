@@ -66,7 +66,7 @@ private fun ForwardLoading() {
         modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        CircularProgressIndicator(modifier = Modifier.size(28.dp))
+        ApuPremiumSpinner(modifier = Modifier.size(28.dp))
         Text(
             stringResource(R.string.action_loading),
             style = MaterialTheme.typography.bodySmall,

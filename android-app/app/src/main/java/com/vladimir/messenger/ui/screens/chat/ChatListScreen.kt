@@ -8,6 +8,8 @@ package com.vladimir.messenger.ui.screens.chat
 // FAB для добавления нового контакта.
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.ApuPremiumSpinner
+import com.vladimir.messenger.ui.components.ApuSearchField
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
 import androidx.activity.compose.BackHandler
@@ -401,7 +403,7 @@ fun ChatListScreen(
             // Плавная листалка: страницы едут за пальцем, в движении видно
             // сразу две вкладки, и чем быстрее движение, тем дальше долистает.
             if (uiState.isLoading) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                ApuPremiumSpinner(modifier = Modifier.align(Alignment.Center))
             } else {
                 HorizontalPager(
                     state = pagerState,
@@ -1420,51 +1422,23 @@ private fun SectionPage(
     }
 }
 
-// Поле поиска в TopAppBar
+// Поле поиска в TopAppBar: общее премиальное поле поиска APU.
 @Composable
 private fun SearchTextField(
     query: String,
     onQueryChanged: (String) -> Unit,
     onClose: () -> Unit,
 ) {
-    // Раунд 265: поиск главного экрана - в фирменном пузыре, как и везде.
-    TextField(
-        value       = query,
+    ApuSearchField(
+        value = query,
         onValueChange = onQueryChanged,
-        placeholder = {
-            Text(
-                stringResource(R.string.chat_search_placeholder),
-                color = androidx.compose.ui.graphics.Color(0xFF1E2430).copy(alpha = 0.45f),
-            )
-        },
-        singleLine  = true,
-        colors = TextFieldDefaults.colors(
-            focusedContainerColor   = androidx.compose.ui.graphics.Color(0xFFF5F7FA).copy(alpha = 0.92f),
-            unfocusedContainerColor = androidx.compose.ui.graphics.Color(0xFFF5F7FA).copy(alpha = 0.92f),
-            focusedIndicatorColor   = androidx.compose.ui.graphics.Color.Transparent,
-            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-            focusedTextColor = androidx.compose.ui.graphics.Color(0xFF1E2430),
-            unfocusedTextColor = androidx.compose.ui.graphics.Color(0xFF1E2430),
-            cursorColor = MaterialTheme.colorScheme.primary,
-        ),
-        trailingIcon = {
+        placeholder = stringResource(R.string.chat_search_placeholder),
+        modifier = Modifier.fillMaxWidth(),
+        trailing = {
             IconButton(onClick = onClose) {
                 Icon(Icons.Default.Close, stringResource(R.string.chat_close_search))
             }
         },
-        modifier = Modifier
-            .fillMaxWidth()
-            // Владелец 2026-10-07: поиск — тот же премиальный слой, что строки
-            // списка: подъём, золотая нить по верхней кромке, блеск под текстом.
-            .apuPremiumLift(4.dp)
-            .apuPremiumThread(inset = 16.dp)
-            .apuPremiumGloss(intensity = 0.35f, topFraction = 0.6f)
-            .clip(RoundedCornerShape(18.dp))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(18.dp),
-            ),
     )
 }
 

@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.groups
 
+import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
 import androidx.compose.animation.core.animateFloatAsState
@@ -72,7 +73,7 @@ internal fun GroupStatisticsTab(
     if (stats == null) {
         Box(Modifier.fillMaxSize().padding(12.dp), contentAlignment = Alignment.Center) {
             ApuBubble {
-                if (isRefreshing) CircularProgressIndicator(Modifier.size(24.dp))
+                if (isRefreshing) ApuPremiumSpinner(Modifier.size(24.dp))
                 Text(if (isRefreshing) stringResource(R.string.stat_loading) else stringResource(R.string.stat_failed))
                 if (!isRefreshing) ApuTextAction(label = stringResource(R.string.stat_retry), onClick = onRefresh)
             }
@@ -99,7 +100,7 @@ internal fun GroupStatisticsTab(
                     }
                     IconButton(onClick = onRefresh, enabled = !isRefreshing) {
                         if (isRefreshing) {
-                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                            ApuPremiumSpinner(Modifier.size(20.dp), strokeWidth = 2.dp)
                         } else {
                             Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.stat_refresh), tint = StatisticsGoldDark)
                         }

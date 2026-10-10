@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.share
 
+import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
 import com.vladimir.messenger.ui.components.ApuSettingsCard
@@ -73,7 +74,7 @@ fun ShareProfileScreen(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator()
+                ApuPremiumSpinner()
             }
             return@Scaffold
         }

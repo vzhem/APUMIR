@@ -116,7 +116,7 @@ fun GifRefCard(
                     .padding(vertical = 22.dp, horizontal = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = ApuBubbleAccentColor)
+                ApuPremiumSpinner(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = ApuBubbleAccentColor)
                 Spacer(Modifier.height(8.dp))
                 Text(
                     stringResource(R.string.gifref_loading),

@@ -363,11 +363,7 @@ fun ApuMessageModerationDialog(
                         // 2. Удалить все сообщения от этого автора в группе/канале
                         if (canModerate && authorId.isNotBlank()) {
                             if (hasPreviousRow) {
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(horizontal = 14.dp),
-                                    thickness = 0.5.dp,
-                                    color = ApuBubbleAccentColor.copy(alpha = 0.16f),
-                                )
+                                ApuSettingsDivider(startPadding = 14.dp)
                             }
                             ApuModerationOptionRow(
                                 title = stringResource(R.string.mod_delete_all_from, displayAuthor),
@@ -385,11 +381,7 @@ fun ApuMessageModerationDialog(
                         // 3. Заблокировать автора в группе/канале
                         if (canModerate && showAuthorActions && !isAuthorOwner) {
                             if (hasPreviousRow) {
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(horizontal = 14.dp),
-                                    thickness = 0.5.dp,
-                                    color = ApuBubbleAccentColor.copy(alpha = 0.16f),
-                                )
+                                ApuSettingsDivider(startPadding = 14.dp)
                             }
                             ApuModerationOptionRow(
                                 title = stringResource(R.string.mod_block_author, displayAuthor),
@@ -404,11 +396,7 @@ fun ApuMessageModerationDialog(
                         // 4. Удалить ВСЕ сообщения в группе или канале
                         if (canModerate) {
                             if (hasPreviousRow) {
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(horizontal = 14.dp),
-                                    thickness = 0.5.dp,
-                                    color = ApuBubbleAccentColor.copy(alpha = 0.16f),
-                                )
+                                ApuSettingsDivider(startPadding = 14.dp)
                             }
                             ApuModerationOptionRow(
                                 title = stringResource(R.string.mod_title_delete_all, communityWord),
@@ -473,18 +461,10 @@ fun ApuMessageModerationDialog(
 
                         AnimatedVisibility(visible = restrictionsExpanded) {
                             Column(modifier = Modifier.fillMaxWidth()) {
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(horizontal = 14.dp),
-                                    thickness = 0.5.dp,
-                                    color = ApuBubbleAccentColor.copy(alpha = 0.16f),
-                                )
+                                ApuSettingsDivider(startPadding = 14.dp)
                                 GroupPermissions.Member.entries.forEachIndexed { index, entry ->
                                     if (index > 0) {
-                                        HorizontalDivider(
-                                            modifier = Modifier.padding(horizontal = 14.dp),
-                                            thickness = 0.5.dp,
-                                            color = ApuBubbleAccentColor.copy(alpha = 0.12f),
-                                        )
+                                        ApuSettingsDivider(startPadding = 14.dp)
                                     }
                                     val enabled = GroupPermissions.has(allowedMemberMask, entry.flag)
                                     Row(

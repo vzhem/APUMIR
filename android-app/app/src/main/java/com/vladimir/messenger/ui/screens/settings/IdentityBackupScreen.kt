@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuBubbleField
@@ -223,7 +224,7 @@ fun IdentityBackupScreen(
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 if (state.busy) {
-                                    CircularProgressIndicator(
+                                    ApuPremiumSpinner(
                                         modifier = Modifier.height(18.dp),
                                         strokeWidth = 2.dp,
                                     )

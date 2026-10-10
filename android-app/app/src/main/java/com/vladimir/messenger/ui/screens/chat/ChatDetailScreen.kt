@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.chat
 
+import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
@@ -474,7 +475,7 @@ fun ChatDetailScreen(
         ) {
             when {
                 uiState.isLoading && uiState.messages.isEmpty() -> {
-                    CircularProgressIndicator(
+                    ApuPremiumSpinner(
                         modifier = Modifier.align(Alignment.Center)
                     )
                 }
@@ -1209,7 +1210,7 @@ private fun MessageInputBar(
                 modifier = Modifier.size(48.dp),
             ) {
                 if (isPreparingFile) {
-                    CircularProgressIndicator(
+                    ApuPremiumSpinner(
                         modifier = Modifier.size(20.dp),
                         strokeWidth = 2.dp,
                     )

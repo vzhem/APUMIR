@@ -386,7 +386,7 @@ fun GifCatalogBody(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center,
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                    ApuPremiumSpinner(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                 }
             } else if (next.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))

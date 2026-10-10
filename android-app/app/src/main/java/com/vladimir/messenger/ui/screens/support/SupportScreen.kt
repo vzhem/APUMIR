@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.support
 
+import com.vladimir.messenger.ui.components.ApuPremiumChip
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuSettingsCard
@@ -267,15 +268,15 @@ fun SupportScreen(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        FilterChip(
+                                        ApuPremiumChip(
+                                            label = stringResource(R.string.support_every_month),
                                             selected = reminder.periodMonths == 1,
                                             onClick = { viewModel.setReminderPeriod(1) },
-                                            label = { Text(stringResource(R.string.support_every_month)) },
                                         )
-                                        FilterChip(
+                                        ApuPremiumChip(
+                                            label = stringResource(R.string.support_every_3_months),
                                             selected = reminder.periodMonths == 3,
                                             onClick = { viewModel.setReminderPeriod(3) },
-                                            label = { Text(stringResource(R.string.support_every_3_months)) },
                                         )
                                     }
 

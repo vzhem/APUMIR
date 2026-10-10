@@ -9,6 +9,7 @@ package com.vladimir.messenger.ui.screens.groups
 // выбранной группы идут вертикальным списком, каждая в своём пузыре,
 // и у каждой — бейдж непрочитанных. Нажатие на тему открывает ленту.
 
+import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
 import androidx.compose.ui.platform.LocalContext
@@ -1223,7 +1224,7 @@ fun GroupChatScreen(
                                 modifier = Modifier.size(40.dp),
                             ) {
                                 if (uiState.isPreparingFile) {
-                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                    ApuPremiumSpinner(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                                 } else {
                                     Icon(
                                         Icons.Filled.AttachFile,

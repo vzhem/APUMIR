@@ -349,17 +349,12 @@ fun MessageBubble(
                         MessageStatus.FILE_EXPIRED,
                     )
                 ) {
-                    androidx.compose.material3.TextButton(
+                    ApuPremiumChip(
+                        label = stringResource(R.string.ft_retry),
+                        selected = true,
                         onClick = onRetry,
-                        contentPadding = PaddingValues(0.dp),
                         modifier = Modifier.align(Alignment.End),
-                    ) {
-                        Text(
-                            stringResource(R.string.ft_retry),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = textColor,
-                        )
-                    }
+                    )
                 }
             }
         }

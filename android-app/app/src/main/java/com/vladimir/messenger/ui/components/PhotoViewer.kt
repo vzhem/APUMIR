@@ -303,7 +303,7 @@ private fun ZoomablePhoto(
                     ),
             )
         } else {
-            CircularProgressIndicator(color = Color.White)
+            ApuPremiumSpinner(color = Color.White)
         }
     }
 }

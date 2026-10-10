@@ -59,7 +59,7 @@ fun GroupQrInviteDialog(
             ) {
                 when {
                     loading -> {
-                        CircularProgressIndicator(
+                        ApuPremiumSpinner(
                             modifier = Modifier.size(26.dp),
                             strokeWidth = 3.dp,
                         )

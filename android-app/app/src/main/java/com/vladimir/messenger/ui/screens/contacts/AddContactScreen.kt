@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.contacts
 
+import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
 // =============================================================================
@@ -185,7 +186,7 @@ fun AddContactScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         if (uiState.isLoading) {
-                            CircularProgressIndicator(
+                            ApuPremiumSpinner(
                                 modifier = Modifier.size(19.dp),
                                 color = ApuGoldInk,
                                 strokeWidth = 2.dp,
@@ -216,7 +217,7 @@ fun AddContactScreen(
                     )
                     if (uiState.nickSearching) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(
+                            ApuPremiumSpinner(
                                 modifier = Modifier.size(16.dp),
                                 color = ApuBubbleAccentColor,
                                 strokeWidth = 2.dp,

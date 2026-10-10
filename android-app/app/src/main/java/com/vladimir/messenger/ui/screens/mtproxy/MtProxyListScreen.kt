@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.mtproxy
 
+import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuAction
@@ -130,7 +131,7 @@ fun MtProxyListScreen(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator()
+                ApuPremiumSpinner()
             }
         } else if (uiState.proxies.isEmpty()) {
             Box(

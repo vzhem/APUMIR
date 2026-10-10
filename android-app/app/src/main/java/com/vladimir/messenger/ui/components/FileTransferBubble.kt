@@ -347,11 +347,9 @@ fun FileTransferBubble(
             }
             val progress = transferProgress(transfer)
             if (progress != null && transfer.state != "COMPLETE" && transfer.state != "FAILED") {
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp),
+                ApuPremiumLinearProgress(
+                    fraction = progress,
+                    modifier = Modifier.padding(top = 6.dp),
                 )
             }
             if (!(previewBitmap != null && isImage) &&

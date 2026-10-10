@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.channels
 
+import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
 import androidx.compose.material3.HorizontalDivider
@@ -287,7 +288,7 @@ fun ChannelScreen(
                 .fillMaxSize(),
         ) {
             when {
-                uiState.isLoading -> CircularProgressIndicator(
+                uiState.isLoading -> ApuPremiumSpinner(
                     modifier = Modifier.align(Alignment.Center),
                 )
 
@@ -1115,7 +1116,8 @@ private fun PostCard(
                     )
                 }
             }
-            HorizontalDivider(modifier = Modifier.padding(top = 10.dp), color = ApuBubbleAccentColor.copy(alpha = 0.2f))
+            Spacer(Modifier.height(10.dp))
+            ApuSettingsDivider(startPadding = 0.dp)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ApuTextAction(label = stringResource(R.string.channel_reaction), onClick = { showReactions = true })
                 ApuTextAction(
@@ -1241,7 +1243,7 @@ private fun PostGallery(images: List<String>, pending: Int) {
                             .clickable { viewerIndex = page },
                     )
                 } else {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                    ApuPremiumSpinner(modifier = Modifier.align(Alignment.Center))
                 }
             }
         }
@@ -1384,7 +1386,7 @@ private fun PostEditorDialog(
                             enabled = !preparing && !creating && images.size < InlineImage.MAX_PHOTOS,
                         )
                         if (preparing) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            ApuPremiumSpinner(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                         }
                     }
                     overflowHint?.let {
@@ -1441,7 +1443,7 @@ private fun PostEditorDialog(
                                 enabled = !preparingFile && !creating,
                             )
                             if (preparingFile) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                ApuPremiumSpinner(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                             }
                         }
                     }

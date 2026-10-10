@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.contacts
 
+import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
 import androidx.compose.foundation.background
@@ -242,7 +243,7 @@ private fun RenameContactContent(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 if (uiState.isLoading) {
-                    CircularProgressIndicator(
+                    ApuPremiumSpinner(
                         modifier = Modifier.size(19.dp),
                         color = ApuGoldInk,
                         strokeWidth = 2.dp,

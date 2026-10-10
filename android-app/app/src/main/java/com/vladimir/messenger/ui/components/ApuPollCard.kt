@@ -213,12 +213,9 @@ private fun PollOptionRow(
         }
         if (showResults) {
             Spacer(Modifier.height(4.dp))
-            LinearProgressIndicator(
-                progress = { (percent / 100f).coerceIn(0f, 1f) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(2.dp)),
+            ApuPremiumLinearProgress(
+                fraction = percent / 100f,
+                thickness = 4.dp,
             )
         }
     }

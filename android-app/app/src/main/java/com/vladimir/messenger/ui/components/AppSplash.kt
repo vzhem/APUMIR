@@ -176,7 +176,7 @@ fun CoreWarmBar() {
                 .background(SplashGold.copy(alpha = 0.10f))
                 .padding(horizontal = 16.dp, vertical = 3.dp),
         ) {
-            CircularProgressIndicator(
+            ApuPremiumSpinner(
                 modifier = Modifier.size(11.dp),
                 strokeWidth = 1.5.dp,
                 color = SplashGold,

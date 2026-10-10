@@ -29,6 +29,7 @@ import com.vladimir.messenger.R
 // =============================================================================
 
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -68,6 +69,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -1008,6 +1010,14 @@ fun ApuDiagnosticsActionButton(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    // Одноразовый переллив на нажатие (без бесконечной анимации).
+    val shine = remember { Animatable(1f) }
+    LaunchedEffect(pressed) {
+        if (pressed && enabled) {
+            shine.snapTo(0f)
+            shine.animateTo(1f, tween(durationMillis = 620))
+        }
+    }
     val emphatic = style == DiagnosticsActionStyle.PRIMARY || style == DiagnosticsActionStyle.DANGER
     val scale by animateFloatAsState(
         targetValue = if (pressed && enabled) 0.965f else 1f,
@@ -1077,6 +1087,7 @@ fun ApuDiagnosticsActionButton(
             shape = shape,
         )
         .diagnosticsGloss(shape, intensity = if (emphatic) 1f else 0.7f)
+        .apuShineSweep(shine.value)
         .clickableDiag(interaction, enabled, onClick)
 
     CompositionLocalProvider(LocalContentColor provides ink.copy(alpha = if (enabled) 1f else 0.48f)) {
@@ -1089,7 +1100,7 @@ fun ApuDiagnosticsActionButton(
                 verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
                 if (progress) {
-                    CircularProgressIndicator(
+                    ApuPremiumSpinner(
                         modifier = Modifier.size(18.dp),
                         color = ink,
                         strokeWidth = 2.dp,
@@ -1122,7 +1133,7 @@ fun ApuDiagnosticsActionButton(
                     content()
                 } else {
                     if (progress) {
-                        CircularProgressIndicator(
+                        ApuPremiumSpinner(
                             modifier = Modifier.size(17.dp),
                             color = ink,
                             strokeWidth = 2.dp,

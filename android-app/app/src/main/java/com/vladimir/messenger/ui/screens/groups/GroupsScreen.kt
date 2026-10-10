@@ -4,6 +4,7 @@ package com.vladimir.messenger.ui.screens.groups
 // GROUPSSCREEN.KT — раздел «Сообщества»: группы и каналы, создание новых
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import android.content.Context
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
@@ -282,7 +283,7 @@ fun GroupsScreen(
 
             when {
                 uiState.isLoading -> Box(Modifier.fillMaxSize(), Alignment.Center) {
-                    CircularProgressIndicator()
+                    ApuPremiumSpinner()
                 }
 
                 uiState.filtered.isEmpty() && uiState.directoryMatches.isEmpty() ->
@@ -415,7 +416,7 @@ fun GroupsScreen(
             text = {
                 if (uiState.joining) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                        ApuPremiumSpinner(modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(12.dp))
                         Text(stringResource(R.string.groups_connecting))
                     }
@@ -956,7 +957,7 @@ private fun CreateGroupDialog(
                 style = DiagnosticsActionStyle.PRIMARY,
             ) {
                 if (creating) {
-                    CircularProgressIndicator(
+                    ApuPremiumSpinner(
                         modifier = Modifier.size(16.dp),
                         strokeWidth = 2.dp,
                         color = ApuGoldInk,

@@ -9,6 +9,7 @@ package com.vladimir.messenger.ui.screens.onboarding
 //   3. ShowInvite — QR-код + текстовая ссылка для первого контакта
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
 import androidx.compose.animation.*
@@ -382,7 +383,7 @@ private fun GeneratingStep() {
     ) {
         // Анимированная иконка
         Box(contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(
+            ApuPremiumSpinner(
                 modifier = Modifier.size(100.dp),
                 color = ApuBubbleAccentColor,
                 strokeWidth = 3.dp,

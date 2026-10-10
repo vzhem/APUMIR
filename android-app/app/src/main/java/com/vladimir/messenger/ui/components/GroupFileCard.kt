@@ -323,9 +323,9 @@ fun GroupFileCard(
             Text(status, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp), color = fileTextColor.copy(alpha = 0.75f))
         }
         if (transfer != null && !complete && transfer.chunkCount > 0 && transfer.state != "FAILED") {
-            LinearProgressIndicator(
-                progress = { (transfer.completedChunks.toFloat() / transfer.chunkCount.toFloat()).coerceIn(0f, 1f) },
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            ApuPremiumLinearProgress(
+                fraction = transfer.completedChunks.toFloat() / transfer.chunkCount.toFloat(),
+                modifier = Modifier.padding(top = 6.dp),
             )
         }
         if (transfer != null && (transfer.state == "FAILED" || state.stalled) && !isFromMe) {

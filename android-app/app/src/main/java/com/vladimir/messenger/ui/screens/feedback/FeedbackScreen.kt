@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.feedback
 
+import com.vladimir.messenger.ui.components.ApuBubbleField
 import android.net.Uri
 import android.os.Build
 import android.widget.Toast
@@ -128,14 +129,13 @@ fun FeedbackScreen(onBackClick: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                OutlinedTextField(
+                ApuBubbleField(
                     value = text,
                     onValueChange = { text = it },
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text(stringResource(R.string.feedback_text_label)) },
                     placeholder = { Text(stringResource(R.string.feedback_text_hint)) },
                     minLines = 6,
-                    enabled = !busy,
                 )
 
                 Text(

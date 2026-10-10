@@ -36,7 +36,7 @@ fun ImagePreview(
         // пишем, если не загрузилось, вместо пустого места.
         loading = {
             Box(contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(strokeWidth = 2.dp)
+                ApuPremiumSpinner(strokeWidth = 2.dp)
             }
         },
         error = {

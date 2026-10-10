@@ -8,6 +8,9 @@ package com.vladimir.messenger.ui.screens.settings
 //   - «Настройки»: оформление, сеть, передача файлов, безопасность, о программе.
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.ApuPremiumChip
+import com.vladimir.messenger.ui.components.ApuPremiumDialog
+import com.vladimir.messenger.ui.components.ApuPremiumChoiceRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -802,16 +805,10 @@ private fun SettingsTabContent(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     ) {
                                         rowOptions.forEach { option ->
-                                            FilterChip(
+                                            ApuPremiumChip(
+                                                label = stringResource(option.labelRes),
                                                 selected = appFontSize == option,
                                                 onClick = { AppFontSizeHolder.set(context, option) },
-                                                label = {
-                                                    Text(
-                                                        stringResource(option.labelRes),
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis,
-                                                    )
-                                                },
                                                 modifier =
                                                     if (chipsHorizontal) Modifier
                                                     else Modifier.fillMaxWidth(),
@@ -912,7 +909,7 @@ private fun SettingsTabContent(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        Switch(
+                        ApuPremiumSwitch(
                             checked = translateOn,
                             onCheckedChange = {
                                 if (it) {
@@ -925,59 +922,41 @@ private fun SettingsTabContent(
                         )
                     }
                     if (showTranslateConsent) {
-                        AlertDialog(
-                            onDismissRequest = { showTranslateConsent = false },
-                            title = { Text(stringResource(R.string.translate_consent_title)) },
-                            text = { Text(stringResource(R.string.translate_consent_body)) },
-                            confirmButton = {
-                                TextButton(onClick = {
-                                    com.vladimir.messenger.data.translate.TranslationSettings.set(context, true)
-                                    showTranslateConsent = false
-                                }) { Text(stringResource(R.string.translate_consent_ok)) }
+                        ApuPremiumDialog(
+                            title = stringResource(R.string.translate_consent_title),
+                            onDismiss = { showTranslateConsent = false },
+                            confirmLabel = stringResource(R.string.translate_consent_ok),
+                            onConfirm = {
+                                com.vladimir.messenger.data.translate.TranslationSettings.set(context, true)
+                                showTranslateConsent = false
                             },
-                            dismissButton = {
-                                TextButton(onClick = { showTranslateConsent = false }) {
-                                    Text(stringResource(R.string.action_cancel))
-                                }
-                            },
-                        )
+                        ) {
+                            Text(
+                                stringResource(R.string.translate_consent_body),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
                     }
                     if (showLanguageDialog) {
-                        AlertDialog(
-                            onDismissRequest = { showLanguageDialog = false },
-                            title = { Text(stringResource(R.string.language_app)) },
-                            text = {
-                                Column {
-                                    com.vladimir.messenger.ui.i18n.AppLanguage.entries.forEach { lang ->
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable(role = Role.RadioButton) {
-                                                    showLanguageDialog = false
-                                                    if (lang != appLanguage) {
-                                                        com.vladimir.messenger.ui.i18n.AppLanguageHolder.set(context, lang)
-                                                        (context as? android.app.Activity)?.recreate()
-                                                    }
-                                                }
-                                                .padding(vertical = 10.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            RadioButton(
-                                                selected = lang == appLanguage,
-                                                onClick = null,
-                                            )
-                                            Spacer(Modifier.width(8.dp))
-                                            Text(lang.nativeName)
+                        ApuPremiumDialog(
+                            title = stringResource(R.string.language_app),
+                            onDismiss = { showLanguageDialog = false },
+                        ) {
+                            com.vladimir.messenger.ui.i18n.AppLanguage.entries.forEach { lang ->
+                                ApuPremiumChoiceRow(
+                                    title = lang.nativeName,
+                                    subtitle = null,
+                                    selected = lang == appLanguage,
+                                    onClick = {
+                                        showLanguageDialog = false
+                                        if (lang != appLanguage) {
+                                            com.vladimir.messenger.ui.i18n.AppLanguageHolder.set(context, lang)
+                                            (context as? android.app.Activity)?.recreate()
                                         }
-                                    }
-                                }
-                            },
-                            confirmButton = {
-                                TextButton(onClick = { showLanguageDialog = false }) {
-                                    Text(stringResource(R.string.action_cancel))
-                                }
-                            },
-                        )
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }
