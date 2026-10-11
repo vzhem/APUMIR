@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
 
 # ─── Настройка ─────────────────────────────────────────────────────
 : "${ANDROID_NDK_HOME:?Переменная ANDROID_NDK_HOME не задана. Пример: export ANDROID_NDK_HOME=\$HOME/Android/Sdk/ndk/26.2.11394342}"
@@ -11,6 +12,7 @@ KOTLIN_OUT_DIR="android-app/app/src/main/java"
 # ─── Целевые платформы ─────────────────────────────────────────────
 TARGETS=(
     "aarch64-linux-android:arm64-v8a"
+    "armv7-linux-androideabi:armeabi-v7a"
     "x86_64-linux-android:x86_64"
 )
 
@@ -47,6 +49,11 @@ export CXX_aarch64_linux_android="$TOOLCHAIN/bin/aarch64-linux-android${API_LEVE
 export AR_aarch64_linux_android="$TOOLCHAIN/bin/llvm-ar"
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$CC_aarch64_linux_android"
 
+export CC_armv7_linux_androideabi="$TOOLCHAIN/bin/armv7a-linux-androideabi${API_LEVEL}-clang"
+export CXX_armv7_linux_androideabi="$TOOLCHAIN/bin/armv7a-linux-androideabi${API_LEVEL}-clang++"
+export AR_armv7_linux_androideabi="$TOOLCHAIN/bin/llvm-ar"
+export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$CC_armv7_linux_androideabi"
+
 export CC_x86_64_linux_android="$TOOLCHAIN/bin/x86_64-linux-android${API_LEVEL}-clang"
 export CXX_x86_64_linux_android="$TOOLCHAIN/bin/x86_64-linux-android${API_LEVEL}-clang++"
 export AR_x86_64_linux_android="$TOOLCHAIN/bin/llvm-ar"
@@ -69,19 +76,10 @@ done
 
 # ─── Генерируем Kotlin-биндинги ────────────────────────────────────
 echo ""
-echo ">>> Сборка uniffi-bindgen (для хоста)..."
-cargo build --release --bin uniffi-bindgen
-
-echo ">>> Генерация Kotlin-биндингов..."
-# Один из готовых .so нужен для чтения scaffolding metadata
-./target/release/uniffi-bindgen generate \
-    --library "target/aarch64-linux-android/release/libp2p_core.so" \
-    --language kotlin \
-    --out-dir "../$KOTLIN_OUT_DIR" \
-    || ./target/release/uniffi-bindgen generate \
-        src/lib.udl \
-        --language kotlin \
-        --out-dir "../$KOTLIN_OUT_DIR"
+echo ">>> Генерация Kotlin-биндингов из того же UDL..."
+cargo run --manifest-path ../tools/uniffi-bindgen/Cargo.toml -- \
+    generate src/lib.udl --language kotlin --config uniffi.toml \
+    --out-dir "../$KOTLIN_OUT_DIR" --no-format
 
 popd > /dev/null
 

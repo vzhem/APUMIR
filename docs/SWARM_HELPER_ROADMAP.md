@@ -5,7 +5,7 @@
 
 ## Этап 1 — устойчивые онлайн-маршруты
 
-Реализовано и опубликовано для всех в v11.74.326 (Latest).
+Реализовано и опубликовано для всех в v11.74.326.
 Проверки 2026-10-11: релизная сборка 38158716996 — success; полный core check
 38158719209 — success (блокирующие тесты ядра). Android APK 95 037 303 bytes,
 APK SHA-256 по GitHub asset digest:
@@ -51,7 +51,11 @@ packet dedup работает для этого sealed packet, но не обе�
 
 ## Этап 2 — выбор и участие помощников
 
-Подэтап 2a — кандидат v11.74.327, пока не опубликован:
+Подэтап 2a — опубликован v11.74.327:
+Release 38161602513 и Core 38161603906 — success. Все helper suites, 3 native ABI,
+UniFFI, APK и выбранные Android tests прошли. APK 95 070 071 bytes, GitHub digest
+`1573dbf55b69680ffaf9549d85dba64992266b524fd4c1f46fee64a0f60a5ffe`.
+Независимый локальный пересчёт скачанного APK и phone tests не выполнены.
 - bounded RAM history: 512 пар recipient/helper, monotonic TTL 30 минут;
 - EWMA latency только после проверки подписи получателя и только для локально
   запущенной authenticated return leg. Это не публичная репутация и не доказательство
@@ -67,7 +71,8 @@ packet dedup работает для этого sealed packet, но не обе�
   pending и при внешнем abort; atomically consumed attempt не штрафуется повторно;
 - 7 новых unit tests качества + integration timeout/abort + attribution в forged,
   two-helper и настоящем QUIC тестах; протокол APUA1/APUX1 и UDL не изменены.
-Проверки: ожидается GitHub CI, локально нет Rust toolchain/Android device.
+Проверки: 7 quality + 7 race + 9 assistance + 14 exchange + 9 direct transport tests
+в release gate прошли; локально нет Rust toolchain/Android device.
 
 Подэтап 2b — кандидат v11.74.328, пока не опубликован:
 - отдельное сохранённое разрешение online_helper_enabled (on для совместимости
@@ -94,9 +99,8 @@ packet dedup работает для этого sealed packet, но не обе�
 522 Kotlin files прошли локально; native/Android/JUnit — ожидается GitHub CI.
 
 Далее: отдельные подписанные capability cards с совместимостью старых клиентов;
-локальные success/latency/backoff, объективное admission поверх неподтверждённых заявлений;
-экономный/обычный/усиленный режим по сети и питанию; пользовательское согласие и приоритет
-своих сообщений; справедливость источников. Не добавлять поля в deny_unknown_fields claims
+новые объявления никогда не отменяют локальный admission. Полный приоритет своих
+сообщений и справедливость источников остаются открытыми поверх резерва admission. Не добавлять поля в deny_unknown_fields claims
 без отдельного совместимого протокола/negotiation.
 
 ## Этап 3 — общая раздача содержимого
@@ -112,3 +116,13 @@ packet dedup работает для этого sealed packet, но не обе�
 Подписанная квитанция доказывает факт acceptance конкретного packet, но сама по себе не
 доказывает уникальных людей или честную полезность вклада. Настройка нагрузочных лимитов
 только после измерений, не обещать 256 активных пользователей на любом телефоне.
+
+## Сборка после изменения UDL
+
+Релиз и Android compile CI регенерируют Kotlin bridge из того же UDL до Kotlin build;
+ошибка генератора блокирует релиз. Tracked bridge/native snapshots не являются текущим
+SDK: не редактировать generated binding вручную и не смешивать с новыми native APIs.
+Для локальной сборки Windows: `./build-rust.ps1` (все три ABI по умолчанию), затем Gradle;
+Linux/macOS: `bash build-rust.sh` (все три ABI). Оба скрипта регенерируют мост из UDL.
+При `-Arch` только одного ABI остальные tracked .so остаются старыми — такой APK не
+распространять. Local scripts проверены статически, без локального NDK/PowerShell.
