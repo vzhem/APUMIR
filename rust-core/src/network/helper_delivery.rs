@@ -31,7 +31,7 @@ where
     let primary = send(0);
     tokio::pin!(primary);
     let mut primary_done = false;
-    let mut reserve = None;
+    let mut reserve: Option<std::pin::Pin<Box<Fut>>> = None;
     let mut reserve_done = false;
     loop {
         tokio::select! {

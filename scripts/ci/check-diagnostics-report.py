@@ -154,9 +154,9 @@ class DiagnosticsContractsTest(unittest.TestCase):
         # у соседних диалогов экрана, это не наша зона).
         logs_block = screen[screen.index("ApuDiagnosticsHero("):screen.index("muteScope?.let { scope ->")]
         self.assertNotIn("TextButton(", logs_block)
-        for label in ("Отправить", "Скопировать", "Обновить", "Закрыть"):
+        for label in ("action_send", "action_copy", "action_refresh", "action_close"):
             with self.subTest(label=label):
-                self.assertIn('label = "%s"' % label, logs_block)
+                self.assertIn("label = stringResource(R.string.%s)" % label, logs_block)
         # Все четыре действия должны уместиться на узком экране телефона.
         # Если вернуть их в отдельные confirm/dismiss-слоты, общая строка
         # AlertDialog сжимает основную кнопку «Отправить» до невидимого края.
@@ -175,7 +175,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertNotIn(".verticalScroll(", text_block)
         self.assertNotIn("heightIn(max = 460.dp)", text_block)
         self.assertNotIn("caption = ", text_block)
-        self.assertIn("Состояние APU", source(DIAG_UI))
+        self.assertIn("stringResource(R.string.diag_state_title)", source(DIAG_UI))
         ui = source(DIAG_UI)
         self.assertIn("ApuSettingsCard(", ui)
         self.assertIn("ApuBubbleMutedColor", ui)
@@ -449,14 +449,14 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "indication = null",
             "diagnosticsGloss(",
             "diagnosticsLift(",
-            "ВСЁ В ПОРЯДКЕ",
-            "ЕСТЬ ПРЕДУПРЕЖДЕНИЯ",
-            "ЕСТЬ ОШИБКИ",
-            "порядок",
-            "справка",
-            "внимание",
-            "поломка",
-            "Полный отчёт",
+            "stringResource(R.string.diag_verdict_ok)",
+            "stringResource(R.string.diag_verdict_warn)",
+            "stringResource(R.string.diag_verdict_bad)",
+            "stringResource(R.string.diag_lvl_ok)",
+            "stringResource(R.string.diag_lvl_info)",
+            "stringResource(R.string.diag_lvl_warn)",
+            "stringResource(R.string.diag_lvl_bad)",
+            "stringResource(R.string.diag_full_report)",
             "fun diagnosticsReportAnnotated(",
             "withStyle(",
             "ApuSettingsCard(",
