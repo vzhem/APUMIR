@@ -69,6 +69,30 @@ packet dedup работает для этого sealed packet, но не обе�
   two-helper и настоящем QUIC тестах; протокол APUA1/APUX1 и UDL не изменены.
 Проверки: ожидается GitHub CI, локально нет Rust toolchain/Android device.
 
+Подэтап 2b — кандидат v11.74.328, пока не опубликован:
+- отдельное сохранённое разрешение online_helper_enabled (on для совместимости
+  с предыдущим автоматическим участием), RU/EN переключатель в «Раздаче»;
+- Android применяет policy через UniFFI ДО start(), включая worker wake, обновляет
+  настройки на lifecycle executor без блокировки UI, окружение — каждые 30 s в service.
+  Уже выполняющийся FFI вызов может задержать применение: мгновенная остановка не обещана;
+- Normal: 8 routes / 4 MiB / 120 relays в минуту; Economy: 4 / 2 MiB / 60;
+  мобильная сеть и заряд <20% без зарядки делят на 2 каждый. Unlimited: 32 / 4 MiB / 240
+  без автоматического снижения (семантика существующего режима сохранена);
+- native ceilings нельзя повысить FFI аргументами. Новые Connect/Relay выключаются,
+  уже принятые routes/receipts дренируются, собственный Deliver/Receipt остаётся;
+- для transit максимум половина aggregate byte/frame admission; Connect использует
+  не более половины control slots, Receipt проверяется по одноразовому pending/route
+  и не блокируется заполненным replay cache. Это резерв admission, НЕ полный
+  приоритет планирования на CPU/QUIC и НЕ измеренная ёмкость телефона;
+- toggles не сбрасывают расход за минуту; no disk changes, ServerMode и custody consent
+  не меняются. Подписанные cards ещё не объявляются; старый отправитель может пробовать
+  opt-out helper и получить отсутствие ACK, но helper не принимает новый transit;
+- исправлены RU-only mode.title на экране EN, гонка init/set prefs, устаревший environment
+  cache при переводе системных часов назад и опасный fallback на старый UniFFI bridge
+  при сбое генератора (теперь release fails closed).
+Проверки: source guards (3 online helper, 15 settings, 7 startup) и unresolved symbols
+522 Kotlin files прошли локально; native/Android/JUnit — ожидается GitHub CI.
+
 Далее: отдельные подписанные capability cards с совместимостью старых клиентов;
 локальные success/latency/backoff, объективное admission поверх неподтверждённых заявлений;
 экономный/обычный/усиленный режим по сети и питанию; пользовательское согласие и приоритет

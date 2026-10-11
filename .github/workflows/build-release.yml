@@ -84,7 +84,7 @@ jobs:
         working-directory: ./rust-core
         run: |
           set -o pipefail
-          for suite in helper_quality helper_delivery peer_assistance peer_exchange direct_transport; do
+          for suite in helper_policy helper_quality helper_delivery peer_assistance peer_exchange direct_transport; do
             LOG="$RUNNER_TEMP/helper-$suite.log"
             if ! RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --features mqtt-dual-broker --lib "network::$suite::tests" > "$LOG" 2>&1; then
               tail -150 "$LOG"
@@ -117,7 +117,7 @@ jobs:
       # разработчика (его нет ни у владельца, ни у бота) - ядро было заморожено.
       # Теперь генератор собирается здесь (tools/uniffi-bindgen, uniffi =0.28.3 -
       # та же линия 0.28, что у ядра) и переписывает файл перед сборкой APK.
-      # Если шаг не удался - остаётся файл из git, то есть ровно то, что было.
+      # Ошибка генерации блокирует APK: старый мост может не совпасть с новым ядром.
       - name: Regenerate uniffi Kotlin bindings from lib.udl
         working-directory: ./rust-core
         run: |
@@ -135,7 +135,7 @@ jobs:
             OLDV=$(git show HEAD:android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt | grep -o 'bindings_contract_version = [0-9]*' | grep -o '[0-9]*$')
             if [ "$NEWV" != "$OLDV" ]; then
               ok=0
-              echo "::warning::uniffi contract version changed ($OLDV -> $NEWV): generator and core are on different uniffi lines - keeping the committed bindings"
+              echo "::error::uniffi contract version changed ($OLDV -> $NEWV): generator and core must use the same contract"
             fi
           fi
           if [ "$ok" = 1 ]; then
@@ -147,8 +147,8 @@ jobs:
               git diff --stat -- "$BIND"
             fi
           else
-            git checkout -- "$BIND"
-            echo "::warning::uniffi-bindgen failed - building with the committed bindings (new core functions, if any, are NOT visible to Kotlin)"
+            echo "::error::uniffi-bindgen failed; refusing an APK with stale bindings"
+            exit 1
           fi
 
       # Свежие мост и ядро - на вкладке Actions этого прогона (30 дней), на
@@ -191,7 +191,7 @@ jobs:
         working-directory: ./android-app
         run: |
           set +e
-          ./gradlew :app:testReleaseUnitTest --tests 'com.vladimir.messenger.ui.components.StoryPlaybackTest' --tests 'com.vladimir.messenger.ui.screens.groups.CommunityListTest' --tests 'com.vladimir.messenger.data.story.StoryPhotoPartsTest' --no-daemon >> "$RUNNER_TEMP/gradle-build.log" 2>&1
+          ./gradlew :app:testReleaseUnitTest --tests 'com.vladimir.messenger.ui.components.StoryPlaybackTest' --tests 'com.vladimir.messenger.ui.screens.groups.CommunityListTest' --tests 'com.vladimir.messenger.data.story.StoryPhotoPartsTest' --tests 'com.vladimir.messenger.data.swarm.OnlineHelperPolicyTest' --no-daemon >> "$RUNNER_TEMP/gradle-build.log" 2>&1
           status=$?
           tail -100 "$RUNNER_TEMP/gradle-build.log"
           exit "$status"

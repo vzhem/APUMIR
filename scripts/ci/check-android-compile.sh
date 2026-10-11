@@ -14,7 +14,7 @@
 # Android SDK cmdline-tools с dl.google.com + platforms;android-35 и
 # build-tools;34.0.0 (те же версии, что в gradle/libs.versions.toml и
 # build-release.yml), затем ./gradlew :app:compileReleaseKotlin --no-daemon.
-# Rust-ядро не трогает: jniLibs лежат в git, для компиляции Kotlin их хватает.
+# Перед Kotlin генерируем мост из текущего UDL. Native runtime проверяет релизный gate.
 #
 # Статус блокировки решает ci-core-check.sh: пока шаг не доказал стабильность,
 # его падение = warning + комментарий (паттерн K6, как у cargo test).
@@ -64,10 +64,16 @@ yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || t
 "$SDK/cmdline-tools/latest/bin/sdkmanager" --install \
     "platforms;android-35" "build-tools;34.0.0" >/dev/null
 
+# ---- мост для текущего UDL, не устаревший tracked snapshot ------------------
+# Генератор обновляет рабочую копию runner; это compile-only, native ABI собирает release.
+cargo run --manifest-path tools/uniffi-bindgen/Cargo.toml -- \
+    generate rust-core/src/lib.udl --language kotlin --config rust-core/uniffi.toml \
+    --out-dir android-app/app/src/main/java --no-format || exit 1
+
 # ---- сама компиляция --------------------------------------------------------
 chmod +x android-app/gradlew
 cd android-app || exit 1
-./gradlew :app:compileReleaseKotlin --no-daemon --console=plain
+./gradlew :app:compileReleaseKotlin --no-daemon --console=plain || exit 1
 
 # ---- JVM-тесты ранга и элиты (чистая логика, без Android) -------------------
 # Разбор APURANK1 и порог VIP - единственные места передачи ранга, которые
@@ -77,7 +83,7 @@ cd android-app || exit 1
 # задача). FileTransferRankPolicyTest держит порог элиты: «Проводник» (10-й
 # ранг) уже VIP (решение владельца 2026-10-07).
 ./gradlew :app:testDebugUnitTest --no-daemon --console=plain \
-    --tests '*RankWireTest*' --tests '*FileTransferRankPolicyTest*'
+    --tests '*RankWireTest*' --tests '*FileTransferRankPolicyTest*' --tests '*OnlineHelperPolicyTest*'
 TESTS_STATUS=$?
 
 # ---- почему тесты упали: словами в лог, а не «красный шаг без причины» -------

@@ -182,6 +182,9 @@ interface P2PCoreHandle {
     void stop();
     boolean is_running();
 
+    // New online transit only. Existing routes may drain; own traffic is never disabled.
+    boolean configure_online_helper(boolean enabled, u32 max_routes, u32 max_bytes_per_minute, u32 max_relays_per_minute);
+
     // K5-1: держать ли чужие сообщения для тех, кто не в сети (кастодия у
     // соседей). Выключено по умолчанию: телефон не занимает место чужими
     // сообщениями без согласия владельца. Включённое - сообщение донесёт

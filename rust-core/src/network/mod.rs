@@ -44,6 +44,7 @@ pub mod peer_exchange;
 pub mod peer_assistance;
 pub mod helper_delivery;
 pub mod helper_quality;
+pub mod helper_policy;
 pub mod presence;
 pub mod presence_scope;
 pub mod quic_client;

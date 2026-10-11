@@ -87,7 +87,7 @@ object SwarmPolicy {
     const val MIN_CONCURRENT = 2
     const val MIN_PACKETS_PER_MINUTE = 30
 
-    /** Режим «Без ограничений»: столько ядро переваривает, не копя очередь. */
+    /** Консервативный потолок веера. Не является измеренной ёмкостью ядра или сети. */
     const val UNLIMITED_CONCURRENT = 32
     const val UNLIMITED_PACKETS_PER_MINUTE = 3000
 
@@ -163,9 +163,9 @@ object SwarmPolicy {
      */
     fun limitsFor(mode: SwarmMode, metered: Boolean, lowPower: Boolean): SwarmLimits {
         val (concurrent, perMinute) = when (mode) {
-            // «Без ограничений» - это предел ядра, а не бесконечность: канал к
-            // Rust вмещает 256 пакетов, и ширина веера больше 32 только копит
-            // очередь. Мобильный интернет и заряд этот режим не сбавляют -
+            // «Без ограничений» сохраняет защитный потолок, а не бесконечную нагрузку.
+            // Ёмкость очереди не доказывает пропускную способность.
+            // Мобильный интернет и заряд этот режим не сбавляют -
             // человек сам так решил.
             SwarmMode.UNLIMITED -> return SwarmLimits(
                 maxConcurrentSends = UNLIMITED_CONCURRENT,

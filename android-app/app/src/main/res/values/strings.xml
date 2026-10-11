@@ -1589,4 +1589,9 @@
     <string name="story_caption">Подпись (необязательно)</string>
     <string name="story_photo_preparing">Подготавливаем фото…</string>
     <string name="story_photo_failed">Не удалось открыть фото. Выберите другое.</string>
+    <string name="swarm_mode_normal">Обычный</string>
+    <string name="swarm_mode_economy">Экономный</string>
+    <string name="swarm_mode_unlimited">Без ограничений</string>
+    <string name="settings_online_helper">Помогать соединению</string>
+    <string name="settings_online_helper_body">Пересылать зашифрованные пакеты между телефонами без хранения на диске. Режим раздачи ограничивает нагрузку. При выключении уже принятые пакеты могут завершить путь; ваши отправки и получение работают.</string>
 </resources>

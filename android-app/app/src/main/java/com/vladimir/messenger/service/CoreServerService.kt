@@ -795,6 +795,13 @@ class CoreServerService : Service() {
             if (ok) {
                 val nodeId = RustBridge.nodeId()
                 Log.i(TAG, "Engine OK. NodeId=$nodeId")
+                // Environment updates remain bounded; no packet-triggered polling or new timer thread.
+                serviceScope.launch {
+                    while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                        RustBridge.refreshOnlineHelperPolicy()
+                        kotlinx.coroutines.delay(30_000)
+                    }
+                }
                 TransferDiagnostics.count(Counters.CORE_STARTS)
                 TransferDiagnostics.recordSuccess("core", "ядро поднято")
                 // Раунд 263: ядро поднято - сплэш может отпустить человека.

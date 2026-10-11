@@ -454,6 +454,7 @@ class MainActivity : ComponentActivity() {
         WallpaperHolder.init(this)
         com.vladimir.messenger.ui.theme.WallpaperTintHolder.init(this)
         com.vladimir.messenger.data.swarm.SwarmSettings.init(this)
+        com.vladimir.messenger.data.swarm.OnlineHelperSettings.init(this)
         com.vladimir.messenger.data.swarm.StorageSettings.init(this)
         com.vladimir.messenger.data.swarm.ServerMode.init(this)
         UsernameHolder.init(this)

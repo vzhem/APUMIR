@@ -1576,4 +1576,9 @@ The file is not on this phone</string>
     <string name="story_caption">Caption (optional)</string>
     <string name="story_photo_preparing">Preparing photo…</string>
     <string name="story_photo_failed">Could not open the photo. Choose another.</string>
+    <string name="swarm_mode_normal">Normal</string>
+    <string name="swarm_mode_economy">Economy</string>
+    <string name="swarm_mode_unlimited">Unlimited</string>
+    <string name="settings_online_helper">Help other phones connect</string>
+    <string name="settings_online_helper_body">Forward encrypted packets between phones without storing them on disk. The seeding mode limits the load. Turning this off lets accepted packets finish; your own sending and receiving stay enabled.</string>
 </resources>

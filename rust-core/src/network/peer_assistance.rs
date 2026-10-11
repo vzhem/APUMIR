@@ -8,6 +8,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use super::helper_quality::HelperQuality;
+use super::helper_policy::HelperPolicy;
 use tokio::sync::oneshot;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -202,6 +203,8 @@ struct Route { origin: String, recipient: HelperIdentity, digest: [u8; 32], expi
 struct State {
     pending: HashMap<[u8; 16], Pending>,
     quality: HelperQuality,
+    policy: HelperPolicy,
+    transit_traffic: VecDeque<(usize, i64)>,
     routes: HashMap<(String, [u8; 16]), Route>,
     received: HashMap<(String, [u8; 16]), Received>,
     frames: VecDeque<([u8; 16], i64)>,
@@ -228,8 +231,13 @@ impl Drop for PendingRelayGuard {
 #[derive(Default)]
 pub struct PeerAssistance { state: Mutex<State> }
 impl PeerAssistance {
-    /// All online nodes enable this service; no disk-custody setting is consulted.
+    /// Online transit defaults on, but has its own owner control, separate from disk custody.
     pub fn new() -> Self { Self::default() }
+
+    pub fn set_policy(&self, enabled: bool, routes: u32, bytes: u32, relays: u32) {
+        // Do not reset counters or drop accepted routes on toggles: neither grants fresh quota.
+        self.state.lock().unwrap().policy = HelperPolicy::bounded(enabled, routes, bytes, relays);
+    }
 
     pub fn connect_request(&self, target: &str, now: i64) -> Option<AssistOperation> {
         if !valid_node_id(target) { return None; }
@@ -298,13 +306,20 @@ impl PeerAssistance {
             || signed.signature.len() != 64 || directory.pinned_key(&c.from)? != c.signing_key { return None; }
         Ed25519KeyPair::verify(&c.signing_key, &canonical(FRAME_DOMAIN, &c)?, &signed.signature).ok()?;
         let mut s = self.state.lock().unwrap(); cleanup(&mut s, now);
-        if s.frames.iter().any(|(id, _)| id == &c.id) { return None; }
-        if s.frames.len() >= MAX_ROUTES { return None; }
-        s.frames.push_back((c.id, now));
+        let new_transit = matches!(&c.operation, AssistOperation::Connect { .. } | AssistOperation::Relay { .. });
+        if new_transit && !s.policy.enabled { return None; }
+        // Receipts consume a matching pending/route exactly once; they need no separate
+        // replay slot. This lets already-admitted transit drain even at capacity or opt-out.
+        if !matches!(&c.operation, AssistOperation::Receipt { .. }) {
+            if s.frames.iter().any(|(id, _)| id == &c.id) { return None; }
+            let ceiling = if new_transit { MAX_ROUTES / 2 } else { MAX_ROUTES };
+            if s.frames.len() >= ceiling { return None; }
+            s.frames.push_back((c.id, now));
+        }
         let mut effect = AssistanceEffect { sender: Some(c.from.clone()), ..AssistanceEffect::default() };
         match c.operation {
             AssistOperation::Connect { target } => {
-                if target == c.from || target == c.to || !valid_node_id(&target) || s.controls.len() >= 60 { return None; }
+                if target == c.from || target == c.to || !valid_node_id(&target) || s.controls.len() >= 30 { return None; }
                 let target_peer = directory.authenticated_peer(&target, now)?;
                 let source = directory.authenticated_peer(&c.from, now)?;
                 if source.identity.claims.signing_key != c.signing_key { return None; }
@@ -327,11 +342,11 @@ impl PeerAssistance {
             AssistOperation::Relay { packet } => {
                 if !packet.verify(now) || packet.header.sender.claims.node_id != c.from
                     || packet.header.sender.claims.signing_key != c.signing_key || packet.header.recipient == c.to
-                    || s.routes.len() >= MAX_ROUTES || s.routes.contains_key(&(c.from.clone(), packet.header.packet_id)) { return None; }
+                    || s.routes.len() >= s.policy.max_routes || s.routes.contains_key(&(c.from.clone(), packet.header.packet_id)) { return None; }
                 let target = directory.authenticated_peer(&packet.header.recipient, now)?;
                 if target.identity.claims.signing_key != packet.header.recipient_signing_key
                     || target.identity.claims.exchange_key != packet.header.recipient_exchange_key
-                    || !admit_bytes(&mut s, &c.from, bytes.len(), now) { return None; }
+                    || !admit_transit(&mut s, &c.from, bytes.len(), now) { return None; }
                 s.routes.insert((c.from.clone(), packet.header.packet_id), Route { origin: c.from, recipient: target.identity,
                     digest: packet.digest()?, expires: packet.header.expires_at_ms });
                 effect.outbound.push((packet.header.recipient.clone(), AssistOperation::Deliver { packet }));
@@ -407,6 +422,14 @@ fn valid_inner(bytes: &[u8], sender: &str) -> bool {
     let parts: Vec<_> = text.splitn(4, '|').collect();
     parts.len() == 4 && parts[0] == sender && !parts[1].is_empty()
 }
+fn admit_transit(s: &mut State, peer: &str, bytes: usize, now: i64) -> bool {
+    let used: usize = s.transit_traffic.iter().map(|(bytes, _)| *bytes).sum();
+    if !s.policy.enabled || s.transit_traffic.len() >= s.policy.max_relays_per_minute
+        || used.saturating_add(bytes) > s.policy.max_bytes_per_minute { return false; }
+    if !admit_bytes(s, peer, bytes, now) { return false; }
+    s.transit_traffic.push_back((bytes, now));
+    true
+}
 fn admit_bytes(s: &mut State, peer: &str, bytes: usize, now: i64) -> bool {
     let global: usize = s.traffic.iter().map(|(_, b, _)| *b).sum();
     let personal: usize = s.traffic.iter().filter(|(id, _, _)| id == peer).map(|(_, b, _)| *b).sum();
@@ -414,6 +437,7 @@ fn admit_bytes(s: &mut State, peer: &str, bytes: usize, now: i64) -> bool {
     s.traffic.push_back((peer.into(), bytes, now)); true
 }
 fn cleanup(s: &mut State, now: i64) {
+    s.transit_traffic.retain(|(_, at)| now.saturating_sub(*at) < 60_000);
     s.pending.retain(|_, p| p.expires > now); s.routes.retain(|_, r| r.expires > now);
     s.received.retain(|_, seen| seen.expires > now);
     s.frames.retain(|(_, at)| now.saturating_sub(*at) < PACKET_MS);
@@ -483,12 +507,15 @@ mod tests {
         enroll(&a, &da, &h, &dh, addr(3), addr(1));
         enroll(&b, &db, &h, &dh, addr(3), addr(2));
         let sa = PeerAssistance::new(); let sb = PeerAssistance::new(); let sh = PeerAssistance::new();
+        sb.set_policy(false, 0, 0, 0); // Own delivery must still work after online opt-out.
         let target = HelperIdentity::create(&b, NOW).unwrap();
         let text = format!("{}|m2|chat|secret", a.legacy_routing_node_id());
         let (op, mut receipt, _) = sa.prepare_relay(&a, &target, text.as_bytes(), NOW).unwrap();
         let wire = encode(&a, h.legacy_routing_node_id(), op, BINDING, NOW).unwrap();
         let forward = sh.handle(&h, &dh, &wire, BINDING, addr(1), NOW).unwrap().outbound.remove(0);
         assert!(receipt.try_recv().is_err(), "writing a helper stream is not a sent receipt");
+        sh.set_policy(false, 0, 0, 0); // Accepted relay may drain after opt-out.
+        for n in 0..MAX_ROUTES { sh.state.lock().unwrap().frames.push_back(([n as u8; 16], NOW)); }
         let delivered = encode(&h, &forward.0, forward.1, BINDING, NOW).unwrap();
         let at_b = sb.handle(&b, &db, &delivered, BINDING, addr(3), NOW).unwrap();
         assert_eq!(at_b.delivery.unwrap(), text.as_bytes());
@@ -665,6 +692,44 @@ mod tests {
         sa.order_helpers(b.legacy_routing_node_id(), &mut order);
         assert_eq!(order, ["reserve", "fresh"]);
         assert!(sa.state.lock().unwrap().pending.is_empty());
+    }
+
+    #[test]
+    fn online_opt_out_refuses_new_transit_without_spending_replay_slots() {
+        let a = identity(1); let h = identity(3);
+        let da = PeerExchange::open(None); let dh = PeerExchange::open(None);
+        enroll(&a, &da, &h, &dh, addr(3), addr(1));
+        let sh = PeerAssistance::new();
+        sh.set_policy(false, 32, u32::MAX, 240);
+        let op = AssistOperation::Connect { target: identity(2).legacy_routing_node_id().into() };
+        let bytes = encode(&a, h.legacy_routing_node_id(), op, BINDING, NOW).unwrap();
+        assert!(sh.handle(&h, &dh, &bytes, BINDING, addr(1), NOW).is_none());
+        assert!(sh.state.lock().unwrap().frames.is_empty());
+        let target = HelperIdentity::create(&identity(2), NOW).unwrap();
+        let packet = seal(&a, &target, format!("{}|m|c|text", a.legacy_routing_node_id()).as_bytes(), NOW).unwrap();
+        let bytes = encode(&a, h.legacy_routing_node_id(), AssistOperation::Relay { packet }, BINDING, NOW).unwrap();
+        assert!(sh.handle(&h, &dh, &bytes, BINDING, addr(1), NOW).is_none());
+        let state = sh.state.lock().unwrap();
+        assert!(state.routes.is_empty() && state.frames.is_empty() && state.transit_traffic.is_empty());
+    }
+
+    #[test]
+    fn transit_budget_leaves_room_for_own_data_and_toggles_do_not_reset_it() {
+        let mut s = State::default();
+        s.policy = HelperPolicy::bounded(true, 8, u32::MAX, 240);
+        assert!(admit_transit(&mut s, "a", MAX_PEER_BYTES_PER_MINUTE, NOW));
+        assert!(admit_transit(&mut s, "b", MAX_PEER_BYTES_PER_MINUTE, NOW));
+        assert!(!admit_transit(&mut s, "c", 1, NOW));
+        assert!(admit_bytes(&mut s, "c", MAX_PEER_BYTES_PER_MINUTE, NOW));
+        assert!(admit_bytes(&mut s, "d", MAX_PEER_BYTES_PER_MINUTE, NOW));
+        s.policy = HelperPolicy::bounded(false, 8, 100, 1);
+        assert!(!admit_transit(&mut s, "e", 1, NOW));
+        s.policy = HelperPolicy::bounded(true, 8, u32::MAX, 240);
+        assert!(!admit_transit(&mut s, "e", 1, NOW));
+        cleanup(&mut s, NOW + 60_000);
+        assert!(admit_transit(&mut s, "e", 1, NOW + 60_000));
+        s.policy = HelperPolicy::bounded(true, 8, 100, 1);
+        assert!(!admit_transit(&mut s, "f", 1, NOW + 60_000), "packet quota includes earlier policy traffic");
     }
 
     // Real QUIC with four endpoints: neither sender nor receiver has a direct

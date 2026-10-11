@@ -1185,6 +1185,18 @@ private fun SettingsTabContent(
                     val context = LocalContext.current
                     // Режим прочитан в MainActivity.onCreate (SwarmSettings.init).
                     val swarmMode by SwarmSettings.mode.collectAsStateWithLifecycle()
+                    val onlineHelp by com.vladimir.messenger.data.swarm.OnlineHelperSettings.enabled.collectAsStateWithLifecycle()
+                    SettingsItem(
+                        icon = Icons.Default.Groups,
+                        title = stringResource(R.string.settings_online_helper),
+                        subtitle = stringResource(R.string.settings_online_helper_body),
+                        trailingContent = {
+                            ApuPremiumSwitch(checked = onlineHelp, onCheckedChange = {
+                                com.vladimir.messenger.data.swarm.OnlineHelperSettings.set(context, it)
+                            })
+                        },
+                    )
+                    ApuSettingsDivider()
                     SwarmMode.entries.forEach { mode ->
                         val limits = SwarmPolicy.limitsFor(mode, metered = false, lowPower = false)
                         Row(
@@ -1200,7 +1212,11 @@ private fun SettingsTabContent(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Column {
-                                Text(mode.title, style = MaterialTheme.typography.bodyLarge)
+                                Text(stringResource(when (mode) {
+                                    SwarmMode.NORMAL -> R.string.swarm_mode_normal
+                                    SwarmMode.ECONOMY -> R.string.swarm_mode_economy
+                                    SwarmMode.UNLIMITED -> R.string.swarm_mode_unlimited
+                                }), style = MaterialTheme.typography.bodyLarge)
                                 Text(
                                     if (mode == SwarmMode.UNLIMITED) {
                                         stringResource(R.string.settings_swarm_full)

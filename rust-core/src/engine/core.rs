@@ -5285,6 +5285,12 @@ impl P2PCore {
         self.storage.save_user(user_id, display_name, false).is_ok()
     }
 
+    /// Independent owner policy for new online transit; existing routes can drain.
+    pub fn configure_online_helper(&self, enabled: bool, routes: u32, bytes: u32, relays: u32) -> bool {
+        self.peer_assistance.set_policy(enabled, routes, bytes, relays);
+        true
+    }
+
     /// K4-1: «свои» для presence - контакты и участники моих групп.
     ///
     /// Их ядро знает и обслуживает лично (прямой канал), а в общий топик
