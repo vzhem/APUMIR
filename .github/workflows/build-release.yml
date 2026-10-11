@@ -84,7 +84,7 @@ jobs:
         working-directory: ./rust-core
         run: |
           set -o pipefail
-          for suite in helper_delivery peer_assistance peer_exchange direct_transport; do
+          for suite in helper_quality helper_delivery peer_assistance peer_exchange direct_transport; do
             LOG="$RUNNER_TEMP/helper-$suite.log"
             if ! RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --features mqtt-dual-broker --lib "network::$suite::tests" > "$LOG" 2>&1; then
               tail -150 "$LOG"

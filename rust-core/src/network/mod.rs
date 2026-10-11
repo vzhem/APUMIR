@@ -43,6 +43,7 @@ pub mod offline_send;
 pub mod peer_exchange;
 pub mod peer_assistance;
 pub mod helper_delivery;
+pub mod helper_quality;
 pub mod presence;
 pub mod presence_scope;
 pub mod quic_client;

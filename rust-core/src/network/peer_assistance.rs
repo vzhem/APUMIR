@@ -6,6 +6,8 @@
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
+use super::helper_quality::HelperQuality;
 use tokio::sync::oneshot;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -192,12 +194,14 @@ pub fn encode(identity: &InstalledSigningIdentity, peer: &str, operation: Assist
     (bytes.len() <= MAX_ASSIST_BYTES).then_some(bytes)
 }
 
-struct Pending { recipient: HelperIdentity, digest: [u8; 32], expires: i64, tx: oneshot::Sender<bool> }
+struct Leg { started: Instant, written: bool }
+struct Pending { recipient: HelperIdentity, digest: [u8; 32], expires: i64, tx: oneshot::Sender<bool>, legs: HashMap<String, Leg> }
 struct Received { digest: [u8; 32], expires: i64, receipt: Receipt }
 struct Route { origin: String, recipient: HelperIdentity, digest: [u8; 32], expires: i64 }
 #[derive(Default)]
 struct State {
     pending: HashMap<[u8; 16], Pending>,
+    quality: HelperQuality,
     routes: HashMap<(String, [u8; 16]), Route>,
     received: HashMap<(String, [u8; 16]), Received>,
     frames: VecDeque<([u8; 16], i64)>,
@@ -242,13 +246,46 @@ impl PeerAssistance {
         let mut s = self.state.lock().unwrap(); cleanup(&mut s, now);
         if s.pending.len() >= MAX_PENDING { return None; }
         let id = packet.header.packet_id;
-        s.pending.insert(id, Pending { recipient: recipient.clone(), digest: packet.digest()?, expires: packet.header.expires_at_ms, tx });
+        s.pending.insert(id, Pending { recipient: recipient.clone(), digest: packet.digest()?, expires: packet.header.expires_at_ms, tx, legs: HashMap::new() });
         Some((AssistOperation::Relay { packet }, rx, id))
     }
     pub fn pending_guard(self: &Arc<Self>, id: [u8; 16]) -> PendingRelayGuard {
         PendingRelayGuard { assistance: Arc::clone(self), id }
     }
     pub fn cancel(&self, id: [u8; 16]) { self.state.lock().unwrap().pending.remove(&id); }
+
+    pub fn order_helpers(&self, recipient: &str, helpers: &mut [String]) {
+        self.state.lock().unwrap().quality.order(recipient, helpers, Instant::now());
+    }
+
+    /// Called in the polled leg, not when its future is merely constructed.
+    pub fn leg_started(&self, id: [u8; 16], helper: &str) {
+        if let Some(pending) = self.state.lock().unwrap().pending.get_mut(&id) {
+            if pending.legs.len() < 2 {
+                pending.legs.entry(helper.into()).or_insert(Leg { started: Instant::now(), written: false });
+            }
+        }
+    }
+
+    pub fn leg_written(&self, id: [u8; 16], helper: &str, written: bool) {
+        let mut s = self.state.lock().unwrap();
+        let Some(pending) = s.pending.get_mut(&id) else { return; };
+        let Some(leg) = pending.legs.get_mut(helper) else { return; };
+        leg.written = written;
+        let recipient = pending.recipient.claims.node_id.clone();
+        if !written { s.quality.write_failed(&recipient, helper, Instant::now()); }
+    }
+
+    /// Atomically consumes this attempt. Receipt and cancel paths use the same mutex;
+    /// an abort is cancellation, not a failure observation. Packet IDs are fresh per attempt.
+    pub fn finish_timeout(&self, id: [u8; 16]) {
+        let mut s = self.state.lock().unwrap();
+        let Some(pending) = s.pending.remove(&id) else { return; };
+        let now = Instant::now();
+        for (helper, leg) in pending.legs {
+            if leg.written { s.quality.timed_out(&pending.recipient.claims.node_id, &helper, now); }
+        }
+    }
 
     pub fn handle(&self, identity: &InstalledSigningIdentity, directory: &PeerExchange,
         bytes: &[u8], binding: [u8; 32], remote: SocketAddr, now: i64) -> Option<AssistanceEffect> {
@@ -336,6 +373,14 @@ impl PeerAssistance {
                         || pending.expires != receipt.claims.expires_at_ms { return None; }
                     Ed25519KeyPair::verify(&pending.recipient.claims.signing_key, &canonical(ACK_DOMAIN, &receipt.claims)?, &receipt.signature).ok()?;
                     let pending = s.pending.remove(&id)?;
+                    // The recipient signature proves acceptance, not a globally provable
+                    // helper path. Credit only this locally started, authenticated return leg.
+                    if let Some(leg) = pending.legs.get(&c.from) {
+                        let now = Instant::now();
+                        s.quality.accepted(&pending.recipient.claims.node_id, &c.from,
+                            now.saturating_duration_since(leg.started), now);
+                    }
+                    // Other legs are censored by the race, NOT failed deliveries.
                     let _ = pending.tx.send(true);
                 } else {
                     let key = (receipt.claims.origin.clone(), id);
@@ -488,6 +533,8 @@ mod tests {
         let (op, mut receipt, packet_id) = sa.prepare_relay(&a, &HelperIdentity::create(&b, NOW).unwrap(), text.as_bytes(), NOW).unwrap();
         let mut deliveries = 0;
         for (helper, directory, assistance) in [(&h, &dh, &sh), (&j, &dj, &sj)] {
+            sa.leg_started(packet_id, helper.legacy_routing_node_id());
+            sa.leg_written(packet_id, helper.legacy_routing_node_id(), true);
             let wire = encode(&a, helper.legacy_routing_node_id(), op.clone(), BINDING, NOW).unwrap();
             let forward = assistance.handle(helper, directory, &wire, BINDING, addr(1), NOW).unwrap().outbound.remove(0);
             let wire = encode(helper, &forward.0, forward.1, BINDING, NOW).unwrap();
@@ -514,6 +561,15 @@ mod tests {
         }
         assert_eq!(deliveries, 1);
         assert!(receipt.try_recv().unwrap());
+        let mut order = vec![h.legacy_routing_node_id().into(), j.legacy_routing_node_id().into()];
+        sa.order_helpers(b.legacy_routing_node_id(), &mut order);
+        assert_eq!(order[0], j.legacy_routing_node_id(), "only the authenticated winning leg is credited");
+        // The primary losing this race does not enter timeout cooldown.
+        sa.state.lock().unwrap().quality.accepted(b.legacy_routing_node_id(), h.legacy_routing_node_id(),
+            std::time::Duration::ZERO, Instant::now());
+        order = vec![h.legacy_routing_node_id().into(), j.legacy_routing_node_id().into()];
+        sa.order_helpers(b.legacy_routing_node_id(), &mut order);
+        assert_eq!(order[0], h.legacy_routing_node_id());
         assert!(!sa.state.lock().unwrap().pending.contains_key(&packet_id));
         assert_eq!(sb.state.lock().unwrap().traffic.len(), 2, "duplicate consumes bandwidth budget");
         let (fresh, _, _) = sa.prepare_relay(&a, &HelperIdentity::create(&b, NOW).unwrap(), text.as_bytes(), NOW).unwrap();
@@ -564,6 +620,7 @@ mod tests {
         let (operation, mut rx, packet_id) = sa.prepare_relay(&a, &HelperIdentity::create(&b, NOW).unwrap(),
             format!("{}|m|chat|private", a.legacy_routing_node_id()).as_bytes(), NOW).unwrap();
         let guard = sa.pending_guard(packet_id);
+        sa.leg_started(packet_id, h.legacy_routing_node_id());
         let packet = match operation { AssistOperation::Relay { packet } => packet, _ => unreachable!() };
         let claims = ReceiptClaims { packet_id, origin: a.legacy_routing_node_id().into(),
             recipient: b.legacy_routing_node_id().into(), digest: packet.digest().unwrap(), expires_at_ms: NOW + PACKET_MS };
@@ -571,9 +628,43 @@ mod tests {
         let wire = encode(&h, a.legacy_routing_node_id(), AssistOperation::Receipt { receipt: Receipt { claims, signature } }, BINDING, NOW).unwrap();
         assert!(sa.handle(&a, &da, &wire, BINDING, addr(3), NOW).is_none());
         assert!(matches!(rx.try_recv(), Err(oneshot::error::TryRecvError::Empty)));
+        let mut order = vec!["unknown".into(), h.legacy_routing_node_id().into()];
+        sa.order_helpers(b.legacy_routing_node_id(), &mut order);
+        assert_eq!(order[0], "unknown", "forged ACK cannot improve ranking");
         drop(guard);
         assert!(sa.state.lock().unwrap().pending.is_empty());
         assert!(matches!(rx.try_recv(), Err(oneshot::error::TryRecvError::Closed)));
+    }
+
+    #[test]
+    fn timeout_and_abort_only_observe_written_legs_of_this_attempt() {
+        let a = identity(1); let b = identity(2);
+        let sa = Arc::new(PeerAssistance::new());
+        let target = HelperIdentity::create(&b, NOW).unwrap();
+        let data = format!("{}|m|chat|text", a.legacy_routing_node_id());
+        let (_, _, id) = sa.prepare_relay(&a, &target, data.as_bytes(), NOW).unwrap();
+        sa.state.lock().unwrap().quality.accepted(b.legacy_routing_node_id(), "reachable",
+            std::time::Duration::from_millis(100), Instant::now());
+        let guard = sa.pending_guard(id);
+        sa.leg_started(id, "primary");
+        sa.leg_written(id, "primary", true);
+        sa.leg_started(id, "reserve"); // Canceled write is not a timeout observation.
+        sa.finish_timeout(id);
+        drop(guard);
+        let mut order = vec!["primary".into(), "reserve".into()];
+        sa.order_helpers(b.legacy_routing_node_id(), &mut order);
+        assert_eq!(order, ["reserve", "primary"]);
+        let (_, _, aborted) = sa.prepare_relay(&a, &target, data.as_bytes(), NOW).unwrap();
+        let guard = sa.pending_guard(aborted);
+        sa.leg_started(aborted, "reserve");
+        sa.leg_written(aborted, "reserve", true);
+        drop(guard); // Outer FFI abort is not evidence of a failed helper.
+        sa.finish_timeout(aborted);
+        sa.leg_written(aborted, "reserve", false); // Late write cannot poison history.
+        let mut order = vec!["reserve".into(), "fresh".into()];
+        sa.order_helpers(b.legacy_routing_node_id(), &mut order);
+        assert_eq!(order, ["reserve", "fresh"]);
+        assert!(sa.state.lock().unwrap().pending.is_empty());
     }
 
     // Real QUIC with four endpoints: neither sender nor receiver has a direct
@@ -641,7 +732,7 @@ mod tests {
         let now = crate::storage::models::now_ms();
         let expected = format!("{}|message|chat|protected transit", a.id.legacy_routing_node_id());
         let recipient = HelperIdentity::create(&b.id, now).unwrap();
-        let (operation, receipt, _) = a.assist.prepare_relay(&a.id, &recipient, expected.as_bytes(), now).unwrap();
+        let (operation, receipt, packet_id) = a.assist.prepare_relay(&a.id, &recipient, expected.as_bytes(), now).unwrap();
         let assistance = Arc::clone(&a.assist);
         let _pending = assistance.pending_guard(match &operation { AssistOperation::Relay { packet } => packet.header.packet_id, _ => unreachable!() });
         let peers = [h.id.legacy_routing_node_id().to_string(), j.id.legacy_routing_node_id().to_string()];
@@ -650,13 +741,20 @@ mod tests {
             started.push(leg);
             let peer = peers[leg].clone(); let target = peer.clone();
             let id = Arc::clone(&a.id); let operation = operation.clone(); let transport = a.transport.clone();
+            let assist = Arc::clone(&a.assist);
             async move {
+                assist.leg_started(packet_id, &peer);
                 let factory: BoundFrameFactory = Arc::new(move |binding, _| encode(&id, &target, operation.clone(), binding, crate::storage::models::now_ms()));
-                transport.send_bound(&peer, None, factory).await
+                let written = transport.send_bound(&peer, None, factory).await;
+                assist.leg_written(packet_id, &peer, written);
+                written
             }
         }, Duration::from_millis(100), Duration::from_secs(3)).await;
         assert!(accepted, "only reserve forwards the recipient receipt");
         assert_eq!(started, [0, 1]);
+        let mut order = peers.to_vec();
+        a.assist.order_helpers(b.id.legacy_routing_node_id(), &mut order);
+        assert_eq!(order[0], j.id.legacy_routing_node_id());
         let data = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap().unwrap();
         assert_eq!(data, expected.as_bytes());
         assert!(tokio::time::timeout(Duration::from_millis(200), rx.recv()).await.is_err(), "same box dispatched once");

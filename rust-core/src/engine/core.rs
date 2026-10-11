@@ -5140,6 +5140,10 @@ impl P2PCore {
         // The FFI caller waits outside the runtime. Both helper legs run on the
         // existing runtime, never in newly-created blocking worker threads.
         let task = runtime.spawn(async move {
+            // Keep admission outside the timed future so its deadline can record a
+            // conservative route observation before the guard releases the attempt.
+            let mut pending_guard = None;
+            let mut attempt_id = None;
             let result = tokio::time::timeout(HELPER_DELIVERY_BUDGET, async {
                 let now = crate::storage::models::now_ms();
                 let mut helpers = Vec::new();
@@ -5151,9 +5155,10 @@ impl P2PCore {
                     let peer = helper.identity.claims.node_id;
                     if transport.has_connection(&peer).await {
                         helpers.push(peer);
-                        if helpers.len() == 2 { break; }
                     }
                 }
+                assistance.order_helpers(&recipient, &mut helpers);
+                helpers.truncate(2);
                 if helpers.is_empty() { directory.wake(); return false; }
                 // Introduce both endpoints even when we already know the recipient key.
                 // This probes in the background without replaying the in-flight payload.
@@ -5167,21 +5172,30 @@ impl P2PCore {
                     directory.wake(); return false;
                 };
                 let Some((operation, receipt, packet_id)) = assistance.prepare_relay(&identity, &target, &bytes, now) else { return false; };
-                let _pending = assistance.pending_guard(packet_id);
+                pending_guard = Some(assistance.pending_guard(packet_id));
+                attempt_id = Some(packet_id);
                 hedged_delivery(helpers.len(), receipt, |leg| {
                     let peer = helpers[leg].clone();
                     let destination = peer.clone();
                     let operation = operation.clone();
                     let identity = Arc::clone(&identity);
                     let transport = transport.clone();
+                    let assistance = Arc::clone(&assistance);
                     async move {
+                        assistance.leg_started(packet_id, &peer);
                         let factory: BoundFrameFactory = Arc::new(move |binding, _| peer_assistance::encode(
                             &identity, &destination, operation.clone(), binding, crate::storage::models::now_ms()));
                         // None forbids new arbitrary dials: only the existing peer channel.
-                        transport.send_bound(&peer, None, factory).await
+                        let written = transport.send_bound(&peer, None, factory).await;
+                        assistance.leg_written(packet_id, &peer, written);
+                        written
                     }
                 }, HELPER_HEDGE_DELAY, HELPER_DELIVERY_BUDGET).await
             }).await.unwrap_or(false);
+            if !result {
+                if let Some(id) = attempt_id { assistance.finish_timeout(id); }
+            }
+            drop(pending_guard);
             let _ = tx.try_send(result);
         });
         match rx.recv_timeout(crate::network::direct_transport::DIRECT_SEND_BUDGET) {
