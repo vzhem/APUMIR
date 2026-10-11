@@ -1575,4 +1575,10 @@
     <string name="story_placeholder">Что нового? До 200 знаков</string>
     <string name="story_publish">Опубликовать</string>
     <string name="story_open">История</string>
+    <string name="story_pause">Пауза</string>
+    <string name="story_resume">Продолжить</string>
+    <string name="story_previous">Назад</string>
+    <string name="story_next">Далее</string>
+    <string name="story_background">Фон %1$d</string>
+    <string name="story_lifetime">История доступна друзьям 24 часа</string>
 </resources>

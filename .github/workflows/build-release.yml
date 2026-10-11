@@ -162,6 +162,15 @@ jobs:
           cat "$RUNNER_TEMP/gradle-build.log"
           exit "$status"
 
+      - name: Verify story playback rules
+        working-directory: ./android-app
+        run: |
+          set +e
+          ./gradlew :app:testReleaseUnitTest --tests 'com.vladimir.messenger.ui.components.StoryPlaybackTest' --no-daemon >> "$RUNNER_TEMP/gradle-build.log" 2>&1
+          status=$?
+          tail -100 "$RUNNER_TEMP/gradle-build.log"
+          exit "$status"
+
       # Сырые логи Actions иногда недоступны через API/сеть. Оставляем хвост
       # компилятора как annotations, чтобы причина ошибки не терялась.
       - name: Expose Gradle failure tail

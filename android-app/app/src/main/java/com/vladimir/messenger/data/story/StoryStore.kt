@@ -30,10 +30,15 @@ object StoryStore {
 
     private const val PREFS = "stories"
     private const val KEY = "items"
+    private const val SEEN_KEY = "seen"
     private val lock = Any()
     private var appContext: Context? = null
     private var loaded = false
     private val _items = MutableStateFlow<List<Story>>(emptyList())
+    private val _seen = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Идентификаторы чужих историй, которые уже открывали (кольцо в ленте становится серым). */
+    val seen: StateFlow<Set<String>> = _seen.asStateFlow()
 
     /** Все сохранённые истории (включая истёкшие, пока не очищены). */
     val items: StateFlow<List<Story>> = _items.asStateFlow()
@@ -45,6 +50,7 @@ object StoryStore {
             if (!loaded) {
                 loaded = true
                 _items.value = parse(prefs()?.getString(KEY, null))
+                _seen.value = prefs()?.getStringSet(SEEN_KEY, null)?.toSet().orEmpty().intersect(active().map { it.id }.toSet())
             }
         }
     }
@@ -52,6 +58,18 @@ object StoryStore {
     /** Актуальные истории: моложе 24 часов. */
     fun active(nowMs: Long = System.currentTimeMillis()): List<Story> =
         _items.value.filter { nowMs - it.createdAtMs < LIFETIME_MS }
+
+    /** Отметить историю просмотренной. Хранятся только id из актуальных историй. */
+    fun markSeen(id: String) {
+        synchronized(lock) {
+            if (id in _seen.value) return
+            val alive = active().map { it.id }.toSet()
+            if (id !in alive) return
+            val next = (_seen.value + id).intersect(alive)
+            _seen.value = next
+            prefs()?.edit()?.putStringSet(SEEN_KEY, next)?.apply()
+        }
+    }
 
     fun isStoryPacket(content: String?): Boolean = content?.startsWith(PREFIX) == true
 
@@ -110,7 +128,8 @@ object StoryStore {
 
     private fun save(list: List<Story>) {
         _items.value = list
-        prefs()?.edit()?.putString(KEY, toJson(list))?.apply()
+        _seen.value = _seen.value.intersect(list.map { it.id }.toSet())
+        prefs()?.edit()?.putString(KEY, toJson(list))?.putStringSet(SEEN_KEY, _seen.value)?.apply()
     }
 
     private fun prefs() = appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

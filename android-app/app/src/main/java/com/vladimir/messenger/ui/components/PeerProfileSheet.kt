@@ -97,6 +97,12 @@ fun PeerProfileSheet(
     onStoryClick: (() -> Unit)? = null,
 ) {
     val avatars by AvatarStore.avatars.collectAsState()
+    val viewedStories by com.vladimir.messenger.data.story.StoryStore.seen.collectAsState()
+    val profileStories by com.vladimir.messenger.data.story.StoryStore.items.collectAsState()
+    val unseenStory = profileStories.any {
+        it.authorId == contactId && !it.mine && it.id !in viewedStories &&
+            System.currentTimeMillis() - it.createdAtMs < com.vladimir.messenger.data.story.StoryStore.LIFETIME_MS
+    }
 
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
@@ -118,7 +124,11 @@ fun PeerProfileSheet(
                     vip = vip,
                     size = 88.dp,
                     modifier = Modifier.then(
-                        if (vip) {
+                        if (onStoryClick != null) {
+                            Modifier.border(3.dp, if (unseenStory) Color(0xFFE6BE70) else Color(0xFF84909F), CircleShape)
+                                .clickable(onClickLabel = stringResource(R.string.story_open), onClick = onStoryClick)
+                                .padding(5.dp)
+                        } else if (vip) {
                             Modifier
                         } else {
                             Modifier.border(
