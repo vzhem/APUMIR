@@ -1537,4 +1537,5 @@ The file is not on this phone</string>
     <string name="feedback_shot_item">Screenshot %1$d</string>
     <string name="feedback_shot_remove">Remove screenshot</string>
     <string name="feedback_shot_failed">Some files could not be attached</string>
+    <string name="link_preview_open">Open link</string>
 </resources>

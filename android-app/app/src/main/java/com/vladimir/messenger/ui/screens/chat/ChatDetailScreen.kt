@@ -636,6 +636,7 @@ fun ChatDetailScreen(
                             items = chatRows,
                             key   = { it.key },
                         ) { row ->
+                            Box(modifier = Modifier.fillMaxWidth().animateItem()) {
                             val transfer = row.transfer
                             if (transfer != null) {
                                 FileTransferBubble(
@@ -847,6 +848,7 @@ fun ChatDetailScreen(
                                 )
                                 }
                             }
+                        }
                         }
                     }
                     } // Раунд 246: закрыли Column «закреп + лента».

@@ -289,6 +289,14 @@ fun MessageBubble(
                         },
                     )
                 }
+                // Карточка первой ссылки под текстом (как в премиальных мессенджерах).
+                // Приглашения и картинки уже показаны своими карточками - их не дублируем.
+                val firstLink = remember(displayContent) { URL_REGEX.find(displayContent)?.value }
+                if (firstLink != null && imageUrl == null && multiCard == null &&
+                    inviteCard == null && groupCard == null && !isSelected
+                ) {
+                    ApuLinkCard(url = firstLink, textColor = textColor)
+                }
                 // Переключатель оригинала: виден только когда перевод есть.
                 if (translation != null) {
                     Text(

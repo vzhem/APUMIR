@@ -1550,4 +1550,5 @@
     <string name="feedback_shot_item">Скриншот %1$d</string>
     <string name="feedback_shot_remove">Убрать скриншот</string>
     <string name="feedback_shot_failed">Не все файлы удалось прикрепить</string>
+    <string name="link_preview_open">Открыть ссылку</string>
 </resources>
