@@ -1185,30 +1185,6 @@ fun GroupChatScreen(
                 }
             }
 
-            // ── Приложенный файл (этап 9): карточка над полем ввода до отправки.
-            val staged = uiState.stagedFile
-            if (staged != null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp)
-                        .apuBubbleSurface()
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(fileIconFor(staged.mediaType), contentDescription = null, modifier = Modifier.size(22.dp), tint = ApuBubbleAccentColor)
-                    Spacer(Modifier.width(8.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(staged.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = ApuBubbleTextColor)
-                        Text(GroupFileMarker.formatSize(staged.sizeBytes), style = MaterialTheme.typography.labelSmall, color = ApuBubbleMutedColor)
-                    }
-                    IconButton(onClick = { viewModel.clearStagedFile() }, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.channel_remove_file), modifier = Modifier.size(16.dp), tint = ApuBubbleMutedColor)
-                    }
-                }
-            }
-
             } // else: лента темы
             } // правая колонка
             } // Row: левая колонка + правая
@@ -1247,6 +1223,30 @@ fun GroupChatScreen(
                         }
                         .padding(horizontal = 14.dp, vertical = 6.dp),
                 )
+            }
+
+            // ── Приложенный файл (этап 9): карточка над полем ввода до отправки.
+            val staged = uiState.stagedFile
+            if (staged != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp)
+                        .apuBubbleSurface()
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(fileIconFor(staged.mediaType), contentDescription = null, modifier = Modifier.size(22.dp), tint = ApuBubbleAccentColor)
+                    Spacer(Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(staged.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = ApuBubbleTextColor)
+                        Text(GroupFileMarker.formatSize(staged.sizeBytes), style = MaterialTheme.typography.labelSmall, color = ApuBubbleMutedColor)
+                    }
+                    IconButton(onClick = { viewModel.clearStagedFile() }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.channel_remove_file), modifier = Modifier.size(16.dp), tint = ApuBubbleMutedColor)
+                    }
+                }
             }
 
             // ── Поле ввода: подложка следует теме и пропускает обои (раунд 45).
@@ -1972,13 +1972,6 @@ private fun MessageBubble(
     // Раунд 211: «три точки» на самом пузыре (владелец: и на текстовых тоже).
     // Не рисуем там, где точки уже есть у вложения: файл-карточка (р168)
     // и гифка-ссылка (р210).
-    val bubbleHasOwnDots = fileCard != null || remember(message.content) {
-        com.vladimir.messenger.data.gif.GifLibrary.isGifRef(
-            com.vladimir.messenger.util.ForwardMarker.stripHeader(
-                com.vladimir.messenger.util.InlineImage.stripImage(message.content)
-            )
-        )
-    }
     val time = remember(message.timestamp) {
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp))
     }
@@ -1999,18 +1992,12 @@ private fun MessageBubble(
             )
         }
         // Раунд 211: точки рядом с пузырём - у своего слева, у чужого справа.
-        if (!bubbleHasOwnDots && message.isFromMe) {
-            ApuMenuDots(
-                onClick = { showMenu = true },
-                modifier = Modifier.align(Alignment.CenterVertically),
-            )
-            Spacer(Modifier.width(2.dp))
-        }
         // Кнопке «Закрепить» справа нужно своё место: пузырь с карточкой
         // файла растягивается на все 300 dp, и на узком экране (лента рядом
         // с колонкой тем) кнопка выдавливалась за край - файл нельзя было
         // закрепить. Вес без заполнения: пузырь занимает не больше остатка.
-        Box(modifier = if (canPin) Modifier.weight(1f, fill = false) else Modifier) {
+        // Пузырь занимает всю свободную ширину строки (кнопок закрепа и точек рядом нет).
+        Box(modifier = Modifier.weight(1f, fill = false)) {
         // Раунд 169: стикер с копией на телефоне парит в чате - пузырь
         // без фона и тени, только картинка, время и реакции.
         val stickerFloat = fileCard != null && fileCard.previewFile != null &&
@@ -2020,7 +2007,7 @@ private fun MessageBubble(
             else if (message.isFromMe) messenger.messageBubbleOwnText else messenger.messageBubbleOtherText
         ApuBubbleCard(
             modifier = Modifier
-                .widthIn(max = 300.dp)
+                .widthIn(max = 340.dp)
                 .combinedClickable(
                     // В режиме выбора клик отмечает сообщение; иначе - реакции / меню действий.
                     onClick = { if (selectionMode) onToggleSelect() else showReactions = true },
@@ -2326,22 +2313,6 @@ private fun MessageBubble(
                 },
             )
         }
-        }
-        if (!bubbleHasOwnDots && !message.isFromMe) {
-            Spacer(Modifier.width(2.dp))
-            ApuMenuDots(
-                onClick = { showMenu = true },
-                modifier = Modifier.align(Alignment.CenterVertically),
-            )
-        }
-        if (canPin) {
-            IconButton(onClick = onTogglePin, modifier = Modifier.size(28.dp)) {
-                Icon(
-                    Icons.Filled.PushPin,
-                    contentDescription = if (message.isPinned) stringResource(R.string.channel_unpin) else stringResource(R.string.channel_pin),
-                    modifier = Modifier.size(16.dp),
-                )
-            }
         }
     }
 }

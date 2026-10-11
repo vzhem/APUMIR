@@ -241,7 +241,13 @@ fun GroupFileCard(
                 if (stickerFloating) Modifier
                 else Modifier.apuBubbleSurface(color = if (isFromMe) messenger.messageBubbleOwn else messenger.messageBubbleOther)
             )
-            .padding(if (stickerFloating) 0.dp else 8.dp),
+            .padding(if (stickerFloating) 0.dp else 8.dp)
+            // Удержание где угодно на карточке (в т.ч. на строке «имя / Скачать»,
+            // пока стикер не загружен) открывает меню сообщения.
+            .then(
+                if (onLongPress != null) Modifier.combinedClickable(onClick = {}, onLongClick = onLongPress)
+                else Modifier
+            ),
     ) {
         val bitmap = previewBitmap
         if ((GroupFileMarker.isAnimatedImage(info) || GroupFileMarker.isSticker(info)) &&
