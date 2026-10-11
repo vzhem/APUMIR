@@ -674,7 +674,7 @@ class ChatDetailViewModel @Inject constructor(
         saveDraft(text)
     }
 
-    fun onSendMessage() {
+    fun onSendMessage(quiet: Boolean = false) {
         val text = _uiState.value.inputText.trim()
         if (text.isEmpty()) return
 
@@ -688,7 +688,11 @@ class ChatDetailViewModel @Inject constructor(
                     text = target.content,
                 )
             }
-            sendMessageUseCase(chatId, text, reply)
+            sendMessageUseCase(
+                chatId,
+                if (quiet) com.vladimir.messenger.util.QuietMessage.wrap(text) else text,
+                reply,
+            )
                 .onSuccess {
                     // р235: сообщение ушло - «печатает…» у собеседника гаснет.
                     publishTyping(false)

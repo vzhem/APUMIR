@@ -1558,4 +1558,14 @@
     <string name="voice_recording">Запись</string>
     <string name="voice_play">Слушать</string>
     <string name="voice_pause">Пауза</string>
+    <string name="send_more">Ещё</string>
+    <string name="send_options_title">Отправка</string>
+    <string name="send_quiet_on">Без звука: вкл</string>
+    <string name="send_quiet_off">Без звука: выкл</string>
+    <string name="send_now">Отправить сейчас</string>
+    <string name="send_in_15">Через 15 минут</string>
+    <string name="send_in_hour">Через час</string>
+    <string name="send_tomorrow">Завтра в 9:00</string>
+    <string name="send_scheduled_at">Отложено на %1$s</string>
+    <string name="send_scheduled_cancel">Отменить</string>
 </resources>

@@ -1365,7 +1365,28 @@ class GroupChatViewModel @Inject constructor(
         }
     }
 
-    fun send(text: String) {
+    /** Отложенная отправка текста группы в назначенное время (тема - выбранная). */
+    fun scheduleSend(context: android.content.Context, sendAtMs: Long, quiet: Boolean) {
+        val state = _uiState.value
+        val topicId = state.selectedTopicId ?: return
+        val text = state.draft.trim()
+        if (text.isEmpty() || state.stagedFile != null) return
+        com.vladimir.messenger.worker.ScheduledSendWorker.enqueue(
+            context,
+            com.vladimir.messenger.data.schedule.ScheduledSendStore.Item(
+                id = java.util.UUID.randomUUID().toString(),
+                isGroup = true,
+                targetId = groupId,
+                topicId = topicId,
+                text = text,
+                sendAtMs = sendAtMs,
+                quiet = quiet,
+            ),
+        )
+        onDraftChanged("")
+    }
+
+    fun send(text: String, quiet: Boolean = false) {
         val topicId = _uiState.value.selectedTopicId ?: return
         val staged = _uiState.value.stagedFile
         if (text.isBlank() && staged == null) return
@@ -1386,7 +1407,11 @@ class GroupChatViewModel @Inject constructor(
             // Файл (этап 9): в сообщении едет визитка и подпись «📎 имя
             // (размер)» - старые версии видят подпись, новые рисуют карточку;
             // сам файл участники просят у меня и друг у друга.
-            val body = if (staged == null) text else com.vladimir.messenger.util.GroupFileMarker.compose(text, staged)
+            val body = if (staged == null) {
+                if (quiet) com.vladimir.messenger.util.QuietMessage.wrap(text) else text
+            } else {
+                com.vladimir.messenger.util.GroupFileMarker.compose(text, staged)
+            }
             groupRepository.sendMessage(groupId, topicId, body, reply = reply)
                 .onFailure { e -> _uiState.update { it.copy(sending = false, error = e.message) } }
                 .onSuccess {

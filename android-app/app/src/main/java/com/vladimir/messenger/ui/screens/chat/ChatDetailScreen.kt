@@ -107,6 +107,9 @@ fun ChatDetailScreen(
     viewModel: ChatDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val scheduledAll by com.vladimir.messenger.data.schedule.ScheduledSendStore.items.collectAsStateWithLifecycle()
+    val storeContext = androidx.compose.ui.platform.LocalContext.current
+    remember(Unit) { com.vladimir.messenger.data.schedule.ScheduledSendStore.load(storeContext) }
     // Раунд 189: результат «Вступить/Подписаться» - всплывающей подсказкой.
     val inviteStatus by viewModel.inviteStatus.collectAsStateWithLifecycle()
     val toastContext = LocalContext.current
@@ -446,7 +449,32 @@ fun ChatDetailScreen(
             MessageInputBar(
                 text         = uiState.inputText,
                 onTextChange = viewModel::onInputTextChanged,
-                onSend       = viewModel::onSendMessage,
+                onSend       = { viewModel.onSendMessage() },
+                onSendChoice = { choice ->
+                    val sendAt = choice.sendAtMs
+                    if (sendAt == null) {
+                        viewModel.onSendMessage(quiet = choice.quiet)
+                    } else {
+                        val text = uiState.inputText.trim()
+                        if (text.isNotEmpty()) {
+                            com.vladimir.messenger.worker.ScheduledSendWorker.enqueue(
+                                context,
+                                com.vladimir.messenger.data.schedule.ScheduledSendStore.Item(
+                                    id = java.util.UUID.randomUUID().toString(),
+                                    isGroup = false,
+                                    targetId = chatId,
+                                    topicId = "",
+                                    text = text,
+                                    sendAtMs = sendAt,
+                                    quiet = choice.quiet,
+                                ),
+                            )
+                            viewModel.onInputTextChanged("")
+                        }
+                    }
+                },
+                scheduled    = scheduledAll.filter { !it.isGroup && it.targetId == chatId },
+                onCancelScheduled = { id -> com.vladimir.messenger.worker.ScheduledSendWorker.cancel(context, id) },
                 replyAuthor  = uiState.replyTo?.replyAuthor?.ifBlank { if (uiState.replyTo?.isFromMe == true) stringResource(R.string.grp_you) else contactName },
                 replyText    = uiState.replyTo?.content.orEmpty(),
                 onClearReply = viewModel::clearReply,
@@ -901,7 +929,7 @@ fun ChatDetailScreen(
                     // гифка - словом «Гифка» (а не «APUGIFREF1|хэш»), файл -
                     // «📎 имя (размер)», как на карточке.
                     val previewText = remember(message.id) {
-                        val stripped = com.vladimir.messenger.util.ForwardMarker.stripHeader(message.content)
+                        val stripped = com.vladimir.messenger.util.ForwardMarker.stripHeader(com.vladimir.messenger.util.QuietMessage.strip(message.content))
                         when {
                             com.vladimir.messenger.data.gif.GifLibrary.isGifRef(stripped) -> context.getString(R.string.cd_gif)
                             else -> com.vladimir.messenger.util.GroupFileMarker.parse(stripped)
@@ -1158,6 +1186,9 @@ private fun MessageInputBar(
     text: String,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
+    onSendChoice: (com.vladimir.messenger.ui.components.SendChoice) -> Unit = {},
+    scheduled: List<com.vladimir.messenger.data.schedule.ScheduledSendStore.Item> = emptyList(),
+    onCancelScheduled: (String) -> Unit = {},
     replyAuthor: String? = null,
     replyText: String = "",
     onClearReply: () -> Unit = {},
@@ -1397,12 +1428,35 @@ private fun MessageInputBar(
             // recomposition), и кнопка активировалась с задержкой; плюс
             // золотая заливка и белый текст (как в темах) - видно сразу.
             val canSend = inputState.text.isNotBlank() && !isSending && !isSelfChat
-            ApuTextAction(
-                label = stringResource(R.string.action_send),
-                onClick = onSend,
-                enabled = canSend,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            if (scheduled.isNotEmpty()) {
+                com.vladimir.messenger.ui.components.ScheduledSendBanner(
+                    items = scheduled,
+                    onCancel = onCancelScheduled,
+                )
+            }
+            var showSendOptions by remember { mutableStateOf(false) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ApuTextAction(
+                    label = stringResource(R.string.action_send),
+                    onClick = onSend,
+                    enabled = canSend,
+                    modifier = Modifier.weight(1f),
+                )
+                ApuTextAction(
+                    label = stringResource(R.string.send_more),
+                    onClick = { showSendOptions = true },
+                    enabled = canSend,
+                )
+            }
+            if (showSendOptions) {
+                com.vladimir.messenger.ui.components.SendOptionsDialog(
+                    onDismiss = { showSendOptions = false },
+                    onPick = { choice ->
+                        showSendOptions = false
+                        onSendChoice(choice)
+                    },
+                )
+            }
         }
     }
 }

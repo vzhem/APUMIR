@@ -86,6 +86,8 @@ object ChatPreviews {
      */
     fun human(raw: String?): String? {
         if (raw == null) return null
+        // Тихое сообщение: в списке и в уведомлении показываем сам текст.
+        if (QuietMessage.isQuiet(raw)) return human(QuietMessage.strip(raw))
         val t = raw.trim()
         // Ссылка на гифку (раунд 128): «APUGIFREF1|<sha256>».
         // Раунд 203: пересылка - шапка-источник вместо служебной строки.

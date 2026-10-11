@@ -1154,6 +1154,7 @@ class CoreServerService : Service() {
                         com.vladimir.messenger.util.ChatPreviews.human(row.content) ?: "Сообщение",
                         true,
                         null,
+                        quiet = com.vladimir.messenger.util.QuietMessage.isQuiet(row.content),
                     )
                 }
             }
@@ -1826,7 +1827,8 @@ class CoreServerService : Service() {
                                     ?.take(200) ?: "Фото"
                             }
                             notificationHelper.showMessageNotification(
-                                msg.chatId, msg.senderId, text, true, topicId
+                                msg.chatId, msg.senderId, text, true, topicId,
+                                quiet = com.vladimir.messenger.util.QuietMessage.isQuiet(msg.content),
                             )
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to show notification: ${e.message}")

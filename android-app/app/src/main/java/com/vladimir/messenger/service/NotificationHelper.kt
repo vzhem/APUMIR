@@ -52,10 +52,14 @@ class NotificationHelper @Inject constructor(
     suspend fun showMessageNotification(
         chatId: String,
         senderId: String,
-        messageText: String,
+        rawText: String,
         isIncoming: Boolean,
         topicId: String?,
+        /** Тихое сообщение (префикс в тексте): уведомление без звука и вибрации. */
+        quiet: Boolean = false,
     ) {
+        val messageText = com.vladimir.messenger.util.QuietMessage.strip(rawText)
+        val silent = quiet || com.vladimir.messenger.util.QuietMessage.isQuiet(rawText)
         android.util.Log.d("NotificationHelper", "showMessageNotification called: chatId=$chatId, senderId=${senderId.take(16)}, isIncoming=$isIncoming")
         if (!isIncoming) {
             android.util.Log.d("NotificationHelper", "Skipping notification (outgoing message)")
@@ -103,7 +107,8 @@ class NotificationHelper @Inject constructor(
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(if (silent) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_HIGH)
+            .setSilent(silent)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .build()

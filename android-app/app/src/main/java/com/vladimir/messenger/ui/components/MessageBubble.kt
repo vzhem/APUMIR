@@ -121,7 +121,7 @@ fun MessageBubble(
                 // строки (маркер + старая шапка) из тела убираем.
                 val fwdRef = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.parseRef(message.content) }
                 val showFwdHeader = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.hasHeader(message.content) }
-                val displayContent = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.stripHeader(message.content) }
+                val displayContent = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.stripHeader(com.vladimir.messenger.util.QuietMessage.strip(message.content)) }
                 if (!message.replyToId.isNullOrBlank()) {
                     MessageQuoteBlock(
                         author = message.replyAuthor,

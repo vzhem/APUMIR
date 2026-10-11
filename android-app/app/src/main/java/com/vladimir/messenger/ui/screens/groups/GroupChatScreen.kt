@@ -380,6 +380,24 @@ fun GroupChatScreen(
     }
     // Голосовое сообщение: запись и отправка тем же путём, что у файла.
     val voice = rememberVoiceRecorder { uri -> viewModel.onFileSelected(uri) }
+    var showSendOptions by remember { mutableStateOf(false) }
+    val storeContext = LocalContext.current
+    remember(Unit) { com.vladimir.messenger.data.schedule.ScheduledSendStore.load(storeContext) }
+    val scheduledAll by com.vladimir.messenger.data.schedule.ScheduledSendStore.items.collectAsStateWithLifecycle()
+    if (showSendOptions) {
+        com.vladimir.messenger.ui.components.SendOptionsDialog(
+            onDismiss = { showSendOptions = false },
+            onPick = { choice ->
+                showSendOptions = false
+                val at = choice.sendAtMs
+                if (at == null) {
+                    viewModel.send(uiState.draft, quiet = choice.quiet)
+                } else {
+                    viewModel.scheduleSend(storeContext, at, choice.quiet)
+                }
+            },
+        )
+    }
     val fwdScope = rememberCoroutineScope()
     val fwdCtx = androidx.compose.ui.platform.LocalContext.current
     // Раунд 203: подтверждение пересылки - плашка по центру экрана.
@@ -1354,13 +1372,29 @@ fun GroupChatScreen(
                 val slowWaitSeconds = (uiState.slowModeWaitMs + 999L) / 1000L
                 val canSend = (uiState.draft.isNotBlank() || uiState.stagedFile != null) &&
                     !uiState.sending && !uiState.isPreparingFile && slowWaitSeconds <= 0L
-                ApuPremiumButton(
-                    label = if (slowWaitSeconds > 0L) stringResource(R.string.slow_wait_seconds, slowWaitSeconds) else stringResource(R.string.action_send),
-                    onClick = { viewModel.send(uiState.draft) },
-                    style = DiagnosticsActionStyle.PRIMARY,
-                    enabled = canSend,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                val scheduledHere = scheduledAll.filter {
+                    it.isGroup && it.targetId == uiState.groupId && it.topicId == (uiState.selectedTopicId ?: "")
+                }
+                if (scheduledHere.isNotEmpty()) {
+                    com.vladimir.messenger.ui.components.ScheduledSendBanner(
+                        items = scheduledHere,
+                        onCancel = { id -> com.vladimir.messenger.worker.ScheduledSendWorker.cancel(storeContext, id) },
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ApuPremiumButton(
+                        label = if (slowWaitSeconds > 0L) stringResource(R.string.slow_wait_seconds, slowWaitSeconds) else stringResource(R.string.action_send),
+                        onClick = { viewModel.send(uiState.draft) },
+                        style = DiagnosticsActionStyle.PRIMARY,
+                        enabled = canSend,
+                        modifier = Modifier.weight(1f),
+                    )
+                    ApuTextAction(
+                        label = stringResource(R.string.send_more),
+                        onClick = { showSendOptions = true },
+                        enabled = canSend,
+                    )
+                }
                 // р250: включённый режим объясняем словами - иначе кажется,
                 // что приложение «не пускает» без причины.
                 if (uiState.slowModeSeconds > 0) {
@@ -2071,7 +2105,7 @@ private fun MessageBubble(
                     com.vladimir.messenger.util.InlineImage.extractB64(message.content)
                 }
                 val bodyText = remember(message.content, fileCard?.info) {
-                    val words = com.vladimir.messenger.util.InlineImage.stripImage(message.content)
+                    val words = com.vladimir.messenger.util.InlineImage.stripImage(com.vladimir.messenger.util.QuietMessage.strip(message.content))
                     // Раунд 203: маркер и шапку пересылки рисуем отдельно.
                     val clean = com.vladimir.messenger.util.ForwardMarker.stripHeader(words)
                     // Подпись «📎 имя (размер)» - для старых версий; здесь её

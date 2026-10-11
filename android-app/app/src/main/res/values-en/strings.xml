@@ -1545,4 +1545,14 @@ The file is not on this phone</string>
     <string name="voice_recording">Recording</string>
     <string name="voice_play">Play</string>
     <string name="voice_pause">Pause</string>
+    <string name="send_more">More</string>
+    <string name="send_options_title">Send options</string>
+    <string name="send_quiet_on">Silent: on</string>
+    <string name="send_quiet_off">Silent: off</string>
+    <string name="send_now">Send now</string>
+    <string name="send_in_15">In 15 minutes</string>
+    <string name="send_in_hour">In 1 hour</string>
+    <string name="send_tomorrow">Tomorrow at 9:00</string>
+    <string name="send_scheduled_at">Scheduled for %1$s</string>
+    <string name="send_scheduled_cancel">Cancel</string>
 </resources>
