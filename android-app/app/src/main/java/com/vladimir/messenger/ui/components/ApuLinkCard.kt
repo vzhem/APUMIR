@@ -72,3 +72,8 @@ fun ApuLinkCard(url: String, textColor: Color, modifier: Modifier = Modifier) {
         }
     }
 }
+
+private val LINK_IN_TEXT = Regex("""https?://[^\s<>"]+""")
+
+/** Первая ссылка в тексте сообщения (для карточки под текстом), либо null. */
+fun firstLinkIn(text: String): String? = LINK_IN_TEXT.find(text)?.value?.trimEnd('.', ',', ')', '!', '?')

@@ -163,6 +163,8 @@ import com.vladimir.messenger.ui.components.ApuPremiumContentButton
 import com.vladimir.messenger.ui.components.ApuPremiumButton
 import com.vladimir.messenger.ui.components.ApuPremiumChip
 import com.vladimir.messenger.ui.components.ApuHeaderButton
+import com.vladimir.messenger.ui.components.firstLinkIn
+import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ApuSkeletonChatFeed
 import com.vladimir.messenger.ui.components.apuGoldBrush
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
@@ -221,6 +223,9 @@ fun GroupChatScreen(
     // Открыта ли лента конкретной темы. Пока не открыта и темы есть —
     // показываем вертикальный список тем пузырями, как просил владелец.
     var showFeed by remember { mutableStateOf(uiState.startInTopic) }
+    // Поиск по ленте: группы с темами, группы без тем и комментарии канала.
+    var searchOpen by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
     // Раунд 143: заявки на вступление - пузырь над содержимым для админов.
     val joinRequests by viewModel.joinRequests.collectAsStateWithLifecycle()
     var showRequestsSheet by remember { mutableStateOf(false) }
@@ -694,6 +699,16 @@ fun GroupChatScreen(
                     )
                 },
                 actions = {
+                    if (!showTopicsList) {
+                        ApuHeaderButton(
+                            icon = Icons.Filled.Search,
+                            contentDescription = stringResource(R.string.action_search),
+                            onClick = {
+                                searchOpen = !searchOpen
+                                if (!searchOpen) searchQuery = ""
+                            },
+                        )
+                    }
                     ApuHeaderButton(
                         icon = Icons.Filled.Settings,
                         contentDescription = stringResource(R.string.group_chat_manage),
@@ -983,6 +998,24 @@ fun GroupChatScreen(
             // ── Лента темы
             // Раунд 144: при входе в тема открывается на первом непрочитанном
             // (или внизу, если всё прочитано), ниже - остальные непрочитанные.
+            // Строка поиска над лентой: фильтрует сообщения по тексту.
+            val shownMessages = remember(uiState.messages, searchQuery) {
+                if (searchQuery.isBlank()) uiState.messages
+                else uiState.messages.filter { m ->
+                    com.vladimir.messenger.util.ForwardMarker.stripHeader(m.content)
+                        .contains(searchQuery.trim(), ignoreCase = true)
+                }
+            }
+            if (searchOpen && !showTopicsList) {
+                ApuFormTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    label = stringResource(R.string.chat_search_in_chat),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
             LazyColumn(
                 state = feedListState,
                 // Раунд 151: лента сжимается над клавиатурой (edge-to-edge:
@@ -1018,7 +1051,7 @@ fun GroupChatScreen(
                         )
                     }
                 }
-                items(uiState.messages, key = { it.id }) { message ->
+                items(shownMessages, key = { it.id }) { message ->
                     Box(modifier = Modifier.fillMaxWidth().animateItem()) {
                     val card = remember(message.content) { GroupFileMarker.parse(message.content) }
                     val cardState = if (card == null) {
@@ -2079,6 +2112,17 @@ private fun MessageBubble(
                         )
                     bodyText.isBlank() && fileCard != null -> Unit
                     else -> Text(bodyText)
+                }
+                // Карточка первой ссылки под обычным текстом (не приглашение и не картинка).
+                val bubbleLink = remember(bodyText) { firstLinkIn(bodyText) }
+                if (bubbleLink != null && fileCard == null && imageUrl == null &&
+                    attachedBitmap == null && !com.vladimir.messenger.data.gif.GifLibrary.isGifRef(bodyText) &&
+                    com.vladimir.messenger.data.group.GroupInviteLinks.parseTarget(bubbleLink) == null
+                ) {
+                    com.vladimir.messenger.ui.components.ApuLinkCard(
+                        url = bubbleLink,
+                        textColor = bubbleTextColor,
+                    )
                 }
                 if (fileCard != null) {
                     // Долгое нажатие на самой картинке = меню пузыря

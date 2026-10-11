@@ -21,6 +21,8 @@ import com.vladimir.messenger.ui.components.ApuNotificationBadge
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuBubbleCard
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
+import com.vladimir.messenger.ui.components.ApuHeaderButton
+import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuAntiRatingInlineBadge
@@ -153,6 +155,9 @@ fun ChannelScreen(
     }
     // Раунд 213: «три точки» шапки + приглашение по QR коду.
     var showTopMenu by remember { mutableStateOf(false) }
+    // Поиск по постам канала: строка над лентой фильтрует заголовки и текст.
+    var searchOpen by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
     var showNotificationMuteDialog by remember { mutableStateOf(false) }
     var showQrInvite by remember { mutableStateOf(false) }
     var qrLink by remember { mutableStateOf<String?>(null) }
@@ -236,16 +241,28 @@ fun ChannelScreen(
                 actions = {
                     // Админ-кабинет канала - тот же, что у группы: участники,
                     // ссылки, заявки, статистика и разрешения.
+                    ApuHeaderButton(
+                        icon = Icons.Default.Search,
+                        contentDescription = stringResource(R.string.action_search),
+                        onClick = {
+                            searchOpen = !searchOpen
+                            if (!searchOpen) searchQuery = ""
+                        },
+                    )
                     if (uiState.canPost) {
-                        IconButton(onClick = { onOpenAdmin(uiState.channelId) }) {
-                            Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.channel_admin_cabinet))
-                        }
+                        ApuHeaderButton(
+                            icon = Icons.Default.Settings,
+                            contentDescription = stringResource(R.string.channel_admin_cabinet),
+                            onClick = { onOpenAdmin(uiState.channelId) },
+                        )
                     }
                     // «Три точки» канала: пауза уведомлений и приглашение по QR.
                     Box {
-                        IconButton(onClick = { showTopMenu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.chat_more))
-                        }
+                        ApuHeaderButton(
+                            icon = Icons.Default.MoreVert,
+                            contentDescription = stringResource(R.string.chat_more),
+                            onClick = { showTopMenu = true },
+                        )
                         ApuActionsMenu(
                             expanded = showTopMenu,
                             onDismiss = { showTopMenu = false },
@@ -573,6 +590,23 @@ fun ChannelScreen(
                         }
                     }
                 }
+                // Строка поиска по постам (заголовок и текст).
+                if (searchOpen) {
+                    ApuFormTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        label = stringResource(R.string.chat_search_in_chat),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                }
+                val shownPosts = remember(uiState.posts, searchQuery) {
+                    if (searchQuery.isBlank()) uiState.posts
+                    else uiState.posts.filter { p ->
+                        (p.title + " " + p.text).contains(searchQuery.trim(), ignoreCase = true)
+                    }
+                }
                 // Бегунок справа: в длинном списке видно, где мы находимся.
                 // Раунд 246: лента берёт остаток Column под закрепом.
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -590,7 +624,7 @@ fun ChannelScreen(
                         ),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        items(uiState.posts, key = { it.topicId }) { post ->
+                        items(shownPosts, key = { it.topicId }) { post ->
                             // Пост показался на экране - засчитываем просмотр.
                             // Повторные открытия счётчик не двигают: считаются
                             // разные читатели, а не показы.
@@ -1041,6 +1075,12 @@ private fun PostCard(
                     bodyText,
                     modifier = Modifier.padding(top = 8.dp),
                 )
+                com.vladimir.messenger.ui.components.firstLinkIn(bodyText)?.let { link ->
+                    com.vladimir.messenger.ui.components.ApuLinkCard(
+                        url = link,
+                        textColor = com.vladimir.messenger.ui.components.ApuBubbleTextColor,
+                    )
+                }
             }
             }
             // Файл поста (рой, этап 10): та же карточка, что в группе.
