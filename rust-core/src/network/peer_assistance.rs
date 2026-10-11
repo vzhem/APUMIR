@@ -391,6 +391,7 @@ mod tests {
     }
     fn addr(n: u8) -> SocketAddr { format!("8.8.4.{n}:7777").parse().unwrap() }
     fn enroll(a: &InstalledSigningIdentity, da: &PeerExchange, h: &InstalledSigningIdentity, dh: &PeerExchange, endpoint: SocketAddr, source: SocketAddr) {
+        da.wake(); // Each test explicitly enrolls another neighbour despite idle cooldown.
         let request = da.plan(a, Some(source), vec![Candidate { node_id: h.legacy_routing_node_id().into(), endpoint,
             learned_at_ms: NOW, live_connection: false }], &[], NOW).remove(0);
         da.bind_request(&request, BINDING, endpoint);
@@ -616,6 +617,7 @@ mod tests {
         }
         async fn hello(client: &Node, helper: &Node) {
             let now = crate::storage::models::now_ms();
+            client.directory.wake();
             let request = client.directory.plan(&client.id, None, vec![Candidate { node_id: helper.id.legacy_routing_node_id().into(),
                 endpoint: "8.8.8.8:7777".parse().unwrap(), learned_at_ms: now, live_connection: false }], &[], now).remove(0);
             let directory = Arc::clone(&client.directory); let id = Arc::clone(&client.id);

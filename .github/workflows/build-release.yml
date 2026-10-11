@@ -86,14 +86,16 @@ jobs:
           set -o pipefail
           for suite in helper_delivery peer_assistance peer_exchange direct_transport; do
             LOG="$RUNNER_TEMP/helper-$suite.log"
-            if ! RUST_LOG=warn cargo test --release --features mqtt-dual-broker --lib "network::$suite::tests" > "$LOG" 2>&1; then
+            if ! RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --features mqtt-dual-broker --lib "network::$suite::tests" > "$LOG" 2>&1; then
               tail -150 "$LOG"
               python3 - "$LOG" <<'PY'
           from pathlib import Path
           import sys
           text = "\n".join(Path(sys.argv[1]).read_text(errors="replace").splitlines()[-150:])
           text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-          print(f"::error title=Helper routing tests::{text}")
+          # Compiler warnings can exceed one annotation's size; preserve final diagnostics.
+          for i in range(0, len(text), 3000):
+              print(f"::error title=Helper routing tests part {i // 3000 + 1}::{text[i:i + 3000]}")
           PY
               exit 1
             fi
