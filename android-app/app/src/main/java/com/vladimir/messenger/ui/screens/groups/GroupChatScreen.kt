@@ -1,13 +1,6 @@
 package com.vladimir.messenger.ui.screens.groups
 
-// =============================================================================
-// GROUPCHATSCREEN.KT — чат группы: слева значки групп, справа темы пузырями
-// =============================================================================
-// Раскладка по требованию владельца (2026-08-31, как в мессенджере со
-// скриншота): после входа в группу слева остаётся вертикальная колонка
-// значков всех групп и каналов с бейджами непрочитанных, а справа темы
-// выбранной группы идут вертикальным списком, каждая в своём пузыре,
-// и у каждой — бейдж непрочитанных. Нажатие на тему открывает ленту.
+// Группа: горизонтальные темы под шапкой, переписка на всю ширину.
 
 import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import androidx.compose.ui.res.stringResource
@@ -61,6 +54,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import coil.compose.AsyncImage
@@ -772,36 +769,25 @@ fun GroupChatScreen(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                // Смахивание вправо: внутри темы - назад к списку тем,
-                // в списке тем и в группе без тем - назад к группам.
-                .swipeBack {
-                    if (hasTopics && showFeed) showFeed = false else onBackClick()
-                },
         ) {
-            Row(modifier = Modifier.fillMaxSize()) {
-
-            // ── Левая колонка. В списке тем — значки групп и каналов,
-            // а внутри открытой темы — значки тем текущей группы.
-            // Если тем нет, колонки тоже нет: просто чат на всю ширину.
-            if (hasTopics) {
-                if (showTopicsList) {
-                    GroupRail(
-                        groups = uiState.allGroups,
-                        currentGroupId = uiState.groupId,
-                        onGroupClick = onSwitchGroup,
-                        onChannelClick = onSwitchChannel,
-                    )
-                } else {
-                    TopicRail(
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (hasTopics) {
+                    TopicTabs(
                         topics = uiState.topics,
-                        currentTopicId = uiState.selectedTopicId,
-                        onTopicClick = { viewModel.selectTopic(it) },
+                        currentTopicId = if (showTopicsList) null else uiState.selectedTopicId,
+                        onTopicClick = {
+                            viewModel.selectTopic(it)
+                            showFeed = true
+                        },
+                        onAllClick = { showFeed = false },
+                        onCreateClick = if (uiState.canManageTopics) ({ showNewTopic = true }) else null,
                     )
                 }
-            }
-
-            // ── Правая часть: список тем пузырями либо лента выбранной темы.
-            Column(modifier = Modifier.weight(1f).fillMaxSize()) {
+                // Полоса тем вне swipeBack: её можно листать в обе стороны,
+                // в том числе на краю списка, не закрывая переписку.
+                Column(modifier = Modifier.weight(1f).fillMaxWidth().swipeBack {
+                    if (hasTopics && showFeed) showFeed = false else onBackClick()
+                }) {
 
             // Раунд 143: пузырь заявок - на главной группы/канала, в темах
             // и в комментариях; содержимое НЕ перекрывает (оно уезжает вниз).
@@ -1584,68 +1570,65 @@ private fun GroupRailAvatar(
     }
 }
 
-// =============================================================================
-// Левая колонка внутри открытой темы: значки тем текущей группы
-// =============================================================================
-
+/** Полоса тем не отнимает ширину у сообщений и поля ввода. */
 @Composable
-private fun TopicRail(
+private fun TopicTabs(
     topics: List<TopicSummary>,
     currentTopicId: String?,
     onTopicClick: (String) -> Unit,
+    onAllClick: () -> Unit,
+    onCreateClick: (() -> Unit)?,
 ) {
-    LazyColumn(
-        // Та же колонка-подложка, что у значков групп: один стиль на обе.
-        modifier = Modifier
-            .width(76.dp)
-            .fillMaxHeight()
-            .apuBubbleSurface(color = Color(0xFFF5F7FA).copy(alpha = 0.72f))
-            .apuPremiumThread(inset = 10.dp),
-        contentPadding = PaddingValues(vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    val state = rememberLazyListState()
+    val selectedIndex = topics.indexOfFirst { it.id == currentTopicId }
+    LaunchedEffect(currentTopicId, selectedIndex) {
+        if (selectedIndex >= 0) state.animateScrollToItem(selectedIndex)
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
+            .apuBubbleSurface().padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        items(topics, key = { it.id }) { topic ->
-            val selected = topic.id == currentTopicId
-            Box(
-                modifier = Modifier.clickable {
-                    if (!selected) onTopicClick(topic.id)
-                },
-            ) {
-                TopicRailIcon(topic = topic, selected = selected)
-                if (topic.unreadCount > 0) {
-                    Box(modifier = Modifier.align(Alignment.TopEnd)) {
-                        ApuNotificationBadge(topic.unreadCount)
-                    }
+        Text(
+            stringResource(R.string.group_all_topics),
+            color = if (currentTopicId == null) ApuBubbleAccentColor else ApuBubbleMutedColor,
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.clip(RoundedCornerShape(16.dp))
+                .selectable(selected = currentTopicId == null, role = Role.Tab, onClick = onAllClick)
+                .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 14.dp),
+        )
+        LazyRow(
+            state = state,
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            items(topics, key = { it.id }) { topic ->
+                val selected = topic.id == currentTopicId
+                Row(
+                    modifier = Modifier.widthIn(max = 220.dp).heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(if (selected) ApuBubbleAccentColor.copy(alpha = .16f) else Color.Transparent)
+                        .selectable(selected = selected, role = Role.Tab, onClick = { onTopicClick(topic.id) })
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    TopicIconView(topic.iconEmoji.ifBlank { TopicIconCatalog.DEFAULT }, 24.dp)
+                    Text(topic.name, modifier = Modifier.weight(1f, fill = false),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (selected) ApuBubbleAccentColor else ApuBubbleTextColor)
+                    if (topic.isClosed) Icon(Icons.Filled.Lock, stringResource(R.string.group_topic_closed_tab),
+                        modifier = Modifier.size(14.dp), tint = ApuBubbleMutedColor)
+                    ApuNotificationBadge(topic.unreadCount)
                 }
             }
         }
-    }
-}
-
-/** Кружок темы: её эмодзи, открытая тема обведена золотым. */
-@Composable
-private fun TopicRailIcon(topic: TopicSummary, selected: Boolean) {
-    // Выбранная тема: золотое кольцо и подъём, остальные - белое стекло.
-    Box(
-        modifier = Modifier
-            .size(52.dp)
-            .apuPremiumLift(if (selected) 5.dp else 2.dp, CircleShape)
-            .apuBubbleSurface(color = Color.White.copy(alpha = 0.92f), shape = CircleShape)
-            .then(
-                if (selected) {
-                    Modifier.border(2.dp, apuGoldBrush(), CircleShape)
-                } else {
-                    Modifier
-                }
-            )
-            .padding(2.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        TopicIconView(
-            topic.iconEmoji.ifBlank { TopicIconCatalog.DEFAULT },
-            30.dp,
-        )
+        if (onCreateClick != null) IconButton(onClick = onCreateClick) {
+            Icon(Icons.Filled.Add, stringResource(R.string.group_new_topic), tint = ApuBubbleAccentColor)
+        }
     }
 }
 

@@ -1581,4 +1581,6 @@
     <string name="story_next">Далее</string>
     <string name="story_background">Фон %1$d</string>
     <string name="story_lifetime">История доступна друзьям 24 часа</string>
+    <string name="group_all_topics">Все</string>
+    <string name="group_topic_closed_tab">Тема закрыта</string>
 </resources>
