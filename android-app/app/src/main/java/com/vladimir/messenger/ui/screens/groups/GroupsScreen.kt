@@ -426,19 +426,22 @@ fun GroupsScreen(
             },
             confirmButton = {
                 val target = uiState.joinedGroupId
+                val isChannel = uiState.joinedIsChannel
                 val postTopic = uiState.joinedPostTopicId
                 ApuTextAction(
                     label = when {
                             target == null -> stringResource(R.string.action_done)
                             postTopic != null -> stringResource(R.string.groups_open_post)
+                            isChannel -> stringResource(R.string.menu_open_channel)
                             else -> stringResource(R.string.menu_open_chat)
                         },
                     onClick = {
                         viewModel.consumeJoinResult()
                         if (target != null) {
-
                             if (postTopic != null) {
                                 onOpenPost(target, postTopic)
+                            } else if (isChannel) {
+                                onChannelClick(target)
                             } else {
                                 onGroupClick(target)
                             }

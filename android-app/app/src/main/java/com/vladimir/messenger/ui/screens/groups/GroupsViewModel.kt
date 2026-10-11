@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class GroupsUiState(
+    /** Все сообщества этого телефона: группы, свои каналы и подписки. */
     val groups: List<GroupSummary> = emptyList(),
     val filtered: List<GroupSummary> = emptyList(),
     val isLoading: Boolean = true,
@@ -35,6 +36,8 @@ data class GroupsUiState(
     val joinMessage: String? = null,
     /** Группа, в которую удалось войти: экран откроет её чат. */
     val joinedGroupId: String? = null,
+    /** Тип сообщества из результата входа, не зависит от задержки потоков Room. */
+    val joinedIsChannel: Boolean = false,
     /** Ссылка вела к конкретному посту канала - откроем сразу его. */
     val joinedPostTopicId: String? = null,
     /** Найдено в сети: чужие публичные группы и каналы из роевого каталога. */
@@ -71,12 +74,17 @@ class GroupsViewModel @Inject constructor(
 
     private fun observe() {
         viewModelScope.launch {
-            groupRepository.observeGroups().collect { groups ->
+            // GroupDao.observeGroups() исключает каналы. Ждём оба первых
+            // снимка и обновляем список при изменении любого из потоков.
+            CommunityList.observe(
+                groups = groupRepository.observeGroups(),
+                channels = groupRepository.observeChannels(),
+            ).collect { communities ->
                 _uiState.update { state ->
                     state.copy(
-                        groups = groups,
-                        filtered = filter(groups, state.searchQuery),
-                        directoryMatches = matchDirectory(state.searchQuery, groups),
+                        groups = communities,
+                        filtered = CommunityList.filter(communities, state.searchQuery),
+                        directoryMatches = matchDirectory(state.searchQuery, communities),
                         isLoading = false,
                     )
                 }
@@ -96,7 +104,7 @@ class GroupsViewModel @Inject constructor(
         _uiState.update { state ->
             state.copy(
                 searchQuery = query,
-                filtered = filter(state.groups, query),
+                filtered = CommunityList.filter(state.groups, query),
                 directoryMatches = matchDirectory(query, state.groups),
             )
         }
@@ -109,21 +117,8 @@ class GroupsViewModel @Inject constructor(
      * успела рассказать. Раньше пустой поиск не показывал ничего, и человек не
      * догадывался, что в APU вообще есть чужие публичные группы и каналы.
      */
-    private fun matchDirectory(query: String, groups: List<GroupSummary>): List<DirectoryEntity> {
-        val q = query.trim().lowercase()
-        val mine = groups.map { it.id }.toSet()
-        // Раунд 154: раздел называется «Открытые группы сети» - закрытые
-        // (вход по заявке) в нём не показываем, в т.ч. записи, разошедшиеся
-        // до фикса публикации. По ссылке из приглашения вход работает как
-        // раньше - скрыта только строка в общем поиске.
-        val available = latestDirectory.filter { it.groupId !in mine && !it.needsApproval }
-        if (q.isEmpty()) {
-            return available
-                .sortedByDescending { it.updatedAtMs }
-                .take(SUGGESTION_LIMIT)
-        }
-        return available.filter { it.title.lowercase().contains(q) }
-    }
+    private fun matchDirectory(query: String, communities: List<GroupSummary>): List<DirectoryEntity> =
+        CommunityList.directoryMatches(latestDirectory, communities, query)
 
     fun createGroup(
         title: String,
@@ -237,6 +232,7 @@ class GroupsViewModel @Inject constructor(
                     joining = true,
                     joinMessage = null,
                     joinedGroupId = null,
+                    joinedIsChannel = false,
                     joinedPostTopicId = null,
                 )
             }
@@ -264,6 +260,7 @@ class GroupsViewModel @Inject constructor(
                     it.copy(
                         joining = false,
                         joinedGroupId = outcome.groupId,
+                        joinedIsChannel = outcome.isChannel,
                         joinedPostTopicId = postTopicId,
                         joinMessage = joinedMessage(outcome),
                     )
@@ -284,17 +281,7 @@ class GroupsViewModel @Inject constructor(
     /** Экран забрал результат входа — убираем, чтобы не показать его дважды. */
     fun consumeJoinResult() {
         _uiState.update {
-            it.copy(joinMessage = null, joinedGroupId = null, joinedPostTopicId = null)
+            it.copy(joinMessage = null, joinedGroupId = null, joinedIsChannel = false, joinedPostTopicId = null)
         }
-    }
-
-    private fun filter(groups: List<GroupSummary>, query: String): List<GroupSummary> {
-        if (query.isBlank()) return groups
-        return groups.filter { it.title.contains(query, ignoreCase = true) }
-    }
-
-    companion object {
-        /** Сколько подсказок показываем при пустом поиске. */
-        private const val SUGGESTION_LIMIT = 12
     }
 }
