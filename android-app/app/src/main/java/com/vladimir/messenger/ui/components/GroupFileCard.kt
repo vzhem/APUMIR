@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Image as ImageIcon
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.MoreVert
+import com.vladimir.messenger.util.VoiceNote
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Save
@@ -176,6 +177,20 @@ fun GroupFileCard(
     messageActions: List<ApuAction> = emptyList(),
 ) {
     val info = state.info
+    // Голосовое (имя файла несёт волну) играем прямо в карточке; нужна локальная копия.
+    val voiceInfo = remember(info.displayName) { VoiceNote.parse(info.displayName) }
+    val voiceFile = state.previewFile
+    if (voiceInfo != null && voiceFile != null) {
+        VoiceFileCard(
+            state = state,
+            file = voiceFile,
+            info = voiceInfo,
+            isFromMe = isFromMe,
+            messageActions = messageActions,
+            onLongPress = onLongPress,
+        )
+        return
+    }
     val transfer = state.transfer
     val complete = transfer != null && transfer.direction == "INCOMING" && transfer.state == "COMPLETE"
     val previewPath = state.previewFile?.absolutePath

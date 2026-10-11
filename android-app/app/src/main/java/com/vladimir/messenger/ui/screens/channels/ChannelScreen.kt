@@ -740,6 +740,7 @@ fun ChannelScreen(
             preparingFile = uiState.isPreparingFile,
             onPickFile = { filePicker.launch(arrayOf("*/*")) },
             onClearFile = { viewModel.clearStagedFile() },
+            onVoiceReady = { uri -> viewModel.onFileSelected(uri) },
         )
     }
 
@@ -1331,8 +1332,11 @@ private fun PostEditorDialog(
     preparingFile: Boolean = false,
     onPickFile: (() -> Unit)? = null,
     onClearFile: () -> Unit = {},
+    /** Голосовое к посту: готовый файл с волной (content:// URI). */
+    onVoiceReady: ((android.net.Uri) -> Unit)? = null,
 ) {
     val pollContext = LocalContext.current
+    val voice = com.vladimir.messenger.ui.components.rememberVoiceRecorder { uri -> onVoiceReady?.invoke(uri) }
     var text by remember { mutableStateOf(initialText) }
     // Уже сжатые картинки (base64) по порядку.
     var images by remember { mutableStateOf(initialImages) }
@@ -1476,8 +1480,17 @@ private fun PostEditorDialog(
                                 Icon(Icons.Default.Close, contentDescription = stringResource(R.string.channel_remove_file), modifier = Modifier.size(16.dp))
                             }
                         }
+                    } else if (voice.recording) {
+                        com.vladimir.messenger.ui.components.VoiceRecordBar(voice)
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (onVoiceReady != null) {
+                                ApuTextAction(
+                                    label = stringResource(R.string.voice_record),
+                                    onClick = { voice.toggle() },
+                                    enabled = !preparingFile && !creating,
+                                )
+                            }
                             ApuTextAction(
                                 label = stringResource(R.string.channel_attach_file),
                                 onClick = onPickFile,

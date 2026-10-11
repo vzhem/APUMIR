@@ -2,6 +2,17 @@ package com.vladimir.messenger.ui.components
 
 import android.media.MediaPlayer
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.Column
@@ -14,6 +25,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -123,7 +135,7 @@ fun VoiceMessagePlayer(
                 }
             }
             Text(
-                formatSeconds(info.durationSec),
+                formatVoiceTime(info.durationSec),
                 style = MaterialTheme.typography.labelSmall,
                 color = textColor.copy(alpha = 0.7f),
             )
@@ -131,5 +143,99 @@ fun VoiceMessagePlayer(
     }
 }
 
-private fun formatSeconds(total: Int): String =
-    "%d:%02d".format(total / 60, total % 60)
+/** Время голоса «м:сс». */
+fun formatVoiceTime(total: Int): String = "%d:%02d".format(total / 60, total % 60)
+
+/**
+ * Голосовое в карточке файла: проигрыватель вместо пиктограммы и тот же
+ * значок «⋯» с действиями сообщения, что и у обычного файла.
+ */
+@Composable
+fun VoiceFileCard(
+    state: FileCardState,
+    file: File,
+    info: VoiceNote.Info,
+    isFromMe: Boolean,
+    messageActions: List<ApuAction>,
+    onLongPress: (() -> Unit)?,
+) {
+    var showActions by remember { mutableStateOf(false) }
+    val hasActions = state.onSave != null || state.onShare != null ||
+        state.onFavorite != null || messageActions.isNotEmpty()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp)
+            .then(
+                if (onLongPress != null) {
+                    Modifier.combinedClickable(onClick = {}, onLongClick = onLongPress)
+                } else {
+                    Modifier
+                },
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        VoiceMessagePlayer(
+            file = file,
+            info = info,
+            textColor = ApuBubbleTextColor,
+            modifier = Modifier.weight(1f),
+        )
+        if (hasActions) {
+            Box(
+                modifier = Modifier
+                    .padding(start = 6.dp)
+                    .size(32.dp)
+                    .apuBubbleSurface(shape = CircleShape)
+                    .clickable { showActions = true },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.MoreVert,
+                    contentDescription = stringResource(R.string.sv_actions),
+                    tint = ApuBubbleAccentColor,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            DropdownMenu(
+                expanded = showActions,
+                onDismissRequest = { showActions = false },
+            ) {
+                Column(
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .widthIn(min = 210.dp, max = 320.dp),
+                ) {
+                    state.onSave?.let { save ->
+                        ApuActionBubble(stringResource(R.string.ft_save_folder), Icons.Filled.Save) {
+                            showActions = false
+                            save()
+                        }
+                    }
+                    state.onShare?.let { share ->
+                        ApuActionBubble(stringResource(R.string.admin_share), Icons.Filled.Share) {
+                            showActions = false
+                            share()
+                        }
+                    }
+                    state.onFavorite?.let { favorite ->
+                        ApuActionBubble(stringResource(R.string.chat_file_to_saved), Icons.Filled.Star) {
+                            showActions = false
+                            favorite()
+                        }
+                    }
+                    messageActions.forEach { action ->
+                        ApuActionBubble(
+                            label = action.title,
+                            icon = action.icon,
+                            destructive = action.destructive,
+                        ) {
+                            showActions = false
+                            action.onClick()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
