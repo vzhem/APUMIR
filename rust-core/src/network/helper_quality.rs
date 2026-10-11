@@ -8,9 +8,11 @@ const HISTORY_TTL: Duration = Duration::from_secs(30 * 60);
 const REACHABLE_WINDOW: Duration = Duration::from_secs(120);
 const MAX_COOLDOWN: Duration = Duration::from_secs(60);
 const MAX_SAMPLE_MS: u64 = 10_000;
+const BUSY_TTL: Duration = Duration::from_secs(60);
+const MAX_BUSY: usize = 512;
 
 #[derive(Default)]
-pub struct HelperQuality { routes: HashMap<(String, String), Observation> }
+pub struct HelperQuality { routes: HashMap<(String, String), Observation>, busy: HashMap<String, Instant> }
 struct Observation {
     updated: Instant,
     success: Option<Instant>,
@@ -20,7 +22,20 @@ struct Observation {
 }
 
 impl HelperQuality {
+    /// A helper's own signed refusal is a hint about that helper only. It can lower priority
+    /// briefly, never raise it, and it never excludes the only available helper.
+    pub fn declined(&mut self, helper: &str, now: Instant) {
+        self.cleanup(now);
+        if !self.busy.contains_key(helper) && self.busy.len() >= MAX_BUSY {
+            if let Some(oldest) = self.busy.iter().min_by_key(|(key, at)| (**at, *key)).map(|(key, _)| key.clone()) {
+                self.busy.remove(&oldest);
+            }
+        }
+        self.busy.insert(helper.to_string(), now);
+    }
+
     pub fn cleanup(&mut self, now: Instant) {
+        self.busy.retain(|_, at| now.saturating_duration_since(*at) < BUSY_TTL);
         self.routes.retain(|_, value| now.saturating_duration_since(value.updated) < HISTORY_TTL);
     }
 
@@ -75,11 +90,12 @@ impl HelperQuality {
         self.cleanup(now);
         helpers.sort_by_key(|helper| {
             let value = self.routes.get(&(recipient.to_string(), helper.clone()));
-            let cooling = value.map(|v| v.retry_after > now).unwrap_or(false);
+            let busy = self.busy.contains_key(helper);
+            let cooling = busy || value.map(|v| v.retry_after > now).unwrap_or(false);
             // A completed cooldown forgives failure priority. Evidence expires in 30 min.
             let failures = if cooling { value.map(|v| v.failures).unwrap_or(0) } else { 0 };
             let latency = value.and_then(|v| v.latency_ms).unwrap_or(1500);
-            (cooling, failures, latency)
+            (busy, cooling, failures, latency)
         });
     }
 }
@@ -145,6 +161,27 @@ mod tests {
         assert_eq!(ordered(&mut q, "r", now), ["b", "c", "a"]);
         assert_eq!(ordered(&mut q, "r", now + Duration::from_secs(10)), ["a", "b", "c"]);
         assert_eq!(q.routes[&("r".into(), "a".into())].failures, 0);
+    }
+
+    #[test]
+    fn signed_refusal_demotes_one_helper_for_every_recipient_but_never_excludes_it() {
+        let now = Instant::now(); let mut q = HelperQuality::default();
+        q.accepted("r", "a", Duration::from_millis(1), now);
+        q.declined("a", now);
+        assert_eq!(ordered(&mut q, "r", now), ["b", "c", "a"]);
+        assert_eq!(ordered(&mut q, "other", now), ["b", "c", "a"]);
+        let mut only = vec!["a".to_string()]; q.order("r", &mut only, now);
+        assert_eq!(only, ["a"]);
+        assert_eq!(ordered(&mut q, "r", now + BUSY_TTL), ["a", "b", "c"]);
+        assert!(q.busy.is_empty());
+    }
+
+    #[test]
+    fn refusal_hints_are_bounded() {
+        let now = Instant::now(); let mut q = HelperQuality::default();
+        for n in 0..(MAX_BUSY + 3) { q.declined(&format!("h{n}"), now + Duration::from_millis(n as u64)); }
+        assert_eq!(q.busy.len(), MAX_BUSY);
+        assert!(!q.busy.contains_key("h0"));
     }
 
     #[test]

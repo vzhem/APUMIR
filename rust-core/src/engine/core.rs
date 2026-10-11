@@ -5183,13 +5183,19 @@ impl P2PCore {
                     let transport = transport.clone();
                     let assistance = Arc::clone(&assistance);
                     async move {
-                        assistance.leg_started(packet_id, &peer);
+                        let declined = assistance.leg_started(packet_id, &peer);
                         let factory: BoundFrameFactory = Arc::new(move |binding, _| peer_assistance::encode(
                             &identity, &destination, operation.clone(), binding, crate::storage::models::now_ms()));
                         // None forbids new arbitrary dials: only the existing peer channel.
                         let written = transport.send_bound(&peer, None, factory).await;
                         assistance.leg_written(packet_id, &peer, written);
-                        written
+                        if !written { return false; }
+                        // A signed refusal makes this leg fail now, so the reserve starts immediately.
+                        // Without refusal/receipt this stays pending until the shared deadline.
+                        match declined {
+                            Some(declined) => match declined.await { Ok(()) => false, Err(_) => std::future::pending::<bool>().await },
+                            None => true,
+                        }
                     }
                 }, HELPER_HEDGE_DELAY, HELPER_DELIVERY_BUDGET).await
             }).await.unwrap_or(false);

@@ -175,6 +175,9 @@ pub enum AssistOperation {
     Relay { packet: SealedPacket },
     Deliver { packet: SealedPacket },
     Receipt { receipt: Receipt },
+    /// Signed by the helper that refused one pending relay. N-1 nodes cannot parse this variant
+    /// and ignore it; the old sender then uses the existing hedge timer. It is only a demotion hint.
+    Decline { packet_id: [u8; 16] },
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -195,7 +198,7 @@ pub fn encode(identity: &InstalledSigningIdentity, peer: &str, operation: Assist
     (bytes.len() <= MAX_ASSIST_BYTES).then_some(bytes)
 }
 
-struct Leg { started: Instant, written: bool }
+struct Leg { started: Instant, written: bool, declined: Option<oneshot::Sender<()>> }
 struct Pending { recipient: HelperIdentity, digest: [u8; 32], expires: i64, tx: oneshot::Sender<bool>, legs: HashMap<String, Leg> }
 struct Received { digest: [u8; 32], expires: i64, receipt: Receipt }
 struct Route { origin: String, recipient: HelperIdentity, digest: [u8; 32], expires: i64 }
@@ -205,6 +208,7 @@ struct State {
     quality: HelperQuality,
     policy: HelperPolicy,
     transit_traffic: VecDeque<(usize, i64)>,
+    declines: VecDeque<i64>,
     routes: HashMap<(String, [u8; 16]), Route>,
     received: HashMap<(String, [u8; 16]), Received>,
     frames: VecDeque<([u8; 16], i64)>,
@@ -267,12 +271,13 @@ impl PeerAssistance {
     }
 
     /// Called in the polled leg, not when its future is merely constructed.
-    pub fn leg_started(&self, id: [u8; 16], helper: &str) {
-        if let Some(pending) = self.state.lock().unwrap().pending.get_mut(&id) {
-            if pending.legs.len() < 2 {
-                pending.legs.entry(helper.into()).or_insert(Leg { started: Instant::now(), written: false });
-            }
-        }
+    pub fn leg_started(&self, id: [u8; 16], helper: &str) -> Option<oneshot::Receiver<()>> {
+        let mut s = self.state.lock().unwrap();
+        let pending = s.pending.get_mut(&id)?;
+        if pending.legs.len() >= 2 || pending.legs.contains_key(helper) { return None; }
+        let (tx, rx) = oneshot::channel();
+        pending.legs.insert(helper.into(), Leg { started: Instant::now(), written: false, declined: Some(tx) });
+        Some(rx)
     }
 
     pub fn leg_written(&self, id: [u8; 16], helper: &str, written: bool) {
@@ -307,16 +312,24 @@ impl PeerAssistance {
         Ed25519KeyPair::verify(&c.signing_key, &canonical(FRAME_DOMAIN, &c)?, &signed.signature).ok()?;
         let mut s = self.state.lock().unwrap(); cleanup(&mut s, now);
         let new_transit = matches!(&c.operation, AssistOperation::Connect { .. } | AssistOperation::Relay { .. });
-        if new_transit && !s.policy.enabled { return None; }
-        // Receipts consume a matching pending/route exactly once; they need no separate
-        // replay slot. This lets already-admitted transit drain even at capacity or opt-out.
-        if !matches!(&c.operation, AssistOperation::Receipt { .. }) {
+        let mut effect = AssistanceEffect { sender: Some(c.from.clone()), ..AssistanceEffect::default() };
+        if new_transit && !s.policy.enabled {
+            if let AssistOperation::Relay { packet } = &c.operation {
+                // Do not verify/open the packet while opted out. The recipient of this hint accepts it
+                // only for its own live pending packet from this authenticated helper.
+                decline(&mut s, &mut effect, &c.from, packet.header.packet_id, now);
+                return Some(effect);
+            }
+            return None;
+        }
+        // Receipts and declines consume matching local state; they need no replay slot. This lets
+        // already-admitted transit drain even at capacity or opt-out.
+        if !matches!(&c.operation, AssistOperation::Receipt { .. } | AssistOperation::Decline { .. }) {
             if s.frames.iter().any(|(id, _)| id == &c.id) { return None; }
             let ceiling = if new_transit { MAX_ROUTES / 2 } else { MAX_ROUTES };
             if s.frames.len() >= ceiling { return None; }
             s.frames.push_back((c.id, now));
         }
-        let mut effect = AssistanceEffect { sender: Some(c.from.clone()), ..AssistanceEffect::default() };
         match c.operation {
             AssistOperation::Connect { target } => {
                 if target == c.from || target == c.to || !valid_node_id(&target) || s.controls.len() >= 30 { return None; }
@@ -342,14 +355,29 @@ impl PeerAssistance {
             AssistOperation::Relay { packet } => {
                 if !packet.verify(now) || packet.header.sender.claims.node_id != c.from
                     || packet.header.sender.claims.signing_key != c.signing_key || packet.header.recipient == c.to
-                    || s.routes.len() >= s.policy.max_routes || s.routes.contains_key(&(c.from.clone(), packet.header.packet_id)) { return None; }
+                    || s.routes.contains_key(&(c.from.clone(), packet.header.packet_id)) { return None; }
+                if s.routes.len() >= s.policy.max_routes {
+                    decline(&mut s, &mut effect, &c.from, packet.header.packet_id, now);
+                    return Some(effect);
+                }
                 let target = directory.authenticated_peer(&packet.header.recipient, now)?;
                 if target.identity.claims.signing_key != packet.header.recipient_signing_key
-                    || target.identity.claims.exchange_key != packet.header.recipient_exchange_key
-                    || !admit_transit(&mut s, &c.from, bytes.len(), now) { return None; }
+                    || target.identity.claims.exchange_key != packet.header.recipient_exchange_key { return None; }
+                if !admit_transit(&mut s, &c.from, bytes.len(), now) {
+                    decline(&mut s, &mut effect, &c.from, packet.header.packet_id, now);
+                    return Some(effect);
+                }
                 s.routes.insert((c.from.clone(), packet.header.packet_id), Route { origin: c.from, recipient: target.identity,
                     digest: packet.digest()?, expires: packet.header.expires_at_ms });
                 effect.outbound.push((packet.header.recipient.clone(), AssistOperation::Deliver { packet }));
+            }
+            AssistOperation::Decline { packet_id } => {
+                let Some(pending) = s.pending.get_mut(&packet_id) else { return None; };
+                let Some(leg) = pending.legs.get_mut(&c.from) else { return None; };
+                if !leg.written { return None; }
+                let Some(tx) = leg.declined.take() else { return None; };
+                let _ = tx.send(());
+                s.quality.declined(&c.from, Instant::now());
             }
             AssistOperation::Deliver { packet } => {
                 // Retries use real bandwidth too. Admission precedes expensive box opening
@@ -421,6 +449,12 @@ fn valid_inner(bytes: &[u8], sender: &str) -> bool {
     let Ok(text) = std::str::from_utf8(bytes) else { return false; };
     let parts: Vec<_> = text.splitn(4, '|').collect();
     parts.len() == 4 && parts[0] == sender && !parts[1].is_empty()
+}
+fn decline(s: &mut State, effect: &mut AssistanceEffect, origin: &str, packet_id: [u8; 16], now: i64) {
+    s.declines.retain(|at| now.saturating_sub(*at) < 60_000);
+    if s.declines.len() >= 30 || packet_id == [0; 16] { return; }
+    s.declines.push_back(now);
+    effect.outbound.push((origin.to_string(), AssistOperation::Decline { packet_id }));
 }
 fn admit_transit(s: &mut State, peer: &str, bytes: usize, now: i64) -> bool {
     let used: usize = s.transit_traffic.iter().map(|(bytes, _)| *bytes).sum();
@@ -708,9 +742,44 @@ mod tests {
         let target = HelperIdentity::create(&identity(2), NOW).unwrap();
         let packet = seal(&a, &target, format!("{}|m|c|text", a.legacy_routing_node_id()).as_bytes(), NOW).unwrap();
         let bytes = encode(&a, h.legacy_routing_node_id(), AssistOperation::Relay { packet }, BINDING, NOW).unwrap();
-        assert!(sh.handle(&h, &dh, &bytes, BINDING, addr(1), NOW).is_none());
+        let refusal = sh.handle(&h, &dh, &bytes, BINDING, addr(1), NOW).unwrap();
+        assert!(refusal.delivery.is_none() && refusal.probe.is_none());
+        assert!(matches!(refusal.outbound.as_slice(), [(origin, AssistOperation::Decline { .. })] if origin == a.legacy_routing_node_id()));
         let state = sh.state.lock().unwrap();
         assert!(state.routes.is_empty() && state.frames.is_empty() && state.transit_traffic.is_empty());
+    }
+
+    #[test]
+    fn signed_decline_only_changes_a_live_written_leg_and_speeds_reserve_without_poisoning_recipient() {
+        let a = identity(1); let b = identity(2); let h = identity(3); let j = identity(4);
+        let da = PeerExchange::open(None); let dh = PeerExchange::open(None);
+        enroll(&a, &da, &h, &dh, addr(3), addr(1));
+        enroll(&a, &da, &j, &PeerExchange::open(None), addr(4), addr(1));
+        let sa = Arc::new(PeerAssistance::new()); let sh = PeerAssistance::new();
+        sh.set_policy(false, 0, 0, 0);
+        let target = HelperIdentity::create(&b, NOW).unwrap();
+        let data = format!("{}|decline|chat|text", a.legacy_routing_node_id());
+        let (op, _receipt, id) = sa.prepare_relay(&a, &target, data.as_bytes(), NOW).unwrap();
+        let guard = sa.pending_guard(id);
+        let mut declined = sa.leg_started(id, h.legacy_routing_node_id()).unwrap();
+        let wire = encode(&a, h.legacy_routing_node_id(), op, BINDING, NOW).unwrap();
+        let reply = sh.handle(&h, &dh, &wire, BINDING, addr(1), NOW).unwrap().outbound.remove(0);
+        let wire = encode(&h, &reply.0, reply.1, BINDING, NOW).unwrap();
+        assert!(sa.handle(&a, &da, &wire, BINDING, addr(3), NOW).is_none(), "unwritten leg is not trusted yet");
+        assert!(declined.try_recv().is_err());
+        sa.leg_written(id, h.legacy_routing_node_id(), true);
+        let again = encode(&h, a.legacy_routing_node_id(), AssistOperation::Decline { packet_id: id }, BINDING, NOW).unwrap();
+        assert!(sa.handle(&a, &da, &again, BINDING, addr(3), NOW).is_some());
+        assert!(declined.try_recv().is_ok());
+        let mut order = vec![h.legacy_routing_node_id().to_string(), j.legacy_routing_node_id().to_string()];
+        sa.order_helpers(b.legacy_routing_node_id(), &mut order);
+        assert_eq!(order[0], j.legacy_routing_node_id());
+        let mut other = vec![h.legacy_routing_node_id().to_string(), "pk_00000000000000000000000000000000".to_string()];
+        sa.order_helpers("pk_11111111111111111111111111111111", &mut other);
+        assert_eq!(other[1], h.legacy_routing_node_id(), "a helper's own refusal is helper-scoped, not recipient failure");
+        let forged = encode(&j, a.legacy_routing_node_id(), AssistOperation::Decline { packet_id: id }, BINDING, NOW + 1).unwrap();
+        assert!(sa.handle(&a, &da, &forged, BINDING, addr(4), NOW + 1).is_none(), "another peer cannot decline this leg");
+        drop(guard);
     }
 
     #[test]
