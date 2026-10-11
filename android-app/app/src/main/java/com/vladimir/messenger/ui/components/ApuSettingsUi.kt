@@ -419,6 +419,7 @@ fun ApuSettingsDialog(
             Column(
                 modifier = modifier
                     .fillMaxWidth()
+                    .apuTapHaptics()
                     .heightIn(max = maxCard)
                     .apuPremiumLift(14.dp, shape, ApuPremiumShadowColor)
                     .clip(shape)

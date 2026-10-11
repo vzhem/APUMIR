@@ -73,6 +73,7 @@ fun ApuPremiumDialog(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .apuTapHaptics()
                 .heightIn(max = maxCard)
                 // Мягкая тень + глянец ПОД содержимым: текст и значки чёткие.
                 .apuPremiumLift(14.dp, shape, ApuPremiumShadowColor)
