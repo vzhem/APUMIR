@@ -84,6 +84,18 @@ import androidx.compose.material.icons.filled.Star
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import android.Manifest
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableIntStateOf
+import com.vladimir.messenger.data.voice.VoiceRecorder
+import com.vladimir.messenger.ui.components.VoiceMessagePlayer
+import com.vladimir.messenger.util.VoiceNote
+import kotlinx.coroutines.delay
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.LaunchedEffect
 import com.vladimir.messenger.util.GroupFileMarker
@@ -374,6 +386,44 @@ fun GroupChatScreen(
     // с указанием источника, что и в личном чате.
     var forwardPayload by remember {
         mutableStateOf<com.vladimir.messenger.ui.components.ForwardPayload?>(null)
+    }
+    // Голосовое: запись в файл, отправка тем же путём, что и любой файл (onFileSelected).
+    val voiceScope = rememberCoroutineScope()
+    val voiceContext = LocalContext.current
+    val voiceRecorder = remember { VoiceRecorder(voiceContext) }
+    var recording by remember { mutableStateOf(false) }
+    var recordSec by remember { mutableIntStateOf(0) }
+    LaunchedEffect(recording) {
+        recordSec = 0
+        while (recording) {
+            delay(1000)
+            recordSec++
+        }
+    }
+    DisposableEffect(voiceRecorder) {
+        onDispose { voiceRecorder.cancel() }
+    }
+    fun stopVoice() {
+        recording = false
+        val result = voiceRecorder.stop() ?: return
+        val uri = FileProvider.getUriForFile(voiceContext, "${voiceContext.packageName}.fileprovider", result.file)
+        viewModel.onFileSelected(uri)
+    }
+    fun cancelVoice() {
+        recording = false
+        voiceRecorder.cancel()
+    }
+    val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted && voiceRecorder.start(voiceScope)) recording = true
+    }
+    fun startVoice() {
+        val granted = ContextCompat.checkSelfPermission(voiceContext, Manifest.permission.RECORD_AUDIO) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!granted) {
+            micPermission.launch(Manifest.permission.RECORD_AUDIO)
+        } else if (voiceRecorder.start(voiceScope)) {
+            recording = true
+        }
     }
     val fwdScope = rememberCoroutineScope()
     val fwdCtx = androidx.compose.ui.platform.LocalContext.current
@@ -1293,6 +1343,20 @@ fun GroupChatScreen(
                                     )
                                 }
                             }
+                            IconButton(
+                                onClick = {
+                                    if (!uiState.canAttach) viewModel.onAttachLocked()
+                                    else if (recording) stopVoice() else startVoice()
+                                },
+                                enabled = !uiState.isPreparingFile && !uiState.sending,
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.Mic,
+                                    contentDescription = stringResource(R.string.voice_record),
+                                    tint = if (recording) Color(0xFFE5484D) else Color(0xFF5A6472),
+                                )
+                            }
                             ApuPremiumChip(
                                 label = "GIF",
                                 selected = false,
@@ -1309,6 +1373,25 @@ fun GroupChatScreen(
                                 },
                                 enabled = !uiState.isPreparingFile && !uiState.sending,
                             )
+                        }
+                    }
+                    if (recording) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(Modifier.size(8.dp).background(Color(0xFFE5484D), CircleShape))
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = stringResource(R.string.voice_recording) + " " + formatVoiceTime(recordSec),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = Color(0xFF5A6472),
+                            )
+                            Spacer(Modifier.weight(1f))
+                            TextButton(onClick = { cancelVoice() }) { Text(stringResource(R.string.voice_cancel)) }
+                            TextButton(onClick = { stopVoice() }) { Text(stringResource(R.string.voice_stop)) }
                         }
                     }
                     ApuBubbleField(
@@ -2124,7 +2207,22 @@ private fun MessageBubble(
                         textColor = bubbleTextColor,
                     )
                 }
-                if (fileCard != null) {
+                // Голосовое: имя файла несёт волну; играем, только когда локальная копия есть.
+                val voiceInfo = remember(fileCard?.info?.displayName) {
+                    fileCard?.info?.displayName?.let(VoiceNote::parse)
+                }
+                val voiceFile = fileCard?.previewFile
+                if (fileCard != null && voiceInfo != null && voiceFile != null) {
+                    VoiceMessagePlayer(
+                        file = voiceFile,
+                        info = voiceInfo,
+                        textColor = bubbleTextColor,
+                        modifier = Modifier.combinedClickable(
+                            onClick = {},
+                            onLongClick = { showMenu = true },
+                        ),
+                    )
+                } else if (fileCard != null) {
                     // Долгое нажатие на самой картинке = меню пузыря
                     // (реакции/закрепить): раньше область карточки
                     // «проглатывала» жест, и реакцию поставить не выходило.
@@ -2566,3 +2664,5 @@ private fun slowModeHint(seconds: Int, role: String?): String {
         stringResource(R.string.gc_slow_member, label)
     }
 }
+
+private fun formatVoiceTime(total: Int): String = "%d:%02d".format(total / 60, total % 60)

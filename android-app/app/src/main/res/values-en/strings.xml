@@ -1539,4 +1539,10 @@ The file is not on this phone</string>
     <string name="feedback_shot_failed">Some files could not be attached</string>
     <string name="link_preview_open">Open link</string>
     <string name="chat_search_in_chat">Search in chat</string>
+    <string name="voice_record">Voice message</string>
+    <string name="voice_stop">Send</string>
+    <string name="voice_cancel">Cancel</string>
+    <string name="voice_recording">Recording</string>
+    <string name="voice_play">Play</string>
+    <string name="voice_pause">Pause</string>
 </resources>
