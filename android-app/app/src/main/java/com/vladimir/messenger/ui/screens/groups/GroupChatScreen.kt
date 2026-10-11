@@ -1454,19 +1454,20 @@ private fun GroupRailAvatar(
     // отрисовке нельзя: десяток аватаров подряд подвешивал главный поток на
     // входе в группу и на возврате назад.
     val bmp = com.vladimir.messenger.ui.components.AvatarBitmaps.rememberAvatar(avatarB64)
+    // Выбранная группа: золотое кольцо и подъём, как у выбранной темы.
     Box(
         modifier = Modifier
             .size(52.dp)
+            .apuPremiumLift(if (selected) 5.dp else 2.dp, CircleShape)
+            .apuBubbleSurface(color = Color.White.copy(alpha = 0.92f), shape = CircleShape)
             .then(
                 if (selected) {
-                    Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                    Modifier.border(2.dp, apuGoldBrush(), CircleShape)
                 } else {
                     Modifier
                 }
             )
-            .padding(2.dp)
-            .clip(CircleShape)
-            .then(if (bmp == null) Modifier.background(Color(0xFFE8EEF5)) else Modifier),
+            .padding(2.dp),
         contentAlignment = Alignment.Center,
     ) {
         if (bmp != null) {

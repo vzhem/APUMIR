@@ -166,6 +166,7 @@ fun ApuPremiumChip(
     enabled: Boolean = true,
     icon: ImageVector? = null,
 ) {
+    val tap = rememberApuTap()
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val shape = RoundedCornerShape(50)
@@ -186,7 +187,7 @@ fun ApuPremiumChip(
                 indication = null,
                 enabled = enabled,
                 role = Role.Button,
-                onClick = onClick,
+                onClick = { tap(); onClick() },
             )
             .padding(horizontal = 14.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.Center,

@@ -38,6 +38,7 @@ fun ApuHeaderButton(
     enabled: Boolean = true,
     size: Dp = 40.dp,
 ) {
+    val tap = rememberApuTap()
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(
@@ -58,7 +59,7 @@ fun ApuHeaderButton(
                 indication = null,
                 enabled = enabled,
                 role = Role.Button,
-                onClick = onClick,
+                onClick = { tap(); onClick() },
             )
             .semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center,
