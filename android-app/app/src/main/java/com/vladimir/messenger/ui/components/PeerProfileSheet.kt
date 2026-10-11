@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -92,6 +93,8 @@ fun PeerProfileSheet(
     onRename: (() -> Unit)? = null,
     onCall: (() -> Unit)? = null,
     onCopyId: (() -> Unit)? = null,
+    /** Открыть историю собеседника; null - кнопки нет (историй нет). */
+    onStoryClick: (() -> Unit)? = null,
 ) {
     val avatars by AvatarStore.avatars.collectAsState()
 
@@ -363,12 +366,19 @@ fun PeerProfileSheet(
                     }
                 }
 
-                if (onRename != null || onCall != null) {
+                if (onRename != null || onCall != null || onStoryClick != null) {
                     Spacer(Modifier.height(12.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly,
                     ) {
+                        if (onStoryClick != null) {
+                            ApuTextAction(
+                                label = stringResource(R.string.story_open),
+                                onClick = onStoryClick,
+                                icon = Icons.Default.Star,
+                            )
+                        }
                         if (onCall != null) {
                             ApuTextAction(
                                 label = stringResource(R.string.menu_call),

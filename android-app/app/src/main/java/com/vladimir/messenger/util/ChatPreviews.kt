@@ -95,6 +95,8 @@ object ChatPreviews {
             ForwardMarker.parseRef(t)?.let { return "↩ Переслано из «" + it.label + "»" }
         }
         if (t.startsWith("APUGIFREF1|")) return GIF_LABEL
+        // История (APUSTORY1): в переписке не хранится, но предпросмотр не должен светить пакет.
+        if (t.startsWith(com.vladimir.messenger.data.story.StoryStore.PREFIX)) return "История"
         // Ранг собеседника (р246): едет в обёртке «печатает…», поэтому проверяем
         // его раньше - иначе в предпросмотре стояло бы чужое «печатает…».
         if (com.vladimir.messenger.data.rank.RankWire.isRankPacket(t)) return "знак VIP"

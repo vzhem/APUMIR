@@ -260,10 +260,33 @@ fun ChatDetailScreen(
     var showPeerProfile by remember { mutableStateOf(false) }
     var showNotificationMuteDialog by remember { mutableStateOf(false) }
 
+    // История собеседника: открывается из карточки профиля.
+    val storiesStore by com.vladimir.messenger.data.story.StoryStore.items.collectAsStateWithLifecycle()
+    var showPeerStories by remember { mutableStateOf(false) }
+    val peerStories = remember(storiesStore, contactId) {
+        com.vladimir.messenger.data.story.StoryStore.active()
+            .filter { it.authorId == contactId && !it.mine }
+            .sortedBy { it.createdAtMs }
+    }
+    if (showPeerStories && peerStories.isNotEmpty()) {
+        com.vladimir.messenger.ui.components.StoryViewerDialog(
+            stories = peerStories,
+            onDismiss = { showPeerStories = false },
+        )
+    }
+
     // Карточка собеседника поверх переписки.
     if (showPeerProfile) {
         PeerProfileSheet(
             name = contactName,
+            onStoryClick = if (peerStories.isNotEmpty()) {
+                {
+                    showPeerProfile = false
+                    showPeerStories = true
+                }
+            } else {
+                null
+            },
             contactId = contactId,
             isOnline = uiState.isContactOnline,
             // Знак и кольцо у профиля элиты: ранг собеседник сообщил сам.
@@ -669,8 +692,12 @@ fun ChatDetailScreen(
                     }
                     // Строка поиска: фильтрует ленту по тексту сообщений.
                     val shownRows = remember(chatRows, searchQuery) {
-                        if (searchQuery.isBlank()) chatRows
-                        else chatRows.filter { row ->
+                        // Истории не лежат в переписке: они открываются из профиля собеседника.
+                        val visible = chatRows.filterNot { row ->
+                            com.vladimir.messenger.data.story.StoryStore.isStoryPacket(row.message?.content)
+                        }
+                        if (searchQuery.isBlank()) visible
+                        else visible.filter { row ->
                             (row.message?.content ?: "").contains(searchQuery.trim(), ignoreCase = true)
                         }
                     }
