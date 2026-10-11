@@ -392,7 +392,7 @@ fun ChatListScreen(
                     val section = uiState.sections.getOrNull(page) ?: return@HorizontalPager
                     SectionPage(
                         section = section,
-                        onPublishStory = { text, bg -> viewModel.publishStory(text, bg) },
+                        onPublishStory = { text, bg, photo -> viewModel.publishStory(text, bg, photo) },
                         // Готовый список раздела, посчитанный в фоне. Раньше
                         // здесь шёл пересчёт прямо во время отрисовки - при
                         // сотнях чатов это подвешивало жест листания.
@@ -1014,7 +1014,7 @@ private fun InviteActionBubble(
 private fun SectionPage(
     section: InboxSection,
     /** Публикация своей истории (ViewModel списка чатов). */
-    onPublishStory: (String, Int) -> Unit = { _, _ -> },
+    onPublishStory: (String, Int, String?) -> Unit = { _, _, _ -> },
     items: List<InboxItem>,
     isSearchActive: Boolean,
     /**
@@ -1060,8 +1060,8 @@ private fun SectionPage(
     if (storyComposer) {
         com.vladimir.messenger.ui.components.StoryComposerDialog(
             onDismiss = { storyComposer = false },
-            onPublish = { text, bg ->
-                onPublishStory(text, bg)
+            onPublish = { text, bg, photo ->
+                onPublishStory(text, bg, photo)
                 storyComposer = false
             },
         )

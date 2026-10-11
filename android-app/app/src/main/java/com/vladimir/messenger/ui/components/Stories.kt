@@ -1,6 +1,16 @@
 package com.vladimir.messenger.ui.components
 
 import android.text.format.DateUtils
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.ContentScale
+import coil.compose.AsyncImage
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import android.util.Base64
+import com.vladimir.messenger.data.story.StoryPhoto
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -223,7 +233,13 @@ fun StoryViewerDialog(stories: List<StoryStore.Story>, onDismiss: () -> Unit) {
                     Crossfade(targetState = current, label = "story-content") { story ->
                         Box(Modifier.fillMaxSize().padding(28.dp),
                             contentAlignment = Alignment.Center) {
-                            Text(story.text, color = Color.White, fontSize = if (story.text.length > 120) 25.sp else 32.sp,
+                            if (story.photoB64 != null) {
+                                StoryPhotoView(story.photoB64, Modifier.fillMaxSize())
+                                if (story.text.isNotBlank()) Text(story.text, color = Color.White,
+                                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                                        .background(Color.Black.copy(alpha = .55f), RoundedCornerShape(16.dp)).padding(12.dp),
+                                    textAlign = TextAlign.Center, fontSize = 20.sp)
+                            } else Text(story.text, color = Color.White, fontSize = if (story.text.length > 120) 25.sp else 32.sp,
                                 lineHeight = if (story.text.length > 120) 34.sp else 42.sp,
                                 fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
                         }
@@ -280,9 +296,26 @@ private fun StoryNavigation(label: String, onClick: () -> Unit, modifier: Modifi
 
 /** Текст сразу редактируется на выбранном фоне — так же он выглядит у получателя. */
 @Composable
-fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int) -> Unit) {
+fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int, photoB64: String?) -> Unit) {
     var text by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
     var bg by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
+    // Do not put large photo bytes into the saved-instance Bundle.
+    var photo by remember { mutableStateOf<String?>(null) }
+    var preparing by remember { mutableStateOf(false) }
+    var photoError by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) scope.launch {
+            preparing = true
+            photoError = false
+            try {
+                photo = withContext(Dispatchers.IO) { StoryPhoto.prepare(context, uri) }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (_: Exception) { photoError = true }
+            finally { preparing = false }
+        }
+    }
     Dialog(onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Column(Modifier.fillMaxSize().background(Color(0xFF071426)).safeDrawingPadding().imePadding()) {
@@ -294,16 +327,28 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
             Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp)
                 .clip(RoundedCornerShape(24.dp)).background(storyBackgrounds[bg])
                 .padding(24.dp).verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) {
-                BasicTextField(value = text, onValueChange = { text = it.take(200) }, modifier = Modifier.fillMaxWidth(),
+                if (photo != null) StoryPhotoView(photo!!, Modifier.fillMaxSize())
+                BasicTextField(value = text, onValueChange = { text = it.take(200) }, modifier = Modifier.fillMaxWidth()
+                        .align(if (photo != null) Alignment.BottomCenter else Alignment.Center)
+                        .background(if (photo != null) Color.Black.copy(alpha = .5f) else Color.Transparent, RoundedCornerShape(16.dp))
+                        .padding(8.dp),
                     textStyle = TextStyle(color = Color.White, fontSize = if (text.length > 120) 25.sp else 32.sp,
                         fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center), cursorBrush = SolidColor(storyGold),
                     decorationBox = { inner ->
-                        if (text.isEmpty()) Text(stringResource(R.string.story_placeholder), color = Color.White.copy(alpha = .6f),
+                        if (text.isEmpty()) Text(stringResource(if (photo != null) R.string.story_caption else R.string.story_placeholder), color = Color.White.copy(alpha = .6f),
                             fontSize = 26.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
                         inner()
                     })
             }
             Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ApuPremiumButton(stringResource(R.string.story_choose_photo), { picker.launch("image/*") },
+                        enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
+                    if (photo != null) ApuPremiumButton(stringResource(R.string.story_remove_photo), { photo = null },
+                        enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
+                }
+                if (preparing) Text(stringResource(R.string.story_photo_preparing), color = Color.White)
+                if (photoError) Text(stringResource(R.string.story_photo_failed), color = Color.White)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         storyBackgrounds.forEachIndexed { i, brush ->
@@ -317,8 +362,8 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                 }
                 Text(stringResource(R.string.story_lifetime), color = Color.White.copy(alpha = .7f),
                     style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp), textAlign = TextAlign.Center)
-                ApuPremiumButton(label = stringResource(R.string.story_publish), onClick = { onPublish(text.trim(), bg) },
-                    enabled = text.isNotBlank(), style = DiagnosticsActionStyle.PRIMARY, modifier = Modifier.fillMaxWidth())
+                ApuPremiumButton(label = stringResource(R.string.story_publish), onClick = { onPublish(text.trim(), bg, photo) },
+                    enabled = !preparing && (text.isNotBlank() || photo != null), style = DiagnosticsActionStyle.PRIMARY, modifier = Modifier.fillMaxWidth())
             }
         }
     }
@@ -326,3 +371,10 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
 
 private fun Modifier.storyBackgroundSemantics(label: String, isSelected: Boolean): Modifier =
     semantics { contentDescription = label; selected = isSelected }
+
+@Composable
+private fun StoryPhotoView(b64: String, modifier: Modifier) {
+    val bytes = remember(b64) { runCatching { Base64.decode(b64, Base64.DEFAULT) }.getOrNull() }
+    AsyncImage(model = bytes, contentDescription = stringResource(R.string.story_photo),
+        modifier = modifier, contentScale = ContentScale.Fit)
+}

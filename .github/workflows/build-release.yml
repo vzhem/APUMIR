@@ -166,7 +166,7 @@ jobs:
         working-directory: ./android-app
         run: |
           set +e
-          ./gradlew :app:testReleaseUnitTest --tests 'com.vladimir.messenger.ui.components.StoryPlaybackTest' --tests 'com.vladimir.messenger.ui.screens.groups.CommunityListTest' --no-daemon >> "$RUNNER_TEMP/gradle-build.log" 2>&1
+          ./gradlew :app:testReleaseUnitTest --tests 'com.vladimir.messenger.ui.components.StoryPlaybackTest' --tests 'com.vladimir.messenger.ui.screens.groups.CommunityListTest' --tests 'com.vladimir.messenger.data.story.StoryPhotoPartsTest' --no-daemon >> "$RUNNER_TEMP/gradle-build.log" 2>&1
           status=$?
           tail -100 "$RUNNER_TEMP/gradle-build.log"
           exit "$status"

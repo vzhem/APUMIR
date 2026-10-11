@@ -1583,4 +1583,10 @@
     <string name="story_lifetime">История доступна друзьям 24 часа</string>
     <string name="group_all_topics">Все</string>
     <string name="group_topic_closed_tab">Тема закрыта</string>
+    <string name="story_photo">Фото истории</string>
+    <string name="story_choose_photo">Выбрать фото</string>
+    <string name="story_remove_photo">Убрать фото</string>
+    <string name="story_caption">Подпись (необязательно)</string>
+    <string name="story_photo_preparing">Подготавливаем фото…</string>
+    <string name="story_photo_failed">Не удалось открыть фото. Выберите другое.</string>
 </resources>

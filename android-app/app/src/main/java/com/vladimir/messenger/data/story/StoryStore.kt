@@ -26,7 +26,10 @@ object StoryStore {
         val bg: Int,
         val createdAtMs: Long,
         val mine: Boolean,
+        val photoB64: String? = null,
     )
+
+    private val photoParts = StoryPhotoParts()
 
     private const val PREFS = "stories"
     private const val KEY = "items"
@@ -78,11 +81,19 @@ object StoryStore {
         if (!isStoryPacket(content)) return false
         val story = runCatching {
             val o = JSONObject(content!!.removePrefix(PREFIX))
+            val ts = o.getLong("ts")
+            val now = System.currentTimeMillis()
+            if (ts < now - LIFETIME_MS || ts > now + 300_000) return true
+            val photo = if (o.optString("kind") == "photo") {
+                photoParts.receive(authorId, o.getString("id"), o.getInt("part"), o.getInt("total"),
+                    o.getString("data"), now) ?: return true
+            } else null
             Story(
+                photoB64 = photo,
                 id = o.getString("id"),
                 authorId = authorId,
                 authorName = o.optString("name", authorName).ifBlank { authorName },
-                text = o.getString("text"),
+                text = o.getString("text").take(200),
                 bg = o.optInt("bg", 0).coerceIn(0, BG_COUNT - 1),
                 createdAtMs = o.getLong("ts"),
                 mine = false,
@@ -94,7 +105,8 @@ object StoryStore {
     }
 
     /** Создать свою историю (текст, фон) и вернуть её для рассылки. */
-    fun publish(authorId: String, text: String, bg: Int): Story {
+    fun publish(authorId: String, text: String, bg: Int, photoB64: String? = null): Story {
+        require(photoB64 == null || photoB64.length <= StoryPhotoParts.MAX_SIZE)
         val story = Story(
             id = java.util.UUID.randomUUID().toString(),
             authorId = authorId,
@@ -103,6 +115,7 @@ object StoryStore {
             bg = bg.coerceIn(0, BG_COUNT - 1),
             createdAtMs = System.currentTimeMillis(),
             mine = true,
+            photoB64 = photoB64,
         )
         add(story)
         return story
@@ -117,12 +130,26 @@ object StoryStore {
         .put("ts", story.createdAtMs)
         .toString()
 
+    /** Small packets fit relay transport; all retain the hidden story prefix. */
+    fun encodePackets(story: Story): List<String> {
+        val photo = story.photoB64 ?: return listOf(encode(story))
+        val chunks = photo.chunked(StoryPhotoParts.CHUNK)
+        return chunks.mapIndexed { index, chunk ->
+            val json = JSONObject(encode(story).removePrefix(PREFIX))
+                .put("kind", "photo").put("part", index).put("total", chunks.size).put("data", chunk)
+            PREFIX + json.toString()
+        }
+    }
+
     private fun add(story: Story) {
         synchronized(lock) {
             val now = System.currentTimeMillis()
             val kept = _items.value
                 .filter { now - it.createdAtMs < LIFETIME_MS && it.id != story.id }
-            save(kept + story)
+            save((kept + story).takeLast(100).let { list ->
+                val photos = list.filter { it.photoB64 != null }.takeLast(30).map { it.id }.toSet()
+                list.filter { it.photoB64 == null || it.id in photos }
+            })
         }
     }
 
@@ -145,7 +172,8 @@ object StoryStore {
                     .put("text", s.text)
                     .put("bg", s.bg)
                     .put("ts", s.createdAtMs)
-                    .put("mine", s.mine),
+                    .put("mine", s.mine)
+                    .put("photo", s.photoB64),
             )
         }
         return array.toString()
@@ -165,6 +193,7 @@ object StoryStore {
                     bg = o.optInt("bg", 0),
                     createdAtMs = o.getLong("ts"),
                     mine = o.optBoolean("mine", false),
+                    photoB64 = o.optString("photo").takeIf { it.isNotBlank() && it != "null" && it.length <= StoryPhotoParts.MAX_SIZE },
                 )
             }
         }.getOrDefault(emptyList())
