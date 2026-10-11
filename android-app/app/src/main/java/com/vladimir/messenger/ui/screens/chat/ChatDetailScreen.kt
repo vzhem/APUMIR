@@ -8,6 +8,7 @@ import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
 import com.vladimir.messenger.ui.components.ApuHeaderIconBubble
+import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.ApuVipBadge
@@ -116,6 +117,9 @@ fun ChatDetailScreen(
         }
     }
     val listState = rememberLazyListState()
+    // Поиск внутри чата: кнопка в шапке открывает строку над лентой.
+    var searchOpen by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
     var activeMessage by remember { mutableStateOf<Message?>(null) }
     var showCopyDialog by remember { mutableStateOf<Message?>(null) }
     // Раунд 203: «Поделиться в APU» - пересылка с указанием источника.
@@ -387,6 +391,15 @@ fun ChatDetailScreen(
                     }
                 },
                 actions = {
+                    ApuHeaderIconBubble(
+                        onClick = {
+                            searchOpen = !searchOpen
+                            if (!searchOpen) searchQuery = ""
+                        },
+                        contentDescription = stringResource(R.string.action_search),
+                    ) {
+                        Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     if (contactId.isNotBlank()) {
                         ApuHeaderIconBubble(
                             onClick = { onRenameClick(contactId, contactName) },
@@ -625,6 +638,23 @@ fun ChatDetailScreen(
                             }
                         }
                     }
+                    // Строка поиска: фильтрует ленту по тексту сообщений.
+                    val shownRows = remember(chatRows, searchQuery) {
+                        if (searchQuery.isBlank()) chatRows
+                        else chatRows.filter { row ->
+                            (row.message?.content ?: "").contains(searchQuery.trim(), ignoreCase = true)
+                        }
+                    }
+                    if (searchOpen) {
+                        ApuFormTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            label = stringResource(R.string.chat_search_in_chat),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                        )
+                    }
                     LazyColumn(
                         state          = listState,
                         // Раунд 246: лента занимает остаток Column под закрепом.
@@ -633,7 +663,7 @@ fun ChatDetailScreen(
                         reverseLayout  = false,
                     ) {
                         items(
-                            items = chatRows,
+                            items = shownRows,
                             key   = { it.key },
                         ) { row ->
                             Box(modifier = Modifier.fillMaxWidth().animateItem()) {
