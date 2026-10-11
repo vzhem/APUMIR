@@ -74,7 +74,13 @@ UniFFI, APK и выбранные Android tests прошли. APK 95 070 071 byt
 Проверки: 7 quality + 7 race + 9 assistance + 14 exchange + 9 direct transport tests
 в release gate прошли; локально нет Rust toolchain/Android device.
 
-Подэтап 2b — кандидат v11.74.328, пока не опубликован:
+Подэтап 2b — опубликован для всех v11.74.328 (Latest):
+Release 38162612464 и Core 38162636775 — success. 1 policy + 7 quality + 7 race +
+11 assistance + 14 exchange + 9 direct transport tests в release gate; сборка трёх ABI,
+генерация UniFFI, APK и выбранные Android tests (включая OnlineHelperPolicyTest) прошли.
+Generated Kotlin SHA-256 prefix: `990d41b7651a9e6a`. APK 95 090 551 bytes,
+GitHub asset digest `a53b22ea07ed4550a82d2cf7c62f4aa5dfdc6848a5d14d8d63520d690f0c7197`.
+Локально APK не скачивался для независимого пересчёта; phone/battery tests не проводились.
 - отдельное сохранённое разрешение online_helper_enabled (on для совместимости
   с предыдущим автоматическим участием), RU/EN переключатель в «Раздаче»;
 - Android применяет policy через UniFFI ДО start(), включая worker wake, обновляет
@@ -96,7 +102,7 @@ UniFFI, APK и выбранные Android tests прошли. APK 95 070 071 byt
   cache при переводе системных часов назад и опасный fallback на старый UniFFI bridge
   при сбое генератора (теперь release fails closed).
 Проверки: source guards (3 online helper, 15 settings, 7 startup) и unresolved symbols
-522 Kotlin files прошли локально; native/Android/JUnit — ожидается GitHub CI.
+522 Kotlin files прошли локально; native/Android/JUnit — GitHub CI success, как указано выше.
 
 Далее: отдельные подписанные capability cards с совместимостью старых клиентов;
 новые объявления никогда не отменяют локальный admission. Полный приоритет своих
@@ -125,4 +131,19 @@ SDK: не редактировать generated binding вручную и не с
 Для локальной сборки Windows: `./build-rust.ps1` (все три ABI по умолчанию), затем Gradle;
 Linux/macOS: `bash build-rust.sh` (все три ABI). Оба скрипта регенерируют мост из UDL.
 При `-Arch` только одного ABI остальные tracked .so остаются старыми — такой APK не
-распространять. Local scripts проверены статически, без локального NDK/PowerShell.
+распространять. Bash script: mock 3 ABI + UDL generation + failure propagation — PASS.
+PowerShell проверен статически; локального NDK/PowerShell нет.
+
+## Исправления после 328 (ещё не входят в APK)
+
+- TCP diagnostics больше не режет UTF-8 по произвольному byte offset и не пишет
+  содержимое сообщений в лог (057fabb). Старый `&text[..text.len().min(100)]`
+  мог паниковать на кириллице/эмодзи. Source regression guard проходит; проверка
+  ядра запущена для ветки, выпуск с этим исправлением — следующий номер 329.
+- Локальные native build scripts теперь синхронно генерируют Kotlin bridge и
+  по умолчанию обновляют все три ABI (a9f1aeb); приложение 328 собрано отдельным
+  release pipeline и от этих локальных скриптов не зависит.
+
+Этап 2 ещё НЕ завершён: capability cards, их freshness/replay/session validation,
+N-1 fallback и дальнейшая fairness/own-message scheduling требуют следующего подэтапа.
+Только затем переходить к реализации content swarm этапа 3.
