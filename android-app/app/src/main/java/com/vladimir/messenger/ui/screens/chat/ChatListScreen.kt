@@ -141,26 +141,6 @@ fun ChatListScreen(
     viewModel: ChatListViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val storiesAll by com.vladimir.messenger.data.story.StoryStore.items.collectAsStateWithLifecycle()
-    val storiesNow = remember(storiesAll) { com.vladimir.messenger.data.story.StoryStore.active() }
-    var storyComposer by remember { mutableStateOf(false) }
-    var storyOpenAuthor by remember { mutableStateOf<String?>(null) }
-    if (storyComposer) {
-        com.vladimir.messenger.ui.components.StoryComposerDialog(
-            onDismiss = { storyComposer = false },
-            onPublish = { text, bg ->
-                viewModel.publishStory(text, bg)
-                storyComposer = false
-            },
-        )
-    }
-    storyOpenAuthor?.let { authorId ->
-        com.vladimir.messenger.ui.components.StoryViewerDialog(
-            stories = storiesAll.filter { it.authorId == authorId && System.currentTimeMillis() - it.createdAtMs < com.vladimir.messenger.data.story.StoryStore.LIFETIME_MS }
-                .sortedBy { it.createdAtMs },
-            onDismiss = { storyOpenAuthor = null },
-        )
-    }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     var isSearchVisible by remember { mutableStateOf(false) }
 
@@ -412,6 +392,7 @@ fun ChatListScreen(
                     val section = uiState.sections.getOrNull(page) ?: return@HorizontalPager
                     SectionPage(
                         section = section,
+                        onPublishStory = { text, bg -> viewModel.publishStory(text, bg) },
                         // Готовый список раздела, посчитанный в фоне. Раньше
                         // здесь шёл пересчёт прямо во время отрисовки - при
                         // сотнях чатов это подвешивало жест листания.
@@ -1032,6 +1013,8 @@ private fun InviteActionBubble(
 @Composable
 private fun SectionPage(
     section: InboxSection,
+    /** Публикация своей истории (ViewModel списка чатов). */
+    onPublishStory: (String, Int) -> Unit = { _, _ -> },
     items: List<InboxItem>,
     isSearchActive: Boolean,
     /**
@@ -1069,6 +1052,27 @@ private fun SectionPage(
     /** Прокрутка подошла к концу загруженного - пора досыпать страницу. */
     onLoadMore: () -> Unit = {},
 ) {
+    val storiesAll by com.vladimir.messenger.data.story.StoryStore.items.collectAsStateWithLifecycle()
+    val storiesNow = remember(storiesAll) { com.vladimir.messenger.data.story.StoryStore.active() }
+    val showStories = section == InboxSection.All || section == InboxSection.Chats
+    var storyComposer by remember { mutableStateOf(false) }
+    var storyOpenAuthor by remember { mutableStateOf<String?>(null) }
+    if (storyComposer) {
+        com.vladimir.messenger.ui.components.StoryComposerDialog(
+            onDismiss = { storyComposer = false },
+            onPublish = { text, bg ->
+                onPublishStory(text, bg)
+                storyComposer = false
+            },
+        )
+    }
+    storyOpenAuthor?.let { authorId ->
+        com.vladimir.messenger.ui.components.StoryViewerDialog(
+            stories = storiesAll.filter { it.authorId == authorId && System.currentTimeMillis() - it.createdAtMs < com.vladimir.messenger.data.story.StoryStore.LIFETIME_MS }
+                .sortedBy { it.createdAtMs },
+            onDismiss = { storyOpenAuthor = null },
+        )
+    }
     val openAdmin = section == InboxSection.AdminGroups ||
         section == InboxSection.AdminChannels
     // «Избранное» ведёт на отдельное личное хранилище, поэтому логично живёт
@@ -1210,7 +1214,7 @@ private fun SectionPage(
                     contentPadding = PaddingValues(top = 4.dp, bottom = 88.dp),
                 ) {
                     // Истории: полоса сверху ленты.
-                    item(key = "stories") {
+                    if (showStories) item(key = "stories") {
                         com.vladimir.messenger.ui.components.StoriesStrip(
                             stories = storiesNow,
                             onAddClick = { storyComposer = true },

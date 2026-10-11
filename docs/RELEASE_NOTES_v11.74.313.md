@@ -1,4 +1,4 @@
-# APU v11.74.312 — Истории и голосовые в личных чатах
+# APU v11.74.313 — Истории и голосовые в личных чатах
 
 Появились истории и голосовые сообщения в личной переписке.
 
@@ -8,4 +8,4 @@
 
 Известные ограничения: истории текстовые и доходят только до контактов, которые сейчас в сети; голосовые в личном чате можно слушать на устройстве, где они записаны, и на устройстве получателя после загрузки.
 
-[Скачать APK](https://github.com/vzhem/APUMIR/releases/download/v11.74.312/app-release.apk) · [SHA-256](https://github.com/vzhem/APUMIR/releases/download/v11.74.312/SHA256SUMS.txt)
+[Скачать APK](https://github.com/vzhem/APUMIR/releases/download/v11.74.313/app-release.apk) · [SHA-256](https://github.com/vzhem/APUMIR/releases/download/v11.74.313/SHA256SUMS.txt)
