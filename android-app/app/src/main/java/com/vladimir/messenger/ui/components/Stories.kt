@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
@@ -147,16 +148,21 @@ private fun StoryBubble(title: String, avatar: String?, viewed: List<Boolean>, o
 /** Полноэкранный просмотр: удержание останавливает таймер; фон приложения — тоже. */
 @Composable
 fun StoryViewerDialog(stories: List<StoryStore.Story>, onDismiss: () -> Unit) {
-    if (stories.isEmpty()) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) { delay(1_000); now = System.currentTimeMillis() }
+    }
+    val activeStories = stories.filter { now - it.createdAtMs < StoryStore.LIFETIME_MS }
+    if (activeStories.isEmpty()) {
         LaunchedEffect(Unit) { onDismiss() }
         return
     }
-    val authorId = stories.first().authorId
+    val authorId = activeStories.first().authorId
     var selectedId by remember(authorId) {
-        mutableStateOf(stories.firstOrNull { !it.mine && it.id !in StoryStore.seen.value }?.id ?: stories.first().id)
+        mutableStateOf(activeStories.firstOrNull { !it.mine && it.id !in StoryStore.seen.value }?.id ?: activeStories.first().id)
     }
-    val index = stories.indexOfFirst { it.id == selectedId }.coerceAtLeast(0)
-    val current = stories[index]
+    val index = activeStories.indexOfFirst { it.id == selectedId }.coerceAtLeast(0)
+    val current = activeStories[index]
     var progress by remember(current.id) { mutableFloatStateOf(0f) }
     var held by remember(current.id) { mutableStateOf(false) }
     var userPaused by remember(authorId) { mutableStateOf(false) }
@@ -170,8 +176,8 @@ fun StoryViewerDialog(stories: List<StoryStore.Story>, onDismiss: () -> Unit) {
         onDispose { owner.lifecycle.removeObserver(observer) }
     }
     val avatars by AvatarStore.avatars.collectAsStateWithLifecycle()
-    val previous: () -> Unit = { if (index > 0) selectedId = stories[index - 1].id else progress = 0f }
-    val next: () -> Unit = { if (index < stories.lastIndex) selectedId = stories[index + 1].id else onDismiss() }
+    val previous: () -> Unit = { if (index > 0) selectedId = activeStories[index - 1].id else progress = 0f }
+    val next: () -> Unit = { if (index < activeStories.lastIndex) selectedId = activeStories[index + 1].id else onDismiss() }
     val nextNow by rememberUpdatedState(next)
     val previousNow by rememberUpdatedState(previous)
     val dismissNow by rememberUpdatedState(onDismiss)
@@ -249,7 +255,7 @@ fun StoryViewerDialog(stories: List<StoryStore.Story>, onDismiss: () -> Unit) {
                     .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = .4f), Color.Transparent)))
                     .padding(horizontal = 16.dp, vertical = 12.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        stories.forEachIndexed { i, _ ->
+                        activeStories.forEachIndexed { i, _ ->
                             Box(Modifier.weight(1f).height(3.dp).clip(CircleShape).background(Color.White.copy(alpha = .25f))) {
                                 val fraction = if (i < index) 1f else if (i == index) progress else 0f
                                 Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().background(Color.White))
@@ -277,7 +283,7 @@ fun StoryViewerDialog(stories: List<StoryStore.Story>, onDismiss: () -> Unit) {
                 Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     StoryNavigation(stringResource(R.string.story_previous), previous, Modifier.weight(1f))
-                    Text("${index + 1} / ${stories.size}", color = Color.White.copy(alpha = .7f),
+                    Text("${index + 1} / ${activeStories.size}", color = Color.White.copy(alpha = .7f),
                         modifier = Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelMedium)
                     StoryNavigation(stringResource(R.string.story_next), next, Modifier.weight(1f))
                 }

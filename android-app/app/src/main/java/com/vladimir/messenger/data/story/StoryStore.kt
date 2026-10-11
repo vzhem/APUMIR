@@ -1,6 +1,9 @@
 package com.vladimir.messenger.data.story
 
 import android.content.Context
+import android.util.AtomicFile
+import java.io.File
+import java.util.concurrent.Executors
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,6 +40,10 @@ object StoryStore {
     private val lock = Any()
     private var appContext: Context? = null
     private var loaded = false
+    private val diskWriter = Executors.newSingleThreadExecutor()
+    private fun offlineFile(): AtomicFile? = appContext?.let {
+        AtomicFile(File(it.filesDir, "stories-offline.json"))
+    }
     private val _items = MutableStateFlow<List<Story>>(emptyList())
     private val _seen = MutableStateFlow<Set<String>>(emptySet())
 
@@ -52,7 +59,12 @@ object StoryStore {
             appContext = context.applicationContext
             if (!loaded) {
                 loaded = true
-                _items.value = parse(prefs()?.getString(KEY, null))
+                // Durable local snapshot contains the actual photo, not a remote URL
+                // or a URI permission that can disappear after a reboot.
+                val stored = runCatching { offlineFile()?.openRead()?.bufferedReader()?.use { it.readText() } }.getOrNull()
+                _items.value = parse(stored ?: prefs()?.getString(KEY, null))
+                    .filter { System.currentTimeMillis() - it.createdAtMs in 0 until LIFETIME_MS }
+                if (stored == null && _items.value.isNotEmpty()) save(_items.value)
                 _seen.value = prefs()?.getStringSet(SEEN_KEY, null)?.toSet().orEmpty().intersect(active().map { it.id }.toSet())
             }
         }
@@ -156,7 +168,23 @@ object StoryStore {
     private fun save(list: List<Story>) {
         _items.value = list
         _seen.value = _seen.value.intersect(list.map { it.id }.toSet())
-        prefs()?.edit()?.putString(KEY, toJson(list))?.putStringSet(SEEN_KEY, _seen.value)?.apply()
+        prefs()?.edit()?.putStringSet(SEEN_KEY, _seen.value)?.apply()
+        // Serial writer preserves snapshot order. AtomicFile keeps the previous
+        // complete snapshot if Android stops the process during a write.
+        val file = offlineFile() ?: return
+        val snapshot = list.toList()
+        diskWriter.execute {
+            var stream: java.io.FileOutputStream? = null
+            try {
+                val bytes = toJson(snapshot).toByteArray(Charsets.UTF_8)
+                stream = file.startWrite()
+                stream.write(bytes)
+                file.finishWrite(stream)
+                prefs()?.edit()?.remove(KEY)?.apply()
+            } catch (_: Exception) {
+                stream?.let { file.failWrite(it) }
+            }
+        }
     }
 
     private fun prefs() = appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
