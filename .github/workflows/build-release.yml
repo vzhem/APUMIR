@@ -78,6 +78,29 @@ jobs:
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
 
+      # Gate changes to online helper routing before cross-compilation/publication.
+      # Includes a real four-endpoint QUIC race with a lost primary receipt.
+      - name: Test online helper routing and direct transport
+        working-directory: ./rust-core
+        run: |
+          set -o pipefail
+          for suite in helper_delivery peer_assistance peer_exchange direct_transport; do
+            LOG="$RUNNER_TEMP/helper-$suite.log"
+            if ! RUST_LOG=warn cargo test --release --features mqtt-dual-broker --lib "network::$suite::tests" > "$LOG" 2>&1; then
+              tail -150 "$LOG"
+              python3 - "$LOG" <<'PY'
+          from pathlib import Path
+          import sys
+          text = "\n".join(Path(sys.argv[1]).read_text(errors="replace").splitlines()[-150:])
+          text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          print(f"::error title=Helper routing tests::{text}")
+          PY
+              exit 1
+            fi
+            tail -25 "$LOG"
+            grep '^test result:' "$LOG" >> "$GITHUB_STEP_SUMMARY"
+          done
+
       - name: Install cargo-ndk
         run: cargo install --locked cargo-ndk
 
