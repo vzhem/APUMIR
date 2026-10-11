@@ -148,7 +148,7 @@ PowerShell проверен статически; локального NDK/Power
 N-1 fallback и дальнейшая fairness/own-message scheduling требуют следующего подэтапа.
 Только затем переходить к реализации content swarm этапа 3.
 
-## Подэтап 2c — в работе (v11.74.329)
+## Подэтап 2c — опубликован v11.74.329
 
 Вместо немедленного расширения подписанных identity/exchange claims добавлен совместимый с N-1
 сигнал `Decline` в уже подписанном assistance frame. Старый узел не разберёт новый вариант и
@@ -160,3 +160,9 @@ N-1 fallback и дальнейшая fairness/own-message scheduling требу�
 приоритет. Отказы ограничены 30/min на helper и 512 записями у отправителя.
 Capability cards как публичные объявления намеренно не добавлены: они не доказывают
 ёмкость и потребовали бы нового wire/negotiation; локальный admission остаётся источником правды.
+
+Release 38166568533 и Core 38166569693 — success; helper gate включает 2 новых теста
+quality и signed-decline integration. Независимый пересчёт APK и phone tests не выполнялись.
+Этап 2 закрыт как локальный admission/ranking/consent/decline. Подписанные capability
+cards НЕ реализованы сознательно (см. выше); возвращаться к ним только вместе с
+измеренной ёмкостью этапа 4.
