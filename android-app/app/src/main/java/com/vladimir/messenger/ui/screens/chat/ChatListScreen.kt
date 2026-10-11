@@ -110,7 +110,6 @@ import androidx.compose.ui.window.DialogProperties
 import com.vladimir.messenger.ui.components.ApuPremiumContentButton
 import com.vladimir.messenger.ui.components.ApuPremiumFloatingActionButton
 import com.vladimir.messenger.ui.components.ApuActionsMenu
-import com.vladimir.messenger.ui.components.ApuAction
 
 private data class NotificationMuteTarget(
     val id: String,
