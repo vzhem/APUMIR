@@ -90,7 +90,9 @@ fun FileTransferBubble(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+                // Свайп по всей строке голосового - тот же ответ, что у текстовых пузырей.
+                .swipeToReply(enabled = onSwipeReply != null) { onSwipeReply?.invoke() },
             contentAlignment = if (isFromMe) Alignment.CenterEnd else Alignment.CenterStart,
         ) {
             Box(

@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 /** Краска опасного действия: тот же тон, что у ошибок в отчёте. */
@@ -155,6 +156,7 @@ private fun ApuTextActionFlat(
             fontWeight = FontWeight.SemiBold,
             color = ink.copy(alpha = if (enabled) 1f else 0.45f),
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

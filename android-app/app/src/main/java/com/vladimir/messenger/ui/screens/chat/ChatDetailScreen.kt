@@ -1469,21 +1469,25 @@ private fun MessageInputBar(
             }
             var showSendOptions by remember { mutableStateOf(false) }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // Три кнопки делят ширину строки: на узких экранах не вылетают за край.
                 ApuTextAction(
-                    label = stringResource(R.string.voice_record),
+                    label = stringResource(R.string.voice_record_short),
                     onClick = { voice.toggle() },
                     enabled = !isSending && !isSelfChat,
+                    icon = Icons.Filled.Mic,
+                    modifier = Modifier.weight(1f),
                 )
                 ApuTextAction(
                     label = stringResource(R.string.action_send),
                     onClick = onSend,
                     enabled = canSend,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1.3f),
                 )
                 ApuTextAction(
                     label = stringResource(R.string.send_more),
                     onClick = { showSendOptions = true },
                     enabled = canSend,
+                    modifier = Modifier.weight(1f),
                 )
             }
             if (showSendOptions) {

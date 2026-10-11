@@ -1553,6 +1553,7 @@
     <string name="link_preview_open">Открыть ссылку</string>
     <string name="chat_search_in_chat">Поиск в чате</string>
     <string name="voice_record">Голосовое сообщение</string>
+    <string name="voice_record_short">Голос</string>
     <string name="voice_stop">Отправить</string>
     <string name="voice_cancel">Отмена</string>
     <string name="voice_recording">Запись</string>
