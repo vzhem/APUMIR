@@ -147,10 +147,9 @@ fun VoiceMessagePlayer(
 fun formatVoiceTime(total: Int): String = "%d:%02d".format(total / 60, total % 60)
 
 /**
- * Голосовое в карточке файла: проигрыватель вместо пиктограммы и тот же
- * значок «⋯» с действиями сообщения, что и у обычного файла.
+ * Голосовое в карточке файла (группы и каналы): проигрыватель и меню «⋯»
+ * с теми же действиями, что у обычного файла.
  */
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun VoiceFileCard(
     state: FileCardState,
@@ -160,11 +159,35 @@ fun VoiceFileCard(
     messageActions: List<ApuAction>,
     onLongPress: (() -> Unit)?,
 ) {
+    val actions = buildList {
+        state.onSave?.let { save -> add(ApuAction(stringResource(R.string.ft_save_folder), Icons.Filled.Save) { save() }) }
+        state.onShare?.let { share -> add(ApuAction(stringResource(R.string.admin_share), Icons.Filled.Share) { share() }) }
+        state.onFavorite?.let { fav -> add(ApuAction(stringResource(R.string.chat_file_to_saved), Icons.Filled.Star) { fav() }) }
+        addAll(messageActions)
+    }
+    VoiceActionsRow(
+        file = file,
+        info = info,
+        textColor = ApuBubbleTextColor,
+        actions = actions,
+        onLongPress = onLongPress,
+    )
+}
+
+/** Проигрыватель голоса и «⋯» с переданным списком действий. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun VoiceActionsRow(
+    file: File,
+    info: VoiceNote.Info,
+    textColor: Color,
+    actions: List<ApuAction>,
+    onLongPress: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
     var showActions by remember { mutableStateOf(false) }
-    val hasActions = state.onSave != null || state.onShare != null ||
-        state.onFavorite != null || messageActions.isNotEmpty()
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(top = 4.dp)
             .then(
@@ -179,10 +202,10 @@ fun VoiceFileCard(
         VoiceMessagePlayer(
             file = file,
             info = info,
-            textColor = ApuBubbleTextColor,
+            textColor = textColor,
             modifier = Modifier.weight(1f),
         )
-        if (hasActions) {
+        if (actions.isNotEmpty()) {
             Box(
                 modifier = Modifier
                     .padding(start = 6.dp)
@@ -207,28 +230,11 @@ fun VoiceFileCard(
                         .padding(8.dp)
                         .widthIn(min = 210.dp, max = 320.dp),
                 ) {
-                    state.onSave?.let { save ->
-                        ApuActionBubble(stringResource(R.string.ft_save_folder), Icons.Filled.Save) {
-                            showActions = false
-                            save()
-                        }
-                    }
-                    state.onShare?.let { share ->
-                        ApuActionBubble(stringResource(R.string.admin_share), Icons.Filled.Share) {
-                            showActions = false
-                            share()
-                        }
-                    }
-                    state.onFavorite?.let { favorite ->
-                        ApuActionBubble(stringResource(R.string.chat_file_to_saved), Icons.Filled.Star) {
-                            showActions = false
-                            favorite()
-                        }
-                    }
-                    messageActions.forEach { action ->
+                    actions.forEach { action ->
                         ApuActionBubble(
                             label = action.title,
                             icon = action.icon,
+                            enabled = action.enabled,
                             destructive = action.destructive,
                         ) {
                             showActions = false

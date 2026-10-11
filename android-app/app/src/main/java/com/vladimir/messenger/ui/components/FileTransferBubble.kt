@@ -1,5 +1,11 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.runtime.remember
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
 import androidx.compose.foundation.clickable
@@ -73,6 +79,37 @@ fun FileTransferBubble(
     val messenger = com.vladimir.messenger.ui.theme.LocalMessengerColors.current
     val background = if (isFromMe) messenger.messageBubbleOwn else messenger.messageBubbleOther
     val bubbleTextColor = if (isFromMe) messenger.messageBubbleOwnText else messenger.messageBubbleOtherText
+    // Голосовое (имя файла несёт волну): проигрыватель и меню, когда локальная копия есть.
+    val voiceInfo = remember(transfer.displayName) { com.vladimir.messenger.util.VoiceNote.parse(transfer.displayName) }
+    if (voiceInfo != null && previewFile != null) {
+        val voiceActions = buildList<ApuAction> {
+            onSaveClick?.let { save -> add(ApuAction(stringResource(R.string.ft_save_folder), Icons.Filled.Save) { save() }) }
+            onShareClick?.let { share -> add(ApuAction(stringResource(R.string.admin_share), Icons.Filled.Share) { share() }) }
+            onSaveToFavorites?.let { fav -> add(ApuAction(stringResource(R.string.chat_file_to_saved), Icons.Filled.Star) { fav() }) }
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            contentAlignment = if (isFromMe) Alignment.CenterEnd else Alignment.CenterStart,
+        ) {
+            Box(
+                modifier = Modifier
+                    .widthIn(max = 320.dp)
+                    .apuBubbleSurface(color = background, shape = RoundedCornerShape(18.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                VoiceActionsRow(
+                    file = previewFile,
+                    info = voiceInfo,
+                    textColor = bubbleTextColor,
+                    actions = voiceActions,
+                    onLongPress = onLongPress,
+                )
+            }
+        }
+        return
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()

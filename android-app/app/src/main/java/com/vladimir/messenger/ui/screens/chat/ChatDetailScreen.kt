@@ -474,6 +474,7 @@ fun ChatDetailScreen(
                     }
                 },
                 scheduled    = scheduledAll.filter { !it.isGroup && it.targetId == chatId },
+                onVoiceReady = { uri -> viewModel.onFileSelected(uri) },
                 onCancelScheduled = { id -> com.vladimir.messenger.worker.ScheduledSendWorker.cancel(context, id) },
                 replyAuthor  = uiState.replyTo?.replyAuthor?.ifBlank { if (uiState.replyTo?.isFromMe == true) stringResource(R.string.grp_you) else contactName },
                 replyText    = uiState.replyTo?.content.orEmpty(),
@@ -1187,6 +1188,7 @@ private fun MessageInputBar(
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onSendChoice: (com.vladimir.messenger.ui.components.SendChoice) -> Unit = {},
+    onVoiceReady: (android.net.Uri) -> Unit = {},
     scheduled: List<com.vladimir.messenger.data.schedule.ScheduledSendStore.Item> = emptyList(),
     onCancelScheduled: (String) -> Unit = {},
     replyAuthor: String? = null,
@@ -1428,6 +1430,10 @@ private fun MessageInputBar(
             // recomposition), и кнопка активировалась с задержкой; плюс
             // золотая заливка и белый текст (как в темах) - видно сразу.
             val canSend = inputState.text.isNotBlank() && !isSending && !isSelfChat
+            val voice = com.vladimir.messenger.ui.components.rememberVoiceRecorder(onVoiceReady)
+            if (voice.recording) {
+                com.vladimir.messenger.ui.components.VoiceRecordBar(voice)
+            }
             if (scheduled.isNotEmpty()) {
                 com.vladimir.messenger.ui.components.ScheduledSendBanner(
                     items = scheduled,
@@ -1436,6 +1442,11 @@ private fun MessageInputBar(
             }
             var showSendOptions by remember { mutableStateOf(false) }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                ApuTextAction(
+                    label = stringResource(R.string.voice_record),
+                    onClick = { voice.toggle() },
+                    enabled = !isSending && !isSelfChat,
+                )
                 ApuTextAction(
                     label = stringResource(R.string.action_send),
                     onClick = onSend,

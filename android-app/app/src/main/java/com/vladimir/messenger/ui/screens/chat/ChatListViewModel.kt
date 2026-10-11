@@ -965,4 +965,20 @@ class ChatListViewModel @Inject constructor(
          */
         const val MAX_WINDOW = 3000
     }
+
+    /** Своя история: сохранить и разослать контактам личных чатов. */
+    fun publishStory(text: String, bg: Int) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            val me = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
+            }
+            val story = com.vladimir.messenger.data.story.StoryStore.publish(me, trimmed.take(200), bg)
+            val packet = com.vladimir.messenger.data.story.StoryStore.encode(story)
+            chatRepository.directContactIds().forEach { peer ->
+                runCatching { chatRepository.sendStoryPacket(peer, packet) }
+            }
+        }
+    }
 }

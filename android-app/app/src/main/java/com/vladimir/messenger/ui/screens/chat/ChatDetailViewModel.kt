@@ -721,6 +721,15 @@ class ChatDetailViewModel @Inject constructor(
      */
     /** Раунд 43: превью картинки для пузыря передачи файла. */
     fun previewFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? {
+        // Голосовое: проигрываем локальную копию. Своё - из кэша записи (имя то же),
+        // принятое - из хранилища приёма.
+        if (com.vladimir.messenger.util.VoiceNote.parse(transfer.displayName) != null) {
+            if (transfer.direction == "OUTGOING") {
+                java.io.File(appContext.cacheDir, "voice/" + transfer.displayName).takeIf { it.isFile }?.let { return it }
+            } else {
+                fileTransferRouter.receivedFileFor(transfer)?.let { return it }
+            }
+        }
         // Раунд 172: стикеру нужен ПОЛНЫЙ файл (webm/webp анимация). Прежний
         // порядок сначала отдавал jpg-снимок роутера - чёрный квадрат вместо
         // анимации; теперь библиотечный стикер - первый источник.
