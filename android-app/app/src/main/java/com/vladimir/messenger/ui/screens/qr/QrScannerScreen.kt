@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.qr
 
+import com.vladimir.messenger.ui.components.ApuSegmentedControl
+
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
 // =============================================================================
@@ -104,32 +106,18 @@ fun QrScannerScreen(
                     .padding(paddingValues),
             ) {
                 // Выбор простой и заметный: две большие кнопки во всю ширину.
-                SingleChoiceSegmentedButtonRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                ) {
-                    QrMode.entries.forEachIndexed { index, item ->
-                        SegmentedButton(
-                            selected = mode == item,
-                            onClick = {
-                                scope.launch { pagerState.animateScrollToPage(index) }
-                            },
-                            shape = SegmentedButtonDefaults.itemShape(index, QrMode.entries.size),
-                            icon = {
-                                Icon(
-                                    if (item == QrMode.Scan) {
-                                        Icons.Default.QrCodeScanner
-                                    } else {
-                                        Icons.Default.QrCode2
-                                    },
-                                    contentDescription = null,
-                                )
-                            },
-                            label = { Text(stringResource(item.titleRes)) },
-                        )
-                    }
-                }
+                ApuSegmentedControl(
+                    options = QrMode.entries,
+                    selected = mode,
+                    onSelect = { item ->
+                        scope.launch { pagerState.animateScrollToPage(QrMode.entries.indexOf(item)) }
+                    },
+                    label = { stringResource(it.titleRes) },
+                    icon = { item ->
+                        if (item == QrMode.Scan) Icons.Default.QrCodeScanner else Icons.Default.QrCode2
+                    },
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                )
 
                 HorizontalPager(
                     state = pagerState,

@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.ui.components.ApuSegmentedControl
+
 import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
@@ -668,16 +670,11 @@ private fun PeriodChooser(
     enabled: Boolean,
     onSelect: (BackupSchedule.Period) -> Unit,
 ) {
-    val periods = BackupSchedule.Period.entries
-    SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-        periods.forEachIndexed { index, period ->
-            SegmentedButton(
-                selected = selected == period,
-                onClick = { onSelect(period) },
-                enabled = enabled,
-                shape = SegmentedButtonDefaults.itemShape(index, periods.size),
-                label = { Text(period.short) },
-            )
-        }
-    }
+    ApuSegmentedControl(
+        options = BackupSchedule.Period.entries,
+        selected = selected,
+        onSelect = onSelect,
+        label = { it.short },
+        enabled = enabled,
+    )
 }

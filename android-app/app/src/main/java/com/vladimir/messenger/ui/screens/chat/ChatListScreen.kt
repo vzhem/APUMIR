@@ -109,6 +109,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.vladimir.messenger.ui.components.ApuPremiumContentButton
 import com.vladimir.messenger.ui.components.ApuPremiumFloatingActionButton
+import com.vladimir.messenger.ui.components.ApuActionsMenu
+import com.vladimir.messenger.ui.components.ApuAction
 
 private data class NotificationMuteTarget(
     val id: String,
@@ -289,45 +291,20 @@ fun ChatListScreen(
                                 IconButton(onClick = { menuOpen = true }) {
                                     Icon(Icons.Default.MoreVert, stringResource(R.string.chat_more))
                                 }
-                                DropdownMenu(
+                                ApuActionsMenu(
                                     expanded = menuOpen,
-                                    onDismissRequest = { menuOpen = false },
-                                    // Скруглённый пузырь и чуть больше воздуха:
-                                    // меню в одном стиле с остальными пузырями APU.
-                                    shape = RoundedCornerShape(22.dp),
-                                    containerColor = com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor,
-                                    tonalElevation = 0.dp,
-                                    shadowElevation = 12.dp,
-                                ) {
-                                    // «Мой QR-код» и «Поделиться приглашением»
-                                    // убраны: раздел QR (значок в шапке) уже
-                                    // показывает свой код, копирует ссылку и
-                                    // делится ею. Три пункта на одно действие
-                                    // только запутывали.
-                                    // Контакты, Группы, Профиль и Настройки
-                                    // живут в нижней панели - под большим
-                                    // пальцем. «Избранное» теперь - первым
-                                    // отдельным контактом в списке чатов,
-                                    // поэтому дублировать его в меню не нужно.
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.chat_connect_by_link)) },
-                                        leadingIcon = { ShimmerIcon(Icons.Default.Link) },
-                                        onClick = {
-                                            menuOpen = false
+                                    onDismiss = { menuOpen = false },
+                                    // Контакты, Группы, Профиль и Настройки живут в нижней панели,
+                                    // «Избранное» — первым контактом в списке чатов.
+                                    actions = listOf(
+                                        ApuAction(stringResource(R.string.chat_connect_by_link), Icons.Default.Link) {
                                             showConnectDialog = true
                                         },
-                                    )
-                                    // Раунд 199 (владелец): приглашение - на
-                                    // главной, под рукой. Тот же путь, что и
-                                    // из «Контактов»: текст + установочный APK.
-                                    DropdownMenuItem(
-                                        text = { Text(stringResource(R.string.chat_invite_apu)) },
-                                        leadingIcon = { ShimmerIcon(Icons.Default.PersonAdd) },
-                                        onClick = {
-                                            menuOpen = false
+                                        ApuAction(stringResource(R.string.chat_invite_apu), Icons.Default.PersonAdd) {
                                             showInviteShare = true
                                         },
-                                    )
+                                    ),
+                                )
                                 }
                             }
                         }
