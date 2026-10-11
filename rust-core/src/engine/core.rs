@@ -2042,7 +2042,8 @@ impl P2PCore {
                                 Ok(0) => break,
                                 Ok(n) => {
                                     let text = String::from_utf8_lossy(&buf[..n]).to_string();
-                                    tracing::info!("TCP recv: {}", &text[..text.len().min(100)]);
+                                    // Do not slice UTF-8 at a byte boundary or log message contents.
+                                    tracing::debug!("TCP received {} bytes", n);
                                     let parts: Vec<&str> = text.splitn(4, '|').collect();
                                     // Страж отправителя - см. QUIC-приёмник выше.
                                     if parts.len() == 4 && parts[0].starts_with("pk_") {

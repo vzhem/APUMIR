@@ -28,6 +28,11 @@ class OnlineHelperWiring(unittest.TestCase):
         self.assertIn('OnlineHelperSettings.set(context, it)', screen)
         self.assertNotIn('Text(mode.title,', screen)
 
+    def test_tcp_diagnostics_never_slice_unicode_or_log_payload(self):
+        core = (ROOT / 'rust-core/src/engine/core.rs').read_text()
+        self.assertNotIn('&text[..text.len().min(100)]', core)
+        self.assertIn('tracing::debug!("TCP received {} bytes", n)', core)
+
     def test_ru_en_strings_and_fail_closed_bindings(self):
         for locale in ['values', 'values-en']:
             names = [node.attrib.get('name') for node in ET.parse(APP / 'res' / locale / 'strings.xml').getroot()]
