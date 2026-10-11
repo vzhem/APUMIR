@@ -391,9 +391,9 @@ mod tests {
     }
     fn addr(n: u8) -> SocketAddr { format!("8.8.4.{n}:7777").parse().unwrap() }
     fn enroll(a: &InstalledSigningIdentity, da: &PeerExchange, h: &InstalledSigningIdentity, dh: &PeerExchange, endpoint: SocketAddr, source: SocketAddr) {
-        da.wake(); // Each test explicitly enrolls another neighbour despite idle cooldown.
-        let request = da.plan(a, Some(source), vec![Candidate { node_id: h.legacy_routing_node_id().into(), endpoint,
-            learned_at_ms: NOW, live_connection: false }], &[], NOW).remove(0);
+        // Explicit enrollment must target this helper, not a third-party record
+        // that the normal discovery planner may legitimately prioritise first.
+        let request = da.probe(a, Some(source), h.legacy_routing_node_id(), endpoint, NOW).unwrap();
         da.bind_request(&request, BINDING, endpoint);
         let effect = dh.handle(h, &request.encode(a, BINDING).unwrap(), BINDING, source, Some(endpoint), NOW).unwrap();
         da.handle(a, &effect.response.unwrap(), BINDING, endpoint, Some(source), NOW).unwrap();
