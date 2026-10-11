@@ -305,7 +305,6 @@ fun ChatListScreen(
                                         },
                                     ),
                                 )
-                                }
                             }
                         }
                     },
