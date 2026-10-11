@@ -150,6 +150,7 @@ fun formatVoiceTime(total: Int): String = "%d:%02d".format(total / 60, total % 6
  * Голосовое в карточке файла: проигрыватель вместо пиктограммы и тот же
  * значок «⋯» с действиями сообщения, что и у обычного файла.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun VoiceFileCard(
     state: FileCardState,

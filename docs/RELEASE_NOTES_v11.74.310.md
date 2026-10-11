@@ -1,4 +1,4 @@
-# APU v11.74.309 — Голосовые сообщения в каналах
+# APU v11.74.310 — Голосовые сообщения в каналах
 
 Голосовые теперь можно записывать и в постах каналов, а не только в групповом чате.
 
@@ -6,4 +6,4 @@
 - В посте голосовое показано волной и длительностью, с кнопкой «играть».
 - Меню «⋯» у голосового остаётся полным: сохранить, поделиться, в избранное, реакция и другие действия.
 
-[Скачать APK](https://github.com/vzhem/APUMIR/releases/download/v11.74.309/app-release.apk) · [SHA-256](https://github.com/vzhem/APUMIR/releases/download/v11.74.309/SHA256SUMS.txt)
+[Скачать APK](https://github.com/vzhem/APUMIR/releases/download/v11.74.310/app-release.apk) · [SHA-256](https://github.com/vzhem/APUMIR/releases/download/v11.74.310/SHA256SUMS.txt)
