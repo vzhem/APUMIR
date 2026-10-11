@@ -320,6 +320,7 @@ fun ChatDetailScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
+                modifier = com.vladimir.messenger.ui.components.apuGlassBarModifier(),
                 colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
                     containerColor = Color.Transparent,
                     // Прокрутка НЕ должна красить панель: под ней обои APU.

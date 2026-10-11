@@ -163,6 +163,7 @@ import com.vladimir.messenger.ui.components.ApuPremiumContentButton
 import com.vladimir.messenger.ui.components.ApuPremiumButton
 import com.vladimir.messenger.ui.components.ApuPremiumChip
 import com.vladimir.messenger.ui.components.ApuHeaderButton
+import com.vladimir.messenger.ui.components.ApuSkeletonChatFeed
 import com.vladimir.messenger.ui.components.apuGoldBrush
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
@@ -597,6 +598,7 @@ fun GroupChatScreen(
         containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
+                modifier = com.vladimir.messenger.ui.components.apuGlassBarModifier(),
                 colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
                     containerColor = Color.Transparent,
                     // Прокрутка НЕ должна красить панель: под ней обои APU.
@@ -1001,6 +1003,10 @@ fun GroupChatScreen(
                 contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 200.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                // Пока группа грузится: вместо пустого экрана — очертания сообщений.
+                if (uiState.group == null && uiState.messages.isEmpty()) {
+                    item(key = "skeleton") { ApuSkeletonChatFeed() }
+                }
                 // Большой канал: комментарии приходят от владельца по запросу,
                 // и здесь может быть не вся ветка. Кнопка тянет более ранние.
                 if (isChannel && uiState.moreComments > 0) {
@@ -1013,6 +1019,7 @@ fun GroupChatScreen(
                     }
                 }
                 items(uiState.messages, key = { it.id }) { message ->
+                    Box(modifier = Modifier.fillMaxWidth().animateItem()) {
                     val card = remember(message.content) { GroupFileMarker.parse(message.content) }
                     val cardState = if (card == null) {
                         null
@@ -1118,6 +1125,7 @@ fun GroupChatScreen(
                         onClosePoll = { uiState.polls[message.id]?.let { viewModel.closePoll(it.pollId) } },
                         onQuoteClick = { targetId -> scrollToMessage(targetId) },
                     )
+                    }
                 }
             }
 
