@@ -87,7 +87,7 @@ object SwarmPolicy {
     const val MIN_CONCURRENT = 2
     const val MIN_PACKETS_PER_MINUTE = 30
 
-    /** Режим «Без ограничений»: столько ядро переваривает, не копя очередь. */
+    /** Консервативный потолок веера. Не является измеренной ёмкостью ядра или сети. */
     const val UNLIMITED_CONCURRENT = 32
     const val UNLIMITED_PACKETS_PER_MINUTE = 3000
 
@@ -163,9 +163,9 @@ object SwarmPolicy {
      */
     fun limitsFor(mode: SwarmMode, metered: Boolean, lowPower: Boolean): SwarmLimits {
         val (concurrent, perMinute) = when (mode) {
-            // «Без ограничений» - это предел ядра, а не бесконечность: канал к
-            // Rust вмещает 256 пакетов, и ширина веера больше 32 только копит
-            // очередь. Мобильный интернет и заряд этот режим не сбавляют -
+            // «Без ограничений» сохраняет защитный потолок, а не бесконечную нагрузку.
+            // Ёмкость очереди не доказывает пропускную способность.
+            // Мобильный интернет и заряд этот режим не сбавляют -
             // человек сам так решил.
             SwarmMode.UNLIMITED -> return SwarmLimits(
                 maxConcurrentSends = UNLIMITED_CONCURRENT,
@@ -186,5 +186,26 @@ object SwarmPolicy {
             maxPacketsPerMinute = packets,
             maxSignalsPerMinute = signals,
         )
+    }
+}
+
+
+/** Stage 4 — bounded contribution statistics (not measurement of capacity). */
+object SwarmContributionStats {
+    // Only counts already-completed local deliveries / receipts / refusals.
+    // No claim of global uniqueness, honesty, or measured capacity.
+    private val delivered = java.util.concurrent.atomic.AtomicLong(0)
+    private val refused = java.util.concurrent.atomic.AtomicLong(0)
+    private val observedPeerDeliveries = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    fun noteDelivered() { delivered.incrementAndGet() }
+    fun noteRefused() { refused.incrementAndGet() }
+    fun notePeer(peerId: String) { observedPeerDeliveries.merge(peerId, 1L, Long::plus) }
+
+    fun deliveredCount(): Long = delivered.get()
+    fun refusedCount(): Long = refused.get()
+    fun peerCountsSnapshot(): Map<String, Long> = observedPeerDeliveries.toMap()
+    fun resetLocal() {
+        delivered.set(0); refused.set(0); observedPeerDeliveries.clear()
     }
 }
