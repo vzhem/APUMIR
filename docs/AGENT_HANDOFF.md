@@ -40,8 +40,8 @@ retaining .330–.336. Old tags/assets were not moved.
 - Story source wiring is present (`ChatListViewModel` → `StoryStore` → `ChatRepository`), and the
   merged tree passed CI. This is still not a manual device/UI test.
 - Stage 3 remains partial: content-addressed chunks currently serve personal photo stories; group/
-  channel swarm sharing and physical-device tests remain. Stage 4 is not active: `SwarmContributionStats`
-  has no call sites; its counters/guards do not measure or limit real traffic. See
+  channel swarm sharing and physical-device tests remain. Stage 4 is not active: `SwarmContributionStats` has bounded pure-Kotlin mechanics, but
+  no call sites; its counters/guard do not measure or limit real traffic. See
   `docs/SWARM_HELPER_ROADMAP.md` and `docs/PHONE_TEST_CHECKLIST.md`.
 
 ## Next work for future releases
@@ -50,9 +50,10 @@ retaining .330–.336. Old tags/assets were not moved.
    delivery, helper fallback, N-1 behavior, battery, traffic, latency and thermal results.
 2. Before calling Stage 3 complete, define authorized group/channel content-key distribution,
    revocation/expiry, custody consent, persistence/migration and quotas; add tests and phone evidence.
-3. Replace Stage 4's unused/unbounded scaffold with bounded, concurrent, time-windowed metrics;
-   connect it only to cryptographically verified helper delivery/refusal events, test it, then
-   consider anti-abuse/UI. Do not claim global honesty, unique users or capacity.
+3. The bounded Stage 4 scaffold and JVM tests are now in the working branch after the `.337` tag;
+   no CI has run for them yet and no production call sites exist. Wire it only to cryptographically
+   verified helper delivery/refusal events, prevent double counting, then test before anti-abuse/UI.
+   Do not claim global honesty, unique users or capacity.
 4. Release any newly completed Stage 3/4 work in a later version with a fresh successful tag CI.
 
 Local Java/Gradle and Rust/Cargo are absent in this sandbox, so no local build claim is available.

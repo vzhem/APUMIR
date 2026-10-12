@@ -12847,3 +12847,17 @@ unchanged.
   left `main` unchanged at `4e5624c`.
 - Public release: https://github.com/vzhem/APUMIR/releases/tag/v11.74.337 . No physical Android,
   NAT, battery/load, or capacity verification was performed. Those remain gates for future stages.
+
+### Follow-up after v11.74.337: bound the Stage 4 scaffold for a later release (2026-10-12)
+
+- The `.337` tag remains pinned at `b8e6dcf`; this follow-up is only on the fixed branch after the
+  release and is not part of `.337`.
+- `SwarmContributionStats` now uses a 256-entry access-order LRU for peer observations, rejects
+  empty/overlong IDs, caps retained refusals at 10 per rolling 30 seconds, and clamps clock rollback
+  to a monotonic high-water mark. Counters saturate instead of wrapping. Added
+  `SwarmContributionStatsTest` for bounds, eviction, rollover, rollback, reset and concurrent calls;
+  included it in the next tag's release-test command.
+- Important: this object still has no app/Rust call sites; no real helper events are measured, and
+  the returned refusal decision is not enforced by the transport. The work is a bounded scaffold,
+  not Stage 4 completion. No CI has run after this follow-up because local Java/Gradle/Cargo are
+  absent; verify the new test in the next tag build before publication.

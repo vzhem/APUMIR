@@ -190,41 +190,103 @@ object SwarmPolicy {
 }
 
 
-/** Stage 4 — bounded contribution statistics (not measurement of capacity). */
+/** Stage 4 — bounded, process-local contribution counters (not capacity measurement). */
 object SwarmContributionStats {
-    // Only counts already-completed local deliveries / receipts / refusals.
-    // No claim of global uniqueness, honesty, or measured capacity.
-    private val delivered = java.util.concurrent.atomic.AtomicLong(0)
-    private val refused = java.util.concurrent.atomic.AtomicLong(0)
-    private val observedPeerDeliveries = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    const val MAX_OBSERVED_PEERS = 256
+    const val REFUSAL_WINDOW_MS = 30_000L
+    const val MAX_REFUSALS_PER_WINDOW = 10
+    private const val MAX_PEER_ID_CHARS = 256
 
-    fun noteDelivered() { delivered.incrementAndGet() }
-    fun noteRefused() { refused.incrementAndGet() }
-    fun notePeer(peerId: String) { observedPeerDeliveries.merge(peerId, 1L, Long::plus) }
+    private val lock = Any()
+    private var delivered = 0L
+    private var refused = 0L
+    private var lastClockMs: Long? = null
+    // Access-order LRU: unique untrusted peer IDs cannot grow this map without bound.
+    private val observedPeerDeliveries = java.util.LinkedHashMap<String, Long>(16, 0.75f, true)
+    private val recentRefusals = java.util.ArrayDeque<Long>()
 
-    fun deliveredCount(): Long = delivered.get()
-    fun refusedCount(): Long = refused.get()
-    fun peerCountsSnapshot(): Map<String, Long> = observedPeerDeliveries.toMap()
-    fun resetLocal() {
-        delivered.set(0); refused.set(0); observedPeerDeliveries.clear()
+    fun noteDelivered() = synchronized(lock) {
+        delivered = incrementSaturated(delivered)
     }
-    // Stage 4 anti-abuse / rate guard (bounded; not proof of global honesty)
-    private val recentRefusals = java.util.concurrent.ConcurrentLinkedQueue<Long>()
-    private val refusalWindowMs = 30000L
-    private val maxRefusalsPerWindow = 10
-    fun recordRefusal(nowMs: Long): Boolean {
-        refused.incrementAndGet()
-        recentRefusals.add(nowMs)
-        val cutoff = nowMs - refusalWindowMs
-        while (recentRefusals.peek() != null && recentRefusals.peek()!! < cutoff) recentRefusals.poll()
-        return recentRefusals.size <= maxRefusalsPerWindow
-    }
-    fun refusalRateOk(nowMs: Long): Boolean {
-        val cutoff = nowMs - refusalWindowMs
-        while (recentRefusals.peek() != null && recentRefusals.peek()!! < cutoff) recentRefusals.poll()
-        return recentRefusals.size <= maxRefusalsPerWindow
-    }
-    fun observedPeerCount(): Int = observedPeerDeliveries.size
-    fun observedPeerLimitReached(): Boolean = observedPeerDeliveries.size >= 256 // bounded guard only, not capacity claim
 
+    /**
+     * Record a locally observed peer delivery. At capacity, the least-recently-used peer is
+     * evicted; invalid/unbounded identifiers are ignored. This is a bounded local sample only.
+     */
+    fun notePeer(peerId: String): Boolean = synchronized(lock) {
+        if (peerId.length !in 1..MAX_PEER_ID_CHARS) return@synchronized false
+        val previous = observedPeerDeliveries[peerId]
+        if (previous != null) {
+            observedPeerDeliveries[peerId] = incrementSaturated(previous)
+            return@synchronized true
+        }
+        if (observedPeerDeliveries.size >= MAX_OBSERVED_PEERS) {
+            val oldest = observedPeerDeliveries.entries.iterator()
+            if (oldest.hasNext()) {
+                oldest.next()
+                oldest.remove()
+            }
+        }
+        observedPeerDeliveries[peerId] = 1L
+        true
+    }
+
+    fun deliveredCount(): Long = synchronized(lock) { delivered }
+    fun refusedCount(): Long = synchronized(lock) { refused }
+    fun peerCountsSnapshot(): Map<String, Long> = synchronized(lock) {
+        java.util.LinkedHashMap<String, Long>(observedPeerDeliveries)
+    }
+
+    /**
+     * Count a refusal and return whether it is inside the local rolling limit. Only the first
+     * [MAX_REFUSALS_PER_WINDOW] events are retained in a [REFUSAL_WINDOW_MS] window, so rejected
+     * excess attempts cannot grow the queue. Callers must act on `false` for this to be a guard.
+     */
+    fun recordRefusal(nowMs: Long): Boolean = synchronized(lock) {
+        refused = incrementSaturated(refused)
+        val now = advanceClock(nowMs) ?: return@synchronized false
+        evictOldRefusals(now)
+        if (recentRefusals.size >= MAX_REFUSALS_PER_WINDOW) return@synchronized false
+        recentRefusals.addLast(now)
+        true
+    }
+
+    /** Whether another refusal can be admitted under the local rolling window. */
+    fun refusalRateOk(nowMs: Long): Boolean = synchronized(lock) {
+        val now = advanceClock(nowMs) ?: return@synchronized false
+        evictOldRefusals(now)
+        recentRefusals.size < MAX_REFUSALS_PER_WINDOW
+    }
+
+    fun observedPeerCount(): Int = synchronized(lock) { observedPeerDeliveries.size }
+    fun observedPeerLimitReached(): Boolean = synchronized(lock) {
+        observedPeerDeliveries.size >= MAX_OBSERVED_PEERS
+    }
+
+    fun resetLocal() = synchronized(lock) {
+        delivered = 0L
+        refused = 0L
+        observedPeerDeliveries.clear()
+        recentRefusals.clear()
+        lastClockMs = null
+    }
+
+    /** Reject invalid clock values and clamp clock rollback to a monotonic high-water mark. */
+    private fun advanceClock(nowMs: Long): Long? {
+        if (nowMs < 0L) return null
+        val previous = lastClockMs
+        val monotonic = if (previous == null || nowMs > previous) nowMs else previous
+        lastClockMs = monotonic
+        return monotonic
+    }
+
+    private fun evictOldRefusals(nowMs: Long) {
+        val cutoff = (nowMs - REFUSAL_WINDOW_MS).coerceAtLeast(0L)
+        while (recentRefusals.peekFirst()?.let { it < cutoff } == true) {
+            recentRefusals.removeFirst()
+        }
+    }
+
+    private fun incrementSaturated(value: Long): Long =
+        if (value == Long.MAX_VALUE) value else value + 1L
 }
