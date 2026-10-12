@@ -12684,3 +12684,19 @@ XML 9 / 314 / 287.
   (прогон зелёный всегда, потому что шаг android неблокирующий).
 - Итог: прогон `37674679520` (8a93bea) — success без замечаний, следующий прогон
   с правками чата проверяется так же.
+
+### GitHub Actions v11.74.335: Kotlin compile failure in the story-photo assembler (2026-10-12)
+
+- Symptom: release run `38204362462` reached `:app:compileReleaseKotlin` and failed at
+  `data/swarm/ContentAddressedChunks.kt:81` with `Unresolved reference: isValidManifest`.
+  Rust core and UniFFI generation had succeeded; APK/re-sign/release steps did not run.
+- Cause: commit `d40040f` restored `Assembler.receive()` with a call to the manifest
+  validator but no validator implementation. The generated source had no declaration anywhere.
+  `ContentAddressedChunksTest.kt` also contained an obsolete test block after the class end.
+- Correction: add fail-closed validation for content hash syntax, content/chunk bounds,
+  chunk count and expiry; use `Long` for `chunkSizeBytes * MAX_CHUNKS` to avoid `Int`
+  overflow; remove obsolete test code and add regressions. Run the focused release-variant
+  JVM tests before `assembleRelease` in the release workflow.
+- Verification discipline: sandbox has no Java, so local Gradle success cannot be claimed.
+  Use GitHub Actions on the fixed Arena branch first; do not create/move a release tag until
+  the full build is green and the exact public notes have been approved.

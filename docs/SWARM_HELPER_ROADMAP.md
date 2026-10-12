@@ -196,3 +196,13 @@ cards НЕ реализованы сознательно (см. выше); во�
 - Anti-abuse: отказ от повторной выдачи уже принятой квитанции (dedup уже в 326/329); новых подписанных cards нет (нет измерений); надстройка на `post_signers` не добавлена.
 - Нагрузочные / phone battery / NAT-стабильность: не выполнены; не обещать ёмкость или работу через произвольный NAT.
 - Далее: только после реального устройства — измерить `SwarmContributionStats` под нагрузкой, затем принимать решение о полной публикации 331.
+
+## CI incident: v11.74.335 Kotlin build (2026-10-12)
+
+The tag build failed at `:app:compileReleaseKotlin` because `Assembler.receive()` called
+`isValidManifest()` without any implementation. Rust and UniFFI steps passed. The repair adds
+strict manifest checks, fixes an `Int` multiplication overflow in the maximum-chunk capacity
+check, removes obsolete test code that sat outside `ContentAddressedChunksTest`, and adds
+focused regressions. The release workflow now runs the story-photo/chunk JVM suites before APK
+assembly. GitHub verification is pending; no phone, battery, load, or NAT verification has been
+performed. Do not claim device behavior or measured swarm capacity from this repair.

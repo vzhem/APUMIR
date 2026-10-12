@@ -2,6 +2,7 @@ package com.vladimir.messenger.data.swarm
 
 import java.security.MessageDigest
 import java.util.Base64
+import kotlin.collections.MutableIterator
 
 object ContentAddressedChunks {
     const val SHA256_HEX_LENGTH = 64
@@ -21,10 +22,12 @@ object ContentAddressedChunks {
 
     fun manifest(content: ByteArray, chunkSizeBytes: Int, expiresAtMs: Long): Manifest {
         require(content.isNotEmpty() && chunkSizeBytes in 1..MAX_CHUNK_BYTES && expiresAtMs > 0)
-        require(chunkSizeBytes * MAX_CHUNKS >= content.size)
+        // Use Long before multiplying: MAX_CHUNK_BYTES * MAX_CHUNKS exceeds Int.MAX_VALUE.
+        require(content.size.toLong() <= chunkSizeBytes.toLong() * MAX_CHUNKS)
         return Manifest(sha256Hex(content), content.size, chunkSizeBytes, expiresAtMs)
     }
     fun split(content: ByteArray, manifest: Manifest): List<Chunk> {
+        require(isValidManifest(manifest, content.size))
         require(manifest.sizeBytes == content.size && sha256Hex(content) == manifest.contentId)
         return (0 until manifest.totalChunks).map { i ->
             val s = i.toLong() * manifest.chunkSizeBytes
@@ -47,6 +50,13 @@ object ContentAddressedChunks {
     }
     fun isSha256Hex(v: String): Boolean = sha256Pattern.matches(v)
 
+    /** Validate untrusted manifest fields before using them for allocation or indexing. */
+    private fun isValidManifest(manifest: Manifest, maxContentBytes: Int): Boolean =
+        isSha256Hex(manifest.contentId) &&
+            manifest.sizeBytes in 1..maxContentBytes &&
+            manifest.chunkSizeBytes in 1..MAX_CHUNK_BYTES &&
+            manifest.totalChunks in 1..MAX_CHUNKS &&
+            manifest.expiresAtMs > 0L
 
     class Assembler(
         private val maxContentBytes: Int,
