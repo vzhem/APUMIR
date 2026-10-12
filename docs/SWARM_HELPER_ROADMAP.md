@@ -224,6 +224,7 @@ claim device behavior or measured swarm capacity from this repair.
 GitHub Actions run `38238290496` passed both targeted JVM suites, `:app:assembleRelease`, release-key
 re-signing, and checksum generation. The `app-release.apk` Actions artifact is present (30,078,909
 bytes). This was `workflow_dispatch`, so it deliberately did not create a public Release or tag.
-The owner has approved the exact notes in `docs/RELEASE_NOTES_v11.74.336.md`; tag build, asset
-verification, and public promotion are the remaining steps. No APK was downloaded/verified in the
-sandbox, and no phone, UI-integration, battery, load, NAT, or capacity verification has been done.
+The owner approved `docs/RELEASE_NOTES_v11.74.336.md`; tag workflow `38240296358` passed, its APK
+and `SHA256SUMS.txt` assets were verified via the GitHub API, and `v11.74.336` is public Latest.
+No APK was downloaded locally (sandbox artifact storage returned EOF), and no phone, UI-integration,
+battery, load, NAT, or capacity verification has been done.

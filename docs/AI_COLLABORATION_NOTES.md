@@ -12768,3 +12768,17 @@ The manual CI run #790 is green, but it did not publish anything. Next create a 
 tag from the fixed Arena branch, let the tag-triggered workflow build and create its draft with APK
 and checksum, verify those assets, then promote it to a public stable release. Keep `v11.74.335`
 unchanged.
+
+### Public release v11.74.336 published (2026-10-12)
+
+- Owner approved the exact notes; annotated tag `v11.74.336` was created at branch commit `1633ce1`
+  and pushed without moving `v11.74.335`.
+- Tag workflow run `38240296358` completed successfully: targeted JVM tests, `assembleRelease`,
+  rotated-key signing, SHA-256 generation, and draft release upload all passed.
+- The draft was verified to contain uploaded `app-release.apk` (44,052,780 bytes) and
+  `SHA256SUMS.txt` (82 bytes), then promoted to a public stable Latest release. GitHub asset API
+  reports APK digest `sha256:05eee186ccd7463f7daaacd690053760e77fb2c6e31f528d33970deb4f60e76b`.
+- Public release: https://github.com/vzhem/APUMIR/releases/tag/v11.74.336 . The sandbox could not
+  download release assets from GitHub's external artifact storage (EOF); asset state and digest are
+  from the GitHub API. No phone, app/UI integration, battery/load/NAT, or capacity verification was
+  performed.
