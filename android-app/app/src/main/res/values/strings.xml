@@ -1585,6 +1585,16 @@
     <string name="group_topic_closed_tab">Тема закрыта</string>
     <string name="story_photo">Фото истории</string>
     <string name="story_choose_photo">Выбрать фото</string>
+    <string name="story_take_photo">Снять фото</string>
+    <string name="story_camera_switch">Переключить камеру</string>
+    <string name="story_camera_front">Передняя</string>
+    <string name="story_camera_back">Задняя</string>
+    <string name="story_camera_starting">Подключаем камеру…</string>
+    <string name="story_camera_capture">Сделать снимок</string>
+    <string name="story_camera_capturing">Снимаем…</string>
+    <string name="story_camera_permission_denied">Разрешите доступ к камере, чтобы сделать фото.</string>
+    <string name="story_camera_unavailable">Камера недоступна на этом устройстве.</string>
+    <string name="story_camera_capture_failed">Не удалось сделать фото. Попробуйте ещё раз.</string>
     <string name="story_remove_photo">Убрать фото</string>
     <string name="story_caption">Подпись (необязательно)</string>
     <string name="story_photo_preparing">Подготавливаем фото…</string>

@@ -1572,6 +1572,16 @@ The file is not on this phone</string>
     <string name="group_topic_closed_tab">Topic closed</string>
     <string name="story_photo">Story photo</string>
     <string name="story_choose_photo">Choose photo</string>
+    <string name="story_take_photo">Take photo</string>
+    <string name="story_camera_switch">Switch camera</string>
+    <string name="story_camera_front">Front</string>
+    <string name="story_camera_back">Rear</string>
+    <string name="story_camera_starting">Starting camera…</string>
+    <string name="story_camera_capture">Take picture</string>
+    <string name="story_camera_capturing">Taking picture…</string>
+    <string name="story_camera_permission_denied">Allow camera access to take a photo.</string>
+    <string name="story_camera_unavailable">Camera is unavailable on this device.</string>
+    <string name="story_camera_capture_failed">Couldn’t take the photo. Try again.</string>
     <string name="story_remove_photo">Remove photo</string>
     <string name="story_caption">Caption (optional)</string>
     <string name="story_photo_preparing">Preparing photo…</string>

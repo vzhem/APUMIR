@@ -7,11 +7,36 @@ import android.graphics.Matrix
 import android.media.ExifInterface
 import android.net.Uri
 import android.util.Base64
+import androidx.core.content.FileProvider
 import java.io.ByteArrayOutputStream
+import java.io.File
 
 /** Decode with sampling before allocating, orient, resize, strip EXIF and cap wire size. */
 object StoryPhoto {
     const val MAX_B64 = 160_000
+
+    /** A private, temporary destination for a CameraX story capture. */
+    class CaptureTarget internal constructor(val uri: Uri, internal val file: File) {
+        fun delete() {
+            file.delete()
+        }
+    }
+
+    fun createCaptureTarget(context: Context): CaptureTarget {
+        val dir = File(context.cacheDir, "story-camera").apply {
+            check(mkdirs() || isDirectory) { "Cannot create story camera directory" }
+        }
+        val file = File.createTempFile("shot-", ".jpg", dir)
+        return try {
+            CaptureTarget(
+                FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file),
+                file,
+            )
+        } catch (error: Exception) {
+            file.delete()
+            throw error
+        }
+    }
 
     fun prepare(context: Context, uri: Uri): String {
         val resolver = context.contentResolver

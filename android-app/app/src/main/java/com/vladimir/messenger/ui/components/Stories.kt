@@ -1,10 +1,23 @@
 package com.vladimir.messenger.ui.components
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.text.format.DateUtils
+import android.view.Surface
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -29,6 +42,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -309,18 +323,42 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
     var photo by remember { mutableStateOf<String?>(null) }
     var preparing by remember { mutableStateOf(false) }
     var photoError by remember { mutableStateOf(false) }
+    var cameraError by remember { mutableStateOf<Int?>(null) }
+    var showCamera by remember { mutableStateOf(false) }
     val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope()
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) scope.launch {
+
+    fun preparePhoto(uri: Uri, cleanup: (() -> Unit)? = null) {
+        scope.launch {
             preparing = true
             photoError = false
+            cameraError = null
             try {
                 photo = withContext(Dispatchers.IO) { StoryPhoto.prepare(context, uri) }
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (_: Exception) { photoError = true }
-            finally { preparing = false }
+            finally {
+                runCatching { cleanup?.invoke() }
+                preparing = false
+            }
         }
+    }
+
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) preparePhoto(uri)
+    }
+    val cameraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) showCamera = true
+        else cameraError = R.string.story_camera_permission_denied
+    }
+    fun requestCamera() {
+        cameraError = null
+        keyboardController?.hide()
+        val hasPermission = ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) ==
+            PackageManager.PERMISSION_GRANTED
+        if (hasPermission) showCamera = true
+        else cameraPermission.launch(Manifest.permission.CAMERA)
     }
     Dialog(onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
@@ -350,11 +388,14 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     ApuPremiumButton(stringResource(R.string.story_choose_photo), { picker.launch("image/*") },
                         enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
-                    if (photo != null) ApuPremiumButton(stringResource(R.string.story_remove_photo), { photo = null },
+                    ApuPremiumButton(stringResource(R.string.story_take_photo), { requestCamera() },
                         enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
                 }
+                if (photo != null) ApuPremiumButton(stringResource(R.string.story_remove_photo), { photo = null },
+                    enabled = !preparing, compact = true, modifier = Modifier.fillMaxWidth())
                 if (preparing) Text(stringResource(R.string.story_photo_preparing), color = Color.White)
                 if (photoError) Text(stringResource(R.string.story_photo_failed), color = Color.White)
+                cameraError?.let { Text(stringResource(it), color = Color.White) }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         storyBackgrounds.forEachIndexed { i, brush ->
@@ -370,6 +411,205 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                     style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp), textAlign = TextAlign.Center)
                 ApuPremiumButton(label = stringResource(R.string.story_publish), onClick = { onPublish(text.trim(), bg, photo) },
                     enabled = !preparing && (text.isNotBlank() || photo != null), style = DiagnosticsActionStyle.PRIMARY, modifier = Modifier.fillMaxWidth())
+            }
+        }
+    }
+    if (showCamera) {
+        StoryCameraDialog(
+            onDismiss = { showCamera = false },
+            onCaptured = { target ->
+                showCamera = false
+                preparePhoto(target.uri, target::delete)
+            },
+        )
+    }
+}
+
+@Composable
+private fun StoryCameraDialog(
+    onDismiss: () -> Unit,
+    onCaptured: (StoryPhoto.CaptureTarget) -> Unit,
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val cameraProviderFuture = remember(context) { ProcessCameraProvider.getInstance(context) }
+    val mainExecutor = remember(context) { ContextCompat.getMainExecutor(context) }
+    val previewView = remember(context) {
+        PreviewView(context).apply {
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+        }
+    }
+    var lensFacing by androidx.compose.runtime.saveable.rememberSaveable {
+        mutableIntStateOf(CameraSelector.LENS_FACING_BACK)
+    }
+    var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
+    var cameraReady by remember { mutableStateOf(false) }
+    var canSwitchCamera by remember { mutableStateOf(false) }
+    var isTakingPhoto by remember { mutableStateOf(false) }
+    var cameraError by remember { mutableStateOf<Int?>(null) }
+
+    DisposableEffect(cameraProviderFuture, lifecycleOwner, lensFacing, previewView) {
+        var active = true
+        var providerForCleanup: ProcessCameraProvider? = null
+        imageCapture = null
+        cameraReady = false
+        canSwitchCamera = false
+        cameraError = null
+
+        val listener = Runnable {
+            if (active) {
+                try {
+                    val provider = cameraProviderFuture.get()
+                    providerForCleanup = provider
+                    if (active) {
+                        val selector = CameraSelector.Builder()
+                            .requireLensFacing(lensFacing)
+                            .build()
+                        if (!provider.hasCamera(selector)) {
+                            val fallbackFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+                                CameraSelector.LENS_FACING_FRONT
+                            } else {
+                                CameraSelector.LENS_FACING_BACK
+                            }
+                            val fallbackSelector = CameraSelector.Builder()
+                                .requireLensFacing(fallbackFacing)
+                                .build()
+                            if (provider.hasCamera(fallbackSelector)) {
+                                lensFacing = fallbackFacing
+                            } else {
+                                cameraError = R.string.story_camera_unavailable
+                            }
+                        } else {
+                            val preview = Preview.Builder().build().also {
+                                it.setSurfaceProvider(previewView.surfaceProvider)
+                            }
+                            val capture = ImageCapture.Builder()
+                                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                                .setTargetRotation(previewView.display?.rotation ?: Surface.ROTATION_0)
+                                .build()
+                            provider.unbindAll()
+                            if (active) {
+                                provider.bindToLifecycle(lifecycleOwner, selector, preview, capture)
+                                imageCapture = capture
+                                cameraReady = true
+                                val otherFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+                                    CameraSelector.LENS_FACING_FRONT
+                                } else {
+                                    CameraSelector.LENS_FACING_BACK
+                                }
+                                canSwitchCamera = runCatching {
+                                    provider.hasCamera(
+                                        CameraSelector.Builder().requireLensFacing(otherFacing).build(),
+                                    )
+                                }.getOrDefault(false)
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    if (active) {
+                        imageCapture = null
+                        cameraReady = false
+                        canSwitchCamera = false
+                        cameraError = R.string.story_camera_unavailable
+                    }
+                }
+            }
+        }
+        cameraProviderFuture.addListener(listener, mainExecutor)
+
+        onDispose {
+            active = false
+            imageCapture = null
+            cameraReady = false
+            canSwitchCamera = false
+            providerForCleanup?.unbindAll()
+        }
+    }
+
+    fun takePhoto() {
+        val capture = imageCapture ?: return
+        if (isTakingPhoto) return
+        isTakingPhoto = true
+        cameraError = null
+        val target = try {
+            StoryPhoto.createCaptureTarget(context)
+        } catch (_: Exception) {
+            isTakingPhoto = false
+            cameraError = R.string.story_camera_unavailable
+            return
+        }
+        capture.targetRotation = previewView.display?.rotation ?: Surface.ROTATION_0
+        val options = ImageCapture.OutputFileOptions.Builder(target.file).build()
+        try {
+            capture.takePicture(options, mainExecutor, object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                    isTakingPhoto = false
+                    onCaptured(target)
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    target.delete()
+                    isTakingPhoto = false
+                    cameraError = R.string.story_camera_capture_failed
+                }
+            })
+        } catch (_: Exception) {
+            target.delete()
+            isTakingPhoto = false
+            cameraError = R.string.story_camera_capture_failed
+        }
+    }
+
+    Dialog(
+        onDismissRequest = { if (!isTakingPhoto) onDismiss() },
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+            AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
+            Column(Modifier.fillMaxSize().safeDrawingPadding().padding(12.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onDismiss, enabled = !isTakingPhoto) {
+                        Icon(Icons.Default.Close, stringResource(R.string.action_close), tint = Color.White)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        stringResource(if (lensFacing == CameraSelector.LENS_FACING_BACK) R.string.story_camera_back else R.string.story_camera_front),
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelLarge,
+                    )
+                    IconButton(
+                        onClick = {
+                            imageCapture = null
+                            cameraReady = false
+                            lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
+                                CameraSelector.LENS_FACING_FRONT
+                            } else {
+                                CameraSelector.LENS_FACING_BACK
+                            }
+                        },
+                        enabled = cameraReady && canSwitchCamera && !isTakingPhoto,
+                    ) {
+                        Icon(Icons.Default.Cameraswitch, stringResource(R.string.story_camera_switch), tint = Color.White)
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                cameraError?.let { errorId ->
+                    Text(stringResource(errorId), color = Color.White, modifier = Modifier.align(Alignment.CenterHorizontally)
+                        .background(Color.Black.copy(alpha = .6f), RoundedCornerShape(12.dp)).padding(12.dp))
+                }
+                if (cameraError == null && !cameraReady) {
+                    Text(stringResource(R.string.story_camera_starting), color = Color.White,
+                        modifier = Modifier.align(Alignment.CenterHorizontally))
+                }
+                ApuPremiumButton(
+                    label = stringResource(if (isTakingPhoto) R.string.story_camera_capturing else R.string.story_camera_capture),
+                    onClick = { takePhoto() },
+                    enabled = cameraReady && !isTakingPhoto,
+                    progress = isTakingPhoto,
+                    style = DiagnosticsActionStyle.PRIMARY,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
