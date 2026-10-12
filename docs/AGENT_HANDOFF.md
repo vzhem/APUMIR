@@ -1,8 +1,8 @@
 === РУЧНОЙ ПЕРЕХОД ДЛЯ СЛЕДУЮЩЕГО АГЕНТА ===
 Сессионная ветка: arena/4f0b31c5-apumir (не переключать ветку).
-Исходная точка: tag v11.74.335, commit 8f6ce09; tag не перемещался и Release для него не создан.
-Ветка remote: arena/4f0b31c5-apumir на 47bfbec. Локальное состояние синхронизировано с веткой; исправление обработки workflow_dispatch versionName уже запушено.
-Исправления исходного compile failure: fail-closed валидатор манифеста, Long-проверка ёмкости, удаление устаревшего блока тестов, регрессии и запуск targeted JVM suites до APK.
-Владелец вручную запустил workflow_dispatch #38232530545 на commit 95f2c09. Native core и UniFFI прошли, затем job упал на Sync versionName with tag: шаг обрезал refs/tags/ у refs/heads/arena/... и передал slash в sed. Тесты и APK ещё не запускались.
-Workflow fix `47bfbec`: синхронизировать versionName только для tag ref; при workflow_dispatch оставить Gradle diagnostic versionName. YAML и diff checks прошли. API dispatch из gh по-прежнему отвечает 403, так что владельцу потребуется повторно нажать Run workflow на новой вершине `arena/4f0b31c5-apumir`.
-Arena sandbox не имеет Java; локальный Gradle недоступен. Не создавать/перемещать tag и не публиковать Release до зелёных targeted tests + assembleRelease и отдельного одобрения публичных заметок. Нет phone/NAT/battery/capacity verification.
+Тег v11.74.335 не перемещался; публичный Release не создан.
+Исходное исправление unresolved reference isValidManifest запушено: fail-closed validator, Long-проверка ёмкости, обновлённые тесты, targeted suites в release workflow; APK artifact теперь загружается после сборки/подписи/checksum.
+Владелец вручную запустил #787 (38232530545, commit 95f2c09). Core/UniFFI прошли; run упал на Sync versionName with tag из-за branch ref. Исправление запушено в 47bfbec: tag ref обрабатывается отдельно; branch workflow_dispatch не переписывает Gradle diagnostic versionName.
+Владелец вручную запустил #788 (38234091924, commit 0b57542). Core/UniFFI и version sync прошли; Test story photo chunk assembly завершился failure, APK step пропущен. Сырой Actions log через API снова получил EOF; причина тестового failure пока неизвестна.
+Текущие локальные изменения: targeted tests и assembleRelease пишут общий log в RUNNER_TEMP; failure-tail annotation теперь должен показывать диагностику для обеих gradle-задач. Их ещё нужно проверить, commit/push только в arena/4f0b31c5-apumir; gh dispatch API отвечает 403, поэтому владелец должен повторно запустить workflow из Actions UI.
+Gradle локально не запускался (Java отсутствует). Не создавать/перемещать tag и не публиковать Release до зелёных целевых тестов + APK build и отдельного одобрения точного публичного текста. Телефон/NAT/battery/capacity verification не проводились.

@@ -209,6 +209,9 @@ could never capture the APK. API dispatch from the Arena token returned HTTP 403
 38232530545 on `arena/4f0b31c5-apumir`. Native core and UniFFI passed, then `Sync versionName with
 tag` failed before unit tests/APK because it assumed every GITHUB_REF was a tag. The workflow fix
 was pushed as `47bfbec`: only tag refs rewrite versionName; branch dispatches keep Gradle's
-diagnostic version. The owner must rerun on this new branch head because API dispatch still returns
-403. Local Gradle is unavailable because Java is absent; no phone, battery, load, or NAT verification
-has been performed. Do not claim device behavior or measured swarm capacity from this repair.
+diagnostic version. Manual run 38234091924 then passed version sync but failed in the targeted Gradle
+tests before APK assembly. The raw Actions log download again returned EOF and the test step had not
+captured its own log; shared test/build log capture and failure-tail annotation are now added for the
+next rerun. API dispatch still returns 403, so the owner must launch from the Actions UI. Local
+Gradle is unavailable because Java is absent; no phone, battery, load, or NAT verification has been
+performed. Do not claim device behavior or measured swarm capacity from this repair.

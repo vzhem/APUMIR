@@ -12720,3 +12720,15 @@ XML 9 / 314 / 287.
 - The workflow correction was pushed to `arena/4f0b31c5-apumir` as `47bfbec`. API dispatch still
   returns HTTP 403 for the Arena token, so the owner must rerun `workflow_dispatch` from the Actions
   UI on this new branch head. The release build, targeted unit tests and APK are still unverified.
+
+### Manual workflow_dispatch run 38234091924: targeted Gradle tests failed (2026-10-12)
+
+- The owner reran the workflow after the branch-ref correction. Core/UniFFI and version sync passed;
+  `Test story photo chunk assembly` failed, so APK assembly did not run.
+- `gh run view --log-failed` again ended with EOF while downloading the Actions log archive from
+  `results-receiver.actions.githubusercontent.com`; no Gradle diagnostic was available through the
+  API. The test step had not saved its own log, so the failure tail annotation was empty.
+- Correction: send both targeted tests and APK assembly output to a shared runner-temp log; the
+  existing failure-tail annotation now reports test as well as build diagnostics.
+- Next: push the log-capture change, ask the owner to rerun workflow_dispatch, inspect the actual
+  Gradle failure annotation, then continue. No APK or release exists.
