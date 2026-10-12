@@ -1,6 +1,7 @@
 package com.vladimir.messenger.ui.components
 
 import android.Manifest
+import android.graphics.BitmapFactory
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.text.format.DateUtils
@@ -27,6 +28,7 @@ import android.util.Base64
 import com.vladimir.messenger.data.story.StoryPhoto
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -57,6 +59,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -427,6 +430,11 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                 }
                 Text(stringResource(R.string.story_lifetime), color = Color.White.copy(alpha = .7f),
                     style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp), textAlign = TextAlign.Center)
+                // Получателю нужна сборка, которая понимает фото-часть пакета: более
+                // старая версия APU покажет только подпись (см. заметки v11.74.321).
+                if (photo != null) Text(stringResource(R.string.story_photo_needs_update),
+                    color = Color.White.copy(alpha = .7f), style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center)
                 ApuPremiumButton(label = stringResource(R.string.story_publish), onClick = { onPublish(text.trim(), bg, photo) },
                     enabled = !preparing && StoryPublish.canPublish(text, photo, photoMissing),
                     style = DiagnosticsActionStyle.PRIMARY, modifier = Modifier.fillMaxWidth())
@@ -640,6 +648,33 @@ private fun Modifier.storyBackgroundSemantics(label: String, isSelected: Boolean
 @Composable
 private fun StoryPhotoView(b64: String, modifier: Modifier) {
     val bytes = remember(b64) { runCatching { Base64.decode(b64, Base64.DEFAULT) }.getOrNull() }
-    AsyncImage(model = bytes, contentDescription = stringResource(R.string.story_photo),
-        modifier = modifier, contentScale = ContentScale.Fit)
+    var fallback by remember(b64) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var coilFailed by remember(b64) { mutableStateOf(false) }
+    var fallbackFailed by remember(b64) { mutableStateOf(false) }
+    if (bytes != null && !coilFailed) {
+        AsyncImage(model = bytes, contentDescription = stringResource(R.string.story_photo),
+            modifier = modifier, contentScale = ContentScale.Fit, onError = { coilFailed = true })
+    }
+    if (bytes == null || coilFailed) {
+        // Coil не отдал картинку (или строка не разобралась): декодируем сами, чтобы
+        // у получателя вместо фото не оставалось пустое место с одной подписью.
+        LaunchedEffect(b64) {
+            val decoded = bytes?.let { raw ->
+                withContext(Dispatchers.IO) {
+                    runCatching { BitmapFactory.decodeByteArray(raw, 0, raw.size) }.getOrNull()
+                }
+            }
+            if (decoded == null) fallbackFailed = true else fallback = decoded
+        }
+    }
+    val decoded = fallback
+    if (decoded != null) {
+        Image(bitmap = decoded.asImageBitmap(), contentDescription = stringResource(R.string.story_photo),
+            modifier = modifier, contentScale = ContentScale.Fit)
+    } else if (fallbackFailed) {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Text(stringResource(R.string.story_photo_unavailable), color = Color.White.copy(alpha = .85f),
+                textAlign = TextAlign.Center, fontSize = 18.sp)
+        }
+    }
 }

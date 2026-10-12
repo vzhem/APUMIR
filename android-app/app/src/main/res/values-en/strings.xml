@@ -1587,6 +1587,7 @@ The file is not on this phone</string>
     <string name="story_caption">Caption (optional)</string>
     <string name="story_photo_preparing">Preparing photo…</string>
     <string name="story_photo_failed">Could not open the photo. Choose another.</string>
+    <string name="story_photo_unavailable">The photo could not be opened on this phone</string>
     <string name="swarm_mode_normal">Normal</string>
     <string name="swarm_mode_economy">Economy</string>
     <string name="swarm_mode_unlimited">Unlimited</string>

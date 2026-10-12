@@ -1292,15 +1292,22 @@ class ChatRepository @Inject constructor(
     /**
      * Пакет истории контакту: только доставка, без записи в переписку и без
      * офлайн-очереди. Не дошло - история у контакта не появится (она живёт сутки).
+     *
+     * [transportId] задаёт `StoryOutbox`: повторная волна обязана приехать тем же
+     * сообщением, иначе получатель увидит дубликат части.
      */
-    suspend fun sendStoryPacket(peerId: String, content: String): Boolean {
+    suspend fun sendStoryPacket(
+        peerId: String,
+        content: String,
+        transportId: String = UUID.randomUUID().toString(),
+    ): Boolean {
         if (peerId.isBlank()) return false
         val actual = when {
             peerId.startsWith("pk_") -> peerId
             peerId.contains("node=pk_") -> "pk_" + peerId.substringAfter("node=pk_").substringBefore("&")
             else -> peerId
         }
-        return sendViaRust(UUID.randomUUID().toString(), "story", actual, content)
+        return sendViaRust(transportId, "story", actual, content)
     }
 
     private suspend fun sendViaRust(messageId: String, chatId: String, peerId: String, content: String): Boolean =

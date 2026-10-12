@@ -1600,6 +1600,7 @@
     <string name="story_caption">Подпись (необязательно)</string>
     <string name="story_photo_preparing">Подготавливаем фото…</string>
     <string name="story_photo_failed">Не удалось открыть фото. Выберите другое.</string>
+    <string name="story_photo_unavailable">Фото не открылось на этом телефоне</string>
     <string name="swarm_mode_normal">Обычный</string>
     <string name="swarm_mode_economy">Экономный</string>
     <string name="swarm_mode_unlimited">Без ограничений</string>
