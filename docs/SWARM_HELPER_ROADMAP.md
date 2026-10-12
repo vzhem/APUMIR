@@ -205,6 +205,8 @@ strict manifest checks, fixes an `Int` multiplication overflow in the maximum-ch
 check, removes obsolete test code that sat outside `ContentAddressedChunksTest`, and adds
 focused regressions. The release workflow now runs the story-photo/chunk JVM suites before APK
 assembly. The APK artifact upload was moved after signing/checksum; its previous pre-build position
-could never capture the APK. GitHub verification is pending; no phone, battery, load, or NAT
-verification has been performed. Do not claim device behavior or measured swarm capacity from this
-repair.
+could never capture the APK. The Arena branch was pushed, but workflow dispatch returned HTTP 403
+`Resource not accessible by integration`; no new run exists. The owner must enable dispatch
+permissions or manually start the workflow. Local Gradle is unavailable because Java is absent; no
+phone, battery, load, or NAT verification has been performed. Do not claim device behavior or
+measured swarm capacity from this repair.

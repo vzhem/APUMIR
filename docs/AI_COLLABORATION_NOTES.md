@@ -12699,5 +12699,9 @@ XML 9 / 314 / 287.
   JVM tests before `assembleRelease` in the release workflow. The APK artifact upload was also
   moved after APK signing/checksum: its old pre-build position could never upload the APK.
 - Verification discipline: sandbox has no Java, so local Gradle success cannot be claimed.
-  Use GitHub Actions on the fixed Arena branch first; do not create/move a release tag until
-  the full build is green and the exact public notes have been approved.
+  Commits `732de6e`/`e126438` were pushed to the fixed Arena branch. Dispatch via
+  `gh workflow run build-release.yml --ref arena/4f0b31c5-apumir` returned HTTP 403
+  `Resource not accessible by integration`; `gh run list` showed no new run. The owner must
+  enable Actions workflow-dispatch write permission/reconnect GitHub or start the run in the
+  Actions UI. Do not create/move a release tag until the full build is green and the exact
+  public notes have been approved.
