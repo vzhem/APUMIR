@@ -213,7 +213,8 @@ diagnostic version. Manual run 38234091924 then passed version sync but failed i
 tests before APK assembly. Run 38236089509 did the same; its 4 KiB failure annotation contained only
 Kotlin warnings. Source review found a test fixture that encoded 4,001 bytes as 5,336 Base64 chars
 (three 2,400-char chunks) but asserted completion after only two chunks; the test now supplies the
-third chunk. Failure-tail reporting now filters warnings and stays under the annotation limit. API
-dispatch still returns 403, so the owner must launch from the Actions UI. Local Gradle is unavailable
+third chunk. Failure-tail reporting now filters warnings and stays under the annotation limit; both changes were
+pushed in `3889a3d`. API dispatch still returns 403, so the owner must launch from the Actions UI on
+the new branch head. Local Gradle is unavailable
 because Java is absent; no phone, battery, load, or NAT verification has been performed. Do not
 claim device behavior or measured swarm capacity from this repair.

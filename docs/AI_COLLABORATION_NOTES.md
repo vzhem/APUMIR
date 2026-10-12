@@ -12744,5 +12744,7 @@ XML 9 / 314 / 287.
   after supplying only chunks 1 and 0. The test now supplies chunk 2 before asserting completion.
 - The failure-tail annotation now drops Kotlin `w:` lines and caps the message below GitHub's
   annotation limit, so a remaining failure should expose its root cause.
-- Next: validate, push these fixes, and have the owner rerun workflow_dispatch. The full APK build
-  has not yet run; do not claim CI success or a release.
+- The fixture correction and warning-filtered failure annotation were validated and pushed in
+  `3889a3d`. API dispatch still returns 403 for the Arena token, so the owner must rerun
+  workflow_dispatch from the Actions UI on this new branch head. The full APK build has not yet run;
+  do not claim CI success or a release.
