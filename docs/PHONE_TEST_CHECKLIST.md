@@ -1,18 +1,24 @@
-# Чек-лист перед тестами на телефоне (этап 3/4 завершён в коде)
+# Проверки CI и чек-лист перед тестами на телефоне
 
-Готово без ложных измерений:
-- [x] ContentAddressedChunks.Assembler.receive — полный (проверка манифеста, хэшей, бюджета, изоляция владельца, сборка, отказ по истечению).
-- [x] StoryPhotoParts.receiveContentAddressed / receiveLegacy + StoryStore (N-1, `photoSha`, `expiresAt`, revokeLocal).
-- [x] SwarmContributionStats + anti-abuse (delivered/refused/peer counts, refusal window 30s, max 10/window, max observed peers 256; без обещаний честности/уникальности).
-- [x] Тесты: ContentAddressedChunksTest (5 тестов на полный сборщик) + StoryPhotoPartsTest.
+## Проверено в GitHub Actions
 
-Не выполнено (требует реального телефона/устройства):
-- [ ] Device verification `gradlew :app:testReleaseUnitTest` с Android SDK / эмулятором / телефоном.
-- [ ] Phone battery / load / NAT-стабильность измерения.
-- [ ] Подписанные capability cards (нужны измерения ёмкости).
-- [ ] Групповые/канальные content-addressed chunks (только личные истории сейчас).
+Ручной запуск Build Release APK `38238290496` на ветке `arena/4f0b31c5-apumir` завершился успешно:
+- [x] `:app:testReleaseUnitTest` для `ContentAddressedChunksTest` и `StoryPhotoPartsTest`.
+- [x] `:app:assembleRelease`.
+- [x] Переподпись APK, создание `SHA256SUMS.txt` и загрузка артефакта `app-release.apk` в Actions.
+- [ ] Публичный GitHub Release для версии `.336` — ожидает согласования точного текста заметок.
 
-Ограничения (не изменять):
-- Нет обещаний ёмкости/работы через произвольный NAT.
+Этот запуск подтверждает JVM-тесты и APK-сборку, но **не** проверяет поведение на физическом устройстве и не создал публичный релиз. Артефакт APK находится в Actions run; отдельная tag-сборка для `.336` ещё не выполнялась.
+
+## Не выполнено: устройство и интеграция приложения
+
+- [ ] Установить APK на реальный телефон и проверить запуск/обновление.
+- [ ] Подтвердить, что `StoryPhotoParts`/`StoryStore` подключены к пользовательским экранам и потоку приложения. По проведённому поиску вызовы из app/UI не найдены; не заявлять, что photo stories доступны пользователям.
+- [ ] Измерить battery/load/NAT-стабильность на устройствах.
+- [ ] Измерить полезную ёмкость swarm; не обещать работу через произвольный NAT.
+- [ ] Групповые/канальные content-addressed chunks не реализованы.
+
+## Ограничения
+
+- Наличие helper-кода и зелёных JVM-тестов не доказывает UI-интеграцию, работу на телефоне, ёмкость или честность/уникальность участников.
 - Signed ACK не доказывает уникальных людей/честность вклада.
-- Assembler.receive готов, но требует device confirmation перед гарантией.

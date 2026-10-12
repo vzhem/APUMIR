@@ -218,3 +218,11 @@ pushed in `3889a3d`. API dispatch still returns 403, so the owner must launch fr
 the new branch head. Local Gradle is unavailable
 because Java is absent; no phone, battery, load, or NAT verification has been performed. Do not
 claim device behavior or measured swarm capacity from this repair.
+
+## CI verification run #790 (2026-10-12)
+
+GitHub Actions run `38238290496` passed both targeted JVM suites, `:app:assembleRelease`, release-key
+re-signing, and checksum generation. The `app-release.apk` Actions artifact is present (30,078,909
+bytes). This was `workflow_dispatch`, so it deliberately did not create a public Release or tag; the
+`.336` tag build and approved public notes are still pending. No APK was downloaded/verified in the
+sandbox, and no phone, UI-integration, battery, load, NAT, or capacity verification has been done.

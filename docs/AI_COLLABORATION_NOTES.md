@@ -12748,3 +12748,15 @@ XML 9 / 314 / 287.
   `3889a3d`. API dispatch still returns 403 for the Arena token, so the owner must rerun
   workflow_dispatch from the Actions UI on this new branch head. The full APK build has not yet run;
   do not claim CI success or a release.
+
+### Manual workflow_dispatch run 38238290496: targeted tests and APK build passed (2026-10-12)
+
+- Run #790 on `arena/4f0b31c5-apumir` completed successfully. The release-variant JVM suites
+  (`ContentAddressedChunksTest`, `StoryPhotoPartsTest`), `:app:assembleRelease`, rotated-key
+  re-signing, and SHA-256 generation all passed.
+- Actions API lists `app-release.apk` as an uploaded artifact (30,078,909 bytes). The manual
+  dispatch intentionally skipped `Create Release`; it is a branch diagnostic build, not a public
+  release/tag build. A real `.336` tag build and approved public notes are still required.
+- Downloading the APK artifact from this sandbox failed with EOF from GitHub's Azure artifact
+  storage host. Metadata confirms the artifact is present; do not claim a local APK verification.
+- Phone/device, UI integration, battery/load/NAT, and capacity checks remain unperformed.
