@@ -12717,5 +12717,6 @@ XML 9 / 314 / 287.
 - Correction: only rewrite `versionName` for `refs/tags/*`; on `workflow_dispatch` leave Gradle's
   diagnostic version name untouched. Use a `|` sed delimiter for tag substitution. Do not treat
   this as an application compile failure.
-- Next: push the workflow fix to the fixed Arena branch and have the owner rerun workflow_dispatch.
-  The release build, targeted unit tests and APK are still unverified.
+- The workflow correction was pushed to `arena/4f0b31c5-apumir` as `47bfbec`. API dispatch still
+  returns HTTP 403 for the Arena token, so the owner must rerun `workflow_dispatch` from the Actions
+  UI on this new branch head. The release build, targeted unit tests and APK are still unverified.
