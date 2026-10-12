@@ -12782,3 +12782,27 @@ unchanged.
   download release assets from GitHub's external artifact storage (EOF); asset state and digest are
   from the GitHub API. No phone, app/UI integration, battery/load/NAT, or capacity verification was
   performed.
+
+### Восстановлена линия стабильного релиза v11.74.329 (2026-10-12)
+
+- Симптом: после .329 в APK казалось, что пропали функции и русский/английский интерфейс.
+- Причина доказана ancestry-сравнением: `v11.74.329` (`198e1da`) продолжает стабильную линию,
+  а `v11.74.330` (`3d37de6`) был создан напрямую от `4e5624c` — `main` на v11.74.206. Между
+  общим предком и v329 лежали 176 неинтегрированных коммитов / 276 путей, включая RU/EN UI,
+  ресурсы, истории и другие доработки. Релизные теги не удалялись; проблема была в кодовой базе
+  ветки для сборки, а не в списке GitHub Releases.
+- Исправление: merge-коммит `73e40eb` в fixed Arena-ветке `arena/4f0b31c5-apumir` интегрировал
+  полный предок v329 и сохранил последующую линию .330–.336. Старые helper/photo packets оставлены
+  читаемыми; текущая сборка использует строгую content-addressed проверку. Все UI и resource
+  файлы совпадают с tree v329; RU/EN key parity: strings 1524, arrays 2, plurals 3.
+- Тег `v11.74.329` остаётся предком исправленной ветки. Теги `v11.74.335` и `v11.74.336`, release
+  notes и assets не перемещались и не редактировались. Публичный `.336` всё ещё создан из старого
+  дерева; не публиковать новую версию, пока объединённая ветка не пройдёт CI и владелец не утвердит
+  RU/EN release notes для реально возвращённых функций.
+- Проверки: `git diff --check`, unresolved-symbol scan (524 файла), source-contract suites и
+  RU/EN XML-key parity прошли. `check-chat-style.py` имеет 4 падения, воспроизводимые на чистом
+  архиве v329 (это baseline, не регресс merge). В sandbox нет Java/Gradle и Rust/Cargo, поэтому
+  JVM/Android/native сборка не запускалась; Actions для нового merge-коммита ещё не стартовали.
+- Не путать текущую fixed-ветку с открытым PR #43 (`arena/7ab0e8d6-apumir`): этот PR head — старый
+  коммит `8f6ce09` на линии от v206 и в этой сессии не изменялся. Работа запушена только в
+  `arena/4f0b31c5-apumir`.
