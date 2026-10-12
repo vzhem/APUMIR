@@ -86,7 +86,7 @@ def call_spans(text: str, name: str) -> list:
 class DiagnosticsContractsTest(unittest.TestCase):
     def test_report_keeps_the_privacy_promise(self):
         report = source(DIAG / "DiagnosticsReport.kt")
-        self.assertIn('const val SCHEMA = "apu-diag/2"', report)
+        self.assertIn('const val SCHEMA = "apu-diag/3"', report)
         for part in (
             "Приватность", "текст переписки", "имена файлов", "ключи", "contact ID", "UUID сообщений",
         ):
@@ -109,6 +109,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "[сеть]",
             "[ядро]",
             "[mqtt]",
+            "[помощники]",
             "[сообщения]",
             "[передачи]",
             "[сессия]",
@@ -121,6 +122,40 @@ class DiagnosticsContractsTest(unittest.TestCase):
         for title in ("Сеть", "Брокер", "Ядро", "Сообщения", "Передачи", "Прямой канал", "Батарея"):
             with self.subTest(title=title):
                 self.assertIn('"%s"' % title, report)
+
+    def test_online_helper_route_diagnostics_are_connected_and_scoped(self):
+        report = source(DIAG / "DiagnosticsReport.kt")
+        collector = source(DIAG / "TransferDiagnostics.kt")
+        core = (ROOT / "rust-core/src/engine/core.rs").read_text()
+        assistance = (ROOT / "rust-core/src/network/peer_assistance.rs").read_text()
+        race = (ROOT / "rust-core/src/network/helper_delivery.rs").read_text()
+        self.assertIn('const val SCHEMA = "apu-diag/3"', report)
+        self.assertIn("HelperRouteDiagnosticsParser.parse(all)", collector)
+        self.assertIn('"ONLINE_HELPER"', collector)
+        for marker in (
+            "event=attempt_started",
+            "event=candidates selected=",
+            "event=leg_started slot=",
+            "event=leg_write slot=",
+            "event=reserve_started trigger=",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, core)
+        for marker in (
+            "event=signed_decline_received slot=",
+            "event=recipient_receipt_issued",
+            "event=receipt_verified return_leg=",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, assistance)
+        self.assertIn("hedged_delivery_observed", race)
+        self.assertIn("ReserveTrigger::PrimaryFailed", race)
+        self.assertIn("ReserveTrigger::HedgeDelayElapsed", race)
+        self.assertIn("file chunks не включены", report)
+        # Diagnostic messages must contain only event enums, slot/count values and elapsed time.
+        for forbidden in ("recipient={}", "peer={}", "packet_id={}", "payload={}", "bytes={}"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, core[core.index("fn send_with_helper("):core.index("pub fn receive_message(")])
 
     def test_dialog_keeps_house_style_and_actions(self):
         screen = source(SCREEN)

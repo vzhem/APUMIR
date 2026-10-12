@@ -257,3 +257,27 @@ The owner approved `docs/RELEASE_NOTES_v11.74.336.md`; tag workflow `38240296358
 and `SHA256SUMS.txt` assets were verified via the GitHub API, and `v11.74.336` is public Latest.
 No APK was downloaded locally (sandbox artifact storage returned EOF), and no phone, UI-integration,
 battery, load, NAT, or capacity verification has been done.
+
+
+## Диагностика пути helper (новая работа; CI и телефоны ещё не подтверждены)
+
+- В `send_with_helper` добавлены машинные Rust logcat events только для обычных сообщений:
+  direct-failure → число выбранных helper slots → начало/write каждой leg → причина старта reserve
+  (ошибка primary или hedge delay) → итог/время. В `PeerAssistance` фиксируются принятый signed
+  decline, создание recipient receipt и проверенная на отправителе квитанция с локальным номером
+  return leg. Значения — только enums, слоты, числа и время; нет helper/contact ID, packet ID,
+  адресов, текста, ciphertext или ключей.
+- Android `Логи` агрегирует эти маркеры в `[помощники]` и добавляет проверку согласия телефона
+  принимать transit. Формат отчёта повышен до `apu-diag/3`; обработка опирается на ограниченную
+  выборку последних 20 000 строк process logcat и показывает, что это sample, не полный журнал.
+- Подробные события сознательно не пишутся на каждый file chunk, чтобы передача больших файлов не
+  заспамила logcat; file/F4 transfer остаётся отдельной диагностикой. Сейчас не инструментируется
+  отдельная статистика о транзитном решении промежуточного телефона, а protocol receipt не включает
+  криптографическую атрибуцию конкретному helper. Поэтому отчет показывает попытки/legs и
+  acceptance, но не доказывает личность или уникальность помощника.
+- Добавлены парсерные JVM regressions, Rust race observer и source guards; release workflow теперь
+  вызывает Python guards и гоняет `DiagnosticsReportTest` до APK, Rust reserve observer входит в
+  helper-delivery suite. Этот workflow ещё не был запущен на текущем commit; до его успеха и
+  трёхтелефонного теста этапы 3 и 4 остаются незавершёнными.
+- Даже будущий green CI не заменит phone/NAT test и не докажет путь конкретного helper: локальная
+  подпись receipt подтверждает acceptance получателя, но не содержит идентичность помощника.

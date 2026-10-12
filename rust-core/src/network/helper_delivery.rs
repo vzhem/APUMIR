@@ -9,20 +9,45 @@ pub const HELPER_HEDGE_DELAY: Duration = Duration::from_millis(1500);
 /// One deadline for both helpers, not an independent full wait for every leg.
 pub const HELPER_DELIVERY_BUDGET: Duration = Duration::from_millis(9500);
 
+/// Why the second (reserve) helper leg was started. Diagnostic-only; never affects routing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReserveTrigger {
+    PrimaryFailed,
+    HedgeDelayElapsed,
+}
+
 /// `send` starts at most two legs; the reserve starts on delay or primary failure.
 /// Dropping a leg's transport reply waiter does not cancel its queued stream write:
 /// DirectTransport's bounded lane owns that write and its own deadline.
 /// Receipt verification belongs to PeerAssistance, before this oneshot is resolved.
 pub async fn hedged_delivery<F, Fut>(
     helpers: usize,
-    mut receipt: oneshot::Receiver<bool>,
-    mut send: F,
+    receipt: oneshot::Receiver<bool>,
+    send: F,
     hedge_delay: Duration,
     budget: Duration,
 ) -> bool
 where
     F: FnMut(usize) -> Fut,
     Fut: Future<Output = bool>,
+{
+    hedged_delivery_observed(helpers, receipt, send, hedge_delay, budget, |_| {}).await
+}
+
+/// Same bounded race as [hedged_delivery], with a safe observation when the reserve starts.
+/// The callback receives only the trigger class: no peer, message, or packet identifiers.
+pub async fn hedged_delivery_observed<F, Fut, O>(
+    helpers: usize,
+    mut receipt: oneshot::Receiver<bool>,
+    mut send: F,
+    hedge_delay: Duration,
+    budget: Duration,
+    mut on_reserve: O,
+) -> bool
+where
+    F: FnMut(usize) -> Fut,
+    Fut: Future<Output = bool>,
+    O: FnMut(ReserveTrigger),
 {
     if helpers == 0 { return false; }
     let deadline = tokio::time::sleep(budget);
@@ -41,10 +66,12 @@ where
             sent = &mut primary, if !primary_done => {
                 primary_done = true;
                 if !sent && helpers > 1 && reserve.is_none() {
+                    on_reserve(ReserveTrigger::PrimaryFailed);
                     reserve = Some(Box::pin(send(1)));
                 }
             }
             _ = &mut hedge, if helpers > 1 && reserve.is_none() => {
+                on_reserve(ReserveTrigger::HedgeDelayElapsed);
                 reserve = Some(Box::pin(send(1)));
             }
             _ = async { reserve.as_mut().unwrap().as_mut().await },
@@ -102,6 +129,41 @@ mod tests {
             async move { if let Some(tx) = receipt { tx.send(true).unwrap(); true } else { false } }
         }, HELPER_HEDGE_DELAY, HELPER_DELIVERY_BUDGET).await);
         assert_eq!(started, [(0, Duration::ZERO), (1, Duration::ZERO)]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reserve_observer_distinguishes_primary_failure_from_hedge_delay() {
+        let (tx, rx) = oneshot::channel();
+        let mut tx = Some(tx);
+        let mut triggers = Vec::new();
+        assert!(hedged_delivery_observed(2, rx, |leg| {
+            let receipt = if leg == 1 { tx.take() } else { None };
+            async move {
+                if let Some(receipt) = receipt {
+                    let _ = receipt.send(true);
+                    true
+                } else {
+                    false
+                }
+            }
+        }, HELPER_HEDGE_DELAY, HELPER_DELIVERY_BUDGET, |trigger| triggers.push(trigger)).await);
+        assert_eq!(triggers, [ReserveTrigger::PrimaryFailed]);
+
+        let (tx, rx) = oneshot::channel();
+        let mut tx = Some(tx);
+        let mut triggers = Vec::new();
+        assert!(hedged_delivery_observed(2, rx, |leg| {
+            let receipt = if leg == 1 { tx.take() } else { None };
+            async move {
+                if let Some(receipt) = receipt {
+                    let _ = receipt.send(true);
+                    true
+                } else {
+                    std::future::pending::<bool>().await
+                }
+            }
+        }, HELPER_HEDGE_DELAY, HELPER_DELIVERY_BUDGET, |trigger| triggers.push(trigger)).await);
+        assert_eq!(triggers, [ReserveTrigger::HedgeDelayElapsed]);
     }
 
     #[tokio::test(start_paused = true)]

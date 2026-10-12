@@ -15,6 +15,7 @@ import android.os.StatFs
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.local.dao.FileTransferDao
+import com.vladimir.messenger.data.swarm.OnlineHelperSettings
 import com.vladimir.messenger.data.swarm.ServerMode
 import com.vladimir.messenger.data.swarm.SwarmSettings
 import com.vladimir.messenger.service.CoreStatus
@@ -343,6 +344,7 @@ object TransferDiagnostics {
                 stunFailedCycles = logcat.stunFailedCycles,
                 stunSuccessfulBindings = logcat.stunSuccessfulBindings,
                 stunLastAttemptFailed = logcat.stunLastAttemptFailed,
+                helperRoutes = logcat.helperRoutes,
                 logcatWarnings = logcat.severities.warnings,
                 logcatErrors = logcat.severities.errors,
             )
@@ -418,6 +420,10 @@ object TransferDiagnostics {
                 SwarmSettings.init(context)
                 SwarmSettings.mode.value.title
             }.getOrDefault("неизвестно"),
+            onlineHelperParticipationEnabled = runCatching {
+                OnlineHelperSettings.init(context)
+                OnlineHelperSettings.enabled.value
+            }.getOrNull(),
             serverMode = runCatching { ServerMode.isEnabled(context) }.getOrDefault(true),
             batteryPercent = battery.percent,
             batteryCharging = battery.charging,
@@ -481,6 +487,7 @@ object TransferDiagnostics {
         val stunSuccessfulBindings: Long,
         val stunLastAttemptFailed: Boolean?,
         val severities: DiagnosticsLogcatLevels,
+        val helperRoutes: HelperRouteDiagnostics,
     ) {
         /** Журнал процесса ещё не читали или прочитать не удалось. */
         val isEmpty: Boolean
@@ -488,12 +495,14 @@ object TransferDiagnostics {
                 queueOwn == null && queueForeign == null && queueOwnSignals == null &&
                 queueRecipients == null && queueOwnEvictions == 0L && stunFailedCycles == 0L &&
                 stunSuccessfulBindings == 0L && stunLastAttemptFailed == null &&
-                severities.warnings == 0L && severities.errors == 0L
+                severities.warnings == 0L && severities.errors == 0L &&
+                helperRoutes == HelperRouteDiagnostics.EMPTY
 
         companion object {
             val EMPTY = LogcatScan(
                 emptyList(), 0L, 0L, null, null, null, null, 0L, 0L, 0L, null,
                 DiagnosticsLogcatLevels(0L, 0L),
+                HelperRouteDiagnostics.EMPTY,
             )
         }
     }
@@ -698,6 +707,7 @@ object TransferDiagnostics {
             stunSuccessfulBindings = all.count(::isStunSuccess).toLong(),
             stunLastAttemptFailed = all.lastOrNull(::isStunOutcome)?.contains(STUN_ALL_SERVERS_FAILED),
             severities = DiagnosticsPrivacy.countLogcatSeverities(all),
+            helperRoutes = HelperRouteDiagnosticsParser.parse(all),
         )
     }.getOrDefault(LogcatScan.EMPTY)
 
@@ -763,6 +773,7 @@ object TransferDiagnostics {
         "APUF",
         "file_chunk_received",
         "MQTT",
+        "ONLINE_HELPER",
         "Engine",
         "мертв", // «движок мёртв» — от ядра о потере связи
         "error",

@@ -111,6 +111,74 @@ class DiagnosticsReportTest {
         assertTrue(lines.all { it.value.isNotBlank() })
     }
 
+    @Test
+    fun helperRouteParserTracksSelectionFallbackDeclinesAndSignedReceiptWithoutIds() {
+        val events = listOf(
+            "10-12 10:00:00.001 1000 1000 I p2p_core: ONLINE_HELPER event=attempt_started cause=direct_send_failed",
+            "10-12 10:00:00.010 1000 1000 I p2p_core: ONLINE_HELPER event=candidates selected=2",
+            "10-12 10:00:00.020 1000 1000 I p2p_core: ONLINE_HELPER event=leg_started slot=1",
+            "10-12 10:00:00.030 1000 1000 I p2p_core: ONLINE_HELPER event=leg_write slot=1 result=success",
+            "10-12 10:00:00.040 1000 1000 I p2p_core: ONLINE_HELPER event=signed_decline_received slot=1",
+            "10-12 10:00:00.050 1000 1000 I p2p_core: ONLINE_HELPER event=reserve_started trigger=primary_failed",
+            "10-12 10:00:00.060 1000 1000 I p2p_core: ONLINE_HELPER event=leg_started slot=2",
+            "10-12 10:00:00.070 1000 1000 I p2p_core: ONLINE_HELPER event=leg_write slot=2 result=success",
+            "10-12 10:00:00.230 1000 1000 I p2p_core: ONLINE_HELPER event=recipient_receipt_issued",
+            "10-12 10:00:00.240 1000 1000 I p2p_core: ONLINE_HELPER event=receipt_verified return_leg=2",
+            "10-12 10:00:00.241 1000 1000 I p2p_core: ONLINE_HELPER event=attempt_result outcome=receipt_verified elapsed_ms=240",
+            "unrelated log line must not affect helper counters",
+        )
+
+        val parsed = HelperRouteDiagnosticsParser.parse(events)
+        assertEquals(1L, parsed.attempts)
+        assertEquals(2L, parsed.selectedCandidates)
+        assertEquals(1L, parsed.primaryLegsStarted)
+        assertEquals(1L, parsed.reserveLegsStarted)
+        assertEquals(2L, parsed.legWritesSucceeded)
+        assertEquals(1L, parsed.signedDeclinesReceived)
+        assertEquals(1L, parsed.reserveAfterPrimaryFailure)
+        assertEquals(1L, parsed.recipientReceiptsIssued)
+        assertEquals(1L, parsed.senderReceiptsVerified)
+        assertEquals(1L, parsed.receiptReturnedByReserve)
+        assertEquals(0L, parsed.receiptReturnedByPrimary)
+        assertEquals(240L, parsed.averageVerifiedReceiptMs ?: -1L)
+    }
+
+    @Test
+    fun helperReportLabelsStreamWritesAndSignedReceiptsSeparately() {
+        val report = DiagnosticsReport.render(
+            facts = facts(
+                onlineHelperParticipationEnabled = false,
+                helperRoutes = HelperRouteDiagnostics(
+                    attempts = 2L,
+                    selectedCandidates = 3L,
+                    attemptsWithoutCandidates = 1L,
+                    primaryLegsStarted = 2L,
+                    reserveLegsStarted = 1L,
+                    legWritesSucceeded = 2L,
+                    legWritesFailed = 1L,
+                    reserveAfterPrimaryFailure = 1L,
+                    signedDeclinesReceived = 1L,
+                    recipientReceiptsIssued = 1L,
+                    senderReceiptsVerified = 1L,
+                    receiptReturnedByReserve = 1L,
+                    attemptsWithoutReceipt = 1L,
+                    averageVerifiedReceiptMs = 240L,
+                ),
+            ),
+            journal = emptyList(),
+            logcat = emptyList(),
+        )
+        assertTrue(report.contains("local_participation_enabled=false"))
+        assertTrue(report.contains("attempts_after_direct_failure=2"))
+        assertTrue(report.contains("selected_helper_slots_total=3"))
+        assertTrue(report.contains("reserve_after_primary_failure=1"))
+        assertTrue(report.contains("helper_stream_writes_succeeded=2 (не подтверждение доставки)"))
+        assertTrue(report.contains("recipient_signed_receipts_verified=1"))
+        assertTrue(report.contains("verified_receipt_return_leg_2=1"))
+        assertTrue(report.contains("verified_receipt_average_elapsed_ms=240"))
+        assertTrue(report.contains("не личность/уникальность помощника"))
+    }
+
     /**
      * Главная жалоба владельца 2026-10-07: «мои сообщения до него доходят, а от
      * него ко мне не приходят». В сводке это должно быть предупреждением, а не
@@ -424,12 +492,13 @@ class DiagnosticsReportTest {
         )
 
         listOf(
-            "apu-diag/2",
+            "apu-diag/3",
             "[сводка]",
             "[окружение]",
             "[сеть]",
             "[ядро]",
             "[mqtt]",
+            "[помощники]",
             "[передачи]",
             "[сессия]",
             "[журнал]",

@@ -93,6 +93,11 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Check helper and diagnostics source contracts
+        run: |
+          python3 scripts/ci/check-online-helper.py
+          python3 scripts/ci/check-diagnostics-report.py
+
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
@@ -224,13 +229,14 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x ./android-app/gradlew
 
-      - name: Test story photo chunk assembly
+      - name: Test story chunks and diagnostics report
         working-directory: ./android-app
         run: |
           set +e
           ./gradlew :app:testReleaseUnitTest \
             --tests com.vladimir.messenger.data.swarm.ContentAddressedChunksTest \
             --tests com.vladimir.messenger.data.story.StoryPhotoPartsTest \
+            --tests com.vladimir.messenger.data.diagnostics.DiagnosticsReportTest \
             --no-daemon > "$RUNNER_TEMP/gradle-release.log" 2>&1
           status=$?
           cat "$RUNNER_TEMP/gradle-release.log"

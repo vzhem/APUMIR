@@ -198,8 +198,17 @@ pub fn encode(identity: &InstalledSigningIdentity, peer: &str, operation: Assist
     (bytes.len() <= MAX_ASSIST_BYTES).then_some(bytes)
 }
 
-struct Leg { started: Instant, written: bool, declined: Option<oneshot::Sender<()>> }
-struct Pending { recipient: HelperIdentity, digest: [u8; 32], expires: i64, tx: oneshot::Sender<bool>, legs: HashMap<String, Leg> }
+struct Leg { slot: u8, started: Instant, written: bool, declined: Option<oneshot::Sender<()>> }
+struct Pending {
+    recipient: HelperIdentity,
+    digest: [u8; 32],
+    expires: i64,
+    tx: oneshot::Sender<bool>,
+    legs: HashMap<String, Leg>,
+    // Only ordinary message packets get detailed route logs. File chunks can be numerous;
+    // they remain covered by the existing file-transfer diagnostics instead.
+    diagnostic_message: bool,
+}
 struct Received { digest: [u8; 32], expires: i64, receipt: Receipt }
 struct Route { origin: String, recipient: HelperIdentity, digest: [u8; 32], expires: i64 }
 #[derive(Default)]
@@ -258,7 +267,15 @@ impl PeerAssistance {
         let mut s = self.state.lock().unwrap(); cleanup(&mut s, now);
         if s.pending.len() >= MAX_PENDING { return None; }
         let id = packet.header.packet_id;
-        s.pending.insert(id, Pending { recipient: recipient.clone(), digest: packet.digest()?, expires: packet.header.expires_at_ms, tx, legs: HashMap::new() });
+        let diagnostic_message = !bytes.starts_with(super::file_wire::FILE_WIRE_MAGIC);
+        s.pending.insert(id, Pending {
+            recipient: recipient.clone(),
+            digest: packet.digest()?,
+            expires: packet.header.expires_at_ms,
+            tx,
+            legs: HashMap::new(),
+            diagnostic_message,
+        });
         Some((AssistOperation::Relay { packet }, rx, id))
     }
     pub fn pending_guard(self: &Arc<Self>, id: [u8; 16]) -> PendingRelayGuard {
@@ -271,12 +288,12 @@ impl PeerAssistance {
     }
 
     /// Called in the polled leg, not when its future is merely constructed.
-    pub fn leg_started(&self, id: [u8; 16], helper: &str) -> Option<oneshot::Receiver<()>> {
+    pub fn leg_started(&self, id: [u8; 16], helper: &str, slot: u8) -> Option<oneshot::Receiver<()>> {
         let mut s = self.state.lock().unwrap();
         let pending = s.pending.get_mut(&id)?;
         if pending.legs.len() >= 2 || pending.legs.contains_key(helper) { return None; }
         let (tx, rx) = oneshot::channel();
-        pending.legs.insert(helper.into(), Leg { started: Instant::now(), written: false, declined: Some(tx) });
+        pending.legs.insert(helper.into(), Leg { slot, started: Instant::now(), written: false, declined: Some(tx) });
         Some(rx)
     }
 
@@ -372,11 +389,17 @@ impl PeerAssistance {
                 effect.outbound.push((packet.header.recipient.clone(), AssistOperation::Deliver { packet }));
             }
             AssistOperation::Decline { packet_id } => {
-                let Some(pending) = s.pending.get_mut(&packet_id) else { return None; };
-                let Some(leg) = pending.legs.get_mut(&c.from) else { return None; };
-                if !leg.written { return None; }
-                let Some(tx) = leg.declined.take() else { return None; };
-                let _ = tx.send(());
+                let (diagnostic_message, slot) = {
+                    let Some(pending) = s.pending.get_mut(&packet_id) else { return None; };
+                    let Some(leg) = pending.legs.get_mut(&c.from) else { return None; };
+                    if !leg.written { return None; }
+                    let Some(tx) = leg.declined.take() else { return None; };
+                    let _ = tx.send(());
+                    (pending.diagnostic_message, leg.slot)
+                };
+                if diagnostic_message {
+                    tracing::info!("ONLINE_HELPER event=signed_decline_received slot={}", slot);
+                }
                 s.quality.declined(&c.from, Instant::now());
             }
             AssistOperation::Deliver { packet } => {
@@ -399,11 +422,15 @@ impl PeerAssistance {
                 let plaintext = open(identity, &packet, now)?;
                 if !valid_inner(&plaintext, &packet.header.sender.claims.node_id)
                     || !directory.accept_end_to_end_identity(&packet.header.sender, now) { return None; }
+                let diagnostic_message = !plaintext.starts_with(super::file_wire::FILE_WIRE_MAGIC);
                 let claims = ReceiptClaims { packet_id: packet.header.packet_id, origin: packet.header.sender.claims.node_id.clone(),
                     recipient: c.to.clone(), digest, expires_at_ms: packet.header.expires_at_ms };
                 let signature = identity.sign_security_payload(&canonical(ACK_DOMAIN, &claims)?);
                 let receipt = Receipt { claims, signature };
                 s.received.insert(key, Received { digest, expires: packet.header.expires_at_ms, receipt: receipt.clone() });
+                if diagnostic_message {
+                    tracing::info!("ONLINE_HELPER event=recipient_receipt_issued");
+                }
                 effect.delivery = Some(plaintext);
                 effect.outbound.push((c.from, AssistOperation::Receipt { receipt }));
             }
@@ -418,10 +445,17 @@ impl PeerAssistance {
                     let pending = s.pending.remove(&id)?;
                     // The recipient signature proves acceptance, not a globally provable
                     // helper path. Credit only this locally started, authenticated return leg.
+                    let return_slot = pending.legs.get(&c.from).map(|leg| leg.slot);
                     if let Some(leg) = pending.legs.get(&c.from) {
                         let now = Instant::now();
                         s.quality.accepted(&pending.recipient.claims.node_id, &c.from,
                             now.saturating_duration_since(leg.started), now);
+                    }
+                    if pending.diagnostic_message {
+                        match return_slot {
+                            Some(slot) => tracing::info!("ONLINE_HELPER event=receipt_verified return_leg={}", slot),
+                            None => tracing::info!("ONLINE_HELPER event=receipt_verified return_leg=unknown"),
+                        }
                     }
                     // Other legs are censored by the race, NOT failed deliveries.
                     let _ = pending.tx.send(true);
@@ -593,8 +627,10 @@ mod tests {
         let text = format!("{}|hedged|chat|one message", a.legacy_routing_node_id());
         let (op, mut receipt, packet_id) = sa.prepare_relay(&a, &HelperIdentity::create(&b, NOW).unwrap(), text.as_bytes(), NOW).unwrap();
         let mut deliveries = 0;
-        for (helper, directory, assistance) in [(&h, &dh, &sh), (&j, &dj, &sj)] {
-            sa.leg_started(packet_id, helper.legacy_routing_node_id());
+        for (slot, (helper, directory, assistance)) in [(&h, &dh, &sh), (&j, &dj, &sj)]
+            .into_iter().enumerate()
+        {
+            sa.leg_started(packet_id, helper.legacy_routing_node_id(), (slot + 1) as u8);
             sa.leg_written(packet_id, helper.legacy_routing_node_id(), true);
             let wire = encode(&a, helper.legacy_routing_node_id(), op.clone(), BINDING, NOW).unwrap();
             let forward = assistance.handle(helper, directory, &wire, BINDING, addr(1), NOW).unwrap().outbound.remove(0);
@@ -681,7 +717,7 @@ mod tests {
         let (operation, mut rx, packet_id) = sa.prepare_relay(&a, &HelperIdentity::create(&b, NOW).unwrap(),
             format!("{}|m|chat|private", a.legacy_routing_node_id()).as_bytes(), NOW).unwrap();
         let guard = sa.pending_guard(packet_id);
-        sa.leg_started(packet_id, h.legacy_routing_node_id());
+        sa.leg_started(packet_id, h.legacy_routing_node_id(), 1);
         let packet = match operation { AssistOperation::Relay { packet } => packet, _ => unreachable!() };
         let claims = ReceiptClaims { packet_id, origin: a.legacy_routing_node_id().into(),
             recipient: b.legacy_routing_node_id().into(), digest: packet.digest().unwrap(), expires_at_ms: NOW + PACKET_MS };
@@ -707,9 +743,9 @@ mod tests {
         sa.state.lock().unwrap().quality.accepted(b.legacy_routing_node_id(), "reachable",
             std::time::Duration::from_millis(100), Instant::now());
         let guard = sa.pending_guard(id);
-        sa.leg_started(id, "primary");
+        sa.leg_started(id, "primary", 1);
         sa.leg_written(id, "primary", true);
-        sa.leg_started(id, "reserve"); // Canceled write is not a timeout observation.
+        sa.leg_started(id, "reserve", 2); // Canceled write is not a timeout observation.
         sa.finish_timeout(id);
         drop(guard);
         let mut order = vec!["primary".into(), "reserve".into()];
@@ -717,7 +753,7 @@ mod tests {
         assert_eq!(order, ["reserve", "primary"]);
         let (_, _, aborted) = sa.prepare_relay(&a, &target, data.as_bytes(), NOW).unwrap();
         let guard = sa.pending_guard(aborted);
-        sa.leg_started(aborted, "reserve");
+        sa.leg_started(aborted, "reserve", 2);
         sa.leg_written(aborted, "reserve", true);
         drop(guard); // Outer FFI abort is not evidence of a failed helper.
         sa.finish_timeout(aborted);
@@ -761,7 +797,7 @@ mod tests {
         let data = format!("{}|decline|chat|text", a.legacy_routing_node_id());
         let (op, _receipt, id) = sa.prepare_relay(&a, &target, data.as_bytes(), NOW).unwrap();
         let guard = sa.pending_guard(id);
-        let mut declined = sa.leg_started(id, h.legacy_routing_node_id()).unwrap();
+        let mut declined = sa.leg_started(id, h.legacy_routing_node_id(), 1).unwrap();
         let wire = encode(&a, h.legacy_routing_node_id(), op, BINDING, NOW).unwrap();
         let reply = sh.handle(&h, &dh, &wire, BINDING, addr(1), NOW).unwrap().outbound.remove(0);
         let wire = encode(&h, &reply.0, reply.1, BINDING, NOW).unwrap();
@@ -877,7 +913,7 @@ mod tests {
             let id = Arc::clone(&a.id); let operation = operation.clone(); let transport = a.transport.clone();
             let assist = Arc::clone(&a.assist);
             async move {
-                assist.leg_started(packet_id, &peer);
+                assist.leg_started(packet_id, &peer, (leg + 1) as u8);
                 let factory: BoundFrameFactory = Arc::new(move |binding, _| encode(&id, &target, operation.clone(), binding, crate::storage::models::now_ms()));
                 let written = transport.send_bound(&peer, None, factory).await;
                 assist.leg_written(packet_id, &peer, written);

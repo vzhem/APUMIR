@@ -5044,7 +5044,7 @@ impl P2PCore {
         let sent = transport.send_blocking(peer_id, addr, bytes.clone());
         if sent { return true; }
         self.peer_exchange.note_route_failure(peer_id, addr, crate::storage::models::now_ms());
-        self.send_with_helper(&transport, peer_id, &bytes)
+        self.send_with_helper(&transport, peer_id, &bytes, true)
     }
 
     /// F4: an exporter-bound C1 session is used only for a v2-capable contact whose exact
@@ -5122,22 +5122,48 @@ impl P2PCore {
         let sent = transport.send_file_blocking(peer_id, addr, frame.clone());
         if sent { return true; }
         self.peer_exchange.note_route_failure(peer_id, addr, crate::storage::models::now_ms());
-        self.send_with_helper(&transport, peer_id, &frame)
+        self.send_with_helper(&transport, peer_id, &frame, false)
     }
 
     /// Online transit does not enable disk custody. True means the RECIPIENT signed
     /// acceptance after end-to-end decryption, not that an intermediate stream was written.
-    fn send_with_helper(&self, transport: &DirectTransport, recipient: &str, bytes: &[u8]) -> bool {
-        use crate::network::helper_delivery::{hedged_delivery, HELPER_DELIVERY_BUDGET, HELPER_HEDGE_DELAY};
-        let Some(runtime) = self.runtime.as_ref() else { return false; };
+    fn send_with_helper(
+        &self,
+        transport: &DirectTransport,
+        recipient: &str,
+        bytes: &[u8],
+        diagnostics: bool,
+    ) -> bool {
+        use crate::network::helper_delivery::{
+            hedged_delivery_observed, ReserveTrigger, HELPER_DELIVERY_BUDGET, HELPER_HEDGE_DELAY,
+        };
+
+        // Detailed events are deliberately limited to ordinary messages. File chunks can be
+        // frequent; their established transfer diagnostics remain the source of truth.
+        if diagnostics {
+            tracing::info!("ONLINE_HELPER event=attempt_started cause=direct_send_failed");
+        }
+        let Some(runtime) = self.runtime.as_ref() else {
+            if diagnostics {
+                tracing::info!("ONLINE_HELPER event=route_unavailable reason=runtime");
+            }
+            return false;
+        };
         let Some(identity) = crate::crypto::signing_identity::installed_signing_identity()
-            .filter(|i| Some(i.legacy_routing_node_id()) == self.node_id_str.as_deref()) else { return false; };
+            .filter(|i| Some(i.legacy_routing_node_id()) == self.node_id_str.as_deref())
+        else {
+            if diagnostics {
+                tracing::info!("ONLINE_HELPER event=route_unavailable reason=identity");
+            }
+            return false;
+        };
         let transport = transport.clone();
         let directory = Arc::clone(&self.peer_exchange);
         let assistance = Arc::clone(&self.peer_assistance);
         let recipient = recipient.to_string();
         let bytes = bytes.to_vec();
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let started_at = std::time::Instant::now();
         // The FFI caller waits outside the runtime. Both helper legs run on the
         // existing runtime, never in newly-created blocking worker threads.
         let task = runtime.spawn(async move {
@@ -5160,7 +5186,16 @@ impl P2PCore {
                 }
                 assistance.order_helpers(&recipient, &mut helpers);
                 helpers.truncate(2);
-                if helpers.is_empty() { directory.wake(); return false; }
+                if diagnostics {
+                    tracing::info!("ONLINE_HELPER event=candidates selected={}", helpers.len());
+                }
+                if helpers.is_empty() {
+                    if diagnostics {
+                        tracing::info!("ONLINE_HELPER event=no_candidates");
+                    }
+                    directory.wake();
+                    return false;
+                }
                 // Introduce both endpoints even when we already know the recipient key.
                 // This probes in the background without replaying the in-flight payload.
                 // Existing per-target cooldown and authenticated probe budgets still apply.
@@ -5170,35 +5205,86 @@ impl P2PCore {
                     }
                 }
                 let Some(target) = directory.helper_identity(&recipient, now) else {
-                    directory.wake(); return false;
+                    if diagnostics {
+                        tracing::info!("ONLINE_HELPER event=route_unavailable reason=recipient_identity");
+                    }
+                    directory.wake();
+                    return false;
                 };
-                let Some((operation, receipt, packet_id)) = assistance.prepare_relay(&identity, &target, &bytes, now) else { return false; };
+                let Some((operation, receipt, packet_id)) = assistance.prepare_relay(&identity, &target, &bytes, now) else {
+                    if diagnostics {
+                        tracing::info!("ONLINE_HELPER event=relay_packet_rejected");
+                    }
+                    return false;
+                };
                 pending_guard = Some(assistance.pending_guard(packet_id));
                 attempt_id = Some(packet_id);
-                hedged_delivery(helpers.len(), receipt, |leg| {
-                    let peer = helpers[leg].clone();
-                    let destination = peer.clone();
-                    let operation = operation.clone();
-                    let identity = Arc::clone(&identity);
-                    let transport = transport.clone();
-                    let assistance = Arc::clone(&assistance);
-                    async move {
-                        let declined = assistance.leg_started(packet_id, &peer);
-                        let factory: BoundFrameFactory = Arc::new(move |binding, _| peer_assistance::encode(
-                            &identity, &destination, operation.clone(), binding, crate::storage::models::now_ms()));
-                        // None forbids new arbitrary dials: only the existing peer channel.
-                        let written = transport.send_bound(&peer, None, factory).await;
-                        assistance.leg_written(packet_id, &peer, written);
-                        if !written { return false; }
-                        // A signed refusal makes this leg fail now, so the reserve starts immediately.
-                        // Without refusal/receipt this stays pending until the shared deadline.
-                        match declined {
-                            Some(declined) => match declined.await { Ok(()) => false, Err(_) => std::future::pending::<bool>().await },
-                            None => true,
+                hedged_delivery_observed(
+                    helpers.len(),
+                    receipt,
+                    |leg| {
+                        let peer = helpers[leg].clone();
+                        let destination = peer.clone();
+                        let operation = operation.clone();
+                        let identity = Arc::clone(&identity);
+                        let transport = transport.clone();
+                        let assistance = Arc::clone(&assistance);
+                        async move {
+                            if diagnostics {
+                                tracing::info!("ONLINE_HELPER event=leg_started slot={}", leg + 1);
+                            }
+                            let declined = assistance.leg_started(packet_id, &peer, (leg + 1) as u8);
+                            let factory: BoundFrameFactory = Arc::new(move |binding, _| peer_assistance::encode(
+                                &identity, &destination, operation.clone(), binding, crate::storage::models::now_ms()));
+                            // None forbids new arbitrary dials: only the existing peer channel.
+                            let written = transport.send_bound(&peer, None, factory).await;
+                            assistance.leg_written(packet_id, &peer, written);
+                            if diagnostics {
+                                tracing::info!(
+                                    "ONLINE_HELPER event=leg_write slot={} result={}",
+                                    leg + 1,
+                                    if written { "success" } else { "failed" },
+                                );
+                            }
+                            if !written { return false; }
+                            // A signed refusal makes this leg fail now, so the reserve starts immediately.
+                            // Without refusal/receipt this stays pending until the shared deadline.
+                            match declined {
+                                Some(declined) => match declined.await {
+                                    Ok(()) => false,
+                                    Err(_) => std::future::pending::<bool>().await,
+                                },
+                                None => true,
+                            }
                         }
-                    }
-                }, HELPER_HEDGE_DELAY, HELPER_DELIVERY_BUDGET).await
+                    },
+                    HELPER_HEDGE_DELAY,
+                    HELPER_DELIVERY_BUDGET,
+                    |trigger| {
+                        if diagnostics {
+                            let trigger = match trigger {
+                                ReserveTrigger::PrimaryFailed => "primary_failed",
+                                ReserveTrigger::HedgeDelayElapsed => "hedge_delay",
+                            };
+                            tracing::info!("ONLINE_HELPER event=reserve_started trigger={}", trigger);
+                        }
+                    },
+                ).await
             }).await.unwrap_or(false);
+            if diagnostics {
+                let outcome = if result {
+                    "receipt_verified"
+                } else if attempt_id.is_some() {
+                    "no_receipt"
+                } else {
+                    "not_prepared"
+                };
+                tracing::info!(
+                    "ONLINE_HELPER event=attempt_result outcome={} elapsed_ms={}",
+                    outcome,
+                    started_at.elapsed().as_millis(),
+                );
+            }
             if !result {
                 if let Some(id) = attempt_id { assistance.finish_timeout(id); }
             }
@@ -5207,7 +5293,16 @@ impl P2PCore {
         });
         match rx.recv_timeout(crate::network::direct_transport::DIRECT_SEND_BUDGET) {
             Ok(accepted) => accepted,
-            Err(_) => { task.abort(); false }
+            Err(_) => {
+                task.abort();
+                if diagnostics {
+                    tracing::info!(
+                        "ONLINE_HELPER event=attempt_result outcome=local_wait_timeout elapsed_ms={}",
+                        started_at.elapsed().as_millis(),
+                    );
+                }
+                false
+            }
         }
     }
 

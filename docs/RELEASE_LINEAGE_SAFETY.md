@@ -44,12 +44,68 @@ baseline. Для обычной цепочки следующим baseline до�
 - Не переносить, не удалять и не переписывать уже опубликованные tags/releases/assets. Исправление
   выпускается новым номером, как v11.74.337.
 
-## Защита на уровне настроек GitHub
+## Рекомендуемые настройки GitHub (ещё не включены)
 
-Администратору репозитория рекомендуется включить rulesets: запрет force-push/delete для основной
-release-ветки; запрет обновления/удаления тегов `v*`; обязательные checks перед merge. Хранить
-регулярную копию Git refs/tags и release asset inventory отдельно от рабочей ветки. Эти настройки
-нужно подтвердить в GitHub UI; данный документ сам по себе не доказывает, что они включены.
+Это рекомендации владельцу, не утверждение о текущих настройках. Агент не менял branch/ruleset,
+Actions, Environment или release permissions. После изменения подтвердить каждую настройку в
+GitHub UI. `main` всё ещё на v11.74.206 и **не является release baseline**; защитить его полезно,
+но защита сама по себе не восстанавливает историю и не разрешает выпускать от него.
+
+### Ruleset A — `protect-main`
+
+Target: `refs/heads/main` (default branch), даже пока он старый.
+
+- Block force pushes and branch deletion.
+- Require pull requests before merge; require the checks that are actually configured for PRs.
+  Сейчас Rust PR workflow `Core compile check / cargo check + uniffi contract` покрывает только
+  соответствующие Rust/tooling paths; не объявлять его Android/полной release-проверкой.
+- Не добавлять обход для обычных Actions/GitHub Apps. Если solo-owner нужен обход, оставить его
+  только владельцу/администратору и использовать явно, не service token.
+- Не продвигать `main` в release source, пока владелец отдельно не согласует восстановление/merge
+  истории и не проверит diff относительно v11.74.337.
+
+### Ruleset B — `protect-release-line`
+
+Target: долговечная release-ветка, которую владелец назначит после выбора процесса выпуска; она
+должна быть основана на v11.74.337 и включать последующие проверенные изменения. На время Arena-сессии
+изменения идут только в `arena/4f0b31c5-apumir`; это не повод создавать/переключать ветку или
+считать временную Arena-ветку постоянной. Для назначенной release-ветки включить PR requirement,
+обязательные build/test checks, запрет force-push/delete и review большого diff. Require linear
+history — опционально, если обычный release-процесс не требует merge commits.
+
+### Ruleset C — `protect-version-tags`
+
+Target: tag name pattern `v*`.
+
+- Restrict tag creation to release maintainers/owner.
+- Restrict tag updates and deletions; не переносить уже опубликованные теги/assets.
+- Оставить узкий admin bypass только для аварийной процедуры, документировать любое применение.
+- Правило на теги дополняет, а не заменяет workflow ancestry gate: оно не проверяет исходный
+  commit, тесты или содержание APK.
+
+### Actions и release permissions
+
+В **Settings → Actions → General** установить default `GITHUB_TOKEN` workflow permissions в
+`Read repository contents`; выключить `Allow GitHub Actions to create and approve pull requests`,
+если конкретный workflow действительно не требует этого. В **Workflow permissions** запретить
+workflow просить write-права без необходимости. Для выпуска:
+
+- build/test jobs — `contents: read`; отдельный release/publish job — только `contents: write`;
+  не оставлять write permission на весь `build-release.yml`/`workflow_dispatch`.
+- Сейчас `.github/workflows/build-release.yml` имеет top-level `contents: write`; ручной
+  `workflow_dispatch` не создаёт Release, но запускается с теми же широкими workflow permissions
+  и может использовать release-signing secrets. Это ещё не сведено к least privilege.
+- Создать Environment `public-release` с required reviewer = владелец, разрешить deployment только
+  для version tags `v*`, держать release-signing secrets только в этом Environment и запрашивать
+  его только в tag-triggered publish job. Fork PR и ручной diagnostic build не должны видеть ключ.
+  Сохранить создание hidden draft/prerelease; promotion в public Latest делать после ручной проверки.
+- В **Actions → General → Actions permissions** выбрать allowlist конкретных reviewed actions;
+  pin third-party actions к full commit SHA (tag — только обновляемый указатель). Не выдавать
+  `id-token: write`, `pull-requests: write` или другие права release job, если шаг их не использует.
+
+В отдельной копии хранить Git refs/tags и перечень release assets/checksums. Перед публичной
+публикацией проверять source ancestry/diff, статус всего tag CI, release-notes body, APK assets и
+checksum. Ни один из этих GitHub UI controls агентом не изменён на 2026-10-12.
 
 ## Оставшиеся проверки
 

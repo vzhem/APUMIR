@@ -52,7 +52,7 @@ enum class DiagnosticsLineTone {
 // Заголовки разделов перечислены явно: под этот шаблон не попадут ни метки
 // приватности вида [contact], ни скрытые тела сообщений.
 private val toneSectionRegex = Regex(
-    "^\\[(?:сводка|окружение|сеть|ядро|mqtt|сообщения|передачи|сессия|журнал|лог процесса)\\]",
+    "^\\[(?:сводка|окружение|сеть|ядро|mqtt|помощники|сообщения|передачи|сессия|журнал|лог процесса)\\]",
 )
 private val toneBadSummaryRegex = Regex("^✖")
 private val toneWarnSummaryRegex = Regex("^!")
@@ -197,7 +197,89 @@ data class DiagnosticsFacts(
     val logcatWarnings: Long = 0L,
     /** Ошибки E/F из последних строк logcat процесса приложения. */
     val logcatErrors: Long = 0L,
+    /** Локальный opt-in принимать online-helper transit; это не разрешение отправителю. */
+    val onlineHelperParticipationEnabled: Boolean? = null,
+    /** Безопасные события маршрута сообщений из ограниченной выборки Rust logcat. */
+    val helperRoutes: HelperRouteDiagnostics = HelperRouteDiagnostics.EMPTY,
 )
+
+/** Агрегаты обычных сообщений; file chunks intentionally stay on file-transfer diagnostics. */
+data class HelperRouteDiagnostics(
+    val attempts: Long = 0L,
+    /** Сумма выбранных helper slots (не число уникальных устройств). */
+    val selectedCandidates: Long = 0L,
+    val attemptsWithoutCandidates: Long = 0L,
+    val routeUnavailable: Long = 0L,
+    val packetPreparationRejected: Long = 0L,
+    val attemptsNotPrepared: Long = 0L,
+    val primaryLegsStarted: Long = 0L,
+    val reserveLegsStarted: Long = 0L,
+    val legWritesSucceeded: Long = 0L,
+    val legWritesFailed: Long = 0L,
+    val reserveAfterPrimaryFailure: Long = 0L,
+    val reserveAfterHedgeDelay: Long = 0L,
+    val signedDeclinesReceived: Long = 0L,
+    val recipientReceiptsIssued: Long = 0L,
+    val senderReceiptsVerified: Long = 0L,
+    val receiptReturnedByPrimary: Long = 0L,
+    val receiptReturnedByReserve: Long = 0L,
+    val receiptReturnedByUnknownLeg: Long = 0L,
+    val attemptsWithoutReceipt: Long = 0L,
+    val averageVerifiedReceiptMs: Long? = null,
+) {
+    companion object {
+        val EMPTY = HelperRouteDiagnostics()
+    }
+}
+
+/** Парсер безопасных машинных маркеров Rust logcat; сами строки не хранятся в фактах. */
+object HelperRouteDiagnosticsParser {
+    private val eventPattern = Regex("""\bONLINE_HELPER event=([a-z_]+)\b""")
+
+    fun parse(lines: List<String>): HelperRouteDiagnostics {
+        val events = lines.mapNotNull { line ->
+            val name = eventPattern.find(line)?.groupValues?.getOrNull(1) ?: return@mapNotNull null
+            name to line
+        }
+        fun count(name: String): Long = events.count { it.first == name }.toLong()
+        fun count(name: String, key: String, value: String): Long =
+            events.count { it.first == name && field(it.second, key) == value }.toLong()
+        val verifiedReceiptTimes = events.asSequence()
+            .filter { (name, line) -> name == "attempt_result" && field(line, "outcome") == "receipt_verified" }
+            .mapNotNull { (_, line) -> field(line, "elapsed_ms")?.toLongOrNull() }
+            .toList()
+        return HelperRouteDiagnostics(
+            attempts = count("attempt_started"),
+            selectedCandidates = events.asSequence()
+                .filter { it.first == "candidates" }
+                .sumOf { (_, line) -> field(line, "selected")?.toLongOrNull() ?: 0L },
+            attemptsWithoutCandidates = count("no_candidates"),
+            routeUnavailable = count("route_unavailable"),
+            packetPreparationRejected = count("relay_packet_rejected"),
+            attemptsNotPrepared = count("attempt_result", "outcome", "not_prepared"),
+            primaryLegsStarted = count("leg_started", "slot", "1"),
+            reserveLegsStarted = count("leg_started", "slot", "2"),
+            legWritesSucceeded = count("leg_write", "result", "success"),
+            legWritesFailed = count("leg_write", "result", "failed"),
+            reserveAfterPrimaryFailure = count("reserve_started", "trigger", "primary_failed"),
+            reserveAfterHedgeDelay = count("reserve_started", "trigger", "hedge_delay"),
+            signedDeclinesReceived = count("signed_decline_received"),
+            recipientReceiptsIssued = count("recipient_receipt_issued"),
+            senderReceiptsVerified = count("receipt_verified"),
+            receiptReturnedByPrimary = count("receipt_verified", "return_leg", "1"),
+            receiptReturnedByReserve = count("receipt_verified", "return_leg", "2"),
+            receiptReturnedByUnknownLeg = count("receipt_verified", "return_leg", "unknown"),
+            attemptsWithoutReceipt = count("attempt_result", "outcome", "no_receipt") +
+                count("attempt_result", "outcome", "local_wait_timeout"),
+            averageVerifiedReceiptMs = verifiedReceiptTimes.takeIf { it.isNotEmpty() }
+                ?.let { values -> values.sum() / values.size },
+        )
+    }
+
+    private fun field(line: String, key: String): String? =
+        Regex("""(?:^|\s)${Regex.escape(key)}=([A-Za-z0-9_-]+)(?:\s|$)""")
+            .find(line)?.groupValues?.getOrNull(1)
+}
 
 /** Имена счётчиков сессии: один список для записи (хуки) и для отчёта. */
 object Counters {
@@ -441,7 +523,7 @@ object DiagnosticsPrivacy {
 /** Сборка текста отчёта и строк сводки. Ничего не читает сама — только форматирует. */
 object DiagnosticsReport {
     /** Версия формата отчёта: по ней видно, что файл разобран теми же правилами. */
-    const val SCHEMA = "apu-diag/2"
+    const val SCHEMA = "apu-diag/3"
 
     private const val MAX_JOURNAL_LINES = 240
 
@@ -471,6 +553,7 @@ object DiagnosticsReport {
         appendNetwork(facts)
         appendCore(facts)
         appendMqtt(facts)
+        appendHelperRoutes(facts)
         appendMessages(facts)
         appendTransfers(facts)
         appendSession(facts)
@@ -759,6 +842,7 @@ object DiagnosticsReport {
         appendLine("notifications=${if (facts.notificationsAllowed) "разрешены" else "запрещены"}")
         appendLine("proxy_tunnel=${if (facts.proxyTunnel) "включён" else "выключен"}")
         appendLine("swarm=${facts.swarmMode}")
+        appendLine("online_helper_participation=${facts.onlineHelperParticipationEnabled?.toString() ?: "unknown"}")
         appendLine("im_the_server=${facts.serverMode}")
         appendLine("power_save=${facts.powerSave} · doze=${facts.deviceIdle} · battery_exempt=${facts.batteryExempt}")
         appendLine("battery=${facts.batteryPercent}% (${if (facts.batteryCharging) "зарядка" else "разряд"})")
@@ -801,6 +885,37 @@ object DiagnosticsReport {
             }
             appendLine("raw=${facts.mqttLine}")
         }
+        appendLine()
+    }
+
+    /** Безопасная сводка helper-route: только тип события, номер локального слота и задержки. */
+    private fun StringBuilder.appendHelperRoutes(facts: DiagnosticsFacts) {
+        val helper = facts.helperRoutes
+        appendLine("[помощники]")
+        appendLine("scope=обычные сообщения после неудачи прямой отправки; file chunks не включены")
+        appendLine("source=ограниченная выборка последних строк logcat процесса, не полный журнал")
+        appendLine("local_participation_enabled=${facts.onlineHelperParticipationEnabled?.toString() ?: "unknown"}")
+        appendLine("attempts_after_direct_failure=${helper.attempts}")
+        appendLine("selected_helper_slots_total=${helper.selectedCandidates}")
+        appendLine("attempts_without_candidates=${helper.attemptsWithoutCandidates}")
+        appendLine("route_unavailable=${helper.routeUnavailable}")
+        appendLine("relay_packet_rejected=${helper.packetPreparationRejected}")
+        appendLine("attempts_not_prepared=${helper.attemptsNotPrepared}")
+        appendLine("primary_legs_started=${helper.primaryLegsStarted}")
+        appendLine("reserve_legs_started=${helper.reserveLegsStarted}")
+        appendLine("helper_stream_writes_succeeded=${helper.legWritesSucceeded} (не подтверждение доставки)")
+        appendLine("helper_stream_writes_failed=${helper.legWritesFailed}")
+        appendLine("reserve_after_primary_failure=${helper.reserveAfterPrimaryFailure}")
+        appendLine("reserve_after_hedge_delay=${helper.reserveAfterHedgeDelay}")
+        appendLine("signed_declines_received=${helper.signedDeclinesReceived}")
+        appendLine("recipient_signed_receipts_issued=${helper.recipientReceiptsIssued}")
+        appendLine("recipient_signed_receipts_verified=${helper.senderReceiptsVerified}")
+        appendLine("verified_receipt_return_leg_1=${helper.receiptReturnedByPrimary}")
+        appendLine("verified_receipt_return_leg_2=${helper.receiptReturnedByReserve}")
+        appendLine("verified_receipt_return_leg_unknown=${helper.receiptReturnedByUnknownLeg}")
+        appendLine("attempts_without_receipt=${helper.attemptsWithoutReceipt}")
+        appendLine("verified_receipt_average_elapsed_ms=${helper.averageVerifiedReceiptMs?.toString() ?: "нет данных"}")
+        appendLine("Квитанция подтверждает принятие адресатом, но не личность/уникальность помощника и не полный путь пакета.")
         appendLine()
     }
 
