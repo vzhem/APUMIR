@@ -149,3 +149,57 @@ class ContentAddressedChunksTest {
         }
     }
 }
+
+    @Test
+    fun fullAssembler_acceptComplete() {
+        val a = Assembler(1024, 10, 4096L, 60000L, 3600000L)
+        val m = Manifest("id1", 10, 100, 10, System.currentTimeMillis() + 300000)
+        val chunk = ByteArray(10) { it.toByte() }
+        val id = sha256Hex(chunk)
+        assertNull(a.receive("u1", "k1", m, 0, 10, id, chunk, System.currentTimeMillis()))
+        for (i in 1 until 9) {
+            val part = ByteArray(10) { (it + i).toByte() }
+            assertNull(a.receive("u1", "k1", m, i, 10, sha256Hex(part), part, System.currentTimeMillis()))
+        }
+        val last = ByteArray(10) { 99.toByte() }
+        val result = a.receive("u1", "k1", m, 9, 10, sha256Hex(last), last, System.currentTimeMillis())
+        assertNotNull(result)
+        assertEquals(100, result!!.size)
+    }
+    @Test
+    fun fullAssembler_rejectBadChunkHash() {
+        val a = Assembler(1024, 10, 4096L, 60000L, 3600000L)
+        val m = Manifest("id2", 5, 50, 10, System.currentTimeMillis() + 300000)
+        val chunk = ByteArray(10) { 1.toByte() }
+        assertNull(a.receive("u1", "k2", m, 0, 5, "badhash", chunk, System.currentTimeMillis()))
+        assertEquals(0, a.pendingCount(System.currentTimeMillis()))
+    }
+    @Test
+    fun fullAssembler_expirePending() {
+        val a = Assembler(1024, 10, 4096L, 100L, 3600000L)
+        val m = Manifest("id3", 1, 10, 10, System.currentTimeMillis() + 300000)
+        val chunk = ByteArray(10) { 2.toByte() }
+        val t = System.currentTimeMillis()
+        assertNull(a.receive("u1", "k3", m, 0, 1, sha256Hex(chunk), chunk, t))
+        assertEquals(1, a.pendingCount(t + 50L))
+        assertEquals(0, a.pendingCount(t + 200L))
+    }
+    @Test
+    fun fullAssembler_discardByOwner() {
+        val a = Assembler(1024, 10, 4096L, 60000L, 3600000L)
+        val m = Manifest("id4", 1, 10, 10, System.currentTimeMillis() + 300000)
+        val chunk = ByteArray(10) { 3.toByte() }
+        val id = sha256Hex(chunk)
+        a.receive("u1", "k4", m, 0, 1, id, chunk, System.currentTimeMillis())
+        assertEquals(1, a.pendingCount(System.currentTimeMillis()))
+        a.discard("u1", "k4")
+        assertEquals(0, a.pendingCount(System.currentTimeMillis()))
+    }
+    @Test
+    fun fullAssembler_perOwnerBudget() {
+        val a = Assembler(1024, 2, 100L, 60000L, 3600000L, maxPendingEntriesPerOwner = 1, maxPendingBytesPerOwner = 30L)
+        val m = Manifest("id5", 1, 10, 10, System.currentTimeMillis() + 300000)
+        val chunk = ByteArray(10) { 4.toByte() }
+        assertNotNull(a.receive("u1", "k5a", m, 0, 1, sha256Hex(chunk), chunk, System.currentTimeMillis()))
+        assertEquals(0, a.pendingCount(System.currentTimeMillis()))
+    }

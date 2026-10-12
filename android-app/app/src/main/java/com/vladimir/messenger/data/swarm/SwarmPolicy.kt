@@ -208,4 +208,23 @@ object SwarmContributionStats {
     fun resetLocal() {
         delivered.set(0); refused.set(0); observedPeerDeliveries.clear()
     }
+    // Stage 4 anti-abuse / rate guard (bounded; not proof of global honesty)
+    private val recentRefusals = java.util.concurrent.ConcurrentLinkedQueue<Long>()
+    private val refusalWindowMs = 30000L
+    private val maxRefusalsPerWindow = 10
+    fun recordRefusal(nowMs: Long): Boolean {
+        refused.incrementAndGet()
+        recentRefusals.add(nowMs)
+        val cutoff = nowMs - refusalWindowMs
+        while (recentRefusals.peek() != null && recentRefusals.peek()!! < cutoff) recentRefusals.poll()
+        return recentRefusals.size <= maxRefusalsPerWindow
+    }
+    fun refusalRateOk(nowMs: Long): Boolean {
+        val cutoff = nowMs - refusalWindowMs
+        while (recentRefusals.peek() != null && recentRefusals.peek()!! < cutoff) recentRefusals.poll()
+        return recentRefusals.size <= maxRefusalsPerWindow
+    }
+    fun observedPeerCount(): Int = observedPeerDeliveries.size
+    fun observedPeerLimitReached(): Boolean = observedPeerDeliveries.size >= 256 // bounded guard only, not capacity claim
+
 }
