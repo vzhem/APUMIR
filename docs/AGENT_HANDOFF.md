@@ -1,9 +1,8 @@
 === РУЧНОЙ ПЕРЕХОД ДЛЯ СЛЕДУЮЩЕГО АГЕНТА ===
 Сессионная ветка: arena/4f0b31c5-apumir (не переключать ветку).
-Исходная точка: tag v11.74.335, commit 8f6ce09; сам tag указывает на не прошедшую сборку и не опубликован как Release. Исправления запушены в arena/4f0b31c5-apumir, HEAD e126438.
-Ошибка CI run 38204362462: :app:compileReleaseKotlin, ContentAddressedChunks.kt:81 — unresolved reference isValidManifest.
-Исправление: добавлен fail-closed validator, устранено переполнение Int в лимите чанков, удалены устаревшие тесты вне класса, добавлены регрессии и целевые JVM-тесты в release workflow. Upload APK artifact перенесён после APK signing/checksum: старый шаг стоял до сборки и не мог сохранить APK.
-Среда Arena без Java, поэтому локальный Gradle build невозможен. Source checks: 9/10 проходят; единственный известный посторонний сбой — старый TextButton в MessageBubble.kt; check_unresolved_symbols и workflow YAML проходят.
-Блокер: gh workflow run build-release.yml --ref arena/4f0b31c5-apumir вернул HTTP 403 Resource not accessible by integration; gh run list не показывает новый run. Нужен Actions workflow-dispatch write permission в подключении GitHub либо ручной запуск владельцем через Actions UI.
-Следующий шаг: после успешного focused tests + assembleRelease рассмотреть новый v11.74.336. Не создавать/перемещать tag и не публиковать Release до зелёной сборки и отдельного одобрения точного публичного текста.
-Нет проверки на физическом телефоне; не обещать работу через любой NAT, измеренную ёмкость или батарейную стабильность.
+Исходная точка: tag v11.74.335, commit 8f6ce09; tag не перемещался и Release для него не создан.
+Ветка remote: arena/4f0b31c5-apumir на 95f2c09. Локально восстановлено состояние этой ветки; сейчас есть незакоммиченная правка workflow и запись CI-попытки.
+Исправления исходного compile failure: fail-closed валидатор манифеста, Long-проверка ёмкости, удаление устаревшего блока тестов, регрессии и запуск targeted JVM suites до APK.
+Владелец вручную запустил workflow_dispatch #38232530545 на commit 95f2c09. Native core и UniFFI прошли, затем job упал на Sync versionName with tag: шаг обрезал refs/tags/ у refs/heads/arena/... и передал slash в sed. Тесты и APK ещё не запускались.
+Текущая правка: синхронизировать versionName только для tag ref; при workflow_dispatch оставить Gradle diagnostic versionName. Проверить diff/YAML, commit/push только на arena/4f0b31c5-apumir. API dispatch из gh по-прежнему отвечает 403, так что владельцу потребуется повторно нажать Run workflow на этой ветке.
+Arena sandbox не имеет Java; локальный Gradle недоступен. Не создавать/перемещать tag и не публиковать Release до зелёных targeted tests + assembleRelease и отдельного одобрения публичных заметок. Нет phone/NAT/battery/capacity verification.

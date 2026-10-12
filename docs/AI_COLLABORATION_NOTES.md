@@ -12705,3 +12705,17 @@ XML 9 / 314 / 287.
   enable Actions workflow-dispatch write permission/reconnect GitHub or start the run in the
   Actions UI. Do not create/move a release tag until the full build is green and the exact
   public notes have been approved.
+
+### Manual workflow_dispatch run 38232530545: branch ref broke versionName sync (2026-10-12)
+
+- The owner manually started Build Release APK on `arena/4f0b31c5-apumir` after API dispatch
+  remained blocked. Native core and UniFFI generation passed; the run then failed at `Sync
+  versionName with tag` before unit tests or APK assembly.
+- Cause: the step always removed `refs/tags/` from `GITHUB_REF`. On workflow_dispatch,
+  `GITHUB_REF` is `refs/heads/arena/...`; the slash-containing branch path was inserted into a
+  `/`-delimited `sed` replacement, which failed.
+- Correction: only rewrite `versionName` for `refs/tags/*`; on `workflow_dispatch` leave Gradle's
+  diagnostic version name untouched. Use a `|` sed delimiter for tag substitution. Do not treat
+  this as an application compile failure.
+- Next: push the workflow fix to the fixed Arena branch and have the owner rerun workflow_dispatch.
+  The release build, targeted unit tests and APK are still unverified.
