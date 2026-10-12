@@ -180,10 +180,11 @@ cards НЕ реализованы сознательно (см. выше); во�
   не перемещались.
 - .330–.336 сохранены в истории/дереве fixed-ветки. Новый tag CI `38246638460` для v11.74.337
   прошёл на объединённом дереве: helper/core suites, 3 native ABI, UniFFI, Android targeted tests,
-  assemble/sign/checksum и загрузка assets. v11.74.337 опубликован как Latest; старые теги/assets
+  assemble/sign/checksum и загрузка assets. v11.74.337 остаётся Latest; старые теги/assets
   не перемещались. CI не заменяет тест на физических устройствах. После .337 добавлен release
-  ancestry gate против последнего stable tag; он ещё не проверен tag-run (см.
-  `docs/RELEASE_LINEAGE_SAFETY.md`).
+  ancestry gate против последнего stable tag; реальные tag-run `.338` и `.339` подтвердили, что
+  gate проходит для потомков Latest `.337`. Сами кандидаты не были опубликованы из-за последующих
+  CI compile/test failures; подробности — `docs/RELEASE_LINEAGE_SAFETY.md`.
 
 ## Этап 3 — фотоистории с content-addressed чанками (частично реализовано)
 
@@ -278,8 +279,11 @@ battery, load, NAT, or capacity verification has been done.
 - Добавлены парсерные JVM regressions, Rust race observer и source guards; release workflow вызывает
   Python guards и гоняет `DiagnosticsReportTest` до APK, Rust reserve observer входит в
   helper-delivery suite. Tag run `38259661223` для `.338` подтвердил ancestry и Python guards,
-  затем остановился до native build из-за двух `starts_with` type errors. Исправлено borrowing
-  константы; тег `.338` оставлен неизменным без Release/assets, следующий кандидат — `.339`.
-  Этапы 3 и 4 остаются незавершёнными до зелёного CI и трёхтелефонного теста.
+  затем остановился до native build из-за двух `starts_with` type errors; borrowing константы
+  исправлено. Следующий tag run `38260169011` для `.339` прошёл ancestry, Python guards, helper
+  routing tests, native build всех ABI и генерацию UniFFI, но упал при компиляции тестов:
+  `DiagnosticsReportTest.facts()` не прокидывал два новых helper-поля. Fixture исправлен в рабочей
+  ветке; теги `.338` и `.339` оставлены неизменными, публичного Release/APK нет. Следующий кандидат
+  — `.340`. Этапы 3 и 4 остаются незавершёнными до зелёного CI и трёхтелефонного теста.
 - Даже будущий green CI не заменит phone/NAT test и не докажет путь конкретного helper: локальная
   подпись receipt подтверждает acceptance получателя, но не содержит идентичность помощника.

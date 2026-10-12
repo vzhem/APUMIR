@@ -41,6 +41,8 @@ class DiagnosticsReportTest {
         stunLastAttemptFailed: Boolean? = null,
         logcatWarnings: Long = 0L,
         logcatErrors: Long = 0L,
+        onlineHelperParticipationEnabled: Boolean? = null,
+        helperRoutes: HelperRouteDiagnostics = HelperRouteDiagnostics.EMPTY,
     ) = DiagnosticsFacts(
         createdAtMs = 1_700_000_000_000L,
         sessionStartedAtMs = 1_700_000_000_000L - 168_000L,
@@ -97,6 +99,8 @@ class DiagnosticsReportTest {
         stunLastAttemptFailed = stunLastAttemptFailed,
         logcatWarnings = logcatWarnings,
         logcatErrors = logcatErrors,
+        onlineHelperParticipationEnabled = onlineHelperParticipationEnabled,
+        helperRoutes = helperRoutes,
     )
 
     private fun titles(lines: List<DiagnosticsLine>): List<String> = lines.map { it.title }
