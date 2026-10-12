@@ -2042,7 +2042,8 @@ impl P2PCore {
                                 Ok(0) => break,
                                 Ok(n) => {
                                     let text = String::from_utf8_lossy(&buf[..n]).to_string();
-                                    tracing::info!("TCP recv: {}", &text[..text.len().min(100)]);
+                                    // Do not slice UTF-8 at a byte boundary or log message contents.
+                                    tracing::debug!("TCP received {} bytes", n);
                                     let parts: Vec<&str> = text.splitn(4, '|').collect();
                                     // Страж отправителя - см. QUIC-приёмник выше.
                                     if parts.len() == 4 && parts[0].starts_with("pk_") {
@@ -5127,38 +5128,87 @@ impl P2PCore {
     /// Online transit does not enable disk custody. True means the RECIPIENT signed
     /// acceptance after end-to-end decryption, not that an intermediate stream was written.
     fn send_with_helper(&self, transport: &DirectTransport, recipient: &str, bytes: &[u8]) -> bool {
-        let now = crate::storage::models::now_ms();
+        use crate::network::helper_delivery::{hedged_delivery, HELPER_DELIVERY_BUDGET, HELPER_HEDGE_DELAY};
+        let Some(runtime) = self.runtime.as_ref() else { return false; };
         let Some(identity) = crate::crypto::signing_identity::installed_signing_identity()
             .filter(|i| Some(i.legacy_routing_node_id()) == self.node_id_str.as_deref()) else { return false; };
-        let helpers: Vec<_> = self.peer_exchange.helpers(now).into_iter()
-            .filter(|h| h.identity.claims.node_id != recipient && h.identity.claims.node_id != identity.legacy_routing_node_id())
-            .take(2).collect();
-        if helpers.is_empty() { return false; }
-        let target = self.peer_exchange.helper_identity(recipient, now);
-        if target.is_none() {
-            if let Some(operation) = self.peer_assistance.connect_request(recipient, now) {
-                for helper in helpers {
+        let transport = transport.clone();
+        let directory = Arc::clone(&self.peer_exchange);
+        let assistance = Arc::clone(&self.peer_assistance);
+        let recipient = recipient.to_string();
+        let bytes = bytes.to_vec();
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        // The FFI caller waits outside the runtime. Both helper legs run on the
+        // existing runtime, never in newly-created blocking worker threads.
+        let task = runtime.spawn(async move {
+            // Keep admission outside the timed future so its deadline can record a
+            // conservative route observation before the guard releases the attempt.
+            let mut pending_guard = None;
+            let mut attempt_id = None;
+            let result = tokio::time::timeout(HELPER_DELIVERY_BUDGET, async {
+                let now = crate::storage::models::now_ms();
+                let mut helpers = Vec::new();
+                // A fresh directory lease is not proof that the connection is still alive.
+                // Search a bounded neighbourhood before choosing two pooled-only routes.
+                for helper in directory.helpers(now).into_iter().filter(|h|
+                    h.identity.claims.node_id != recipient && h.identity.claims.node_id != identity.legacy_routing_node_id()
+                ).take(32) {
                     let peer = helper.identity.claims.node_id;
-                    let destination = peer.clone(); let operation = operation.clone(); let identity = Arc::clone(&identity);
-                    let factory: BoundFrameFactory = Arc::new(move |binding, _| peer_assistance::encode(
-                        &identity, &destination, operation.clone(), binding, crate::storage::models::now_ms()));
-                    let _ = transport.send_bound_blocking(&peer, None, factory);
+                    if transport.has_connection(&peer).await {
+                        helpers.push(peer);
+                    }
                 }
+                assistance.order_helpers(&recipient, &mut helpers);
+                helpers.truncate(2);
+                if helpers.is_empty() { directory.wake(); return false; }
+                // Introduce both endpoints even when we already know the recipient key.
+                // This probes in the background without replaying the in-flight payload.
+                // Existing per-target cooldown and authenticated probe budgets still apply.
+                if let Some(operation) = assistance.connect_request(&recipient, now) {
+                    for peer in &helpers {
+                        Self::spawn_assist_send(transport.clone(), Arc::clone(&identity), peer.clone(), operation.clone());
+                    }
+                }
+                let Some(target) = directory.helper_identity(&recipient, now) else {
+                    directory.wake(); return false;
+                };
+                let Some((operation, receipt, packet_id)) = assistance.prepare_relay(&identity, &target, &bytes, now) else { return false; };
+                pending_guard = Some(assistance.pending_guard(packet_id));
+                attempt_id = Some(packet_id);
+                hedged_delivery(helpers.len(), receipt, |leg| {
+                    let peer = helpers[leg].clone();
+                    let destination = peer.clone();
+                    let operation = operation.clone();
+                    let identity = Arc::clone(&identity);
+                    let transport = transport.clone();
+                    let assistance = Arc::clone(&assistance);
+                    async move {
+                        let declined = assistance.leg_started(packet_id, &peer);
+                        let factory: BoundFrameFactory = Arc::new(move |binding, _| peer_assistance::encode(
+                            &identity, &destination, operation.clone(), binding, crate::storage::models::now_ms()));
+                        // None forbids new arbitrary dials: only the existing peer channel.
+                        let written = transport.send_bound(&peer, None, factory).await;
+                        assistance.leg_written(packet_id, &peer, written);
+                        if !written { return false; }
+                        // A signed refusal makes this leg fail now, so the reserve starts immediately.
+                        // Without refusal/receipt this stays pending until the shared deadline.
+                        match declined {
+                            Some(declined) => match declined.await { Ok(()) => false, Err(_) => std::future::pending::<bool>().await },
+                            None => true,
+                        }
+                    }
+                }, HELPER_HEDGE_DELAY, HELPER_DELIVERY_BUDGET).await
+            }).await.unwrap_or(false);
+            if !result {
+                if let Some(id) = attempt_id { assistance.finish_timeout(id); }
             }
-            self.peer_exchange.wake(); return false;
+            drop(pending_guard);
+            let _ = tx.try_send(result);
+        });
+        match rx.recv_timeout(crate::network::direct_transport::DIRECT_SEND_BUDGET) {
+            Ok(accepted) => accepted,
+            Err(_) => { task.abort(); false }
         }
-        let Some((operation, receipt, packet_id)) = self.peer_assistance.prepare_relay(&identity, &target.unwrap(), bytes, now) else { return false; };
-        for helper in helpers {
-            let peer = helper.identity.claims.node_id;
-            let destination = peer.clone(); let operation = operation.clone(); let identity = Arc::clone(&identity);
-            let factory: BoundFrameFactory = Arc::new(move |binding, _| peer_assistance::encode(
-                &identity, &destination, operation.clone(), binding, crate::storage::models::now_ms()));
-            if !transport.send_bound_blocking(&peer, None, factory) { continue; }
-            if matches!(receipt.recv_timeout(peer_assistance::RECEIPT_WAIT), Ok(true)) {
-                self.peer_assistance.cancel(packet_id); return true;
-            }
-        }
-        self.peer_assistance.cancel(packet_id); false
     }
 
     pub fn receive_message(
@@ -5240,6 +5290,12 @@ impl P2PCore {
 
     pub fn add_contact(&self, user_id: String, display_name: String) -> bool {
         self.storage.save_user(user_id, display_name, false).is_ok()
+    }
+
+    /// Independent owner policy for new online transit; existing routes can drain.
+    pub fn configure_online_helper(&self, enabled: bool, routes: u32, bytes: u32, relays: u32) -> bool {
+        self.peer_assistance.set_policy(enabled, routes, bytes, relays);
+        true
     }
 
     /// K4-1: «свои» для presence - контакты и участники моих групп.

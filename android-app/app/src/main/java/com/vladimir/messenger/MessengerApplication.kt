@@ -40,6 +40,7 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        com.vladimir.messenger.data.story.StoryStore.attach(this)
         // Отметка в журнале «Логов»: владелец видит, с какого момента
         // собраны события, и не путает свежий запуск со старым.
         com.vladimir.messenger.data.diagnostics.TransferDiagnostics.record(

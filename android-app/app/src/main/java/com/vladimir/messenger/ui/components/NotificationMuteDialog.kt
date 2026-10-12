@@ -1,5 +1,9 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.platform.LocalContext
+
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -45,7 +49,7 @@ fun NotificationMuteDialog(
         },
         title = {
             Text(
-                "Отключить уведомления",
+                stringResource(R.string.menu_mute),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -61,7 +65,7 @@ fun NotificationMuteDialog(
                     color = ApuBubbleMutedColor,
                 )
                 Text(
-                    "На какой срок?",
+                    stringResource(R.string.nm_duration),
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                     color = ApuBubbleTextColor,
@@ -72,9 +76,9 @@ fun NotificationMuteDialog(
                     ApuPremiumChoiceRow(
                         title = duration.label,
                         subtitle = if (duration == NotificationMuteDuration.FOREVER) {
-                            "Включить вручную"
+                            stringResource(R.string.nm_manual)
                         } else {
-                            "Включатся автоматически"
+                            stringResource(R.string.nm_auto)
                         },
                         selected = false,
                         onClick = { onSelectUntil(duration.deadlineFrom(nowMs)) },
@@ -83,12 +87,12 @@ fun NotificationMuteDialog(
 
                 if (isMuted) {
                     ApuSettingsChip(
-                        text = notificationMuteStatus(mutedUntilMs, nowMs),
+                        text = notificationMuteStatus(LocalContext.current, mutedUntilMs, nowMs),
                         highlighted = false,
                         modifier = Modifier.padding(top = 4.dp),
                     )
                     ApuTextAction(
-                        label = "Включить уведомления",
+                        label = stringResource(R.string.menu_unmute),
                         onClick = onTurnOn,
                         modifier = Modifier.fillMaxWidth(),
                         icon = Icons.Default.NotificationsActive,
@@ -98,7 +102,7 @@ fun NotificationMuteDialog(
         },
         confirmButton = {
             ApuTextAction(
-                label = "Отменить",
+                label = stringResource(R.string.call_cancel),
                 onClick = onDismiss,
             )
         },
@@ -107,18 +111,19 @@ fun NotificationMuteDialog(
 
 /** Короткий статус для списка настроек и диалога отключения. */
 fun notificationMuteStatus(
+    context: android.content.Context,
     mutedUntilMs: Long,
     nowMs: Long = System.currentTimeMillis(),
 ): String {
-    if (mutedUntilMs <= nowMs) return "Уведомления включены"
-    if (mutedUntilMs == Long.MAX_VALUE) return "Уведомления отключены навсегда"
+    if (mutedUntilMs <= nowMs) return context.getString(R.string.mute_on)
+    if (mutedUntilMs == Long.MAX_VALUE) return context.getString(R.string.mute_forever)
     val locale = Locale.getDefault()
     val until = Date(mutedUntilMs)
     val today = SimpleDateFormat("yyyyMMdd", locale).format(Date(nowMs))
     val targetDay = SimpleDateFormat("yyyyMMdd", locale).format(until)
     return if (today == targetDay) {
-        "Отключены до ${SimpleDateFormat("HH:mm", locale).format(until)}"
+        context.getString(R.string.mute_until, SimpleDateFormat("HH:mm", locale).format(until))
     } else {
-        "Отключены до ${SimpleDateFormat("dd.MM, HH:mm", locale).format(until)}"
+        context.getString(R.string.mute_until, SimpleDateFormat("dd.MM, HH:mm", locale).format(until))
     }
 }

@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
 import android.graphics.BitmapFactory
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -161,7 +162,7 @@ internal fun SplashCoreScene(modifier: Modifier = Modifier) {
         art?.let { bitmap ->
             Image(
                 bitmap = bitmap,
-                contentDescription = "Цифровое ядро APU и серверы сети",
+                contentDescription = stringResource(R.string.splash_core_cd),
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Fit,
                 filterQuality = FilterQuality.High,

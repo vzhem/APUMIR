@@ -1,6 +1,8 @@
 package com.vladimir.messenger.ui.screens.chat
 
 import android.util.Log
+import com.vladimir.messenger.R
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.domain.model.Chat
@@ -38,16 +40,16 @@ import javax.inject.Inject
  * Вкладка «Не прочитано» — как в Viber: только чаты/группы/каналы с
  * unreadCount>0, с бейджем количества чатов.
  */
-enum class InboxSection(val title: String) {
-    All("Все"),
-    Unread("Не прочитано"),
-    Chats("Чаты"),
-    Groups("Группы"),
-    Channels("Каналы"),
-    AdminGroups("Админ группы"),
-    AdminChannels("Админ каналы"),
+enum class InboxSection(@StringRes val labelRes: Int) {
+    All(R.string.inbox_all),
+    Unread(R.string.inbox_unread),
+    Chats(R.string.inbox_chats),
+    Groups(R.string.inbox_groups),
+    Channels(R.string.inbox_channels),
+    AdminGroups(R.string.inbox_admin_groups),
+    AdminChannels(R.string.inbox_admin_channels),
     /** р249: убранное из общего списка - чаты, группы и каналы в архиве. */
-    Archive("Архив"),
+    Archive(R.string.inbox_archive),
 }
 
 /** Группа в общем списке главного экрана. */
@@ -689,7 +691,7 @@ class ChatListViewModel @Inject constructor(
                 InboxPinMutation.NOT_FOUND -> withContext(Dispatchers.Main) {
                     android.widget.Toast.makeText(
                         appContext,
-                        "Эта беседа больше недоступна",
+                        appContext.getString(R.string.clv_chat_unavailable),
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
                 }
@@ -862,7 +864,7 @@ class ChatListViewModel @Inject constructor(
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                 android.widget.Toast.makeText(
                     appContext,
-                    if (ok) "Контакт отправлен: " + toName else "Не удалось отправить контакт",
+                    if (ok) appContext.getString(R.string.contact_sent_ok, toName) else appContext.getString(R.string.contact_send_failed),
                     android.widget.Toast.LENGTH_SHORT,
                 ).show()
             }
@@ -962,5 +964,23 @@ class ChatListViewModel @Inject constructor(
          * а глубже человек ищет поиском, который спрашивает всю таблицу.
          */
         const val MAX_WINDOW = 3000
+    }
+
+    /** Своя история: сохранить и разослать контактам личных чатов. */
+    fun publishStory(text: String, bg: Int, photoB64: String? = null) {
+        val trimmed = text.trim()
+        if (trimmed.isEmpty() && photoB64 == null) return
+        viewModelScope.launch {
+            val me = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
+            }
+            val story = com.vladimir.messenger.data.story.StoryStore.publish(me, trimmed.take(200), bg, photoB64)
+            val packets = com.vladimir.messenger.data.story.StoryStore.encodePackets(story)
+            chatRepository.directContactIds().forEach { peer ->
+                packets.forEach { packet ->
+                    runCatching { chatRepository.sendStoryPacket(peer, packet) }
+                }
+            }
+        }
     }
 }

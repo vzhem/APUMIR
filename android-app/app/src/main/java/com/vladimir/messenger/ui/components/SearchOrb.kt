@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.clickable
@@ -40,7 +42,7 @@ fun SearchOrb(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     size: Dp = 40.dp,
-    contentDescription: String = "Поиск",
+    contentDescription: String = stringResource(R.string.action_search),
 ) {
     // Отдельная переменная: внутри semantics имя contentDescription занято
     // свойством области видимости, и присваивание себе же не читалось бы.

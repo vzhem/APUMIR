@@ -1,5 +1,8 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,6 +13,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -51,7 +55,7 @@ fun ApuPremiumDialog(
     onConfirm: (() -> Unit)? = null,
     confirmEnabled: Boolean = true,
     confirmStyle: DiagnosticsActionStyle = DiagnosticsActionStyle.PRIMARY,
-    dismissLabel: String? = "Отмена",
+    dismissLabel: String? = stringResource(R.string.action_cancel),
     onDismissClick: (() -> Unit)? = null,
     dismissEnabled: Boolean = true,
     properties: DialogProperties = DialogProperties(),
@@ -64,9 +68,13 @@ fun ApuPremiumDialog(
 ) {
     Dialog(onDismissRequest = onDismiss, properties = properties) {
         val shape = RoundedCornerShape(22.dp)
+        // Окно не выше экрана: кнопки остаются видимыми при любом повороте.
+        val maxCard = (LocalConfiguration.current.screenHeightDp.dp - 48.dp).coerceAtLeast(240.dp)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .apuTapHaptics()
+                .heightIn(max = maxCard)
                 // Мягкая тень + глянец ПОД содержимым: текст и значки чёткие.
                 .apuPremiumLift(14.dp, shape, ApuPremiumShadowColor)
                 .clip(shape)
@@ -101,7 +109,7 @@ fun ApuPremiumDialog(
                 }
             }
             Spacer(Modifier.size(12.dp))
-            Column(content = content)
+            Column(modifier = Modifier.weight(1f, fill = false), content = content)
             if (confirmLabel != null || dismissLabel != null) {
                 Spacer(Modifier.size(16.dp))
                 Row(
@@ -141,7 +149,7 @@ fun ApuPremiumNoticeDialog(
     title: String,
     message: String,
     onDismiss: () -> Unit,
-    confirmLabel: String = "Понятно",
+    confirmLabel: String = stringResource(R.string.groups_ok),
     icon: ImageVector? = null,
 ) {
     ApuPremiumDialog(

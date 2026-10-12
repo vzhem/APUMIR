@@ -3,6 +3,9 @@ package com.vladimir.messenger
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -69,6 +72,39 @@ interface MainActivityEntryPoint {
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    // Тактильный отклик на каждое нажатие во всём приложении: короткий «клик»
+    // на тап и «долгое нажатие» на удержание. Прокрутка и перетаскивание без
+    // отклика: палец заметно сдвинулся. Работает с системной настройкой вибрации.
+    private var tapDownX = 0f
+    private var tapDownY = 0f
+    private var tapDownAt = 0L
+    private var tapMoved = false
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        val slop = ViewConfiguration.get(this).scaledTouchSlop
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                tapDownX = ev.x
+                tapDownY = ev.y
+                tapDownAt = ev.eventTime
+                tapMoved = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = ev.x - tapDownX
+                val dy = ev.y - tapDownY
+                if (dx * dx + dy * dy > slop * slop) tapMoved = true
+            }
+            MotionEvent.ACTION_UP -> if (!tapMoved) {
+                val held = ev.eventTime - tapDownAt
+                window.decorView.performHapticFeedback(
+                    if (held >= 450L) HapticFeedbackConstants.LONG_PRESS
+                    else HapticFeedbackConstants.CONTEXT_CLICK,
+                )
+            }
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
     private val requestNotificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { isGranted: Boolean ->
@@ -387,6 +423,11 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Язык интерфейса выбирается в настройках и применяется до создания UI.
+    override fun attachBaseContext(newBase: android.content.Context) {
+        super.attachBaseContext(com.vladimir.messenger.ui.i18n.AppLanguageHolder.wrap(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -408,9 +449,12 @@ class MainActivity : ComponentActivity() {
         handleUpdateNotificationTap(intent)
 
         ThemeModeHolder.init(this)
+        com.vladimir.messenger.data.translate.TranslationSettings.init(this)
         AppFontSizeHolder.init(this)
         WallpaperHolder.init(this)
+        com.vladimir.messenger.ui.theme.WallpaperTintHolder.init(this)
         com.vladimir.messenger.data.swarm.SwarmSettings.init(this)
+        com.vladimir.messenger.data.swarm.OnlineHelperSettings.init(this)
         com.vladimir.messenger.data.swarm.StorageSettings.init(this)
         com.vladimir.messenger.data.swarm.ServerMode.init(this)
         UsernameHolder.init(this)

@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.groups
 
+import com.vladimir.messenger.R
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -173,7 +174,7 @@ class GroupAdminViewModel @Inject constructor(
                 throw e
             } catch (e: Exception) {
                 _uiState.update { state ->
-                    if (state.isAdmin) state.copy(error = e.message ?: "Не удалось обновить статистику")
+                    if (state.isAdmin) state.copy(error = e.message ?: appContext.getString(R.string.ga_stats_failed))
                     else state.copy(stats = null)
                 }
             } finally {
@@ -193,7 +194,7 @@ class GroupAdminViewModel @Inject constructor(
         viewModelScope.launch {
             groupRepository.decideJoinRequest(groupId, nodeId, approve)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-                .onSuccess { _uiState.update { it.copy(notice = if (approve) "Участник добавлен" else "Заявка отклонена") } }
+                .onSuccess { _uiState.update { it.copy(notice = if (approve) appContext.getString(R.string.ga_member_added) else appContext.getString(R.string.ga_request_declined)) } }
         }
     }
 
@@ -201,7 +202,7 @@ class GroupAdminViewModel @Inject constructor(
         viewModelScope.launch {
             groupRepository.createInvite(groupId, requestApproval = requestApproval)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-                .onSuccess { _uiState.update { it.copy(notice = "Ссылка создана") } }
+                .onSuccess { _uiState.update { it.copy(notice = appContext.getString(R.string.ga_link_created)) } }
         }
     }
 
@@ -214,7 +215,7 @@ class GroupAdminViewModel @Inject constructor(
             groupRepository.resyncMembers(groupId)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
                 .onSuccess { count ->
-                    _uiState.update { it.copy(notice = "Отправлено участникам: $count") }
+                    _uiState.update { it.copy(notice = appContext.getString(R.string.ga_sent_to_members, count)) }
                 }
         }
     }
@@ -223,7 +224,7 @@ class GroupAdminViewModel @Inject constructor(
         viewModelScope.launch {
             groupRepository.revokeInvite(groupId, slug)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-                .onSuccess { _uiState.update { it.copy(notice = "Ссылка отозвана") } }
+                .onSuccess { _uiState.update { it.copy(notice = appContext.getString(R.string.ga_link_revoked)) } }
         }
     }
 
@@ -232,7 +233,7 @@ class GroupAdminViewModel @Inject constructor(
         viewModelScope.launch {
             groupRepository.deleteInvite(groupId, slug)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-                .onSuccess { _uiState.update { it.copy(notice = "Ссылка удалена") } }
+                .onSuccess { _uiState.update { it.copy(notice = appContext.getString(R.string.ga_link_deleted)) } }
         }
     }
 
@@ -264,7 +265,7 @@ class GroupAdminViewModel @Inject constructor(
         viewModelScope.launch {
             groupRepository.setPublic(groupId, isPublic)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-                .onSuccess { _uiState.update { it.copy(notice = if (isPublic) "Группа публичная" else "Группа частная") } }
+                .onSuccess { _uiState.update { it.copy(notice = if (isPublic) appContext.getString(R.string.ga_public) else appContext.getString(R.string.ga_private)) } }
         }
     }
 
@@ -273,7 +274,7 @@ class GroupAdminViewModel @Inject constructor(
         viewModelScope.launch {
             groupRepository.enableTopics(groupId)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-                .onSuccess { _uiState.update { it.copy(notice = "Темы включены") } }
+                .onSuccess { _uiState.update { it.copy(notice = appContext.getString(R.string.ga_topics_on)) } }
         }
     }
 
@@ -291,9 +292,9 @@ class GroupAdminViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             notice = if (seconds <= 0) {
-                                "Медленный режим выключен"
+                                appContext.getString(R.string.ga_slow_off)
                             } else {
-                                "Медленный режим: одно сообщение в ${secondsWords(seconds)}"
+                                appContext.getString(R.string.ga_slow_mode_notice, secondsWords(seconds))
                             },
                         )
                     }
@@ -302,19 +303,19 @@ class GroupAdminViewModel @Inject constructor(
     }
 
     private fun secondsWords(seconds: Int): String = when (seconds) {
-        10 -> "10 секунд"
-        30 -> "30 секунд"
-        60 -> "минуту"
-        300 -> "5 минут"
-        900 -> "15 минут"
-        else -> "$seconds с"
+        10 -> appContext.getString(R.string.ga_slow_10s)
+        30 -> appContext.getString(R.string.ga_slow_30s)
+        60 -> appContext.getString(R.string.ga_slow_1m)
+        300 -> appContext.getString(R.string.ga_slow_5m)
+        900 -> appContext.getString(R.string.ga_slow_15m)
+        else -> appContext.getString(R.string.ga_seconds_short, seconds)
     }
 
     fun updateProfile(title: String, about: String) {
         viewModelScope.launch {
             groupRepository.updateProfile(groupId, title, about)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-                .onSuccess { _uiState.update { it.copy(notice = "Сохранено") } }
+                .onSuccess { _uiState.update { it.copy(notice = appContext.getString(R.string.ga_saved)) } }
         }
     }
 
@@ -328,12 +329,12 @@ class GroupAdminViewModel @Inject constructor(
             val b64 = com.vladimir.messenger.util.AvatarCompress
                 .compressUri(appContext, uri.toString())
             if (b64 == null) {
-                _uiState.update { it.copy(error = "Не удалось прочитать картинку") }
+                _uiState.update { it.copy(error = appContext.getString(R.string.ga_image_read)) }
                 return@launch
             }
             groupRepository.saveGroupAvatar(groupId, b64)
             groupRepository.publishGroupAvatar(groupId, b64)
-            _uiState.update { it.copy(notice = "Аватар группы обновлён") }
+            _uiState.update { it.copy(notice = appContext.getString(R.string.ga_avatar_updated)) }
         }
     }
 
@@ -341,7 +342,7 @@ class GroupAdminViewModel @Inject constructor(
         viewModelScope.launch {
             groupRepository.setMemberBlocked(groupId, nodeId, true)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
-                .onSuccess { _uiState.update { it.copy(notice = "Участник исключён") } }
+                .onSuccess { _uiState.update { it.copy(notice = appContext.getString(R.string.ga_member_removed)) } }
         }
     }
 
@@ -353,7 +354,7 @@ class GroupAdminViewModel @Inject constructor(
     fun transferOwnership(nodeId: String) {
         viewModelScope.launch {
             groupRepository.transferOwnership(groupId, nodeId)
-                .onSuccess { _uiState.update { it.copy(notice = "Владение передано") } }
+                .onSuccess { _uiState.update { it.copy(notice = appContext.getString(R.string.ga_ownership_moved)) } }
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
         }
     }
@@ -362,7 +363,7 @@ class GroupAdminViewModel @Inject constructor(
     fun claimOwnership() {
         viewModelScope.launch {
             groupRepository.claimOwnership(groupId)
-                .onSuccess { _uiState.update { it.copy(notice = "Вы теперь владелец группы") } }
+                .onSuccess { _uiState.update { it.copy(notice = appContext.getString(R.string.ga_now_owner)) } }
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
         }
     }

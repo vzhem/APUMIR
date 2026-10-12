@@ -1,5 +1,9 @@
 package com.vladimir.messenger.ui.components
 
+import com.vladimir.messenger.R
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.res.stringResource
+import androidx.compose.runtime.produceState
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -84,7 +88,10 @@ fun MessageBubble(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 2.dp),
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+            // Свайп ловим по всей строке, а не только по пузырю: короткое
+            // сообщение из одного знака иначе почти не захватить.
+            .swipeToReply(enabled = onReply != null) { onReply?.invoke() },
         horizontalArrangement = if (isOwn) Arrangement.End else Arrangement.Start,
     ) {
         // Раунд 211: «три точки» рядом с пузырём (те же, что у картинок и
@@ -103,7 +110,6 @@ fun MessageBubble(
                     color = if (isOwn) messenger.messageBubbleOwn else messenger.messageBubbleOther,
                     shape = if (isOwn) OwnBubbleShape else OtherBubbleShape,
                 )
-                .swipeToReply(enabled = onReply != null) { onReply?.invoke() }
                 .combinedClickable(
                     onClick = onTap,
                     onLongClick = { onLongClick?.invoke() }
@@ -115,7 +121,7 @@ fun MessageBubble(
                 // строки (маркер + старая шапка) из тела убираем.
                 val fwdRef = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.parseRef(message.content) }
                 val showFwdHeader = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.hasHeader(message.content) }
-                val displayContent = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.stripHeader(message.content) }
+                val displayContent = remember(message.content) { com.vladimir.messenger.util.ForwardMarker.stripHeader(com.vladimir.messenger.util.QuietMessage.strip(message.content)) }
                 if (!message.replyToId.isNullOrBlank()) {
                     MessageQuoteBlock(
                         author = message.replyAuthor,
@@ -136,7 +142,7 @@ fun MessageBubble(
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                     ) {
                         Text(
-                            "↩ Переслано из «" + fwdLabel + "»",
+                            stringResource(R.string.fwd_from_label, fwdLabel),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             textDecoration = TextDecoration.Underline,
@@ -144,8 +150,31 @@ fun MessageBubble(
                         )
                     }
                 }
-                val annotatedText = remember(displayContent, linkColor) {
-                    buildAnnotatedMessageText(displayContent, linkColor)
+                // Перевод входящего текста на язык приложения (если включён в настройках).
+                // Свои сообщения, карточки и картинки не переводим.
+                val translateOn by com.vladimir.messenger.data.translate.TranslationSettings.enabled
+                    .collectAsStateWithLifecycle()
+                val appLang by com.vladimir.messenger.ui.i18n.AppLanguageHolder.language
+                    .collectAsStateWithLifecycle()
+                var showOriginal by remember(message.id) { mutableStateOf(false) }
+                // Ручной перевод одного сообщения кнопкой «Перевести», если авто-перевод выключен.
+                var manualRequested by remember(message.id) { mutableStateOf(false) }
+                val translation by produceState<com.vladimir.messenger.data.translate.MessageTranslation?>(
+                    initialValue = null,
+                    message.id, displayContent, translateOn, appLang, manualRequested,
+                ) {
+                    value = null
+                    if ((translateOn || manualRequested) && !message.isFromMe &&
+                        com.vladimir.messenger.data.translate.MessageTranslator.isTranslatableText(displayContent)
+                    ) {
+                        value = com.vladimir.messenger.data.translate.MessageTranslator
+                            .translateForeign(displayContent, appLang.code)
+                    }
+                }
+                val shownTranslation = translation
+                val shownContent = if (shownTranslation != null && !showOriginal) shownTranslation.text else displayContent
+                val annotatedText = remember(shownContent, linkColor) {
+                    buildAnnotatedMessageText(shownContent, linkColor)
                 }
                 // Сообщение из одной ссылки на картинку или гифку показываем
                 // картинкой: клавиатура вставляет гифки именно ссылкой, и в чате
@@ -195,7 +224,7 @@ fun MessageBubble(
                 } else if (imageUrl != null) {
                     ImagePreview(
                         model = imageUrl,
-                        contentDescription = "Картинка из сообщения",
+                        contentDescription = stringResource(R.string.group_message_image),
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = 240.dp)
@@ -260,6 +289,39 @@ fun MessageBubble(
                         },
                     )
                 }
+                // Карточка первой ссылки под текстом (как в премиальных мессенджерах).
+                // Приглашения и картинки уже показаны своими карточками - их не дублируем.
+                val firstLink = remember(displayContent) { URL_REGEX.find(displayContent)?.value }
+                if (firstLink != null && imageUrl == null && multiCard == null &&
+                    inviteCard == null && groupCard == null && !isSelected
+                ) {
+                    ApuLinkCard(url = firstLink, textColor = textColor)
+                }
+                // Переключатель оригинала: виден только когда перевод есть.
+                if (translation != null) {
+                    Text(
+                        text = if (showOriginal) stringResource(R.string.chat_show_translation)
+                               else stringResource(R.string.chat_show_original),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = textColor.copy(alpha = 0.7f),
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .clickable { showOriginal = !showOriginal },
+                    )
+                }
+                // Кнопка «Перевести» для входящего текста, когда авто-перевод выключен.
+                if (translation == null && !translateOn && !manualRequested && !message.isFromMe &&
+                    com.vladimir.messenger.data.translate.MessageTranslator.isTranslatableText(displayContent)
+                ) {
+                    Text(
+                        text = stringResource(R.string.chat_translate_now),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = textColor.copy(alpha = 0.7f),
+                        modifier = Modifier
+                            .padding(top = 2.dp)
+                            .clickable { manualRequested = true },
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(4.dp))
 
@@ -268,12 +330,13 @@ fun MessageBubble(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.End,
                 ) {
+                    val yesterdayLabel = stringResource(R.string.msg_yesterday)
                     Text(
                         // Раунд 184 (аудит-5): SimpleDateFormat+Calendar создавались
                         // заново на каждую перерисовку каждого пузыря. remember
                         // кэширует результат; часовой маркер - «Вчера» обновится.
-                        text = remember(message.timestamp, System.currentTimeMillis() / 3_600_000L) {
-                            formatMessageTime(message.timestamp)
+                        text = remember(message.timestamp, yesterdayLabel, System.currentTimeMillis() / 3_600_000L) {
+                            formatMessageTime(message.timestamp, yesterdayLabel)
                         },
                         style = MaterialTheme.typography.labelSmall,
                         color = if (isOwn) messenger.messageBubbleOwnText.copy(alpha = 0.7f)
@@ -294,17 +357,12 @@ fun MessageBubble(
                         MessageStatus.FILE_EXPIRED,
                     )
                 ) {
-                    androidx.compose.material3.TextButton(
+                    ApuPremiumChip(
+                        label = stringResource(R.string.ft_retry),
+                        selected = true,
                         onClick = onRetry,
-                        contentPadding = PaddingValues(0.dp),
                         modifier = Modifier.align(Alignment.End),
-                    ) {
-                        Text(
-                            "Повторить отправку",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = textColor,
-                        )
-                    }
+                    )
                 }
             }
         }
@@ -369,7 +427,7 @@ private fun MessageStatusIcon(status: MessageStatus, tint: Color) {
     )
 }
 
-private fun formatMessageTime(timestamp: Long): String {
+private fun formatMessageTime(timestamp: Long, yesterdayLabel: String): String {
     val date = Date(timestamp)
     val today = Calendar.getInstance().apply {
         set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0)
@@ -379,7 +437,7 @@ private fun formatMessageTime(timestamp: Long): String {
     }
     return when {
         timestamp > today.timeInMillis -> SimpleDateFormat("HH:mm", Locale.getDefault()).format(date)
-        timestamp > yesterday.timeInMillis -> "Вчера"
+        timestamp > yesterday.timeInMillis -> yesterdayLabel
         else -> SimpleDateFormat("d MMM", Locale("ru")).format(date)
     }
 }
@@ -416,7 +474,7 @@ private fun ContactInviteCardView(
         ) {
             Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text("Добавить контакт")
+            Text(stringResource(R.string.chat_add_contact))
         }
     }
 }
@@ -456,7 +514,7 @@ private fun GroupInviteCardView(
         ) {
             Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text(if (card.isChannel) "Подписаться" else "Вступить")
+            Text(if (card.isChannel) stringResource(R.string.groups_subscribe) else stringResource(R.string.groups_join_btn))
         }
         card.apkLink?.let { apk ->
             Spacer(Modifier.height(8.dp))
@@ -466,7 +524,7 @@ private fun GroupInviteCardView(
             ) {
                 Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Скачать APU")
+                Text(stringResource(R.string.mb_download_apu))
             }
         }
     }
@@ -487,7 +545,7 @@ private fun MultiInviteCardView(
 ) {
     Column {
         Text(
-            text = "Приглашение в сообщества",
+            text = stringResource(R.string.mb_invite_communities),
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
             color = textColor,
@@ -495,13 +553,13 @@ private fun MultiInviteCardView(
         Spacer(Modifier.height(8.dp))
         card.items.forEach { item ->
             Text(
-                text = item.title.ifBlank { if (item.isChannel) "Канал" else "Группа" },
+                text = item.title.ifBlank { if (item.isChannel) stringResource(R.string.contacts_channel) else stringResource(R.string.contacts_group) },
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
                 color = textColor,
             )
             Text(
-                text = if (item.isChannel) "Канал" else "Группа",
+                text = if (item.isChannel) stringResource(R.string.contacts_channel) else stringResource(R.string.contacts_group),
                 style = MaterialTheme.typography.bodySmall,
                 color = textColor.copy(alpha = 0.7f),
             )
@@ -512,7 +570,7 @@ private fun MultiInviteCardView(
             ) {
                 Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text(if (item.isChannel) "Подписаться" else "Вступить")
+                Text(if (item.isChannel) stringResource(R.string.groups_subscribe) else stringResource(R.string.groups_join_btn))
             }
             Spacer(Modifier.height(8.dp))
         }
@@ -523,7 +581,7 @@ private fun MultiInviteCardView(
             ) {
                 Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Скачать APU")
+                Text(stringResource(R.string.mb_download_apu))
             }
         }
     }

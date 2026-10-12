@@ -8,6 +8,10 @@ package com.vladimir.messenger.ui.screens.settings
 //   - «Настройки»: оформление, сеть, передача файлов, безопасность, о программе.
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.ApuPremiumChip
+import com.vladimir.messenger.ui.components.ApuPremiumIconTile
+import com.vladimir.messenger.ui.components.ApuPremiumDialog
+import com.vladimir.messenger.ui.components.ApuPremiumChoiceRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -84,7 +88,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import com.vladimir.messenger.R
+import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.ui.components.ChatWallpaper
@@ -110,6 +117,14 @@ import com.vladimir.messenger.ui.theme.AppFontSize
 import com.vladimir.messenger.ui.theme.AppFontSizeHolder
 import com.vladimir.messenger.ui.theme.UsernameHolder
 import com.vladimir.messenger.ui.theme.WallpaperHolder
+import com.vladimir.messenger.ui.theme.WallpaperTint
+import com.vladimir.messenger.ui.theme.WallpaperTintHolder
+import com.vladimir.messenger.ui.theme.LocalAppDarkTheme
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import com.vladimir.messenger.util.QrCodeGenerator
 import com.vladimir.messenger.ui.components.ApuPremiumRadioButton
 import com.vladimir.messenger.ui.components.ApuPremiumSlider
@@ -128,6 +143,8 @@ fun SettingsScreen(
     onIdentityBackupClick: () -> Unit = {},
     /** Раунд 219: «Поддержать разработчика» (черновик). */
     onSupportClick: () -> Unit = {},
+    /** «Написать разработчику»: открывает экран обратной связи. */
+    onFeedbackClick: () -> Unit = {},
     /** Полная копия профиля в файл (чаты, контакты, ключи) и восстановление из него. */
     onProfileBackupClick: () -> Unit = {},
     /**
@@ -177,11 +194,11 @@ fun SettingsScreen(
                     scrolledContainerColor = Color.Transparent,
                         ),
                         title = {
-                            ApuSettingsHeader(if (showProfile) "Профиль" else "Настройки")
+                            ApuSettingsHeader(if (showProfile) stringResource(R.string.settings_header_profile) else stringResource(R.string.settings_header_settings))
                         },
                         navigationIcon = {
                             IconButton(onClick = onBackClick) {
-                                Icon(Icons.Default.ArrowBack, "Назад")
+                                Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back))
                             }
                         },
                     )
@@ -195,7 +212,7 @@ fun SettingsScreen(
                     onMyQr = { showMyQrDialog = true },
                     onCopyLink = {
                         clipboardManager.setText(AnnotatedString(uiState.inviteLink))
-                        android.widget.Toast.makeText(contextForToast, "Ссылка скопирована", android.widget.Toast.LENGTH_SHORT).show()
+                        android.widget.Toast.makeText(contextForToast, contextForToast.getString(R.string.toast_link_copied), android.widget.Toast.LENGTH_SHORT).show()
                     },
                     onUsername = { showUsernameDialog = true },
                     onEditName = { showNameDialog = true },
@@ -213,6 +230,7 @@ fun SettingsScreen(
                     onProfileBackupClick = onProfileBackupClick,
                     onProfileClick = onProfileClick,
                     onSupportClick = onSupportClick,
+                    onFeedbackClick = onFeedbackClick,
                 )
             }
         }
@@ -225,13 +243,13 @@ fun SettingsScreen(
         }
         ApuSettingsDialog(
             onDismissRequest = { showNameDialog = false },
-            title = { Text("Ваше имя") },
+            title = { Text(stringResource(R.string.settings_name_title)) },
             text = {
                 ApuBubbleField(
                     value = nameValue,
                     onValueChange = { nameValue = it.take(50) },
-                    label = { Text("Имя") },
-                    placeholder = { Text("Имя Фамилия") },
+                    label = { Text(stringResource(R.string.settings_name_label)) },
+                    placeholder = { Text(stringResource(R.string.settings_name_placeholder)) },
                     singleLine = true,
                     supportingText = { Text("${nameValue.trim().length}/50") },
                     modifier = Modifier.fillMaxWidth(),
@@ -239,7 +257,7 @@ fun SettingsScreen(
             },
             confirmButton = {
                 ApuTextAction(
-                    label = "Сохранить",
+                    label = stringResource(R.string.action_save),
                     onClick = {
                         viewModel.onDisplayNameChanged(nameValue)
                         showNameDialog = false
@@ -248,7 +266,7 @@ fun SettingsScreen(
                 )
             },
             dismissButton = {
-                ApuTextAction(label = "Отмена", onClick = { showNameDialog = false })
+                ApuTextAction(label = stringResource(R.string.action_cancel), onClick = { showNameDialog = false })
             },
         )
     }
@@ -260,29 +278,29 @@ fun SettingsScreen(
         var usernameValue by remember { mutableStateOf(currentUsername.orEmpty()) }
         ApuSettingsDialog(
             onDismissRequest = { showUsernameDialog = false },
-            title = { Text("Ваш @никнейм") },
+            title = { Text(stringResource(R.string.settings_username_title)) },
             text = {
                 Column {
                     ApuBubbleField(
                         value = usernameValue,
                         onValueChange = { usernameValue = UsernameHolder.sanitize(it) },
-                        label = { Text("никнейм") },
-                        placeholder = { Text("никнейм") },
+                        label = { Text(stringResource(R.string.settings_username_label)) },
+                        placeholder = { Text(stringResource(R.string.settings_username_label)) },
                         prefix = { Text("@") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "Латинские буквы, цифры и подчёркивание. " +
-                            "Короткое имя даёт короткую ссылку и крупный QR-код.",
+                        stringResource(R.string.settings_username_hint_1) +
+                            stringResource(R.string.settings_username_hint_2),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
             },
             confirmButton = {
                 ApuTextAction(
-                    label = "Сохранить",
+                    label = stringResource(R.string.action_save),
                     onClick = {
 
                     UsernameHolder.set(usernameContext, usernameValue)
@@ -293,7 +311,7 @@ fun SettingsScreen(
                 )
             },
             dismissButton = {
-                ApuTextAction(label = "Отмена", onClick = { showUsernameDialog = false })
+                ApuTextAction(label = stringResource(R.string.action_cancel), onClick = { showUsernameDialog = false })
             },
         )
     }
@@ -308,7 +326,7 @@ fun SettingsScreen(
 
         ApuSettingsDialog(
             onDismissRequest = { showMyQrDialog = false },
-            title = { Text("Мой QR-код") },
+            title = { Text(stringResource(R.string.settings_my_qr)) },
             text = {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -317,7 +335,7 @@ fun SettingsScreen(
                     if (qrBitmap != null) {
                         Image(
                             bitmap = qrBitmap.asImageBitmap(),
-                            contentDescription = "QR-код профиля",
+                            contentDescription = stringResource(R.string.settings_qr_desc),
                             modifier = Modifier.size(280.dp),
                         )
                         Spacer(modifier = Modifier.height(12.dp))
@@ -332,7 +350,7 @@ fun SettingsScreen(
                 }
             },
             confirmButton = {
-                ApuTextAction(label = "Закрыть", onClick = { showMyQrDialog = false })
+                ApuTextAction(label = stringResource(R.string.action_close), onClick = { showMyQrDialog = false })
             },
         )
     }
@@ -439,7 +457,7 @@ private fun ProfileTabContent(
                             ) {
                                 Icon(
                                     Icons.Default.PhotoCamera,
-                                    contentDescription = "Изменить аватар",
+                                    contentDescription = stringResource(R.string.settings_change_avatar),
                                     tint = Color.White,
                                     modifier = Modifier.size(16.dp),
                                 )
@@ -459,10 +477,10 @@ private fun ProfileTabContent(
                                 modifier = Modifier.weight(1f, fill = false),
                             )
                             Spacer(Modifier.width(8.dp))
-                            Icon(Icons.Default.Edit, contentDescription = "Изменить имя", tint = ApuBubbleAccentColor, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.Edit, contentDescription = stringResource(R.string.settings_change_name), tint = ApuBubbleAccentColor, modifier = Modifier.size(18.dp))
                         }
                         Text(
-                            if (myUsername.isNullOrBlank()) "Задать @никнейм" else "@$myUsername",
+                            if (myUsername.isNullOrBlank()) stringResource(R.string.settings_set_username) else "@$myUsername",
                             style = MaterialTheme.typography.bodyMedium,
                             color = ApuBubbleAccentColor,
                             fontWeight = FontWeight.SemiBold,
@@ -484,7 +502,7 @@ private fun ProfileTabContent(
                                 Text(uiState.heartCount.toString(), fontWeight = FontWeight.SemiBold)
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    if (uiState.heartCount == 0) "сердечки" else "рейтинг",
+                                    if (uiState.heartCount == 0) stringResource(R.string.st_hearts_label) else stringResource(R.string.st_rating_label),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = ApuBubbleMutedColor,
                                 )
@@ -510,7 +528,7 @@ private fun ProfileTabContent(
                                 )
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    "жалобы",
+                                    stringResource(R.string.st_complaints_label),
                                     style = MaterialTheme.typography.labelMedium,
                                     color = if (uiState.antiRatingCount > 0) ApuSettingsDangerColor else ApuBubbleMutedColor,
                                 )
@@ -518,7 +536,7 @@ private fun ProfileTabContent(
                             if (uiState.antiRatingWarning) {
                                 Spacer(Modifier.height(6.dp))
                                 Text(
-                                    "⚠️ Всплеск жалоб: репутация и приоритет узла временно понижены.",
+                                    stringResource(R.string.settings_complaints_spike),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = ApuSettingsDangerColor,
                                 )
@@ -541,10 +559,10 @@ private fun ProfileTabContent(
                         }
                         Spacer(Modifier.height(14.dp))
                         val actions = listOf(
-                            Triple("Мой QR", Icons.Default.QrCode, onMyQr),
-                            Triple("Ссылка", Icons.Default.ContentCopy, onCopyLink),
-                            Triple("Никнейм", Icons.Default.AlternateEmail, onUsername),
-                            Triple("Аватар", Icons.Default.AccountCircle, { showAvatarPicker = true }),
+                            Triple(stringResource(R.string.settings_my_qr), Icons.Default.QrCode, onMyQr),
+                            Triple(stringResource(R.string.groups_link), Icons.Default.ContentCopy, onCopyLink),
+                            Triple(stringResource(R.string.identity_nickname), Icons.Default.AlternateEmail, onUsername),
+                            Triple(stringResource(R.string.settings_avatar), Icons.Default.AccountCircle, { showAvatarPicker = true }),
                         )
                         val fontScale = LocalDensity.current.fontScale
                         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
@@ -562,7 +580,7 @@ private fun ProfileTabContent(
                         if (avatarUri != null) {
                             Spacer(Modifier.height(6.dp))
                             ApuTextAction(
-                                label = "Убрать аватар",
+                                label = stringResource(R.string.settings_remove_avatar),
                                 onClick = { AvatarHolder.set(context, null) },
                             )
                         }
@@ -576,8 +594,8 @@ private fun ProfileTabContent(
                 SettingsCard {
                     SettingsItem(
                         icon = Icons.Default.Share,
-                        title = "Поделиться профилем",
-                        subtitle = "Отправить ссылку для добавления в контакты",
+                        title = stringResource(R.string.settings_share_profile),
+                        subtitle = stringResource(R.string.settings_share_profile_hint),
                         onClick = onShareProfile,
                     )
                 }
@@ -587,8 +605,8 @@ private fun ProfileTabContent(
                 SettingsCard {
                     SettingsItem(
                         icon = Icons.Default.EmojiEvents,
-                        title = "Ранги и возможности",
-                        subtitle = "Что открывается за подтверждённые приглашения",
+                        title = stringResource(R.string.settings_ranks),
+                        subtitle = stringResource(R.string.settings_ranks_hint),
                         onClick = onRankBenefits,
                     )
                 }
@@ -657,6 +675,8 @@ private fun SettingsTabContent(
     onProfileClick: () -> Unit = {},
     /** Раунд 219: «Поддержать разработчика» (черновик). */
     onSupportClick: () -> Unit = {},
+    /** «Написать разработчику»: открывает экран обратной связи. */
+    onFeedbackClick: () -> Unit = {},
 ) {
     // Диалог «Сеть сообщений» и буфер обмена для «Скопировать» в нём —
     // локальные для этого экрана.
@@ -701,8 +721,7 @@ private fun SettingsTabContent(
                 // что случилось, и предлагаем повторить. Быстрая часть отчёта
                 // при этом остаётся на экране — она уже собрана.
                 transferLogsStage = null
-                transferLogsError = "сбор отчёта не завершился (" +
-                    failure.javaClass.simpleName + ") — нажмите «Обновить»"
+                transferLogsError = settingsContext.getString(R.string.diag_report_failed, failure.javaClass.simpleName, settingsContext.getString(R.string.action_refresh))
             } finally {
                 transferLogsLoading = false
             }
@@ -740,13 +759,13 @@ private fun SettingsTabContent(
         ) {
             // Профиль первым пунктом: имя, @никнейм и свой QR нужны чаще
             // остального, а раньше они прятались за вкладкой сверху.
-            item { SettingsSectionTitle("Мой профиль") }
+            item { SettingsSectionTitle(stringResource(R.string.section_my_profile)) }
             item {
                 SettingsCard {
                     SettingsItem(
                         icon = Icons.Default.Person,
-                        title = "Профиль",
-                        subtitle = "Имя, никнейм, мой QR-код и приглашения",
+                        title = stringResource(R.string.settings_item_profile),
+                        subtitle = stringResource(R.string.settings_item_profile_hint),
                         onClick = onProfileClick,
                     )
                 }
@@ -755,7 +774,7 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // ОФОРМЛЕНИЕ: день / ночь / авто + обои
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle("Оформление") }
+            item { SettingsSectionTitle(stringResource(R.string.section_appearance)) }
             item {
                 SettingsCard {
                     val context = LocalContext.current
@@ -776,12 +795,12 @@ private fun SettingsTabContent(
                         )
                         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text(
-                                "Размер текста",
+                                stringResource(R.string.settings_font_size),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Text(
-                                "Меняется во всех личных чатах, группах, каналах и темах",
+                                stringResource(R.string.settings_font_size_hint),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -798,16 +817,10 @@ private fun SettingsTabContent(
                                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                                     ) {
                                         rowOptions.forEach { option ->
-                                            FilterChip(
+                                            ApuPremiumChip(
+                                                label = stringResource(option.labelRes),
                                                 selected = appFontSize == option,
                                                 onClick = { AppFontSizeHolder.set(context, option) },
-                                                label = {
-                                                    Text(
-                                                        option.title,
-                                                        maxLines = 1,
-                                                        overflow = TextOverflow.Ellipsis,
-                                                    )
-                                                },
                                                 modifier =
                                                     if (chipsHorizontal) Modifier
                                                     else Modifier.fillMaxWidth(),
@@ -838,8 +851,8 @@ private fun SettingsTabContent(
                     }
                     SettingsItem(
                         icon = Icons.Default.Wallpaper,
-                        title = "Обои",
-                        subtitle = if (customWallpaper != null) "Своя картинка из галереи" else "Стандартные, в тон теме",
+                        title = stringResource(R.string.settings_wallpaper),
+                        subtitle = if (customWallpaper != null) stringResource(R.string.settings_wallpaper_custom) else stringResource(R.string.st_wallpaper_default),
                         onClick = { wallpaperPicker.launch("image/*") },
                     )
                     Row(
@@ -848,7 +861,7 @@ private fun SettingsTabContent(
                             .padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
                     ) {
                         ApuPremiumButton(
-                            label = "Из галереи",
+                            label = stringResource(R.string.settings_from_gallery),
                             icon = Icons.Default.PhotoLibrary,
                             onClick = { wallpaperPicker.launch("image/*") },
                         )
@@ -860,11 +873,144 @@ private fun SettingsTabContent(
                                 .padding(start = 16.dp, end = 16.dp, bottom = 6.dp),
                         ) {
                             ApuPremiumButton(
-                                label = "Вернуть стандартные",
+                                label = stringResource(R.string.settings_reset_wallpaper),
                                 icon = Icons.Default.RestartAlt,
                                 style = DiagnosticsActionStyle.QUIET,
                                 onClick = { WallpaperHolder.set(context, null) },
                             )
+                        }
+                    }
+
+                    // Цветовая гамма подложки: 10 вариантов. Своя картинка важнее гаммы.
+                    ApuSettingsDivider()
+                    val wallpaperTint by WallpaperTintHolder.tint.collectAsStateWithLifecycle()
+                    val tintDark = LocalAppDarkTheme.current
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            stringResource(R.string.settings_tint_title),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            stringResource(R.string.settings_tint_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            WallpaperTint.entries.forEach { option ->
+                                WallpaperTintSwatch(
+                                    option = option,
+                                    dark = tintDark,
+                                    selected = wallpaperTint == option,
+                                    name = stringResource(option.labelRes),
+                                    onClick = { WallpaperTintHolder.set(context, option) },
+                                )
+                            }
+                        }
+                        Text(
+                            stringResource(wallpaperTint.labelRes),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = ApuBubbleAccentColor,
+                        )
+                    }
+                }
+            }
+
+            // ----------------------------------------------------------------
+            // ЯЗЫК интерфейса: русский / English. Применяется после перезапуска
+            // экрана; выбор хранится в p2p_prefs (см. AppLanguageHolder).
+            // ----------------------------------------------------------------
+            item { SettingsSectionTitle(stringResource(R.string.language_section)) }
+            item {
+                SettingsCard {
+                    val context = LocalContext.current
+                    val appLanguage by com.vladimir.messenger.ui.i18n.AppLanguageHolder.language
+                        .collectAsStateWithLifecycle()
+                    var showLanguageDialog by remember { mutableStateOf(false) }
+                    var showTranslateConsent by remember { mutableStateOf(false) }
+                    SettingsItem(
+                        icon = Icons.Default.Language,
+                        title = stringResource(R.string.language_app),
+                        subtitle = appLanguage.nativeName,
+                        onClick = { showLanguageDialog = true },
+                    )
+                    // Перевод входящих сообщений на язык приложения (на устройстве).
+                    val translateOn by com.vladimir.messenger.data.translate.TranslationSettings.enabled
+                        .collectAsStateWithLifecycle()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.translate_title),
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                            Text(
+                                stringResource(R.string.translate_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        ApuPremiumSwitch(
+                            checked = translateOn,
+                            onCheckedChange = {
+                                if (it) {
+                                    // Включение только после согласия: пакеты весят около 30 МБ.
+                                    showTranslateConsent = true
+                                } else {
+                                    com.vladimir.messenger.data.translate.TranslationSettings.set(context, false)
+                                }
+                            },
+                        )
+                    }
+                    if (showTranslateConsent) {
+                        ApuPremiumDialog(
+                            title = stringResource(R.string.translate_consent_title),
+                            onDismiss = { showTranslateConsent = false },
+                            confirmLabel = stringResource(R.string.translate_consent_ok),
+                            onConfirm = {
+                                com.vladimir.messenger.data.translate.TranslationSettings.set(context, true)
+                                showTranslateConsent = false
+                            },
+                        ) {
+                            Text(
+                                stringResource(R.string.translate_consent_body),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                    if (showLanguageDialog) {
+                        ApuPremiumDialog(
+                            title = stringResource(R.string.language_app),
+                            onDismiss = { showLanguageDialog = false },
+                        ) {
+                            com.vladimir.messenger.ui.i18n.AppLanguage.entries.forEach { lang ->
+                                ApuPremiumChoiceRow(
+                                    title = lang.nativeName,
+                                    subtitle = null,
+                                    selected = lang == appLanguage,
+                                    onClick = {
+                                        showLanguageDialog = false
+                                        if (lang != appLanguage) {
+                                            com.vladimir.messenger.ui.i18n.AppLanguageHolder.set(context, lang)
+                                            (context as? android.app.Activity)?.recreate()
+                                        }
+                                    },
+                                )
+                            }
                         }
                     }
                 }
@@ -873,7 +1019,7 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // Пауза новых сообщений: приложение целиком или нужный раздел.
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle("Уведомления") }
+            item { SettingsSectionTitle(stringResource(R.string.section_notifications)) }
             item {
                 SettingsCard {
                     val muteScopes = listOf(
@@ -889,7 +1035,7 @@ private fun SettingsTabContent(
                             icon = icon,
                             title = scope.title,
                             subtitle = if (untilMs > notificationMuteNowMs) {
-                                notificationMuteStatus(untilMs, notificationMuteNowMs)
+                                notificationMuteStatus(LocalContext.current, untilMs, notificationMuteNowMs)
                             } else {
                                 scope.description
                             },
@@ -900,25 +1046,25 @@ private fun SettingsTabContent(
                 }
             }
 
-            item { SettingsSectionTitle("Безопасность") }
+            item { SettingsSectionTitle(stringResource(R.string.section_security)) }
             item {
                 SettingsCard {
                     SettingsItem(
                         icon     = Icons.Default.Shield,
-                        title    = "Защита личности",
+                        title    = stringResource(R.string.settings_identity_protection),
                         // Самая дорогая потеря в мессенджере - оказаться для
                         // всех новым человеком после переустановки. Поэтому
                         // строка честно говорит, защищён человек или нет.
-                        subtitle = "Никнейм и пароль, чтобы вернуть себя после переустановки",
+                        subtitle = stringResource(R.string.settings_identity_protection_hint),
                         onClick  = onIdentityBackupClick,
                     )
                     ApuSettingsDivider()
                     SettingsItem(
                         icon     = Icons.Default.Save,
-                        title    = "Резервная копия",
+                        title    = stringResource(R.string.settings_backup),
                         // «Защита личности» возвращает только адрес и имя; здесь -
                         // всё: чаты, контакты, сообщества, ключи, ранг, настройки.
-                        subtitle = "Сохранить всё в файл и восстановить после переустановки",
+                        subtitle = stringResource(R.string.settings_backup_hint),
                         onClick  = onProfileBackupClick,
                     )
                     ApuSettingsDivider()
@@ -926,20 +1072,20 @@ private fun SettingsTabContent(
                     // экран входа, где можно войти под другим логином.
                     SettingsItem(
                         icon     = Icons.Default.Logout,
-                        title    = "Выйти из APU",
-                        subtitle = "Выйти и войти под другим логином",
+                        title    = stringResource(R.string.settings_logout),
+                        subtitle = stringResource(R.string.settings_logout_hint),
                         onClick  = { showLogoutDialog = true },
                     )
                 }
             }
 
-            item { SettingsSectionTitle("Сеть") }
+            item { SettingsSectionTitle(stringResource(R.string.section_network)) }
             item {
                 SettingsCard {
                     SettingsItem(
                         icon  = Icons.Default.Hub,
-                        title = "Статус соединения",
-                        subtitle = uiState.connectionStatus.displayName,
+                        title = stringResource(R.string.settings_connection_status),
+                        subtitle = uiState.connectionStatus.displayName(),
                         trailingContent = {
                             StatusDot(status = uiState.connectionStatus)
                         }
@@ -950,28 +1096,28 @@ private fun SettingsTabContent(
                         // Было «Подключено пиров» - слово из документации, а не
                         // из речи. Теперь это вход в подробности: кто держит
                         // сеть и через кого данные идут первыми.
-                        title    = "Узлы сети",
-                        subtitle = "${uiState.connectedPeers} на связи - открыть оценку",
+                        title    = stringResource(R.string.peer_nodes_title),
+                        subtitle = stringResource(R.string.peer_nodes_online_tpl, uiState.connectedPeers),
                         onClick  = onPeerRatingClick,
                     )
                     ApuSettingsDivider()
                     SettingsItem(
                         icon     = Icons.Default.Public,
-                        title    = "Публичный IP",
-                        subtitle = uiState.publicIp ?: "Не удалось определить (нет сети?)",
+                        title    = stringResource(R.string.settings_public_ip),
+                        subtitle = uiState.publicIp ?: stringResource(R.string.settings_public_ip_unknown),
                     )
                     ApuSettingsDivider()
                     SettingsItem(
                         icon  = Icons.Default.RestartAlt,
-                        title = "Перезапустить сетевой движок",
-                        subtitle = "Пересоединиться со всеми пирами",
+                        title = stringResource(R.string.settings_restart_engine),
+                        subtitle = stringResource(R.string.settings_restart_engine_hint),
                         onClick = viewModel::onRestartEngine,
                     )
                     ApuSettingsDivider()
                     SettingsItem(
                         icon  = Icons.Default.Refresh,
-                        title = "Собрать данные об абонентах",
-                        subtitle = "Запустить поиск пиров по сети",
+                        title = stringResource(R.string.settings_collect_peers),
+                        subtitle = stringResource(R.string.settings_collect_peers_hint),
                         onClick = viewModel::onTriggerGossipDiscovery,
                     )
                     ApuSettingsDivider()
@@ -979,15 +1125,15 @@ private fun SettingsTabContent(
                     // доходят сообщения: роль, партнёр, канал, недоотправленные.
                     SettingsItem(
                         icon     = Icons.Default.Refresh,
-                        title    = "Диагностика синхронизации",
-                        subtitle = "Роль устройства, партнёр, канал, недоотправленные",
+                        title    = stringResource(R.string.settings_sync_diag),
+                        subtitle = stringResource(R.string.settings_sync_diag_hint),
                         onClick  = { showMirrorDiag = true },
                     )
                     ApuSettingsDivider()
                     SettingsItem(
                         icon     = Icons.Default.VpnKey,
-                        title    = "Туннель через прокси",
-                        subtitle = "Автовыбор лучшего прокси для соединений (любая сеть)",
+                        title    = stringResource(R.string.settings_proxy_tunnel),
+                        subtitle = stringResource(R.string.settings_proxy_tunnel_hint),
                         trailingContent = {
                             ApuPremiumSwitch(
                                 checked = uiState.proxyTunnelEnabled,
@@ -1001,8 +1147,8 @@ private fun SettingsTabContent(
                     // концах экрана.
                     SettingsItem(
                         icon = Icons.Default.Dns,
-                        title = "Настроить прокси вручную",
-                        subtitle = "Свои серверы MTProto",
+                        title = stringResource(R.string.settings_proxy_manual),
+                        subtitle = stringResource(R.string.settings_proxy_manual_hint),
                         onClick = onMtProxyClick,
                     )
                 }
@@ -1011,20 +1157,20 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // ПЕРЕДАЧА ФАЙЛОВ
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle("Передача файлов") }
+            item { SettingsSectionTitle(stringResource(R.string.section_file_transfer)) }
             item {
                 SettingsCard {
                     SettingsItem(
                         icon     = Icons.Default.Delete,
-                        title    = "Остановить зависшие отправки",
-                        subtitle = "Отменяет незавершённые отправки и чистит их очереди",
+                        title    = stringResource(R.string.settings_stop_stuck),
+                        subtitle = stringResource(R.string.settings_stop_stuck_hint),
                         onClick  = viewModel::onCancelStalledTransfers,
                     )
                     ApuSettingsDivider()
                     SettingsItem(
                         icon     = Icons.Default.CleaningServices,
-                        title    = "Очистить завершённые",
-                        subtitle = "Освобождает место; сохранённые файлы остаются у вас",
+                        title    = stringResource(R.string.settings_clear_done),
+                        subtitle = stringResource(R.string.settings_clear_done_hint),
                         onClick  = viewModel::onPurgeCompletedTransfers,
                     )
                 }
@@ -1033,12 +1179,24 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // РАЗДАЧА: темп, в котором телефон рассылает и раздаёт дальше
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle("Раздача") }
+            item { SettingsSectionTitle(stringResource(R.string.section_seeding)) }
             item {
                 SettingsCard {
                     val context = LocalContext.current
                     // Режим прочитан в MainActivity.onCreate (SwarmSettings.init).
                     val swarmMode by SwarmSettings.mode.collectAsStateWithLifecycle()
+                    val onlineHelp by com.vladimir.messenger.data.swarm.OnlineHelperSettings.enabled.collectAsStateWithLifecycle()
+                    SettingsItem(
+                        icon = Icons.Default.Groups,
+                        title = stringResource(R.string.settings_online_helper),
+                        subtitle = stringResource(R.string.settings_online_helper_body),
+                        trailingContent = {
+                            ApuPremiumSwitch(checked = onlineHelp, onCheckedChange = {
+                                com.vladimir.messenger.data.swarm.OnlineHelperSettings.set(context, it)
+                            })
+                        },
+                    )
+                    ApuSettingsDivider()
                     SwarmMode.entries.forEach { mode ->
                         val limits = SwarmPolicy.limitsFor(mode, metered = false, lowPower = false)
                         Row(
@@ -1054,13 +1212,16 @@ private fun SettingsTabContent(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Column {
-                                Text(mode.title, style = MaterialTheme.typography.bodyLarge)
+                                Text(stringResource(when (mode) {
+                                    SwarmMode.NORMAL -> R.string.swarm_mode_normal
+                                    SwarmMode.ECONOMY -> R.string.swarm_mode_economy
+                                    SwarmMode.UNLIMITED -> R.string.swarm_mode_unlimited
+                                }), style = MaterialTheme.typography.bodyLarge)
                                 Text(
                                     if (mode == SwarmMode.UNLIMITED) {
-                                        "Раздаёт на полную и на мобильном интернете, и при низком заряде"
+                                        stringResource(R.string.settings_swarm_full)
                                     } else {
-                                        "до ${limits.maxPacketsPerMinute} пакетов в минуту, " +
-                                            "${limits.maxConcurrentSends} одновременно"
+                                        stringResource(R.string.swarm_limits_tpl, limits.maxPacketsPerMinute, limits.maxConcurrentSends)
                                     },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1071,11 +1232,8 @@ private fun SettingsTabContent(
                     ApuSettingsDivider()
                     SettingsItem(
                         icon = Icons.Default.Groups,
-                        title = "Кому первому",
-                        subtitle = "Сначала контактам, проверенным и стабильным узлам, " +
-                            "потом всем остальным. В обычном и экономном режимах на " +
-                            "мобильном интернете и при заряде ниже " +
-                            "${SwarmPolicy.LOW_BATTERY_PERCENT} % темп вдвое ниже.",
+                        title = stringResource(R.string.settings_seed_priority),
+                        subtitle = stringResource(R.string.settings_seed_priority_body, SwarmPolicy.LOW_BATTERY_PERCENT),
                     )
                 }
             }
@@ -1093,16 +1251,11 @@ private fun SettingsTabContent(
                         .collectAsStateWithLifecycle()
                     SettingsItem(
                         icon = Icons.Default.Storage,
-                        title = "Я сервер",
+                        title = stringResource(R.string.settings_i_am_server),
                         subtitle = if (imServer) {
-                            "Включено: телефон хранит чужие файлы на хранении для контактов " +
-                                "не в сети, раздаёт файлы сообществ и обновления другим. " +
-                                "Чем больше телефонов-серверов, тем быстрее сеть."
+                            stringResource(R.string.settings_relay_on)
                         } else {
-                            "Выключено - режим абонента: НОВОЕ чужое на хранение не принимается, " +
-                                "тяжёлое (картинки, видео, гифки, большие файлы) другим не " +
-                                "пересылается. Лёгкое и нужное для связи несут все: маленькие " +
-                                "документы и стикеры, текст и резервные копии, APK обновлений."
+                            stringResource(R.string.settings_relay_off)
                         },
                         trailingContent = {
                             ApuPremiumSwitch(
@@ -1138,12 +1291,8 @@ private fun SettingsTabContent(
                     }
                     SettingsItem(
                         icon = Icons.Default.Storage,
-                        title = "Место под пересылку: ${StoragePolicy.format(StoragePolicy.stepBytes(step))}",
-                        subtitle = "Сколько места телефон отдаёт под данные в пути: куски " +
-                            "файлов, чужие файлы на хранении для контактов, которые сейчас " +
-                            "не в сети, и то, что ждёт узлов не в сети. Телефон здесь и есть " +
-                            "сервер: чем больше места вы даёте, тем выше ваш рейтинг у " +
-                            "других узлов (до +10 из 100, и только пока вы бываете в сети).",
+                        title = stringResource(R.string.settings_forward_space_title, StoragePolicy.format(StoragePolicy.stepBytes(step))),
+                        subtitle = stringResource(R.string.settings_space_body),
                     )
                     Row(
                         modifier = Modifier
@@ -1179,16 +1328,9 @@ private fun SettingsTabContent(
                     val used = usage
                     Text(
                         if (used == null) {
-                            "Считаю занятое место…"
+                            stringResource(R.string.settings_counting_space)
                         } else {
-                            "Занято сейчас: ${StoragePolicy.format(used.total)} " +
-                                "(куски файлов ${StoragePolicy.format(used.chunkBytes)}" +
-                                (if (held > 0L) ", из них чужих на хранении ${StoragePolicy.format(held)}" else "") +
-                                ", принятые файлы ${StoragePolicy.format(used.receivedBytes)}, " +
-                                (if (used.groupFileBytes > 0L) "мои файлы для раздачи в сообществах ${StoragePolicy.format(used.groupFileBytes)}, " else "") +
-                                "очередь сообщений ${StoragePolicy.format(used.relayBytes)}). " +
-                                "Свободно на телефоне: ${StoragePolicy.format(free)}; последние " +
-                                "${StoragePolicy.format(StoragePolicy.FREE_RESERVE_BYTES)} не занимаются никогда."
+                            stringResource(R.string.space_used_head, StoragePolicy.format(used.total), StoragePolicy.format(used.chunkBytes)) + (if (held > 0L) stringResource(R.string.space_held, StoragePolicy.format(held)) else "") + stringResource(R.string.space_received, StoragePolicy.format(used.receivedBytes)) + (if (used.groupFileBytes > 0L) stringResource(R.string.space_group_files, StoragePolicy.format(used.groupFileBytes)) else "") + stringResource(R.string.space_queue, StoragePolicy.format(used.relayBytes)) + stringResource(R.string.space_free_tail, StoragePolicy.format(free), StoragePolicy.format(StoragePolicy.FREE_RESERVE_BYTES))
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1206,13 +1348,13 @@ private fun SettingsTabContent(
             // (docs/UPDATE_SEEDING.md) — без сервера, по кусочкам, как файлы
             // групп. Новая версия видна тем, у кого версия ниже.
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle("Обновления") }
+            item { SettingsSectionTitle(stringResource(R.string.section_updates)) }
             item { ApkUpdatesCard(viewModel) }
 
             // ----------------------------------------------------------------
             // О ПРИЛОЖЕНИИ
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle("Сервер") }
+            item { SettingsSectionTitle(stringResource(R.string.section_server)) }
             item {
                 SettingsCard {
                     // Наш relay-сервер: реестр, приглашения, обновления и
@@ -1222,15 +1364,15 @@ private fun SettingsTabContent(
                         icon     = Icons.Default.Dns,
                         // Адрес сервера не показываем (просьба владельца,
                         // 2026-09-19): в интерфейсе только нейтральное имя.
-                        title    = "Наш сервер",
-                        subtitle = uiState.serverStatus,
+                        title    = stringResource(R.string.settings_our_server),
+                        subtitle = uiState.serverStatus.ifEmpty { stringResource(R.string.settings_server_checking) },
                     )
                     // Диагностика брокерной линии: режим (наш сервер или
                     // запасные), давность ConnAck, последняя ошибка.
                     if (uiState.mqttLink.isNotBlank()) {
                         SettingsItem(
                             icon     = Icons.Default.NetworkCheck,
-                            title    = "Сообщения сети",
+                            title    = stringResource(R.string.settings_network_messages),
                             // Раунд 190: человекочитаемая строка; если разбор
                             // не удался - сырая, как раньше.
                             subtitle = uiState.mqttHuman.ifBlank { uiState.mqttLink },
@@ -1241,7 +1383,7 @@ private fun SettingsTabContent(
                     // и по кнопке (диалог ниже).
                     SettingsItem(
                         icon     = Icons.Default.CloudSync,
-                        title    = "Резервная копия адресов",
+                        title    = stringResource(R.string.settings_address_backup),
                         subtitle = uiState.addrBookLine.ifBlank { "…" },
                         onClick  = { showAddrBookDialog = true },
                     )
@@ -1250,13 +1392,13 @@ private fun SettingsTabContent(
 
             // Обычная синхронизация уже настроенных телефонов идёт в фоне
             // через живое зеркало. Это окно - только разовый перенос профиля.
-            item { SettingsSectionTitle("Устройства") }
+            item { SettingsSectionTitle(stringResource(R.string.section_devices)) }
             item {
                 SettingsCard {
                     SettingsItem(
                         icon     = Icons.Default.Sync,
-                        title    = "Перенос профиля на новое устройство",
-                        subtitle = "Подключённые телефоны синхронизируются сами",
+                        title    = stringResource(R.string.settings_profile_transfer),
+                        subtitle = stringResource(R.string.settings_profile_transfer_hint),
                         onClick  = { showSyncDialog = true },
                     )
                 }
@@ -1265,32 +1407,38 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // ЛОГИ: отчёт для проверки прямой F4-передачи на двух телефонах.
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle("Поддержка") }
+            item { SettingsSectionTitle(stringResource(R.string.section_support)) }
             item {
                 SettingsCard {
                     SettingsItem(
                         icon = Icons.Default.Description,
-                        title = "Логи",
-                        subtitle = "Скопировать безопасный отчёт о сети и передаче файлов",
+                        title = stringResource(R.string.settings_logs),
+                        subtitle = stringResource(R.string.settings_logs_hint),
                         onClick = { showTransferLogsDialog = true },
                     )
                 }
             }
 
-            item { SettingsSectionTitle("О приложении") }
+            item { SettingsSectionTitle(stringResource(R.string.section_about)) }
             item {
                 SettingsCard {
                     // Раунд 219: «Поддержать разработчика». Реквизитов в коде
                     // нет: список способов экран получает из нашего сервиса.
                     SettingsItem(
+                        icon     = Icons.Default.Email,
+                        title    = stringResource(R.string.settings_feedback),
+                        subtitle = stringResource(R.string.settings_feedback_hint),
+                        onClick  = onFeedbackClick,
+                    )
+                    SettingsItem(
                         icon     = Icons.Default.Favorite,
-                        title    = "Поддержать разработчика",
-                        subtitle = "Переводом напрямую - без комиссий магазинов",
+                        title    = stringResource(R.string.settings_support_dev),
+                        subtitle = stringResource(R.string.settings_support_dev_hint),
                         onClick  = onSupportClick,
                     )
                     SettingsItem(
                         icon     = Icons.Default.Info,
-                        title    = "Версия",
+                        title    = stringResource(R.string.settings_version),
                         subtitle = "APU ${uiState.appVersion}",
                     )
                     // Какое ядро внутри: строку отдаёт само ядро, поэтому
@@ -1298,7 +1446,7 @@ private fun SettingsTabContent(
                     // lib.udl (первая функция после снятия заморозки).
                     SettingsItem(
                         icon     = Icons.Default.Memory,
-                        title    = "Ядро",
+                        title    = stringResource(R.string.settings_core),
                         subtitle = uiState.rustCoreVersion,
                     )
                 }
@@ -1318,38 +1466,32 @@ private fun SettingsTabContent(
         val nick = uiState.protectedNick
         ApuSettingsDialog(
             onDismissRequest = { showLogoutDialog = false },
-            icon = { Icon(Icons.Default.Logout, contentDescription = null) },
-            title = { Text("Выйти из APU?") },
+            icon = { ApuPremiumIconTile(icon = Icons.Default.Logout, size = 34.dp, corner = 10.dp) },
+            title = { Text(stringResource(R.string.settings_logout_title)) },
             text = {
                 Text(
                     buildString {
                         append(
-                            "Чаты, контакты и ключи на этом телефоне будут стёрты. " +
-                                "Приложение откроет экран входа - войдите под другим " +
-                                "логином или создайте новый профиль.",
+                            stringResource(R.string.settings_logout_body),
                         )
                         append("\n\n")
                         if (nick.isNullOrBlank()) {
                             append(
-                                "ВНИМАНИЕ: «Защита личности» не настроена. Вернуться в " +
-                                    "текущий профиль после выхода будет НЕЛЬЗЯ. Если хотите " +
-                                    "сохранить его - отмените выход и задайте никнейм и пароль " +
-                                    "в «Защита личности».",
+                                stringResource(R.string.settings_logout_warning),
                             )
                         } else {
                             append(
-                                "Вернуться в текущий профиль можно в любой момент: на экране " +
-                                    "входа вкладка «Я уже зарегистрирован», никнейм @$nick и ваш пароль.",
+                                stringResource(R.string.profile_return_hint, nick),
                             )
                         }
                     },
                 )
             },
             confirmButton = {
-                ApuTextAction(label = "Выйти", onClick = { viewModel.logout() }, danger = true)
+                ApuTextAction(label = stringResource(R.string.action_logout), onClick = { viewModel.logout() }, danger = true)
             },
             dismissButton = {
-                ApuTextAction(label = "Отмена", onClick = { showLogoutDialog = false })
+                ApuTextAction(label = stringResource(R.string.action_cancel), onClick = { showLogoutDialog = false })
             },
         )
     }
@@ -1357,25 +1499,24 @@ private fun SettingsTabContent(
     if (showAddrBookDialog) {
         ApuSettingsDialog(
             onDismissRequest = { showAddrBookDialog = false },
-            title = { Text("Резервная копия адресов") },
+            title = { Text(stringResource(R.string.settings_address_backup)) },
             text = {
                 Text(
                     (uiState.addrBookLine.ifBlank { "…" }) + "\n\n" +
                         uiState.addrBookMessage.ifBlank {
-                            "Копия шифруется вашим ключом: сервер хранит её, но прочитать не может. " +
-                                "При переустановке приложения и восстановлении личности адреса вернутся сами."
+                            stringResource(R.string.settings_backup_note)
                         }
                 )
             },
             confirmButton = {
                 ApuTextAction(
-                    label = "Создать копию",
+                    label = stringResource(R.string.action_create_copy),
                     onClick = { viewModel.backupAddressBookNow() },
                 )
             },
             dismissButton = {
                 ApuTextAction(
-                    label = "Восстановить",
+                    label = stringResource(R.string.action_restore),
                     onClick = { viewModel.restoreAddressBookNow() },
                 )
             },
@@ -1390,13 +1531,10 @@ private fun SettingsTabContent(
             if (uiState.mqttHuman.isNotBlank()) {
                 append(uiState.mqttHuman)
                 append("\n\n")
-                append("Путь выбирается сам: сначала прямой, если сеть его ")
-                append("не пропускает — через обходной канал, и потом обратно. ")
-                append("Нажимать ничего не нужно.")
+                append(stringResource(R.string.mqtt_path_auto))
                 if (uiState.mqttLink.contains(", ошибка ")) {
-                    append("\n\nПроверка «Наш сервер» и брокер сообщений — разные ")
-                    append("соединения. Если брокер не ответил, приложение повторяет ")
-                    append("подключение само; отправлять копию профиля не нужно.")
+                    append("\n\n")
+                    append(stringResource(R.string.mqtt_broker_note))
                 }
             } else {
                 append(uiState.mqttLink)
@@ -1404,11 +1542,11 @@ private fun SettingsTabContent(
         }
         ApuSettingsDialog(
             onDismissRequest = { showMqttDialog = false },
-            title = { Text("Сеть сообщений") },
+            title = { Text(stringResource(R.string.settings_network_dialog_title)) },
             text = { Text(mqttHumanText) },
             confirmButton = {
                 ApuTextAction(
-                    label = "Скопировать",
+                    label = stringResource(R.string.action_copy),
                     onClick = {
                     val forDiagnostics = listOf(uiState.mqttHuman, uiState.mqttLink)
                         .filter { it.isNotBlank() }
@@ -1419,7 +1557,7 @@ private fun SettingsTabContent(
                 )
             },
             dismissButton = {
-                ApuTextAction(label = "Закрыть", onClick = { showMqttDialog = false })
+                ApuTextAction(label = stringResource(R.string.action_close), onClick = { showMqttDialog = false })
             },
         )
     }
@@ -1436,7 +1574,7 @@ private fun SettingsTabContent(
         ApuSettingsDialog(
             onDismissRequest = { showTransferLogsDialog = false },
             icon = { Icon(Icons.Default.Terminal, contentDescription = null) },
-            title = { Text("Логи") },
+            title = { Text(stringResource(R.string.settings_logs)) },
             text = {
                 // Диалог прокручивает сводку целиком; только длинный список и
                 // сырая консоль имеют собственные ограниченные области.
@@ -1457,7 +1595,7 @@ private fun SettingsTabContent(
                     // Ход работ и ошибка говорятся словами — окно никогда не
                     // молчит пустым экраном.
                     val stageLine = when {
-                        transferLogsLoading -> transferLogsStage ?: "Собираю безопасный отчёт…"
+                        transferLogsLoading -> transferLogsStage ?: stringResource(R.string.settings_collecting_report)
                         transferLogsError != null -> transferLogsError
                         else -> null
                     }
@@ -1473,8 +1611,7 @@ private fun SettingsTabContent(
                         )
                         if (transferLogsLoading && transferLogsSlow) {
                             Text(
-                                "сбор идёт дольше обычного — что-то в телефоне занято; " +
-                                    "«Обновить» запустит заново",
+                                stringResource(R.string.settings_slow_collect),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = ApuBubbleMutedColor,
                             )
@@ -1488,12 +1625,10 @@ private fun SettingsTabContent(
                     // Обещание приватности — тёмной стеклянной полосой со щитом:
                     // его читают, а не пролистывают.
                     ApuDiagnosticsPrivacyStrip(
-                        "Отчёт содержит состояние сети, ядра, брокера и передач. Чаты, имена " +
-                            "файлов, ключи, ciphertext, адреса и contact ID в него не попадают — " +
-                            "его можно копировать и присылать целиком.",
+                        stringResource(R.string.settings_report_info),
                     )
                     ApuDiagnosticsReportCard(
-                        text = reportText.ifBlank { "Собираю безопасный отчёт…" },
+                        text = reportText.ifBlank { stringResource(R.string.settings_collecting_report) },
                         maxHeight = 260.dp,
                     )
                 }
@@ -1510,24 +1645,26 @@ private fun SettingsTabContent(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
+                        val logsTitle = stringResource(R.string.settings_logs_title)
+                        val logsCopied = stringResource(R.string.settings_logs_copied)
                         // Кнопка всегда живая: при сборке отчёта объясняет,
                         // что происходит, вместо того чтобы молчать.
                         ApuDiagnosticsActionButton(
-                            label = "Отправить",
+                            label = stringResource(R.string.action_send),
                             icon = DiagnosticsActionIcons.Send,
                             modifier = Modifier.weight(1f),
                             style = DiagnosticsActionStyle.PRIMARY,
                             compact = true,
                             onClick = {
                                 if (reportText.isNotBlank()) {
-                                    AppShare.shareText(settingsContext, reportText, "Логи APU")
+                                    AppShare.shareText(settingsContext, reportText, logsTitle)
                                 } else {
                                     apuDiagnosticsNothingYet(settingsContext, transferLogsStage)
                                 }
                             },
                         )
                         ApuDiagnosticsActionButton(
-                            label = "Скопировать",
+                            label = stringResource(R.string.action_copy),
                             icon = DiagnosticsActionIcons.Copy,
                             modifier = Modifier.weight(1f),
                             compact = true,
@@ -1536,7 +1673,7 @@ private fun SettingsTabContent(
                                     mqttClipboard.setText(AnnotatedString(reportText))
                                     android.widget.Toast.makeText(
                                         settingsContext,
-                                        "Логи скопированы",
+                                        logsCopied,
                                         android.widget.Toast.LENGTH_SHORT,
                                     ).show()
                                 } else {
@@ -1550,7 +1687,7 @@ private fun SettingsTabContent(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         ApuDiagnosticsActionButton(
-                            label = "Обновить",
+                            label = stringResource(R.string.action_refresh),
                             icon = DiagnosticsActionIcons.Refresh,
                             modifier = Modifier.weight(1f),
                             style = DiagnosticsActionStyle.QUIET,
@@ -1562,7 +1699,7 @@ private fun SettingsTabContent(
                             },
                         )
                         ApuDiagnosticsActionButton(
-                            label = "Закрыть",
+                            label = stringResource(R.string.action_close),
                             modifier = Modifier.weight(1f),
                             style = DiagnosticsActionStyle.QUIET,
                             compact = true,
@@ -1597,7 +1734,8 @@ private fun SettingsTabContent(
         // спрашивает ядро (JNI), и вызов при отрисовке окна давал «APU не
         // отвечает» ровно в тот момент, когда человек смотрит на диагностику
         // (скриншот владельца 30.09 21:20).
-        var syncText by remember { mutableStateOf("Собираю…") }
+        val collectingText = stringResource(R.string.mirror_collecting)
+        var syncText by remember { mutableStateOf(collectingText) }
         LaunchedEffect(showMirrorDiag) {
             syncText = withContext(Dispatchers.IO) {
                 com.vladimir.messenger.data.mirror.MirrorHub.debugStatus()
@@ -1605,16 +1743,15 @@ private fun SettingsTabContent(
         }
         ApuSettingsDialog(
             onDismissRequest = { showMirrorDiag = false },
-            title = { Text("Синхронизация устройств") },
+            title = { Text(stringResource(R.string.settings_sync_devices)) },
             text = {
                 Text(
-                    syncText + "\n\nЕсли недоотправленных много, а партнёр виден - " +
-                        "подождите минуту: строка уйдёт сама, когда связь восстановится.",
+                    syncText + stringResource(R.string.settings_sync_hint),
                 )
             },
             confirmButton = {
                 ApuTextAction(
-                    label = "Скопировать",
+                    label = stringResource(R.string.action_copy),
                     onClick = {
 
                     mqttClipboard.setText(
@@ -1625,7 +1762,7 @@ private fun SettingsTabContent(
                 )
             },
             dismissButton = {
-                ApuTextAction(label = "Закрыть", onClick = { showMirrorDiag = false })
+                ApuTextAction(label = stringResource(R.string.settings_close), onClick = { showMirrorDiag = false })
             },
         )
     }
@@ -1655,9 +1792,9 @@ private fun ThemeModeChoices(selected: ThemeMode, onSelect: (ThemeMode) -> Unit)
                         val checked = selected == mode
                         val shape = RoundedCornerShape(14.dp)
                         val label = when (mode) {
-                            ThemeMode.SYSTEM -> "Авто"
-                            ThemeMode.LIGHT -> "День"
-                            ThemeMode.DARK -> "Ночь"
+                            ThemeMode.SYSTEM -> stringResource(R.string.settings_theme_auto)
+                            ThemeMode.LIGHT -> stringResource(R.string.settings_theme_day)
+                            ThemeMode.DARK -> stringResource(R.string.settings_theme_night)
                         }
                         val icon = when (mode) {
                             ThemeMode.SYSTEM -> Icons.Default.BrightnessAuto
@@ -1705,7 +1842,7 @@ private fun ThemeModeChoices(selected: ThemeMode, onSelect: (ThemeMode) -> Unit)
                 }
             }
             Text(
-                if (selected == ThemeMode.SYSTEM) "Тема меняется вместе с настройками телефона" else "Выбрано: ${selected.title.lowercase()}",
+                if (selected == ThemeMode.SYSTEM) stringResource(R.string.settings_theme_follows) else stringResource(R.string.settings_theme_chosen, stringResource(selected.labelRes).lowercase()),
                 style = MaterialTheme.typography.bodySmall,
                 color = ApuBubbleMutedColor,
             )
@@ -1778,18 +1915,14 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         seed?.let { s ->
             SettingsItem(
                 icon    = Icons.Default.Share,
-                title   = if (s.preparing) {
-                    "Готовлю раздачу обновления v${s.version}"
-                } else {
-                    "Раздаю обновление v${s.version}"
-                },
-                subtitle = "${s.name}, ${StoragePolicy.format(s.sizeBytes)}; получили: ${s.served}",
+                title   = if (s.preparing) { stringResource(R.string.seed_preparing_tpl, s.version) } else { stringResource(R.string.seed_sharing_tpl, s.version) },
+                subtitle = stringResource(R.string.seed_subtitle_tpl, s.name, StoragePolicy.format(s.sizeBytes), s.served),
             )
             ApuSettingsDivider()
             SettingsItem(
                 icon    = Icons.Default.Close,
-                title   = "Остановить раздачу",
-                subtitle = "Убрать объявление и локальную копию",
+                title   = stringResource(R.string.settings_stop_sharing),
+                subtitle = stringResource(R.string.settings_stop_sharing_hint),
                 onClick = viewModel::onStopUpdateSeed,
             )
         }
@@ -1799,8 +1932,8 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         ready?.let { r ->
             SettingsItem(
                 icon    = Icons.Default.SystemUpdate,
-                title   = "Обновить до v${r.version}",
-                subtitle = "${r.name}, ${StoragePolicy.format(r.sizeBytes)}; уже раздаётся соседям",
+                title   = stringResource(R.string.update_to_tpl, r.version),
+                subtitle = stringResource(R.string.ready_subtitle_tpl, r.name, StoragePolicy.format(r.sizeBytes)),
                 onClick = viewModel::onInstallUpdate,
             )
         }
@@ -1808,14 +1941,13 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         download?.let { d ->
             SettingsItem(
                 icon    = Icons.Default.Download,
-                title   = "Принимаю v${d.version}",
-                subtitle = StoragePolicy.format(d.receivedBytes) + " из " + StoragePolicy.format(d.totalBytes) +
-                    "; кусками от " + offers.size.coerceAtLeast(1).toString() + " сосед(ей)",
+                title   = stringResource(R.string.receiving_tpl, d.version),
+                subtitle = stringResource(R.string.receiving_progress_tpl, StoragePolicy.format(d.receivedBytes), StoragePolicy.format(d.totalBytes), offers.size.coerceAtLeast(1)),
             )
             ApuSettingsDivider()
             SettingsItem(
                 icon    = Icons.Default.Close,
-                title   = "Остановить приём",
+                title   = stringResource(R.string.settings_stop_receiving),
                 onClick = viewModel::onCancelUpdateDownload,
             )
         }
@@ -1823,14 +1955,13 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         patchDownload?.let { pd ->
             SettingsItem(
                 icon    = Icons.Default.Download,
-                title   = "Принимаю v${pd.version} (компактно)",
-                subtitle = StoragePolicy.format(pd.receivedBytes) + " из " + StoragePolicy.format(pd.totalBytes) +
-                    " — качаем только разницу версий",
+                title   = stringResource(R.string.receiving_compact_tpl, pd.version),
+                subtitle = stringResource(R.string.receiving_patch_tpl, StoragePolicy.format(pd.receivedBytes), StoragePolicy.format(pd.totalBytes)),
             )
             ApuSettingsDivider()
             SettingsItem(
                 icon    = Icons.Default.Close,
-                title   = "Остановить приём",
+                title   = stringResource(R.string.settings_stop_receiving),
                 onClick = viewModel::onCancelPatchDownload,
             )
         }
@@ -1840,9 +1971,8 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         if (patchBest != null && download == null && patchDownload == null && ready == null) {
             SettingsItem(
                 icon    = Icons.Default.Download,
-                title   = "Скачать компактно v" + patchBest.toVersion,
-                subtitle = "Патч " + StoragePolicy.format(patchBest.sizeBytes) +
-                    " от " + patchOffers.size.coerceAtLeast(1).toString() + " сосед(ей) — только разница версий",
+                title   = stringResource(R.string.st_dl_patch_title, patchBest.toVersion),
+                subtitle = stringResource(R.string.patch_offer_tpl, StoragePolicy.format(patchBest.sizeBytes), patchOffers.size.coerceAtLeast(1)),
                 onClick = { viewModel.onDownloadPatchFrom(patchBest.nodeId) },
             )
         }
@@ -1854,20 +1984,20 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         val best = offers.firstOrNull()
         if (officialNow != null && best != null && download == null && patchDownload == null && ready == null) {
             Text(
-                "Обновление найдено в двух местах — выберите, откуда скачать:",
+                stringResource(R.string.settings_update_two_places),
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
             )
             SettingsItem(
                 icon    = Icons.Default.CloudDownload,
-                title   = "С официального сайта v" + officialNow.version.removePrefix("v"),
-                subtitle = "Через интернет (GitHub); файл сам встанет в этот раздел",
+                title   = stringResource(R.string.st_dl_official_v, officialNow.version.removePrefix("v")),
+                subtitle = stringResource(R.string.settings_via_internet),
                 onClick = viewModel::onDownloadOfficialRelease,
             )
             SettingsItem(
                 icon    = Icons.Default.Download,
-                title   = "По сети v" + best.version,
-                subtitle = "Кусками от " + offers.size + " сосед(ей) — без интернета",
+                title   = stringResource(R.string.st_dl_net_v, best.version),
+                subtitle = stringResource(R.string.pieces_offer_tpl, offers.size),
                 onClick = { viewModel.onDownloadUpdateFrom(best.nodeId) },
             )
         } else {
@@ -1876,11 +2006,11 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
             if (best != null && download == null && patchDownload == null && ready == null) {
                 SettingsItem(
                     icon    = Icons.Default.Download,
-                    title   = "Скачать v" + best.version,
+                    title   = stringResource(R.string.st_dl_v, best.version),
                     subtitle = if (offers.size > 1) {
-                        "Раздают " + offers.size + " соседа; " + StoragePolicy.format(best.sizeBytes)
+                        stringResource(R.string.offers_many_tpl, offers.size, StoragePolicy.format(best.sizeBytes))
                     } else {
-                        "Раздаёт сосед; " + StoragePolicy.format(best.sizeBytes)
+                        stringResource(R.string.offer_one_tpl, StoragePolicy.format(best.sizeBytes))
                     },
                     onClick = { viewModel.onDownloadUpdateFrom(best.nodeId) },
                 )
@@ -1889,26 +2019,25 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
             official?.let { rel ->
                 SettingsItem(
                     icon    = Icons.Default.CloudDownload,
-                    title   = "Скачать официальный v" + rel.version.removePrefix("v"),
-                    subtitle = "С GitHub; файл сам встанет в этот раздел и начнёт раздаваться",
+                    title   = stringResource(R.string.st_dl_official_only, rel.version.removePrefix("v")),
+                    subtitle = stringResource(R.string.settings_from_github),
                     onClick = viewModel::onDownloadOfficialRelease,
                 )
             }
         }
         // Принятые APK: «раздать полученный» (сценарий: APK переслан с ПК).
+        val shareReceivedTitle = stringResource(R.string.settings_share_received)
         receivedApks.forEach { apk ->
             SettingsItem(
                 icon    = Icons.Default.InsertDriveFile,
                 title   = apk.displayName,
                 subtitle = buildString {
-                    append("Получен, ")
-                    append(StoragePolicy.format(apk.sizeBytes))
-                    apk.versionGuess?.let { append(", версия ")
-                        append(it) }
+                    append(stringResource(R.string.received_apk_tpl, StoragePolicy.format(apk.sizeBytes)))
+                    apk.versionGuess?.let { append(stringResource(R.string.apk_version_suffix, it)) }
                 },
                 onClick = {
                     markTarget = MarkTarget(
-                        title        = "Раздать полученный APK",
+                        title        = shareReceivedTitle,
                         versionGuess = apk.versionGuess ?: "",
                         transferId   = apk.transferId,
                     )
@@ -1918,8 +2047,8 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         // Пометить файл (с ПК / из проводника): имя и версия читаются сами.
         SettingsItem(
             icon    = Icons.Default.FileOpen,
-            title   = "Отметить APK как обновление",
-            subtitle = "Имя и версия возьмутся из файла; проверим (это APK, версия новее текущей) и раздаём всем, у кого ниже версия",
+            title   = stringResource(R.string.settings_mark_apk),
+            subtitle = stringResource(R.string.st_apk_hint),
             onClick = { apkPicker.launch(arrayOf("application/vnd.android.package-archive")) },
         )
         // «Проверить новую версию»: спросить соседей (upask) + посмотреть
@@ -1927,8 +2056,8 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         ApuSettingsDivider()
         SettingsItem(
             icon    = Icons.Default.Refresh,
-            title   = if (checking) "Проверяю…" else "Проверить новую версию",
-            subtitle = "Спросит соседей в сети и посмотрит официальный релиз",
+            title   = if (checking) stringResource(R.string.settings_checking) else stringResource(R.string.settings_check_version),
+            subtitle = stringResource(R.string.settings_check_hint),
             onClick = if (checking) null else viewModel::onCheckForUpdates,
         )
     }
@@ -1949,7 +2078,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
     apkPick?.let { pick ->
         if (pick.error == null) {
             ApkVersionDialog(
-                title          = "Раздавать этот файл как обновление?",
+                title          = stringResource(R.string.settings_share_update_q),
                 fileName       = pick.displayName,
                 sizeText       = StoragePolicy.format(pick.sizeBytes),
                 initialVersion = pick.version ?: "",
@@ -1992,7 +2121,7 @@ private fun ApkVersionDialog(
                 }
                 if (sizeText != null) {
                     Text(
-                        "Размер: " + sizeText,
+                        stringResource(R.string.size_label_tpl, sizeText),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -2000,15 +2129,14 @@ private fun ApkVersionDialog(
                 if (reading) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        "Читаю версию из файла…",
+                        stringResource(R.string.settings_reading_version),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
-                    "Числовая версия, например 11.70.29. Должна быть новее текущей — иначе файл не станет обновлением. " +
-                        "Обычно она уже подставлена из файла.",
+                    stringResource(R.string.settings_version_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -2017,20 +2145,20 @@ private fun ApkVersionDialog(
                     value        = version,
                     onValueChange = { version = it },
                     singleLine = true,
-                    label      = { Text("Версия") },
+                    label      = { Text(stringResource(R.string.settings_version_label)) },
                     modifier   = Modifier.fillMaxWidth(),
                 )
             }
         },
         confirmButton = {
             ApuTextAction(
-                label = "Раздавать",
+                label = stringResource(R.string.settings_share_btn),
                 onClick = { onConfirm(version) },
                 enabled = !reading && version.isNotBlank(),
             )
         },
         dismissButton = {
-            ApuTextAction(label = "Отмена", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
         },
     )
 }
@@ -2051,13 +2179,15 @@ private fun StatusDot(status: com.vladimir.messenger.data.repository.NetworkStat
 }
 
 // Расширение для отображения статуса
-private val com.vladimir.messenger.data.repository.NetworkStatus.displayName: String
-    get() = when (this) {
-        com.vladimir.messenger.data.repository.NetworkStatus.Connected    -> "Подключен"
-        com.vladimir.messenger.data.repository.NetworkStatus.Connecting   -> "Подключение..."
-        com.vladimir.messenger.data.repository.NetworkStatus.Degraded     -> "Через ретранслятор"
-        com.vladimir.messenger.data.repository.NetworkStatus.Disconnected -> "Нет соединения"
+@Composable
+private fun com.vladimir.messenger.data.repository.NetworkStatus.displayName(): String = stringResource(
+    when (this) {
+        com.vladimir.messenger.data.repository.NetworkStatus.Connected    -> R.string.net_status_connected
+        com.vladimir.messenger.data.repository.NetworkStatus.Connecting   -> R.string.nsb_connecting
+        com.vladimir.messenger.data.repository.NetworkStatus.Degraded     -> R.string.nsb_relay
+        com.vladimir.messenger.data.repository.NetworkStatus.Disconnected -> R.string.nsb_disconnected
     }
+)
 
 /**
  * Отчёт ещё собирается: кнопка не молчит, а объясняет, где именно идёт сбор.
@@ -2066,7 +2196,47 @@ private val com.vladimir.messenger.data.repository.NetworkStatus.displayName: St
  */
 private fun apuDiagnosticsNothingYet(context: android.content.Context, stage: String?) {
     val text = stage?.takeIf { it.isNotBlank() }
-        ?.let { "Отчёт собирается: $it" }
-        ?: "Отчёт ещё собирается — нажмите «Обновить»"
+        ?.let { context.getString(R.string.report_collecting_tpl, it) }
+        ?: context.getString(R.string.report_still_collecting, context.getString(R.string.action_refresh))
     android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_SHORT).show()
+}
+
+/** Образец гаммы подложки: круг с её градиентом для текущей темы; выбранный — золотое кольцо. */
+@Composable
+private fun WallpaperTintSwatch(
+    option: WallpaperTint,
+    dark: Boolean,
+    selected: Boolean,
+    name: String,
+    onClick: () -> Unit,
+) {
+    val circle = CircleShape
+    // «Классическая» показывает сам рисунок APU: его средние цвета дня и ночи.
+    val fill = if (option == WallpaperTint.CLASSIC) {
+        if (dark) Brush.verticalGradient(listOf(Color(0xFF16233A), Color(0xFF0A1018)))
+        else Brush.verticalGradient(listOf(Color(0xFFB5D0AA), Color(0xFFD0DEB7)))
+    } else {
+        Brush.verticalGradient(option.colorsFor(dark))
+    }
+    Column(
+        modifier = Modifier
+            .width(64.dp)
+            .clickable(role = androidx.compose.ui.semantics.Role.RadioButton, onClick = onClick)
+            .semantics { contentDescription = name },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(52.dp)
+                .apuPremiumLift(if (selected) 6.dp else 3.dp, circle, ApuGold.copy(alpha = 0.35f))
+                .clip(circle)
+                .background(fill)
+                .border(if (selected) 3.dp else 1.dp, if (selected) ApuGold else Color.White.copy(alpha = 0.6f), circle),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected) {
+                Icon(Icons.Default.Check, contentDescription = null, tint = if (dark) ApuGold else ApuGoldInk, modifier = Modifier.size(22.dp))
+            }
+        }
+    }
 }
