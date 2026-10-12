@@ -49,6 +49,54 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # The lineage gate below must be able to walk back to the last stable tag.
+          fetch-depth: 0
+
+      # Prevent a tag from rebuilding a branch that silently forked before the
+      # latest public release (the v330-from-v206 failure mode). Compare with
+      # GitHub's latest published stable release, not `main`, which may lag.
+      - name: Require ancestry from the latest stable release
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          CURRENT_TAG="${GITHUB_REF#refs/tags/}"
+          LATEST_TAG="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          if [[ -z "$CURRENT_TAG" || -z "$LATEST_TAG" ]]; then
+            echo "::error::Could not identify current tag and latest published stable release"
+            exit 1
+          fi
+          if ! git rev-parse --verify --quiet "refs/tags/${LATEST_TAG}^{commit}" >/dev/null; then
+            echo "::error::Latest stable tag $LATEST_TAG is missing from the full checkout"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "refs/tags/${LATEST_TAG}^{commit}" "$GITHUB_SHA"; then
+            echo "::error::Release tag $CURRENT_TAG does not descend from latest stable $LATEST_TAG; refusing a disconnected release line"
+            exit 1
+          fi
+          echo "::notice::Release tag $CURRENT_TAG descends from latest stable $LATEST_TAG"
+          {
+            echo "### Release lineage and source delta"
+            echo "- Candidate tag: $CURRENT_TAG"
+            echo "- Latest published stable baseline: $LATEST_TAG"
+            echo "- Baseline-to-candidate diff:"
+            echo '```text'
+            git diff --shortstat "refs/tags/${LATEST_TAG}^{commit}" "$GITHUB_SHA"
+            git diff --name-status "refs/tags/${LATEST_TAG}^{commit}" "$GITHUB_SHA" > "$RUNNER_TEMP/release-paths.txt"
+            sed -n '1,200p' "$RUNNER_TEMP/release-paths.txt"
+            PATH_COUNT="$(wc -l < "$RUNNER_TEMP/release-paths.txt")"
+            if [[ "$PATH_COUNT" -gt 200 ]]; then
+              echo "... $((PATH_COUNT - 200)) more changed paths omitted"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check helper and diagnostics source contracts
+        run: |
+          python3 scripts/ci/check-online-helper.py
+          python3 scripts/ci/check-diagnostics-report.py
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -78,6 +126,41 @@ jobs:
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
 
+      # Gate changes to online helper routing before cross-compilation/publication.
+      # Includes a real four-endpoint QUIC race with a lost primary receipt.
+      - name: Test online helper routing and direct transport
+        working-directory: ./rust-core
+        run: |
+          set -o pipefail
+          for suite in helper_policy helper_quality helper_delivery peer_assistance peer_exchange direct_transport mqtt_fanout; do
+            LOG="$RUNNER_TEMP/helper-$suite.log"
+            if ! RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --features mqtt-dual-broker --lib "network::$suite::tests" > "$LOG" 2>&1; then
+              tail -150 "$LOG"
+              python3 - "$LOG" <<'PY'
+          from pathlib import Path
+          import sys
+          text = "\n".join(Path(sys.argv[1]).read_text(errors="replace").splitlines()[-150:])
+          text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          # Compiler warnings can exceed one annotation's size; preserve final diagnostics.
+          for i in range(0, len(text), 3000):
+              print(f"::error title=Helper routing tests part {i // 3000 + 1}::{text[i:i + 3000]}")
+          PY
+              exit 1
+            fi
+            tail -25 "$LOG"
+            grep '^test result:' "$LOG" >> "$GITHUB_STEP_SUMMARY"
+          done
+          # STUN fallback is pure/deterministic; don't depend on public DNS or live servers.
+          for test in stun_fallback_uses_next_endpoint_after_a_temporary_refusal all_stun_refusals_return_a_recoverable_error_after_all_attempts; do
+            LOG="$RUNNER_TEMP/stun-$test.log"
+            if ! RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --features mqtt-dual-broker --lib "network::ice::tests::$test" > "$LOG" 2>&1; then
+              tail -150 "$LOG"
+              exit 1
+            fi
+            tail -25 "$LOG"
+            grep '^test result:' "$LOG" >> "$GITHUB_STEP_SUMMARY"
+          done
+
       - name: Install cargo-ndk
         run: cargo install --locked cargo-ndk
 
@@ -92,7 +175,7 @@ jobs:
       # разработчика (его нет ни у владельца, ни у бота) - ядро было заморожено.
       # Теперь генератор собирается здесь (tools/uniffi-bindgen, uniffi =0.28.3 -
       # та же линия 0.28, что у ядра) и переписывает файл перед сборкой APK.
-      # Если шаг не удался - остаётся файл из git, то есть ровно то, что было.
+      # Ошибка генерации блокирует APK: старый мост может не совпасть с новым ядром.
       - name: Regenerate uniffi Kotlin bindings from lib.udl
         working-directory: ./rust-core
         run: |
@@ -110,7 +193,7 @@ jobs:
             OLDV=$(git show HEAD:android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt | grep -o 'bindings_contract_version = [0-9]*' | grep -o '[0-9]*$')
             if [ "$NEWV" != "$OLDV" ]; then
               ok=0
-              echo "::warning::uniffi contract version changed ($OLDV -> $NEWV): generator and core are on different uniffi lines - keeping the committed bindings"
+              echo "::error::uniffi contract version changed ($OLDV -> $NEWV): generator and core must use the same contract"
             fi
           fi
           if [ "$ok" = 1 ]; then
@@ -122,12 +205,11 @@ jobs:
               git diff --stat -- "$BIND"
             fi
           else
-            git checkout -- "$BIND"
-            echo "::warning::uniffi-bindgen failed - building with the committed bindings (new core functions, if any, are NOT visible to Kotlin)"
+            echo "::error::uniffi-bindgen failed; refusing an APK with stale bindings"
+            exit 1
           fi
 
-      # Свежие мост и ядро - на вкладке Actions этого прогона (30 дней), на
-      # случай если сборка APK упадёт именно на них.
+      # Native bridge/core snapshot for debugging this run.
       - name: Upload core bindings (debug aid)
         uses: actions/upload-artifact@v4
         continue-on-error: true
@@ -145,41 +227,68 @@ jobs:
 
       - name: Sync versionName with tag
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
-          echo "Setting versionName to $VERSION"
-          sed -i "s/versionName = .*/versionName = \"$VERSION\"/" android-app/app/build.gradle.kts
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+            echo "Setting versionName to $VERSION"
+            sed -i "s|versionName = .*|versionName = \"$VERSION\"|" android-app/app/build.gradle.kts
+          else
+            echo "::notice::workflow_dispatch is not a tag build; leaving the Gradle diagnostic versionName unchanged"
+          fi
           grep -n "versionName" android-app/app/build.gradle.kts
 
       - name: Grant execute permission for gradlew
         run: chmod +x ./android-app/gradlew
 
+      - name: Test story chunks and diagnostics report
+        working-directory: ./android-app
+        run: |
+          set +e
+          ./gradlew :app:testReleaseUnitTest \
+            --tests com.vladimir.messenger.data.swarm.ContentAddressedChunksTest \
+            --tests com.vladimir.messenger.data.story.StoryPhotoPartsTest \
+            --tests com.vladimir.messenger.data.diagnostics.DiagnosticsReportTest \
+            --no-daemon > "$RUNNER_TEMP/gradle-release.log" 2>&1
+          status=$?
+          cat "$RUNNER_TEMP/gradle-release.log"
+          exit "$status"
+
       - name: Build Release APK
         working-directory: ./android-app
         run: |
           set +e
-          ./gradlew :app:assembleRelease --no-daemon > "$RUNNER_TEMP/gradle-build.log" 2>&1
+          ./gradlew :app:assembleRelease --no-daemon > "$RUNNER_TEMP/gradle-release.log" 2>&1
           status=$?
-          cat "$RUNNER_TEMP/gradle-build.log"
+          cat "$RUNNER_TEMP/gradle-release.log"
+          exit "$status"
+
+      - name: Verify story playback and community lists
+        working-directory: ./android-app
+        run: |
+          set +e
+          ./gradlew :app:testReleaseUnitTest --tests 'com.vladimir.messenger.ui.components.StoryPlaybackTest' --tests 'com.vladimir.messenger.ui.screens.groups.CommunityListTest' --tests 'com.vladimir.messenger.data.story.StoryPhotoPartsTest' --tests 'com.vladimir.messenger.data.swarm.OnlineHelperPolicyTest' --tests 'com.vladimir.messenger.data.swarm.SwarmContributionStatsTest' --no-daemon >> "$RUNNER_TEMP/gradle-build.log" 2>&1
+          status=$?
+          tail -100 "$RUNNER_TEMP/gradle-build.log"
           exit "$status"
 
       # Сырые логи Actions иногда недоступны через API/сеть. Оставляем хвост
-      # компилятора как annotations, чтобы причина ошибки не терялась.
+      # тестов или компилятора как annotations, чтобы причина ошибки не терялась.
       - name: Expose Gradle failure tail
         if: failure()
         run: |
-          test -f "$RUNNER_TEMP/gradle-build.log" || exit 0
-          python3 - "$RUNNER_TEMP/gradle-build.log" <<'PY'
+          test -f "$RUNNER_TEMP/gradle-release.log" || exit 0
+          python3 - "$RUNNER_TEMP/gradle-release.log" <<'PY'
           from pathlib import Path
           import sys
 
-          # One sizeable annotation preserves the actual compiler diagnostics;
-          # Actions limits a step to ten annotations, so emitting one per line
-          # drops the useful part of a long Gradle tail.
-          text = "\n".join(
-              Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines()[-200:]
-          )
+          # Kotlin emits many warnings before test failures. Remove them and cap
+          # the annotation below GitHub's 4 KiB message limit so the root cause survives.
+          lines = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines()[-200:]
+          lines = [line for line in lines if not line.startswith("w: ")]
+          text = "\n".join(lines[-100:])
+          if len(text) > 3500:
+              text = "...[truncated]\n" + text[-3480:]
           escaped = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-          print(f"::error title=Gradle build tail::{escaped}")
+          print(f"::error title=Gradle failure tail::{escaped}")
           PY
 
       # ---- подпись релиза -------------------------------------------------
@@ -245,6 +354,16 @@ jobs:
           APK_DIR=android-app/app/build/outputs/apk/release
           (cd "$APK_DIR" && sha256sum app-release.apk > SHA256SUMS.txt)
           cat "$APK_DIR/SHA256SUMS.txt"
+
+      # Upload the assembled, signed APK from this run (also for workflow_dispatch).
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: app-release.apk
+          path: android-app/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Create Release
         if: github.event_name != 'workflow_dispatch'

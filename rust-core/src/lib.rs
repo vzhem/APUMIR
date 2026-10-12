@@ -156,6 +156,11 @@ impl P2PCoreHandle {
             )
     }
 
+    /// Online transit only. Does not change disk custody or own send/receive admission.
+    pub fn configure_online_helper(&self, enabled: bool, max_routes: u32, max_bytes_per_minute: u32, max_relays_per_minute: u32) -> bool {
+        self.inner.lock().unwrap().configure_online_helper(enabled, max_routes, max_bytes_per_minute, max_relays_per_minute)
+    }
+
     /// K5-1: разрешить ядру держать чужие сообщения для тех, кто не в сети.
     ///
     /// Выключено по умолчанию. Включённое - телефон держит копии сообщений

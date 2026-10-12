@@ -151,6 +151,28 @@ object RustBridge {
         appContext = context.applicationContext
     }
 
+    private val helperRefreshQueued = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** Coalesced on the lifecycle executor: never block UI on the native engine mutex. */
+    fun refreshOnlineHelperPolicy() {
+        if (!helperRefreshQueued.compareAndSet(false, true)) return
+        enqueueLifecycle {
+            // Clear before reading preferences so a concurrent change schedules a follow-up.
+            helperRefreshQueued.set(false)
+            val current = engine ?: return@enqueueLifecycle
+            runCatching { applyOnlineHelperPolicy(current) }
+                .onFailure { Log.w(TAG, "Online helper policy update failed", it) }
+        }
+    }
+
+    private fun applyOnlineHelperPolicy(current: P2pCoreHandle) {
+        val context = appContext
+        val limits = context?.let { com.vladimir.messenger.data.swarm.OnlineHelperSettings.limits(it) }
+            ?: com.vladimir.messenger.data.swarm.OnlineHelperLimits(false, 0, 0, 0)
+        check(current.configureOnlineHelper(limits.enabled, limits.routes.toUInt(),
+            limits.bytesPerMinute.toUInt(), limits.relaysPerMinute.toUInt()))
+    }
+
     /**
      * р228: адрес личности для устройства-зеркала. Движка у тени нет (сеть
      * ведёт партнёр), но личность та же, поэтому без этого `nodeId()` вернул
@@ -235,6 +257,8 @@ object RustBridge {
                 createEngine(displayName)
             }
 
+            // Apply saved consent before the first inbound packet, including worker wakeups.
+            applyOnlineHelperPolicy(e)
             val ok = e.start()
             if (ok) {
                 engine = e

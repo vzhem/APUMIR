@@ -1,5 +1,9 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+
+import com.vladimir.messenger.R
+
 // =============================================================================
 // STICKERANIMATED.KT - анимированный стикер любого вида (раунд 170)
 // =============================================================================
@@ -210,7 +214,7 @@ fun StickerViewer(file: File?, onDismiss: () -> Unit) {
         ) {
             StickerAnimated(
                 file = file,
-                contentDescription = "Стикер",
+                contentDescription = stringResource(R.string.sticker_cd),
                 contentScale = ContentScale.Fit,
                 // Раунд 191: тап должен УВЕЛИЧИВАТЬ стикер. Раньше здесь был
                 // только sizeIn (потолок 320 dp), а Image сворачивался в

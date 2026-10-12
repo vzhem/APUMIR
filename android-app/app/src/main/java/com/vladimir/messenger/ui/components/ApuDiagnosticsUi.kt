@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // APUDIAGNOSTICSUI.KT — окно «Логи»: премиальный вид в стиле современных
 // мессенджеров (переработка 2026-10-07 по замечанию владельца: «как то всё по
@@ -27,6 +29,7 @@ package com.vladimir.messenger.ui.components
 // =============================================================================
 
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -66,6 +69,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -153,11 +157,12 @@ private fun diagnosticsLevelGradient(level: DiagnosticsLevel): List<Color> = whe
 }
 
 /** Слова для легенды: у каждого цвета на сводке есть понятное название. */
+@Composable
 private fun diagnosticsLevelLabel(level: DiagnosticsLevel): String = when (level) {
-    DiagnosticsLevel.OK -> "порядок"
-    DiagnosticsLevel.INFO -> "справка"
-    DiagnosticsLevel.WARN -> "внимание"
-    DiagnosticsLevel.BAD -> "поломка"
+    DiagnosticsLevel.OK -> stringResource(R.string.diag_lvl_ok)
+    DiagnosticsLevel.INFO -> stringResource(R.string.diag_lvl_info)
+    DiagnosticsLevel.WARN -> stringResource(R.string.diag_lvl_warn)
+    DiagnosticsLevel.BAD -> stringResource(R.string.diag_lvl_bad)
 }
 
 /** Общий уровень по строкам: сначала поломки, потом внимание, иначе порядок. */
@@ -167,11 +172,12 @@ private fun diagnosticsWorstLevel(lines: List<DiagnosticsLine>): DiagnosticsLeve
     else -> DiagnosticsLevel.OK
 }
 
+@Composable
 private fun diagnosticsVerdictText(level: DiagnosticsLevel): String = when (level) {
-    DiagnosticsLevel.BAD -> "ЕСТЬ ОШИБКИ"
-    DiagnosticsLevel.WARN -> "ЕСТЬ ПРЕДУПРЕЖДЕНИЯ"
-    DiagnosticsLevel.INFO -> "ВСЁ В ПОРЯДКЕ"
-    DiagnosticsLevel.OK -> "ВСЁ В ПОРЯДКЕ"
+    DiagnosticsLevel.BAD -> stringResource(R.string.diag_verdict_bad)
+    DiagnosticsLevel.WARN -> stringResource(R.string.diag_verdict_warn)
+    DiagnosticsLevel.INFO -> stringResource(R.string.diag_verdict_ok)
+    DiagnosticsLevel.OK -> stringResource(R.string.diag_verdict_ok)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -330,7 +336,7 @@ fun ApuDiagnosticsHero(
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Состояние APU",
+                        stringResource(R.string.diag_state_title),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Black,
                         color = Color.White,
@@ -340,7 +346,7 @@ fun ApuDiagnosticsHero(
                         appVersion?.takeIf { it.isNotBlank() },
                     ).joinToString(" · ")
                     Text(
-                        subtitle.ifBlank { "Отчёт о состоянии сети и передач" },
+                        subtitle.ifBlank { stringResource(R.string.diag_report_desc) },
                         style = MaterialTheme.typography.labelMedium,
                         color = Color.White.copy(alpha = 0.72f),
                         maxLines = 1,
@@ -349,7 +355,7 @@ fun ApuDiagnosticsHero(
                 }
             }
             ApuDiagnosticsVerdictPill(
-                text = if (collecting) "СОБИРАЮ ОТЧЁТ…" else diagnosticsVerdictText(level),
+                text = if (collecting) stringResource(R.string.diag_collecting) else diagnosticsVerdictText(level),
                 level = level,
                 checks = lines.size,
             )
@@ -357,10 +363,10 @@ fun ApuDiagnosticsHero(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                ApuDiagnosticsGlassChip("событий", journalSize.toString(), modifier = Modifier.weight(1f))
-                ApuDiagnosticsGlassChip("предупр.", warnCount.toString(), modifier = Modifier.weight(1f))
+                ApuDiagnosticsGlassChip(stringResource(R.string.diag_events_label), journalSize.toString(), modifier = Modifier.weight(1f))
+                ApuDiagnosticsGlassChip(stringResource(R.string.diag_warn_label), warnCount.toString(), modifier = Modifier.weight(1f))
                 ApuDiagnosticsGlassChip(
-                    "ошибок",
+                    stringResource(R.string.diag_errors_label),
                     badCount.toString(),
                     alarm = badCount > 0,
                     modifier = Modifier.weight(1f),
@@ -474,7 +480,7 @@ private fun ApuDiagnosticsVerdictPill(text: String, level: DiagnosticsLevel, che
         if (checks > 0) {
             Spacer(Modifier.width(10.dp))
             Text(
-                "проверок $checks",
+                stringResource(R.string.diag_checks_count, checks),
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = Color.White.copy(alpha = 0.88f),
@@ -539,7 +545,7 @@ fun ApuDiagnosticsStatusCard(
         ) {
             if (lines.isEmpty()) {
                 Text(
-                    "Проверки ещё не собраны: откройте «Логи» снова через пару секунд.",
+                    stringResource(R.string.diag_checks_pending),
                     style = MaterialTheme.typography.bodySmall,
                     color = ApuBubbleMutedColor,
                 )
@@ -748,14 +754,14 @@ fun ApuDiagnosticsReportCard(
                 ApuDiagnosticsTrafficLights()
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    "Полный отчёт",
+                    stringResource(R.string.diag_full_report),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    "строк $lineCount",
+                    stringResource(R.string.diag_lines_count, lineCount),
                     style = MaterialTheme.typography.labelMedium,
                     color = DiagConsoleMuted,
                     maxLines = 1,
@@ -842,14 +848,14 @@ fun ApuDiagnosticsEventList(
                 )
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    "Журнал событий",
+                    stringResource(R.string.diag_event_log),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    if (events.isEmpty()) "пока нет" else "свежие сверху",
+                    if (events.isEmpty()) stringResource(R.string.diag_none_yet) else stringResource(R.string.diag_newest_first),
                     style = MaterialTheme.typography.labelMedium,
                     color = DiagConsoleMuted,
                     maxLines = 1,
@@ -857,7 +863,7 @@ fun ApuDiagnosticsEventList(
             }
             if (events.isEmpty()) {
                 Text(
-                    "В этой сессии событий ещё не было — журнал наполнится по ходу работы.",
+                    stringResource(R.string.diag_no_events),
                     style = MaterialTheme.typography.bodySmall,
                     color = DiagConsoleMuted,
                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
@@ -1004,6 +1010,14 @@ fun ApuDiagnosticsActionButton(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    // Одноразовый переллив на нажатие (без бесконечной анимации).
+    val shine = remember { Animatable(1f) }
+    LaunchedEffect(pressed) {
+        if (pressed && enabled) {
+            shine.snapTo(0f)
+            shine.animateTo(1f, tween(durationMillis = 620))
+        }
+    }
     val emphatic = style == DiagnosticsActionStyle.PRIMARY || style == DiagnosticsActionStyle.DANGER
     val scale by animateFloatAsState(
         targetValue = if (pressed && enabled) 0.965f else 1f,
@@ -1073,6 +1087,7 @@ fun ApuDiagnosticsActionButton(
             shape = shape,
         )
         .diagnosticsGloss(shape, intensity = if (emphatic) 1f else 0.7f)
+        .apuShineSweep(shine.value)
         .clickableDiag(interaction, enabled, onClick)
 
     CompositionLocalProvider(LocalContentColor provides ink.copy(alpha = if (enabled) 1f else 0.48f)) {
@@ -1085,7 +1100,7 @@ fun ApuDiagnosticsActionButton(
                 verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
                 if (progress) {
-                    CircularProgressIndicator(
+                    ApuPremiumSpinner(
                         modifier = Modifier.size(18.dp),
                         color = ink,
                         strokeWidth = 2.dp,
@@ -1118,7 +1133,7 @@ fun ApuDiagnosticsActionButton(
                     content()
                 } else {
                     if (progress) {
-                        CircularProgressIndicator(
+                        ApuPremiumSpinner(
                             modifier = Modifier.size(17.dp),
                             color = ink,
                             strokeWidth = 2.dp,

@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -60,12 +62,11 @@ fun AvatarCropDialog(
 
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Область аватара") },
+        title = { Text(stringResource(R.string.avc_area)) },
         text = {
             Column {
                 Text(
-                    "Двигайте фото пальцем и приближайте щипком. В аватар попадёт то, " +
-                        "что видно в круге.",
+                    stringResource(R.string.avatar_crop_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -117,7 +118,7 @@ fun AvatarCropDialog(
         },
         confirmButton = {
             ApuTextAction(
-                label = "Готово",
+                label = stringResource(R.string.action_done),
                 onClick = {
                 val cropped = cropVisibleArea(source, scale, offsetX, offsetY, viewportPx)
                 onConfirm(cropped)
@@ -125,7 +126,7 @@ fun AvatarCropDialog(
             )
         },
         dismissButton = {
-            ApuTextAction(label = "Отмена", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
         },
     )
 }

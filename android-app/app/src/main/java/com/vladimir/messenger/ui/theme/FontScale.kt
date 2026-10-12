@@ -1,14 +1,15 @@
 package com.vladimir.messenger.ui.theme
 
+import com.vladimir.messenger.R
 import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-enum class AppFontSize(val storedValue: String, val title: String, val scale: Float) {
-    SMALL("small", "Мелкий", 0.85f),
-    STANDARD("standard", "Стандартный", 1.0f),
-    LARGE("large", "Крупный", 1.2f),
+enum class AppFontSize(val storedValue: String, @androidx.annotation.StringRes val labelRes: Int, val scale: Float) {
+    SMALL("small", R.string.font_size_small, 0.85f),
+    STANDARD("standard", R.string.font_size_standard, 1.0f),
+    LARGE("large", R.string.font_size_large, 1.2f),
     ;
 
     companion object {

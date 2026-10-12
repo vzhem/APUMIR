@@ -4,6 +4,10 @@ package com.vladimir.messenger.ui.screens.groups
 // GROUPSSCREEN.KT — раздел «Сообщества»: группы и каналы, создание новых
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.ApuPremiumSpinner
+import android.content.Context
+import com.vladimir.messenger.R
+import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuAction
 import com.vladimir.messenger.ui.components.ApuActionsMenu
 import com.vladimir.messenger.ui.components.ApuBubbleField
@@ -205,29 +209,29 @@ fun GroupsScreen(
                     // Прокрутка НЕ должна красить панель: под ней обои APU.
                     scrolledContainerColor = androidx.compose.ui.graphics.Color.Transparent,
                 ),
-                title = { ApuSettingsHeader("Сообщества") },
+                title = { ApuSettingsHeader(stringResource(R.string.nav_communities)) },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                     }
                 },
                 actions = {
                     // Кроме QR: вставить скопированную ссылку и войти.
                     IconButton(onClick = { showJoin = true }) {
-                        Icon(Icons.Filled.Link, contentDescription = "Войти по ссылке")
+                        Icon(Icons.Filled.Link, contentDescription = stringResource(R.string.groups_join_by_link))
                     }
                     // Меню «⋮» - в фирменных золотых пузырях, как в каналах и группах.
                     Box {
                         var menuOpen by remember { mutableStateOf(false) }
                         IconButton(onClick = { menuOpen = true }) {
-                            Icon(Icons.Filled.MoreVert, contentDescription = "Ещё")
+                            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.chat_more))
                         }
                         ApuActionsMenu(
                             expanded = menuOpen,
                             onDismiss = { menuOpen = false },
                             actions = listOf(
                                 ApuAction(
-                                    title = "Новая группа",
+                                    title = stringResource(R.string.chat_new_group),
                                     icon = Icons.Filled.Groups,
                                     onClick = {
                                         createAsChannel = false
@@ -235,7 +239,7 @@ fun GroupsScreen(
                                     },
                                 ),
                                 ApuAction(
-                                    title = "Новый канал",
+                                    title = stringResource(R.string.chat_new_channel),
                                     icon = Icons.Filled.Campaign,
                                     onClick = {
                                         createAsChannel = true
@@ -243,12 +247,12 @@ fun GroupsScreen(
                                     },
                                 ),
                                 ApuAction(
-                                    title = "Войти по ссылке",
+                                    title = stringResource(R.string.groups_join_by_link),
                                     icon = Icons.Filled.Link,
                                     onClick = { showJoin = true },
                                 ),
                                 ApuAction(
-                                    title = "Обновить список",
+                                    title = stringResource(R.string.groups_refresh_list),
                                     icon = Icons.Filled.Refresh,
                                     onClick = { viewModel.refreshDirectory() },
                                 ),
@@ -265,7 +269,7 @@ fun GroupsScreen(
                     if (uiState.canCreate) showCreate = true else showRankHint = true
                 },
                 icon = Icons.Filled.Add,
-                contentDescription = "Создать группу или канал",
+                contentDescription = stringResource(R.string.groups_create_desc),
             )
         },
     ) { padding ->
@@ -273,13 +277,13 @@ fun GroupsScreen(
             ApuSearchField(
                 value = uiState.searchQuery,
                 onValueChange = viewModel::onSearchQueryChanged,
-                placeholder = "Поиск групп и каналов",
+                placeholder = stringResource(R.string.groups_search),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
             )
 
             when {
                 uiState.isLoading -> Box(Modifier.fillMaxSize(), Alignment.Center) {
-                    CircularProgressIndicator()
+                    ApuPremiumSpinner()
                 }
 
                 uiState.filtered.isEmpty() && uiState.directoryMatches.isEmpty() ->
@@ -297,24 +301,24 @@ fun GroupsScreen(
                             Spacer(Modifier.height(8.dp))
                             Text(
                                 if (uiState.searchQuery.isBlank()) {
-                                    "Групп и каналов пока нет"
+                                    stringResource(R.string.groups_none)
                                 } else {
-                                    "Ничего не нашлось"
+                                    stringResource(R.string.groups_nothing_found)
                                 },
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = HintBubbleTextColor,
                             )
                             Text(
                                 if (uiState.searchQuery.isBlank()) {
-                                    "Создайте свою или войдите по ссылке-приглашению"
+                                    stringResource(R.string.groups_empty_hint)
                                 } else {
-                                    "Попробуйте другое название или войдите по ссылке"
+                                    stringResource(R.string.groups_search_hint)
                                 },
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = HintBubbleMutedColor,
                             )
                             Spacer(Modifier.height(12.dp))
-                            ApuTextAction(label = "Войти по ссылке", onClick = { showJoin = true })
+                            ApuTextAction(label = stringResource(R.string.groups_join_by_link), onClick = { showJoin = true })
                         }
                     }
                 }
@@ -332,12 +336,13 @@ fun GroupsScreen(
                         val myGroups = uiState.filtered.filter { !it.isChannel }
                         val myChannels = uiState.filtered.filter { it.isChannel }
                         if (myGroups.isNotEmpty()) {
-                            item { DirectoryHeader("Мои группы") }
+                            item { DirectoryHeader(stringResource(R.string.groups_my_groups)) }
                             items(myGroups, key = { it.id }) { group ->
                                 GroupRow(
                                     group = group,
                                     onClick = { onGroupClick(group.id) },
                                     menuActions = groupMenuActions(
+                                        context = context,
                                         group = group,
                                         onOpen = { onGroupClick(group.id) },
                                         onAdmin = { onGroupAdminClick(group.id) },
@@ -350,13 +355,14 @@ fun GroupsScreen(
                             }
                         }
                         if (myChannels.isNotEmpty()) {
-                            item { DirectoryHeader("Мои каналы") }
+                            item { DirectoryHeader(stringResource(R.string.groups_my_channels)) }
                             items(myChannels, key = { it.id }) { group ->
                                 // Канал открывается лентой постов, группа - чатом.
                                 GroupRow(
                                     group = group,
                                     onClick = { onChannelClick(group.id) },
                                     menuActions = groupMenuActions(
+                                        context = context,
                                         group = group,
                                         onOpen = { onChannelClick(group.id) },
                                         onAdmin = { onGroupAdminClick(group.id) },
@@ -376,7 +382,7 @@ fun GroupsScreen(
                         if (foundGroups.isNotEmpty()) {
                             item {
                                 DirectoryHeader(
-                                    if (browsing) "Открытые группы сети" else "Группы в сети"
+                                    if (browsing) stringResource(R.string.groups_open_groups) else stringResource(R.string.groups_online_groups)
                                 )
                             }
                             items(foundGroups, key = { it.groupId }) { entry ->
@@ -386,7 +392,7 @@ fun GroupsScreen(
                         if (foundChannels.isNotEmpty()) {
                             item {
                                 DirectoryHeader(
-                                    if (browsing) "Открытые каналы сети" else "Каналы в сети"
+                                    if (browsing) stringResource(R.string.groups_open_channels) else stringResource(R.string.groups_online_channels)
                                 )
                             }
                             items(foundChannels, key = { it.groupId }) { entry ->
@@ -406,13 +412,13 @@ fun GroupsScreen(
     if (uiState.joining || joinMessage != null) {
         ApuSettingsDialog(
             onDismissRequest = { viewModel.consumeJoinResult() },
-            title = { Text("Вход по ссылке") },
+            title = { Text(stringResource(R.string.groups_join_title)) },
             text = {
                 if (uiState.joining) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                        ApuPremiumSpinner(modifier = Modifier.size(20.dp))
                         Spacer(Modifier.width(12.dp))
-                        Text("Подключаемся...")
+                        Text(stringResource(R.string.groups_connecting))
                     }
                 } else {
                     Text(joinMessage.orEmpty())
@@ -420,19 +426,22 @@ fun GroupsScreen(
             },
             confirmButton = {
                 val target = uiState.joinedGroupId
+                val isChannel = uiState.joinedIsChannel
                 val postTopic = uiState.joinedPostTopicId
                 ApuTextAction(
                     label = when {
-                            target == null -> "Готово"
-                            postTopic != null -> "Открыть пост"
-                            else -> "Открыть чат"
+                            target == null -> stringResource(R.string.action_done)
+                            postTopic != null -> stringResource(R.string.groups_open_post)
+                            isChannel -> stringResource(R.string.menu_open_channel)
+                            else -> stringResource(R.string.menu_open_chat)
                         },
                     onClick = {
                         viewModel.consumeJoinResult()
                         if (target != null) {
-
                             if (postTopic != null) {
                                 onOpenPost(target, postTopic)
+                            } else if (isChannel) {
+                                onChannelClick(target)
                             } else {
                                 onGroupClick(target)
                             }
@@ -481,18 +490,17 @@ fun GroupsScreen(
 
     // Как приглашать: показываем QR или отправляем ссылку.
     inviteChoice?.let { group ->
-        val what = if (group.isChannel) "канал" else "группу"
+        val what = if (group.isChannel) stringResource(R.string.word_channel_acc) else stringResource(R.string.word_group_acc)
         // Раунд 198: получателя ссылки может не быть с APU - по умолчанию
         // прикладываем установочный APK; галочка позволяет не таскать 40 МБ.
         var attachApk by remember { mutableStateOf(true) }
         ApuSettingsDialog(
             onDismissRequest = { inviteChoice = null },
-            title = { Text("Пригласить в $what") },
+            title = { Text(stringResource(R.string.invite_title, what)) },
             text = {
                 Column {
                     Text(
-                        "Покажите QR-код, если человек рядом: он отсканирует его и войдёт сразу. " +
-                            "Ссылку можно отправить кому угодно - по ней вход как обычно."
+                        stringResource(R.string.grp_qr_hint)
                     )
                     Spacer(Modifier.height(4.dp))
                     Row(
@@ -504,7 +512,7 @@ fun GroupsScreen(
                     ) {
                         ApuPremiumCheckbox(checked = attachApk, onCheckedChange = { attachApk = it })
                         Text(
-                            "Приложить установочный файл (APK)",
+                            stringResource(R.string.contacts_attach_apk),
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -512,7 +520,7 @@ fun GroupsScreen(
             },
             confirmButton = {
                 ApuTextAction(
-                    label = "Показать QR-код",
+                    label = stringResource(R.string.groups_show_qr),
                     onClick = {
                     val chosen = group
                     inviteChoice = null
@@ -524,7 +532,7 @@ fun GroupsScreen(
             },
             dismissButton = {
                 ApuTextAction(
-                    label = "Отправить ссылку",
+                    label = stringResource(R.string.groups_send_link),
                     onClick = {
                     val chosen = group
                     inviteChoice = null
@@ -546,8 +554,7 @@ fun GroupsScreen(
             text = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        "Пусть собеседник откроет сканер QR на главном экране " +
-                            "и наведёт камеру. Он войдёт без подтверждения.",
+                        stringResource(R.string.grp_qr_wait),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Spacer(Modifier.height(12.dp))
@@ -555,7 +562,7 @@ fun GroupsScreen(
                 }
             },
             confirmButton = {
-                ApuTextAction(label = "Готово", onClick = { qrInvite = null })
+                ApuTextAction(label = stringResource(R.string.action_done), onClick = { qrInvite = null })
             },
         )
     }
@@ -563,15 +570,15 @@ fun GroupsScreen(
     // Подтверждение выхода или удаления.
     confirmLeave?.let { group ->
         val owner = group.myRole == GroupRole.OWNER
-        val what = if (group.isChannel) "канал" else "группу"
+        val what = if (group.isChannel) stringResource(R.string.word_channel_acc) else stringResource(R.string.word_group_acc)
         ApuSettingsDialog(
             onDismissRequest = { confirmLeave = null },
             title = {
                 Text(
                     when {
-                        owner -> "Удалить $what?"
-                        group.isChannel -> "Отписаться от канала?"
-                        else -> "Выйти из группы?"
+                        owner -> stringResource(R.string.confirm_delete_title, what)
+                        group.isChannel -> stringResource(R.string.groups_unsubscribe_channel_q)
+                        else -> stringResource(R.string.groups_leave_group_q)
                     }
                 )
             },
@@ -579,22 +586,22 @@ fun GroupsScreen(
                 Text(
                     when {
                         owner && group.isChannel ->
-                            "«${group.title}» и все посты будут удалены у всех подписчиков."
+                            stringResource(R.string.grp_del_channel_all, group.title)
                         owner ->
-                            "«${group.title}» и вся переписка будут удалены у всех участников."
+                            stringResource(R.string.grp_del_group_all, group.title)
                         group.isChannel ->
-                            "Вы перестанете получать посты канала «${group.title}»."
+                            stringResource(R.string.grp_unsub_channel_body, group.title)
                         else ->
-                            "Вы перестанете получать сообщения группы «${group.title}»."
+                            stringResource(R.string.grp_leave_group_body, group.title)
                     }
                 )
             },
             confirmButton = {
                 ApuTextAction(
                     label = when {
-                            owner -> "Удалить"
-                            group.isChannel -> "Отписаться"
-                            else -> "Выйти"
+                            owner -> stringResource(R.string.action_delete)
+                            group.isChannel -> stringResource(R.string.menu_unsubscribe)
+                            else -> stringResource(R.string.action_logout)
                         },
                     onClick = {
                     viewModel.leaveOrDelete(group)
@@ -604,7 +611,7 @@ fun GroupsScreen(
                 )
             },
             dismissButton = {
-                ApuTextAction(label = "Отмена", onClick = { confirmLeave = null })
+                ApuTextAction(label = stringResource(R.string.action_cancel), onClick = { confirmLeave = null })
             },
         )
     }
@@ -612,14 +619,13 @@ fun GroupsScreen(
     if (showRankHint) {
         ApuSettingsDialog(
             onDismissRequest = { showRankHint = false },
-            title = { Text("Создание групп недоступно") },
+            title = { Text(stringResource(R.string.groups_create_unavailable)) },
             text = {
                 Text(
-                    "Создавать группы можно с ранга «Проводник» — это 10 квалифицированных " +
-                        "приглашённых. Вступать в группы по ссылке можно уже сейчас."
+                    stringResource(R.string.groups_create_rank)
                 )
             },
-            confirmButton = { ApuTextAction(label = "Понятно", onClick = { showRankHint = false }) },
+            confirmButton = { ApuTextAction(label = stringResource(R.string.groups_ok), onClick = { showRankHint = false }) },
         )
     }
 
@@ -682,8 +688,8 @@ private fun GroupRow(
                 // в общем списке они неразличимы.
                 Text(
                     buildString {
-                        append(if (group.isChannel) "Канал" else "Группа")
-                        append(if (group.isPublic) " · публичная" else " · частная")
+                        append(if (group.isChannel) stringResource(R.string.contacts_channel) else stringResource(R.string.contacts_group))
+                        append(" · ").append(if (group.isPublic) stringResource(R.string.grp_public) else stringResource(R.string.grp_private))
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = ApuBubbleAccentColor,
@@ -691,9 +697,8 @@ private fun GroupRow(
                 )
                 Text(
                     buildString {
-                        append(group.memberCount)
-                        append(" участн.")
-                        if (group.topicsEnabled) append(" • темы")
+                        append(stringResource(R.string.members_count_short, group.memberCount))
+                        if (group.topicsEnabled) append(" • ").append(stringResource(R.string.topics_tag))
                         // Раунд 156: без служебных строк (гифки/стикеры).
                         group.lastMessagePreview?.let {
                             append(" • ").append(
@@ -772,7 +777,7 @@ private fun CreateGroupDialog(
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (isChannel) "Новый канал" else "Новая группа",
+                        text = if (isChannel) stringResource(R.string.chat_new_channel) else stringResource(R.string.chat_new_group),
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = ApuBubbleTextColor,
@@ -781,9 +786,9 @@ private fun CreateGroupDialog(
                     )
                     Text(
                         text = if (isChannel) {
-                            "Лента публикаций с комментариями"
+                            stringResource(R.string.groups_channel_desc)
                         } else {
-                            "Общение участников и темы"
+                            stringResource(R.string.groups_group_desc)
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = ApuBubbleMutedColor,
@@ -808,9 +813,9 @@ private fun CreateGroupDialog(
                 ApuBubbleField(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text(if (isChannel) "Название канала" else "Название") },
+                    label = { Text(if (isChannel) stringResource(R.string.groups_name_channel) else stringResource(R.string.groups_name)) },
                     placeholder = {
-                        Text(if (isChannel) "Например, Новости APU" else "Например, Рабочий чат")
+                        Text(if (isChannel) stringResource(R.string.groups_example_channel) else stringResource(R.string.groups_example_group))
                     },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
@@ -818,8 +823,8 @@ private fun CreateGroupDialog(
                 ApuBubbleField(
                     value = about,
                     onValueChange = { about = it },
-                    label = { Text(if (isChannel) "Описание канала" else "Описание") },
-                    placeholder = { Text("О чём сообщество (необязательно)") },
+                    label = { Text(if (isChannel) stringResource(R.string.groups_desc_channel) else stringResource(R.string.groups_desc)) },
+                    placeholder = { Text(stringResource(R.string.groups_desc_placeholder)) },
                     minLines = 2,
                     maxLines = 4,
                     modifier = Modifier.fillMaxWidth(),
@@ -867,16 +872,16 @@ private fun CreateGroupDialog(
                             verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
                             Text(
-                                text = if (isChannel) "Публичный канал" else "Публичная группа",
+                                text = if (isChannel) stringResource(R.string.groups_public_channel) else stringResource(R.string.groups_public_group),
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.Medium,
                                 color = ApuBubbleTextColor,
                             )
                             Text(
                                 text = if (isChannel) {
-                                    "Подписка по ссылке без одобрения"
+                                    stringResource(R.string.groups_sub_no_approval)
                                 } else {
-                                    "Вход по ссылке без одобрения"
+                                    stringResource(R.string.groups_join_no_approval)
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = ApuBubbleMutedColor,
@@ -922,13 +927,13 @@ private fun CreateGroupDialog(
                                 verticalArrangement = Arrangement.spacedBy(2.dp),
                             ) {
                                 Text(
-                                    text = "Темы",
+                                    text = stringResource(R.string.groups_topics),
                                     style = MaterialTheme.typography.bodyLarge,
                                     fontWeight = FontWeight.Medium,
                                     color = ApuBubbleTextColor,
                                 )
                                 Text(
-                                    text = "Обсуждения внутри группы",
+                                    text = stringResource(R.string.groups_topics_hint),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = ApuBubbleMutedColor,
                                 )
@@ -955,17 +960,17 @@ private fun CreateGroupDialog(
                 style = DiagnosticsActionStyle.PRIMARY,
             ) {
                 if (creating) {
-                    CircularProgressIndicator(
+                    ApuPremiumSpinner(
                         modifier = Modifier.size(16.dp),
                         strokeWidth = 2.dp,
                         color = ApuGoldInk,
                     )
                     Spacer(Modifier.width(8.dp))
                 }
-                Text(if (creating) "Создаём…" else "Создать")
+                Text(if (creating) stringResource(R.string.groups_creating) else stringResource(R.string.chat_create))
             }
         },
-        dismissButton = { ApuTextAction(label = "Отмена", onClick = onDismiss) },
+        dismissButton = { ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss) },
     )
 }
 
@@ -976,8 +981,8 @@ private fun CommunityTypeChoices(
 ) {
     val fontScale = LocalDensity.current.fontScale
     val options = listOf(
-        Triple(false, "Группа", "Чаты и темы"),
-        Triple(true, "Канал", "Посты и комментарии"),
+        Triple(false, stringResource(R.string.contacts_group), stringResource(R.string.groups_chats_topics)),
+        Triple(true, stringResource(R.string.contacts_channel), stringResource(R.string.groups_posts_comments)),
     )
     BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
         val horizontal = ApuSettingsLayout.horizontalCommunityTypeChoices(maxWidth.value, fontScale)
@@ -1061,14 +1066,15 @@ private fun JoinByLinkDialog(
 ) {
     var link by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    val notInviteLinkText = stringResource(R.string.groups_not_invite_link)
 
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Войти по ссылке") },
+        title = { Text(stringResource(R.string.groups_join_by_link)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    "Вставьте ссылку-приглашение или пересланное сообщение со ссылкой.",
+                    stringResource(R.string.groups_join_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = ApuBubbleMutedColor,
                 )
@@ -1078,8 +1084,8 @@ private fun JoinByLinkDialog(
                         link = it
                         error = null
                     },
-                    label = { Text("Ссылка-приглашение") },
-                    placeholder = { Text("Ссылка") },
+                    label = { Text(stringResource(R.string.chat_invite_link_label)) },
+                    placeholder = { Text(stringResource(R.string.groups_link)) },
                     maxLines = 4,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -1101,16 +1107,16 @@ private fun JoinByLinkDialog(
                     // Короткую ссылку /s/<код> принимаем тоже: что за ней -
                     // узнает репозиторий у сервиса.
                     if (GroupInviteLinks.parseTarget(link) == null && !ShortLinks.isShortLink(link)) {
-                        error = "Не похоже на ссылку-приглашение в группу"
+                        error = notInviteLinkText
                     } else {
                         onSubmit(link.trim())
                     }
                 },
                 style = DiagnosticsActionStyle.PRIMARY,
-            ) { Text("Войти") }
+            ) { Text(stringResource(R.string.groups_join)) }
         },
         dismissButton = {
-            ApuTextAction(label = "Отмена", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
         },
     )
 }
@@ -1156,18 +1162,18 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                if (entry.isChannel) "Канал" else "Группа",
+                if (entry.isChannel) stringResource(R.string.contacts_channel) else stringResource(R.string.contacts_group),
                 style = MaterialTheme.typography.labelMedium,
                 color = ApuBubbleAccentColor,
             )
             Text(
-                if (entry.needsApproval) "Вход по заявке" else "Вход сразу",
+                if (entry.needsApproval) stringResource(R.string.groups_by_request) else stringResource(R.string.groups_direct_join),
                 style = MaterialTheme.typography.bodySmall,
                 color = ApuBubbleMutedColor,
             )
         }
         ApuTextAction(
-            label = if (entry.isChannel) "Подписаться" else "Вступить",
+            label = if (entry.isChannel) stringResource(R.string.groups_subscribe) else stringResource(R.string.groups_join_btn),
             onClick = {
             onJoin(
                 GroupInviteLinks.build(
@@ -1190,6 +1196,7 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
  * иначе владелец ищет привычное действие и не находит.
  */
 private fun groupMenuActions(
+    context: Context,
     group: GroupSummary,
     onOpen: () -> Unit,
     onAdmin: () -> Unit,
@@ -1200,14 +1207,14 @@ private fun groupMenuActions(
 ): List<BubbleMenuAction> = buildList {
     add(
         BubbleMenuAction(
-            title = if (group.isChannel) "Открыть канал" else "Открыть группу",
+            title = if (group.isChannel) context.getString(R.string.menu_open_channel) else context.getString(R.string.menu_open_group),
             icon = Icons.Filled.Forum,
             onClick = onOpen,
         )
     )
     add(
         BubbleMenuAction(
-            title = if (group.isChannel) "Пригласить в канал" else "Пригласить в сообщество",
+            title = if (group.isChannel) context.getString(R.string.menu_invite_channel) else context.getString(R.string.menu_invite_community),
             icon = Icons.Filled.PersonAdd,
             onClick = onInvite,
         )
@@ -1215,7 +1222,7 @@ private fun groupMenuActions(
     val muted = group.mutedUntilMs > System.currentTimeMillis()
     add(
         BubbleMenuAction(
-            title = if (muted) "Включить уведомления" else "Отключить уведомления",
+            title = if (muted) context.getString(R.string.menu_unmute) else context.getString(R.string.menu_mute),
             icon = if (muted) Icons.Filled.NotificationsActive else Icons.Filled.NotificationsOff,
             onClick = onMute,
         )
@@ -1223,7 +1230,7 @@ private fun groupMenuActions(
     if (GroupRole.isAdminOrOwner(group.myRole)) {
         add(
             BubbleMenuAction(
-                title = "Управление",
+                title = context.getString(R.string.menu_manage),
                 icon = Icons.Filled.Settings,
                 onClick = onAdmin,
             )
@@ -1231,7 +1238,7 @@ private fun groupMenuActions(
     }
     add(
         BubbleMenuAction(
-            title = "Отметить прочитанным",
+            title = context.getString(R.string.menu_mark_read),
             icon = Icons.Filled.DoneAll,
             onClick = onMarkRead,
         )
@@ -1240,9 +1247,9 @@ private fun groupMenuActions(
         BubbleMenuAction(
             title = when {
                 group.myRole == GroupRole.OWNER ->
-                    if (group.isChannel) "Удалить канал" else "Удалить группу"
-                group.isChannel -> "Отписаться"
-                else -> "Выйти"
+                    if (group.isChannel) context.getString(R.string.menu_delete_channel) else context.getString(R.string.menu_delete_group)
+                group.isChannel -> context.getString(R.string.menu_unsubscribe)
+                else -> context.getString(R.string.action_logout)
             },
             icon = Icons.Filled.Delete,
             destructive = true,

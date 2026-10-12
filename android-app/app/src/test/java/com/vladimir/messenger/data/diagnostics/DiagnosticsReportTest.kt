@@ -1,5 +1,7 @@
 package com.vladimir.messenger.data.diagnostics
 
+import com.vladimir.messenger.service.resolveUpdateCheckOutcome
+import com.vladimir.messenger.service.shouldTryRelayFallback
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -36,11 +38,15 @@ class DiagnosticsReportTest {
         relayQueueOwnSignals: Long? = null,
         relayQueueRecipients: Long? = null,
         relayQueueOwnEvictions: Long = 0L,
+        relayQueueOwnEvictionsAreCumulative: Boolean = false,
         stunFailedCycles: Long = 0L,
         stunSuccessfulBindings: Long = 0L,
         stunLastAttemptFailed: Boolean? = null,
         logcatWarnings: Long = 0L,
         logcatErrors: Long = 0L,
+        onlineHelperParticipationEnabled: Boolean? = null,
+        helperRoutes: HelperRouteDiagnostics = HelperRouteDiagnostics.EMPTY,
+        updateDiagnostics: UpdateDiagnosticFacts = UpdateDiagnosticFacts.EMPTY,
     ) = DiagnosticsFacts(
         createdAtMs = 1_700_000_000_000L,
         sessionStartedAtMs = 1_700_000_000_000L - 168_000L,
@@ -92,11 +98,15 @@ class DiagnosticsReportTest {
         relayQueueOwnSignals = relayQueueOwnSignals,
         relayQueueRecipients = relayQueueRecipients,
         relayQueueOwnEvictions = relayQueueOwnEvictions,
+        relayQueueOwnEvictionsAreCumulative = relayQueueOwnEvictionsAreCumulative,
         stunFailedCycles = stunFailedCycles,
         stunSuccessfulBindings = stunSuccessfulBindings,
         stunLastAttemptFailed = stunLastAttemptFailed,
         logcatWarnings = logcatWarnings,
         logcatErrors = logcatErrors,
+        onlineHelperParticipationEnabled = onlineHelperParticipationEnabled,
+        helperRoutes = helperRoutes,
+        updateDiagnostics = updateDiagnostics,
     )
 
     private fun titles(lines: List<DiagnosticsLine>): List<String> = lines.map { it.title }
@@ -109,6 +119,92 @@ class DiagnosticsReportTest {
             titles(lines),
         )
         assertTrue(lines.all { it.value.isNotBlank() })
+    }
+
+    @Test
+    fun helperRouteParserTracksSelectionFallbackDeclinesAndSignedReceiptWithoutIds() {
+        val events = listOf(
+            "10-12 10:00:00.001 1000 1000 I p2p_core: ONLINE_HELPER event=attempt_started cause=direct_send_failed",
+            "10-12 10:00:00.010 1000 1000 I p2p_core: ONLINE_HELPER event=candidates selected=2",
+            "10-12 10:00:00.020 1000 1000 I p2p_core: ONLINE_HELPER event=leg_started slot=1",
+            "10-12 10:00:00.030 1000 1000 I p2p_core: ONLINE_HELPER event=leg_write slot=1 result=success",
+            "10-12 10:00:00.040 1000 1000 I p2p_core: ONLINE_HELPER event=signed_decline_received slot=1",
+            "10-12 10:00:00.050 1000 1000 I p2p_core: ONLINE_HELPER event=reserve_started trigger=primary_failed",
+            "10-12 10:00:00.060 1000 1000 I p2p_core: ONLINE_HELPER event=leg_started slot=2",
+            "10-12 10:00:00.070 1000 1000 I p2p_core: ONLINE_HELPER event=leg_write slot=2 result=success",
+            "10-12 10:00:00.230 1000 1000 I p2p_core: ONLINE_HELPER event=recipient_receipt_issued",
+            "10-12 10:00:00.240 1000 1000 I p2p_core: ONLINE_HELPER event=receipt_verified return_leg=2",
+            "10-12 10:00:00.241 1000 1000 I p2p_core: ONLINE_HELPER event=attempt_result outcome=receipt_verified elapsed_ms=240",
+            "10-12 10:00:01.001 1000 1000 I p2p_core: ONLINE_HELPER event=route_unavailable reason=runtime",
+            "10-12 10:00:01.002 1000 1000 I p2p_core: ONLINE_HELPER event=route_unavailable reason=identity",
+            "10-12 10:00:01.003 1000 1000 I p2p_core: ONLINE_HELPER event=route_unavailable reason=recipient_identity recipient_id=private-value",
+            "10-12 10:00:01.004 1000 1000 I p2p_core: ONLINE_HELPER event=attempt_result outcome=not_prepared elapsed_ms=1",
+            "unrelated log line must not affect helper counters",
+        )
+
+        val parsed = HelperRouteDiagnosticsParser.parse(events)
+        assertEquals(1L, parsed.attempts)
+        assertEquals(3L, parsed.routeUnavailable)
+        assertEquals(1L, parsed.routeUnavailableRuntime)
+        assertEquals(1L, parsed.routeUnavailableLocalIdentity)
+        assertEquals(1L, parsed.routeUnavailableRecipientIdentity)
+        assertEquals(1L, parsed.attemptsNotPrepared)
+        assertEquals(2L, parsed.selectedCandidates)
+        assertEquals(1L, parsed.primaryLegsStarted)
+        assertEquals(1L, parsed.reserveLegsStarted)
+        assertEquals(2L, parsed.legWritesSucceeded)
+        assertEquals(1L, parsed.signedDeclinesReceived)
+        assertEquals(1L, parsed.reserveAfterPrimaryFailure)
+        assertEquals(1L, parsed.recipientReceiptsIssued)
+        assertEquals(1L, parsed.senderReceiptsVerified)
+        assertEquals(1L, parsed.receiptReturnedByReserve)
+        assertEquals(0L, parsed.receiptReturnedByPrimary)
+        assertEquals(240L, parsed.averageVerifiedReceiptMs ?: -1L)
+    }
+
+    @Test
+    fun helperReportLabelsStreamWritesAndSignedReceiptsSeparately() {
+        val report = DiagnosticsReport.render(
+            facts = facts(
+                onlineHelperParticipationEnabled = false,
+                helperRoutes = HelperRouteDiagnostics(
+                    attempts = 2L,
+                    selectedCandidates = 3L,
+                    attemptsWithoutCandidates = 1L,
+                    routeUnavailable = 3L,
+                    routeUnavailableRuntime = 1L,
+                    routeUnavailableLocalIdentity = 1L,
+                    routeUnavailableRecipientIdentity = 1L,
+                    primaryLegsStarted = 2L,
+                    reserveLegsStarted = 1L,
+                    legWritesSucceeded = 2L,
+                    legWritesFailed = 1L,
+                    reserveAfterPrimaryFailure = 1L,
+                    signedDeclinesReceived = 1L,
+                    recipientReceiptsIssued = 1L,
+                    senderReceiptsVerified = 1L,
+                    receiptReturnedByReserve = 1L,
+                    attemptsWithoutReceipt = 1L,
+                    averageVerifiedReceiptMs = 240L,
+                ),
+            ),
+            journal = emptyList(),
+            logcat = emptyList(),
+        )
+        assertTrue(report.contains("local_participation_enabled=false"))
+        assertTrue(report.contains("attempts_after_direct_failure=2"))
+        assertTrue(report.contains("route_unavailable=3"))
+        assertTrue(report.contains("route_unavailable_runtime=1"))
+        assertTrue(report.contains("route_unavailable_local_identity=1"))
+        assertTrue(report.contains("route_unavailable_recipient_identity=1"))
+        assertTrue(report.contains("selected_helper_slots_total=3"))
+        assertFalse(report.contains("private-value"))
+        assertTrue(report.contains("reserve_after_primary_failure=1"))
+        assertTrue(report.contains("helper_stream_writes_succeeded=2 (не подтверждение доставки)"))
+        assertTrue(report.contains("recipient_signed_receipts_verified=1"))
+        assertTrue(report.contains("verified_receipt_return_leg_2=1"))
+        assertTrue(report.contains("verified_receipt_average_elapsed_ms=240"))
+        assertTrue(report.contains("не личность/уникальность помощника"))
     }
 
     /**
@@ -258,22 +354,49 @@ class DiagnosticsReportTest {
     }
 
     @Test
-    fun ownQueueEvictionsAreReportedAsHistoricalSample() {
+    fun ownQueueEvictionCounterResetsAtTheNewestCoreStartAndUsesLegacySamples() {
+        val previousCoreSummary =
+            "Relay-очередь: своих=3 сигналов=0 чужих=0 всего=3 получателей=1 снято-по-ACK=0 вытеснено-своих=9"
+        val restartedCore =
+            "MESH durable: restored 0/0 relay record(s) after startup (своих 0, чужих 0, own_capacity_evictions=0)"
+        val reset = DiagnosticsPrivacy.parseRelayQueueOwnEvictions(
+            listOf(previousCoreSummary, restartedCore),
+        )
+        assertEquals(0L, reset.count)
+        assertTrue(reset.cumulative)
+
+        val afterNewEviction = DiagnosticsPrivacy.parseRelayQueueOwnEvictions(
+            listOf(previousCoreSummary, restartedCore, previousCoreSummary.replace("=9", "=2")),
+        )
+        assertEquals(2L, afterNewEviction.count)
+        assertTrue(afterNewEviction.cumulative)
+
+        val legacy = DiagnosticsPrivacy.parseRelayQueueOwnEvictions(
+            listOf("Relay-очередь: запас своих для получателя исчерпан, вытеснено самое старое своё pk_0123456789abcdef"),
+        )
+        assertEquals(1L, legacy.count)
+        assertFalse(legacy.cumulative)
+    }
+
+    @Test
+    fun ownQueueEvictionsAreReportedAsCumulativeRamCachePressure() {
         val facts = facts(
             relayQueueOwn = 1_000L,
             relayQueueForeign = 3_292L,
             relayQueueRecipients = 18L,
             relayQueueOwnEvictions = 3L,
+            relayQueueOwnEvictionsAreCumulative = true,
         )
         val message = DiagnosticsReport.summaryLines(facts).first { it.title == "Сообщения" }
         assertEquals(DiagnosticsLevel.INFO, message.level)
         assertTrue(message.value.contains("своё ждёт получателя 1000"))
-        assertTrue(message.value.contains("в выборке logcat было вытеснений своего запаса: 3"))
+        assertTrue(message.value.contains("вытеснений своего из ограниченного RAM-кэша: 3 (с запуска ядра)"))
+        assertTrue(message.value.contains("само по себе не доказывает потерю"))
 
         val report = DiagnosticsReport.render(facts, emptyList(), emptyList())
         assertTrue(report.contains("очередь ядра: получателей=18"))
-        assertTrue(report.contains("вытеснений своих из RAM в выборке=3"))
-        assertTrue(report.contains("зашифрованном хранилище и очереди досылки"))
+        assertTrue(report.contains("вытеснений своих из RAM-кэша=3 (с запуска ядра"))
+        assertTrue(report.contains("при успешной durable/outbox-записи копия остаётся для досылки"))
     }
 
     /** Чужая очередь сама по себе — не повод пугать: она для других узлов. */
@@ -363,9 +486,21 @@ class DiagnosticsReportTest {
             ),
         )
         val direct = lines.first { it.title == "Прямой канал" }
-        assertTrue(direct.value.contains("сессий 2"))
+        assertTrue(direct.value.contains("исходящих сессий согласовано 2"))
         assertTrue(direct.value.contains("отдано 37 диапазонов"))
         assertTrue(direct.value.contains("8.4 МиБ"))
+
+        // Inbound ranges do not increment the locally negotiated outbound-session counter.
+        val inboundOnly = DiagnosticsReport.summaryLines(
+            facts(
+                counters = mapOf(
+                    Counters.F4_RANGES_RECEIVED to 46L,
+                    Counters.F4_BYTES_RECEIVED to 5_866_672L,
+                ),
+            ),
+        ).first { it.title == "Прямой канал" }
+        assertTrue(inboundOnly.value.contains("исходящих сессий согласовано 0"))
+        assertTrue(inboundOnly.value.contains("принято 46"))
     }
 
     @Test
@@ -413,6 +548,78 @@ class DiagnosticsReportTest {
     }
 
     @Test
+    fun updatePolicyFallsBackOnlyWhenTheDirectCheckDidNotConfirmCurrentVersion() {
+        assertTrue(shouldTryRelayFallback("network_error"))
+        assertTrue(shouldTryRelayFallback("http_error"))
+        assertTrue(shouldTryRelayFallback("invalid_response"))
+        assertFalse(shouldTryRelayFallback("up_to_date"))
+        assertFalse(shouldTryRelayFallback("update_available"))
+        assertEquals(
+            "fallback_not_due",
+            resolveUpdateCheckOutcome(false, "network_error", "not_due"),
+        )
+        assertEquals(
+            "unavailable",
+            resolveUpdateCheckOutcome(false, "http_error", "network_error"),
+        )
+        assertEquals(
+            "up_to_date",
+            resolveUpdateCheckOutcome(false, "http_error", "up_to_date"),
+        )
+        assertEquals(
+            "unavailable",
+            resolveUpdateCheckOutcome(false, "asset_missing", "up_to_date"),
+        )
+    }
+
+    @Test
+    fun updateSectionExplainsCheckSourceAndNotificationWithoutUrls() {
+        val report = DiagnosticsReport.render(
+            facts = facts(
+                updateDiagnostics = UpdateDiagnosticFacts(
+                    currentVersion = "v11.74.340",
+                    latestVersion = "v11.74.341",
+                    lastCheckAtMs = 1_700_000_000_000L - 60_000L,
+                    checkDurationMs = 842L,
+                    trigger = "manual",
+                    source = "github",
+                    outcome = "update_available",
+                    httpStatus = 200,
+                    githubOutcome = "update_available",
+                    githubHttpStatus = 200,
+                    relayOutcome = "not_attempted",
+                    notificationVersion = "v11.74.341",
+                    notificationKind = "official",
+                    notificationAtMs = 1_700_000_000_000L - 30_000L,
+                    notificationResult = "posted",
+                    notificationsAllowed = true,
+                    notificationChannelEnabled = true,
+                    notificationChannelImportance = 3,
+                ),
+            ),
+            journal = emptyList(),
+            logcat = emptyList(),
+        )
+
+        assertTrue(report.contains("current_version=v11.74.340"))
+        assertTrue(report.contains("latest_version=v11.74.341"))
+        assertTrue(report.contains("last_check_trigger=manual"))
+        assertTrue(report.contains("last_check_source=github"))
+        assertTrue(report.contains("last_check_result=update_available"))
+        assertTrue(report.contains("github_http_status=200"))
+        assertTrue(report.contains("relay_check_result=not_attempted"))
+        assertTrue(report.contains("last_check_duration_ms=842"))
+        assertTrue(report.contains("last_notification_attempt_kind=official"))
+        assertTrue(report.contains("last_notification_attempt_result=posted"))
+        assertTrue(report.contains("notifications_allowed=true"))
+        assertTrue(report.contains("update_channel_enabled=true"))
+        assertTrue(report.contains("update_channel_importance=3"))
+        assertFalse(report.contains("https://"))
+        assertFalse(report.contains("downloadUrl"))
+        assertFalse(report.contains("releaseNotes"))
+    }
+
+    @Test
     fun reportHasStableSectionsForMachinesAndRussianForHumans() {
         val report = DiagnosticsReport.render(
             facts = facts(transferStates = mapOf("COMPLETE" to 4L, "FAILED" to 1L)),
@@ -424,12 +631,14 @@ class DiagnosticsReportTest {
         )
 
         listOf(
-            "apu-diag/2",
+            "apu-diag/4",
             "[сводка]",
             "[окружение]",
             "[сеть]",
+            "[обновления]",
             "[ядро]",
             "[mqtt]",
+            "[помощники]",
             "[передачи]",
             "[сессия]",
             "[журнал]",
@@ -523,6 +732,19 @@ class DiagnosticsReportTest {
     }
 
     @Test
+    fun messageDerivedSha256ReceiptKeysAreRedactedFromMqttTopics() {
+        val messageHash = "0123456789abcdef".repeat(4)
+        val line = "MQTT IN: topic=p2pm2/msg/[contact]/receipt/$messageHash " +
+            "cleanup=p2pm2/receipt/cleanup/$messageHash payload=[скрыто]"
+
+        val safe = DiagnosticsPrivacy.redact(line)
+
+        assertTrue(safe.contains("p2pm2/msg/[contact]/receipt/[id]"))
+        assertTrue(safe.contains("p2pm2/receipt/cleanup/[id]"))
+        assertFalse(safe.contains(messageHash))
+    }
+
+    @Test
     fun logcatCountsWarningsAndErrorsAndKeepsHeartbeatTail() {
         val levels = DiagnosticsPrivacy.countLogcatSeverities(
             listOf(
@@ -539,6 +761,51 @@ class DiagnosticsReportTest {
         assertTrue(clipped.startsWith("MQTT LIVENESS HEARTBEAT:"))
         assertTrue(clipped.endsWith("request_errors=7"))
         assertTrue(clipped.contains("середина строки скрыта"))
+    }
+
+    @Test
+    fun absolutePathsAndNamedFileFieldsAreRedacted() {
+        val safe = DiagnosticsPrivacy.redact(
+            "open failed path=/storage/emulated/0/Download/private-report.pdf " +
+                "uri=file:///data/user/0/com.apu/files/account.db",
+        )
+        assertFalse(safe.contains("/storage"))
+        assertFalse(safe.contains("private-report.pdf"))
+        assertFalse(safe.contains("/data/user"))
+        assertFalse(safe.contains("account.db"))
+        assertTrue(safe.contains("path=[скрыто]"))
+        assertTrue(safe.contains("uri=[скрыто]"))
+    }
+
+    @Test
+    fun logcatErrorPriorityKeepsEAndFLinesWithinTheReportLimit() {
+        val lines = buildList {
+            repeat(20) { index ->
+                add("10-08 08:32:${index.toString().padStart(2, '0')}.000 17568 23168 W p2p_core: repeated warning $index")
+            }
+            add("10-08 08:33:00.000 17568 23168 E p2p_core: distinctive error that must survive")
+            add("10-08 08:33:01.000 17568 23168 F p2p_core: fatal error that must survive")
+            repeat(20) { index ->
+                add("10-08 08:34:${index.toString().padStart(2, '0')}.000 17568 23168 I p2p_core: routine info $index")
+            }
+        }
+
+        val selected = DiagnosticsPrivacy.prioritizeLogcatErrors(lines, limit = 10, maxErrorLines = 4)
+        assertTrue("строк больше лимита: ${selected.size}", selected.size <= 10)
+        assertTrue(selected.any { it.contains("distinctive error that must survive") })
+        assertTrue(selected.any { it.contains("fatal error that must survive") })
+        assertEquals(2L, DiagnosticsPrivacy.countLogcatSeverities(selected).errors)
+        assertEquals(1L, DiagnosticsPrivacy.countLogcatSeverities(selected).warnings)
+
+        val oneSlot = DiagnosticsPrivacy.prioritizeLogcatErrors(
+            lines = List(12) { index ->
+                "10-08 08:35:${index.toString().padStart(2, '0')}.000 17568 23168 E p2p_core: unique failure $index"
+            },
+            limit = 1,
+            maxErrorLines = 1,
+        )
+        assertEquals(1, oneSlot.size)
+        assertTrue(oneSlot.single().contains("E p2p_core:"))
     }
 
     @Test
@@ -693,6 +960,7 @@ class DiagnosticsReportTest {
     @Test
     fun reportHighlightMarksSectionsFailuresAndWarnings() {
         assertEquals(DiagnosticsLineTone.SECTION, diagnosticsLineTone("[ядро]"))
+        assertEquals(DiagnosticsLineTone.SECTION, diagnosticsLineTone("[обновления]"))
         assertEquals(
             DiagnosticsLineTone.SECTION,
             diagnosticsLineTone("[журнал] (последние события этой сессии)"),

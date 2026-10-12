@@ -4,6 +4,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -13,6 +14,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.ColorFilter
+import com.vladimir.messenger.ui.theme.WallpaperTint
+import com.vladimir.messenger.ui.theme.WallpaperTintHolder
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -54,12 +59,17 @@ fun ChatWallpaper() {
             )
         } else {
             val dark = LocalAppDarkTheme.current
+            val tint by WallpaperTintHolder.tint.collectAsState()
+            val drawable = if (dark) R.drawable.chat_wallpaper_dark else R.drawable.chat_wallpaper_light
+            // Рисунок APU окрашивается оттенком гаммы: его яркость сохраняется, поэтому
+            // линии по контрасту такие же, как на дневной подложке. Дневная классика
+            // показывается как есть; ночная классика — тёмно-синяя (палитра логов).
+            val paint = tint.paintFor(dark)
             Image(
-                painter = painterResource(
-                    if (dark) R.drawable.chat_wallpaper_dark else R.drawable.chat_wallpaper_light
-                ),
+                painter = painterResource(drawable),
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
+                colorFilter = paint?.let { ColorFilter.tint(it, BlendMode.Color) },
                 contentScale = ContentScale.Crop,
             )
         }

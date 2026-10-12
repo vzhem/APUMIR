@@ -36,11 +36,11 @@ class SavedInputContractTest(unittest.TestCase):
         self.assertIn("bottomBar = {", text)
         self.assertIn("onSend = {", text)
         # Кнопка подписана «Отправить» - как в чате.
-        self.assertIn('"Отправить"', text)
+        self.assertIn("label = stringResource(R.string.action_send)", text)
         # Владелец 2026-10-07: кнопка отправки — фирменная ApuTextAction.
         self.assertIn("ApuTextAction(", text)
         # Поле с подсказкой и пузырём APU, а не серый прямоугольник поверх обоев.
-        self.assertIn("Заметка или сообщение себе...", text)
+        self.assertIn("stringResource(R.string.sv_note_hint)", text)
         self.assertIn("apuBubbleSurface(color = Color.White)", text)
 
     def test_keyboard_does_not_cover_the_input_bar(self):

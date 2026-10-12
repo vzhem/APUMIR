@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // IMAGEPREVIEW.KT — картинка внутри пузыря сообщения
 // =============================================================================
@@ -34,12 +36,12 @@ fun ImagePreview(
         // пишем, если не загрузилось, вместо пустого места.
         loading = {
             Box(contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(strokeWidth = 2.dp)
+                ApuPremiumSpinner(strokeWidth = 2.dp)
             }
         },
         error = {
             Text(
-                "Картинка не загрузилась",
+                stringResource(R.string.ip_load_failed),
                 style = MaterialTheme.typography.bodySmall,
             )
         },

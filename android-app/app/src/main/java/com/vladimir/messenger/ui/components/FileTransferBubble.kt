@@ -1,5 +1,13 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.runtime.remember
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
@@ -71,6 +79,39 @@ fun FileTransferBubble(
     val messenger = com.vladimir.messenger.ui.theme.LocalMessengerColors.current
     val background = if (isFromMe) messenger.messageBubbleOwn else messenger.messageBubbleOther
     val bubbleTextColor = if (isFromMe) messenger.messageBubbleOwnText else messenger.messageBubbleOtherText
+    // Голосовое (имя файла несёт волну): проигрыватель и меню, когда локальная копия есть.
+    val voiceInfo = remember(transfer.displayName) { com.vladimir.messenger.util.VoiceNote.parse(transfer.displayName) }
+    if (voiceInfo != null && previewFile != null) {
+        val voiceActions = buildList<ApuAction> {
+            onSaveClick?.let { save -> add(ApuAction(stringResource(R.string.ft_save_folder), Icons.Filled.Save) { save() }) }
+            onShareClick?.let { share -> add(ApuAction(stringResource(R.string.admin_share), Icons.Filled.Share) { share() }) }
+            onSaveToFavorites?.let { fav -> add(ApuAction(stringResource(R.string.chat_file_to_saved), Icons.Filled.Star) { fav() }) }
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 4.dp)
+                // Свайп по всей строке голосового - тот же ответ, что у текстовых пузырей.
+                .swipeToReply(enabled = onSwipeReply != null) { onSwipeReply?.invoke() },
+            contentAlignment = if (isFromMe) Alignment.CenterEnd else Alignment.CenterStart,
+        ) {
+            Box(
+                modifier = Modifier
+                    .widthIn(max = 320.dp)
+                    .apuBubbleSurface(color = background, shape = RoundedCornerShape(18.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                VoiceActionsRow(
+                    file = previewFile,
+                    info = voiceInfo,
+                    textColor = bubbleTextColor,
+                    actions = voiceActions,
+                    onLongPress = onLongPress,
+                )
+            }
+        }
+        return
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -81,7 +122,7 @@ fun FileTransferBubble(
         // Раунд 169/170: стикер (webp и видео-webm) парит в чате - без
         // подложки пузыря; остаётся только анимированная картинка.
         val stickerFloat = previewFile != null && (
-            transfer.displayName.startsWith("Стикер", ignoreCase = true) ||
+            transfer.displayName.startsWith(com.vladimir.messenger.data.file.STICKER_FILE_PREFIX, ignoreCase = true) ||
                 transfer.displayName.lowercase().endsWith(".webp")
             )
         val contentColor = if (stickerFloat) MaterialTheme.colorScheme.onBackground else bubbleTextColor
@@ -109,7 +150,7 @@ fun FileTransferBubble(
                 }
             }
             // Раунд 170: стикер - и webp, и видео-webm (генераторы стикеров).
-            val isSticker = transfer.displayName.startsWith("Стикер", ignoreCase = true) ||
+            val isSticker = transfer.displayName.startsWith(com.vladimir.messenger.data.file.STICKER_FILE_PREFIX, ignoreCase = true) ||
                 transfer.displayName.lowercase().endsWith(".webp") ||
                 transfer.displayName.lowercase().endsWith(".webm")
             val isImage = transfer.mediaType.startsWith("image/") || isSticker
@@ -233,7 +274,7 @@ fun FileTransferBubble(
                         ) {
                             Icon(
                                 imageVector = androidx.compose.material.icons.Icons.Default.MoreVert,
-                                contentDescription = "Действия с изображением",
+                                contentDescription = stringResource(R.string.ft_image_actions),
                                 tint = Color.White,
                                 modifier = Modifier
                                     .size(28.dp)
@@ -258,7 +299,7 @@ fun FileTransferBubble(
                         ) {
                             if (onSaveClick != null) {
                                 androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text("Сохранить в папку") },
+                                    text = { Text(stringResource(R.string.ft_save_folder)) },
                                     onClick = {
                                         imageMenuOpen.value = false
                                         onSaveClick()
@@ -267,7 +308,7 @@ fun FileTransferBubble(
                             }
                             if (onShareClick != null) {
                                 androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text("Поделиться") },
+                                    text = { Text(stringResource(R.string.admin_share)) },
                                     onClick = {
                                         imageMenuOpen.value = false
                                         onShareClick()
@@ -276,7 +317,7 @@ fun FileTransferBubble(
                             }
                             if (onSaveToFavorites != null) {
                                 androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text("В избранное") },
+                                    text = { Text(stringResource(R.string.chat_to_saved)) },
                                     onClick = {
                                         imageMenuOpen.value = false
                                         onSaveToFavorites()
@@ -336,7 +377,7 @@ fun FileTransferBubble(
                         val remaining = transfer.totalBytes - transfer.transferredBytes
                         val etaSec = remaining / bytesPerSec
                         Text(
-                            "${formatSpeed(bytesPerSec)} · осталось ~${formatEta(etaSec)}",
+                            stringResource(R.string.transfer_speed_eta_tpl, formatSpeed(androidx.compose.ui.platform.LocalContext.current, bytesPerSec), formatEta(androidx.compose.ui.platform.LocalContext.current, etaSec)),
                             style = MaterialTheme.typography.labelSmall,
                             color = contentColor.copy(alpha = 0.7f),
                         )
@@ -345,25 +386,23 @@ fun FileTransferBubble(
             }
             val progress = transferProgress(transfer)
             if (progress != null && transfer.state != "COMPLETE" && transfer.state != "FAILED") {
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp),
+                ApuPremiumLinearProgress(
+                    fraction = progress,
+                    modifier = Modifier.padding(top = 6.dp),
                 )
             }
             if (!(previewBitmap != null && isImage) &&
                 transfer.state == "COMPLETE" && transfer.direction == "INCOMING" && onSaveClick != null
             ) {
-                ApuTextAction(label = "Сохранить в папку", onClick = onSaveClick)
+                ApuTextAction(label = stringResource(R.string.ft_save_folder), onClick = onSaveClick)
             }
             // У документов и видео превью нет, меню картинки тоже - поэтому
             // «В избранное» выносим отдельной кнопкой.
             if (!(previewBitmap != null && isImage) && onSaveToFavorites != null) {
-                ApuTextAction(label = "В избранное", onClick = onSaveToFavorites)
+                ApuTextAction(label = stringResource(R.string.chat_to_saved), onClick = onSaveToFavorites)
             }
             if (isFromMe && onRetry != null) {
-                ApuTextAction(label = "Повторить отправку", onClick = onRetry)
+                ApuTextAction(label = stringResource(R.string.ft_retry), onClick = onRetry)
             }
         }
     }
@@ -377,6 +416,7 @@ private fun iconFor(mediaType: String): ImageVector = when {
     else -> Icons.Default.InsertDriveFile
 }
 
+@Composable
 private fun stateLabel(
     transfer: FileTransferEntity,
     messageStatus: com.vladimir.messenger.domain.model.MessageStatus?,
@@ -384,7 +424,7 @@ private fun stateLabel(
     if (transfer.direction == "OUTGOING" &&
         messageStatus == com.vladimir.messenger.domain.model.MessageStatus.FILE_EXPIRED
     ) {
-        return "Срок хранения истёк"
+        return stringResource(R.string.fsl_expired_storage)
     }
     val ofChunks = if (transfer.chunkCount > 0) {
         " ${transfer.completedChunks}/${transfer.chunkCount}"
@@ -395,54 +435,54 @@ private fun stateLabel(
     // отправитель повторит, как только владелец подвинет ползунок или
     // очистит завершённые.
     if (transfer.state != "FAILED" && transfer.errorCode == "NO_SPACE") {
-        return "Нет места под пересылку — увеличьте его в настройках$ofChunks"
+        return stringResource(R.string.fsl_no_space, ofChunks)
     }
     return when (transfer.state) {
-        "PREPARING" -> "Подготовка…"
-        "PREPARED" -> "В очереди (дождётся получателя)"
-        "OFFERED" -> "Входящий файл…"
+        "PREPARING" -> stringResource(R.string.fsl_preparing)
+        "PREPARED" -> stringResource(R.string.fsl_queued)
+        "OFFERED" -> stringResource(R.string.fsl_incoming)
         "TRANSFERRING" -> if (transfer.direction == "OUTGOING") {
-            "Передача…$ofChunks"
+            stringResource(R.string.fsl_sending, ofChunks)
         } else if (transfer.custodianNodeId.isNotBlank()) {
-            "Приём от хранителя…$ofChunks"
+            stringResource(R.string.fsl_recv_custodian, ofChunks)
         } else {
-            "Приём…$ofChunks"
+            stringResource(R.string.fsl_recv, ofChunks)
         }
-        "VERIFYING" -> "Проверка…"
-        "SENT" -> "Отправлено, ждём подтверждение"
-        "COMPLETE" -> if (transfer.direction == "OUTGOING") "Доставлено ✓" else "Сохранено ✓"
-        "FAILED" -> "Ошибка (${transfer.errorCode ?: "неизвестно"})"
-        "EXPIRED" -> "Срок истёк"
-        "CANCELLED" -> "Передача отменена"
+        "VERIFYING" -> stringResource(R.string.fsl_verifying)
+        "SENT" -> stringResource(R.string.fsl_sent_wait)
+        "COMPLETE" -> if (transfer.direction == "OUTGOING") stringResource(R.string.fsl_delivered) else stringResource(R.string.fsl_saved)
+        "FAILED" -> stringResource(R.string.fsl_error, transfer.errorCode ?: stringResource(R.string.fsl_unknown))
+        "EXPIRED" -> stringResource(R.string.fsl_expired)
+        "CANCELLED" -> stringResource(R.string.fsl_cancelled)
         "WAITING_RECIPIENT" -> if (transfer.custodianNodeId.isNotBlank()) {
-            "У хранителя, ждём получателя онлайн"
+            stringResource(R.string.fsl_keeper_wait)
         } else {
-            "Ждём получателя онлайн"
+            stringResource(R.string.fsl_wait_online)
         }
         // Файл лежит у третьего телефона (этап 7 роя): получатель заберёт
         // его, даже если отправитель выйдет из сети.
         "CUSTODIED" -> {
             val holders = transfer.custodianNodeId.split(',').count { it.isNotBlank() }
             if (holders > 1) {
-                "На хранении у $holders телефонов, получатель заберёт при появлении"
+                stringResource(R.string.fsl_custody_many, holders)
             } else {
-                "Передано на хранение, получатель заберёт при появлении"
+                stringResource(R.string.fsl_custody_one)
             }
         }
         else -> transfer.state
     }
 }
 
-private fun formatSpeed(bytesPerSec: Long): String = when {
-    bytesPerSec >= 1024 * 1024 -> "%.1f МБ/с".format(bytesPerSec / (1024.0 * 1024.0))
-    bytesPerSec >= 1024 -> "%.0f КБ/с".format(bytesPerSec / 1024.0)
-    else -> "$bytesPerSec Б/с"
+private fun formatSpeed(context: android.content.Context, bytesPerSec: Long): String = when {
+    bytesPerSec >= 1024 * 1024 -> context.getString(R.string.speed_mb_s, bytesPerSec / (1024.0 * 1024.0))
+    bytesPerSec >= 1024 -> context.getString(R.string.speed_kb_s, bytesPerSec / 1024.0)
+    else -> context.getString(R.string.speed_b_s, bytesPerSec)
 }
 
-private fun formatEta(seconds: Long): String = when {
-    seconds >= 3600 -> "${seconds / 3600} ч ${seconds % 3600 / 60} мин"
-    seconds >= 60 -> "${seconds / 60} мин ${seconds % 60} с"
-    else -> "$seconds с"
+private fun formatEta(context: android.content.Context, seconds: Long): String = when {
+    seconds >= 3600 -> context.getString(R.string.eta_h_m, seconds / 3600, seconds % 3600 / 60)
+    seconds >= 60 -> context.getString(R.string.eta_m_s, seconds / 60, seconds % 60)
+    else -> context.getString(R.string.eta_s, seconds)
 }
 
 private fun transferProgress(transfer: FileTransferEntity): Float? = when {

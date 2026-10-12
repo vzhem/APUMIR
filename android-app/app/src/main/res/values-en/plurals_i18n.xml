@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <plurals name="poll_voters_count">
+        <item quantity="one">%d voter</item>
+        <item quantity="other">%d voters</item>
+    </plurals>
+    <plurals name="poll_votes_count">
+        <item quantity="one">%d vote</item>
+        <item quantity="other">%d votes</item>
+    </plurals>
+    <plurals name="gc_messages_count">
+        <item quantity="one">%d message</item>
+        <item quantity="other">%d messages</item>
+    </plurals>
+</resources>

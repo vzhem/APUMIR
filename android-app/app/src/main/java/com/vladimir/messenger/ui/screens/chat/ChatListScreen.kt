@@ -8,6 +8,10 @@ package com.vladimir.messenger.ui.screens.chat
 // FAB для добавления нового контакта.
 // =============================================================================
 
+import com.vladimir.messenger.ui.components.ApuPremiumSpinner
+import com.vladimir.messenger.ui.components.ApuSearchField
+import com.vladimir.messenger.R
+import androidx.compose.ui.res.stringResource
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.height
@@ -105,6 +109,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.vladimir.messenger.ui.components.ApuPremiumContentButton
 import com.vladimir.messenger.ui.components.ApuPremiumFloatingActionButton
+import com.vladimir.messenger.ui.components.ApuActionsMenu
 
 private data class NotificationMuteTarget(
     val id: String,
@@ -261,8 +266,10 @@ fun ChatListScreen(
                                         overflow = TextOverflow.Ellipsis,
                                     )
                                     if (uiState.rankVip) {
+                                        // Полный знак «VIP» вместо одной звезды: у VIP
+                                        // в шапке должно быть видно сам статус.
                                         Spacer(Modifier.width(6.dp))
-                                        ApuVipBadge(compact = true)
+                                        ApuVipBadge()
                                     }
                                 }
                             }
@@ -276,52 +283,27 @@ fun ChatListScreen(
                             // здесь главное действие и должен быть заметен.
                             SearchOrb(onClick = { isSearchVisible = true })
                             IconButton(onClick = onScanQrClick) {
-                                Icon(Icons.Default.QrCodeScanner, "Сканировать QR")
+                                Icon(Icons.Default.QrCodeScanner, stringResource(R.string.chat_scan_qr))
                             }
                             Box {
                                 var menuOpen by remember { mutableStateOf(false) }
                                 IconButton(onClick = { menuOpen = true }) {
-                                    Icon(Icons.Default.MoreVert, "Ещё")
+                                    Icon(Icons.Default.MoreVert, stringResource(R.string.chat_more))
                                 }
-                                DropdownMenu(
+                                ApuActionsMenu(
                                     expanded = menuOpen,
-                                    onDismissRequest = { menuOpen = false },
-                                    // Скруглённый пузырь и чуть больше воздуха:
-                                    // меню в одном стиле с остальными пузырями APU.
-                                    shape = RoundedCornerShape(20.dp),
-                                    tonalElevation = 3.dp,
-                                    shadowElevation = 8.dp,
-                                ) {
-                                    // «Мой QR-код» и «Поделиться приглашением»
-                                    // убраны: раздел QR (значок в шапке) уже
-                                    // показывает свой код, копирует ссылку и
-                                    // делится ею. Три пункта на одно действие
-                                    // только запутывали.
-                                    // Контакты, Группы, Профиль и Настройки
-                                    // живут в нижней панели - под большим
-                                    // пальцем. «Избранное» теперь - первым
-                                    // отдельным контактом в списке чатов,
-                                    // поэтому дублировать его в меню не нужно.
-                                    DropdownMenuItem(
-                                        text = { Text("Подключиться по ссылке") },
-                                        leadingIcon = { ShimmerIcon(Icons.Default.Link) },
-                                        onClick = {
-                                            menuOpen = false
+                                    onDismiss = { menuOpen = false },
+                                    // Контакты, Группы, Профиль и Настройки живут в нижней панели,
+                                    // «Избранное» — первым контактом в списке чатов.
+                                    actions = listOf(
+                                        ApuAction(stringResource(R.string.chat_connect_by_link), Icons.Default.Link) {
                                             showConnectDialog = true
                                         },
-                                    )
-                                    // Раунд 199 (владелец): приглашение - на
-                                    // главной, под рукой. Тот же путь, что и
-                                    // из «Контактов»: текст + установочный APK.
-                                    DropdownMenuItem(
-                                        text = { Text("Пригласить в APU") },
-                                        leadingIcon = { ShimmerIcon(Icons.Default.PersonAdd) },
-                                        onClick = {
-                                            menuOpen = false
+                                        ApuAction(stringResource(R.string.chat_invite_apu), Icons.Default.PersonAdd) {
                                             showInviteShare = true
                                         },
-                                    )
-                                }
+                                    ),
+                                )
                             }
                         }
                     },
@@ -332,7 +314,7 @@ fun ChatListScreen(
                 // пальцем вбок - разделов может стать больше, чем влезает.
                 // Вкладка «Не прочитано» показывает бейдж с числом чатов с непрочитано >0.
                 ApuTabBar(
-                    titles = uiState.sections.map { it.title },
+                    titles = uiState.sections.map { stringResource(it.labelRes) },
                     selectedIndex = pagerState.currentPage,
                     offsetFraction = pagerState.currentPageOffsetFraction,
                     onSelect = { index ->
@@ -363,24 +345,24 @@ fun ChatListScreen(
                 ApuPremiumFloatingActionButton(
                     onClick = { fabMenuExpanded = true },
                     icon = Icons.Default.Edit,
-                    contentDescription = "Создать",
+                    contentDescription = stringResource(R.string.chat_create),
                 )
                 ApuActionsMenu(
                     expanded = fabMenuExpanded,
                     onDismiss = { fabMenuExpanded = false },
                     actions = listOf(
                         ApuAction(
-                            title = "Новый чат",
+                            title = stringResource(R.string.chat_new_chat),
                             icon = Icons.Default.Person,
                             onClick = onAddContactClick,
                         ),
                         ApuAction(
-                            title = "Новая группа",
+                            title = stringResource(R.string.chat_new_group),
                             icon = Icons.Default.Group,
                             onClick = onCreateGroupClick,
                         ),
                         ApuAction(
-                            title = "Новый канал",
+                            title = stringResource(R.string.chat_new_channel),
                             icon = Icons.Default.Campaign,
                             onClick = onCreateChannelClick,
                         ),
@@ -397,7 +379,7 @@ fun ChatListScreen(
             // Плавная листалка: страницы едут за пальцем, в движении видно
             // сразу две вкладки, и чем быстрее движение, тем дальше долистает.
             if (uiState.isLoading) {
-                CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                ApuPremiumSpinner(modifier = Modifier.align(Alignment.Center))
             } else {
                 HorizontalPager(
                     state = pagerState,
@@ -410,6 +392,7 @@ fun ChatListScreen(
                     val section = uiState.sections.getOrNull(page) ?: return@HorizontalPager
                     SectionPage(
                         section = section,
+                        onPublishStory = { text, bg, photo -> viewModel.publishStory(text, bg, photo) },
                         // Готовый список раздела, посчитанный в фоне. Раньше
                         // здесь шёл пересчёт прямо во время отрисовки - при
                         // сотнях чатов это подвешивало жест листания.
@@ -481,9 +464,9 @@ fun ChatListScreen(
     }
 
     inviteChoice?.let { group ->
-        val what = if (group.isChannel) "канал" else "группу"
+        val what = if (group.isChannel) stringResource(R.string.word_channel_acc) else stringResource(R.string.word_group_acc)
         ApuPremiumDialog(
-            title = "Пригласить в $what",
+            title = stringResource(R.string.invite_title, what),
             onDismiss = { inviteChoice = null },
             dismissLabel = null,
         ) {
@@ -492,11 +475,10 @@ fun ChatListScreen(
                 // цветовой гаммой») вместо сжатых текстовых кнопок.
                 Column {
                     Text(
-                        "Покажите QR-код, если человек рядом: он отсканирует его и войдёт сразу. " +
-                            "Ссылку можно отправить кому угодно - по ней вход как обычно."
+                        stringResource(R.string.grp_qr_hint)
                     )
                     Spacer(Modifier.height(14.dp))
-                    InviteActionBubble("Показать QR-код", filled = true) {
+                    InviteActionBubble(stringResource(R.string.groups_show_qr), filled = true) {
                         val chosen = group
                         inviteChoice = null
                         viewModel.prepareQrGroupInvite(chosen.id) { title, link ->
@@ -504,13 +486,13 @@ fun ChatListScreen(
                         }
                     }
                     Spacer(Modifier.height(8.dp))
-                    InviteActionBubble("Отправить ссылку", filled = true) {
+                    InviteActionBubble(stringResource(R.string.groups_send_link), filled = true) {
                         val chosen = group
                         inviteChoice = null
                         groupLinkShare = chosen
                     }
                     Spacer(Modifier.height(8.dp))
-                    InviteActionBubble("Отправить в APU", filled = true) {
+                    InviteActionBubble(stringResource(R.string.contacts_send_in_apu), filled = true) {
                         val chosen = group
                         inviteChoice = null
                         inviteApu = chosen
@@ -535,10 +517,10 @@ fun ChatListScreen(
             viewModel.groupMemberIdsOnce(grp.id) { memberIds = it }
         }
         ApuPremiumDialog(
-            title = "Кому отправить",
+            title = stringResource(R.string.chat_send_to),
             onDismiss = { if (!sending) inviteApu = null },
             confirmLabel = if (selected.isNotEmpty()) {
-                if (sending) "Отправляем…" else "Отправить"
+                if (sending) stringResource(R.string.chat_sending) else stringResource(R.string.action_send)
             } else {
                 null
             },
@@ -551,7 +533,7 @@ fun ChatListScreen(
                     inviteApu = null
                     android.widget.Toast.makeText(
                         context,
-                        if (failed == 0) "Отправлено: $sent" else "Отправлено: $sent, не удалось: $failed",
+                        if (failed == 0) context.getString(R.string.sent_count, sent) else context.getString(R.string.sent_failed, sent, failed),
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
                 }
@@ -561,11 +543,11 @@ fun ChatListScreen(
                 Column {
                     val list = contacts
                     when {
-                        list == null -> Text("Загрузка…")
-                        list.isEmpty() -> Text("Пока нет личных чатов - сначала добавьте контакты.")
+                        list == null -> Text(stringResource(R.string.action_loading))
+                        list.isEmpty() -> Text(stringResource(R.string.chat_no_personal))
                         else -> {
                             Text(
-                                "Выбрано: ${selected.size} из $maxPick",
+                                stringResource(R.string.selected_of, selected.size, maxPick),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color(0xFF5A6472),
                             )
@@ -645,7 +627,7 @@ fun ChatListScreen(
                                         }
                                         Spacer(Modifier.width(10.dp))
                                         Text(
-                                            c.contactName.ifBlank { "Без имени" },
+                                            c.contactName.ifBlank { stringResource(R.string.chat_no_name) },
                                             modifier = Modifier.weight(1f),
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
@@ -659,7 +641,7 @@ fun ChatListScreen(
                                         if (inGroup) {
                                             Text(
                                                 // Раунд 163: каналу - честное «уже в канале».
-                                                if (grp.isChannel) "уже в канале" else "уже в группе",
+                                                if (grp.isChannel) stringResource(R.string.chat_already_channel) else stringResource(R.string.chat_already_group),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = Color(0xFF9AA3AF),
                                                 maxLines = 1,
@@ -680,15 +662,14 @@ fun ChatListScreen(
         ApuPremiumDialog(
             title = title,
             onDismiss = { qrInvite = null },
-            confirmLabel = "Готово",
+            confirmLabel = stringResource(R.string.action_done),
             onConfirm = { qrInvite = null },
             confirmStyle = DiagnosticsActionStyle.GLASS,
             dismissLabel = null,
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    "Пусть собеседник откроет сканер QR на главном экране " +
-                        "и наведёт камеру. Он войдёт без подтверждения.",
+                    stringResource(R.string.grp_qr_wait),
                     style = MaterialTheme.typography.bodyMedium,
                     color = ApuBubbleTextColor,
                 )
@@ -704,16 +685,16 @@ fun ChatListScreen(
     // Подтверждение удаления чата.
     confirmDeleteChat?.let { chat ->
         ApuPremiumDialog(
-            title = "Удалить чат?",
+            title = stringResource(R.string.chat_delete_q),
             onDismiss = { confirmDeleteChat = null },
-            confirmLabel = "Удалить",
+            confirmLabel = stringResource(R.string.action_delete),
             onConfirm = {
                 viewModel.deleteChat(chat.id)
                 confirmDeleteChat = null
             },
         ) {
             Text(
-                "Чат с «${chat.contactName}» и вся переписка будут удалены на этом телефоне.",
+                stringResource(R.string.chat_delete_body, chat.contactName),
                 style = MaterialTheme.typography.bodyMedium,
                 color = ApuBubbleTextColor,
             )
@@ -723,16 +704,16 @@ fun ChatListScreen(
     // Подтверждение очистки переписки.
     confirmClearChat?.let { chat ->
         ApuPremiumDialog(
-            title = "Очистить переписку?",
+            title = stringResource(R.string.chat_clear_q),
             onDismiss = { confirmClearChat = null },
-            confirmLabel = "Очистить",
+            confirmLabel = stringResource(R.string.chat_clear),
             onConfirm = {
                 viewModel.clearChatHistory(chat.id)
                 confirmClearChat = null
             },
         ) {
             Text(
-                "Сообщения чата с «${chat.contactName}» будут удалены, сам чат останется.",
+                stringResource(R.string.chat_clear_body, chat.contactName),
                 style = MaterialTheme.typography.bodyMedium,
                 color = ApuBubbleTextColor,
             )
@@ -742,18 +723,18 @@ fun ChatListScreen(
     // Подтверждение выхода/удаления группы или канала.
     confirmGroup?.let { group ->
         val owner = group.myRole == GroupRole.OWNER
-        val what = if (group.isChannel) "канал" else "группу"
+        val what = if (group.isChannel) stringResource(R.string.word_channel_acc) else stringResource(R.string.word_group_acc)
         ApuPremiumDialog(
             title = when {
-                owner -> "Удалить $what?"
-                group.isChannel -> "Отписаться от канала?"
-                else -> "Выйти из группы?"
+                owner -> stringResource(R.string.confirm_delete_title, what)
+                group.isChannel -> stringResource(R.string.groups_unsubscribe_channel_q)
+                else -> stringResource(R.string.groups_leave_group_q)
             },
             onDismiss = { confirmGroup = null },
             confirmLabel = when {
-                owner -> "Удалить"
-                group.isChannel -> "Отписаться"
-                else -> "Выйти"
+                owner -> stringResource(R.string.action_delete)
+                group.isChannel -> stringResource(R.string.menu_unsubscribe)
+                else -> stringResource(R.string.action_logout)
             },
             onConfirm = {
                 if (owner) viewModel.deleteGroup(group.id) else viewModel.leaveGroup(group.id)
@@ -762,10 +743,10 @@ fun ChatListScreen(
         ) {
             Text(
                 when {
-                    owner && group.isChannel -> "«${group.title}» будет удалён у всех подписчиков."
-                    owner -> "«${group.title}» будет удалён у всех участников."
-                    group.isChannel -> "Вы перестанете получать посты канала «${group.title}»."
-                    else -> "Вы перестанете получать сообщения «${group.title}»."
+                    owner && group.isChannel -> stringResource(R.string.grp_del_channel_body, group.title)
+                    owner -> stringResource(R.string.grp_del_group_body, group.title)
+                    group.isChannel -> stringResource(R.string.grp_unsub_channel_body, group.title)
+                    else -> stringResource(R.string.grp_leave_body, group.title)
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = ApuBubbleTextColor,
@@ -780,14 +761,14 @@ fun ChatListScreen(
     // Раунд 200: перед отправкой приглашения спрашиваем про APK.
     if (showInviteShare) {
         InviteAttachDialog(
-            title = "Пригласить в APU",
+            title = stringResource(R.string.chat_invite_apu),
             onDismiss = { showInviteShare = false },
             onShare = { attach ->
                 showInviteShare = false
                 val link = runCatching { OwnInvite.link(context) }.getOrNull()
                 if (link.isNullOrBlank()) {
                     android.widget.Toast.makeText(
-                        context, "Личность ещё не создана",
+                        context, context.getString(R.string.chat_no_identity),
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
                 } else {
@@ -804,7 +785,7 @@ fun ChatListScreen(
     if (groupLinkShare != null) {
         val chosenGroup = groupLinkShare!!
         InviteAttachDialog(
-            title = if (chosenGroup.isChannel) "Пригласить в канал" else "Пригласить в сообщество",
+            title = if (chosenGroup.isChannel) stringResource(R.string.menu_invite_channel) else stringResource(R.string.menu_invite_community),
             onDismiss = { groupLinkShare = null },
             onShare = { attach ->
                 groupLinkShare = null
@@ -919,13 +900,13 @@ private fun ApuConnectByLinkDialog(
                     Spacer(Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Подключиться по ссылке",
+                            text = stringResource(R.string.chat_connect_by_link),
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                             color = ApuBubbleTextColor,
                         )
                         Text(
-                            text = "Добавьте приглашение от собеседника",
+                            text = stringResource(R.string.chat_connect_hint),
                             style = MaterialTheme.typography.bodySmall,
                             color = ApuBubbleMutedColor,
                         )
@@ -935,8 +916,8 @@ private fun ApuConnectByLinkDialog(
                 ApuFormTextField(
                     value = link,
                     onValueChange = onLinkChange,
-                    label = "Ссылка-приглашение",
-                    placeholder = "Вставьте ссылку p2pm://…",
+                    label = stringResource(R.string.chat_invite_link_label),
+                    placeholder = stringResource(R.string.chat_invite_link_placeholder),
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.Default.Link,
@@ -947,7 +928,7 @@ private fun ApuConnectByLinkDialog(
                 )
 
                 Text(
-                    text = "Проверьте, что ссылка получена от человека, которому вы доверяете.",
+                    text = stringResource(R.string.chat_connect_trust_hint),
                     style = MaterialTheme.typography.bodySmall,
                     color = ApuBubbleMutedColor,
                 )
@@ -961,7 +942,7 @@ private fun ApuConnectByLinkDialog(
                         style = DiagnosticsActionStyle.QUIET,
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text("Отмена", fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.action_cancel), fontWeight = FontWeight.SemiBold)
                     }
                     ApuPremiumContentButton(
                         onClick = onConnect,
@@ -976,7 +957,7 @@ private fun ApuConnectByLinkDialog(
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "Подключиться",
+                            text = stringResource(R.string.chat_connect),
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                         )
@@ -1032,6 +1013,8 @@ private fun InviteActionBubble(
 @Composable
 private fun SectionPage(
     section: InboxSection,
+    /** Публикация своей истории (ViewModel списка чатов). */
+    onPublishStory: (String, Int, String?) -> Unit = { _, _, _ -> },
     items: List<InboxItem>,
     isSearchActive: Boolean,
     /**
@@ -1069,6 +1052,27 @@ private fun SectionPage(
     /** Прокрутка подошла к концу загруженного - пора досыпать страницу. */
     onLoadMore: () -> Unit = {},
 ) {
+    val storiesAll by com.vladimir.messenger.data.story.StoryStore.items.collectAsStateWithLifecycle()
+    val storiesNow = remember(storiesAll) { com.vladimir.messenger.data.story.StoryStore.active() }
+    val showStories = section == InboxSection.All || section == InboxSection.Chats
+    var storyComposer by remember { mutableStateOf(false) }
+    var storyOpenAuthor by remember { mutableStateOf<String?>(null) }
+    if (storyComposer) {
+        com.vladimir.messenger.ui.components.StoryComposerDialog(
+            onDismiss = { storyComposer = false },
+            onPublish = { text, bg, photo ->
+                onPublishStory(text, bg, photo)
+                storyComposer = false
+            },
+        )
+    }
+    storyOpenAuthor?.let { authorId ->
+        com.vladimir.messenger.ui.components.StoryViewerDialog(
+            stories = storiesAll.filter { it.authorId == authorId && System.currentTimeMillis() - it.createdAtMs < com.vladimir.messenger.data.story.StoryStore.LIFETIME_MS }
+                .sortedBy { it.createdAtMs },
+            onDismiss = { storyOpenAuthor = null },
+        )
+    }
     val openAdmin = section == InboxSection.AdminGroups ||
         section == InboxSection.AdminChannels
     // «Избранное» ведёт на отдельное личное хранилище, поэтому логично живёт
@@ -1086,8 +1090,7 @@ private fun SectionPage(
                         .padding(24.dp),
                 ) {
                     Text(
-                        "Каналов пока нет. Создайте свой в разделе «Сообщества» " +
-                            "(кнопка «+», переключатель «Это канал») или войдите по ссылке.",
+                        stringResource(R.string.chats_no_channels),
                         textAlign = TextAlign.Center,
                         style     = MaterialTheme.typography.bodyMedium,
                         color     = HintBubbleTextColor,
@@ -1111,7 +1114,7 @@ private fun SectionPage(
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            "Нет непрочитанных",
+                            stringResource(R.string.chat_no_unread),
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = HintBubbleTextColor,
@@ -1119,7 +1122,7 @@ private fun SectionPage(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            "Здесь появятся чаты, группы и каналы с новыми сообщениями. Когда всё прочитаете — они исчезнут отсюда.",
+                            stringResource(R.string.chat_unread_empty_hint),
                             style = MaterialTheme.typography.bodyMedium,
                             textAlign = TextAlign.Center,
                             color = HintBubbleMutedColor,
@@ -1147,9 +1150,9 @@ private fun SectionPage(
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
                             if (section == InboxSection.AdminGroups) {
-                                "Вы пока не создали ни одной группы"
+                                stringResource(R.string.chat_no_groups_created)
                             } else {
-                                "Групп пока нет"
+                                stringResource(R.string.chat_no_groups)
                             },
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.SemiBold,
@@ -1158,8 +1161,7 @@ private fun SectionPage(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            "Создайте свою кнопкой с карандашом внизу справа " +
-                                "или войдите в чужую по ссылке-приглашению",
+                            stringResource(R.string.chats_create_hint),
                             style = MaterialTheme.typography.bodyMedium,
                             textAlign = TextAlign.Center,
                             color = HintBubbleMutedColor,
@@ -1211,6 +1213,14 @@ private fun SectionPage(
                     // последний чат (как было в ленте канала и в избранном).
                     contentPadding = PaddingValues(top = 4.dp, bottom = 88.dp),
                 ) {
+                    // Истории: полоса сверху ленты.
+                    if (showStories) item(key = "stories") {
+                        com.vladimir.messenger.ui.components.StoriesStrip(
+                            stories = storiesNow,
+                            onAddClick = { storyComposer = true },
+                            onOpenAuthor = { storyOpenAuthor = it },
+                        )
+                    }
                     if (showSavedContact) {
                         item(key = "saved-contact") {
                             SavedContactCard(onClick = onSavedClick)
@@ -1242,12 +1252,12 @@ private fun SectionPage(
                                 },
                                 menuActions = listOf(
                                     BubbleMenuAction(
-                                        title = if (item.chat.isPinned) "Открепить" else "Закрепить",
+                                        title = if (item.chat.isPinned) stringResource(R.string.menu_unpin) else stringResource(R.string.menu_pin),
                                         icon = Icons.Filled.PushPin,
                                         onClick = { onTogglePersonalPin(item.chat) },
                                     ),
                                     BubbleMenuAction(
-                                        title = "Открыть чат",
+                                        title = stringResource(R.string.menu_open_chat),
                                         icon = Icons.Default.Forum,
                                         onClick = {
                                             onChatClick(
@@ -1258,7 +1268,7 @@ private fun SectionPage(
                                         },
                                     ),
                                     BubbleMenuAction(
-                                        title = "Позвонить",
+                                        title = stringResource(R.string.menu_call),
                                         icon = Icons.Default.Call,
                                         onClick = {
                                             onCallClick(
@@ -1268,7 +1278,7 @@ private fun SectionPage(
                                         },
                                     ),
                                     BubbleMenuAction(
-                                        title = "Поделиться контактом",
+                                        title = stringResource(R.string.menu_share_contact),
                                         icon = Icons.Default.Share,
                                         onClick = { onShareCard(item.chat) },
                                     ),
@@ -1277,12 +1287,12 @@ private fun SectionPage(
                                     // зеркала, поэтому пункт показывает то,
                                     // что будет после нажатия.
                                     BubbleMenuAction(
-                                        title = if (item.chat.isArchived) "Вернуть из архива" else "В архив",
+                                        title = if (item.chat.isArchived) stringResource(R.string.menu_unarchive) else stringResource(R.string.menu_archive),
                                         icon = Icons.Default.Archive,
                                         onClick = { onTogglePersonalArchive(item.chat) },
                                     ),
                                     BubbleMenuAction(
-                                        title = if (item.chat.isMuted()) "Включить уведомления" else "Отключить уведомления",
+                                        title = if (item.chat.isMuted()) stringResource(R.string.menu_unmute) else stringResource(R.string.menu_mute),
                                         icon = if (item.chat.isMuted()) {
                                             Icons.Default.NotificationsActive
                                         } else {
@@ -1291,17 +1301,17 @@ private fun SectionPage(
                                         onClick = { onTogglePersonalMute(item.chat) },
                                     ),
                                     BubbleMenuAction(
-                                        title = "Отметить прочитанным",
+                                        title = stringResource(R.string.menu_mark_read),
                                         icon = Icons.Default.DoneAll,
                                         onClick = { onMarkChatRead(item.chat.id) },
                                     ),
                                     BubbleMenuAction(
-                                        title = "Очистить переписку",
+                                        title = stringResource(R.string.menu_clear_chat),
                                         icon = Icons.Default.CleaningServices,
                                         onClick = { onClearChat(item.chat) },
                                     ),
                                     BubbleMenuAction(
-                                        title = "Удалить чат",
+                                        title = stringResource(R.string.menu_delete_chat),
                                         icon = Icons.Default.Delete,
                                         destructive = true,
                                         onClick = { onDeleteChat(item.chat) },
@@ -1315,7 +1325,7 @@ private fun SectionPage(
                                 menuActions = buildList {
                                     add(
                                         BubbleMenuAction(
-                                            title = if (item.group.isPinned) "Открепить" else "Закрепить",
+                                            title = if (item.group.isPinned) stringResource(R.string.menu_unpin) else stringResource(R.string.menu_pin),
                                             icon = Icons.Filled.PushPin,
                                             onClick = { onToggleGroupPin(item.group) },
                                         )
@@ -1324,14 +1334,14 @@ private fun SectionPage(
                                     // личное, участникам не рассылается.
                                     add(
                                         BubbleMenuAction(
-                                            title = if (item.group.isArchived) "Вернуть из архива" else "В архив",
+                                            title = if (item.group.isArchived) stringResource(R.string.menu_unarchive) else stringResource(R.string.menu_archive),
                                             icon = Icons.Default.Archive,
                                             onClick = { onToggleGroupArchive(item.group) },
                                         )
                                     )
                                     add(
                                         BubbleMenuAction(
-                                            title = if (item.group.isMuted()) "Включить уведомления" else "Отключить уведомления",
+                                            title = if (item.group.isMuted()) stringResource(R.string.menu_unmute) else stringResource(R.string.menu_mute),
                                             icon = if (item.group.isMuted()) {
                                                 Icons.Default.NotificationsActive
                                             } else {
@@ -1342,7 +1352,7 @@ private fun SectionPage(
                                     )
                                     add(
                                         BubbleMenuAction(
-                                            title = if (item.group.isChannel) "Открыть канал" else "Открыть группу",
+                                            title = if (item.group.isChannel) stringResource(R.string.menu_open_channel) else stringResource(R.string.menu_open_group),
                                             icon = Icons.Default.Forum,
                                             onClick = {
                                                 if (item.group.isChannel) {
@@ -1356,9 +1366,9 @@ private fun SectionPage(
                                     add(
                                         BubbleMenuAction(
                                             title = if (item.group.isChannel) {
-                                                "Пригласить в канал"
+                                                stringResource(R.string.menu_invite_channel)
                                             } else {
-                                                "Пригласить в сообщество"
+                                                stringResource(R.string.menu_invite_community)
                                             },
                                             icon = Icons.Default.PersonAdd,
                                             onClick = { onInviteToGroup(item.group) },
@@ -1369,7 +1379,7 @@ private fun SectionPage(
                                     ) {
                                         add(
                                             BubbleMenuAction(
-                                                title = "Управление",
+                                                title = stringResource(R.string.menu_manage),
                                                 icon = Icons.Default.Settings,
                                                 onClick = { onGroupAdminClick(item.group.id) },
                                             )
@@ -1377,7 +1387,7 @@ private fun SectionPage(
                                     }
                                     add(
                                         BubbleMenuAction(
-                                            title = "Отметить прочитанным",
+                                            title = stringResource(R.string.menu_mark_read),
                                             icon = Icons.Default.DoneAll,
                                             onClick = { onMarkGroupRead(item.group.id) },
                                         )
@@ -1386,9 +1396,9 @@ private fun SectionPage(
                                         BubbleMenuAction(
                                             title = when {
                                                 item.group.myRole == GroupRole.OWNER ->
-                                                    if (item.group.isChannel) "Удалить канал" else "Удалить группу"
-                                                item.group.isChannel -> "Отписаться"
-                                                else -> "Выйти"
+                                                    if (item.group.isChannel) stringResource(R.string.menu_delete_channel) else stringResource(R.string.menu_delete_group)
+                                                item.group.isChannel -> stringResource(R.string.menu_unsubscribe)
+                                                else -> stringResource(R.string.action_logout)
                                             },
                                             icon = Icons.Default.Delete,
                                             destructive = true,
@@ -1420,51 +1430,23 @@ private fun SectionPage(
     }
 }
 
-// Поле поиска в TopAppBar
+// Поле поиска в TopAppBar: общее премиальное поле поиска APU.
 @Composable
 private fun SearchTextField(
     query: String,
     onQueryChanged: (String) -> Unit,
     onClose: () -> Unit,
 ) {
-    // Раунд 265: поиск главного экрана - в фирменном пузыре, как и везде.
-    TextField(
-        value       = query,
+    ApuSearchField(
+        value = query,
         onValueChange = onQueryChanged,
-        placeholder = {
-            Text(
-                "Поиск: чаты, группы, каналы",
-                color = androidx.compose.ui.graphics.Color(0xFF1E2430).copy(alpha = 0.45f),
-            )
-        },
-        singleLine  = true,
-        colors = TextFieldDefaults.colors(
-            focusedContainerColor   = androidx.compose.ui.graphics.Color(0xFFF5F7FA).copy(alpha = 0.92f),
-            unfocusedContainerColor = androidx.compose.ui.graphics.Color(0xFFF5F7FA).copy(alpha = 0.92f),
-            focusedIndicatorColor   = androidx.compose.ui.graphics.Color.Transparent,
-            unfocusedIndicatorColor = androidx.compose.ui.graphics.Color.Transparent,
-            focusedTextColor = androidx.compose.ui.graphics.Color(0xFF1E2430),
-            unfocusedTextColor = androidx.compose.ui.graphics.Color(0xFF1E2430),
-            cursorColor = MaterialTheme.colorScheme.primary,
-        ),
-        trailingIcon = {
+        placeholder = stringResource(R.string.chat_search_placeholder),
+        modifier = Modifier.fillMaxWidth(),
+        trailing = {
             IconButton(onClick = onClose) {
-                Icon(Icons.Default.Close, "Закрыть поиск")
+                Icon(Icons.Default.Close, stringResource(R.string.chat_close_search))
             }
         },
-        modifier = Modifier
-            .fillMaxWidth()
-            // Владелец 2026-10-07: поиск — тот же премиальный слой, что строки
-            // списка: подъём, золотая нить по верхней кромке, блеск под текстом.
-            .apuPremiumLift(4.dp)
-            .apuPremiumThread(inset = 16.dp)
-            .apuPremiumGloss(intensity = 0.35f, topFraction = 0.6f)
-            .clip(RoundedCornerShape(18.dp))
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(18.dp),
-            ),
     )
 }
 
@@ -1489,7 +1471,7 @@ private fun EmptyChatList(
             )
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                "Ничего не найдено",
+                stringResource(R.string.chat_nothing_found),
                 style = MaterialTheme.typography.titleMedium,
                 color = HintBubbleTextColor,
             )
@@ -1502,14 +1484,14 @@ private fun EmptyChatList(
             )
             Spacer(modifier = Modifier.height(20.dp))
             Text(
-                "Нет чатов",
+                stringResource(R.string.chat_no_chats),
                 style     = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.SemiBold,
                 color     = HintBubbleTextColor,
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                "Добавьте контакт через QR-код или пригласительную ссылку",
+                stringResource(R.string.chat_add_contact_hint),
                 style     = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
                 color     = HintBubbleMutedColor,
@@ -1521,7 +1503,7 @@ private fun EmptyChatList(
             ) {
                 Icon(Icons.Default.PersonAdd, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Добавить контакт")
+                Text(stringResource(R.string.chat_add_contact))
             }
         }
     }
@@ -1569,7 +1551,7 @@ private fun SavedContactCard(
         Spacer(modifier = Modifier.width(14.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "Избранное",
+                text = stringResource(R.string.chat_saved),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = Color(0xFF1E2430),
@@ -1577,14 +1559,14 @@ private fun SavedContactCard(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = "Личное хранилище",
+                text = stringResource(R.string.chat_saved_subtitle),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
                 maxLines = 1,
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = "Заметки, файлы и пересланное",
+                text = stringResource(R.string.chat_saved_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFF5A6472),
                 maxLines = 1,
@@ -1661,7 +1643,7 @@ private fun GroupCard(
                 if (openAdmin) {
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (group.myRole == GroupRole.OWNER) "владелец" else "админ",
+                        text = if (group.myRole == GroupRole.OWNER) stringResource(R.string.chat_role_owner) else stringResource(R.string.chat_role_admin),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                     )
@@ -1669,14 +1651,14 @@ private fun GroupCard(
             }
             // Подпись пузыря — как у личных чатов: сразу видно, что это.
             Text(
-                text = if (group.isChannel) BubbleKind.Channel.label else BubbleKind.Group.label,
+                text = if (group.isChannel) stringResource(BubbleKind.Channel.labelRes) else stringResource(BubbleKind.Group.labelRes),
                 style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFF5A6472),
                 maxLines = 1,
             )
             if (draftText.isNotEmpty()) {
                 Text(
-                    text = "Черновик: $draftText",
+                    text = stringResource(R.string.contact_draft_prefix, draftText),
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color(0xFFC62828),
                     maxLines = 1,
@@ -1687,9 +1669,9 @@ private fun GroupCard(
                     // Раунд 155: без служебных строк (гифки/стикеры).
                     text = com.vladimir.messenger.util.ChatPreviews.human(group.preview)
                         ?: if (group.isPublic) {
-                        "Публичная группа - ${group.memberCount} уч."
+                        stringResource(R.string.group_public_members, group.memberCount)
                     } else {
-                        "Частная группа - ${group.memberCount} уч."
+                        stringResource(R.string.group_private_members, group.memberCount)
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = Color(0xFF5A6472),
@@ -1718,7 +1700,7 @@ private fun GroupCard(
                     Spacer(Modifier.width(4.dp))
                     Icon(
                         imageVector = Icons.Filled.PushPin,
-                        contentDescription = "Закреплено в главном списке",
+                        contentDescription = stringResource(R.string.chat_pinned_desc),
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(15.dp),
                     )

@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -99,7 +101,7 @@ fun InviteAttachDialog(
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            text = "Отправьте приглашение удобным способом",
+                            text = stringResource(R.string.iad_title),
                             style = MaterialTheme.typography.bodySmall,
                             color = ApuBubbleMutedColor,
                         )
@@ -107,7 +109,7 @@ fun InviteAttachDialog(
                 }
 
                 Text(
-                    text = "Ссылка на приглашение будет добавлена к сообщению. При желании приложите APK, чтобы получатель мог установить APU сразу.",
+                    text = stringResource(R.string.iad_hint),
                     style = MaterialTheme.typography.bodyMedium,
                     color = ApuBubbleTextColor,
                 )
@@ -134,13 +136,13 @@ fun InviteAttachDialog(
                     Spacer(Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Приложить установочный файл",
+                            text = stringResource(R.string.iad_attach_apk),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = ApuBubbleTextColor,
                         )
                         Text(
-                            text = "APK около 40 МБ — удобно, если у получателя ещё нет APU.",
+                            text = stringResource(R.string.iad_apk_size),
                             style = MaterialTheme.typography.bodySmall,
                             color = ApuBubbleMutedColor,
                         )
@@ -156,14 +158,14 @@ fun InviteAttachDialog(
                         style = DiagnosticsActionStyle.QUIET,
                         modifier = Modifier.weight(1f),
                     ) {
-                        Text("Отмена", fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.action_cancel), fontWeight = FontWeight.SemiBold)
                     }
                     ApuPremiumContentButton(
                         onClick = { onShare(attachApk) },
                         style = DiagnosticsActionStyle.PRIMARY,
                         modifier = Modifier.weight(1.2f),
                     ) {
-                        Text("Поделиться", fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.admin_share), fontWeight = FontWeight.SemiBold)
                     }
                 }
             }

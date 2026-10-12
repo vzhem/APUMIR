@@ -123,20 +123,28 @@ impl StunClient {
     /// # Аргументы
     /// - `servers` — список серверов (например `DEFAULT_STUN_SERVERS`)
     pub fn get_external_address_from_any(servers: &[&str]) -> IceResult<SocketAddr> {
-        for server in servers {
-            match Self::get_external_address(server) {
-                Ok(addr) => {
-                    tracing::info!(server = server, addr = %addr, "STUN: получен внешний адрес");
-                    return Ok(addr);
-                }
-                Err(e) => {
-                    tracing::warn!(server = server, error = %e, "STUN сервер недоступен");
-                    continue;
-                }
+        try_stun_servers(servers, Self::get_external_address)
+    }
+}
+
+/// Пробует STUN endpoints по очереди: один внешний отказ не должен отменять
+/// последующие адреса. Изолировано для детерминированного теста без интернета.
+fn try_stun_servers<F>(servers: &[&str], mut query: F) -> IceResult<SocketAddr>
+where
+    F: FnMut(&str) -> IceResult<SocketAddr>,
+{
+    for server in servers {
+        match query(server) {
+            Ok(addr) => {
+                tracing::info!(server = server, addr = %addr, "STUN: получен внешний адрес");
+                return Ok(addr);
+            }
+            Err(error) => {
+                tracing::warn!(server = server, error = %error, "STUN сервер недоступен");
             }
         }
-        Err(IceError::AllServersFailed)
     }
+    Err(IceError::AllServersFailed)
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -233,6 +241,40 @@ mod tests {
     #[test]
     fn test_decode_rejects_garbage() {
         assert!(decode_binding_response(&[0u8; 8]).is_err());
+    }
+
+    #[test]
+    fn stun_fallback_uses_next_endpoint_after_a_temporary_refusal() {
+        let servers = ["offline.example:3478", "available.example:3478"];
+        let expected: SocketAddr = "192.0.2.10:54321".parse().unwrap();
+        let mut attempted = Vec::new();
+        let result = try_stun_servers(&servers, |server| {
+            attempted.push(server.to_string());
+            if server.starts_with("offline.") {
+                Err(IceError::Timeout)
+            } else {
+                Ok(expected)
+            }
+        });
+
+        assert_eq!(result.unwrap(), expected);
+        assert_eq!(
+            attempted,
+            servers.iter().map(|server| server.to_string()).collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn all_stun_refusals_return_a_recoverable_error_after_all_attempts() {
+        let servers = ["offline-a.example:3478", "offline-b.example:3478"];
+        let mut attempts = 0usize;
+        let result = try_stun_servers(&servers, |_| {
+            attempts += 1;
+            Err(IceError::Timeout)
+        });
+
+        assert!(matches!(result, Err(IceError::AllServersFailed)));
+        assert_eq!(attempts, servers.len());
     }
 
     #[test]

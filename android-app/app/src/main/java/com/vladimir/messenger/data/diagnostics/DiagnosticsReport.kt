@@ -52,7 +52,7 @@ enum class DiagnosticsLineTone {
 // Заголовки разделов перечислены явно: под этот шаблон не попадут ни метки
 // приватности вида [contact], ни скрытые тела сообщений.
 private val toneSectionRegex = Regex(
-    "^\\[(?:сводка|окружение|сеть|ядро|mqtt|сообщения|передачи|сессия|журнал|лог процесса)\\]",
+    "^\\[(?:сводка|окружение|сеть|обновления|ядро|mqtt|помощники|сообщения|передачи|сессия|журнал|лог процесса)\\]",
 )
 private val toneBadSummaryRegex = Regex("^✖")
 private val toneWarnSummaryRegex = Regex("^!")
@@ -91,6 +91,33 @@ data class DiagnosticsJournalEntry(
     val area: String,
     val detail: String,
 )
+
+/** Privacy-safe summary of release checks and update-notification delivery. */
+data class UpdateDiagnosticFacts(
+    val currentVersion: String = "",
+    val latestVersion: String = "",
+    val lastCheckAtMs: Long = 0L,
+    val checkDurationMs: Long? = null,
+    val trigger: String = "never",
+    val source: String = "none",
+    val outcome: String = "never_checked",
+    val httpStatus: Int? = null,
+    val githubOutcome: String = "not_attempted",
+    val githubHttpStatus: Int? = null,
+    val relayOutcome: String = "not_attempted",
+    val relayHttpStatus: Int? = null,
+    val notificationVersion: String = "",
+    val notificationKind: String = "never",
+    val notificationAtMs: Long = 0L,
+    val notificationResult: String = "never",
+    val notificationsAllowed: Boolean? = null,
+    val notificationChannelEnabled: Boolean? = null,
+    val notificationChannelImportance: Int? = null,
+) {
+    companion object {
+        val EMPTY = UpdateDiagnosticFacts()
+    }
+}
 
 /**
  * Факты отчёта, собранные на телефоне. Обычные значения: ни Android, ни ядра
@@ -185,8 +212,9 @@ data class DiagnosticsFacts(
     val relayQueueOwnSignals: Long? = null,
     /** Сколько получателей занято в последней сводке очереди ядра. */
     val relayQueueRecipients: Long? = null,
-    /** Вытеснения своего запаса в текущей выборке системного журнала. */
+    /** Вытеснения своей переписки из RAM-кэша: накопительный счётчик либо выборка старых логов. */
     val relayQueueOwnEvictions: Long = 0L,
+    val relayQueueOwnEvictionsAreCumulative: Boolean = false,
     /** Полные циклы STUN, в которых ни один сервер не ответил. */
     val stunFailedCycles: Long = 0L,
     /** Успешные ответы STUN в выборке системного журнала. */
@@ -197,7 +225,97 @@ data class DiagnosticsFacts(
     val logcatWarnings: Long = 0L,
     /** Ошибки E/F из последних строк logcat процесса приложения. */
     val logcatErrors: Long = 0L,
+    /** Локальный opt-in принимать online-helper transit; это не разрешение отправителю. */
+    val onlineHelperParticipationEnabled: Boolean? = null,
+    /** Безопасные события маршрута сообщений из ограниченной выборки Rust logcat. */
+    val helperRoutes: HelperRouteDiagnostics = HelperRouteDiagnostics.EMPTY,
+    /** Состояние последней проверки/уведомления о версии; без URL и текста релиза. */
+    val updateDiagnostics: UpdateDiagnosticFacts = UpdateDiagnosticFacts.EMPTY,
 )
+
+/** Агрегаты обычных сообщений; file chunks intentionally stay on file-transfer diagnostics. */
+data class HelperRouteDiagnostics(
+    val attempts: Long = 0L,
+    /** Сумма выбранных helper slots (не число уникальных устройств). */
+    val selectedCandidates: Long = 0L,
+    val attemptsWithoutCandidates: Long = 0L,
+    val routeUnavailable: Long = 0L,
+    val routeUnavailableRuntime: Long = 0L,
+    val routeUnavailableLocalIdentity: Long = 0L,
+    val routeUnavailableRecipientIdentity: Long = 0L,
+    val packetPreparationRejected: Long = 0L,
+    val attemptsNotPrepared: Long = 0L,
+    val primaryLegsStarted: Long = 0L,
+    val reserveLegsStarted: Long = 0L,
+    val legWritesSucceeded: Long = 0L,
+    val legWritesFailed: Long = 0L,
+    val reserveAfterPrimaryFailure: Long = 0L,
+    val reserveAfterHedgeDelay: Long = 0L,
+    val signedDeclinesReceived: Long = 0L,
+    val recipientReceiptsIssued: Long = 0L,
+    val senderReceiptsVerified: Long = 0L,
+    val receiptReturnedByPrimary: Long = 0L,
+    val receiptReturnedByReserve: Long = 0L,
+    val receiptReturnedByUnknownLeg: Long = 0L,
+    val attemptsWithoutReceipt: Long = 0L,
+    val averageVerifiedReceiptMs: Long? = null,
+) {
+    companion object {
+        val EMPTY = HelperRouteDiagnostics()
+    }
+}
+
+/** Парсер безопасных машинных маркеров Rust logcat; сами строки не хранятся в фактах. */
+object HelperRouteDiagnosticsParser {
+    private val eventPattern = Regex("""\bONLINE_HELPER event=([a-z_]+)\b""")
+
+    fun parse(lines: List<String>): HelperRouteDiagnostics {
+        val events = lines.mapNotNull { line ->
+            val name = eventPattern.find(line)?.groupValues?.getOrNull(1) ?: return@mapNotNull null
+            name to line
+        }
+        fun count(name: String): Long = events.count { it.first == name }.toLong()
+        fun count(name: String, key: String, value: String): Long =
+            events.count { it.first == name && field(it.second, key) == value }.toLong()
+        val verifiedReceiptTimes = events.asSequence()
+            .filter { (name, line) -> name == "attempt_result" && field(line, "outcome") == "receipt_verified" }
+            .mapNotNull { (_, line) -> field(line, "elapsed_ms")?.toLongOrNull() }
+            .toList()
+        return HelperRouteDiagnostics(
+            attempts = count("attempt_started"),
+            selectedCandidates = events.asSequence()
+                .filter { it.first == "candidates" }
+                .sumOf { (_, line) -> field(line, "selected")?.toLongOrNull() ?: 0L },
+            attemptsWithoutCandidates = count("no_candidates"),
+            routeUnavailable = count("route_unavailable"),
+            routeUnavailableRuntime = count("route_unavailable", "reason", "runtime"),
+            routeUnavailableLocalIdentity = count("route_unavailable", "reason", "identity"),
+            routeUnavailableRecipientIdentity = count("route_unavailable", "reason", "recipient_identity"),
+            packetPreparationRejected = count("relay_packet_rejected"),
+            attemptsNotPrepared = count("attempt_result", "outcome", "not_prepared"),
+            primaryLegsStarted = count("leg_started", "slot", "1"),
+            reserveLegsStarted = count("leg_started", "slot", "2"),
+            legWritesSucceeded = count("leg_write", "result", "success"),
+            legWritesFailed = count("leg_write", "result", "failed"),
+            reserveAfterPrimaryFailure = count("reserve_started", "trigger", "primary_failed"),
+            reserveAfterHedgeDelay = count("reserve_started", "trigger", "hedge_delay"),
+            signedDeclinesReceived = count("signed_decline_received"),
+            recipientReceiptsIssued = count("recipient_receipt_issued"),
+            senderReceiptsVerified = count("receipt_verified"),
+            receiptReturnedByPrimary = count("receipt_verified", "return_leg", "1"),
+            receiptReturnedByReserve = count("receipt_verified", "return_leg", "2"),
+            receiptReturnedByUnknownLeg = count("receipt_verified", "return_leg", "unknown"),
+            attemptsWithoutReceipt = count("attempt_result", "outcome", "no_receipt") +
+                count("attempt_result", "outcome", "local_wait_timeout"),
+            averageVerifiedReceiptMs = verifiedReceiptTimes.takeIf { it.isNotEmpty() }
+                ?.let { values -> values.sum() / values.size },
+        )
+    }
+
+    private fun field(line: String, key: String): String? =
+        Regex("""(?:^|\s)${Regex.escape(key)}=([A-Za-z0-9_-]+)(?:\s|$)""")
+            .find(line)?.groupValues?.getOrNull(1)
+}
 
 /** Имена счётчиков сессии: один список для записи (хуки) и для отчёта. */
 object Counters {
@@ -286,6 +404,9 @@ object TransferErrorText {
 /** Счётчики уровней Android logcat для ограниченной выборки процесса. */
 data class DiagnosticsLogcatLevels(val warnings: Long, val errors: Long)
 
+/** Накопительный счётчик вытеснений своей переписки из RAM либо legacy sample. */
+data class RelayQueueEvictionDiagnostics(val count: Long, val cumulative: Boolean)
+
 /**
  * Приватность отчёта и строк системного журнала. Живёт в чистом Kotlin
  * нарочно: правила покрыты JVM-тестами на runner (см. DiagnosticsReportTest),
@@ -297,12 +418,22 @@ data class DiagnosticsLogcatLevels(val warnings: Long, val errors: Long)
 object DiagnosticsPrivacy {
     private val contactRegex = Regex("pk_[0-9a-f]{32,64}")
     private val uuidRegex = Regex("(?i)\\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\\b")
+    // MQTT receipt topics carry SHA-256(messageId), a stable 64-hex correlator.
+    // Hide it as an identifier too; redacting only UUID and 32-hex transfer IDs
+    // left these message-derived keys visible in the privacy report.
+    private val messageHashRegex = Regex("(?i)\\b[0-9a-f]{64}\\b")
     private val transferHexRegex = Regex("(?i)\\b[0-9a-f]{32}\\b")
     private val threadtimeSeverityRegex = Regex(
         "^\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d+\\s+\\d+\\s+\\d+\\s+([A-Z])\\s",
     )
     private val fromHexRegex = Regex("(?i)(\\bfrom\\s+)[0-9a-f]{8}\\b")
     private val ipv4Regex = Regex("(?<![0-9A-Fa-f])(?:[0-9]{1,3}\\.){3}[0-9]{1,3}(?::[0-9]{1,5})?")
+    private val privatePathRegex = Regex(
+        "(?i)(?<![A-Za-z0-9])/(?:data|storage|sdcard|mnt|tmp|cache|home|users|private|documents|download)(?:/[^\\s,;:'\"<>]+)+",
+    )
+    private val privatePathFieldRegex = Regex(
+        "(?i)\\b(file(?:name)?|path|local_uri|uri)=(?:\"[^\"]*\"|'[^']*'|[^\\s,;]+)",
+    )
 
     /**
      * IPv6 бывает сжатым («fe80::1», «2001:db8:12::7») или полным (8 групп).
@@ -329,23 +460,89 @@ object DiagnosticsPrivacy {
     fun redact(text: String): String = text
         .replace(contactRegex, "[contact]")
         .replace(uuidRegex, "[id]")
+        .replace(messageHashRegex, "[id]")
         .replace(transferHexRegex, "[transfer]")
         .replace(fromHexRegex) { match -> "${match.groupValues[1]}[contact]" }
         .replace(ipv4Regex, "[ip]")
         .replace(ipv6CompressedRegex, "[ipv6]")
         .replace(ipv6FullRegex, "[ipv6]")
+        .replace(privatePathFieldRegex) { match -> "${match.groupValues[1]}=[скрыто]" }
+        .replace(privatePathRegex, "[path]")
+
+    /** Уровень строки Android logcat threadtime (`V/D/I/W/E/F`), если есть. */
+    fun logcatSeverity(line: String): String? =
+        threadtimeSeverityRegex.find(line)?.groupValues?.get(1)
 
     /** Подсчитать Android logcat W и E/F в уже ограниченной выборке процесса. */
     fun countLogcatSeverities(lines: List<String>): DiagnosticsLogcatLevels {
         var warnings = 0L
         var errors = 0L
         lines.forEach { line ->
-            when (threadtimeSeverityRegex.find(line)?.groupValues?.get(1)) {
+            when (logcatSeverity(line)) {
                 "W" -> warnings++
                 "E", "F" -> errors++
             }
         }
         return DiagnosticsLogcatLevels(warnings, errors)
+    }
+
+    /**
+     * Берёт самый свежий queue counter из текущего запуска ядра. Startup summary
+     * сбрасывает старый cumulative value после перезапуска; periodic summary
+     * обновляет его. Older builds fall back to the bounded legacy warning sample.
+     */
+    fun parseRelayQueueOwnEvictions(lines: List<String>): RelayQueueEvictionDiagnostics {
+        for (line in lines.asReversed()) {
+            if (line.contains("Relay-очередь: своих=")) {
+                numericValueAfter(line, "вытеснено-своих=")?.let {
+                    return RelayQueueEvictionDiagnostics(it, cumulative = true)
+                }
+            }
+            numericValueAfter(line, "own_capacity_evictions=")?.let {
+                return RelayQueueEvictionDiagnostics(it, cumulative = true)
+            }
+        }
+        val legacyWarnings = lines.count { it.contains("вытеснено самое старое своё") }.toLong()
+        return RelayQueueEvictionDiagnostics(legacyWarnings, cumulative = false)
+    }
+
+    private fun numericValueAfter(line: String, marker: String): Long? {
+        val start = line.indexOf(marker)
+        if (start < 0) return null
+        val digits = line.substring(start + marker.length).takeWhile { it.isDigit() }
+        return digits.takeIf { it.isNotEmpty() }?.toLongOrNull()
+    }
+
+    /**
+     * Оставить место для настоящих E/F строк: большой поток повторных W не должен
+     * вытеснять ошибки из итогового отчёта. Ошибки идут последними, чтобы их было
+     * видно и в конце длинного отчёта.
+     */
+    fun prioritizeLogcatErrors(
+        lines: List<String>,
+        limit: Int,
+        maxErrorLines: Int = 20,
+    ): List<String> {
+        val boundedLimit = limit.coerceAtLeast(1)
+        val (errors, ordinary) = lines.partition { line ->
+            val severity = logcatSeverity(line)
+            severity == "E" || severity == "F"
+        }
+        val errorBudget = minOf(maxErrorLines.coerceAtLeast(1), maxOf(1, boundedLimit / 3))
+        val keptErrors = if (errors.size <= errorBudget) {
+            errors
+        } else {
+            val collapsed = collapseRepeatedLogLines(errors, errorBudget)
+            val actualErrors = collapsed.filter { logcatSeverity(it) == "E" || logcatSeverity(it) == "F" }
+            (actualErrors.ifEmpty { errors }).takeLast(errorBudget)
+        }.takeLast(errorBudget)
+        val ordinaryBudget = boundedLimit - keptErrors.size
+        val keptOrdinary = if (ordinaryBudget > 0) {
+            collapseRepeatedLogLines(ordinary, ordinaryBudget)
+        } else {
+            emptyList()
+        }
+        return (keptOrdinary + keptErrors).takeLast(boundedLimit)
     }
 
     /**
@@ -441,7 +638,7 @@ object DiagnosticsPrivacy {
 /** Сборка текста отчёта и строк сводки. Ничего не читает сама — только форматирует. */
 object DiagnosticsReport {
     /** Версия формата отчёта: по ней видно, что файл разобран теми же правилами. */
-    const val SCHEMA = "apu-diag/2"
+    const val SCHEMA = "apu-diag/4"
 
     private const val MAX_JOURNAL_LINES = 240
 
@@ -469,8 +666,10 @@ object DiagnosticsReport {
         appendSummary(facts)
         appendEnvironment(facts)
         appendNetwork(facts)
+        appendUpdateDiagnostics(facts)
         appendCore(facts)
         appendMqtt(facts)
+        appendHelperRoutes(facts)
         appendMessages(facts)
         appendTransfers(facts)
         appendSession(facts)
@@ -604,7 +803,7 @@ object DiagnosticsReport {
             DiagnosticsLine(
                 DiagnosticsLevel.OK,
                 "Прямой канал",
-                "сессий $negotiated, отдано $sentRanges диапазонов " +
+                "исходящих сессий согласовано $negotiated, отдано $sentRanges диапазонов " +
                     "(${formatBytes(facts.counters[Counters.F4_BYTES_SENT] ?: 0L)}), " +
                     "принято $receivedRanges " +
                     "(${formatBytes(facts.counters[Counters.F4_BYTES_RECEIVED] ?: 0L)})",
@@ -657,8 +856,13 @@ object DiagnosticsReport {
             val waitingSignals = facts.relayQueueOwnSignals ?: 0L
             if (waitingSignals > 0L) append(" (из них сигналов и пакетов $waitingSignals)")
             if (ownEvictions > 0L) {
-                append(" · в выборке logcat было вытеснений своего запаса: $ownEvictions; " +
-                    "копии остаются в durable-сторе и очереди досылки")
+                val evictionsSource = if (facts.relayQueueOwnEvictionsAreCumulative) {
+                    "с запуска ядра"
+                } else {
+                    "по доступным строкам logcat"
+                }
+                append(" · вытеснений своего из ограниченного RAM-кэша: $ownEvictions ($evictionsSource); " +
+                    "само по себе не доказывает потерю; отдельная durable/outbox-копия остаётся, если запись прошла")
             }
             if (facts.relayQueueFull > 0L) {
                 append(" · в выборке logcat было отказов чужой пересылки из-за лимита: ${facts.relayQueueFull}")
@@ -759,11 +963,51 @@ object DiagnosticsReport {
         appendLine("notifications=${if (facts.notificationsAllowed) "разрешены" else "запрещены"}")
         appendLine("proxy_tunnel=${if (facts.proxyTunnel) "включён" else "выключен"}")
         appendLine("swarm=${facts.swarmMode}")
+        appendLine("online_helper_participation=${facts.onlineHelperParticipationEnabled?.toString() ?: "unknown"}")
         appendLine("im_the_server=${facts.serverMode}")
         appendLine("power_save=${facts.powerSave} · doze=${facts.deviceIdle} · battery_exempt=${facts.batteryExempt}")
         appendLine("battery=${facts.batteryPercent}% (${if (facts.batteryCharging) "зарядка" else "разряд"})")
         appendLine()
     }
+
+    private fun StringBuilder.appendUpdateDiagnostics(facts: DiagnosticsFacts) {
+        val update = facts.updateDiagnostics
+        appendLine("[обновления]")
+        appendLine("current_version=${safeDiagnosticToken(update.currentVersion.ifBlank { facts.appVersion.substringBefore(" (") })}")
+        appendLine("latest_version=${safeDiagnosticToken(update.latestVersion).ifBlank { "unknown" }}")
+        appendLine("last_check_trigger=${safeDiagnosticToken(update.trigger).ifBlank { "unknown" }}")
+        appendLine("last_check_source=${safeDiagnosticToken(update.source).ifBlank { "unknown" }}")
+        appendLine("last_check_result=${safeDiagnosticToken(update.outcome).ifBlank { "unknown" }}")
+        appendLine("last_check_http_status=${update.httpStatus?.takeIf { it in 100..599 }?.toString() ?: "unknown"}")
+        appendLine("github_check_result=${safeDiagnosticToken(update.githubOutcome).ifBlank { "unknown" }}")
+        appendLine("github_http_status=${update.githubHttpStatus?.takeIf { it in 100..599 }?.toString() ?: "unknown"}")
+        appendLine("relay_check_result=${safeDiagnosticToken(update.relayOutcome).ifBlank { "unknown" }}")
+        appendLine("relay_http_status=${update.relayHttpStatus?.takeIf { it in 100..599 }?.toString() ?: "unknown"}")
+        if (update.lastCheckAtMs > 0L) {
+            appendLine("last_check_at=${stamp(update.lastCheckAtMs)}")
+            val ageSec = ((facts.createdAtMs - update.lastCheckAtMs).coerceAtLeast(0L) / 1000L).toInt()
+            appendLine("last_check_ago=${MqttLinkText.humanAgo(ageSec)}")
+        } else {
+            appendLine("last_check_at=нет")
+        }
+        appendLine("last_check_duration_ms=${update.checkDurationMs?.coerceAtLeast(0L)?.toString() ?: "unknown"}")
+        appendLine("last_notification_attempt_version=${safeDiagnosticToken(update.notificationVersion).ifBlank { "none" }}")
+        appendLine("last_notification_attempt_kind=${safeDiagnosticToken(update.notificationKind).ifBlank { "unknown" }}")
+        appendLine("last_notification_attempt_result=${safeDiagnosticToken(update.notificationResult).ifBlank { "unknown" }}")
+        if (update.notificationAtMs > 0L) {
+            appendLine("last_notification_attempt_at=${stamp(update.notificationAtMs)}")
+        } else {
+            appendLine("last_notification_attempt_at=нет")
+        }
+        appendLine("notifications_allowed=${update.notificationsAllowed?.toString() ?: "unknown"}")
+        appendLine("update_channel_enabled=${update.notificationChannelEnabled?.toString() ?: "unknown"}")
+        appendLine("update_channel_importance=${update.notificationChannelImportance?.toString() ?: "unknown"}")
+        appendLine()
+    }
+
+    /** Report tokens are deliberately narrower than arbitrary strings/URLs. */
+    private fun safeDiagnosticToken(value: String): String =
+        value.filter { it.isLetterOrDigit() || it in ".+-_" }.take(64)
 
     private fun StringBuilder.appendCore(facts: DiagnosticsFacts) {
         appendLine("[ядро]")
@@ -801,6 +1045,40 @@ object DiagnosticsReport {
             }
             appendLine("raw=${facts.mqttLine}")
         }
+        appendLine()
+    }
+
+    /** Безопасная сводка helper-route: только тип события, номер локального слота и задержки. */
+    private fun StringBuilder.appendHelperRoutes(facts: DiagnosticsFacts) {
+        val helper = facts.helperRoutes
+        appendLine("[помощники]")
+        appendLine("scope=обычные сообщения после неудачи прямой отправки; file chunks не включены")
+        appendLine("source=ограниченная выборка последних строк logcat процесса, не полный журнал")
+        appendLine("local_participation_enabled=${facts.onlineHelperParticipationEnabled?.toString() ?: "unknown"}")
+        appendLine("attempts_after_direct_failure=${helper.attempts}")
+        appendLine("selected_helper_slots_total=${helper.selectedCandidates}")
+        appendLine("attempts_without_candidates=${helper.attemptsWithoutCandidates}")
+        appendLine("route_unavailable=${helper.routeUnavailable}")
+        appendLine("route_unavailable_runtime=${helper.routeUnavailableRuntime}")
+        appendLine("route_unavailable_local_identity=${helper.routeUnavailableLocalIdentity}")
+        appendLine("route_unavailable_recipient_identity=${helper.routeUnavailableRecipientIdentity}")
+        appendLine("relay_packet_rejected=${helper.packetPreparationRejected}")
+        appendLine("attempts_not_prepared=${helper.attemptsNotPrepared}")
+        appendLine("primary_legs_started=${helper.primaryLegsStarted}")
+        appendLine("reserve_legs_started=${helper.reserveLegsStarted}")
+        appendLine("helper_stream_writes_succeeded=${helper.legWritesSucceeded} (не подтверждение доставки)")
+        appendLine("helper_stream_writes_failed=${helper.legWritesFailed}")
+        appendLine("reserve_after_primary_failure=${helper.reserveAfterPrimaryFailure}")
+        appendLine("reserve_after_hedge_delay=${helper.reserveAfterHedgeDelay}")
+        appendLine("signed_declines_received=${helper.signedDeclinesReceived}")
+        appendLine("recipient_signed_receipts_issued=${helper.recipientReceiptsIssued}")
+        appendLine("recipient_signed_receipts_verified=${helper.senderReceiptsVerified}")
+        appendLine("verified_receipt_return_leg_1=${helper.receiptReturnedByPrimary}")
+        appendLine("verified_receipt_return_leg_2=${helper.receiptReturnedByReserve}")
+        appendLine("verified_receipt_return_leg_unknown=${helper.receiptReturnedByUnknownLeg}")
+        appendLine("attempts_without_receipt=${helper.attemptsWithoutReceipt}")
+        appendLine("verified_receipt_average_elapsed_ms=${helper.averageVerifiedReceiptMs?.toString() ?: "нет данных"}")
+        appendLine("Квитанция подтверждает принятие адресатом, но не личность/уникальность помощника и не полный путь пакета.")
         appendLine()
     }
 
@@ -851,9 +1129,14 @@ object DiagnosticsReport {
                 (facts.relayQueueRecipients?.toString() ?: "нет данных") +
                 (if (facts.relayQueueRecipients != null) " (последняя сводка logcat)" else ""),
         )
-        appendLine("вытеснений своих из RAM в выборке=${facts.relayQueueOwnEvictions} (logcat)")
+        val ownEvictionsSource = if (facts.relayQueueOwnEvictionsAreCumulative) {
+            "с запуска ядра"
+        } else {
+            "по доступным строкам logcat"
+        }
+        appendLine("вытеснений своих из RAM-кэша=${facts.relayQueueOwnEvictions} ($ownEvictionsSource; durable/outbox отдельно)")
         if (facts.relayQueueOwnEvictions > 0L) {
-            appendLine("  ↳ долговременная копия остаётся в зашифрованном хранилище и очереди досылки")
+            appendLine("  ↳ вытеснение из RAM само по себе не доказывает потерю; при успешной durable/outbox-записи копия остаётся для досылки")
         }
         appendLine(
             "смена ключа у собеседника (раз)=" + (c[Counters.MSG_PEER_KEY_CHANGED] ?: 0L),
@@ -955,7 +1238,7 @@ object DiagnosticsReport {
         appendLine("приёмов начато=${c[Counters.FILE_STARTED_IN] ?: 0L}")
         appendLine("передач завершено=${c[Counters.FILE_COMPLETED] ?: 0L}")
         appendLine("ошибок передачи=${c[Counters.FILE_FAILED] ?: 0L}")
-        appendLine("F4-сессий согласовано=${c[Counters.F4_NEGOTIATED] ?: 0L}")
+        appendLine("F4-исходящих сессий согласовано=${c[Counters.F4_NEGOTIATED] ?: 0L}")
         appendLine("F4-диапазонов отправлено=${c[Counters.F4_RANGES_SENT] ?: 0L}")
         appendLine("F4-диапазонов принято=${c[Counters.F4_RANGES_RECEIVED] ?: 0L}")
         appendLine("F4-байт отправлено=${c[Counters.F4_BYTES_SENT] ?: 0L}")

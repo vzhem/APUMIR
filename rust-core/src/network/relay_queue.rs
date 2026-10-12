@@ -559,6 +559,9 @@ pub struct RelayQueue {
     /// Сколько СВОИХ записей освободил прямой ACK доставки. Нужно журналу: «своих=1000» само по себе не показывает,
     /// работает ли разгрузка (владелец, 2026-10-07).
     delivered_removed: AtomicUsize,
+    /// Число своих записей переписки, вытесненных из ограниченного RAM-кэша.
+    /// Зашифрованная durable/outbox-копия остаётся источником восстановления.
+    own_capacity_evictions: AtomicUsize,
     max_per_recipient: usize,
     max_total: usize,
     max_own_per_recipient: usize,
@@ -575,6 +578,8 @@ pub struct RelayQueueStats {
     pub foreign: usize,
     pub total: usize,
     pub recipients: usize,
+    /// Вытеснения своей переписки из RAM с момента запуска этого экземпляра очереди.
+    pub own_capacity_evictions: usize,
 }
 
 impl RelayQueue {
@@ -583,6 +588,7 @@ impl RelayQueue {
         RelayQueue {
             entries: Mutex::new(HashMap::new()),
             delivered_removed: AtomicUsize::new(0),
+            own_capacity_evictions: AtomicUsize::new(0),
             max_per_recipient: MAX_PER_RECIPIENT,
             max_total: MAX_TOTAL,
             max_own_per_recipient: MAX_OWN_PER_RECIPIENT,
@@ -607,6 +613,7 @@ impl RelayQueue {
         RelayQueue {
             entries: Mutex::new(HashMap::new()),
             delivered_removed: AtomicUsize::new(0),
+            own_capacity_evictions: AtomicUsize::new(0),
             max_per_recipient,
             max_total,
             max_own_per_recipient,
@@ -715,8 +722,10 @@ impl RelayQueue {
                 Self::evict_oldest_own_transient(&mut entries);
             }
         } else {
-            if self.own_for_locked(&entries, &msg.recipient) >= self.max_own_per_recipient {
-                Self::evict_oldest_own_for(&mut entries, &msg.recipient);
+            if self.own_for_locked(&entries, &msg.recipient) >= self.max_own_per_recipient
+                && Self::evict_oldest_own_for(&mut entries, &msg.recipient)
+            {
+                self.own_capacity_evictions.fetch_add(1, Ordering::Relaxed);
             }
 
             if self.own_count_locked(&entries) >= self.max_own_total {
@@ -726,8 +735,10 @@ impl RelayQueue {
                 }
             }
 
-            if self.own_count_locked(&entries) >= self.max_own_total {
-                Self::evict_oldest_own(&mut entries);
+            if self.own_count_locked(&entries) >= self.max_own_total
+                && Self::evict_oldest_own(&mut entries)
+            {
+                self.own_capacity_evictions.fetch_add(1, Ordering::Relaxed);
             }
 
             if self.own_count_locked(&entries) >= self.max_own_total {
@@ -816,19 +827,13 @@ impl RelayQueue {
     // ─── Вытеснение своих (только свои, чужое не трогаем) ───────────
 
     /// Убрать самое старое своё сообщение этому получателю.
-    fn evict_oldest_own_for(entries: &mut HashMap<String, QueueEntry>, recipient: &str) {
+    fn evict_oldest_own_for(entries: &mut HashMap<String, QueueEntry>, recipient: &str) -> bool {
         let victim = entries
             .iter()
             .filter(|(_, e)| e.own && e.message.recipient == recipient)
             .min_by_key(|(id, e)| (e.message.created_at_ms, (*id).clone()))
             .map(|(id, _)| id.clone());
-        if let Some(id) = victim {
-            entries.remove(&id);
-            tracing::warn!(
-                "Relay-очередь: запас своих для получателя исчерпан, вытеснено самое старое своё {} (копия остаётся в durable-сторе и в очереди досылки)",
-                id
-            );
-        }
+        victim.is_some_and(|id| entries.remove(&id).is_some())
     }
 
     /// Самое старое СВОЁ служебное (сигнал или пакет передачи), если есть.
@@ -858,19 +863,13 @@ impl RelayQueue {
     }
 
     /// Убрать самое старое своё сообщение по всей очереди.
-    fn evict_oldest_own(entries: &mut HashMap<String, QueueEntry>) {
+    fn evict_oldest_own(entries: &mut HashMap<String, QueueEntry>) -> bool {
         let victim = entries
             .iter()
             .filter(|(_, e)| e.own)
             .min_by_key(|(id, e)| (e.message.created_at_ms, (*id).clone()))
             .map(|(id, _)| id.clone());
-        if let Some(id) = victim {
-            entries.remove(&id);
-            tracing::warn!(
-                "Relay-очередь: общий запас своих исчерпан, вытеснено самое старое своё {} (копия остаётся в durable-сторе и в очереди досылки)",
-                id
-            );
-        }
+        victim.is_some_and(|id| entries.remove(&id).is_some())
     }
 
     // ─── Подсчёт по запасам (внутри уже взятого лока) ────────────────
@@ -1167,6 +1166,7 @@ impl RelayQueue {
             foreign: total - own - own_transients,
             total,
             recipients: seen.len(),
+            own_capacity_evictions: self.own_capacity_evictions.load(Ordering::Relaxed),
         }
     }
 }
@@ -1335,6 +1335,17 @@ mod tests {
         assert!(q.contains("f1"), "чужое не вытесняется своим");
         assert_eq!(q.count_own_for("pk_b"), 2);
         assert_eq!(q.count_foreign_for("pk_b"), 1);
+        assert_eq!(q.stats().own_capacity_evictions, 1);
+    }
+
+    #[test]
+    fn own_capacity_eviction_metric_counts_global_boundaries() {
+        let q = RelayQueue::with_all_limits(10, 10, 10, 2);
+        assert!(q.enqueue_own(own_msg("o1", "pk_b")).unwrap());
+        assert!(q.enqueue_own(own_msg("o2", "pk_c")).unwrap());
+        assert!(q.enqueue_own(own_msg("o3", "pk_d")).unwrap());
+        assert_eq!(q.own_count(), 2);
+        assert_eq!(q.stats().own_capacity_evictions, 1);
     }
 
     #[test]

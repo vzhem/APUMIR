@@ -78,7 +78,7 @@ class ChatStartupTest(unittest.TestCase):
         # Владелец 2026-10-07: «в таком стиле нужно переделать всё приложение».
         # Кнопка «Повторить» — фирменная ApuTextAction, а не стоковый TextButton.
         self.assertIn("ApuTextAction(", retry)
-        self.assertIn('label = "Повторить"', retry)
+        self.assertIn("label = stringResource(R.string.action_retry)", retry)
         self.assertNotIn("TextButton(", retry)
         self.assertNotIn("TextButtonDefaults", retry)
 

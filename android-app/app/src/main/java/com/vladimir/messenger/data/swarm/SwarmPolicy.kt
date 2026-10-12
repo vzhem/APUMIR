@@ -87,7 +87,7 @@ object SwarmPolicy {
     const val MIN_CONCURRENT = 2
     const val MIN_PACKETS_PER_MINUTE = 30
 
-    /** Режим «Без ограничений»: столько ядро переваривает, не копя очередь. */
+    /** Консервативный потолок веера. Не является измеренной ёмкостью ядра или сети. */
     const val UNLIMITED_CONCURRENT = 32
     const val UNLIMITED_PACKETS_PER_MINUTE = 3000
 
@@ -163,9 +163,9 @@ object SwarmPolicy {
      */
     fun limitsFor(mode: SwarmMode, metered: Boolean, lowPower: Boolean): SwarmLimits {
         val (concurrent, perMinute) = when (mode) {
-            // «Без ограничений» - это предел ядра, а не бесконечность: канал к
-            // Rust вмещает 256 пакетов, и ширина веера больше 32 только копит
-            // очередь. Мобильный интернет и заряд этот режим не сбавляют -
+            // «Без ограничений» сохраняет защитный потолок, а не бесконечную нагрузку.
+            // Ёмкость очереди не доказывает пропускную способность.
+            // Мобильный интернет и заряд этот режим не сбавляют -
             // человек сам так решил.
             SwarmMode.UNLIMITED -> return SwarmLimits(
                 maxConcurrentSends = UNLIMITED_CONCURRENT,
@@ -187,4 +187,106 @@ object SwarmPolicy {
             maxSignalsPerMinute = signals,
         )
     }
+}
+
+
+/** Stage 4 — bounded, process-local contribution counters (not capacity measurement). */
+object SwarmContributionStats {
+    const val MAX_OBSERVED_PEERS = 256
+    const val REFUSAL_WINDOW_MS = 30_000L
+    const val MAX_REFUSALS_PER_WINDOW = 10
+    private const val MAX_PEER_ID_CHARS = 256
+
+    private val lock = Any()
+    private var delivered = 0L
+    private var refused = 0L
+    private var lastClockMs: Long? = null
+    // Access-order LRU: unique untrusted peer IDs cannot grow this map without bound.
+    private val observedPeerDeliveries = java.util.LinkedHashMap<String, Long>(16, 0.75f, true)
+    private val recentRefusals = java.util.ArrayDeque<Long>()
+
+    fun noteDelivered() = synchronized(lock) {
+        delivered = incrementSaturated(delivered)
+    }
+
+    /**
+     * Record a locally observed peer delivery. At capacity, the least-recently-used peer is
+     * evicted; invalid/unbounded identifiers are ignored. This is a bounded local sample only.
+     */
+    fun notePeer(peerId: String): Boolean = synchronized(lock) {
+        if (peerId.length !in 1..MAX_PEER_ID_CHARS) return@synchronized false
+        val previous = observedPeerDeliveries[peerId]
+        if (previous != null) {
+            observedPeerDeliveries[peerId] = incrementSaturated(previous)
+            return@synchronized true
+        }
+        if (observedPeerDeliveries.size >= MAX_OBSERVED_PEERS) {
+            val oldest = observedPeerDeliveries.entries.iterator()
+            if (oldest.hasNext()) {
+                oldest.next()
+                oldest.remove()
+            }
+        }
+        observedPeerDeliveries[peerId] = 1L
+        true
+    }
+
+    fun deliveredCount(): Long = synchronized(lock) { delivered }
+    fun refusedCount(): Long = synchronized(lock) { refused }
+    fun peerCountsSnapshot(): Map<String, Long> = synchronized(lock) {
+        java.util.LinkedHashMap<String, Long>(observedPeerDeliveries)
+    }
+
+    /**
+     * Count a refusal and return whether it is inside the local rolling limit. Only the first
+     * [MAX_REFUSALS_PER_WINDOW] events are retained in a [REFUSAL_WINDOW_MS] window, so rejected
+     * excess attempts cannot grow the queue. Callers must act on `false` for this to be a guard.
+     */
+    fun recordRefusal(nowMs: Long): Boolean = synchronized(lock) {
+        refused = incrementSaturated(refused)
+        val now = advanceClock(nowMs) ?: return@synchronized false
+        evictOldRefusals(now)
+        if (recentRefusals.size >= MAX_REFUSALS_PER_WINDOW) return@synchronized false
+        recentRefusals.addLast(now)
+        true
+    }
+
+    /** Whether another refusal can be admitted under the local rolling window. */
+    fun refusalRateOk(nowMs: Long): Boolean = synchronized(lock) {
+        val now = advanceClock(nowMs) ?: return@synchronized false
+        evictOldRefusals(now)
+        recentRefusals.size < MAX_REFUSALS_PER_WINDOW
+    }
+
+    fun observedPeerCount(): Int = synchronized(lock) { observedPeerDeliveries.size }
+    fun observedPeerLimitReached(): Boolean = synchronized(lock) {
+        observedPeerDeliveries.size >= MAX_OBSERVED_PEERS
+    }
+
+    fun resetLocal() = synchronized(lock) {
+        delivered = 0L
+        refused = 0L
+        observedPeerDeliveries.clear()
+        recentRefusals.clear()
+        lastClockMs = null
+    }
+
+    /** Reject invalid clock values and clamp clock rollback to a monotonic high-water mark. */
+    private fun advanceClock(nowMs: Long): Long? {
+        if (nowMs < 0L) return null
+        val previous = lastClockMs
+        val monotonic = if (previous == null || nowMs > previous) nowMs else previous
+        lastClockMs = monotonic
+        return monotonic
+    }
+
+    private fun evictOldRefusals(nowMs: Long) {
+        val cutoff = (nowMs - REFUSAL_WINDOW_MS).coerceAtLeast(0L)
+        while (recentRefusals.peekFirst()?.let { it < cutoff } == true) {
+            recentRefusals.removeFirst()
+        }
+    }
+
+    private fun incrementSaturated(value: Long): Long =
+        if (value == Long.MAX_VALUE) value else value + 1L
 }

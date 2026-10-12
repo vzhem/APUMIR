@@ -15,9 +15,11 @@ import android.os.StatFs
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.local.dao.FileTransferDao
+import com.vladimir.messenger.data.swarm.OnlineHelperSettings
 import com.vladimir.messenger.data.swarm.ServerMode
 import com.vladimir.messenger.data.swarm.SwarmSettings
 import com.vladimir.messenger.service.CoreStatus
+import com.vladimir.messenger.service.UpdateDiagnosticsStore
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -102,6 +104,10 @@ object TransferDiagnostics {
         if (delta == 0L) return
         synchronized(lock) { counters[key] = (counters[key] ?: 0L) + delta }
     }
+
+    /** Read-only seam for JVM regression tests of event counters. */
+    internal fun counterValueForTests(key: String): Long =
+        synchronized(lock) { counters[key] ?: 0L }
 
     /** Увеличить счётчик и узнать новое значение — для «первое и каждое N-е». */
     private fun bump(key: String, delta: Long = 1L): Long {
@@ -340,9 +346,11 @@ object TransferDiagnostics {
                 relayQueueOwnSignals = logcat.queueOwnSignals,
                 relayQueueRecipients = logcat.queueRecipients,
                 relayQueueOwnEvictions = logcat.queueOwnEvictions,
+                relayQueueOwnEvictionsAreCumulative = logcat.queueOwnEvictionsAreCumulative,
                 stunFailedCycles = logcat.stunFailedCycles,
                 stunSuccessfulBindings = logcat.stunSuccessfulBindings,
                 stunLastAttemptFailed = logcat.stunLastAttemptFailed,
+                helperRoutes = logcat.helperRoutes,
                 logcatWarnings = logcat.severities.warnings,
                 logcatErrors = logcat.severities.errors,
             )
@@ -418,6 +426,13 @@ object TransferDiagnostics {
                 SwarmSettings.init(context)
                 SwarmSettings.mode.value.title
             }.getOrDefault("неизвестно"),
+            onlineHelperParticipationEnabled = runCatching {
+                OnlineHelperSettings.init(context)
+                OnlineHelperSettings.enabled.value
+            }.getOrNull(),
+            updateDiagnostics = runCatching {
+                UpdateDiagnosticsStore.snapshot(context)
+            }.getOrDefault(com.vladimir.messenger.data.diagnostics.UpdateDiagnosticFacts.EMPTY),
             serverMode = runCatching { ServerMode.isEnabled(context) }.getOrDefault(true),
             batteryPercent = battery.percent,
             batteryCharging = battery.charging,
@@ -477,23 +492,39 @@ object TransferDiagnostics {
         val queueOwnSignals: Long?,
         val queueRecipients: Long?,
         val queueOwnEvictions: Long,
+        val queueOwnEvictionsAreCumulative: Boolean,
         val stunFailedCycles: Long,
         val stunSuccessfulBindings: Long,
         val stunLastAttemptFailed: Boolean?,
         val severities: DiagnosticsLogcatLevels,
+        val helperRoutes: HelperRouteDiagnostics,
     ) {
         /** Журнал процесса ещё не читали или прочитать не удалось. */
         val isEmpty: Boolean
             get() = lines.isEmpty() && coreMessageSignals == 0L && relayQueueFull == 0L &&
                 queueOwn == null && queueForeign == null && queueOwnSignals == null &&
-                queueRecipients == null && queueOwnEvictions == 0L && stunFailedCycles == 0L &&
+                queueRecipients == null && queueOwnEvictions == 0L && !queueOwnEvictionsAreCumulative &&
+                stunFailedCycles == 0L &&
                 stunSuccessfulBindings == 0L && stunLastAttemptFailed == null &&
-                severities.warnings == 0L && severities.errors == 0L
+                severities.warnings == 0L && severities.errors == 0L &&
+                helperRoutes == HelperRouteDiagnostics.EMPTY
 
         companion object {
             val EMPTY = LogcatScan(
-                emptyList(), 0L, 0L, null, null, null, null, 0L, 0L, 0L, null,
-                DiagnosticsLogcatLevels(0L, 0L),
+                lines = emptyList(),
+                coreMessageSignals = 0L,
+                relayQueueFull = 0L,
+                queueOwn = null,
+                queueForeign = null,
+                queueOwnSignals = null,
+                queueRecipients = null,
+                queueOwnEvictions = 0L,
+                queueOwnEvictionsAreCumulative = false,
+                stunFailedCycles = 0L,
+                stunSuccessfulBindings = 0L,
+                stunLastAttemptFailed = null,
+                severities = DiagnosticsLogcatLevels(0L, 0L),
+                helperRoutes = HelperRouteDiagnostics.EMPTY,
             )
         }
     }
@@ -680,11 +711,12 @@ object TransferDiagnostics {
         }
         process.destroy()
         val all = synchronized(raw) { raw.toList() }
+        val evictionScan = DiagnosticsPrivacy.parseRelayQueueOwnEvictions(all)
         LogcatScan(
             // Свежие строки важнее старых: logcat отдаёт их по времени вперёд.
-            lines = DiagnosticsPrivacy.collapseRepeatedLogLines(
+            lines = DiagnosticsPrivacy.prioritizeLogcatErrors(
                 all.filter(::isRelevantProcessLog)
-                    .map { DiagnosticsPrivacy.hidePayloadBodies(redact(it)) },
+                    .map { DiagnosticsPrivacy.clipLogcatLine(DiagnosticsPrivacy.hidePayloadBodies(redact(it))) },
                 limit = MAX_LOGCAT_LINES,
             ),
             coreMessageSignals = all.count { it.contains(CORE_MESSAGE_SIGNAL) }.toLong(),
@@ -693,11 +725,13 @@ object TransferDiagnostics {
             queueForeign = queueStat(all, "чужих="),
             queueOwnSignals = queueStat(all, "сигналов="),
             queueRecipients = queueStat(all, "получателей="),
-            queueOwnEvictions = all.count { it.contains("вытеснено самое старое своё") }.toLong(),
+            queueOwnEvictions = evictionScan.count,
+            queueOwnEvictionsAreCumulative = evictionScan.cumulative,
             stunFailedCycles = all.count { it.contains(STUN_ALL_SERVERS_FAILED) }.toLong(),
             stunSuccessfulBindings = all.count(::isStunSuccess).toLong(),
             stunLastAttemptFailed = all.lastOrNull(::isStunOutcome)?.contains(STUN_ALL_SERVERS_FAILED),
             severities = DiagnosticsPrivacy.countLogcatSeverities(all),
+            helperRoutes = HelperRouteDiagnosticsParser.parse(all),
         )
     }.getOrDefault(LogcatScan.EMPTY)
 
@@ -718,6 +752,15 @@ object TransferDiagnostics {
         }
         return null
     }
+
+    private val safeErrorLogTags = setOf(
+        "p2p_core",
+        "ApuDiagnostics",
+        "NetworkMonitor",
+        "NetworkChange",
+        "CoreServerService",
+        "ProxyAutopilot",
+    )
 
     private val knownLogTags = listOf(
         "p2p_core",
@@ -750,6 +793,8 @@ object TransferDiagnostics {
         "Relay-очередь получателя переполнена",
         "Relay-очередь: своих=",
         "запас своих",
+        "own_capacity_evictions=",
+        "вытеснено-своих=",
         "СВОЁ сообщение не удержано",
         "File HELLO",
         "exchange key changed",
@@ -763,6 +808,7 @@ object TransferDiagnostics {
         "APUF",
         "file_chunk_received",
         "MQTT",
+        "ONLINE_HELPER",
         "Engine",
         "мертв", // «движок мёртв» — от ядра о потере связи
         "error",
@@ -776,6 +822,12 @@ object TransferDiagnostics {
 
     private fun isRelevantProcessLog(line: String): Boolean {
         if (knownLogTags.none { line.contains(it) }) return false
+        val severity = DiagnosticsPrivacy.logcatSeverity(line)
+        val safeErrorTag = safeErrorLogTags.any { line.contains(it) }
+        // Keep process E/F diagnostics even when their message has no keyword
+        // match, but only for network/core tags (not file-name-bearing transfer
+        // logs). redact() and payload scrubbing still run before selection.
+        if ((severity == "E" || severity == "F") && safeErrorTag) return true
         return relevantLogWords.any { line.contains(it) }
     }
 

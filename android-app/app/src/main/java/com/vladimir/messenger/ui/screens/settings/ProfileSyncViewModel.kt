@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.R
 // =============================================================================
 // PROFILESYNCVIEWMODEL.KT — разовый перенос профиля
 // =============================================================================
@@ -177,18 +178,16 @@ class ProfileSyncViewModel @Inject constructor(
             val (message, failed) = when (result) {
                 is ProfileSyncNet.UploadResult.Ok -> {
                     _uiState.value = _uiState.value.copy(netSent = true)
-                    "Копия в сети APU: второе устройство с тем же ником и паролем " +
-                        "найдёт и заберёт её само. Копия исчезнет после забора " +
-                        "(или через сутки)." to false
+                    context.getString(R.string.ps_net_copy_info) to false
                 }
                 ProfileSyncNet.UploadResult.NoIdentity ->
-                    "Сначала создайте профиль" to true
+                    context.getString(R.string.ps_create_profile_first) to true
                 ProfileSyncNet.UploadResult.BadPassword ->
-                    "Пароль короткий - нужно минимум ${BackupCipher.MIN_PASSWORD_LENGTH} знаков" to true
+                    context.getString(R.string.ps_pw_short, BackupCipher.MIN_PASSWORD_LENGTH) to true
                 is ProfileSyncNet.UploadResult.TooBig ->
-                    "Копия ${result.megaBytes} МБ - больше лимита сети APU (24 МБ без медиа)" to true
+                    context.getString(R.string.ps_too_big, result.megaBytes) to true
                 is ProfileSyncNet.UploadResult.Failed ->
-                    "Не удалось отправить: ${result.reason}" to true
+                    context.getString(R.string.ps_send_failed, result.reason) to true
             }
             _uiState.value = _uiState.value.copy(busy = false, netMessage = message, netFailed = failed)
         }
@@ -208,14 +207,14 @@ class ProfileSyncViewModel @Inject constructor(
                 ProfileSyncNet.FetchResult.NotFound -> {
                     _uiState.value = _uiState.value.copy(
                         busy = false,
-                        netMessage = "В сети APU копии нет - отправьте её с телефона с данными",
+                        netMessage = context.getString(R.string.ps_none_on_net),
                         netFailed = true,
                     )
                 }
                 ProfileSyncNet.FetchResult.WrongPassword -> {
                     _uiState.value = _uiState.value.copy(
                         busy = false,
-                        netMessage = "Копия защищена другим паролем - введите пароль с основного устройства",
+                        netMessage = context.getString(R.string.ps_other_pw),
                         netFailed = true,
                     )
                 }
@@ -226,7 +225,7 @@ class ProfileSyncViewModel @Inject constructor(
                     lastAutoFetchMetaTimeMs = 0L
                     _uiState.value = _uiState.value.copy(
                         busy = false,
-                        netMessage = "Не удалось забрать: ${fetched.reason}",
+                        netMessage = context.getString(R.string.ps_fetch_failed, fetched.reason),
                         netFailed = true,
                     )
                 }
@@ -243,17 +242,15 @@ class ProfileSyncViewModel @Inject constructor(
             chars.fill('\u0000')
             _uiState.value = _uiState.value.copy(
                 autoEnabled = ok,
-                netMessage = if (ok) "Автопоиск включён: телефон проверяет сам в фоне. " +
-                    "Подтверждение понадобится только перед заменой данных."
-                else "Один раз введите пароль из «Защиты личности» (не короче " +
-                    "${BackupCipher.MIN_PASSWORD_LENGTH} знаков); он хранится только в защищённом хранилище телефона.",
+                netMessage = if (ok) context.getString(R.string.ps_autosearch_on)
+                else context.getString(R.string.ps_need_password, BackupCipher.MIN_PASSWORD_LENGTH),
                 netFailed = !ok,
             )
         } else {
             ProfileSyncAuto.disable(context)
             _uiState.value = _uiState.value.copy(
                 autoEnabled = false,
-                netMessage = "Авто-проверка выключена",
+                netMessage = context.getString(R.string.ps_auto_off),
                 netFailed = false,
             )
         }
@@ -277,7 +274,7 @@ class ProfileSyncViewModel @Inject constructor(
             if (shareFile == null) {
                 _uiState.value = _uiState.value.copy(
                     busy = false,
-                    message = "Копию не собрать: нужен пароль от 8 знаков и созданный профиль",
+                    message = context.getString(R.string.ps_cant_build),
                     failed = true,
                 )
                 return@launch
@@ -286,7 +283,7 @@ class ProfileSyncViewModel @Inject constructor(
             if (ip == null) {
                 _uiState.value = _uiState.value.copy(
                     busy = false,
-                    message = "Нет Wi-Fi сети: подключите оба устройства к одной сети",
+                    message = context.getString(R.string.ps_no_wifi),
                     failed = true,
                 )
                 return@launch
@@ -303,7 +300,7 @@ class ProfileSyncViewModel @Inject constructor(
                 onDone = { served, reason ->
                     stopShare()
                     _uiState.value = _uiState.value.copy(
-                        message = if (served) "Копия передана" else "Передача не удалась: ${reason ?: "отмена"}",
+                        message = if (served) context.getString(R.string.sync_copy_handed) else context.getString(R.string.sync_transfer_failed, reason ?: context.getString(R.string.sync_cancelled)),
                         failed = !served,
                     )
                 },
@@ -314,7 +311,7 @@ class ProfileSyncViewModel @Inject constructor(
                 busy = false,
                 sharing = true,
                 shareAddress = address,
-                message = "Копия готова: отдайте адрес и код устройству-приёмнику",
+                message = context.getString(R.string.ps_ready),
                 failed = false,
             )
         }
@@ -335,7 +332,7 @@ class ProfileSyncViewModel @Inject constructor(
         val port = address.substringAfter(':', "").toIntOrNull() ?: 0
         if (host.isBlank() || port !in 1..65535 || token.length < 4) {
             _uiState.value = _uiState.value.copy(
-                message = "Введите адрес вида 192.168.1.5:48126 и код с экрана телефона",
+                message = context.getString(R.string.ps_enter_addr),
                 failed = true,
             )
             return
@@ -352,7 +349,7 @@ class ProfileSyncViewModel @Inject constructor(
                 chars.fill('\u0000')
                 _uiState.value = _uiState.value.copy(
                     busy = false,
-                    message = "Не удалось забрать копию: проверьте адрес, код и что оба устройства в одной сети Wi-Fi",
+                    message = context.getString(R.string.ps_fetch_check),
                     failed = true,
                 )
                 return@launch
@@ -379,21 +376,21 @@ class ProfileSyncViewModel @Inject constructor(
             is ProfileBackup.StageResult.WrongPassword -> {
                 backup.discardStaged()
                 _uiState.value = _uiState.value.copy(
-                    busy = false, message = "Неверный пароль копии", failed = true,
+                    busy = false, message = context.getString(R.string.ps_wrong_pw), failed = true,
                 )
             }
             is ProfileBackup.StageResult.TooNew -> {
                 backup.discardStaged()
                 _uiState.value = _uiState.value.copy(
                     busy = false,
-                    message = "Копия сделана более новой версией APU (${staged.appVersion}) - сначала обновите это устройство",
+                    message = context.getString(R.string.sync_newer_app, staged.appVersion),
                     failed = true,
                 )
             }
             else -> {
                 backup.discardStaged()
                 _uiState.value = _uiState.value.copy(
-                    busy = false, message = "Копию не удалось открыть", failed = true,
+                    busy = false, message = context.getString(R.string.ps_cant_open), failed = true,
                 )
             }
         }
@@ -415,7 +412,7 @@ class ProfileSyncViewModel @Inject constructor(
             val ok = withContext(Dispatchers.IO) { backup.confirmStaged() }
             if (!ok) {
                 _uiState.value = _uiState.value.copy(
-                    message = "Подготовленная копия не найдена - скачайте ещё раз",
+                    message = context.getString(R.string.ps_staged_missing),
                     failed = true,
                 )
                 return@launch

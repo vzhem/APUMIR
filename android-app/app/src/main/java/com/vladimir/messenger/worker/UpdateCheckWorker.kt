@@ -35,7 +35,7 @@ class UpdateCheckWorker @AssistedInject constructor(
         if (currentVersion.isBlank()) return Result.success()
 
         return try {
-            val release = updateChecker.checkForUpdate(currentVersion)
+            val release = updateChecker.checkForUpdate(currentVersion, trigger = "background")
             if (release != null) {
                 updateNotifier.notifyOfficialRelease(release)
                 Log.i(TAG, "Update ${release.version} announced by background check")

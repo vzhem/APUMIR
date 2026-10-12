@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.chat
 
+import com.vladimir.messenger.R
 import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
@@ -174,7 +175,7 @@ class ChatDetailViewModel @Inject constructor(
         },
         onLoadError = { error ->
             android.util.Log.w("ChatDetailVM", "Local history read failed", error)
-            _uiState.update { it.copy(isLoading = false, historyError = "Не удалось прочитать историю чата") }
+            _uiState.update { it.copy(isLoading = false, historyError = appContext.getString(R.string.cd_history_failed)) }
         },
         onReadError = { error -> android.util.Log.w("ChatDetailVM", "Read receipt failed", error) },
     )
@@ -431,7 +432,7 @@ class ChatDetailViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             runCatching { chatRepository.setChatMutedUntil(chatId, untilMs) }
                 .onFailure { error ->
-                    _uiState.update { it.copy(error = error.message ?: "Не удалось изменить уведомления") }
+                    _uiState.update { it.copy(error = error.message ?: appContext.getString(R.string.cd_notify_failed)) }
                 }
         }
     }
@@ -449,9 +450,7 @@ class ChatDetailViewModel @Inject constructor(
                 attachmentsLockedHint = if (allowed) {
                     ""
                 } else {
-                    "Отправка файлов, фото и видео открывается с ранга «Круг друзей» — " +
-                        "это 3 подтверждённых приглашения. Сейчас подтверждено: $qualified. " +
-                        "Текстовые сообщения доступны без ограничений."
+                    appContext.getString(R.string.cdv_files_locked, qualified) + " " + appContext.getString(R.string.cdv_text_unlimited)
                 },
             )
         }
@@ -490,7 +489,7 @@ class ChatDetailViewModel @Inject constructor(
                 runCatching { groupRepository.expandLink(link) }.getOrNull()
             }
             if (expanded == null) {
-                _inviteStatus.value = "Нет связи с сервисом APU - попробуйте позже"
+                _inviteStatus.value = appContext.getString(R.string.cd_no_service)
                 return@launch
             }
             val outcome = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -498,13 +497,12 @@ class ChatDetailViewModel @Inject constructor(
             }
             _inviteStatus.value = when (outcome) {
                 is com.vladimir.messenger.data.group.JoinOutcome.Joined ->
-                    if (outcome.isChannel) "Вы подписались: " + outcome.title
-                    else "Вы вступили: " + outcome.title
+                    if (outcome.isChannel) appContext.getString(R.string.cdv_joined_channel, outcome.title) else appContext.getString(R.string.cdv_joined_group, outcome.title)
                 is com.vladimir.messenger.data.group.JoinOutcome.RequestSent ->
-                    "Заявка отправлена: " + outcome.title
+                    appContext.getString(R.string.cdv_request_sent, outcome.title)
                 is com.vladimir.messenger.data.group.JoinOutcome.Failed ->
-                    "Не удалось войти: " + outcome.reason
-                null -> "Не удалось войти - попробуйте позже"
+                    appContext.getString(R.string.cdv_join_failed, outcome.reason)
+                null -> appContext.getString(R.string.cd_join_failed2)
             }
         }
     }
@@ -513,7 +511,7 @@ class ChatDetailViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             val result = runCatching { chatRepository.setMessagePinned(messageId, pinned) }
                 .getOrElse { error ->
-                    _uiState.update { it.copy(error = error.message ?: "Не удалось изменить закреп") }
+                    _uiState.update { it.copy(error = error.message ?: appContext.getString(R.string.cd_pin_failed)) }
                     return@launch
                 }
             when (result) {
@@ -524,7 +522,7 @@ class ChatDetailViewModel @Inject constructor(
                     _uiState.update { it.copy(error = MessagePinPolicy.SCOPE_CONFLICT_MESSAGE) }
                 }
                 MessagePinMutation.NOT_FOUND -> {
-                    _uiState.update { it.copy(error = "Сообщение не найдено") }
+                    _uiState.update { it.copy(error = appContext.getString(R.string.cd_msg_not_found)) }
                 }
                 MessagePinMutation.UPDATED,
                 MessagePinMutation.UNCHANGED -> {
@@ -676,7 +674,7 @@ class ChatDetailViewModel @Inject constructor(
         saveDraft(text)
     }
 
-    fun onSendMessage() {
+    fun onSendMessage(quiet: Boolean = false) {
         val text = _uiState.value.inputText.trim()
         if (text.isEmpty()) return
 
@@ -690,7 +688,11 @@ class ChatDetailViewModel @Inject constructor(
                     text = target.content,
                 )
             }
-            sendMessageUseCase(chatId, text, reply)
+            sendMessageUseCase(
+                chatId,
+                if (quiet) com.vladimir.messenger.util.QuietMessage.wrap(text) else text,
+                reply,
+            )
                 .onSuccess {
                     // р235: сообщение ушло - «печатает…» у собеседника гаснет.
                     publishTyping(false)
@@ -706,7 +708,7 @@ class ChatDetailViewModel @Inject constructor(
                     _uiState.update { it.copy(
                         isSending = false,
                         inputText = text,  // Восстанавливаем текст при ошибке
-                        error     = "Ошибка отправки: ${e.message}"
+                        error     = appContext.getString(R.string.cd_send_error, e.message)
                     )}
                 }
         }
@@ -719,6 +721,15 @@ class ChatDetailViewModel @Inject constructor(
      */
     /** Раунд 43: превью картинки для пузыря передачи файла. */
     fun previewFileFor(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity): java.io.File? {
+        // Голосовое: проигрываем локальную копию. Своё - из кэша записи (имя то же),
+        // принятое - из хранилища приёма.
+        if (com.vladimir.messenger.util.VoiceNote.parse(transfer.displayName) != null) {
+            if (transfer.direction == "OUTGOING") {
+                java.io.File(appContext.cacheDir, "voice/" + transfer.displayName).takeIf { it.isFile }?.let { return it }
+            } else {
+                fileTransferRouter.receivedFileFor(transfer)?.let { return it }
+            }
+        }
         // Раунд 172: стикеру нужен ПОЛНЫЙ файл (webm/webp анимация). Прежний
         // порядок сначала отдавал jpg-снимок роутера - чёрный квадрат вместо
         // анимации; теперь библиотечный стикер - первый источник.
@@ -753,10 +764,10 @@ class ChatDetailViewModel @Inject constructor(
                     .putExtra(android.content.Intent.EXTRA_STREAM, uri)
                     .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 ctx.startActivity(
-                    android.content.Intent.createChooser(intent, "Поделиться")
+                    android.content.Intent.createChooser(intent, appContext.getString(R.string.cd_share_chooser))
                         .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
-            }.onFailure { _uiState.update { st -> st.copy(error = "Не удалось поделиться") } }
+            }.onFailure { _uiState.update { st -> st.copy(error = appContext.getString(R.string.cd_share_failed)) } }
         }
     }
 
@@ -796,7 +807,7 @@ class ChatDetailViewModel @Inject constructor(
         viewModelScope.launch {
             chatRepository.retryOutgoingMessage(message.id)
                 .onFailure { error ->
-                    _uiState.update { it.copy(error = "Повторить отправку не удалось: ${error.message.orEmpty()}") }
+                    _uiState.update { it.copy(error = appContext.getString(R.string.cdv_retry_failed, error.message.orEmpty())) }
                 }
         }
     }
@@ -831,18 +842,18 @@ class ChatDetailViewModel @Inject constructor(
             try {
                 claimEngineForMediaIfNeeded()
                 val message = chatRepository.getMessageById(messageId)
-                    ?: error("Исходное сообщение не найдено")
-                check(message.isFromMe) { "Можно повторить только свой файл" }
+                    ?: error(appContext.getString(R.string.cdv_source_not_found))
+                check(message.isFromMe) { appContext.getString(R.string.cdv_retry_own_only) }
                 check(
                     message.status == com.vladimir.messenger.domain.model.MessageStatus.LOCAL_FILE ||
                         message.status == com.vladimir.messenger.domain.model.MessageStatus.FILE_EXPIRED
-                ) { "Файл уже доставлен или больше не ожидает отправки" }
+                ) { appContext.getString(R.string.cdv_file_not_pending) }
                 val chat = chatRepository.getChatById(message.chatId)
-                    ?: error("Чат недоступен")
+                    ?: error(appContext.getString(R.string.cdv_chat_unavailable))
                 val recipientId = chat.contactId
-                check(recipientId.startsWith("pk_")) { "У контакта нет ключа для передачи файлов" }
+                check(recipientId.startsWith("pk_")) { appContext.getString(R.string.cdv_no_key) }
                 check(chatRepository.markOutgoingFileRequeued(messageId)) {
-                    "Статус файла изменился: он уже мог быть подтверждён"
+                    appContext.getString(R.string.cdv_status_changed)
                 }
                 fileTransferRouter.retryOutgoingFile(
                     source = uri,
@@ -855,7 +866,7 @@ class ChatDetailViewModel @Inject constructor(
                 fileTransferRouter.pumpOutgoing()
             } catch (e: Exception) {
                 android.util.Log.w("ChatDetailVM", "file retry failed: ${e.javaClass.simpleName}")
-                _uiState.update { it.copy(error = "Файл не отправлен: ${e.message.orEmpty()}") }
+                _uiState.update { it.copy(error = appContext.getString(R.string.cd_file_not_sent2, e.message.orEmpty())) }
             } finally {
                 _uiState.update { it.copy(isPreparingFile = false) }
             }
@@ -876,10 +887,10 @@ class ChatDetailViewModel @Inject constructor(
                 // р245: с телефона-зеркала сначала забираем движок у активного.
                 claimEngineForMediaIfNeeded()
                 val chat = chatRepository.getChatById(chatId)
-                    ?: error("Чат недоступен")
+                    ?: error(appContext.getString(R.string.cdv_chat_unavailable))
                 val recipientId = chat.contactId
                 targetRecipientId = recipientId
-                check(recipientId.startsWith("pk_")) { "У контакта нет ключа для передачи файлов" }
+                check(recipientId.startsWith("pk_")) { appContext.getString(R.string.cdv_no_key) }
                 val messageId = UUID.randomUUID().toString()
                 val prepared = filePreparation.prepare(
                     source = uri,
@@ -909,10 +920,10 @@ class ChatDetailViewModel @Inject constructor(
                     // recipient can pin us and reply; durable transport delivers it when online.
                     targetRecipientId?.let { fileTransferRouter.requestExchangeBinding(it) }
                     _uiState.update {
-                        it.copy(error = "Ключ получателя ещё не закреплён. Отправил запрос — попробуйте снова через пару минут.")
+                        it.copy(error = appContext.getString(R.string.cd_key_pending))
                     }
                 } else {
-                    _uiState.update { it.copy(error = "Файл не отправлен: ${e.message}") }
+                    _uiState.update { it.copy(error = appContext.getString(R.string.cd_file_not_sent, e.message)) }
                 }
             } finally {
                 _uiState.update { it.copy(isPreparingFile = false) }
@@ -953,26 +964,25 @@ class ChatDetailViewModel @Inject constructor(
                         cached != null -> state.copy(
                             gifLoading = false,
                             gifError = null,
-                            gifNotice = "Сервер перегружен — показываю сохранённые гифки. " +
-                                "Скачать и отправить можно как обычно",
+                            gifNotice = appContext.getString(R.string.gif_server_busy) + " " + appContext.getString(R.string.sv_download_send_hint),
                             gifItems = cached.first,
                             gifNext = "",
                         )
                         more -> state.copy(
                             gifLoading = false,
                             gifError = null,
-                            gifNotice = "Сервер перегружен — «Ещё» пока недоступно",
+                            gifNotice = appContext.getString(R.string.cd_gif_more_unavailable),
                             gifNext = "",
                         )
                         else -> state.copy(
                             gifLoading = false,
-                            gifError = "Каталог гиф недоступен: сервер перегружен. Это временно — попробуйте позже",
+                            gifError = appContext.getString(R.string.sv_gif_catalog_down),
                         )
                     }
                 } else {
                     val (items, next) = result
                     if (items.isEmpty() && state.gifItems.isEmpty()) {
-                        state.copy(gifLoading = false, gifError = "Ничего не нашлось")
+                        state.copy(gifLoading = false, gifError = appContext.getString(R.string.cd_gif_nothing))
                     } else {
                         state.copy(
                             gifLoading = false,
@@ -1115,9 +1125,9 @@ class ChatDetailViewModel @Inject constructor(
             if (swarm != null) {
                 autoFetchSticker(swarm)
                 pendingSwarmStickerSha = entry.sha256
-                _uiState.update { it.copy(swarmStatus = "Стикер подгружается из сети - сразу отправим") }
+                _uiState.update { it.copy(swarmStatus = appContext.getString(R.string.cd_sticker_loading)) }
             } else {
-                _uiState.update { it.copy(error = "Файл стикера пропал с телефона - докачать его неоткуда") }
+                _uiState.update { it.copy(error = appContext.getString(R.string.cd_sticker_lost)) }
             }
             return
         }
@@ -1127,10 +1137,10 @@ class ChatDetailViewModel @Inject constructor(
             try {
                 // р245: с телефона-зеркала сначала забираем движок (как и файл).
                 claimEngineForMediaIfNeeded()
-                val chat = chatRepository.getChatById(chatId) ?: error("Чат недоступен")
+                val chat = chatRepository.getChatById(chatId) ?: error(appContext.getString(R.string.cdv_chat_unavailable))
                 val recipientId = chat.contactId
                 targetRecipientId = recipientId
-                check(recipientId.startsWith("pk_")) { "У контакта нет ключа для передачи файлов" }
+                check(recipientId.startsWith("pk_")) { appContext.getString(R.string.cdv_no_key) }
                 val messageId = UUID.randomUUID().toString()
                 // Раунд 166/170: честный тип и имя - на карточке и в
                 // уведомлениях «Стикер.webp»/«Стикер.webm», не sha-строка.
@@ -1167,7 +1177,7 @@ class ChatDetailViewModel @Inject constructor(
                     fileTransferRouter.requestExchangeBinding(it)
                 }
                 _uiState.update {
-                    it.copy(error = "Стикер не отправлен: ${e.message.orEmpty()}")
+                    it.copy(error = appContext.getString(R.string.cd_sticker_not_sent, e.message.orEmpty()))
                 }
             } finally {
                 _uiState.update { it.copy(isPreparingFile = false) }
@@ -1203,9 +1213,9 @@ class ChatDetailViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     swarmStatus = when (holder) {
-                        null -> "Сеть пока не отвечает - попробуйте позже"
-                        "" -> "Уже качаем этот стикер"
-                        else -> "Качается с $holder - сейчас отправим"
+                        null -> appContext.getString(R.string.cd_net_silent)
+                        "" -> appContext.getString(R.string.cd_already_downloading)
+                        else -> appContext.getString(R.string.cdv_downloading_from, holder)
                     },
                 )
             }
@@ -1235,7 +1245,7 @@ class ChatDetailViewModel @Inject constructor(
     fun retryFetchSticker(swarm: com.vladimir.messenger.data.sticker.SwarmSticker) {
         viewModelScope.launch {
             com.vladimir.messenger.data.sticker.StickerLibrary.rememberWant(swarm.sha256)
-            _uiState.update { it.copy(swarmStatus = "Просим у всех держателей сети…") }
+            _uiState.update { it.copy(swarmStatus = appContext.getString(R.string.cd_asking_holders)) }
             val holder = runCatching {
                 com.vladimir.messenger.data.sticker.StickerLibrary.requestSticker(
                     appContext, chatRepository, swarm.sha256, swarm.holders,
@@ -1246,9 +1256,9 @@ class ChatDetailViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     swarmStatus = when (holder) {
-                        null -> "Сеть пока не отвечает - попробуйте позже"
-                        "" -> "Уже качаем этот стикер"
-                        else -> "Просили: $holder"
+                        null -> appContext.getString(R.string.cd_net_silent)
+                        "" -> appContext.getString(R.string.cd_already_downloading)
+                        else -> appContext.getString(R.string.cdv_asked_by, holder)
                     },
                 )
             }
@@ -1332,7 +1342,7 @@ class ChatDetailViewModel @Inject constructor(
                 }.getOrNull()
             }
             if (added == null) {
-                _uiState.update { it.copy(swarmStatus = "Не вышло: нужен файл GIF до 30 МБ") }
+                _uiState.update { it.copy(swarmStatus = appContext.getString(R.string.cd_gif_too_big)) }
             } else {
                 runCatching {
                     com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
@@ -1340,7 +1350,7 @@ class ChatDetailViewModel @Inject constructor(
                     )
                 }
                 onGifCatalogOpened()
-                _uiState.update { it.copy(swarmStatus = "Своя гифка добавлена - уже в нашей сети") }
+                _uiState.update { it.copy(swarmStatus = appContext.getString(R.string.cd_gif_added)) }
             }
         }
     }
@@ -1359,7 +1369,7 @@ class ChatDetailViewModel @Inject constructor(
             } catch (e: Exception) {
                 val message = e.message.orEmpty()
                 _uiState.update {
-                    it.copy(error = if (message.contains("недоступен")) "Собеседник недоступен - попробуйте позже" else "Гифка не отправлена: $message")
+                    it.copy(error = if (message.contains("недоступен")) appContext.getString(R.string.cd_peer_unavailable) else appContext.getString(R.string.cdv_gif_not_sent, message))
                 }
             }
         }
@@ -1371,7 +1381,7 @@ class ChatDetailViewModel @Inject constructor(
      * хранителей из каталога сети.
      */
     private suspend fun sendGifRefInternal(sha256: String) {
-        val chat = chatRepository.getChatById(chatId) ?: error("Чат недоступен")
+        val chat = chatRepository.getChatById(chatId) ?: error(appContext.getString(R.string.cdv_chat_unavailable))
         val recipientId = chat.contactId
         val messageId = UUID.randomUUID().toString()
         // р245: это устройство без сети (зеркало)? Тогда ссылку отправляет
@@ -1414,7 +1424,7 @@ class ChatDetailViewModel @Inject constructor(
             it.copy(
                 scrollToBottom = true,
                 swarmStatus = if (sent) null
-                else "Гифка будет доставлена, когда собеседник появится в сети",
+                else appContext.getString(R.string.cd_gif_later),
             )
         }
         // Раунд 131: я мог только что скачать эту гифку - объявить каталог,
@@ -1490,9 +1500,9 @@ class ChatDetailViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 sendGifRefInternal(swarm.entry.sha256)
-                _uiState.update { it.copy(swarmStatus = "Ссылка отправлена - гифка подтянется из сети") }
+                _uiState.update { it.copy(swarmStatus = appContext.getString(R.string.cd_gif_link_sent)) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(swarmStatus = "Собеседник недоступен - попробуйте позже") }
+                _uiState.update { it.copy(swarmStatus = appContext.getString(R.string.cd_peer_unavailable)) }
             }
         }
     }
@@ -1515,18 +1525,18 @@ class ChatDetailViewModel @Inject constructor(
                 if (sha == null) {
                     val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         botApi.downloadGif(item.gif)
-                    } ?: error("Гифка не скачалась")
+                    } ?: error(appContext.getString(R.string.gc_gif_not_downloaded))
                     val added = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         com.vladimir.messenger.data.gif.GifLibrary.add(
                             appContext, bytes, item.id, lastGifQuery, "gif_" + item.id + ".gif",
                         )
-                    } ?: error("Гифка не сохранилась")
+                    } ?: error(appContext.getString(R.string.gc_gif_not_saved))
                     sha = added.sha256
                 }
                 sendGifRefInternal(sha)
             } catch (e: Exception) {
                 android.util.Log.w("ChatDetailVM", "gif attach failed", e)
-                _uiState.update { it.copy(error = "Гифка не отправлена: " + e.message.orEmpty()) }
+                _uiState.update { it.copy(error = appContext.getString(R.string.cd_gif_not_sent, e.message.orEmpty())) }
             } finally {
                 _uiState.update { it.copy(isPreparingFile = false) }
             }
@@ -1575,11 +1585,11 @@ class ChatDetailViewModel @Inject constructor(
                 it.copy(
                     error = when (result) {
                         com.vladimir.messenger.data.repository.SaveResult.Saved ->
-                            "Добавлено в избранное"
+                            appContext.getString(R.string.cd_saved_fav)
                         com.vladimir.messenger.data.repository.SaveResult.AlreadySaved ->
-                            "Уже в избранном"
+                            appContext.getString(R.string.cd_already_saved)
                         com.vladimir.messenger.data.repository.SaveResult.FileNotReady ->
-                            "Файл ещё не получен полностью"
+                            appContext.getString(R.string.cd_file_incomplete)
                     },
                 )
             }
@@ -1603,7 +1613,7 @@ class ChatDetailViewModel @Inject constructor(
                     contactId = chat?.contactId.orEmpty(),
                 ),
             )
-            _uiState.update { it.copy(error = "Добавлено в избранное") }
+            _uiState.update { it.copy(error = appContext.getString(R.string.cd_saved_fav)) }
         }
     }
 
@@ -1621,7 +1631,7 @@ class ChatDetailViewModel @Inject constructor(
                 .getOrDefault(false)
             _uiState.update {
                 it.copy(
-                    error = if (ok) "Сохранено: ${transfer.displayName}" else "Не удалось сохранить файл",
+                    error = if (ok) appContext.getString(R.string.cd_saved_as, transfer.displayName) else appContext.getString(R.string.cd_save_failed),
                 )
             }
         }
@@ -1686,7 +1696,7 @@ class ChatDetailViewModel @Inject constructor(
         return if (!ref.isGroup) {
             val chat = chatRepository.forwardChatByContact(ref.id)
             if (chat == null) {
-                com.vladimir.messenger.util.ForwardMarker.Open.Missing("Этого человека нет в контактах на этом телефоне")
+                com.vladimir.messenger.util.ForwardMarker.Open.Missing(appContext.getString(R.string.cd_no_contact))
             } else {
                 com.vladimir.messenger.util.ForwardMarker.Open.Chat(chat.id, chat.contactName, chat.contactId)
             }
@@ -1706,7 +1716,7 @@ class ChatDetailViewModel @Inject constructor(
                         )
                     )
                 } else {
-                    com.vladimir.messenger.util.ForwardMarker.Open.Missing("Нет ссылки-приглашения для этой группы")
+                    com.vladimir.messenger.util.ForwardMarker.Open.Missing(appContext.getString(R.string.cd_no_invite_link))
                 }
             } else {
                 com.vladimir.messenger.util.ForwardMarker.Open.Group(group.id, ref.topicId.takeIf { it.isNotBlank() })

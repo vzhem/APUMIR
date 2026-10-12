@@ -86,7 +86,7 @@ def call_spans(text: str, name: str) -> list:
 class DiagnosticsContractsTest(unittest.TestCase):
     def test_report_keeps_the_privacy_promise(self):
         report = source(DIAG / "DiagnosticsReport.kt")
-        self.assertIn('const val SCHEMA = "apu-diag/2"', report)
+        self.assertIn('const val SCHEMA = "apu-diag/4"', report)
         for part in (
             "Приватность", "текст переписки", "имена файлов", "ключи", "contact ID", "UUID сообщений",
         ):
@@ -94,7 +94,8 @@ class DiagnosticsContractsTest(unittest.TestCase):
                 self.assertIn(part, report)
         # Скрытие contact/message IDs и адресов живёт в чистом DiagnosticsPrivacy.
         for marker in (
-            '"[contact]"', '"[id]"', '"[ip]"', '"[ipv6]"', '"[transfer]"', "fun redact",
+            '"[contact]"', '"[id]"', '"[ip]"', '"[ipv6]"', '"[transfer]"',
+            "privatePathRegex", "privatePathFieldRegex", "fun redact",
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, report)
@@ -107,8 +108,10 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "[сводка]",
             "[окружение]",
             "[сеть]",
+            "[обновления]",
             "[ядро]",
             "[mqtt]",
+            "[помощники]",
             "[сообщения]",
             "[передачи]",
             "[сессия]",
@@ -121,6 +124,40 @@ class DiagnosticsContractsTest(unittest.TestCase):
         for title in ("Сеть", "Брокер", "Ядро", "Сообщения", "Передачи", "Прямой канал", "Батарея"):
             with self.subTest(title=title):
                 self.assertIn('"%s"' % title, report)
+
+    def test_online_helper_route_diagnostics_are_connected_and_scoped(self):
+        report = source(DIAG / "DiagnosticsReport.kt")
+        collector = source(DIAG / "TransferDiagnostics.kt")
+        core = (ROOT / "rust-core/src/engine/core.rs").read_text()
+        assistance = (ROOT / "rust-core/src/network/peer_assistance.rs").read_text()
+        race = (ROOT / "rust-core/src/network/helper_delivery.rs").read_text()
+        self.assertIn('const val SCHEMA = "apu-diag/4"', report)
+        self.assertIn("HelperRouteDiagnosticsParser.parse(all)", collector)
+        self.assertIn('"ONLINE_HELPER"', collector)
+        for marker in (
+            "event=attempt_started",
+            "event=candidates selected=",
+            "event=leg_started slot=",
+            "event=leg_write slot=",
+            "event=reserve_started trigger=",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, core)
+        for marker in (
+            "event=signed_decline_received slot=",
+            "event=recipient_receipt_issued",
+            "event=receipt_verified return_leg=",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, assistance)
+        self.assertIn("hedged_delivery_observed", race)
+        self.assertIn("ReserveTrigger::PrimaryFailed", race)
+        self.assertIn("ReserveTrigger::HedgeDelayElapsed", race)
+        self.assertIn("file chunks не включены", report)
+        # Diagnostic messages must contain only event enums, slot/count values and elapsed time.
+        for forbidden in ("recipient={}", "peer={}", "packet_id={}", "payload={}", "bytes={}"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, core[core.index("fn send_with_helper("):core.index("pub fn receive_message(")])
 
     def test_dialog_keeps_house_style_and_actions(self):
         screen = source(SCREEN)
@@ -154,9 +191,9 @@ class DiagnosticsContractsTest(unittest.TestCase):
         # у соседних диалогов экрана, это не наша зона).
         logs_block = screen[screen.index("ApuDiagnosticsHero("):screen.index("muteScope?.let { scope ->")]
         self.assertNotIn("TextButton(", logs_block)
-        for label in ("Отправить", "Скопировать", "Обновить", "Закрыть"):
+        for label in ("action_send", "action_copy", "action_refresh", "action_close"):
             with self.subTest(label=label):
-                self.assertIn('label = "%s"' % label, logs_block)
+                self.assertIn("label = stringResource(R.string.%s)" % label, logs_block)
         # Все четыре действия должны уместиться на узком экране телефона.
         # Если вернуть их в отдельные confirm/dismiss-слоты, общая строка
         # AlertDialog сжимает основную кнопку «Отправить» до невидимого края.
@@ -175,7 +212,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertNotIn(".verticalScroll(", text_block)
         self.assertNotIn("heightIn(max = 460.dp)", text_block)
         self.assertNotIn("caption = ", text_block)
-        self.assertIn("Состояние APU", source(DIAG_UI))
+        self.assertIn("stringResource(R.string.diag_state_title)", source(DIAG_UI))
         ui = source(DIAG_UI)
         self.assertIn("ApuSettingsCard(", ui)
         self.assertIn("ApuBubbleMutedColor", ui)
@@ -449,14 +486,14 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "indication = null",
             "diagnosticsGloss(",
             "diagnosticsLift(",
-            "ВСЁ В ПОРЯДКЕ",
-            "ЕСТЬ ПРЕДУПРЕЖДЕНИЯ",
-            "ЕСТЬ ОШИБКИ",
-            "порядок",
-            "справка",
-            "внимание",
-            "поломка",
-            "Полный отчёт",
+            "stringResource(R.string.diag_verdict_ok)",
+            "stringResource(R.string.diag_verdict_warn)",
+            "stringResource(R.string.diag_verdict_bad)",
+            "stringResource(R.string.diag_lvl_ok)",
+            "stringResource(R.string.diag_lvl_info)",
+            "stringResource(R.string.diag_lvl_warn)",
+            "stringResource(R.string.diag_lvl_bad)",
+            "stringResource(R.string.diag_full_report)",
             "fun diagnosticsReportAnnotated(",
             "withStyle(",
             "ApuSettingsCard(",
@@ -515,8 +552,12 @@ class DiagnosticsContractsTest(unittest.TestCase):
         collector = source(DIAG / "TransferDiagnostics.kt")
         for marker in (
             "DiagnosticsPrivacy.hidePayloadBodies(",
-            "DiagnosticsPrivacy.collapseRepeatedLogLines(",
-            "queueOwnEvictions = all.count",
+            "DiagnosticsPrivacy.prioritizeLogcatErrors(",
+            "queueOwnEvictions = evictionScan.count",
+            "private fun isRelevantProcessLog(line: String)",
+            'severity == "E" || severity == "F"',
+            "safeErrorTag",
+            "UpdateDiagnosticsStore.snapshot(context)",
             "queueRecipients = queueStat(all, \"получателей=\")",
             "stunFailedCycles = all.count",
             "stunSuccessfulBindings = all.count",
@@ -544,10 +585,15 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "peerKeyChangeExplainsSilentChat",
             "offlineQueueIsNotMistakenForSilence",
             "queueIsSplitBetweenOwnAndForeign",
-            "ownQueueEvictionsAreReportedAsHistoricalSample",
+            "ownQueueEvictionsAreReportedAsCumulativeRamCachePressure",
+            "ownQueueEvictionCounterResetsAtTheNewestCoreStartAndUsesLegacySamples",
             "seedingWaitsForAReceiverAndHistoricalStunFailureIsExplained",
             "messageUuidsAreRedactedFromJournalAndLogcat",
             "logcatCountsWarningsAndErrorsAndKeepsHeartbeatTail",
+            "logcatErrorPriorityKeepsEAndFLinesWithinTheReportLimit",
+            "absolutePathsAndNamedFileFieldsAreRedacted",
+            "updatePolicyFallsBackOnlyWhenTheDirectCheckDidNotConfirmCurrentVersion",
+            "updateSectionExplainsCheckSourceAndNotificationWithoutUrls",
             "foreignQueueAloneIsNotAWarning",
             "refusedSendIsNamedInTheSummary",
         ):
@@ -586,7 +632,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "очередь ядра: своё ждёт получателя=",
             "очередь ядра: чужая пересылка=",
             "очередь ядра: получателей=",
-            "вытеснений своих из RAM в выборке=",
+            "вытеснений своих из RAM-кэша=",
             "STUN в выборке:",
             "уровни в ограниченной выборке logcat:",
             "лимит на получателя был исчерпан",
@@ -666,6 +712,8 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "pub fn own_count(",
             "pub fn foreign_count(",
             "pub struct RelayQueueStats",
+            "own_capacity_evictions: AtomicUsize",
+            "self.own_capacity_evictions.fetch_add(1, Ordering::Relaxed)",
             "pub fn stats(",
         ):
             with self.subTest(marker=marker):
@@ -688,9 +736,13 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "q.enqueue_own(next_hop_message)",
             "let is_own_origin = next_hop_message.origin_sender == node_id;",
             "queue.enqueue_own(record)",
+            "Always emit a startup snapshot",
+            "own_capacity_evictions={})",
             # Сигналы отдельно от переписки: в журнале и в отчёте видно, чем
             # занят резерв «своих» (владелец 2026-10-07).
-            "Relay-очередь: своих={} сигналов={} чужих={}",
+            "Relay-очередь: своих={}",
+            "stats.total > 0 || stats.own_capacity_evictions > 0",
+            "вытеснено-своих={}",
             "MAX_TOTAL + MAX_OWN_TOTAL",
             # Владелец 2026-10-07 (отчёт v11.74.199): «своё ждёт получателя=1000»
             # при «сигналов=0» и постоянных «delivery ACK received». Прямое
@@ -784,10 +836,87 @@ class DiagnosticsContractsTest(unittest.TestCase):
                         for forbidden in FORBIDDEN_IN_EVENTS:
                             self.assertNotIn(forbidden, span, f"{relative}: {method} с {forbidden}")
 
+    def test_update_check_fallback_and_notification_state_are_reported_safely(self):
+        report = source(DIAG / "DiagnosticsReport.kt")
+        collector = source(DIAG / "TransferDiagnostics.kt")
+        store = source(MAIN / "service/UpdateDiagnosticsStore.kt")
+        checker = source(MAIN / "service/UpdateChecker.kt")
+        notifier = source(MAIN / "service/UpdateNotifier.kt")
+        worker = source(MAIN / "worker/UpdateCheckWorker.kt")
+        tests = source(ROOT / "android-app/app/src/test/java/com/vladimir/messenger/service/UpdateCheckerTest.kt")
+
+        for field in (
+            "last_check_trigger=", "last_check_source=", "last_check_result=",
+            "github_http_status=", "relay_http_status=", "last_notification_attempt_result=",
+            "notifications_allowed=", "update_channel_enabled=",
+        ):
+            with self.subTest(field=field):
+                self.assertIn(field, report)
+        self.assertIn("UpdateDiagnosticsStore.snapshot(context)", collector)
+        self.assertIn("UpdateDiagnosticsStore.begin", checker)
+        self.assertIn("UpdateDiagnosticsStore.markHttp", checker)
+        self.assertIn("shouldTryRelayFallback(trace.githubOutcome)", checker)
+        self.assertIn('trigger = "background"', worker)
+        self.assertIn("UpdateDiagnosticsStore.recordNotification", notifier)
+        self.assertIn("permission_blocked", notifier)
+        self.assertIn("channel_blocked", notifier)
+        # Only safe tokens/statuses are persisted; release URLs, notes, and body text stay out.
+        for forbidden in ("downloadUrl", "releaseNotes", "httpGet(", "RELAY_BASE"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, store)
+        for test in (
+            "tries relay fallback when GitHub is unavailable or malformed",
+            "maps endpoint failures separately from a confirmed up to date result",
+        ):
+            with self.subTest(test=test):
+                self.assertIn(test, tests)
+
+    def test_external_stun_and_secondary_broker_refusals_keep_their_fallbacks(self):
+        ice = source(ROOT / "rust-core/src/network/ice.rs")
+        core = source(ROOT / "rust-core/src/engine/core.rs")
+        mqtt = source(ROOT / "rust-core/src/network/mqtt_transport.rs")
+        fanout = source(ROOT / "rust-core/src/network/mqtt_fanout.rs")
+        workflow = source(ROOT / ".github/workflows/build-release.yml")
+
+        for marker in (
+            "try_stun_servers(servers, Self::get_external_address)",
+            "Err(IceError::AllServersFailed)",
+            "fn stun_fallback_uses_next_endpoint_after_a_temporary_refusal",
+            "fn all_stun_refusals_return_a_recoverable_error_after_all_attempts",
+        ):
+            with self.subTest(source="STUN", marker=marker):
+                self.assertIn(marker, ice)
+        for marker in (
+            "StunClient::get_external_address_from_any(DEFAULT_STUN_SERVERS)",
+            "STUN: all servers failed",
+            "backoff_secs = std::cmp::min(backoff_secs.saturating_mul(2), 120)",
+        ):
+            with self.subTest(source="core STUN", marker=marker):
+                self.assertIn(marker, core)
+        for marker in (
+            "MQTT_FAILOVER_TCP_ERRORS",
+            "MQTT_FAILOVER_WSS_ERRORS",
+            "MQTT_PREFER_WSS.store(true",
+            "MQTT FAILOVER REVIEW",
+            "state=backoff retry_in=",
+        ):
+            with self.subTest(source="MQTT", marker=marker):
+                self.assertIn(marker, mqtt)
+        self.assertIn("fanout_outcome_requires_at_least_one_real_target", fanout)
+        self.assertIn("if !outcome.queued_any()", mqtt)
+        self.assertIn("MQTT FANOUT DEGRADED", mqtt)
+        self.assertIn("mqtt_fanout", workflow)
+        self.assertIn('"network::ice::tests::$test"', workflow)
+        self.assertIn("for test in stun_fallback_uses_next_endpoint_after_a_temporary_refusal", workflow)
+        self.assertIn("all_stun_refusals_return_a_recoverable_error_after_all_attempts; do", workflow)
+
     def test_ci_runs_the_pure_kotlin_diagnostics_tests(self):
         script = source(ROOT / "scripts/ci/check-chat-history.sh")
         self.assertIn("DiagnosticsReportTest.kt", script)
         self.assertIn("MqttLinkTextTest.kt", script)
+        self.assertIn("UpdateCheckPolicy.kt", script)
+        self.assertIn("UpdateCheckerTest.kt", script)
+        self.assertIn("com.vladimir.messenger.service.UpdateCheckerTest", script)
         self.assertIn("com.vladimir.messenger.data.diagnostics.DiagnosticsReportTest", script)
 
 

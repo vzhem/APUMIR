@@ -5,8 +5,11 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
-use std::sync::{mpsc, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+use super::helper_quality::HelperQuality;
+use super::helper_policy::HelperPolicy;
+use tokio::sync::oneshot;
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use chacha20poly1305::{aead::{Aead, KeyInit, Payload}, XChaCha20Poly1305, XNonce};
@@ -22,7 +25,6 @@ use super::peer_exchange::{is_public_endpoint, valid_node_id, PeerExchange};
 pub const ASSIST_MAGIC: &[u8] = b"APUA1\n";
 pub const MAX_ASSIST_BYTES: usize = 384 * 1024;
 pub const MAX_INNER_BYTES: usize = 256 * 1024;
-pub const RECEIPT_WAIT: Duration = Duration::from_secs(8);
 const LEASE_MS: i64 = 24 * 60 * 60_000;
 const PACKET_MS: i64 = 60_000;
 const SKEW_MS: i64 = 120_000;
@@ -173,6 +175,9 @@ pub enum AssistOperation {
     Relay { packet: SealedPacket },
     Deliver { packet: SealedPacket },
     Receipt { receipt: Receipt },
+    /// Signed by the helper that refused one pending relay. N-1 nodes cannot parse this variant
+    /// and ignore it; the old sender then uses the existing hedge timer. It is only a demotion hint.
+    Decline { packet_id: [u8; 16] },
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -193,13 +198,28 @@ pub fn encode(identity: &InstalledSigningIdentity, peer: &str, operation: Assist
     (bytes.len() <= MAX_ASSIST_BYTES).then_some(bytes)
 }
 
-struct Pending { recipient: HelperIdentity, digest: [u8; 32], expires: i64, tx: mpsc::SyncSender<bool> }
+struct Leg { slot: u8, started: Instant, written: bool, declined: Option<oneshot::Sender<()>> }
+struct Pending {
+    recipient: HelperIdentity,
+    digest: [u8; 32],
+    expires: i64,
+    tx: oneshot::Sender<bool>,
+    legs: HashMap<String, Leg>,
+    // Only ordinary message packets get detailed route logs. File chunks can be numerous;
+    // they remain covered by the existing file-transfer diagnostics instead.
+    diagnostic_message: bool,
+}
+struct Received { digest: [u8; 32], expires: i64, receipt: Receipt }
 struct Route { origin: String, recipient: HelperIdentity, digest: [u8; 32], expires: i64 }
 #[derive(Default)]
 struct State {
     pending: HashMap<[u8; 16], Pending>,
-    routes: HashMap<[u8; 16], Route>,
-    received: HashMap<[u8; 16], i64>,
+    quality: HelperQuality,
+    policy: HelperPolicy,
+    transit_traffic: VecDeque<(usize, i64)>,
+    declines: VecDeque<i64>,
+    routes: HashMap<(String, [u8; 16]), Route>,
+    received: HashMap<(String, [u8; 16]), Received>,
     frames: VecDeque<([u8; 16], i64)>,
     traffic: VecDeque<(String, usize, i64)>,
     controls: VecDeque<i64>,
@@ -215,11 +235,22 @@ pub struct AssistanceEffect {
     pub delivery: Option<Vec<u8>>,
 }
 
+/// Releases origin admission even if the race is timed out, panics, or is aborted.
+pub struct PendingRelayGuard { assistance: Arc<PeerAssistance>, id: [u8; 16] }
+impl Drop for PendingRelayGuard {
+    fn drop(&mut self) { self.assistance.cancel(self.id); }
+}
+
 #[derive(Default)]
 pub struct PeerAssistance { state: Mutex<State> }
 impl PeerAssistance {
-    /// All online nodes enable this service; no disk-custody setting is consulted.
+    /// Online transit defaults on, but has its own owner control, separate from disk custody.
     pub fn new() -> Self { Self::default() }
+
+    pub fn set_policy(&self, enabled: bool, routes: u32, bytes: u32, relays: u32) {
+        // Do not reset counters or drop accepted routes on toggles: neither grants fresh quota.
+        self.state.lock().unwrap().policy = HelperPolicy::bounded(enabled, routes, bytes, relays);
+    }
 
     pub fn connect_request(&self, target: &str, now: i64) -> Option<AssistOperation> {
         if !valid_node_id(target) { return None; }
@@ -230,16 +261,61 @@ impl PeerAssistance {
     }
 
     pub fn prepare_relay(&self, identity: &InstalledSigningIdentity, recipient: &HelperIdentity, bytes: &[u8], now: i64)
-        -> Option<(AssistOperation, mpsc::Receiver<bool>, [u8; 16])> {
+        -> Option<(AssistOperation, oneshot::Receiver<bool>, [u8; 16])> {
         let packet = seal(identity, recipient, bytes, now)?;
-        let (tx, rx) = mpsc::sync_channel(1);
+        let (tx, rx) = oneshot::channel();
         let mut s = self.state.lock().unwrap(); cleanup(&mut s, now);
         if s.pending.len() >= MAX_PENDING { return None; }
         let id = packet.header.packet_id;
-        s.pending.insert(id, Pending { recipient: recipient.clone(), digest: packet.digest()?, expires: packet.header.expires_at_ms, tx });
+        let diagnostic_message = !bytes.starts_with(&super::file_wire::FILE_WIRE_MAGIC);
+        s.pending.insert(id, Pending {
+            recipient: recipient.clone(),
+            digest: packet.digest()?,
+            expires: packet.header.expires_at_ms,
+            tx,
+            legs: HashMap::new(),
+            diagnostic_message,
+        });
         Some((AssistOperation::Relay { packet }, rx, id))
     }
+    pub fn pending_guard(self: &Arc<Self>, id: [u8; 16]) -> PendingRelayGuard {
+        PendingRelayGuard { assistance: Arc::clone(self), id }
+    }
     pub fn cancel(&self, id: [u8; 16]) { self.state.lock().unwrap().pending.remove(&id); }
+
+    pub fn order_helpers(&self, recipient: &str, helpers: &mut [String]) {
+        self.state.lock().unwrap().quality.order(recipient, helpers, Instant::now());
+    }
+
+    /// Called in the polled leg, not when its future is merely constructed.
+    pub fn leg_started(&self, id: [u8; 16], helper: &str, slot: u8) -> Option<oneshot::Receiver<()>> {
+        let mut s = self.state.lock().unwrap();
+        let pending = s.pending.get_mut(&id)?;
+        if pending.legs.len() >= 2 || pending.legs.contains_key(helper) { return None; }
+        let (tx, rx) = oneshot::channel();
+        pending.legs.insert(helper.into(), Leg { slot, started: Instant::now(), written: false, declined: Some(tx) });
+        Some(rx)
+    }
+
+    pub fn leg_written(&self, id: [u8; 16], helper: &str, written: bool) {
+        let mut s = self.state.lock().unwrap();
+        let Some(pending) = s.pending.get_mut(&id) else { return; };
+        let Some(leg) = pending.legs.get_mut(helper) else { return; };
+        leg.written = written;
+        let recipient = pending.recipient.claims.node_id.clone();
+        if !written { s.quality.write_failed(&recipient, helper, Instant::now()); }
+    }
+
+    /// Atomically consumes this attempt. Receipt and cancel paths use the same mutex;
+    /// an abort is cancellation, not a failure observation. Packet IDs are fresh per attempt.
+    pub fn finish_timeout(&self, id: [u8; 16]) {
+        let mut s = self.state.lock().unwrap();
+        let Some(pending) = s.pending.remove(&id) else { return; };
+        let now = Instant::now();
+        for (helper, leg) in pending.legs {
+            if leg.written { s.quality.timed_out(&pending.recipient.claims.node_id, &helper, now); }
+        }
+    }
 
     pub fn handle(&self, identity: &InstalledSigningIdentity, directory: &PeerExchange,
         bytes: &[u8], binding: [u8; 32], remote: SocketAddr, now: i64) -> Option<AssistanceEffect> {
@@ -252,13 +328,28 @@ impl PeerAssistance {
             || signed.signature.len() != 64 || directory.pinned_key(&c.from)? != c.signing_key { return None; }
         Ed25519KeyPair::verify(&c.signing_key, &canonical(FRAME_DOMAIN, &c)?, &signed.signature).ok()?;
         let mut s = self.state.lock().unwrap(); cleanup(&mut s, now);
-        if s.frames.iter().any(|(id, _)| id == &c.id) { return None; }
-        if s.frames.len() >= MAX_ROUTES { return None; }
-        s.frames.push_back((c.id, now));
+        let new_transit = matches!(&c.operation, AssistOperation::Connect { .. } | AssistOperation::Relay { .. });
         let mut effect = AssistanceEffect { sender: Some(c.from.clone()), ..AssistanceEffect::default() };
+        if new_transit && !s.policy.enabled {
+            if let AssistOperation::Relay { packet } = &c.operation {
+                // Do not verify/open the packet while opted out. The recipient of this hint accepts it
+                // only for its own live pending packet from this authenticated helper.
+                decline(&mut s, &mut effect, &c.from, packet.header.packet_id, now);
+                return Some(effect);
+            }
+            return None;
+        }
+        // Receipts and declines consume matching local state; they need no replay slot. This lets
+        // already-admitted transit drain even at capacity or opt-out.
+        if !matches!(&c.operation, AssistOperation::Receipt { .. } | AssistOperation::Decline { .. }) {
+            if s.frames.iter().any(|(id, _)| id == &c.id) { return None; }
+            let ceiling = if new_transit { MAX_ROUTES / 2 } else { MAX_ROUTES };
+            if s.frames.len() >= ceiling { return None; }
+            s.frames.push_back((c.id, now));
+        }
         match c.operation {
             AssistOperation::Connect { target } => {
-                if target == c.from || target == c.to || !valid_node_id(&target) || s.controls.len() >= 60 { return None; }
+                if target == c.from || target == c.to || !valid_node_id(&target) || s.controls.len() >= 30 { return None; }
                 let target_peer = directory.authenticated_peer(&target, now)?;
                 let source = directory.authenticated_peer(&c.from, now)?;
                 if source.identity.claims.signing_key != c.signing_key { return None; }
@@ -281,47 +372,101 @@ impl PeerAssistance {
             AssistOperation::Relay { packet } => {
                 if !packet.verify(now) || packet.header.sender.claims.node_id != c.from
                     || packet.header.sender.claims.signing_key != c.signing_key || packet.header.recipient == c.to
-                    || s.routes.len() >= MAX_ROUTES || s.routes.contains_key(&packet.header.packet_id) { return None; }
+                    || s.routes.contains_key(&(c.from.clone(), packet.header.packet_id)) { return None; }
+                if s.routes.len() >= s.policy.max_routes {
+                    decline(&mut s, &mut effect, &c.from, packet.header.packet_id, now);
+                    return Some(effect);
+                }
                 let target = directory.authenticated_peer(&packet.header.recipient, now)?;
                 if target.identity.claims.signing_key != packet.header.recipient_signing_key
-                    || target.identity.claims.exchange_key != packet.header.recipient_exchange_key
-                    || !admit_bytes(&mut s, &c.from, bytes.len(), now) { return None; }
-                s.routes.insert(packet.header.packet_id, Route { origin: c.from, recipient: target.identity,
+                    || target.identity.claims.exchange_key != packet.header.recipient_exchange_key { return None; }
+                if !admit_transit(&mut s, &c.from, bytes.len(), now) {
+                    decline(&mut s, &mut effect, &c.from, packet.header.packet_id, now);
+                    return Some(effect);
+                }
+                s.routes.insert((c.from.clone(), packet.header.packet_id), Route { origin: c.from, recipient: target.identity,
                     digest: packet.digest()?, expires: packet.header.expires_at_ms });
                 effect.outbound.push((packet.header.recipient.clone(), AssistOperation::Deliver { packet }));
             }
+            AssistOperation::Decline { packet_id } => {
+                let (diagnostic_message, slot) = {
+                    let Some(pending) = s.pending.get_mut(&packet_id) else { return None; };
+                    let Some(leg) = pending.legs.get_mut(&c.from) else { return None; };
+                    if !leg.written { return None; }
+                    let Some(tx) = leg.declined.take() else { return None; };
+                    let _ = tx.send(());
+                    (pending.diagnostic_message, leg.slot)
+                };
+                if diagnostic_message {
+                    tracing::info!("ONLINE_HELPER event=signed_decline_received slot={}", slot);
+                }
+                s.quality.declined(&c.from, Instant::now());
+            }
             AssistOperation::Deliver { packet } => {
-                if !packet.verify(now) || packet.header.recipient != c.to || s.received.len() >= MAX_ROUTES
-                    { return None; }
+                // Retries use real bandwidth too. Admission precedes expensive box opening
+                // and receipt signing, including duplicates and invalid inner packets.
+                if !admit_bytes(&mut s, &c.from, bytes.len(), now)
+                    || !packet.verify(now) || packet.header.recipient != c.to { return None; }
+                let key = (packet.header.sender.claims.node_id.clone(), packet.header.packet_id);
+                let digest = packet.digest()?;
+                if let Some(seen) = s.received.get(&key) {
+                    if seen.digest != digest { return None; }
+                    // Exact retry via another enrolled helper: re-use recipient-signed ACK,
+                    // without decrypting/re-signing or dispatching the payload again.
+                    effect.outbound.push((c.from, AssistOperation::Receipt { receipt: seen.receipt.clone() }));
+                    return Some(effect);
+                }
+                // Never evict a live entry to admit a new packet: that permits re-delivery.
+                // Per-sender bytes bound traffic; the cache remains globally bounded too.
+                if s.received.len() >= MAX_ROUTES { return None; }
                 let plaintext = open(identity, &packet, now)?;
                 if !valid_inner(&plaintext, &packet.header.sender.claims.node_id)
                     || !directory.accept_end_to_end_identity(&packet.header.sender, now) { return None; }
+                let diagnostic_message = !plaintext.starts_with(&super::file_wire::FILE_WIRE_MAGIC);
                 let claims = ReceiptClaims { packet_id: packet.header.packet_id, origin: packet.header.sender.claims.node_id.clone(),
-                    recipient: c.to.clone(), digest: packet.digest()?, expires_at_ms: packet.header.expires_at_ms };
+                    recipient: c.to.clone(), digest, expires_at_ms: packet.header.expires_at_ms };
                 let signature = identity.sign_security_payload(&canonical(ACK_DOMAIN, &claims)?);
-                // A retried ciphertext gets the same end-to-end receipt, but no duplicate delivery.
-                if !s.received.contains_key(&packet.header.packet_id) {
-                    if !admit_bytes(&mut s, &c.from, bytes.len(), now) { return None; }
-                    s.received.insert(packet.header.packet_id, packet.header.expires_at_ms);
-                    effect.delivery = Some(plaintext);
+                let receipt = Receipt { claims, signature };
+                s.received.insert(key, Received { digest, expires: packet.header.expires_at_ms, receipt: receipt.clone() });
+                if diagnostic_message {
+                    tracing::info!("ONLINE_HELPER event=recipient_receipt_issued");
                 }
-                effect.outbound.push((c.from, AssistOperation::Receipt { receipt: Receipt { claims, signature } }));
+                effect.delivery = Some(plaintext);
+                effect.outbound.push((c.from, AssistOperation::Receipt { receipt }));
             }
             AssistOperation::Receipt { receipt } => {
                 if receipt.claims.expires_at_ms <= now || receipt.signature.len() != 64 { return None; }
                 let id = receipt.claims.packet_id;
                 if receipt.claims.origin == c.to {
                     let pending = s.pending.get(&id)?;
-                    if pending.digest != receipt.claims.digest || pending.recipient.claims.node_id != receipt.claims.recipient { return None; }
+                    if pending.digest != receipt.claims.digest || pending.recipient.claims.node_id != receipt.claims.recipient
+                        || pending.expires != receipt.claims.expires_at_ms { return None; }
                     Ed25519KeyPair::verify(&pending.recipient.claims.signing_key, &canonical(ACK_DOMAIN, &receipt.claims)?, &receipt.signature).ok()?;
                     let pending = s.pending.remove(&id)?;
-                    let _ = pending.tx.try_send(true);
+                    // The recipient signature proves acceptance, not a globally provable
+                    // helper path. Credit only this locally started, authenticated return leg.
+                    let return_slot = pending.legs.get(&c.from).map(|leg| leg.slot);
+                    if let Some(leg) = pending.legs.get(&c.from) {
+                        let now = Instant::now();
+                        s.quality.accepted(&pending.recipient.claims.node_id, &c.from,
+                            now.saturating_duration_since(leg.started), now);
+                    }
+                    if pending.diagnostic_message {
+                        match return_slot {
+                            Some(slot) => tracing::info!("ONLINE_HELPER event=receipt_verified return_leg={}", slot),
+                            None => tracing::info!("ONLINE_HELPER event=receipt_verified return_leg=unknown"),
+                        }
+                    }
+                    // Other legs are censored by the race, NOT failed deliveries.
+                    let _ = pending.tx.send(true);
                 } else {
-                    let route = s.routes.get(&id)?;
+                    let key = (receipt.claims.origin.clone(), id);
+                    let route = s.routes.get(&key)?;
                     if route.origin != receipt.claims.origin || route.recipient.claims.node_id != c.from
-                        || route.recipient.claims.node_id != receipt.claims.recipient || route.digest != receipt.claims.digest { return None; }
+                        || route.recipient.claims.node_id != receipt.claims.recipient || route.digest != receipt.claims.digest
+                        || route.expires != receipt.claims.expires_at_ms { return None; }
                     Ed25519KeyPair::verify(&route.recipient.claims.signing_key, &canonical(ACK_DOMAIN, &receipt.claims)?, &receipt.signature).ok()?;
-                    let route = s.routes.remove(&id)?;
+                    let route = s.routes.remove(&key)?;
                     effect.outbound.push((route.origin, AssistOperation::Receipt { receipt }));
                 }
             }
@@ -339,6 +484,20 @@ fn valid_inner(bytes: &[u8], sender: &str) -> bool {
     let parts: Vec<_> = text.splitn(4, '|').collect();
     parts.len() == 4 && parts[0] == sender && !parts[1].is_empty()
 }
+fn decline(s: &mut State, effect: &mut AssistanceEffect, origin: &str, packet_id: [u8; 16], now: i64) {
+    s.declines.retain(|at| now.saturating_sub(*at) < 60_000);
+    if s.declines.len() >= 30 || packet_id == [0; 16] { return; }
+    s.declines.push_back(now);
+    effect.outbound.push((origin.to_string(), AssistOperation::Decline { packet_id }));
+}
+fn admit_transit(s: &mut State, peer: &str, bytes: usize, now: i64) -> bool {
+    let used: usize = s.transit_traffic.iter().map(|(bytes, _)| *bytes).sum();
+    if !s.policy.enabled || s.transit_traffic.len() >= s.policy.max_relays_per_minute
+        || used.saturating_add(bytes) > s.policy.max_bytes_per_minute { return false; }
+    if !admit_bytes(s, peer, bytes, now) { return false; }
+    s.transit_traffic.push_back((bytes, now));
+    true
+}
 fn admit_bytes(s: &mut State, peer: &str, bytes: usize, now: i64) -> bool {
     let global: usize = s.traffic.iter().map(|(_, b, _)| *b).sum();
     let personal: usize = s.traffic.iter().filter(|(id, _, _)| id == peer).map(|(_, b, _)| *b).sum();
@@ -346,8 +505,9 @@ fn admit_bytes(s: &mut State, peer: &str, bytes: usize, now: i64) -> bool {
     s.traffic.push_back((peer.into(), bytes, now)); true
 }
 fn cleanup(s: &mut State, now: i64) {
+    s.transit_traffic.retain(|(_, at)| now.saturating_sub(*at) < 60_000);
     s.pending.retain(|_, p| p.expires > now); s.routes.retain(|_, r| r.expires > now);
-    s.received.retain(|_, until| *until > now);
+    s.received.retain(|_, seen| seen.expires > now);
     s.frames.retain(|(_, at)| now.saturating_sub(*at) < PACKET_MS);
     s.traffic.retain(|(_, _, at)| now.saturating_sub(*at) < 60_000);
     s.controls.retain(|at| now.saturating_sub(*at) < 60_000);
@@ -359,6 +519,7 @@ fn cleanup(s: &mut State, now: i64) {
 mod tests {
     use super::*;
     use std::sync::Arc;
+    use std::time::Duration;
     use super::super::peer_exchange::Candidate;
     const NOW: i64 = 1_000_000;
     const BINDING: [u8; 32] = [17; 32];
@@ -367,8 +528,9 @@ mod tests {
     }
     fn addr(n: u8) -> SocketAddr { format!("8.8.4.{n}:7777").parse().unwrap() }
     fn enroll(a: &InstalledSigningIdentity, da: &PeerExchange, h: &InstalledSigningIdentity, dh: &PeerExchange, endpoint: SocketAddr, source: SocketAddr) {
-        let request = da.plan(a, Some(source), vec![Candidate { node_id: h.legacy_routing_node_id().into(), endpoint,
-            learned_at_ms: NOW, live_connection: false }], &[], NOW).remove(0);
+        // Explicit enrollment must target this helper, not a third-party record
+        // that the normal discovery planner may legitimately prioritise first.
+        let request = da.probe(a, Some(source), h.legacy_routing_node_id(), endpoint, NOW).unwrap();
         da.bind_request(&request, BINDING, endpoint);
         let effect = dh.handle(h, &request.encode(a, BINDING).unwrap(), BINDING, source, Some(endpoint), NOW).unwrap();
         da.handle(a, &effect.response.unwrap(), BINDING, endpoint, Some(source), NOW).unwrap();
@@ -413,12 +575,15 @@ mod tests {
         enroll(&a, &da, &h, &dh, addr(3), addr(1));
         enroll(&b, &db, &h, &dh, addr(3), addr(2));
         let sa = PeerAssistance::new(); let sb = PeerAssistance::new(); let sh = PeerAssistance::new();
+        sb.set_policy(false, 0, 0, 0); // Own delivery must still work after online opt-out.
         let target = HelperIdentity::create(&b, NOW).unwrap();
         let text = format!("{}|m2|chat|secret", a.legacy_routing_node_id());
-        let (op, receipt, _) = sa.prepare_relay(&a, &target, text.as_bytes(), NOW).unwrap();
+        let (op, mut receipt, _) = sa.prepare_relay(&a, &target, text.as_bytes(), NOW).unwrap();
         let wire = encode(&a, h.legacy_routing_node_id(), op, BINDING, NOW).unwrap();
         let forward = sh.handle(&h, &dh, &wire, BINDING, addr(1), NOW).unwrap().outbound.remove(0);
         assert!(receipt.try_recv().is_err(), "writing a helper stream is not a sent receipt");
+        sh.set_policy(false, 0, 0, 0); // Accepted relay may drain after opt-out.
+        for n in 0..MAX_ROUTES { sh.state.lock().unwrap().frames.push_back(([n as u8; 16], NOW)); }
         let delivered = encode(&h, &forward.0, forward.1, BINDING, NOW).unwrap();
         let at_b = sb.handle(&b, &db, &delivered, BINDING, addr(3), NOW).unwrap();
         assert_eq!(at_b.delivery.unwrap(), text.as_bytes());
@@ -448,10 +613,234 @@ mod tests {
         assert!(helper.connect_request(h.legacy_routing_node_id(), NOW + 1).is_none());
     }
 
-    // Real QUIC with three independent endpoints: neither sender nor receiver has a direct
-    // connection to the other. Only the helper has both, and never receives the plaintext.
+    #[test]
+    fn two_helpers_deliver_once_and_each_gets_recipient_receipt_even_at_capacity() {
+        let a = identity(1); let b = identity(2); let h = identity(3); let j = identity(4);
+        let da = PeerExchange::open(None); let db = PeerExchange::open(None);
+        let dh = PeerExchange::open(None); let dj = PeerExchange::open(None);
+        enroll(&a, &da, &h, &dh, addr(3), addr(1));
+        enroll(&b, &db, &h, &dh, addr(3), addr(2));
+        enroll(&a, &da, &j, &dj, addr(4), addr(1));
+        enroll(&b, &db, &j, &dj, addr(4), addr(2));
+        let sa = PeerAssistance::new(); let sb = PeerAssistance::new();
+        let sh = PeerAssistance::new(); let sj = PeerAssistance::new();
+        let text = format!("{}|hedged|chat|one message", a.legacy_routing_node_id());
+        let (op, mut receipt, packet_id) = sa.prepare_relay(&a, &HelperIdentity::create(&b, NOW).unwrap(), text.as_bytes(), NOW).unwrap();
+        let mut deliveries = 0;
+        for (slot, (helper, directory, assistance)) in [(&h, &dh, &sh), (&j, &dj, &sj)]
+            .into_iter().enumerate()
+        {
+            sa.leg_started(packet_id, helper.legacy_routing_node_id(), (slot + 1) as u8);
+            sa.leg_written(packet_id, helper.legacy_routing_node_id(), true);
+            let wire = encode(&a, helper.legacy_routing_node_id(), op.clone(), BINDING, NOW).unwrap();
+            let forward = assistance.handle(helper, directory, &wire, BINDING, addr(1), NOW).unwrap().outbound.remove(0);
+            let wire = encode(helper, &forward.0, forward.1, BINDING, NOW).unwrap();
+            let at_b = sb.handle(&b, &db, &wire, BINDING, addr(3), NOW).unwrap();
+            if let Some(payload) = at_b.delivery { assert_eq!(payload, text.as_bytes()); deliveries += 1; }
+            let ack = at_b.outbound.into_iter().next().unwrap();
+            // Fill the cache after first acceptance; known duplicates still get a receipt.
+            if deliveries == 1 && sb.state.lock().unwrap().received.len() == 1 {
+                let mut state = sb.state.lock().unwrap();
+                let cached = match &ack.1 { AssistOperation::Receipt { receipt } => receipt.clone(), _ => unreachable!() };
+                for n in 1..MAX_ROUTES {
+                    state.received.insert((format!("filler-{n}"), [0; 16]), Received {
+                        digest: [0; 32], expires: NOW + PACKET_MS, receipt: cached.clone(),
+                    });
+                }
+            }
+            let wire = encode(&b, &ack.0, ack.1, BINDING, NOW).unwrap();
+            let back = assistance.handle(helper, directory, &wire, BINDING, addr(2), NOW).unwrap().outbound.remove(0);
+            let wire = encode(helper, &back.0, back.1, BINDING, NOW).unwrap();
+            if helper.legacy_routing_node_id() == h.legacy_routing_node_id() {
+                // Drop the first helper's verified return receipt. The reserve must win.
+                assert!(receipt.try_recv().is_err());
+            } else { sa.handle(&a, &da, &wire, BINDING, addr(4), NOW).unwrap(); }
+        }
+        assert_eq!(deliveries, 1);
+        assert!(receipt.try_recv().unwrap());
+        let mut order = vec![h.legacy_routing_node_id().into(), j.legacy_routing_node_id().into()];
+        sa.order_helpers(b.legacy_routing_node_id(), &mut order);
+        assert_eq!(order[0], j.legacy_routing_node_id(), "only the authenticated winning leg is credited");
+        // The primary losing this race does not enter timeout cooldown.
+        sa.state.lock().unwrap().quality.accepted(b.legacy_routing_node_id(), h.legacy_routing_node_id(),
+            std::time::Duration::ZERO, Instant::now());
+        order = vec![h.legacy_routing_node_id().into(), j.legacy_routing_node_id().into()];
+        sa.order_helpers(b.legacy_routing_node_id(), &mut order);
+        assert_eq!(order[0], h.legacy_routing_node_id());
+        assert!(!sa.state.lock().unwrap().pending.contains_key(&packet_id));
+        assert_eq!(sb.state.lock().unwrap().traffic.len(), 2, "duplicate consumes bandwidth budget");
+        let (fresh, _, _) = sa.prepare_relay(&a, &HelperIdentity::create(&b, NOW).unwrap(), text.as_bytes(), NOW).unwrap();
+        let packet = match fresh { AssistOperation::Relay { packet } => packet, _ => unreachable!() };
+        let wire = encode(&h, b.legacy_routing_node_id(), AssistOperation::Deliver { packet }, BINDING, NOW).unwrap();
+        assert!(sb.handle(&b, &db, &wire, BINDING, addr(3), NOW).is_none(), "new packet refused at capacity without eviction");
+    }
+
+    #[test]
+    fn same_sender_id_cannot_reuse_packet_id_for_different_content_but_other_sender_can() {
+        let a = identity(1); let b = identity(2); let h = identity(3); let other = identity(4);
+        let db = PeerExchange::open(None); let dh = PeerExchange::open(None);
+        enroll(&b, &db, &h, &dh, addr(3), addr(2));
+        let sb = PeerAssistance::new();
+        let mut packet = seal(&a, &HelperIdentity::create(&b, NOW).unwrap(),
+            format!("{}|m1|chat|first", a.legacy_routing_node_id()).as_bytes(), NOW).unwrap();
+        let collision = packet.header.packet_id;
+        let original_header = packet.header.clone();
+        let wire = encode(&h, b.legacy_routing_node_id(), AssistOperation::Deliver { packet: packet.clone() }, BINDING, NOW).unwrap();
+        assert!(sb.handle(&b, &db, &wire, BINDING, addr(3), NOW).unwrap().delivery.is_some());
+        // A signed conflicting ciphertext must not be answered with the cached ACK.
+        packet.ciphertext.push('A');
+        packet.signature = a.sign_security_payload(&packet.signed_bytes().unwrap());
+        let wire = encode(&h, b.legacy_routing_node_id(), AssistOperation::Deliver { packet }, BINDING, NOW).unwrap();
+        assert!(sb.handle(&b, &db, &wire, BINDING, addr(3), NOW).is_none());
+        // Create a valid second box with the same id, including matching AAD/key derivation.
+        let ephemeral = X25519KeyPair::generate();
+        let header = PacketHeader { sender: HelperIdentity::create(&other, NOW).unwrap(), packet_id: collision,
+            ephemeral_key: ephemeral.public_key().0.try_into().unwrap(), ..original_header };
+        let shared = ephemeral.diffie_hellman(&header.recipient_exchange_key).unwrap();
+        let key = derive(&shared, &header).unwrap();
+        let data = format!("{}|m2|chat|second sender", other.legacy_routing_node_id());
+        let ciphertext = XChaCha20Poly1305::new_from_slice(&key).unwrap().encrypt(XNonce::from_slice(&header.nonce),
+            Payload { msg: data.as_bytes(), aad: &canonical(PACKET_DOMAIN, &header).unwrap() }).unwrap();
+        let mut packet = SealedPacket { header, ciphertext: STANDARD.encode(ciphertext), signature: vec![] };
+        packet.signature = other.sign_security_payload(&packet.signed_bytes().unwrap());
+        let wire = encode(&h, b.legacy_routing_node_id(), AssistOperation::Deliver { packet }, BINDING, NOW).unwrap();
+        assert_eq!(sb.handle(&b, &db, &wire, BINDING, addr(3), NOW).unwrap().delivery.unwrap(), data.as_bytes());
+        assert_eq!(sb.state.lock().unwrap().received.len(), 2);
+    }
+
+    #[test]
+    fn helper_cannot_forge_acceptance_and_guard_releases_origin_admission() {
+        let a = identity(1); let b = identity(2); let h = identity(3);
+        let da = PeerExchange::open(None); let dh = PeerExchange::open(None);
+        enroll(&a, &da, &h, &dh, addr(3), addr(1));
+        let sa = Arc::new(PeerAssistance::new());
+        let (operation, mut rx, packet_id) = sa.prepare_relay(&a, &HelperIdentity::create(&b, NOW).unwrap(),
+            format!("{}|m|chat|private", a.legacy_routing_node_id()).as_bytes(), NOW).unwrap();
+        let guard = sa.pending_guard(packet_id);
+        sa.leg_started(packet_id, h.legacy_routing_node_id(), 1);
+        let packet = match operation { AssistOperation::Relay { packet } => packet, _ => unreachable!() };
+        let claims = ReceiptClaims { packet_id, origin: a.legacy_routing_node_id().into(),
+            recipient: b.legacy_routing_node_id().into(), digest: packet.digest().unwrap(), expires_at_ms: NOW + PACKET_MS };
+        let signature = h.sign_security_payload(&canonical(ACK_DOMAIN, &claims).unwrap());
+        let wire = encode(&h, a.legacy_routing_node_id(), AssistOperation::Receipt { receipt: Receipt { claims, signature } }, BINDING, NOW).unwrap();
+        assert!(sa.handle(&a, &da, &wire, BINDING, addr(3), NOW).is_none());
+        assert!(matches!(rx.try_recv(), Err(oneshot::error::TryRecvError::Empty)));
+        let mut order = vec!["unknown".into(), h.legacy_routing_node_id().into()];
+        sa.order_helpers(b.legacy_routing_node_id(), &mut order);
+        assert_eq!(order[0], "unknown", "forged ACK cannot improve ranking");
+        drop(guard);
+        assert!(sa.state.lock().unwrap().pending.is_empty());
+        assert!(matches!(rx.try_recv(), Err(oneshot::error::TryRecvError::Closed)));
+    }
+
+    #[test]
+    fn timeout_and_abort_only_observe_written_legs_of_this_attempt() {
+        let a = identity(1); let b = identity(2);
+        let sa = Arc::new(PeerAssistance::new());
+        let target = HelperIdentity::create(&b, NOW).unwrap();
+        let data = format!("{}|m|chat|text", a.legacy_routing_node_id());
+        let (_, _, id) = sa.prepare_relay(&a, &target, data.as_bytes(), NOW).unwrap();
+        sa.state.lock().unwrap().quality.accepted(b.legacy_routing_node_id(), "reachable",
+            std::time::Duration::from_millis(100), Instant::now());
+        let guard = sa.pending_guard(id);
+        sa.leg_started(id, "primary", 1);
+        sa.leg_written(id, "primary", true);
+        sa.leg_started(id, "reserve", 2); // Canceled write is not a timeout observation.
+        sa.finish_timeout(id);
+        drop(guard);
+        let mut order = vec!["primary".into(), "reserve".into()];
+        sa.order_helpers(b.legacy_routing_node_id(), &mut order);
+        assert_eq!(order, ["reserve", "primary"]);
+        let (_, _, aborted) = sa.prepare_relay(&a, &target, data.as_bytes(), NOW).unwrap();
+        let guard = sa.pending_guard(aborted);
+        sa.leg_started(aborted, "reserve", 2);
+        sa.leg_written(aborted, "reserve", true);
+        drop(guard); // Outer FFI abort is not evidence of a failed helper.
+        sa.finish_timeout(aborted);
+        sa.leg_written(aborted, "reserve", false); // Late write cannot poison history.
+        let mut order = vec!["reserve".into(), "fresh".into()];
+        sa.order_helpers(b.legacy_routing_node_id(), &mut order);
+        assert_eq!(order, ["reserve", "fresh"]);
+        assert!(sa.state.lock().unwrap().pending.is_empty());
+    }
+
+    #[test]
+    fn online_opt_out_refuses_new_transit_without_spending_replay_slots() {
+        let a = identity(1); let h = identity(3);
+        let da = PeerExchange::open(None); let dh = PeerExchange::open(None);
+        enroll(&a, &da, &h, &dh, addr(3), addr(1));
+        let sh = PeerAssistance::new();
+        sh.set_policy(false, 32, u32::MAX, 240);
+        let op = AssistOperation::Connect { target: identity(2).legacy_routing_node_id().into() };
+        let bytes = encode(&a, h.legacy_routing_node_id(), op, BINDING, NOW).unwrap();
+        assert!(sh.handle(&h, &dh, &bytes, BINDING, addr(1), NOW).is_none());
+        assert!(sh.state.lock().unwrap().frames.is_empty());
+        let target = HelperIdentity::create(&identity(2), NOW).unwrap();
+        let packet = seal(&a, &target, format!("{}|m|c|text", a.legacy_routing_node_id()).as_bytes(), NOW).unwrap();
+        let bytes = encode(&a, h.legacy_routing_node_id(), AssistOperation::Relay { packet }, BINDING, NOW).unwrap();
+        let refusal = sh.handle(&h, &dh, &bytes, BINDING, addr(1), NOW).unwrap();
+        assert!(refusal.delivery.is_none() && refusal.probe.is_none());
+        assert!(matches!(refusal.outbound.as_slice(), [(origin, AssistOperation::Decline { .. })] if origin == a.legacy_routing_node_id()));
+        let state = sh.state.lock().unwrap();
+        assert!(state.routes.is_empty() && state.frames.is_empty() && state.transit_traffic.is_empty());
+    }
+
+    #[test]
+    fn signed_decline_only_changes_a_live_written_leg_and_speeds_reserve_without_poisoning_recipient() {
+        let a = identity(1); let b = identity(2); let h = identity(3); let j = identity(4);
+        let da = PeerExchange::open(None); let dh = PeerExchange::open(None);
+        enroll(&a, &da, &h, &dh, addr(3), addr(1));
+        enroll(&a, &da, &j, &PeerExchange::open(None), addr(4), addr(1));
+        let sa = Arc::new(PeerAssistance::new()); let sh = PeerAssistance::new();
+        sh.set_policy(false, 0, 0, 0);
+        let target = HelperIdentity::create(&b, NOW).unwrap();
+        let data = format!("{}|decline|chat|text", a.legacy_routing_node_id());
+        let (op, _receipt, id) = sa.prepare_relay(&a, &target, data.as_bytes(), NOW).unwrap();
+        let guard = sa.pending_guard(id);
+        let mut declined = sa.leg_started(id, h.legacy_routing_node_id(), 1).unwrap();
+        let wire = encode(&a, h.legacy_routing_node_id(), op, BINDING, NOW).unwrap();
+        let reply = sh.handle(&h, &dh, &wire, BINDING, addr(1), NOW).unwrap().outbound.remove(0);
+        let wire = encode(&h, &reply.0, reply.1, BINDING, NOW).unwrap();
+        assert!(sa.handle(&a, &da, &wire, BINDING, addr(3), NOW).is_none(), "unwritten leg is not trusted yet");
+        assert!(declined.try_recv().is_err());
+        sa.leg_written(id, h.legacy_routing_node_id(), true);
+        let again = encode(&h, a.legacy_routing_node_id(), AssistOperation::Decline { packet_id: id }, BINDING, NOW).unwrap();
+        assert!(sa.handle(&a, &da, &again, BINDING, addr(3), NOW).is_some());
+        assert!(declined.try_recv().is_ok());
+        let mut order = vec![h.legacy_routing_node_id().to_string(), j.legacy_routing_node_id().to_string()];
+        sa.order_helpers(b.legacy_routing_node_id(), &mut order);
+        assert_eq!(order[0], j.legacy_routing_node_id());
+        let mut other = vec![h.legacy_routing_node_id().to_string(), "pk_00000000000000000000000000000000".to_string()];
+        sa.order_helpers("pk_11111111111111111111111111111111", &mut other);
+        assert_eq!(other[1], h.legacy_routing_node_id(), "a helper's own refusal is helper-scoped, not recipient failure");
+        let forged = encode(&j, a.legacy_routing_node_id(), AssistOperation::Decline { packet_id: id }, BINDING, NOW + 1).unwrap();
+        assert!(sa.handle(&a, &da, &forged, BINDING, addr(4), NOW + 1).is_none(), "another peer cannot decline this leg");
+        drop(guard);
+    }
+
+    #[test]
+    fn transit_budget_leaves_room_for_own_data_and_toggles_do_not_reset_it() {
+        let mut s = State::default();
+        s.policy = HelperPolicy::bounded(true, 8, u32::MAX, 240);
+        assert!(admit_transit(&mut s, "a", MAX_PEER_BYTES_PER_MINUTE, NOW));
+        assert!(admit_transit(&mut s, "b", MAX_PEER_BYTES_PER_MINUTE, NOW));
+        assert!(!admit_transit(&mut s, "c", 1, NOW));
+        assert!(admit_bytes(&mut s, "c", MAX_PEER_BYTES_PER_MINUTE, NOW));
+        assert!(admit_bytes(&mut s, "d", MAX_PEER_BYTES_PER_MINUTE, NOW));
+        s.policy = HelperPolicy::bounded(false, 8, 100, 1);
+        assert!(!admit_transit(&mut s, "e", 1, NOW));
+        s.policy = HelperPolicy::bounded(true, 8, u32::MAX, 240);
+        assert!(!admit_transit(&mut s, "e", 1, NOW));
+        cleanup(&mut s, NOW + 60_000);
+        assert!(admit_transit(&mut s, "e", 1, NOW + 60_000));
+        s.policy = HelperPolicy::bounded(true, 8, 100, 1);
+        assert!(!admit_transit(&mut s, "f", 1, NOW + 60_000), "packet quota includes earlier policy traffic");
+    }
+
+    // Real QUIC with four endpoints: neither sender nor receiver has a direct
+    // connection to the other. Primary forwards but drops the ACK; reserve must win.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn real_three_node_online_relay_with_signed_receipt_and_no_external_service() {
+    async fn real_four_node_hedged_relay_with_lost_primary_receipt_and_no_duplicate() {
         use super::super::direct_transport::{DirectTransport, BoundFrameFactory, BoundFrameHandler, BoundFrameResult};
         struct Node { id: Arc<InstalledSigningIdentity>, directory: Arc<PeerExchange>, assist: Arc<PeerAssistance>, transport: DirectTransport }
         fn node(n: u8, tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>) -> Node {
@@ -471,6 +860,7 @@ mod tests {
                     if let Some(data) = effect.delivery { let _ = tx.send(data); }
                     if let Some(transport) = slot.lock().unwrap().clone() {
                         for (peer, op) in effect.outbound {
+                            if n == 3 && matches!(op, AssistOperation::Receipt { .. }) { continue; }
                             let transport = transport.clone(); let id = Arc::clone(&id);
                             tokio::spawn(async move {
                                 let target = peer.clone();
@@ -488,6 +878,7 @@ mod tests {
         }
         async fn hello(client: &Node, helper: &Node) {
             let now = crate::storage::models::now_ms();
+            client.directory.wake();
             let request = client.directory.plan(&client.id, None, vec![Candidate { node_id: helper.id.legacy_routing_node_id().into(),
                 endpoint: "8.8.8.8:7777".parse().unwrap(), learned_at_ms: now, live_connection: false }], &[], now).remove(0);
             let directory = Arc::clone(&client.directory); let id = Arc::clone(&client.id);
@@ -504,20 +895,43 @@ mod tests {
             }).await.unwrap();
         }
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let a = node(1, tx.clone()); let b = node(2, tx.clone()); let h = node(3, tx);
+        let a = node(1, tx.clone()); let b = node(2, tx.clone()); let h = node(3, tx.clone()); let j = node(4, tx);
         hello(&a, &h).await; hello(&b, &h).await;
+        hello(&a, &j).await; hello(&b, &j).await;
         assert!(!a.transport.has_connection(b.id.legacy_routing_node_id()).await);
         let now = crate::storage::models::now_ms();
         let expected = format!("{}|message|chat|protected transit", a.id.legacy_routing_node_id());
         let recipient = HelperIdentity::create(&b.id, now).unwrap();
-        let (operation, receipt, _) = a.assist.prepare_relay(&a.id, &recipient, expected.as_bytes(), now).unwrap();
-        let id = Arc::clone(&a.id); let target = h.id.legacy_routing_node_id().to_string();
-        let factory: BoundFrameFactory = Arc::new(move |binding, _| encode(&id, &target, operation.clone(), binding, crate::storage::models::now_ms()));
-        assert!(a.transport.send_bound(h.id.legacy_routing_node_id(), None, factory).await);
+        let (operation, receipt, packet_id) = a.assist.prepare_relay(&a.id, &recipient, expected.as_bytes(), now).unwrap();
+        let assistance = Arc::clone(&a.assist);
+        let _pending = assistance.pending_guard(match &operation { AssistOperation::Relay { packet } => packet.header.packet_id, _ => unreachable!() });
+        let peers = [h.id.legacy_routing_node_id().to_string(), j.id.legacy_routing_node_id().to_string()];
+        let mut started = Vec::new();
+        let accepted = super::super::helper_delivery::hedged_delivery(2, receipt, |leg| {
+            started.push(leg);
+            let peer = peers[leg].clone(); let target = peer.clone();
+            let id = Arc::clone(&a.id); let operation = operation.clone(); let transport = a.transport.clone();
+            let assist = Arc::clone(&a.assist);
+            async move {
+                assist.leg_started(packet_id, &peer, (leg + 1) as u8);
+                let factory: BoundFrameFactory = Arc::new(move |binding, _| encode(&id, &target, operation.clone(), binding, crate::storage::models::now_ms()));
+                let written = transport.send_bound(&peer, None, factory).await;
+                assist.leg_written(packet_id, &peer, written);
+                written
+            }
+        }, Duration::from_millis(100), Duration::from_secs(3)).await;
+        assert!(accepted, "only reserve forwards the recipient receipt");
+        assert_eq!(started, [0, 1]);
+        let mut order = peers.to_vec();
+        a.assist.order_helpers(b.id.legacy_routing_node_id(), &mut order);
+        assert_eq!(order[0], j.id.legacy_routing_node_id());
         let data = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap().unwrap();
         assert_eq!(data, expected.as_bytes());
-        let acknowledged = tokio::task::spawn_blocking(move || receipt.recv_timeout(Duration::from_secs(3))).await.unwrap().unwrap();
-        assert!(acknowledged);
-        a.transport.shutdown(); b.transport.shutdown(); h.transport.shutdown();
+        assert!(tokio::time::timeout(Duration::from_millis(200), rx.recv()).await.is_err(), "same box dispatched once");
+        assert_eq!(b.assist.state.lock().unwrap().received.len(), 1);
+        assert_eq!(h.assist.state.lock().unwrap().routes.len(), 0, "primary consumed ACK but did not return it");
+        assert_eq!(j.assist.state.lock().unwrap().routes.len(), 0);
+        assert!(!a.transport.has_connection(b.id.legacy_routing_node_id()).await);
+        a.transport.shutdown(); b.transport.shutdown(); h.transport.shutdown(); j.transport.shutdown();
     }
 }

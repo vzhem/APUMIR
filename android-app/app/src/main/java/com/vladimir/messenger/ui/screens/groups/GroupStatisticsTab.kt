@@ -1,8 +1,11 @@
 package com.vladimir.messenger.ui.screens.groups
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -15,9 +18,7 @@ import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,7 +46,15 @@ import com.vladimir.messenger.data.group.TopicSummary
 import com.vladimir.messenger.ui.components.ApuBubble
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
-import com.vladimir.messenger.ui.components.ApuTextAction
+import com.vladimir.messenger.ui.components.ApuGoldInk
+import com.vladimir.messenger.ui.components.ApuPremiumButton
+import com.vladimir.messenger.ui.components.ApuPremiumIconTile
+import com.vladimir.messenger.ui.components.ApuPremiumSpinner
+import com.vladimir.messenger.ui.components.ApuSettingsSectionTitle
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
+import com.vladimir.messenger.ui.components.apuGoldBrush
+import com.vladimir.messenger.ui.components.apuPremiumGloss
+import com.vladimir.messenger.ui.components.apuPremiumLift
 import com.vladimir.messenger.ui.components.TopicIconCatalog
 import com.vladimir.messenger.ui.components.TopicIconView
 import java.text.NumberFormat
@@ -70,9 +79,9 @@ internal fun GroupStatisticsTab(
     if (stats == null) {
         Box(Modifier.fillMaxSize().padding(12.dp), contentAlignment = Alignment.Center) {
             ApuBubble {
-                if (isRefreshing) CircularProgressIndicator(Modifier.size(24.dp))
-                Text(if (isRefreshing) "Загружаем статистику…" else "Статистику пока не удалось загрузить")
-                if (!isRefreshing) ApuTextAction(label = "Попробовать ещё раз", onClick = onRefresh)
+                if (isRefreshing) ApuPremiumSpinner(Modifier.size(24.dp))
+                Text(if (isRefreshing) stringResource(R.string.stat_loading) else stringResource(R.string.stat_failed))
+                if (!isRefreshing) ApuPremiumButton(label = stringResource(R.string.stat_retry), onClick = onRefresh, style = DiagnosticsActionStyle.PRIMARY)
             }
         }
         return
@@ -86,22 +95,22 @@ internal fun GroupStatisticsTab(
     ) {
         item {
             ApuBubble {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ApuPremiumIconTile(
+                        icon = if (isChannel) Icons.Filled.Article else Icons.Filled.Forum,
+                        size = 44.dp,
+                        corner = 14.dp,
+                    )
                     Column(Modifier.weight(1f)) {
                         Text(
-                            if (isChannel) "Статистика канала" else "Статистика группы",
+                            if (isChannel) stringResource(R.string.stat_title_channel) else stringResource(R.string.stat_title_group),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
+                            color = ApuBubbleTextColor,
                         )
-                        Text("Всё время · последние 7 дней", style = MaterialTheme.typography.bodySmall, color = ApuBubbleMutedColor)
+                        Text(stringResource(R.string.stat_period), style = MaterialTheme.typography.bodySmall, color = ApuBubbleMutedColor)
                     }
-                    IconButton(onClick = onRefresh, enabled = !isRefreshing) {
-                        if (isRefreshing) {
-                            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Filled.Refresh, contentDescription = "Обновить статистику", tint = StatisticsGoldDark)
-                        }
-                    }
+                    StatisticsRefreshButton(isRefreshing = isRefreshing, onRefresh = onRefresh)
                 }
             }
         }
@@ -110,13 +119,13 @@ internal fun GroupStatisticsTab(
                 StatisticsMetric(
                     Icons.Filled.People,
                     stats.memberCount,
-                    if (isChannel) "Подписчики" else "Участники",
+                    if (isChannel) stringResource(R.string.stat_subscribers) else stringResource(R.string.stat_members),
                     Modifier.weight(1f),
                 )
                 StatisticsMetric(
                     if (isChannel) Icons.Filled.Article else Icons.Filled.Chat,
                     if (isChannel) stats.channelPosts.size else stats.totalMessages,
-                    if (isChannel) "Публикации" else "Сообщения",
+                    if (isChannel) stringResource(R.string.stat_posts) else stringResource(R.string.stat_messages),
                     Modifier.weight(1f),
                 )
             }
@@ -126,13 +135,13 @@ internal fun GroupStatisticsTab(
                 StatisticsMetric(
                     if (isChannel) Icons.Filled.Visibility else Icons.Filled.Forum,
                     if (isChannel) totalViews else stats.topicCount,
-                    if (isChannel) "Просмотры постов" else "Темы",
+                    if (isChannel) stringResource(R.string.stat_post_views) else stringResource(R.string.groups_topics),
                     Modifier.weight(1f),
                 )
                 StatisticsMetric(
                     if (isChannel) Icons.Filled.Chat else Icons.Filled.People,
                     if (isChannel) totalComments else stats.activeSenders7Days,
-                    if (isChannel) "Комментарии" else "Авторы за 7 дней",
+                    if (isChannel) stringResource(R.string.stat_comments) else stringResource(R.string.stat_authors_7d),
                     Modifier.weight(1f),
                 )
             }
@@ -147,13 +156,13 @@ internal fun GroupStatisticsTab(
         if (isChannel) {
             item {
                 ApuBubble {
-                    StatisticsHeading("Отклик на публикации")
+                    StatisticsHeading(stringResource(R.string.stat_engagement))
                     if (stats.channelPosts.isEmpty()) {
-                        StatisticsHint("Опубликуйте первый пост — здесь появятся его показатели.")
+                        StatisticsHint(stringResource(R.string.stat_first_post))
                     } else {
-                        StatisticsSummary("Просмотров в среднем на пост", decimal(totalViews.toDouble() / stats.channelPosts.size))
-                        StatisticsSummary("Комментариев в среднем на пост", decimal(totalComments.toDouble() / stats.channelPosts.size))
-                        StatisticsHint("Сумма просмотров постов — не число уникальных читателей канала.")
+                        StatisticsSummary(stringResource(R.string.stat_avg_views), decimal(totalViews.toDouble() / stats.channelPosts.size))
+                        StatisticsSummary(stringResource(R.string.stat_avg_comments), decimal(totalComments.toDouble() / stats.channelPosts.size))
+                        StatisticsHint(stringResource(R.string.stat_views_note))
                     }
                 }
             }
@@ -161,15 +170,15 @@ internal fun GroupStatisticsTab(
         item { StatisticsRanking(stats, topics, isChannel) }
         item {
             ApuBubble {
-                StatisticsHeading("Управление")
-                StatisticsSummary("Администраторов", count(stats.adminCount))
-                StatisticsSummary("Заявок в ожидании", count(stats.pendingRequests))
-                if (!isChannel) StatisticsSummary("Тем без сообщений", count(stats.perTopic.count { it.value == 0 }))
+                StatisticsHeading(stringResource(R.string.menu_manage))
+                StatisticsSummary(stringResource(R.string.stat_admins), count(stats.adminCount))
+                StatisticsSummary(stringResource(R.string.stat_requests), count(stats.pendingRequests))
+                if (!isChannel) StatisticsSummary(stringResource(R.string.stat_empty_topics), count(stats.perTopic.count { it.value == 0 }))
             }
         }
         item {
             ApuBubble {
-                StatisticsHint("Сводка по сохранённым данным. История и счётчики дополняются при синхронизации.")
+                StatisticsHint(stringResource(R.string.stat_summary_note))
             }
         }
     }
@@ -177,20 +186,16 @@ internal fun GroupStatisticsTab(
 
 @Composable
 private fun StatisticsMetric(icon: ImageVector, value: Number, label: String, modifier: Modifier) {
-    ApuBubble(modifier = modifier) {
+    ApuBubble(modifier = modifier, premium = 6.dp) {
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                Modifier.size(36.dp).clip(CircleShape).background(StatisticsGold.copy(alpha = 0.18f)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(icon, null, Modifier.size(20.dp), tint = StatisticsGoldDark)
-            }
-            Spacer(Modifier.height(6.dp))
+            ApuPremiumIconTile(icon = icon, size = 42.dp, corner = 14.dp, lift = 4.dp)
+            Spacer(Modifier.height(10.dp))
             val formatted = count(value)
             Text(
                 formatted,
-                fontSize = if (formatted.length > 10) 22.sp else 28.sp,
+                fontSize = if (formatted.length > 10) 22.sp else 30.sp,
                 fontWeight = FontWeight.Bold,
+                color = ApuBubbleTextColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -202,9 +207,9 @@ private fun StatisticsMetric(icon: ImageVector, value: Number, label: String, mo
 @Composable
 private fun StatisticsActivity(groupId: String, days: List<GroupStatDay>, isChannel: Boolean) {
     ApuBubble {
-        StatisticsHeading(if (isChannel) "Публикации за 7 дней" else "Сообщения за 7 дней")
+        StatisticsHeading(if (isChannel) stringResource(R.string.stat_posts_7d) else stringResource(R.string.stat_msgs_7d))
         if (days.isEmpty()) {
-            StatisticsHint("Пока нет данных за этот период.")
+            StatisticsHint(stringResource(R.string.stat_no_data))
             return@ApuBubble
         }
         StatisticsHint("${shortDay(days.first().dayKey)} — ${shortDay(days.last().dayKey)} · UTC")
@@ -222,62 +227,83 @@ private fun StatisticsActivity(groupId: String, days: List<GroupStatDay>, isChan
                     animationSpec = tween(350),
                     label = "dailyStatisticsBar",
                 )
+                val dayDesc = stringResource(R.string.stat_day_desc, longDay(day.dayKey), stringResource(if (isChannel) R.string.stat_unit_posts else R.string.stat_unit_messages), day.messageCount.toString(), day.senderCount.toString())
                 Column(
-                    Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(10.dp))
-                        .background(if (chosen) StatisticsGold.copy(alpha = 0.14f) else Color.Transparent)
+                    Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(14.dp))
+                        .background(
+                            if (chosen) Brush.verticalGradient(listOf(StatisticsGold.copy(alpha = 0.22f), StatisticsGold.copy(alpha = 0.06f)))
+                            else Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent)),
+                        )
                         .clickable(role = Role.Button, onClick = { selectedKey = day.dayKey })
                         .semantics {
-                            contentDescription = "${longDay(day.dayKey)}: " +
-                                (if (isChannel) "публикаций" else "сообщений") +
-                                " ${day.messageCount}, авторов ${day.senderCount}"
+                            contentDescription = dayDesc
                         }
                         .padding(horizontal = 2.dp, vertical = 6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(count(day.messageCount), fontSize = 11.sp, maxLines = 1, color = if (chosen) StatisticsGoldDark else ApuBubbleMutedColor)
-                            Spacer(Modifier.height(4.dp))
-                            val barHeight = if (day.messageCount > 0) (88.dp * fraction).coerceAtLeast(2.dp) else 2.dp
-                            Box(
-                                Modifier.fillMaxWidth(0.65f).height(barHeight).clip(RoundedCornerShape(6.dp))
-                                    .then(
-                                        if (day.messageCount > 0) Modifier.background(Brush.verticalGradient(listOf(StatisticsGold, StatisticsGoldDark)))
-                                        else Modifier.background(ApuBubbleMutedColor.copy(alpha = 0.25f))
-                                    ),
+                            Text(
+                                count(day.messageCount),
+                                fontSize = 11.sp,
+                                fontWeight = if (chosen) FontWeight.Bold else FontWeight.Normal,
+                                maxLines = 1,
+                                color = if (chosen) ApuGoldInk else ApuBubbleMutedColor,
                             )
+                            Spacer(Modifier.height(4.dp))
+                            if (day.messageCount > 0) {
+                                val barHeight = (96.dp * fraction).coerceAtLeast(6.dp)
+                                Box(
+                                    Modifier.fillMaxWidth(0.62f).height(barHeight).clip(RoundedCornerShape(8.dp))
+                                        .background(Brush.verticalGradient(listOf(StatisticsGold, StatisticsGoldDark))),
+                                )
+                            } else {
+                                // Пустой день — точка, а не пустой столбик без смысла.
+                                Box(
+                                    Modifier.size(6.dp).clip(CircleShape)
+                                        .background(ApuBubbleMutedColor.copy(alpha = 0.35f)),
+                                )
+                            }
                         }
                     }
                     Spacer(Modifier.height(6.dp))
-                    Text(shortDay(day.dayKey), fontSize = 10.sp, maxLines = 1, color = ApuBubbleMutedColor)
+                    Text(
+                        shortDay(day.dayKey),
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        fontWeight = if (chosen) FontWeight.SemiBold else FontWeight.Normal,
+                        color = if (chosen) ApuGoldInk else ApuBubbleMutedColor,
+                    )
                 }
             }
         }
         Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                .background(StatisticsGold.copy(alpha = 0.12f)).padding(horizontal = 12.dp, vertical = 10.dp),
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                .background(Brush.linearGradient(listOf(Color(0xFFFFF8E6), Color(0xFFF5E6BC))))
+                .border(1.dp, StatisticsGold.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(longDay(selected.dayKey), fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
             Column(horizontalAlignment = Alignment.End) {
-                Text((if (isChannel) "Публикации: " else "Сообщения: ") + count(selected.messageCount), fontSize = 13.sp)
-                Text("Авторов: ${count(selected.senderCount)}", fontSize = 12.sp, color = ApuBubbleMutedColor)
+                Text(if (isChannel) stringResource(R.string.stat_posts_count, count(selected.messageCount)) else stringResource(R.string.stat_messages_count, count(selected.messageCount)), fontSize = 13.sp)
+                Text(stringResource(R.string.stat_authors_count, count(selected.senderCount)), fontSize = 12.sp, color = ApuBubbleMutedColor)
             }
         }
         val total = days.sumOf { it.messageCount.toLong() }
-        Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatisticsSmallMetric("Всего", count(total), Modifier.weight(1f))
-            StatisticsSmallMetric("В день", decimal(total.toDouble() / days.size), Modifier.weight(1f))
-            StatisticsSmallMetric("Активных дней", "${days.count { it.messageCount > 0 }}/${days.size}", Modifier.weight(1f))
+        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatisticsSmallMetric(stringResource(R.string.stat_total), count(total), Modifier.weight(1f))
+            StatisticsSmallMetric(stringResource(R.string.stat_per_day), decimal(total.toDouble() / days.size), Modifier.weight(1f))
+            StatisticsSmallMetric(stringResource(R.string.stat_active_days), "${days.count { it.messageCount > 0 }}/${days.size}", Modifier.weight(1f))
         }
         if (total > 0) {
             val peak = days.maxByOrNull { it.messageCount }!!
-            StatisticsSummary("Самый активный день", "${shortDay(peak.dayKey)} · ${count(peak.messageCount)}")
+            StatisticsSummary(stringResource(R.string.stat_busiest), "${shortDay(peak.dayKey)} · ${count(peak.messageCount)}")
         } else {
-            StatisticsHint(if (isChannel) "За эти дни новых публикаций не было." else "За эти дни сообщений не было.")
+            StatisticsHint(if (isChannel) stringResource(R.string.stat_no_posts_days) else stringResource(R.string.stat_no_msgs_days))
         }
-        StatisticsHint("Нажмите на день для подробностей. Текущий день ещё идёт.")
+        StatisticsHint(stringResource(R.string.stat_tap_day))
     }
 }
 
@@ -286,49 +312,53 @@ private fun StatisticsRanking(stats: GroupStats, topics: List<TopicSummary>, isC
     val byId = topics.associateBy { it.id }
     var expanded by rememberSaveable(stats.groupId, isChannel) { mutableStateOf(false) }
     ApuBubble {
-        StatisticsHeading(if (isChannel) "Популярные публикации" else "Активность тем")
+        StatisticsHeading(if (isChannel) stringResource(R.string.stat_top_posts) else stringResource(R.string.stat_topic_activity))
         if (isChannel) {
             val sorted = stats.channelPosts.sortedWith(compareByDescending<com.vladimir.messenger.data.group.ChannelPostStat> { it.viewCount }
                 .thenByDescending { it.commentCount }.thenByDescending { it.publishedAtMs })
-            if (sorted.isEmpty()) StatisticsHint("Пока нет публикаций.")
+            if (sorted.isEmpty()) StatisticsHint(stringResource(R.string.stat_no_posts))
             val max = sorted.maxOfOrNull { it.viewCount }?.coerceAtLeast(1) ?: 1
             sorted.take(if (expanded) sorted.size else 5).forEachIndexed { i, post ->
                 StatisticsRankRow(
                     rank = i + 1,
-                    title = byId[post.topicId]?.name?.takeIf { it.isNotBlank() } ?: "Публикация",
-                    details = "${count(post.viewCount)} просмотров · ${count(post.commentCount)} комментариев",
+                    title = byId[post.topicId]?.name?.takeIf { it.isNotBlank() } ?: stringResource(R.string.stat_post),
+                    details = stringResource(R.string.stat_post_details, count(post.viewCount), count(post.commentCount)),
                     value = count(post.viewCount),
                     fraction = post.viewCount.toFloat() / max,
                     icon = null,
                 )
             }
             if (sorted.size > 5) {
-                ApuTextAction(
-                    label = if (expanded) "Свернуть" else "Все публикации · ${count(sorted.size)}",
+                ApuPremiumButton(
+                    label = if (expanded) stringResource(R.string.stat_collapse) else stringResource(R.string.stat_all_posts, count(sorted.size)),
                     onClick = { expanded = !expanded },
+                    style = DiagnosticsActionStyle.GLASS,
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                 )
             }
         } else {
             val sorted = stats.perTopic.entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }
                 .thenBy { byId[it.key]?.name.orEmpty() })
-            if (sorted.isEmpty()) StatisticsHint("В этой группе нет тем.")
+            if (sorted.isEmpty()) StatisticsHint(stringResource(R.string.stat_no_topics))
             val total = sorted.sumOf { it.value.toLong() }
             sorted.take(if (expanded) sorted.size else 5).forEachIndexed { i, entry ->
                 val topic = byId[entry.key]
                 val share = if (total > 0) entry.value.toFloat() / total else 0f
                 StatisticsRankRow(
                     rank = i + 1,
-                    title = topic?.name?.takeIf { it.isNotBlank() } ?: "Без темы",
-                    details = if (entry.value > 0) "${decimal(share * 100.0)}% сообщений группы" else "Пока без сообщений",
+                    title = topic?.name?.takeIf { it.isNotBlank() } ?: stringResource(R.string.stat_no_topic),
+                    details = if (entry.value > 0) stringResource(R.string.stat_share_of_messages, decimal(share * 100.0)) else stringResource(R.string.stat_no_messages),
                     value = count(entry.value),
                     fraction = share,
                     icon = topic?.iconEmoji?.ifBlank { TopicIconCatalog.DEFAULT } ?: TopicIconCatalog.DEFAULT,
                 )
             }
             if (sorted.size > 5) {
-                ApuTextAction(
-                    label = if (expanded) "Свернуть" else "Все темы · ${count(sorted.size)}",
+                ApuPremiumButton(
+                    label = if (expanded) stringResource(R.string.stat_collapse) else stringResource(R.string.stat_all_topics, count(sorted.size)),
                     onClick = { expanded = !expanded },
+                    style = DiagnosticsActionStyle.GLASS,
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                 )
             }
         }
@@ -339,8 +369,14 @@ private fun StatisticsRanking(stats: GroupStats, topics: List<TopicSummary>, isC
 private fun StatisticsRankRow(rank: Int, title: String, details: String, value: String, fraction: Float, icon: String?) {
     Column(Modifier.fillMaxWidth().padding(top = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.size(34.dp).clip(CircleShape).background(StatisticsGold.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
-                if (icon == null) Text(rank.toString(), color = StatisticsGoldDark, fontWeight = FontWeight.SemiBold)
+            // Первые три места — золотыми медалями, остальные — тихие кружки.
+            val medal = rank <= 3 && icon == null
+            Box(
+                Modifier.size(36.dp).clip(CircleShape)
+                    .then(if (medal) Modifier.background(apuGoldBrush()) else Modifier.background(StatisticsGold.copy(alpha = 0.12f))),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (icon == null) Text(rank.toString(), color = if (medal) ApuGoldInk else StatisticsGoldDark, fontWeight = FontWeight.Bold)
                 else TopicIconView(icon, 25.dp)
             }
             Column(Modifier.weight(1f)) {
@@ -362,9 +398,17 @@ private fun StatisticsRankRow(rank: Int, title: String, details: String, value: 
 
 @Composable
 private fun StatisticsSmallMetric(label: String, value: String, modifier: Modifier) {
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
-        Text(label, fontSize = 11.sp, color = ApuBubbleMutedColor, textAlign = TextAlign.Center)
+    val tile = RoundedCornerShape(16.dp)
+    Column(
+        modifier
+            .clip(tile)
+            .background(Color.White.copy(alpha = 0.78f))
+            .border(1.dp, StatisticsGold.copy(alpha = 0.28f), tile)
+            .padding(vertical = 10.dp, horizontal = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(value, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = ApuBubbleTextColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(label, fontSize = 11.sp, color = ApuBubbleMutedColor, textAlign = TextAlign.Center, maxLines = 2)
     }
 }
 
@@ -378,7 +422,31 @@ private fun StatisticsSummary(label: String, value: String) {
 
 @Composable
 private fun StatisticsHeading(text: String) {
-    Text(text, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = ApuBubbleTextColor)
+    ApuSettingsSectionTitle(title = text)
+}
+
+/** Кнопка обновления: золотой глянцевый круг; во время загрузки — спиннер. */
+@Composable
+private fun StatisticsRefreshButton(isRefreshing: Boolean, onRefresh: () -> Unit) {
+    val circle = CircleShape
+    val label = stringResource(R.string.stat_refresh)
+    Box(
+        Modifier
+            .size(44.dp)
+            .apuPremiumLift(5.dp, circle, StatisticsGold.copy(alpha = 0.45f))
+            .clip(circle)
+            .background(apuGoldBrush())
+            .apuPremiumGloss(circle, intensity = 0.9f, topFraction = 0.6f)
+            .clickable(enabled = !isRefreshing, role = Role.Button, onClick = onRefresh)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        if (isRefreshing) {
+            ApuPremiumSpinner(Modifier.size(20.dp), color = ApuGoldInk, strokeWidth = 2.dp)
+        } else {
+            Icon(Icons.Filled.Refresh, contentDescription = null, tint = ApuGoldInk, modifier = Modifier.size(22.dp))
+        }
+    }
 }
 
 @Composable

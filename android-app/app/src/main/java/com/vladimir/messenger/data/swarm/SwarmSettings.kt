@@ -29,6 +29,7 @@ object SwarmSettings {
     private var initialized = false
 
     /** Прочитать сохранённый режим. Безопасно звать многократно. */
+    @Synchronized
     fun init(context: Context) {
         if (initialized) return
         val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -37,11 +38,13 @@ object SwarmSettings {
     }
 
     /** Из настроек: пишет в prefs и действует сразу (бюджет читает пределы при каждом решении). */
+    @Synchronized
     fun set(context: Context, value: SwarmMode) {
         context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY_MODE, value.storedValue).apply()
         _mode.value = value
         initialized = true
+        com.vladimir.messenger.data.RustBridge.refreshOnlineHelperPolicy()
     }
 
     /** Обстановка, снятая не чаще раза в секунду: бюджет спрашивает её на каждый пакет. */
@@ -53,7 +56,7 @@ object SwarmSettings {
     /** Действующие пределы с учётом режима и обстановки прямо сейчас. */
     fun limits(context: Context, nowMs: Long = System.currentTimeMillis()): SwarmLimits {
         init(context)
-        val env = environment?.takeIf { nowMs - it.atMs < ENVIRONMENT_TTL_MS }
+        val env = environment?.takeIf { nowMs >= it.atMs && nowMs - it.atMs < ENVIRONMENT_TTL_MS }
             ?: Environment(nowMs, isMetered(context), isLowPower(context)).also { environment = it }
         return SwarmPolicy.limitsFor(
             mode = _mode.value,

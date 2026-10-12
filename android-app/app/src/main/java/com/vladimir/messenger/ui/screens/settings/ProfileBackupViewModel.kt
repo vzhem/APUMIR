@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.R
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -24,10 +25,14 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+enum class BusyKind { NONE, BUILDING, OPENING, ENABLING }
+
 data class ProfileBackupUiState(
     val busy: Boolean = false,
     /** Что сейчас делаем - подпись под индикатором. */
     val busyText: String = "",
+    /** Код текущего действия: экран смотрит на него, а не на текст (текст зависит от языка). */
+    val busyKind: BusyKind = BusyKind.NONE,
     val message: String? = null,
     val failed: Boolean = false,
     /** Сколько весят полученные файлы - чтобы человек решил, класть ли их в копию. */
@@ -162,10 +167,10 @@ class ProfileBackupViewModel @Inject constructor(
     fun create(target: Uri, password: String, includeReceived: Boolean) {
         if (_uiState.value.busy) return
         if (password.length < BackupCipher.MIN_PASSWORD_LENGTH) {
-            fail("Пароль не короче ${BackupCipher.MIN_PASSWORD_LENGTH} знаков.")
+            fail(context.getString(R.string.bk_pw_short, BackupCipher.MIN_PASSWORD_LENGTH))
             return
         }
-        _uiState.update { it.copy(busy = true, busyText = "Собираем копию…", message = null, failed = false) }
+        _uiState.update { it.copy(busy = true, busyKind = BusyKind.BUILDING, busyText = context.getString(R.string.bk_building), message = null, failed = false) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 backup.create(target, password.toCharArray(), includeReceived)
@@ -182,18 +187,16 @@ class ProfileBackupViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             busy = false,
-                            message = "Копия сохранена (${humanBytes(result.bytes)}" +
-                                (if (result.receivedFiles > 0) ", файлов: ${result.receivedFiles}" else "") +
-                                "). Запомните пароль: без него файл не открыть.",
+                            message = if (result.receivedFiles > 0) context.getString(R.string.bk_saved_files, humanBytes(context, result.bytes), result.receivedFiles) else context.getString(R.string.bk_saved, humanBytes(context, result.bytes)),
                             failed = false,
                             lastSaved = target,
                             schedule = schedule,
                         )
                     }
                 }
-                ProfileBackup.CreateResult.NoIdentity -> fail("Профиль ещё не создан.")
-                ProfileBackup.CreateResult.BadPassword -> fail("Пароль не короче ${BackupCipher.MIN_PASSWORD_LENGTH} знаков.")
-                is ProfileBackup.CreateResult.Failed -> fail("Не удалось записать копию: ${result.reason}")
+                ProfileBackup.CreateResult.NoIdentity -> fail(context.getString(R.string.bk_no_identity))
+                ProfileBackup.CreateResult.BadPassword -> fail(context.getString(R.string.bk_pw_short, BackupCipher.MIN_PASSWORD_LENGTH))
+                is ProfileBackup.CreateResult.Failed -> fail(context.getString(R.string.bk_write_failed, result.reason))
             }
         }
     }
@@ -201,10 +204,10 @@ class ProfileBackupViewModel @Inject constructor(
     fun stage(source: Uri, password: String) {
         if (_uiState.value.busy) return
         if (password.isEmpty()) {
-            fail("Введите пароль от копии.")
+            fail(context.getString(R.string.bk_enter_pw))
             return
         }
-        _uiState.update { it.copy(busy = true, busyText = "Открываем копию…", message = null, failed = false) }
+        _uiState.update { it.copy(busy = true, busyKind = BusyKind.OPENING, busyText = context.getString(R.string.bk_opening), message = null, failed = false) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) { backup.stage(source, password.toCharArray()) }
             when (result) {
@@ -216,15 +219,13 @@ class ProfileBackupViewModel @Inject constructor(
                         failed = false,
                     )
                 }
-                ProfileBackup.StageResult.WrongPassword -> fail("Пароль не подошёл.")
-                ProfileBackup.StageResult.NotBackupFile -> fail("Это не файл резервной копии APU.")
+                ProfileBackup.StageResult.WrongPassword -> fail(context.getString(R.string.bk_wrong_pw))
+                ProfileBackup.StageResult.NotBackupFile -> fail(context.getString(R.string.bk_not_backup))
                 is ProfileBackup.StageResult.TooNew -> fail(
-                    "Копия сделана более новой версией приложения" +
-                        (if (result.appVersion.isNotBlank()) " (${result.appVersion})" else "") +
-                        ". Сначала обновите APU.",
+                    if (result.appVersion.isNotBlank()) context.getString(R.string.bk_too_new_ver, result.appVersion) else context.getString(R.string.bk_too_new),
                 )
-                ProfileBackup.StageResult.Truncated -> fail("Файл копии повреждён или скопирован не до конца.")
-                is ProfileBackup.StageResult.Failed -> fail("Не удалось прочитать копию: ${result.reason}")
+                ProfileBackup.StageResult.Truncated -> fail(context.getString(R.string.bk_truncated))
+                is ProfileBackup.StageResult.Failed -> fail(context.getString(R.string.bk_read_failed, result.reason))
             }
         }
     }
@@ -232,11 +233,11 @@ class ProfileBackupViewModel @Inject constructor(
     /** Включить автообновление только что сохранённого файла тем же паролем. */
     fun enableAutoUpdate(password: String, includeReceived: Boolean, period: BackupSchedule.Period) {
         val target = _uiState.value.lastSaved ?: run {
-            fail("Сначала сохраните копию в файл — обновляться будет именно он.")
+            fail(context.getString(R.string.bk_save_first))
             return
         }
         if (_uiState.value.busy) return
-        _uiState.update { it.copy(busy = true, busyText = "Включаем обновление…", message = null, failed = false) }
+        _uiState.update { it.copy(busy = true, busyKind = BusyKind.ENABLING, busyText = context.getString(R.string.bk_enabling), message = null, failed = false) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 BackupSchedule.enable(context, target, password.toCharArray(), includeReceived, period)
@@ -247,8 +248,7 @@ class ProfileBackupViewModel @Inject constructor(
                     it.copy(
                         busy = false,
                         schedule = schedule,
-                        message = "Файл будет обновляться ${period.title}. Пароль тот же; " +
-                            "он хранится в защищённом хранилище телефона.",
+                        message = context.getString(R.string.backup_will_update, period.localizedTitle(context)),
                         failed = false,
                     )
                 }
@@ -256,13 +256,12 @@ class ProfileBackupViewModel @Inject constructor(
                     it.copy(
                         busy = false,
                         schedule = schedule,
-                        message = "Это хранилище не даёт постоянного доступа к файлу — обновлять его " +
-                            "автоматически нельзя. Сохраните копию в «Файлы» телефона или на карту памяти.",
+                        message = context.getString(R.string.bk_storage_no_access),
                         failed = true,
                     )
                 }
                 is BackupSchedule.EnableResult.Failed -> _uiState.update {
-                    it.copy(busy = false, schedule = schedule, message = "Не удалось включить: ${result.reason}", failed = true)
+                    it.copy(busy = false, schedule = schedule, message = context.getString(R.string.bk_enable_failed, result.reason), failed = true)
                 }
             }
         }
@@ -276,7 +275,7 @@ class ProfileBackupViewModel @Inject constructor(
      */
     fun enableAutoUpdateFor(target: Uri, password: String, includeReceived: Boolean, period: BackupSchedule.Period) {
         if (_uiState.value.busy) return
-        _uiState.update { it.copy(busy = true, busyText = "Включаем обновление…", message = null, failed = false) }
+        _uiState.update { it.copy(busy = true, busyKind = BusyKind.ENABLING, busyText = context.getString(R.string.bk_enabling), message = null, failed = false) }
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 BackupSchedule.enable(context, target, password.toCharArray(), includeReceived, period)
@@ -287,7 +286,7 @@ class ProfileBackupViewModel @Inject constructor(
                     it.copy(
                         busy = false,
                         schedule = schedule,
-                        message = "Автообновление включено: файл будет перезаписываться ${period.title}.",
+                        message = context.getString(R.string.backup_auto_enabled, period.localizedTitle(context)),
                         failed = false,
                     )
                 }
@@ -295,12 +294,12 @@ class ProfileBackupViewModel @Inject constructor(
                     it.copy(
                         busy = false,
                         schedule = schedule,
-                        message = "Это хранилище не даёт постоянного доступа к файлу — обновлять его " +                            "автоматически нельзя. Сохраните копию в «Файлы» телефона или на карту памяти.",
+                        message = context.getString(R.string.bk_storage_no_access),
                         failed = true,
                     )
                 }
                 is BackupSchedule.EnableResult.Failed -> _uiState.update {
-                    it.copy(busy = false, schedule = schedule, message = "Не удалось включить: ${result.reason}", failed = true)
+                    it.copy(busy = false, schedule = schedule, message = context.getString(R.string.bk_enable_failed, result.reason), failed = true)
                 }
             }
         }
@@ -318,7 +317,7 @@ class ProfileBackupViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             BackupSchedule.disable(context)
             val schedule = BackupSchedule.state(context)
-            _uiState.update { it.copy(schedule = schedule, message = "Автообновление выключено.", failed = false) }
+            _uiState.update { it.copy(schedule = schedule, message = context.getString(R.string.bk_auto_off), failed = false) }
         }
     }
 
@@ -326,7 +325,7 @@ class ProfileBackupViewModel @Inject constructor(
     fun runAutoNow() {
         viewModelScope.launch(Dispatchers.IO) {
             BackupSchedule.runNow(context)
-            _uiState.update { it.copy(message = "Обновление запущено в фоне; итог появится здесь через минуту-другую.", failed = false) }
+            _uiState.update { it.copy(message = context.getString(R.string.bk_update_bg), failed = false) }
         }
     }
 
@@ -350,7 +349,7 @@ class ProfileBackupViewModel @Inject constructor(
         viewModelScope.launch {
             val ok = withContext(Dispatchers.IO) { backup.confirmStaged() }
             if (!ok) {
-                fail("Подготовленная копия не найдена. Выберите файл ещё раз.")
+                fail(context.getString(R.string.bk_staged_missing))
                 return@launch
             }
             _uiState.update { it.copy(restarting = true, message = null, failed = false) }
@@ -370,11 +369,20 @@ class ProfileBackupViewModel @Inject constructor(
     }
 
     companion object {
-        fun humanBytes(bytes: Long): String = when {
-            bytes >= 1L shl 30 -> String.format(Locale.US, "%.1f ГБ", bytes / (1024.0 * 1024 * 1024))
-            bytes >= 1L shl 20 -> String.format(Locale.US, "%.1f МБ", bytes / (1024.0 * 1024))
-            bytes >= 1L shl 10 -> String.format(Locale.US, "%.0f КБ", bytes / 1024.0)
-            else -> "$bytes Б"
+        fun humanBytes(context: Context, bytes: Long): String = when {
+            bytes >= 1L shl 30 -> context.getString(R.string.unit_gb, bytes / (1024.0 * 1024 * 1024))
+            bytes >= 1L shl 20 -> context.getString(R.string.unit_mb, bytes / (1024.0 * 1024))
+            bytes >= 1L shl 10 -> context.getString(R.string.unit_kb, bytes / 1024.0)
+            else -> context.getString(R.string.unit_b, bytes)
         }
     }
 }
+
+/** Название периода на языке приложения (для сообщений и подписей). */
+internal fun BackupSchedule.Period.localizedTitle(context: Context): String = context.getString(
+    when (this) {
+        BackupSchedule.Period.DAILY -> R.string.period_daily
+        BackupSchedule.Period.WEEKLY -> R.string.period_weekly
+        BackupSchedule.Period.MONTHLY -> R.string.period_monthly
+    }
+)

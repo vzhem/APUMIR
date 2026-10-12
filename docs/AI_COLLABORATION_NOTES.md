@@ -12684,3 +12684,191 @@ XML 9 / 314 / 287.
   (прогон зелёный всегда, потому что шаг android неблокирующий).
 - Итог: прогон `37674679520` (8a93bea) — success без замечаний, следующий прогон
   с правками чата проверяется так же.
+
+### GitHub Actions v11.74.335: Kotlin compile failure in the story-photo assembler (2026-10-12)
+
+- Symptom: release run `38204362462` reached `:app:compileReleaseKotlin` and failed at
+  `data/swarm/ContentAddressedChunks.kt:81` with `Unresolved reference: isValidManifest`.
+  Rust core and UniFFI generation had succeeded; APK/re-sign/release steps did not run.
+- Cause: commit `d40040f` restored `Assembler.receive()` with a call to the manifest
+  validator but no validator implementation. The generated source had no declaration anywhere.
+  `ContentAddressedChunksTest.kt` also contained an obsolete test block after the class end.
+- Correction: add fail-closed validation for content hash syntax, content/chunk bounds,
+  chunk count and expiry; use `Long` for `chunkSizeBytes * MAX_CHUNKS` to avoid `Int`
+  overflow; remove obsolete test code and add regressions. Run the focused release-variant
+  JVM tests before `assembleRelease` in the release workflow. The APK artifact upload was also
+  moved after APK signing/checksum: its old pre-build position could never upload the APK.
+- Verification discipline: sandbox has no Java, so local Gradle success cannot be claimed.
+  Commits `732de6e`/`e126438` were pushed to the fixed Arena branch. Dispatch via
+  `gh workflow run build-release.yml --ref arena/4f0b31c5-apumir` returned HTTP 403
+  `Resource not accessible by integration`; `gh run list` showed no new run. The owner must
+  enable Actions workflow-dispatch write permission/reconnect GitHub or start the run in the
+  Actions UI. Do not create/move a release tag until the full build is green and the exact
+  public notes have been approved.
+
+### Manual workflow_dispatch run 38232530545: branch ref broke versionName sync (2026-10-12)
+
+- The owner manually started Build Release APK on `arena/4f0b31c5-apumir` after API dispatch
+  remained blocked. Native core and UniFFI generation passed; the run then failed at `Sync
+  versionName with tag` before unit tests or APK assembly.
+- Cause: the step always removed `refs/tags/` from `GITHUB_REF`. On workflow_dispatch,
+  `GITHUB_REF` is `refs/heads/arena/...`; the slash-containing branch path was inserted into a
+  `/`-delimited `sed` replacement, which failed.
+- Correction: only rewrite `versionName` for `refs/tags/*`; on `workflow_dispatch` leave Gradle's
+  diagnostic version name untouched. Use a `|` sed delimiter for tag substitution. Do not treat
+  this as an application compile failure.
+- The workflow correction was pushed to `arena/4f0b31c5-apumir` as `47bfbec`. API dispatch still
+  returns HTTP 403 for the Arena token, so the owner must rerun `workflow_dispatch` from the Actions
+  UI on this new branch head. The release build, targeted unit tests and APK are still unverified.
+
+### Manual workflow_dispatch run 38234091924: targeted Gradle tests failed (2026-10-12)
+
+- The owner reran the workflow after the branch-ref correction. Core/UniFFI and version sync passed;
+  `Test story photo chunk assembly` failed, so APK assembly did not run.
+- `gh run view --log-failed` again ended with EOF while downloading the Actions log archive from
+  `results-receiver.actions.githubusercontent.com`; no Gradle diagnostic was available through the
+  API. The test step had not saved its own log, so the failure tail annotation was empty.
+- Correction: send both targeted tests and APK assembly output to a shared runner-temp log; the
+  existing failure-tail annotation now reports test as well as build diagnostics.
+- Next: push the log-capture change, ask the owner to rerun workflow_dispatch, inspect the actual
+  Gradle failure annotation, then continue. No APK or release exists.
+
+### Manual workflow_dispatch run 38236089509: legacy story test supplied too few chunks (2026-10-12)
+
+- Run #789 passed core/UniFFI and version sync, but the targeted JVM-test step failed. The
+  annotation was capped at 4 KiB and showed only compiler warnings, so the exact JUnit report was
+  not available from the Actions API.
+- Source review found a deterministic test-fixture error in
+  `StoryPhotoPartsTest.legacyPacketsAreReadWithStrictSizeAndBase64Checks`: 4,001 raw bytes encode
+  to 5,336 Base64 characters, i.e. three 2,400-character chunks, but the test asserted completion
+  after supplying only chunks 1 and 0. The test now supplies chunk 2 before asserting completion.
+- The failure-tail annotation now drops Kotlin `w:` lines and caps the message below GitHub's
+  annotation limit, so a remaining failure should expose its root cause.
+- The fixture correction and warning-filtered failure annotation were validated and pushed in
+  `3889a3d`. API dispatch still returns 403 for the Arena token, so the owner must rerun
+  workflow_dispatch from the Actions UI on this new branch head. The full APK build has not yet run;
+  do not claim CI success or a release.
+
+### Manual workflow_dispatch run 38238290496: targeted tests and APK build passed (2026-10-12)
+
+- Run #790 on `arena/4f0b31c5-apumir` completed successfully. The release-variant JVM suites
+  (`ContentAddressedChunksTest`, `StoryPhotoPartsTest`), `:app:assembleRelease`, rotated-key
+  re-signing, and SHA-256 generation all passed.
+- Actions API lists `app-release.apk` as an uploaded artifact (30,078,909 bytes). The manual
+  dispatch intentionally skipped `Create Release`; it is a branch diagnostic build, not a public
+  release/tag build. A real `.336` tag build and approved public notes are still required.
+- Downloading the APK artifact from this sandbox failed with EOF from GitHub's Azure artifact
+  storage host. Metadata confirms the artifact is present; do not claim a local APK verification.
+- Phone/device, UI integration, battery/load/NAT, and capacity checks remain unperformed.
+
+### Public release text approval for v11.74.336 (2026-10-12)
+
+The owner explicitly approved the exact public text saved in `docs/RELEASE_NOTES_v11.74.336.md`.
+The manual CI run #790 is green, but it did not publish anything. Next create a fresh `v11.74.336`
+tag from the fixed Arena branch, let the tag-triggered workflow build and create its draft with APK
+and checksum, verify those assets, then promote it to a public stable release. Keep `v11.74.335`
+unchanged.
+
+### Public release v11.74.336 published (2026-10-12)
+
+- Owner approved the exact notes; annotated tag `v11.74.336` was created at branch commit `1633ce1`
+  and pushed without moving `v11.74.335`.
+- Tag workflow run `38240296358` completed successfully: targeted JVM tests, `assembleRelease`,
+  rotated-key signing, SHA-256 generation, and draft release upload all passed.
+- The draft was verified to contain uploaded `app-release.apk` (44,052,780 bytes) and
+  `SHA256SUMS.txt` (82 bytes), then promoted to a public stable Latest release. GitHub asset API
+  reports APK digest `sha256:05eee186ccd7463f7daaacd690053760e77fb2c6e31f528d33970deb4f60e76b`.
+- Public release: https://github.com/vzhem/APUMIR/releases/tag/v11.74.336 . The sandbox could not
+  download release assets from GitHub's external artifact storage (EOF); asset state and digest are
+  from the GitHub API. No phone, app/UI integration, battery/load/NAT, or capacity verification was
+  performed.
+
+### Восстановлена линия стабильного релиза v11.74.329 (2026-10-12)
+
+- Симптом: после .329 в APK казалось, что пропали функции и русский/английский интерфейс.
+- Причина доказана ancestry-сравнением: `v11.74.329` (`198e1da`) продолжает стабильную линию,
+  а `v11.74.330` (`3d37de6`) был создан напрямую от `4e5624c` — `main` на v11.74.206. Между
+  общим предком и v329 лежали 176 неинтегрированных коммитов / 276 путей, включая RU/EN UI,
+  ресурсы, истории и другие доработки. Релизные теги не удалялись; проблема была в кодовой базе
+  ветки для сборки, а не в списке GitHub Releases.
+- Исправление: merge-коммит `73e40eb` в fixed Arena-ветке `arena/4f0b31c5-apumir` интегрировал
+  полный предок v329 и сохранил последующую линию .330–.336. Старые helper/photo packets оставлены
+  читаемыми; текущая сборка использует строгую content-addressed проверку. UI и ресурсы
+  восстановления совпадают с tree v329; единственное отличие в UI — удалена лишняя пустая строка
+  в конце `GroupChatScreen.kt`. RU/EN key parity: strings 1524, arrays 2, plurals 3.
+- Тег `v11.74.329` остаётся предком исправленной ветки. Теги `v11.74.335` и `v11.74.336`, release
+  notes и assets не перемещались и не редактировались. Публичный `.336` всё ещё создан из старого
+  дерева; не публиковать новую версию, пока объединённая ветка не пройдёт CI и владелец не утвердит
+  RU/EN release notes для реально возвращённых функций.
+- Проверки: `git diff --check`, unresolved-symbol scan (524 файла), source-contract suites и
+  RU/EN XML-key parity прошли. `check-chat-style.py` имеет 4 падения, воспроизводимые на чистом
+  архиве v329 (это baseline, не регресс merge). В sandbox нет Java/Gradle и Rust/Cargo, поэтому
+  JVM/Android/native сборка не запускалась; Actions для нового merge-коммита ещё не стартовали.
+- Не путать текущую fixed-ветку с открытым PR #43 (`arena/7ab0e8d6-apumir`): этот PR head — старый
+  коммит `8f6ce09` на линии от v206 и в этой сессии не изменялся. Работа запушена только в
+  `arena/4f0b31c5-apumir`.
+
+### Recovery audit: stable v207–v329 change-set, phone helpers, and next stages (2026-10-12)
+
+- Owner clarified that RU/EN was only an example: restore the complete stable line and describe
+  helper work separately. Git evidence: v206→v329 is 276 paths, +12,919/-2,823; old PR #43
+  head `8f6ce09`→v206 is 13 paths, +1,186/-4. v11.74.330 forked from v206, not v329. The fixed
+  Arena branch now contains v329 as an ancestor; no published tags/assets were moved.
+- Phone-related features are distinct: online helper routing for messages is stages 1–2, published
+  .326–.329 (direct first, then bounded helpers, locally ranked selection, consent/load controls,
+  signed decline + fast fallback); UDP hole-punching in `SWARM_MOBILE.md` is for file-transfer
+  packets and was already present in v206. Neither is verified on real phones/NAT in this session.
+- The old phone checklist claim that stories had no app/UI calls was stale after the v329 merge.
+  Source path is now confirmed: `ChatListViewModel.publishStory` → `StoryStore.encodePackets` →
+  `ChatRepository.sendStoryPacket`; incoming `saveIncomingMessage` → `StoryStore.receive`; UI reads
+  `StoryStore.active`. This is source wiring only, not device verification.
+- Content-addressed assembly for personal photo stories is implemented and targeted tests/build
+  passed in pre-merge workflow #790; no CI run exists for the recovered combined tree. Group/channel
+  swarm sharing remains unimplemented. `SwarmContributionStats` has only its declaration in
+  app/Rust sources; `notePeer` does not enforce the 256-entry threshold and the refusal boolean is
+  unused. Treat Stage 4 as a non-operative scaffold, not an anti-abuse or capacity feature.
+- Owner approved the exact bilingual `.337` notes and authorized public release. Keep .337 limited
+  to claims in those notes; after successful tag CI, continue the incomplete Stage 3/4 work for
+  subsequent releases. Do not claim physical phone, NAT, battery/load, or useful-capacity results.
+
+### v11.74.337 restored-tree release published (2026-10-12)
+
+- Owner-approved `docs/RELEASE_NOTES_v11.74.337.md` was committed on the fixed Arena branch;
+  annotated tag `v11.74.337` points to `b8e6dcf`. Old tags/releases/assets were untouched.
+- Tag workflow `38246638460` succeeded on the merged v329 + .330–.336 tree: all online-helper and
+  direct-transport Rust suites, all three native ABIs, UniFFI, targeted story-photo/JVM and
+  story/community/helper Android suites, `assembleRelease`, rotated-key signing, SHA-256, APK and
+  checksum asset upload. The generated draft was verified against the approved bilingual body,
+  then promoted to stable Latest.
+- GitHub API asset metadata: APK 95,123,319 bytes, digest
+  `sha256:b51f09815a0e87612bfe5db3866497c52c9798bcd598b76e4fb59fc22bde1536`; checksum 82 bytes,
+  asset digest `sha256:5dcf54a5901a0209092d901cfbdd7b50c0fff4e6968b7f7c4c9751b53cdccdf1`.
+  Assets were not independently downloaded in the sandbox. The run's conditional bindings push
+  left `main` unchanged at `4e5624c`.
+- Public release: https://github.com/vzhem/APUMIR/releases/tag/v11.74.337 . No physical Android,
+  NAT, battery/load, or capacity verification was performed. Those remain gates for future stages.
+
+### Follow-up after v11.74.337: bound the Stage 4 scaffold for a later release (2026-10-12)
+
+- The `.337` tag remains pinned at `b8e6dcf`; this follow-up is only on the fixed branch after the
+  release and is not part of `.337`.
+- `SwarmContributionStats` now uses a 256-entry access-order LRU for peer observations, rejects
+  empty/overlong IDs, caps retained refusals at 10 per rolling 30 seconds, and clamps clock rollback
+  to a monotonic high-water mark. Counters saturate instead of wrapping. Added
+  `SwarmContributionStatsTest` for bounds, eviction, rollover, rollback, reset and concurrent calls;
+  included it in the next tag's release-test command.
+- Important: this object still has no app/Rust call sites; no real helper events are measured, and
+  the returned refusal decision is not enforced by the transport. The work is a bounded scaffold,
+  not Stage 4 completion. No CI has run after this follow-up because local Java/Gradle/Cargo are
+  absent; verify the new test in the next tag build before publication.
+
+### Release-lineage prevention gate (added after v11.74.337, 2026-10-12)
+
+- Added a pre-build step to the tag release workflow: fetch complete Git history, query GitHub's latest
+  published stable release (not `main`), and fail closed unless the candidate tag commit descends from
+  that release's commit. It also writes a baseline diff-stat and changed-path list to Actions summary.
+- The diagnostic `workflow_dispatch` path skips the ancestry gate because it cannot publish a release.
+- This gate was committed after the `.337` tag run, so it has not yet been exercised in GitHub Actions.
+  Validate it on the next tag before relying on it. Current details/checklist: `docs/RELEASE_LINEAGE_SAFETY.md`.
+- Recommended repository rulesets (protect release branch, prohibit force-push/deletion of `v*` tags,
+  require CI checks) are administrative settings and remain unverified; do not claim they are active.

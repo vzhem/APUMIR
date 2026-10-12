@@ -1,5 +1,10 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.stringResource
+
+import com.vladimir.messenger.R
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -274,7 +279,7 @@ fun ApuSettingsFeatureRow(
     ) {
         ApuPremiumIconTile(
             icon = if (available) Icons.Default.Check else Icons.Default.Lock,
-            contentDescription = if (available) "Открыто" else "Ещё закрыто",
+            contentDescription = if (available) stringResource(R.string.a11y_open) else stringResource(R.string.a11y_still_locked),
             size = 26.dp,
             corner = 8.dp,
             lift = 3.dp,
@@ -405,15 +410,24 @@ fun ApuSettingsDialog(
     Dialog(onDismissRequest = onDismissRequest, properties = properties) {
         ApuSettingsPalette {
             val shape = RoundedCornerShape(22.dp)
+            // Окно не выше экрана. Когда содержимое выше (длинный текст, поворот
+            // в альбомный режим, крупный шрифт), прокручивается ВСЯ карточка:
+            // заголовок, текст и кнопки. Раньше текст получал «остаток» высоты, а
+            // кнопки уходили за нижний край и их не было видно.
+            val maxCard = (LocalConfiguration.current.screenHeightDp.dp - 48.dp).coerceAtLeast(240.dp)
+            val cardScroll = rememberScrollState()
             Column(
                 modifier = modifier
                     .fillMaxWidth()
+                    .apuTapHaptics()
+                    .heightIn(max = maxCard)
                     .apuPremiumLift(14.dp, shape, ApuPremiumShadowColor)
                     .clip(shape)
                     .background(Color(0xFFF7F9FC).copy(alpha = 0.98f))
                     .border(1.dp, ApuGold.copy(alpha = 0.45f), shape)
                     .apuPremiumGloss(shape, intensity = 0.5f, topFraction = 0.35f)
-                    .padding(16.dp),
+                    .padding(16.dp)
+                    .verticalScroll(cardScroll),
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (icon != null) {
@@ -442,16 +456,7 @@ fun ApuSettingsDialog(
                 }
                 if (text != null) {
                     Spacer(modifier = Modifier.size(12.dp))
-                    // Длинные тексты (правила, подтверждения) прокручиваются:
-                    // окно не растягивается выше экрана.
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 420.dp)
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        CompositionLocalProvider(LocalContentColor provides ApuBubbleTextColor) { text() }
-                    }
+                    CompositionLocalProvider(LocalContentColor provides ApuBubbleTextColor) { text() }
                 }
                 Spacer(modifier = Modifier.size(16.dp))
                 Row(
@@ -460,10 +465,14 @@ fun ApuSettingsDialog(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (dismissButton != null) {
-                        dismissButton()
+                        CompositionLocalProvider(LocalApuDialogButtonRole provides DialogButtonRole.DISMISS) {
+                            dismissButton()
+                        }
                         Spacer(modifier = Modifier.width(8.dp))
                     }
-                    confirmButton()
+                    CompositionLocalProvider(LocalApuDialogButtonRole provides DialogButtonRole.CONFIRM) {
+                        confirmButton()
+                    }
                 }
             }
         }
