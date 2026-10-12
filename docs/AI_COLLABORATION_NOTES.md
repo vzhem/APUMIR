@@ -12830,3 +12830,20 @@ unchanged.
 - Owner approved the exact bilingual `.337` notes and authorized public release. Keep .337 limited
   to claims in those notes; after successful tag CI, continue the incomplete Stage 3/4 work for
   subsequent releases. Do not claim physical phone, NAT, battery/load, or useful-capacity results.
+
+### v11.74.337 restored-tree release published (2026-10-12)
+
+- Owner-approved `docs/RELEASE_NOTES_v11.74.337.md` was committed on the fixed Arena branch;
+  annotated tag `v11.74.337` points to `b8e6dcf`. Old tags/releases/assets were untouched.
+- Tag workflow `38246638460` succeeded on the merged v329 + .330–.336 tree: all online-helper and
+  direct-transport Rust suites, all three native ABIs, UniFFI, targeted story-photo/JVM and
+  story/community/helper Android suites, `assembleRelease`, rotated-key signing, SHA-256, APK and
+  checksum asset upload. The generated draft was verified against the approved bilingual body,
+  then promoted to stable Latest.
+- GitHub API asset metadata: APK 95,123,319 bytes, digest
+  `sha256:b51f09815a0e87612bfe5db3866497c52c9798bcd598b76e4fb59fc22bde1536`; checksum 82 bytes,
+  asset digest `sha256:5dcf54a5901a0209092d901cfbdd7b50c0fff4e6968b7f7c4c9751b53cdccdf1`.
+  Assets were not independently downloaded in the sandbox. The run's conditional bindings push
+  left `main` unchanged at `4e5624c`.
+- Public release: https://github.com/vzhem/APUMIR/releases/tag/v11.74.337 . No physical Android,
+  NAT, battery/load, or capacity verification was performed. Those remain gates for future stages.
