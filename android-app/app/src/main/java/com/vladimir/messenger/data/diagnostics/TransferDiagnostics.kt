@@ -105,6 +105,10 @@ object TransferDiagnostics {
         synchronized(lock) { counters[key] = (counters[key] ?: 0L) + delta }
     }
 
+    /** Read-only seam for JVM regression tests of event counters. */
+    internal fun counterValueForTests(key: String): Long =
+        synchronized(lock) { counters[key] ?: 0L }
+
     /** Увеличить счётчик и узнать новое значение — для «первое и каждое N-е». */
     private fun bump(key: String, delta: Long = 1L): Long {
         synchronized(lock) {

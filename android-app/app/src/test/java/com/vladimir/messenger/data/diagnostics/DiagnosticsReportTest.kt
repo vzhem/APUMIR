@@ -486,9 +486,21 @@ class DiagnosticsReportTest {
             ),
         )
         val direct = lines.first { it.title == "Прямой канал" }
-        assertTrue(direct.value.contains("сессий 2"))
+        assertTrue(direct.value.contains("исходящих сессий согласовано 2"))
         assertTrue(direct.value.contains("отдано 37 диапазонов"))
         assertTrue(direct.value.contains("8.4 МиБ"))
+
+        // Inbound ranges do not increment the locally negotiated outbound-session counter.
+        val inboundOnly = DiagnosticsReport.summaryLines(
+            facts(
+                counters = mapOf(
+                    Counters.F4_RANGES_RECEIVED to 46L,
+                    Counters.F4_BYTES_RECEIVED to 5_866_672L,
+                ),
+            ),
+        ).first { it.title == "Прямой канал" }
+        assertTrue(inboundOnly.value.contains("исходящих сессий согласовано 0"))
+        assertTrue(inboundOnly.value.contains("принято 46"))
     }
 
     @Test
@@ -717,6 +729,19 @@ class DiagnosticsReportTest {
         )
         assertFalse(report.contains(id))
         assertTrue(report.contains("UUID сообщений"))
+    }
+
+    @Test
+    fun messageDerivedSha256ReceiptKeysAreRedactedFromMqttTopics() {
+        val messageHash = "0123456789abcdef".repeat(4)
+        val line = "MQTT IN: topic=p2pm2/msg/[contact]/receipt/$messageHash " +
+            "cleanup=p2pm2/receipt/cleanup/$messageHash payload=[скрыто]"
+
+        val safe = DiagnosticsPrivacy.redact(line)
+
+        assertTrue(safe.contains("p2pm2/msg/[contact]/receipt/[id]"))
+        assertTrue(safe.contains("p2pm2/receipt/cleanup/[id]"))
+        assertFalse(safe.contains(messageHash))
     }
 
     @Test

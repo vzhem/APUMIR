@@ -418,6 +418,10 @@ data class RelayQueueEvictionDiagnostics(val count: Long, val cumulative: Boolea
 object DiagnosticsPrivacy {
     private val contactRegex = Regex("pk_[0-9a-f]{32,64}")
     private val uuidRegex = Regex("(?i)\\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\\b")
+    // MQTT receipt topics carry SHA-256(messageId), a stable 64-hex correlator.
+    // Hide it as an identifier too; redacting only UUID and 32-hex transfer IDs
+    // left these message-derived keys visible in the privacy report.
+    private val messageHashRegex = Regex("(?i)\\b[0-9a-f]{64}\\b")
     private val transferHexRegex = Regex("(?i)\\b[0-9a-f]{32}\\b")
     private val threadtimeSeverityRegex = Regex(
         "^\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d+\\s+\\d+\\s+\\d+\\s+([A-Z])\\s",
@@ -456,6 +460,7 @@ object DiagnosticsPrivacy {
     fun redact(text: String): String = text
         .replace(contactRegex, "[contact]")
         .replace(uuidRegex, "[id]")
+        .replace(messageHashRegex, "[id]")
         .replace(transferHexRegex, "[transfer]")
         .replace(fromHexRegex) { match -> "${match.groupValues[1]}[contact]" }
         .replace(ipv4Regex, "[ip]")
@@ -798,7 +803,7 @@ object DiagnosticsReport {
             DiagnosticsLine(
                 DiagnosticsLevel.OK,
                 "Прямой канал",
-                "сессий $negotiated, отдано $sentRanges диапазонов " +
+                "исходящих сессий согласовано $negotiated, отдано $sentRanges диапазонов " +
                     "(${formatBytes(facts.counters[Counters.F4_BYTES_SENT] ?: 0L)}), " +
                     "принято $receivedRanges " +
                     "(${formatBytes(facts.counters[Counters.F4_BYTES_RECEIVED] ?: 0L)})",
@@ -1233,7 +1238,7 @@ object DiagnosticsReport {
         appendLine("приёмов начато=${c[Counters.FILE_STARTED_IN] ?: 0L}")
         appendLine("передач завершено=${c[Counters.FILE_COMPLETED] ?: 0L}")
         appendLine("ошибок передачи=${c[Counters.FILE_FAILED] ?: 0L}")
-        appendLine("F4-сессий согласовано=${c[Counters.F4_NEGOTIATED] ?: 0L}")
+        appendLine("F4-исходящих сессий согласовано=${c[Counters.F4_NEGOTIATED] ?: 0L}")
         appendLine("F4-диапазонов отправлено=${c[Counters.F4_RANGES_SENT] ?: 0L}")
         appendLine("F4-диапазонов принято=${c[Counters.F4_RANGES_RECEIVED] ?: 0L}")
         appendLine("F4-байт отправлено=${c[Counters.F4_BYTES_SENT] ?: 0L}")

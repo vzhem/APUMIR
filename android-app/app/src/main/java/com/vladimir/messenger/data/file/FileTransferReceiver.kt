@@ -790,19 +790,6 @@ class FileTransferReceiver(
             Log.w(TAG, "Binary range for $transferIdHex exceeds chunk bounds; dropped")
             return
         }
-        // Диагностика «Логи»: счётчики растут на каждом диапазоне, а в журнал
-        // попадает каждый 16-й (плюс первый) - иначе приём файла вытеснил бы
-        // из журнала сеть, ядро и F4-переговоры.
-        TransferDiagnostics.count(Counters.F4_BYTES_RECEIVED, ciphertextRange.size.toLong())
-        TransferDiagnostics.recordProgress(
-            key = Counters.F4_RANGES_RECEIVED,
-            everyN = 16,
-            area = "F4",
-            detail = {
-                "прямой канал: принят кусок=$chunkIndex смещение=$chunkOffset " +
-                    "байт=${ciphertextRange.size}"
-            },
-        )
         mutex.withLock {
             if (declined.containsKey(transferIdHex)) return
             val key = "$transferIdHex|$chunkIndex"
@@ -818,6 +805,19 @@ class FileTransferReceiver(
                 Log.w(TAG, "Binary range overlap for $key at offset $chunkOffset; dropped")
                 return
             }
+            // Count only syntactically valid ranges admitted by the assembler.
+            // Previously counters ran before the declined/overlap checks and
+            // reported rejected or duplicate bytes as received.
+            TransferDiagnostics.count(Counters.F4_BYTES_RECEIVED, ciphertextRange.size.toLong())
+            TransferDiagnostics.recordProgress(
+                key = Counters.F4_RANGES_RECEIVED,
+                everyN = 16,
+                area = "F4",
+                detail = {
+                    "прямой канал: принят диапазон куска=$chunkIndex смещение=$chunkOffset " +
+                        "байт=${ciphertextRange.size}"
+                },
+            )
             if (!assembler.isComplete) return
             // Кусок собран целиком: дальше ровно тот же путь, что и для
             // склеенных текстовых фрагментов — аутентификация, диск, ACK.

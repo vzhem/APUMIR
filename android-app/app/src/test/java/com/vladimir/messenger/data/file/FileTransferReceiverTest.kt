@@ -1,5 +1,7 @@
 package com.vladimir.messenger.data.file
 
+import com.vladimir.messenger.data.diagnostics.Counters
+import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import java.io.File
 import java.security.MessageDigest
 import kotlinx.coroutines.test.runTest
@@ -473,13 +475,19 @@ class FileTransferReceiverTest {
         val receiver = receiver()
         deliver(receiver, offerTexts())
 
+        val rangesBefore = TransferDiagnostics.counterValueForTests(Counters.F4_RANGES_RECEIVED)
+        val bytesBefore = TransferDiagnostics.counterValueForTests(Counters.F4_BYTES_RECEIVED)
         val cipher = FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(0))
         val firstRangeEnd = 200
         binaryChunk(receiver, 0, 0, cipher, cipher.copyOfRange(0, firstRangeEnd))
         assertEquals(0L, sentAckContiguous().last())
-        // Пересечение с уже принятым диапазоном игнорируется, сборка остаётся целой.
+        assertEquals(rangesBefore + 1L, TransferDiagnostics.counterValueForTests(Counters.F4_RANGES_RECEIVED))
+        assertEquals(bytesBefore + firstRangeEnd, TransferDiagnostics.counterValueForTests(Counters.F4_BYTES_RECEIVED))
+        // Пересечение с уже принятым диапазоном игнорируется и не попадает в F4 receive counters.
         binaryChunk(receiver, 0, 100, cipher, cipher.copyOfRange(100, 300))
         assertEquals(0L, sentAckContiguous().last())
+        assertEquals(rangesBefore + 1L, TransferDiagnostics.counterValueForTests(Counters.F4_RANGES_RECEIVED))
+        assertEquals(bytesBefore + firstRangeEnd, TransferDiagnostics.counterValueForTests(Counters.F4_BYTES_RECEIVED))
         binaryChunk(receiver, 0, firstRangeEnd, cipher, cipher.copyOfRange(firstRangeEnd, cipher.size))
         assertEquals(1L, sentAckContiguous().last())
         assertEquals("TRANSFERRING", dao.getTransfer(transferIdHex)!!.state)
