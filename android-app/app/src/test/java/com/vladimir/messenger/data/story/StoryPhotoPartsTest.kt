@@ -94,6 +94,34 @@ class StoryPhotoPartsTest {
     }
 
     @Test
+    fun photoPartsDeliveredInWavesHoursApartStillAssemble() {
+        val image = ByteArray(9_001) { (it * 17).toByte() }
+        val packets = contentParts(image)
+        assertTrue(packets.size >= 2)
+        val parts = StoryPhotoParts()
+        // Первая волна: relay отдаёт часть пакетов сразу после публикации.
+        packets.dropLast(1).forEach { assertNull(receive(parts, it)) }
+        // Остаток доходит, когда телефон получателя проснулся, - через часы.
+        // Прежнее пятиминутное окно сборки к этому времени уже обнуляло части, и
+        // фото у друга не появлялось никогда.
+        assertEquals(
+            ContentAddressedChunks.encodeBase64(image),
+            receive(parts, packets.last(), receiveAt = now + 6 * 60 * 60 * 1_000L),
+        )
+    }
+
+    @Test
+    fun partialPhotoNeverAssemblesIntoATruncatedPhoto() {
+        // 3 * CHUNK_BYTES байт кодируются ровно в четыре части по CHUNK символов.
+        val packets = contentParts(ByteArray(StoryPhotoParts.CHUNK_BYTES * 3) { (it * 5).toByte() })
+        assertEquals(4, packets.size)
+        val parts = StoryPhotoParts()
+        // Без последней части получатель не должен получить «обрезанную» подпись
+        // истории: сборка отдаёт фото только целиком.
+        packets.dropLast(1).forEach { assertNull(receive(parts, it)) }
+    }
+
+    @Test
     fun partialAssembliesExpireAndDoNotCrossSenderBoundaries() {
         val packets = contentParts(ByteArray(StoryPhotoParts.CHUNK_BYTES * 2) { it.toByte() })
         val parts = StoryPhotoParts()
@@ -140,7 +168,8 @@ class StoryPhotoPartsTest {
         assertNull(parts.receive("a", "s", 0, 2, "A".repeat(2401), 0))
         assertNull(parts.receive("a", "s", 0, 2, "bad!", 0))
         assertNull(parts.receive("a", "s", 0, 2, "AAAA", 0))
-        assertNull(parts.receive("a", "s", 1, 2, "BBBB", 300001))
+        // Части, разнесённые дальше срока хранения недособранной истории, не склеиваются.
+        assertNull(parts.receive("a", "s", 1, 2, "BBBB", StoryPhotoParts.PENDING_TTL_MS + 1))
     }
 
     @Test fun legacyFullPhotoRoundTrip() {

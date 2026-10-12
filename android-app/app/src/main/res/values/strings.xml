@@ -1574,6 +1574,7 @@
     <string name="story_new">Новая история</string>
     <string name="story_placeholder">Что нового? До 200 знаков</string>
     <string name="story_publish">Опубликовать</string>
+    <string name="story_publish_without_photo">Опубликовать без фото</string>
     <string name="story_open">История</string>
     <string name="story_pause">Пауза</string>
     <string name="story_resume">Продолжить</string>

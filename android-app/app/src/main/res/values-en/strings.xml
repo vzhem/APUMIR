@@ -1561,6 +1561,7 @@ The file is not on this phone</string>
     <string name="story_new">New story</string>
     <string name="story_placeholder">What is new? Up to 200 characters</string>
     <string name="story_publish">Publish</string>
+    <string name="story_publish_without_photo">Publish without photo</string>
     <string name="story_open">Story</string>
     <string name="story_pause">Pause</string>
     <string name="story_resume">Resume</string>

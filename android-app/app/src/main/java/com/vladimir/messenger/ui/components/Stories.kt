@@ -323,6 +323,10 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
     var photo by remember { mutableStateOf<String?>(null) }
     var preparing by remember { mutableStateOf(false) }
     var photoError by remember { mutableStateOf(false) }
+    // «Опубликовать без фото» - осознанный выбор человека после неудачного
+    // прикрепления. Без него кнопка публикации ждёт фото: иначе история молча
+    // уходила текстом, и у друзей вместо снимка была только подпись.
+    var photoSkipped by remember { mutableStateOf(false) }
     var cameraError by remember { mutableStateOf<Int?>(null) }
     var showCamera by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -333,6 +337,7 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
         scope.launch {
             preparing = true
             photoError = false
+            photoSkipped = false
             cameraError = null
             try {
                 photo = withContext(Dispatchers.IO) { StoryPhoto.prepare(context, uri) }
@@ -360,6 +365,11 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
         if (hasPermission) showCamera = true
         else cameraPermission.launch(Manifest.permission.CAMERA)
     }
+    /**
+     * Прикрепление не удалось и другого фото в редакторе нет: молча отправлять
+     * историю без картинки нельзя - у друзей была бы видна только подпись.
+     */
+    val photoMissing = photoError && photo == null && !photoSkipped
     Dialog(onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         Column(Modifier.fillMaxSize().background(Color(0xFF071426)).safeDrawingPadding().imePadding()) {
@@ -391,10 +401,18 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                     ApuPremiumButton(stringResource(R.string.story_take_photo), { requestCamera() },
                         enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
                 }
-                if (photo != null) ApuPremiumButton(stringResource(R.string.story_remove_photo), { photo = null },
+                if (photo != null) ApuPremiumButton(stringResource(R.string.story_remove_photo),
+                    { photo = null; photoError = false; photoSkipped = false },
                     enabled = !preparing, compact = true, modifier = Modifier.fillMaxWidth())
                 if (preparing) Text(stringResource(R.string.story_photo_preparing), color = Color.White)
-                if (photoError) Text(stringResource(R.string.story_photo_failed), color = Color.White)
+                if (photoError) Text(stringResource(R.string.story_photo_failed), color = Color(0xFFFF8A80),
+                    fontWeight = FontWeight.SemiBold)
+                // Прикрепление не удалось, снимка у истории нет: показываем это
+                // отдельно и не даём опубликовать молча - человек должен сам
+                // решить, отправлять ли историю без фото.
+                if (photoMissing) ApuPremiumButton(stringResource(R.string.story_publish_without_photo),
+                    { photoSkipped = true },
+                    enabled = !preparing, compact = true, modifier = Modifier.fillMaxWidth())
                 cameraError?.let { Text(stringResource(it), color = Color.White) }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -410,7 +428,8 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                 Text(stringResource(R.string.story_lifetime), color = Color.White.copy(alpha = .7f),
                     style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp), textAlign = TextAlign.Center)
                 ApuPremiumButton(label = stringResource(R.string.story_publish), onClick = { onPublish(text.trim(), bg, photo) },
-                    enabled = !preparing && (text.isNotBlank() || photo != null), style = DiagnosticsActionStyle.PRIMARY, modifier = Modifier.fillMaxWidth())
+                    enabled = !preparing && StoryPublish.canPublish(text, photo, photoMissing),
+                    style = DiagnosticsActionStyle.PRIMARY, modifier = Modifier.fillMaxWidth())
             }
         }
     }
