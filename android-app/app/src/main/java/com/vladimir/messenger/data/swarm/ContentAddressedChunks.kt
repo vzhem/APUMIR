@@ -37,7 +37,14 @@ object ContentAddressedChunks {
         d.takeIf { Base64.getEncoder().encodeToString(d) == text }
     } catch (_: IllegalArgumentException) { null }
     fun encodeBase64(bytes: ByteArray): String = Base64.getEncoder().encodeToString(bytes)
-    fun sha256Hex(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it.toInt() and 0xff) }
+    fun sha256Hex(bytes: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(bytes)
+        val sb = StringBuilder()
+        for (b in digest) {
+            sb.append(String.format("%02x", b.toInt() and 0xff))
+        }
+        return sb.toString()
+    }
     fun isSha256Hex(v: String): Boolean = sha256Pattern.matches(v)
 
 
