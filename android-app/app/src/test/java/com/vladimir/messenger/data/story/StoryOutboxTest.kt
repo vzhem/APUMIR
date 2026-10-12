@@ -32,6 +32,32 @@ class StoryOutboxTest {
     }
 
     @Test
+    fun singlePacketStoriesAreStillDelivered() {
+        assertTrue(StoryOutbox.canDeliver("story-1", 1, 1))
+        assertTrue(StoryOutbox.canDeliver("story-1", 2, 2))
+        assertFalse(StoryOutbox.canDeliver("story-1", 0, 1))
+        assertFalse(StoryOutbox.canDeliver("story-1", 1, 0))
+        assertFalse(StoryOutbox.canDeliver("", 1, 1))
+        assertFalse(StoryOutbox.canDeliver("x".repeat(101), 1, 1))
+    }
+
+    @Test
+    fun aSinglePacketStoryIsSentOnceEvenWhenTheTransportFails() = runBlocking {
+        val packets = StoryOutbox.packets("story-1", listOf("hello"))
+        val sent = mutableListOf<String>()
+        val pauses = mutableListOf<Long>()
+        StoryOutbox.deliver(
+            packets = packets,
+            peers = listOf("alice"),
+            send = { _, packet -> sent += packet.content; false },
+            pause = { pauses += it },
+            rounds = 1,
+        )
+        assertEquals(listOf("hello"), sent)
+        assertTrue(pauses.isEmpty())
+    }
+
+    @Test
     fun aLostPartRepeatsTheWholeStoryInTheNextWave() = runBlocking {
         val packets = StoryOutbox.packets("story-1", listOf("p0", "p1", "p2"))
         val sent = mutableListOf<String>()

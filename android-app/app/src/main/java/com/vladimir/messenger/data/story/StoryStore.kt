@@ -106,7 +106,10 @@ object StoryStore {
                         authorId, id, o.getInt("part"), o.getInt("total"), o.getString("data"), now,
                     ) ?: return true
                 }
-                else -> { photoParts.discard(authorId, id); null }
+                // Пакет без kind — текстовая история, не «отмена фото». Сбрасывать
+                // сборку здесь нельзя: иначе подпись затирает уже принятый снимок,
+                // и у друга остаётся одна подпись при живом фото у автора.
+                else -> null
             }
             Story(id, authorId, o.optString("name", authorName).ifBlank { authorName },
                 o.getString("text").take(200), o.optInt("bg", 0).coerceIn(0, BG_COUNT - 1), ts, false, photo)
@@ -173,10 +176,28 @@ object StoryStore {
     private fun safeAdd(l: Long, r: Long): Long =
         if (l < 0) 0L else if (l > Long.MAX_VALUE - r) Long.MAX_VALUE else l + r
 
+    /**
+     * Две копии одной истории: фото, которое уже есть, не затираем подписью.
+     * Иначе пакет без `kind` подменяет снимок пустым `photoB64`, и у друга
+     * остаётся одна подпись, хотя автор по-прежнему видит свою копию с фото.
+     */
+    internal fun mergeIncoming(existing: Story?, incoming: Story): Story {
+        if (existing == null || existing.id != incoming.id) return incoming
+        return incoming.copy(
+            authorId = existing.authorId,
+            authorName = incoming.authorName.ifBlank { existing.authorName },
+            photoB64 = incoming.photoB64 ?: existing.photoB64,
+            mine = existing.mine || incoming.mine,
+            createdAtMs = existing.createdAtMs,
+        )
+    }
+
     private fun add(story: Story) = synchronized(lock) {
         val now = System.currentTimeMillis()
-        val kept = _items.value.filter { now - it.createdAtMs in 0 until LIFETIME_MS && it.id != story.id }
-        save((kept + story).takeLast(100).let { list ->
+        val previous = _items.value.firstOrNull { it.id == story.id }
+        val merged = mergeIncoming(previous, story)
+        val kept = _items.value.filter { now - it.createdAtMs in 0 until LIFETIME_MS && it.id != merged.id }
+        save((kept + merged).takeLast(100).let { list ->
             val ids = list.filter { it.photoB64 != null }.takeLast(30).map { it.id }.toSet()
             list.filter { it.photoB64 == null || it.id in ids }
         })

@@ -247,6 +247,7 @@ jobs:
             --tests com.vladimir.messenger.data.swarm.ContentAddressedChunksTest \
             --tests com.vladimir.messenger.data.story.StoryPhotoPartsTest \
             --tests com.vladimir.messenger.data.story.StoryOutboxTest \
+            --tests com.vladimir.messenger.data.story.StoryStoreMergeTest \
             --tests com.vladimir.messenger.data.diagnostics.DiagnosticsReportTest \
             --no-daemon > "$RUNNER_TEMP/gradle-release.log" 2>&1
           status=$?
@@ -266,7 +267,7 @@ jobs:
         working-directory: ./android-app
         run: |
           set +e
-          ./gradlew :app:testReleaseUnitTest --tests 'com.vladimir.messenger.ui.components.StoryPlaybackTest' --tests 'com.vladimir.messenger.ui.components.StoryPublishTest' --tests 'com.vladimir.messenger.ui.screens.groups.CommunityListTest' --tests 'com.vladimir.messenger.data.story.StoryPhotoPartsTest' --tests 'com.vladimir.messenger.data.swarm.OnlineHelperPolicyTest' --tests 'com.vladimir.messenger.data.swarm.SwarmContributionStatsTest' --no-daemon >> "$RUNNER_TEMP/gradle-build.log" 2>&1
+          ./gradlew :app:testReleaseUnitTest --tests 'com.vladimir.messenger.ui.components.StoryPlaybackTest' --tests 'com.vladimir.messenger.ui.components.StoryPublishTest' --tests 'com.vladimir.messenger.ui.screens.groups.CommunityListTest' --tests 'com.vladimir.messenger.data.story.StoryPhotoPartsTest' --tests 'com.vladimir.messenger.data.story.StoryStoreMergeTest' --tests 'com.vladimir.messenger.data.swarm.OnlineHelperPolicyTest' --tests 'com.vladimir.messenger.data.swarm.SwarmContributionStatsTest' --no-daemon >> "$RUNNER_TEMP/gradle-build.log" 2>&1
           status=$?
           tail -100 "$RUNNER_TEMP/gradle-build.log"
           exit "$status"

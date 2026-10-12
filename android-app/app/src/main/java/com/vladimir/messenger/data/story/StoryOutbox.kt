@@ -58,11 +58,19 @@ object StoryOutbox {
         storyId.length in 1..100 && packetCount in 2..MAX_RESEND_PACKETS
 
     /**
+     * Можно ли вообще слать: текстовая история — один пакет, фото — несколько.
+     * Первую волну отправляем всегда; без этого текстовые истории молча не уходят.
+     */
+    fun canDeliver(storyId: String, packetCount: Int, peerCount: Int): Boolean =
+        storyId.length in 1..100 && packetCount in 1..MAX_RESEND_PACKETS && peerCount > 0
+
+    /**
      * Разослать пакеты всем контактам и повторить волны позже.
      *
      * [send] возвращает false, если часть не удалось отдать транспорту; тогда
      * следующий раунд повторяет историю целиком (пропущенную часть в одиночку
-     * собрать всё равно нельзя).
+     * собрать всё равно нельзя). Первая волна уходит всегда, в том числе для
+     * однопакетной текстовой истории; повтор — только у фото (несколько пакетов).
      */
     fun start(
         storyId: String,
@@ -70,9 +78,10 @@ object StoryOutbox {
         peers: List<String>,
         send: suspend (peerId: String, packet: Packet) -> Boolean,
     ) {
-        if (!canResend(storyId, packets.size) || peers.isEmpty()) return
+        if (!canDeliver(storyId, packets.size, peers.size)) return
+        val rounds = if (canResend(storyId, packets.size)) MAX_ROUNDS else 1
         val job = scope.launch {
-            deliver(packets, peers, send) { delay(it) }
+            deliver(packets, peers, send, { delay(it) }, rounds)
         }
         synchronized(lock) {
             jobs.remove(storyId)?.cancel()
@@ -107,8 +116,10 @@ object StoryOutbox {
         peers: List<String>,
         send: suspend (peerId: String, packet: Packet) -> Boolean,
         pause: suspend (Long) -> Unit,
+        rounds: Int = MAX_ROUNDS,
     ) {
-        repeat(MAX_ROUNDS) { round ->
+        val total = rounds.coerceIn(1, MAX_ROUNDS)
+        repeat(total) { round ->
             if (round > 0) pause(ROUND_DELAY_MS * round)
             var missed = 0
             for (peer in peers) {
