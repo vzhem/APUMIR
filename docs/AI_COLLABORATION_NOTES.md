@@ -12760,3 +12760,11 @@ XML 9 / 314 / 287.
 - Downloading the APK artifact from this sandbox failed with EOF from GitHub's Azure artifact
   storage host. Metadata confirms the artifact is present; do not claim a local APK verification.
 - Phone/device, UI integration, battery/load/NAT, and capacity checks remain unperformed.
+
+### Public release text approval for v11.74.336 (2026-10-12)
+
+The owner explicitly approved the exact public text saved in `docs/RELEASE_NOTES_v11.74.336.md`.
+The manual CI run #790 is green, but it did not publish anything. Next create a fresh `v11.74.336`
+tag from the fixed Arena branch, let the tag-triggered workflow build and create its draft with APK
+and checksum, verify those assets, then promote it to a public stable release. Keep `v11.74.335`
+unchanged.
