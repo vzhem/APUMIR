@@ -12807,3 +12807,26 @@ unchanged.
 - Не путать текущую fixed-ветку с открытым PR #43 (`arena/7ab0e8d6-apumir`): этот PR head — старый
   коммит `8f6ce09` на линии от v206 и в этой сессии не изменялся. Работа запушена только в
   `arena/4f0b31c5-apumir`.
+
+### Recovery audit: stable v207–v329 change-set, phone helpers, and next stages (2026-10-12)
+
+- Owner clarified that RU/EN was only an example: restore the complete stable line and describe
+  helper work separately. Git evidence: v206→v329 is 276 paths, +12,919/-2,823; old PR #43
+  head `8f6ce09`→v206 is 13 paths, +1,186/-4. v11.74.330 forked from v206, not v329. The fixed
+  Arena branch now contains v329 as an ancestor; no published tags/assets were moved.
+- Phone-related features are distinct: online helper routing for messages is stages 1–2, published
+  .326–.329 (direct first, then bounded helpers, locally ranked selection, consent/load controls,
+  signed decline + fast fallback); UDP hole-punching in `SWARM_MOBILE.md` is for file-transfer
+  packets and was already present in v206. Neither is verified on real phones/NAT in this session.
+- The old phone checklist claim that stories had no app/UI calls was stale after the v329 merge.
+  Source path is now confirmed: `ChatListViewModel.publishStory` → `StoryStore.encodePackets` →
+  `ChatRepository.sendStoryPacket`; incoming `saveIncomingMessage` → `StoryStore.receive`; UI reads
+  `StoryStore.active`. This is source wiring only, not device verification.
+- Content-addressed assembly for personal photo stories is implemented and targeted tests/build
+  passed in pre-merge workflow #790; no CI run exists for the recovered combined tree. Group/channel
+  swarm sharing remains unimplemented. `SwarmContributionStats` has only its declaration in
+  app/Rust sources; `notePeer` does not enforce the 256-entry threshold and the refusal boolean is
+  unused. Treat Stage 4 as a non-operative scaffold, not an anti-abuse or capacity feature.
+- Owner approved the exact bilingual `.337` notes and authorized public release. Keep .337 limited
+  to claims in those notes; after successful tag CI, continue the incomplete Stage 3/4 work for
+  subsequent releases. Do not claim physical phone, NAT, battery/load, or useful-capacity results.
