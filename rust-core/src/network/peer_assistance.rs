@@ -267,7 +267,7 @@ impl PeerAssistance {
         let mut s = self.state.lock().unwrap(); cleanup(&mut s, now);
         if s.pending.len() >= MAX_PENDING { return None; }
         let id = packet.header.packet_id;
-        let diagnostic_message = !bytes.starts_with(super::file_wire::FILE_WIRE_MAGIC);
+        let diagnostic_message = !bytes.starts_with(&super::file_wire::FILE_WIRE_MAGIC);
         s.pending.insert(id, Pending {
             recipient: recipient.clone(),
             digest: packet.digest()?,
@@ -422,7 +422,7 @@ impl PeerAssistance {
                 let plaintext = open(identity, &packet, now)?;
                 if !valid_inner(&plaintext, &packet.header.sender.claims.node_id)
                     || !directory.accept_end_to_end_identity(&packet.header.sender, now) { return None; }
-                let diagnostic_message = !plaintext.starts_with(super::file_wire::FILE_WIRE_MAGIC);
+                let diagnostic_message = !plaintext.starts_with(&super::file_wire::FILE_WIRE_MAGIC);
                 let claims = ReceiptClaims { packet_id: packet.header.packet_id, origin: packet.header.sender.claims.node_id.clone(),
                     recipient: c.to.clone(), digest, expires_at_ms: packet.header.expires_at_ms };
                 let signature = identity.sign_security_payload(&canonical(ACK_DOMAIN, &claims)?);

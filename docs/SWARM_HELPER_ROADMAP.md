@@ -275,9 +275,11 @@ battery, load, NAT, or capacity verification has been done.
   отдельная статистика о транзитном решении промежуточного телефона, а protocol receipt не включает
   криптографическую атрибуцию конкретному helper. Поэтому отчет показывает попытки/legs и
   acceptance, но не доказывает личность или уникальность помощника.
-- Добавлены парсерные JVM regressions, Rust race observer и source guards; release workflow теперь
-  вызывает Python guards и гоняет `DiagnosticsReportTest` до APK, Rust reserve observer входит в
-  helper-delivery suite. Этот workflow ещё не был запущен на текущем commit; до его успеха и
-  трёхтелефонного теста этапы 3 и 4 остаются незавершёнными.
+- Добавлены парсерные JVM regressions, Rust race observer и source guards; release workflow вызывает
+  Python guards и гоняет `DiagnosticsReportTest` до APK, Rust reserve observer входит в
+  helper-delivery suite. Tag run `38259661223` для `.338` подтвердил ancestry и Python guards,
+  затем остановился до native build из-за двух `starts_with` type errors. Исправлено borrowing
+  константы; тег `.338` оставлен неизменным без Release/assets, следующий кандидат — `.339`.
+  Этапы 3 и 4 остаются незавершёнными до зелёного CI и трёхтелефонного теста.
 - Даже будущий green CI не заменит phone/NAT test и не докажет путь конкретного helper: локальная
   подпись receipt подтверждает acceptance получателя, но не содержит идентичность помощника.
