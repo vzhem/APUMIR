@@ -274,15 +274,16 @@ class SettingsStyleTest(unittest.TestCase):
         main = source("screens/settings/SettingsScreen.kt")
         self.assertNotRegex(main, r"\bAlertDialog\(")
         self.assertIn("ApuSettingsDialog", main)
-        self.assertIn("Подключённые телефоны синхронизируются сами", main)
+        self.assertIn("R.string.settings_profile_transfer_hint", main)
         sync = source("screens/settings/ProfileSyncDialog.kt")
         self.assertIn("ApuSettingsDialog", sync)
         # The dialog owns the single scroll container; nesting another one in
         # its content can be measured with infinite height and crash Compose.
         self.assertNotIn(".verticalScroll(", sync)
         settings_ui = source("components/ApuSettingsUi.kt")
-        self.assertIn(".heightIn(max = 420.dp)", settings_ui)
-        self.assertIn(".verticalScroll(rememberScrollState())", settings_ui)
+        self.assertIn("LocalConfiguration.current.screenHeightDp.dp - 48.dp", settings_ui)
+        self.assertIn(".heightIn(max = maxCard)", settings_ui)
+        self.assertIn(".verticalScroll(cardScroll)", settings_ui)
         settings_item = settings_ui.split("fun ApuSettingsItem(", 1)[1].split("\n}", 1)[0]
         self.assertIn("maxLines = 2", settings_item)
         self.assertIn("ui.passwordAuto", sync)
@@ -291,7 +292,9 @@ class SettingsStyleTest(unittest.TestCase):
         self.assertIn("!ui.busy && !ui.restarting", sync)
         actions = source("components/ApuActionMenu.kt")
         self.assertIn("maxLines: Int = 2", actions)
-        self.assertIn("maxLines = maxLines", actions)
+        self.assertIn("ApuDiagnosticsActionButton(", actions)
+        self.assertIn("label = label", actions)
+        self.assertIn("maxLines = 2", source("components/ApuDiagnosticsUi.kt"))
         self.assertIn("maxLines = 1", actions)
         for file in ("ProfileBackupScreen.kt", "IdentityBackupScreen.kt"):
             text = source("screens/settings/" + file)
@@ -360,7 +363,7 @@ class SettingsStyleTest(unittest.TestCase):
         self.assertIn("bringIntoViewRequester(promoBlock)", text)
         promo_block = text.index("bringIntoViewRequester(promoBlock)")
         self.assertIn("ApuFormTextField(", text[promo_block:])
-        self.assertIn('Text("Применить")', text[promo_block:])
+        self.assertIn("Text(stringResource(R.string.rank_apply))", text[promo_block:])
         self.assertGreaterEqual(text.count("promoBlock.bringIntoView()"), 2)
         shared = source("components/ApuSettingsUi.kt")
         for house_part in (
@@ -385,8 +388,8 @@ class SettingsStyleTest(unittest.TestCase):
         медаль и знак у имени), а не размазан по экрану числами.
         """
         text = source("screens/settings/RankBenefitsScreen.kt")
-        self.assertIn("ApuSettingsSectionTitle(\"Ранги\")", text)
-        self.assertIn('ApuSettingsSectionTitle("VIP — элита APU")', text)
+        self.assertIn("ApuSettingsSectionTitle(stringResource(R.string.rank_section_ranks))", text)
+        self.assertIn("ApuSettingsSectionTitle(stringResource(R.string.rank_section_vip))", text)
         self.assertIn("FileTransferRankPolicy.regularTiers", text)
         self.assertIn("FileTransferRankPolicy.vipTiers", text)
         self.assertIn("ApuVipBadge(", text)
@@ -416,7 +419,8 @@ class SettingsStyleTest(unittest.TestCase):
         # Рядом с собственным званием знак виден и на главном экране.
         chat_list = source("screens/chat/ChatListScreen.kt")
         self.assertIn("RankMedal(size = 26.dp, vip = uiState.rankVip)", chat_list)
-        self.assertIn("ApuVipBadge(compact = true)", chat_list)
+        self.assertIn("if (uiState.rankVip)", chat_list)
+        self.assertIn("ApuVipBadge()", chat_list)
 
     def test_large_profile_initials_and_avatar_io_are_preserved(self):
         avatar = source("components/MyAvatar.kt")
@@ -436,7 +440,7 @@ class SettingsStyleTest(unittest.TestCase):
     def test_groups_screen_and_create_dialog_use_house_style(self):
         groups = source("screens/groups/GroupsScreen.kt")
         self.assertNotRegex(groups, r"\bAlertDialog\(")
-        self.assertIn("ApuSettingsHeader(\"Сообщества\")", groups)
+        self.assertIn("ApuSettingsHeader(stringResource(R.string.nav_communities))", groups)
         self.assertIn("ApuSettingsSectionTitle(title)", groups)
         self.assertIn("ApuSettingsDialog(", groups)
         self.assertIn("CommunityTypeChoices(", groups)

@@ -1,5 +1,8 @@
 package com.vladimir.messenger.ui.screens.channels
 
+import com.vladimir.messenger.ui.components.ApuPremiumSpinner
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.material3.HorizontalDivider
 import com.vladimir.messenger.data.local.MessagePinPolicy
 
@@ -18,6 +21,8 @@ import com.vladimir.messenger.ui.components.ApuNotificationBadge
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuBubbleCard
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
+import com.vladimir.messenger.ui.components.ApuHeaderButton
+import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuAntiRatingInlineBadge
@@ -50,6 +55,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
@@ -150,6 +156,9 @@ fun ChannelScreen(
     }
     // Раунд 213: «три точки» шапки + приглашение по QR коду.
     var showTopMenu by remember { mutableStateOf(false) }
+    // Поиск по постам канала: строка над лентой фильтрует заголовки и текст.
+    var searchOpen by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
     var showNotificationMuteDialog by remember { mutableStateOf(false) }
     var showQrInvite by remember { mutableStateOf(false) }
     var qrLink by remember { mutableStateOf<String?>(null) }
@@ -208,14 +217,14 @@ fun ChannelScreen(
                             }
                             Column(Modifier.weight(1f, fill = false)) {
                                 Text(
-                                    uiState.channel?.title ?: "Канал",
+                                    uiState.channel?.title ?: stringResource(R.string.contacts_channel),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     fontWeight = FontWeight.SemiBold,
                                     color = ApuBubbleTextColor,
                                 )
                                 Text(
-                                    "Подписчиков: ${uiState.channel?.memberCount ?: 0}",
+                                    stringResource(R.string.ch_subscribers_tpl, uiState.channel?.memberCount ?: 0),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = ApuBubbleMutedColor,
                                     maxLines = 1,
@@ -227,31 +236,43 @@ fun ChannelScreen(
                 },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                     }
                 },
                 actions = {
                     // Админ-кабинет канала - тот же, что у группы: участники,
                     // ссылки, заявки, статистика и разрешения.
+                    ApuHeaderButton(
+                        icon = Icons.Default.Search,
+                        contentDescription = stringResource(R.string.action_search),
+                        onClick = {
+                            searchOpen = !searchOpen
+                            if (!searchOpen) searchQuery = ""
+                        },
+                    )
                     if (uiState.canPost) {
-                        IconButton(onClick = { onOpenAdmin(uiState.channelId) }) {
-                            Icon(Icons.Default.Settings, contentDescription = "Админ-кабинет")
-                        }
+                        ApuHeaderButton(
+                            icon = Icons.Default.Settings,
+                            contentDescription = stringResource(R.string.channel_admin_cabinet),
+                            onClick = { onOpenAdmin(uiState.channelId) },
+                        )
                     }
                     // «Три точки» канала: пауза уведомлений и приглашение по QR.
                     Box {
-                        IconButton(onClick = { showTopMenu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "Ещё")
-                        }
+                        ApuHeaderButton(
+                            icon = Icons.Default.MoreVert,
+                            contentDescription = stringResource(R.string.chat_more),
+                            onClick = { showTopMenu = true },
+                        )
                         ApuActionsMenu(
                             expanded = showTopMenu,
                             onDismiss = { showTopMenu = false },
                             actions = listOf(
                                 ApuAction(
                                     title = if ((uiState.channel?.mutedUntilMs ?: 0L) > System.currentTimeMillis()) {
-                                        "Включить уведомления"
+                                        stringResource(R.string.menu_unmute)
                                     } else {
-                                        "Отключить уведомления"
+                                        stringResource(R.string.menu_mute)
                                     },
                                     icon = if ((uiState.channel?.mutedUntilMs ?: 0L) > System.currentTimeMillis()) {
                                         Icons.Default.NotificationsActive
@@ -260,7 +281,7 @@ fun ChannelScreen(
                                     },
                                     onClick = { showNotificationMuteDialog = true },
                                 ),
-                                ApuAction("Пригласить по QR коду", Icons.Filled.QrCode2) {
+                                ApuAction(stringResource(R.string.channel_invite_qr), Icons.Filled.QrCode2) {
                                     showQrInvite = true
                                 },
                             ),
@@ -274,7 +295,7 @@ fun ChannelScreen(
                 ApuPremiumFloatingActionButton(
                     onClick = { showNewPost = true },
                     icon = Icons.Default.Add,
-                    contentDescription = "Новый пост",
+                    contentDescription = stringResource(R.string.channel_new_post),
                 )
             }
         },
@@ -285,7 +306,7 @@ fun ChannelScreen(
                 .fillMaxSize(),
         ) {
             when {
-                uiState.isLoading -> CircularProgressIndicator(
+                uiState.isLoading -> ApuPremiumSpinner(
                     modifier = Modifier.align(Alignment.Center),
                 )
 
@@ -297,7 +318,7 @@ fun ChannelScreen(
                         .padding(24.dp),
                 ) {
                     Text(
-                        "Канал недоступен: вы в нём больше не состоите.",
+                        stringResource(R.string.channel_unavailable),
                         textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.bodyMedium,
                         color = HintBubbleTextColor,
@@ -313,9 +334,9 @@ fun ChannelScreen(
                 ) {
                     Text(
                         if (uiState.canPost) {
-                            "Постов пока нет. Нажмите «+», чтобы опубликовать первый."
+                            stringResource(R.string.channel_no_posts_hint)
                         } else {
-                            "В канале пока нет постов."
+                            stringResource(R.string.channel_empty)
                         },
                         textAlign = TextAlign.Center,
                         style = MaterialTheme.typography.bodyMedium,
@@ -352,8 +373,8 @@ fun ChannelScreen(
                     val targetAuthorId = if (distinctAuthors.size == 1) distinctAuthors.first() else primaryPost.authorId
                     val targetMember = uiState.members.firstOrNull { it.nodeId == targetAuthorId }
                     val targetAuthorName = primaryPost.authorName.ifBlank {
-                        targetMember?.displayName?.ifBlank { "Участник " + targetAuthorId.takeLast(4) }
-                            ?: ("Участник " + targetAuthorId.takeLast(4))
+                        targetMember?.displayName?.ifBlank { stringResource(R.string.member_fallback, targetAuthorId.takeLast(4)) }
+                            ?: stringResource(R.string.member_fallback, targetAuthorId.takeLast(4))
                     }
                     val isAuthorMe = uiState.myId.isNotBlank() && uiState.myId == targetAuthorId
                     val isAuthorOwner = (uiState.channel?.ownerId != null && uiState.channel?.ownerId == targetAuthorId) ||
@@ -418,7 +439,7 @@ fun ChannelScreen(
                 if (!inspectedPeerId.isNullOrBlank()) {
                     val isSelfPeer = uiState.myId.isNotBlank() && uiState.myId == inspectedPeerId
                     PeerProfileSheet(
-                        name = uiState.inspectedPeerName.ifBlank { "Участник " + inspectedPeerId.takeLast(4) },
+                        name = uiState.inspectedPeerName.ifBlank { stringResource(R.string.member_fallback, inspectedPeerId.takeLast(4)) },
                         contactId = inspectedPeerId,
                         isOnline = true,
                         // Элита: знак и кольцо в карточке автора.
@@ -443,8 +464,8 @@ fun ChannelScreen(
                         onCopyId = {
                             val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                                 as android.content.ClipboardManager
-                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Узел", inspectedPeerId))
-                            Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText(context.getString(R.string.grp_node), inspectedPeerId))
+                            Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
                         },
                     )
                 }
@@ -470,13 +491,13 @@ fun ChannelScreen(
                             ) {
                                 Icon(
                                     Icons.Filled.Close,
-                                    contentDescription = "Снять выделение",
+                                    contentDescription = stringResource(R.string.channel_clear_selection),
                                     tint = ApuBubbleTextColor,
                                 )
                             }
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                text = "Выбрано $selCount",
+                                text = stringResource(R.string.ch_selected_n, selCount),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = ApuBubbleTextColor,
@@ -489,15 +510,15 @@ fun ChannelScreen(
                                         .joinToString("\n\n") { listOf(it.title, it.text).filter { s -> s.isNotBlank() }.joinToString("\n") }
                                     val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                                         as android.content.ClipboardManager
-                                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Посты", combined))
-                                    Toast.makeText(context, "Скопировано ($selCount)", Toast.LENGTH_SHORT).show()
+                                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText(context.getString(R.string.ch_posts), combined))
+                                    Toast.makeText(context, context.getString(R.string.toast_copied_count, selCount), Toast.LENGTH_SHORT).show()
                                     viewModel.clearPostSelection()
                                 },
                                 modifier = Modifier.size(36.dp),
                             ) {
                                 Icon(
                                     Icons.Filled.ContentCopy,
-                                    contentDescription = "Скопировать выбранные",
+                                    contentDescription = stringResource(R.string.channel_copy_selected),
                                     tint = ApuBubbleAccentColor,
                                 )
                             }
@@ -508,7 +529,7 @@ fun ChannelScreen(
                                 ) {
                                     Icon(
                                         Icons.Filled.Delete,
-                                        contentDescription = "Удалить выбранные",
+                                        contentDescription = stringResource(R.string.channel_delete_selected),
                                         tint = ApuSettingsDangerColor,
                                     )
                                 }
@@ -533,8 +554,7 @@ fun ChannelScreen(
                                 )
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    "Закреплённые (" + uiState.pinnedPostIds.size + "/" +
-                                        com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE + ")",
+                                    stringResource(R.string.pinned_count, uiState.pinnedPostIds.size, com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE),
                                     fontWeight = FontWeight.Medium,
                                 )
                             }
@@ -553,7 +573,7 @@ fun ChannelScreen(
                                         },
                                     ) {
                                         Text(
-                                            (pinnedPost.title.ifBlank { "Пост" }) + " - " + pinnedPost.text.take(60),
+                                            (pinnedPost.title.ifBlank { stringResource(R.string.ch_post) }) + " - " + pinnedPost.text.take(60),
                                             style = MaterialTheme.typography.bodySmall,
                                             maxLines = 2,
                                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
@@ -562,13 +582,30 @@ fun ChannelScreen(
                                         IconButton(onClick = { viewModel.togglePostPin(pinnedPost) }) {
                                             Icon(
                                                 androidx.compose.material.icons.Icons.Filled.Close,
-                                                contentDescription = "Открепить",
+                                                contentDescription = stringResource(R.string.channel_unpin),
                                                 modifier = Modifier.size(16.dp),
                                             )
                                         }
                                     }
                                 }
                         }
+                    }
+                }
+                // Строка поиска по постам (заголовок и текст).
+                if (searchOpen) {
+                    ApuFormTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        label = stringResource(R.string.chat_search_in_chat),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                }
+                val shownPosts = remember(uiState.posts, searchQuery) {
+                    if (searchQuery.isBlank()) uiState.posts
+                    else uiState.posts.filter { p ->
+                        (p.title + " " + p.text).contains(searchQuery.trim(), ignoreCase = true)
                     }
                 }
                 // Бегунок справа: в длинном списке видно, где мы находимся.
@@ -588,7 +625,7 @@ fun ChannelScreen(
                         ),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        items(uiState.posts, key = { it.topicId }) { post ->
+                        items(shownPosts, key = { it.topicId }) { post ->
                             // Пост показался на экране - засчитываем просмотр.
                             // Повторные открытия счётчик не двигают: считаются
                             // разные читатели, а не показы.
@@ -685,8 +722,8 @@ fun ChannelScreen(
     ) { uri -> uri?.let(viewModel::onFileSelected) }
     if (showNewPost) {
         PostEditorDialog(
-            title = "Новый пост",
-            confirmLabel = "Опубликовать",
+            title = stringResource(R.string.channel_new_post),
+            confirmLabel = stringResource(R.string.channel_publish),
             creating = uiState.creating,
             onDismiss = {
                 showNewPost = false
@@ -703,6 +740,7 @@ fun ChannelScreen(
             preparingFile = uiState.isPreparingFile,
             onPickFile = { filePicker.launch(arrayOf("*/*")) },
             onClearFile = { viewModel.clearStagedFile() },
+            onVoiceReady = { uri -> viewModel.onFileSelected(uri) },
         )
     }
 
@@ -710,8 +748,8 @@ fun ChannelScreen(
     // не меняем - они уже разошлись по подписчикам отдельными пакетами.
     editingPost?.let { post ->
         PostEditorDialog(
-            title = "Изменить пост",
-            confirmLabel = "Сохранить",
+            title = stringResource(R.string.channel_edit_post),
+            confirmLabel = stringResource(R.string.admin_save),
             initialText = post.text,
             initialImages = post.images,
             imagesEditable = false,
@@ -765,7 +803,7 @@ fun ChannelScreen(
             fTopics = viewModel.forwardTopics(picked.id)
             fTopicsLoading = false
         }
-        val sourceLabel = uiState.channel?.title?.takeIf { it.isNotBlank() } ?: "канал"
+        val sourceLabel = uiState.channel?.title?.takeIf { it.isNotBlank() } ?: stringResource(R.string.fwd_default_channel)
         com.vladimir.messenger.ui.components.ForwardChooserDialog(
             targets = fTargets,
             loading = fLoading,
@@ -777,7 +815,7 @@ fun ChannelScreen(
                         if (ok) {
                             fwdSent = true
                         } else {
-                            Toast.makeText(fCtx, "Не удалось переслать", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(fCtx, fCtx.getString(R.string.toast_forward_failed), Toast.LENGTH_SHORT).show()
                         }
                     }
                 } else {
@@ -803,7 +841,7 @@ fun ChannelScreen(
                         if (ok) {
                             fwdSent = true
                         } else {
-                            Toast.makeText(fCtx, "Не удалось переслать", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(fCtx, fCtx.getString(R.string.toast_forward_failed), Toast.LENGTH_SHORT).show()
                         }
                     }
                 },
@@ -812,7 +850,7 @@ fun ChannelScreen(
     }
     if (showNotificationMuteDialog) {
         NotificationMuteDialog(
-            targetName = uiState.channel?.title ?: "Канал",
+            targetName = uiState.channel?.title ?: stringResource(R.string.contacts_channel),
             mutedUntilMs = uiState.channel?.mutedUntilMs ?: 0L,
             onSelectUntil = { untilMs ->
                 viewModel.setNotificationsMutedUntil(untilMs)
@@ -942,7 +980,7 @@ private fun PostCard(
                     IconButton(onClick = onTogglePin, modifier = Modifier.size(28.dp)) {
                         Icon(
                             androidx.compose.material.icons.Icons.Filled.PushPin,
-                            contentDescription = if (post.isPinned) "Открепить" else "Закрепить",
+                            contentDescription = if (post.isPinned) stringResource(R.string.channel_unpin) else stringResource(R.string.channel_pin),
                             tint = if (post.isPinned) {
                                 ApuBubbleAccentColor
                             } else {
@@ -958,7 +996,7 @@ private fun PostCard(
                     IconButton(onClick = onEdit, modifier = Modifier.size(32.dp)) {
                         Icon(
                             Icons.Default.Edit,
-                            contentDescription = "Изменить пост",
+                            contentDescription = stringResource(R.string.channel_edit_post),
                             tint = ApuBubbleMutedColor,
                             modifier = Modifier.size(18.dp),
                         )
@@ -971,7 +1009,7 @@ private fun PostCard(
                     IconButton(onClick = { showPostMenu = true }, modifier = Modifier.size(32.dp)) {
                         Icon(
                             Icons.Default.MoreVert,
-                            contentDescription = "Действия с постом",
+                            contentDescription = stringResource(R.string.channel_post_actions),
                             tint = ApuBubbleMutedColor,
                             modifier = Modifier.size(18.dp),
                         )
@@ -983,30 +1021,30 @@ private fun PostCard(
                         actions = buildList {
                             // Раунд 212: пересылка поста внутрь APU - раньше
                             // был только системный «Поделиться» наружу.
-                            add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
-                            add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
-                            add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
-                            add(ApuAction("Поделиться…", Icons.Filled.Share) { onSharePost() })
-                            add(ApuAction(if (post.isPinned) "Открепить" else "Закрепить", Icons.Filled.PushPin) { onTogglePin() })
+                            add(ApuAction(stringResource(R.string.channel_share_in_apu), Icons.Filled.Send) { onShareToApu() })
+                            add(ApuAction(stringResource(R.string.channel_add_reaction), Icons.Filled.EmojiEmotions) { showReactions = true })
+                            add(ApuAction(stringResource(R.string.channel_to_favorites), Icons.Filled.Star) { onSaveToFavorites() })
+                            add(ApuAction(stringResource(R.string.channel_share_ellipsis), Icons.Filled.Share) { onSharePost() })
+                            add(ApuAction(if (post.isPinned) stringResource(R.string.channel_unpin) else stringResource(R.string.channel_pin), Icons.Filled.PushPin) { onTogglePin() })
                             if (post.title.isNotBlank() || post.text.isNotBlank()) {
-                                add(ApuAction("Копировать текст", Icons.Filled.ContentCopy) { selectPostText = true })
+                                add(ApuAction(stringResource(R.string.channel_copy_text), Icons.Filled.ContentCopy) { selectPostText = true })
                             }
                             if (!isAuthorMe && post.authorId.isNotBlank()) {
-                                add(ApuAction("Профиль и репутация", Icons.Filled.Person) { onOpenAuthorProfile() })
+                                add(ApuAction(stringResource(R.string.channel_profile_reputation), Icons.Filled.Person) { onOpenAuthorProfile() })
                             }
                             add(
                                 ApuAction(
-                                    if (isSelected) "Снять выбор" else "Выбрать несколько",
+                                    if (isSelected) stringResource(R.string.channel_deselect) else stringResource(R.string.channel_select_many),
                                     Icons.Filled.CheckCircle,
                                 ) { onToggleSelect() }
                             )
                             if (canEdit) {
-                                add(ApuAction("Изменить пост", Icons.Filled.Edit) { onEdit() })
+                                add(ApuAction(stringResource(R.string.channel_edit_post), Icons.Filled.Edit) { onEdit() })
                             }
                             if (canModerate || canEdit) {
                                 add(
                                     ApuAction(
-                                        if (canModerate && !isAuthorMe) "Удалить и модерация…" else "Удалить…",
+                                        if (canModerate && !isAuthorMe) stringResource(R.string.channel_delete_moderate) else stringResource(R.string.channel_delete_ellipsis),
                                         Icons.Filled.Delete,
                                         destructive = true,
                                     ) { onDeletePost() }
@@ -1028,7 +1066,7 @@ private fun PostCard(
             if (imageUrl != null) {
                 ImagePreview(
                     model = imageUrl,
-                    contentDescription = "Картинка к посту",
+                    contentDescription = stringResource(R.string.channel_post_image),
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(max = 260.dp)
@@ -1039,6 +1077,12 @@ private fun PostCard(
                     bodyText,
                     modifier = Modifier.padding(top = 8.dp),
                 )
+                com.vladimir.messenger.ui.components.firstLinkIn(bodyText)?.let { link ->
+                    com.vladimir.messenger.ui.components.ApuLinkCard(
+                        url = link,
+                        textColor = com.vladimir.messenger.ui.components.ApuBubbleTextColor,
+                    )
+                }
             }
             }
             // Файл поста (рой, этап 10): та же карточка, что в группе.
@@ -1048,16 +1092,16 @@ private fun PostCard(
                     state = fileCard,
                     isFromMe = fileCard.isFromMe,
                     messageActions = buildList {
-                        add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
-                        add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
-                        add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
-                        add(ApuAction("Поделиться", Icons.Filled.Send) { onSharePost() })
-                        add(ApuAction(if (post.isPinned) "Открепить" else "Закрепить", Icons.Filled.PushPin) { onTogglePin() })
+                        add(ApuAction(stringResource(R.string.channel_share_in_apu), Icons.Filled.Send) { onShareToApu() })
+                        add(ApuAction(stringResource(R.string.channel_add_reaction), Icons.Filled.EmojiEmotions) { showReactions = true })
+                        add(ApuAction(stringResource(R.string.channel_to_favorites), Icons.Filled.Star) { onSaveToFavorites() })
+                        add(ApuAction(stringResource(R.string.channel_share), Icons.Filled.Send) { onSharePost() })
+                        add(ApuAction(if (post.isPinned) stringResource(R.string.channel_unpin) else stringResource(R.string.channel_pin), Icons.Filled.PushPin) { onTogglePin() })
                         if (post.title.isNotBlank() || post.text.isNotBlank()) {
-                            add(ApuAction("Копировать текст", Icons.Filled.ContentCopy) { selectPostText = true })
+                            add(ApuAction(stringResource(R.string.channel_copy_text), Icons.Filled.ContentCopy) { selectPostText = true })
                         }
                         if (canEdit) {
-                            add(ApuAction("Изменить пост", Icons.Filled.Edit) { onEdit() })
+                            add(ApuAction(stringResource(R.string.channel_edit_post), Icons.Filled.Edit) { onEdit() })
                         }
                     },
                 )
@@ -1087,7 +1131,7 @@ private fun PostCard(
             ) {
                 Icon(
                     Icons.Default.Visibility,
-                    contentDescription = "Просмотры",
+                    contentDescription = stringResource(R.string.channel_views),
                     tint = ApuBubbleMutedColor,
                     modifier = Modifier.size(15.dp),
                 )
@@ -1102,7 +1146,7 @@ private fun PostCard(
                     Spacer(Modifier.width(12.dp))
                     Icon(
                         Icons.Default.Favorite,
-                        contentDescription = "Реакции",
+                        contentDescription = stringResource(R.string.channel_reactions),
                         tint = ApuBubbleMutedColor,
                         modifier = Modifier.size(15.dp),
                     )
@@ -1114,14 +1158,15 @@ private fun PostCard(
                     )
                 }
             }
-            HorizontalDivider(modifier = Modifier.padding(top = 10.dp), color = ApuBubbleAccentColor.copy(alpha = 0.2f))
+            Spacer(Modifier.height(10.dp))
+            ApuSettingsDivider(startPadding = 0.dp)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                ApuTextAction(label = "Реакция", onClick = { showReactions = true })
+                ApuTextAction(label = stringResource(R.string.channel_reaction), onClick = { showReactions = true })
                 ApuTextAction(
                     label = if (post.comments > 0) {
-                            "Комментарии (${post.comments})"
+                            stringResource(R.string.ch_comments_tpl, post.comments)
                         } else {
-                            "Оставить комментарий"
+                            stringResource(R.string.channel_leave_comment)
                         },
                     onClick = onOpenComments,
                     modifier = Modifier.weight(1f),
@@ -1130,7 +1175,7 @@ private fun PostCard(
                 IconButton(onClick = onSharePost) {
                     Icon(
                         Icons.Default.Share,
-                        contentDescription = "Поделиться постом",
+                        contentDescription = stringResource(R.string.channel_share_post),
                         tint = ApuBubbleAccentColor,
                     )
                 }
@@ -1139,7 +1184,7 @@ private fun PostCard(
                 IconButton(onClick = onSaveToFavorites) {
                     Icon(
                         Icons.Default.BookmarkBorder,
-                        contentDescription = "В избранное",
+                        contentDescription = stringResource(R.string.channel_to_favorites),
                         tint = ApuBubbleAccentColor,
                     )
                 }
@@ -1189,7 +1234,7 @@ private fun PostGallery(images: List<String>, pending: Int) {
         if (single != null) {
             androidx.compose.foundation.Image(
                 bitmap = single.asImageBitmap(),
-                contentDescription = "Фото поста",
+                contentDescription = stringResource(R.string.channel_post_photo),
                 // Без contentScale картинка рисовалась в своих пикселях и
                 // висела крошечной посреди карточки: сжатие ужимает её до
                 // нескольких сотен точек по стороне. FillWidth растягивает
@@ -1207,7 +1252,7 @@ private fun PostGallery(images: List<String>, pending: Int) {
     }
     if (images.isEmpty()) {
         Text(
-            if (pending == 1) "Фото ещё загружается…" else "Фото ещё загружаются…",
+            if (pending == 1) stringResource(R.string.ch_photo_loading) else stringResource(R.string.ch_photos_loading),
             style = MaterialTheme.typography.labelSmall,
             color = ApuBubbleMutedColor,
             modifier = Modifier.padding(top = 8.dp),
@@ -1233,21 +1278,21 @@ private fun PostGallery(images: List<String>, pending: Int) {
                 if (bitmap != null) {
                     androidx.compose.foundation.Image(
                         bitmap = bitmap.asImageBitmap(),
-                        contentDescription = "Фото поста ${page + 1} из ${images.size}",
+                        contentDescription = stringResource(R.string.ch_post_photo_of, page + 1, images.size),
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
                             .fillMaxSize()
                             .clickable { viewerIndex = page },
                     )
                 } else {
-                    CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+                    ApuPremiumSpinner(modifier = Modifier.align(Alignment.Center))
                 }
             }
         }
         Text(
             buildString {
                 append(pagerState.currentPage + 1).append('/').append(images.size)
-                if (pending > 0) append(" · ещё ").append(pending)
+                if (pending > 0) append(" ").append(stringResource(R.string.pager_more_tpl, pending))
             },
             style = MaterialTheme.typography.labelSmall,
             color = Color.White,
@@ -1287,7 +1332,11 @@ private fun PostEditorDialog(
     preparingFile: Boolean = false,
     onPickFile: (() -> Unit)? = null,
     onClearFile: () -> Unit = {},
+    /** Голосовое к посту: готовый файл с волной (content:// URI). */
+    onVoiceReady: ((android.net.Uri) -> Unit)? = null,
 ) {
+    val pollContext = LocalContext.current
+    val voice = com.vladimir.messenger.ui.components.rememberVoiceRecorder { uri -> onVoiceReady?.invoke(uri) }
     var text by remember { mutableStateOf(initialText) }
     // Уже сжатые картинки (base64) по порядку.
     var images by remember { mutableStateOf(initialImages) }
@@ -1298,6 +1347,7 @@ private fun PostEditorDialog(
     val pollState = remember { com.vladimir.messenger.ui.components.PollDraftState() }
     var pollProblem by remember { mutableStateOf<String?>(null) }
 
+    val pickerCtx = LocalContext.current
     val picker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.GetMultipleContents()
     ) { uris ->
@@ -1305,7 +1355,7 @@ private fun PostEditorDialog(
             val room = (InlineImage.MAX_PHOTOS - images.size).coerceAtLeast(0)
             val taken = uris.take(room)
             overflowHint = if (uris.size > room) {
-                "К посту можно приложить не больше ${InlineImage.MAX_PHOTOS} фото"
+                pickerCtx.getString(R.string.ch_overflow_photos, InlineImage.MAX_PHOTOS.toString())
             } else {
                 null
             }
@@ -1327,7 +1377,7 @@ private fun PostEditorDialog(
                 ApuBubbleField(
                     value = text,
                     onValueChange = { text = it },
-                    label = { Text("Текст поста") },
+                    label = { Text(stringResource(R.string.channel_post_text)) },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp),
                 )
                 Spacer(Modifier.height(8.dp))
@@ -1345,7 +1395,7 @@ private fun PostEditorDialog(
                                 if (thumb != null) {
                                     androidx.compose.foundation.Image(
                                         bitmap = thumb.asImageBitmap(),
-                                        contentDescription = "Фото ${index + 1}",
+                                        contentDescription = stringResource(R.string.ch_photo_index, index + 1),
                                         contentScale = ContentScale.Crop,
                                         modifier = Modifier.fillMaxSize(),
                                     )
@@ -1362,7 +1412,7 @@ private fun PostEditorDialog(
                                     ) {
                                         Icon(
                                             Icons.Default.Close,
-                                            contentDescription = "Убрать фото",
+                                            contentDescription = stringResource(R.string.channel_remove_photo),
                                             tint = Color.White,
                                             modifier = Modifier.size(14.dp),
                                         )
@@ -1376,12 +1426,12 @@ private fun PostEditorDialog(
                 if (imagesEditable) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         ApuTextAction(
-                            label = if (images.isEmpty()) "Прикрепить фото" else "Ещё фото (${images.size}/${InlineImage.MAX_PHOTOS})",
+                            label = if (images.isEmpty()) stringResource(R.string.ch_attach_photo) else stringResource(R.string.ch_more_photos, images.size, InlineImage.MAX_PHOTOS),
                             onClick = { picker.launch("image/*") },
                             enabled = !preparing && !creating && images.size < InlineImage.MAX_PHOTOS,
                         )
                         if (preparing) {
-                            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                            ApuPremiumSpinner(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                         }
                     }
                     overflowHint?.let {
@@ -1393,7 +1443,7 @@ private fun PostEditorDialog(
                     }
                 } else if (images.isNotEmpty()) {
                     Text(
-                        "Фотографии при правке не меняются",
+                        stringResource(R.string.channel_photos_locked),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -1427,18 +1477,27 @@ private fun PostEditorDialog(
                                 Text(GroupFileMarker.formatSize(stagedFile.sizeBytes), style = MaterialTheme.typography.labelSmall)
                             }
                             IconButton(onClick = onClearFile, modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Default.Close, contentDescription = "Убрать файл", modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.channel_remove_file), modifier = Modifier.size(16.dp))
                             }
                         }
+                    } else if (voice.recording) {
+                        com.vladimir.messenger.ui.components.VoiceRecordBar(voice)
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (onVoiceReady != null) {
+                                ApuTextAction(
+                                    label = stringResource(R.string.voice_record),
+                                    onClick = { voice.toggle() },
+                                    enabled = !preparingFile && !creating,
+                                )
+                            }
                             ApuTextAction(
-                                label = "Прикрепить файл",
+                                label = stringResource(R.string.channel_attach_file),
                                 onClick = onPickFile,
                                 enabled = !preparingFile && !creating,
                             )
                             if (preparingFile) {
-                                CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                ApuPremiumSpinner(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                             }
                         }
                     }
@@ -1451,12 +1510,12 @@ private fun PostEditorDialog(
                         Spacer(Modifier.height(6.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                "Опрос к посту",
+                                stringResource(R.string.channel_poll),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.weight(1f),
                             )
-                            ApuTextAction(label = "Убрать", onClick = { withPoll = false })
+                            ApuTextAction(label = stringResource(R.string.channel_remove), onClick = { withPoll = false })
                         }
                         com.vladimir.messenger.ui.components.PollDraftFields(
                             state = pollState,
@@ -1464,7 +1523,7 @@ private fun PostEditorDialog(
                         )
                     } else {
                         ApuTextAction(
-                            label = "Прикрепить опрос",
+                            label = stringResource(R.string.channel_attach_poll),
                             onClick = { withPoll = true },
                             enabled = !creating,
                         )
@@ -1479,7 +1538,7 @@ private fun PostEditorDialog(
                     val draft = if (withPoll) pollState.draft() else null
 
                     if (withPoll && draft == null) {
-                        pollProblem = pollState.problem()
+                        pollProblem = pollState.problem(pollContext)
                         return@ApuTextAction
                     }
                     onConfirm(text, images, draft)
@@ -1489,7 +1548,7 @@ private fun PostEditorDialog(
             )
         },
         dismissButton = {
-            ApuTextAction(label = "Отмена", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
         },
     )
 }

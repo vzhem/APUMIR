@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.saved
 
+import com.vladimir.messenger.R
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -91,7 +92,7 @@ class SavedViewModel @Inject constructor(
                     }
                 }
             }
-            _uiState.update { it.copy(message = "Удалено из избранного") }
+            _uiState.update { it.copy(message = appContext.getString(R.string.sv_removed)) }
         }
     }
 
@@ -109,11 +110,11 @@ class SavedViewModel @Inject constructor(
                     .putExtra(android.content.Intent.EXTRA_STREAM, uri)
                     .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 appContext.startActivity(
-                    android.content.Intent.createChooser(intent, "Поделиться")
+                    android.content.Intent.createChooser(intent, appContext.getString(R.string.admin_share))
                         .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             }.onFailure {
-                _uiState.update { st -> st.copy(message = "Не удалось поделиться") }
+                _uiState.update { st -> st.copy(message = appContext.getString(R.string.sv_share_failed)) }
             }
         }
     }
@@ -144,12 +145,12 @@ class SavedViewModel @Inject constructor(
             }
             val transfer = transferOf(item)
             if (transfer == null) {
-                _uiState.update { it.copy(message = "Файл больше не доступен") }
+                _uiState.update { it.copy(message = appContext.getString(R.string.sv_file_gone)) }
                 return@launch
             }
             val src = fileTransferRouter.receivedFileFor(transfer)
             if (src == null) {
-                _uiState.update { it.copy(message = "Файл больше не доступен") }
+                _uiState.update { it.copy(message = appContext.getString(R.string.sv_file_gone)) }
                 return@launch
             }
             runCatching {
@@ -164,11 +165,11 @@ class SavedViewModel @Inject constructor(
                     .putExtra(android.content.Intent.EXTRA_STREAM, uri)
                     .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 appContext.startActivity(
-                    android.content.Intent.createChooser(intent, "Поделиться")
+                    android.content.Intent.createChooser(intent, appContext.getString(R.string.admin_share))
                         .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             }.onFailure {
-                _uiState.update { st -> st.copy(message = "Не удалось поделиться") }
+                _uiState.update { st -> st.copy(message = appContext.getString(R.string.sv_share_failed)) }
             }
         }
     }
@@ -185,7 +186,7 @@ class SavedViewModel @Inject constructor(
                     com.vladimir.messenger.util.PhotoShare.writeShareImage(appContext, item.photoList(), item.id)
                 }.getOrNull()
             }
-            com.vladimir.messenger.util.PhotoShare.copyToClipboard(appContext, "Пост APU", item.text)
+            com.vladimir.messenger.util.PhotoShare.copyToClipboard(appContext, appContext.getString(R.string.chv_post_clip_label), item.text)
             val intent = when {
                 uri != null -> com.vladimir.messenger.util.PhotoShare.buildImageIntent(
                     uri,
@@ -193,12 +194,12 @@ class SavedViewModel @Inject constructor(
                 )
                 item.text.isNotBlank() -> com.vladimir.messenger.util.PhotoShare.buildTextIntent(item.text)
                 else -> {
-                    _uiState.update { st -> st.copy(message = "Нечем поделиться") }
+                    _uiState.update { st -> st.copy(message = appContext.getString(R.string.sv_nothing_share)) }
                     return@launch
                 }
             }
-            if (!com.vladimir.messenger.util.PhotoShare.open(appContext, intent, "Поделиться")) {
-                _uiState.update { st -> st.copy(message = "Не удалось поделиться") }
+            if (!com.vladimir.messenger.util.PhotoShare.open(appContext, intent, appContext.getString(R.string.admin_share))) {
+                _uiState.update { st -> st.copy(message = appContext.getString(R.string.sv_share_failed)) }
             }
         }
     }
@@ -208,7 +209,7 @@ class SavedViewModel @Inject constructor(
         viewModelScope.launch {
             if (item.transferId?.startsWith("local:") == true) {
                 if (localFileOf(item) == null) {
-                    _uiState.update { it.copy(message = "Файл больше не доступен") }
+                    _uiState.update { it.copy(message = appContext.getString(R.string.sv_file_gone)) }
                 } else {
                     _uiState.update { it.copy(pendingLocalExport = item) }
                 }
@@ -216,7 +217,7 @@ class SavedViewModel @Inject constructor(
             }
             val transfer = transferOf(item)
             if (transfer == null) {
-                _uiState.update { it.copy(message = "Файл больше не доступен") }
+                _uiState.update { it.copy(message = appContext.getString(R.string.sv_file_gone)) }
                 return@launch
             }
             _uiState.update { it.copy(pendingExport = transfer) }
@@ -239,7 +240,7 @@ class SavedViewModel @Inject constructor(
                     }.getOrDefault(false)
                 }
                 _uiState.update {
-                    it.copy(message = if (ok) "Сохранено: " + localItem.fileName else "Не удалось сохранить файл")
+                    it.copy(message = if (ok) appContext.getString(R.string.sv_saved_as, localItem.fileName) else appContext.getString(R.string.sv_save_failed))
                 }
             }
             return
@@ -253,9 +254,9 @@ class SavedViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     message = if (ok) {
-                        "Сохранено: " + transfer.displayName
+                        appContext.getString(R.string.sv_saved_as, transfer.displayName)
                     } else {
-                        "Не удалось сохранить файл"
+                        appContext.getString(R.string.sv_save_failed)
                     },
                 )
             }
@@ -313,8 +314,8 @@ class SavedViewModel @Inject constructor(
             }
             _uiState.update {
                 it.copy(
-                    message = if (ok != null) "Стикер добавлен в библиотеку"
-                    else "Не удалось добавить стикер"
+                    message = if (ok != null) appContext.getString(R.string.sv_sticker_lib)
+                    else appContext.getString(R.string.sv_sticker_failed)
                 )
             }
             onDone()
@@ -339,9 +340,9 @@ class SavedViewModel @Inject constructor(
             }
             _uiState.update {
                 val text = if (summary == null) {
-                    "Не удалось открыть архив"
+                    appContext.getString(R.string.sv_archive_open_failed)
                 } else {
-                    "Добавлено стикеров: " + summary.first + " из " + summary.second
+                    appContext.getString(R.string.sv_stickers_added, summary.first, summary.second)
                 }
                 it.copy(message = text)
             }
@@ -373,7 +374,7 @@ class SavedViewModel @Inject constructor(
                 }.getOrDefault(false)
             }
             _uiState.update {
-                it.copy(message = if (ok) "Стикер добавлен в избранное" else "Не удалось добавить стикер")
+                it.copy(message = if (ok) appContext.getString(R.string.sv_sticker_fav) else appContext.getString(R.string.sv_sticker_failed))
             }
         }
     }
@@ -406,8 +407,8 @@ class SavedViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     message = when {
-                        saved != null -> "Добавлено в избранное: $saved"
-                        else -> "Не удалось добавить файл"
+                        saved != null -> appContext.getString(R.string.sv_added_fav, saved)
+                        else -> appContext.getString(R.string.sv_add_file_failed)
                     },
                 )
             }
@@ -431,7 +432,7 @@ class SavedViewModel @Inject constructor(
                 }.getOrDefault(false)
             }
             _uiState.update {
-                it.copy(message = if (ok) "Гифка добавлена - в избранном и в нашей сети" else "Не вышло: нужен файл GIF до 30 МБ")
+                it.copy(message = if (ok) appContext.getString(R.string.sv_gif_fav_net) else appContext.getString(R.string.sv_gif_too_big))
             }
         }
     }
@@ -453,7 +454,7 @@ class SavedViewModel @Inject constructor(
                 }.getOrDefault(false)
             }
             _uiState.update {
-                it.copy(message = if (ok) "Гифка добавлена в избранное" else "Не удалось скачать гифку")
+                it.copy(message = if (ok) appContext.getString(R.string.sv_gif_fav) else appContext.getString(R.string.sv_gif_download_failed))
             }
         }
     }
@@ -465,7 +466,7 @@ class SavedViewModel @Inject constructor(
                 runCatching { favoriteLibraryGif(entry, "Мои гифки") }.getOrDefault(false)
             }
             _uiState.update {
-                it.copy(message = if (ok) "Уже в избранном" else "Не удалось добавить")
+                it.copy(message = if (ok) appContext.getString(R.string.sv_already) else appContext.getString(R.string.sv_add_failed))
             }
         }
     }
@@ -544,26 +545,26 @@ class SavedViewModel @Inject constructor(
                         cached != null -> state.copy(
                             gifLoading = false,
                             gifError = null,
-                            gifNotice = "Сервер перегружен — показываю сохранённые гифки. " +
-                                "Скачать и отправить можно как обычно",
+                            gifNotice = appContext.getString(R.string.gif_server_busy) + " " +
+                                appContext.getString(R.string.sv_download_send_hint),
                             gifItems = cached.first,
                             gifNext = "",
                         )
                         more -> state.copy(
                             gifLoading = false,
                             gifError = null,
-                            gifNotice = "Сервер перегружен — «Ещё» пока недоступно",
+                            gifNotice = appContext.getString(R.string.cd_gif_more_unavailable),
                             gifNext = "",
                         )
                         else -> state.copy(
                             gifLoading = false,
-                            gifError = "Каталог гиф недоступен: сервер перегружен. Это временно — попробуйте позже",
+                            gifError = appContext.getString(R.string.sv_gif_catalog_down),
                         )
                     }
                 } else {
                     val (items, next) = result
                     if (items.isEmpty() && state.gifItems.isEmpty()) {
-                        state.copy(gifLoading = false, gifError = "Ничего не нашлось")
+                        state.copy(gifLoading = false, gifError = appContext.getString(R.string.sv_gif_nothing))
                     } else {
                         state.copy(
                             gifLoading = false,

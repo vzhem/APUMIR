@@ -1,5 +1,8 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringArrayResource
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import android.content.Context
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -46,14 +49,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
-private val AVATAR_PRESET_LABELS = listOf(
-    "Лиса", "Кит", "Кот", "Сова", "Карп кои", "Бабочка", "Пингвин", "Черепаха", "Кролик", "Стрекоза",
-    "Горы", "Кактус", "Гриб", "Росток", "Цветок", "Комета", "Дождевое облако", "Вулкан", "Снежинка", "Ель",
-    "Ракета", "Спутник", "Телескоп", "Планета с кольцами", "Шлем космонавта", "Наушники", "Виниловая пластинка",
-    "Гитара", "Пианино", "Микрофон", "Фотоаппарат", "Палитра", "Книга", "Карандаш", "Бумажный самолётик",
-    "Кофе", "Рамен", "Кекс", "Авокадо", "Клубника", "Воздушный шар", "Парусник", "Самолёт", "Поезд",
-    "Велосипед", "Компас", "Песочные часы", "Ключ", "Корона", "Геймпад",
-)
 
 /**
  * Выбор аватара для профиля и сообществ.
@@ -117,13 +112,13 @@ fun AvatarPickerDialog(
                     Spacer(Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Выберите аватар",
+                            text = stringResource(R.string.av_choose_title),
                             style = MaterialTheme.typography.titleLarge,
                             fontWeight = FontWeight.Bold,
                             color = ApuBubbleTextColor,
                         )
                         Text(
-                            text = "Готовый образ или ваша фотография",
+                            text = stringResource(R.string.av_subtitle),
                             style = MaterialTheme.typography.bodySmall,
                             color = ApuBubbleMutedColor,
                         )
@@ -143,7 +138,7 @@ fun AvatarPickerDialog(
                 ) {
                     items(ids.size) { idx ->
                         val resId = ids[idx]
-                        val label = AVATAR_PRESET_LABELS.getOrElse(idx) { "Аватар ${idx + 1}" }
+                        val label = stringArrayResource(R.array.avatar_preset_labels).getOrElse(idx) { stringResource(R.string.settings_avatar) + " ${idx + 1}" }
                         AvatarPresetTile(
                             resId = resId,
                             label = label,
@@ -162,13 +157,13 @@ fun AvatarPickerDialog(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     AvatarSourceButton(
-                        label = "Снять фото",
+                        label = stringResource(R.string.av_take_photo),
                         icon = Icons.Default.PhotoCamera,
                         onClick = onTakePhoto,
                         modifier = Modifier.weight(1f),
                     )
                     AvatarSourceButton(
-                        label = "Из галереи",
+                        label = stringResource(R.string.settings_from_gallery),
                         icon = Icons.Default.Image,
                         onClick = onPickGallery,
                         modifier = Modifier.weight(1f),
@@ -180,7 +175,7 @@ fun AvatarPickerDialog(
                     style = DiagnosticsActionStyle.QUIET,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text("Отмена", fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.action_cancel), fontWeight = FontWeight.SemiBold)
                 }
             }
         }

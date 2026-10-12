@@ -1,15 +1,14 @@
 package com.vladimir.messenger.ui.screens.groups
 
-// =============================================================================
-// GROUPCHATSCREEN.KT — чат группы: слева значки групп, справа темы пузырями
-// =============================================================================
-// Раскладка по требованию владельца (2026-08-31, как в мессенджере со
-// скриншота): после входа в группу слева остаётся вертикальная колонка
-// значков всех групп и каналов с бейджами непрочитанных, а справа темы
-// выбранной группы идут вертикальным списком, каждая в своём пузыре,
-// и у каждой — бейдж непрочитанных. Нажатие на тему открывает ленту.
+// Группа: горизонтальные темы под шапкой, переписка на всю ширину.
 
+import com.vladimir.messenger.ui.components.ApuPremiumSpinner
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
+import androidx.compose.ui.platform.LocalContext
 import com.vladimir.messenger.ui.components.ApuBubbleField
+import com.vladimir.messenger.ui.components.VoiceRecordBar
+import com.vladimir.messenger.ui.components.rememberVoiceRecorder
 import com.vladimir.messenger.ui.components.ApuHeaderBubble
 import com.vladimir.messenger.ui.components.ApuNotificationBadge
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
@@ -27,6 +26,7 @@ import com.vladimir.messenger.ui.components.CreatePollDialog
 import com.vladimir.messenger.ui.components.ApuSettingsDangerColor
 import com.vladimir.messenger.ui.components.PeerProfileSheet
 import com.vladimir.messenger.ui.components.apuBubbleSurface
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Person
@@ -54,6 +54,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import coil.compose.AsyncImage
@@ -79,6 +83,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.LaunchedEffect
 import com.vladimir.messenger.util.GroupFileMarker
@@ -148,12 +153,20 @@ import com.vladimir.messenger.ui.components.ImagePreview
 import com.vladimir.messenger.ui.components.TopicEmojiCatalog
 import com.vladimir.messenger.ui.components.TopicEmojiPicker
 import com.vladimir.messenger.ui.components.TopicIconCatalog
+import com.vladimir.messenger.ui.components.topicIconName
 import com.vladimir.messenger.ui.components.TopicIconView
 import com.vladimir.messenger.util.ImageLinkDetector
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import com.vladimir.messenger.ui.components.ApuPremiumContentButton
+import com.vladimir.messenger.ui.components.ApuPremiumButton
+import com.vladimir.messenger.ui.components.ApuPremiumChip
+import com.vladimir.messenger.ui.components.ApuHeaderButton
+import com.vladimir.messenger.ui.components.firstLinkIn
+import com.vladimir.messenger.ui.components.ApuFormTextField
+import com.vladimir.messenger.ui.components.ApuSkeletonChatFeed
+import com.vladimir.messenger.ui.components.apuGoldBrush
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -210,6 +223,9 @@ fun GroupChatScreen(
     // Открыта ли лента конкретной темы. Пока не открыта и темы есть —
     // показываем вертикальный список тем пузырями, как просил владелец.
     var showFeed by remember { mutableStateOf(uiState.startInTopic) }
+    // Поиск по ленте: группы с темами, группы без тем и комментарии канала.
+    var searchOpen by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
     // Раунд 143: заявки на вступление - пузырь над содержимым для админов.
     val joinRequests by viewModel.joinRequests.collectAsStateWithLifecycle()
     var showRequestsSheet by remember { mutableStateOf(false) }
@@ -257,7 +273,7 @@ fun GroupChatScreen(
         val targetMember = uiState.members.firstOrNull { it.nodeId == targetAuthorId }
         val targetAuthorName = senderNames[targetAuthorId]?.takeIf { it.isNotBlank() }
             ?: targetMember?.displayName?.takeIf { it.isNotBlank() }
-            ?: ("Участник " + targetAuthorId.takeLast(4))
+            ?: stringResource(R.string.mod_author_fallback, targetAuthorId.takeLast(4))
         val isAuthorMe = primaryMsg.isFromMe || (uiState.me?.nodeId != null && uiState.me?.nodeId == targetAuthorId)
         val isAuthorOwner = (uiState.group?.ownerId != null && uiState.group?.ownerId == targetAuthorId) ||
             targetMember?.role == com.vladimir.messenger.data.group.GroupRole.OWNER
@@ -323,7 +339,7 @@ fun GroupChatScreen(
         val isSelfPeer = uiState.me?.nodeId == inspectedPeerId
         val peerClipboardCtx = androidx.compose.ui.platform.LocalContext.current
         PeerProfileSheet(
-            name = uiState.inspectedPeerName.ifBlank { "Участник " + inspectedPeerId.takeLast(4) },
+            name = uiState.inspectedPeerName.ifBlank { stringResource(R.string.member_fallback, inspectedPeerId.takeLast(4)) },
             contactId = inspectedPeerId,
             isOnline = true,
             // Элита в группе: знак и кольцо в карточке участника тоже.
@@ -348,8 +364,8 @@ fun GroupChatScreen(
             onCopyId = {
                 val clipboard = peerClipboardCtx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                     as android.content.ClipboardManager
-                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Узел", inspectedPeerId))
-                Toast.makeText(peerClipboardCtx, "Скопировано", Toast.LENGTH_SHORT).show()
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText(peerClipboardCtx.getString(R.string.grp_node), inspectedPeerId))
+                Toast.makeText(peerClipboardCtx, peerClipboardCtx.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
             },
         )
     }
@@ -358,6 +374,26 @@ fun GroupChatScreen(
     // с указанием источника, что и в личном чате.
     var forwardPayload by remember {
         mutableStateOf<com.vladimir.messenger.ui.components.ForwardPayload?>(null)
+    }
+    // Голосовое сообщение: запись и отправка тем же путём, что у файла.
+    val voice = rememberVoiceRecorder { uri -> viewModel.onFileSelected(uri) }
+    var showSendOptions by remember { mutableStateOf(false) }
+    val storeContext = LocalContext.current
+    remember(Unit) { com.vladimir.messenger.data.schedule.ScheduledSendStore.load(storeContext) }
+    val scheduledAll by com.vladimir.messenger.data.schedule.ScheduledSendStore.items.collectAsStateWithLifecycle()
+    if (showSendOptions) {
+        com.vladimir.messenger.ui.components.SendOptionsDialog(
+            onDismiss = { showSendOptions = false },
+            onPick = { choice ->
+                showSendOptions = false
+                val at = choice.sendAtMs
+                if (at == null) {
+                    viewModel.send(uiState.draft, quiet = choice.quiet)
+                } else {
+                    viewModel.scheduleSend(storeContext, at, choice.quiet)
+                }
+            },
+        )
     }
     val fwdScope = rememberCoroutineScope()
     val fwdCtx = androidx.compose.ui.platform.LocalContext.current
@@ -398,7 +434,7 @@ fun GroupChatScreen(
                         if (ok) {
                             fwdSent = true
                         } else {
-                            android.widget.Toast.makeText(fCtx, "Не удалось переслать", android.widget.Toast.LENGTH_SHORT).show()
+                            android.widget.Toast.makeText(fCtx, fCtx.getString(R.string.toast_forward_failed), android.widget.Toast.LENGTH_SHORT).show()
                         }
                     }
                 } else {
@@ -424,7 +460,7 @@ fun GroupChatScreen(
                         if (ok) {
                             fwdSent = true
                         } else {
-                            android.widget.Toast.makeText(fCtx, "Не удалось переслать", android.widget.Toast.LENGTH_SHORT).show()
+                            android.widget.Toast.makeText(fCtx, fCtx.getString(R.string.toast_forward_failed), android.widget.Toast.LENGTH_SHORT).show()
                         }
                     }
                 },
@@ -515,10 +551,10 @@ fun GroupChatScreen(
         else uiState.group?.mutedUntilMs ?: 0L
     }
     val muteTargetName = when {
-        muteTopicId != null && isChannel -> "Комментарии к «${selectedTopicName ?: "публикации"}»"
-        muteTopicId != null -> "Тема «${selectedTopicName ?: "группы"}»"
-        isChannel -> uiState.group?.title ?: "Канал"
-        else -> uiState.group?.title ?: "Группа"
+        muteTopicId != null && isChannel -> stringResource(R.string.comments_to_topic, selectedTopicName ?: stringResource(R.string.mute_fallback_post))
+        muteTopicId != null -> stringResource(R.string.topic_label_tpl, selectedTopicName ?: stringResource(R.string.mute_fallback_group))
+        isChannel -> uiState.group?.title ?: stringResource(R.string.contacts_channel)
+        else -> uiState.group?.title ?: stringResource(R.string.contacts_group)
     }
     val notificationsMuted = muteUntilMs > System.currentTimeMillis()
     // Системный жест «Назад» (смахивание от края экрана, в т.ч. справа
@@ -569,7 +605,7 @@ fun GroupChatScreen(
                 if (index < 0) {
                     android.widget.Toast.makeText(
                         quoteCtx,
-                        "Сообщения нет в загруженной части ветки",
+                        quoteCtx.getString(R.string.grp_not_loaded),
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
                     return
@@ -587,6 +623,7 @@ fun GroupChatScreen(
         containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
+                modifier = com.vladimir.messenger.ui.components.apuGlassBarModifier(),
                 colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
                     containerColor = Color.Transparent,
                     // Прокрутка НЕ должна красить панель: под ней обои APU.
@@ -644,7 +681,7 @@ fun GroupChatScreen(
                                 if (topicHeader && selectedTopic != null) {
                                     selectedTopic.name
                                 } else {
-                                    uiState.group?.title ?: "Группа"
+                                    uiState.group?.title ?: stringResource(R.string.contacts_group)
                                 },
                                 fontWeight = FontWeight.SemiBold,
                                 color = Color(0xFF1E2430),
@@ -657,12 +694,12 @@ fun GroupChatScreen(
                                 // человек пришёл из ленты и должен видеть,
                                 // под чем он находится.
                                 when {
-                                    isChannel -> selectedTopicName?.let { "Комментарии - $it" }
-                                        ?: "Комментарии"
+                                    isChannel -> selectedTopicName?.let { stringResource(R.string.topic_comments_dash, it) }
+                                        ?: stringResource(R.string.stat_comments)
                                     // В теме: «Тема · группа», участники - на
                                     // списке тем, там они и нужны.
-                                    topicHeader -> "Тема · " + (uiState.group?.title ?: "Группа")
-                                    else -> (uiState.group?.memberCount ?: 0).toString() + " участн."
+                                    topicHeader -> stringResource(R.string.topic_in_group, uiState.group?.title ?: stringResource(R.string.contacts_group))
+                                    else -> stringResource(R.string.members_count_short, uiState.group?.memberCount ?: 0)
                                 },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color(0xFF5A6472),
@@ -674,29 +711,43 @@ fun GroupChatScreen(
                     }
                 },
                 navigationIcon = {
-                    ApuTextAction(
-                        label = "Назад",
-                        onClick = {
-
-                        if (hasTopics && showFeed) showFeed = false else onBackClick()
-                    },
+                    ApuHeaderButton(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.action_back),
+                        onClick = { if (hasTopics && showFeed) showFeed = false else onBackClick() },
+                        modifier = Modifier.padding(start = 4.dp),
                     )
                 },
                 actions = {
-                    IconButton(onClick = { onOpenAdmin(uiState.groupId) }) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Управление группой")
+                    if (!showTopicsList) {
+                        ApuHeaderButton(
+                            icon = Icons.Filled.Search,
+                            contentDescription = stringResource(R.string.action_search),
+                            onClick = {
+                                searchOpen = !searchOpen
+                                if (!searchOpen) searchQuery = ""
+                            },
+                        )
                     }
+                    ApuHeaderButton(
+                        icon = Icons.Filled.Settings,
+                        contentDescription = stringResource(R.string.group_chat_manage),
+                        onClick = { onOpenAdmin(uiState.groupId) },
+                    )
+                    Spacer(Modifier.width(6.dp))
                     // Действия группы/канала и уведомлений собраны в «три точки».
                     Box {
-                        IconButton(onClick = { showTopMenu = true }) {
-                            Icon(Icons.Filled.MoreVert, contentDescription = "Ещё")
-                        }
+                        ApuHeaderButton(
+                            icon = Icons.Filled.MoreVert,
+                            contentDescription = stringResource(R.string.chat_more),
+                            onClick = { showTopMenu = true },
+                        )
                         ApuActionsMenu(
                             expanded = showTopMenu,
                             onDismiss = { showTopMenu = false },
                             actions = listOf(
                                 ApuAction(
-                                    title = if (notificationsMuted) "Включить уведомления" else "Отключить уведомления",
+                                    title = if (notificationsMuted) stringResource(R.string.menu_unmute) else stringResource(R.string.menu_mute),
                                     icon = if (notificationsMuted) {
                                         Icons.Default.NotificationsActive
                                     } else {
@@ -704,7 +755,7 @@ fun GroupChatScreen(
                                     },
                                     onClick = { showNotificationMuteDialog = true },
                                 ),
-                                ApuAction("Пригласить по QR коду", Icons.Filled.QrCode2) {
+                                ApuAction(stringResource(R.string.channel_invite_qr), Icons.Filled.QrCode2) {
                                     showQrInvite = true
                                 },
                             ),
@@ -718,36 +769,25 @@ fun GroupChatScreen(
             modifier = Modifier
                 .padding(padding)
                 .fillMaxSize()
-                // Смахивание вправо: внутри темы - назад к списку тем,
-                // в списке тем и в группе без тем - назад к группам.
-                .swipeBack {
-                    if (hasTopics && showFeed) showFeed = false else onBackClick()
-                },
         ) {
-            Row(modifier = Modifier.fillMaxSize()) {
-
-            // ── Левая колонка. В списке тем — значки групп и каналов,
-            // а внутри открытой темы — значки тем текущей группы.
-            // Если тем нет, колонки тоже нет: просто чат на всю ширину.
-            if (hasTopics) {
-                if (showTopicsList) {
-                    GroupRail(
-                        groups = uiState.allGroups,
-                        currentGroupId = uiState.groupId,
-                        onGroupClick = onSwitchGroup,
-                        onChannelClick = onSwitchChannel,
-                    )
-                } else {
-                    TopicRail(
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (hasTopics) {
+                    TopicTabs(
                         topics = uiState.topics,
-                        currentTopicId = uiState.selectedTopicId,
-                        onTopicClick = { viewModel.selectTopic(it) },
+                        currentTopicId = if (showTopicsList) null else uiState.selectedTopicId,
+                        onTopicClick = {
+                            viewModel.selectTopic(it)
+                            showFeed = true
+                        },
+                        onAllClick = { showFeed = false },
+                        onCreateClick = if (uiState.canManageTopics) ({ showNewTopic = true }) else null,
                     )
                 }
-            }
-
-            // ── Правая часть: список тем пузырями либо лента выбранной темы.
-            Column(modifier = Modifier.weight(1f).fillMaxSize()) {
+                // Полоса тем вне swipeBack: её можно листать в обе стороны,
+                // в том числе на краю списка, не закрывая переписку.
+                Column(modifier = Modifier.weight(1f).fillMaxWidth().swipeBack {
+                    if (hasTopics && showFeed) showFeed = false else onBackClick()
+                }) {
 
             // Раунд 143: пузырь заявок - на главной группы/канала, в темах
             // и в комментариях; содержимое НЕ перекрывает (оно уезжает вниз).
@@ -798,7 +838,7 @@ fun GroupChatScreen(
                                         tint = Color(0xFF5A6472),
                                     )
                                     Spacer(Modifier.width(8.dp))
-                                    Text("Новая тема", color = Color(0xFF5A6472))
+                                    Text(stringResource(R.string.group_new_topic), color = Color(0xFF5A6472))
                                 }
                             }
                         }
@@ -821,7 +861,7 @@ fun GroupChatScreen(
                             Icon(Icons.Filled.PushPin, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
                             Text(
-                                "Закреплённые" +
+                                stringResource(R.string.grp_pinned) +
                                     (pinnedTopicName?.let { " · $it" }.orEmpty()) +
                                     " (" + uiState.pinned.size + "/" +
                                     com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE + ")",
@@ -885,7 +925,7 @@ fun GroupChatScreen(
                                         ) {
                                             Icon(
                                                 Icons.Filled.Close,
-                                                contentDescription = "Открепить",
+                                                contentDescription = stringResource(R.string.channel_unpin),
                                                 modifier = Modifier.size(16.dp),
                                             )
                                         }
@@ -919,13 +959,13 @@ fun GroupChatScreen(
                         ) {
                             Icon(
                                 Icons.Filled.Close,
-                                contentDescription = "Снять выделение",
+                                contentDescription = stringResource(R.string.channel_clear_selection),
                                 tint = ApuBubbleTextColor,
                             )
                         }
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            text = "Выбрано $selCount",
+                            text = stringResource(R.string.selected_count, selCount),
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.Bold,
                             color = ApuBubbleTextColor,
@@ -938,15 +978,15 @@ fun GroupChatScreen(
                                     .joinToString("\n\n") { it.content }
                                 val clipboard = selCtx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                                     as android.content.ClipboardManager
-                                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Сообщения", combined))
-                                Toast.makeText(selCtx, "Скопировано ($selCount)", Toast.LENGTH_SHORT).show()
+                                clipboard.setPrimaryClip(android.content.ClipData.newPlainText(selCtx.getString(R.string.stat_messages), combined))
+                                Toast.makeText(selCtx, selCtx.getString(R.string.toast_copied_count, selCount), Toast.LENGTH_SHORT).show()
                                 viewModel.clearMessageSelection()
                             },
                             modifier = Modifier.size(36.dp),
                         ) {
                             Icon(
                                 Icons.Filled.ContentCopy,
-                                contentDescription = "Скопировать выбранные",
+                                contentDescription = stringResource(R.string.channel_copy_selected),
                                 tint = ApuBubbleAccentColor,
                             )
                         }
@@ -956,7 +996,7 @@ fun GroupChatScreen(
                         ) {
                             Icon(
                                 Icons.Filled.Delete,
-                                contentDescription = "Удалить выбранные",
+                                contentDescription = stringResource(R.string.channel_delete_selected),
                                 tint = ApuSettingsDangerColor,
                             )
                         }
@@ -967,28 +1007,61 @@ fun GroupChatScreen(
             // ── Лента темы
             // Раунд 144: при входе в тема открывается на первом непрочитанном
             // (или внизу, если всё прочитано), ниже - остальные непрочитанные.
+            // Строка поиска над лентой: фильтрует сообщения по тексту.
+            val shownMessages = remember(uiState.messages, searchQuery) {
+                if (searchQuery.isBlank()) uiState.messages
+                else uiState.messages.filter { m ->
+                    com.vladimir.messenger.util.ForwardMarker.stripHeader(m.content)
+                        .contains(searchQuery.trim(), ignoreCase = true)
+                }
+            }
+            if (searchOpen && !showTopicsList) {
+                ApuFormTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    label = stringResource(R.string.chat_search_in_chat),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
             LazyColumn(
                 state = feedListState,
                 // Раунд 151: лента сжимается над клавиатурой (edge-to-edge:
                 // окно само не сжимается - переписка пряталась за пузырями
                 // ввода; запас 200dp снизу отводит место под пузыри).
-                modifier = Modifier.weight(1f).fillMaxWidth().imePadding(),
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .imePadding()
+                    .padding(horizontal = 4.dp)
+                    // Лёгкая подложка под пузырями: рисунок обоев мягко проступает
+                    // сквозь полупрозрачную основу, текст читается ровнее.
+                    .apuBubbleSurface(
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.22f),
+                        shape = RoundedCornerShape(22.dp),
+                    ),
                 // Раунд 147: снизу запас под оверлей поля ввода.
                 contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 8.dp, bottom = 200.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                // Пока группа грузится: вместо пустого экрана — очертания сообщений.
+                if (uiState.group == null && uiState.messages.isEmpty()) {
+                    item(key = "skeleton") { ApuSkeletonChatFeed() }
+                }
                 // Большой канал: комментарии приходят от владельца по запросу,
                 // и здесь может быть не вся ветка. Кнопка тянет более ранние.
                 if (isChannel && uiState.moreComments > 0) {
                     item(key = "more-comments") {
                         ApuTextAction(
-                            label = "Показать ещё " + uiState.moreComments,
+                            label = stringResource(R.string.show_more_n, uiState.moreComments),
                             onClick = { viewModel.loadOlderComments() },
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
                 }
-                items(uiState.messages, key = { it.id }) { message ->
+                items(shownMessages, key = { it.id }) { message ->
+                    Box(modifier = Modifier.fillMaxWidth().animateItem()) {
                     val card = remember(message.content) { GroupFileMarker.parse(message.content) }
                     val cardState = if (card == null) {
                         null
@@ -1014,7 +1087,7 @@ fun GroupChatScreen(
                     val st = cardState
                     val stickerCard = card
                     if (st != null && stickerCard != null && !message.isFromMe &&
-                        stickerCard.displayName.startsWith("Стикер") &&
+                        stickerCard.displayName.startsWith(com.vladimir.messenger.data.file.STICKER_FILE_PREFIX) &&
                         st.transfer == null && !st.pending
                     ) {
                         LaunchedEffect(stickerCard.sha256) {
@@ -1022,7 +1095,7 @@ fun GroupChatScreen(
                         }
                     }
                     val resolvedSenderName = senderNames[message.senderId]?.takeIf { it.isNotBlank() }
-                        ?: "Участник " + message.senderId.takeLast(4)
+                        ?: stringResource(R.string.member_fallback, message.senderId.takeLast(4))
                     MessageBubble(
                         message = message,
                         senderName = resolvedSenderName,
@@ -1094,29 +1167,6 @@ fun GroupChatScreen(
                         onClosePoll = { uiState.polls[message.id]?.let { viewModel.closePoll(it.pollId) } },
                         onQuoteClick = { targetId -> scrollToMessage(targetId) },
                     )
-                }
-            }
-
-            // ── Приложенный файл (этап 9): карточка над полем ввода до отправки.
-            val staged = uiState.stagedFile
-            if (staged != null) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp)
-                        .apuBubbleSurface()
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(fileIconFor(staged.mediaType), contentDescription = null, modifier = Modifier.size(22.dp), tint = ApuBubbleAccentColor)
-                    Spacer(Modifier.width(8.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(staged.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = ApuBubbleTextColor)
-                        Text(GroupFileMarker.formatSize(staged.sizeBytes), style = MaterialTheme.typography.labelSmall, color = ApuBubbleMutedColor)
-                    }
-                    IconButton(onClick = { viewModel.clearStagedFile() }, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Filled.Close, contentDescription = "Убрать файл", modifier = Modifier.size(16.dp), tint = ApuBubbleMutedColor)
                     }
                 }
             }
@@ -1142,7 +1192,7 @@ fun GroupChatScreen(
             if (feedRemaining > 0) {
                 val lastIndex = (if (uiState.moreComments > 0) 1 else 0) + uiState.messages.size - 1
                 Text(
-                    "↓  Ещё " + messagesLabel(feedRemaining),
+                    stringResource(R.string.gc_more_messages, messagesLabel(feedRemaining)),
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
@@ -1159,6 +1209,30 @@ fun GroupChatScreen(
                         }
                         .padding(horizontal = 14.dp, vertical = 6.dp),
                 )
+            }
+
+            // ── Приложенный файл (этап 9): карточка над полем ввода до отправки.
+            val staged = uiState.stagedFile
+            if (staged != null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp)
+                        .apuBubbleSurface()
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(fileIconFor(staged.mediaType), contentDescription = null, modifier = Modifier.size(22.dp), tint = ApuBubbleAccentColor)
+                    Spacer(Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(staged.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = ApuBubbleTextColor)
+                        Text(GroupFileMarker.formatSize(staged.sizeBytes), style = MaterialTheme.typography.labelSmall, color = ApuBubbleMutedColor)
+                    }
+                    IconButton(onClick = { viewModel.clearStagedFile() }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.channel_remove_file), modifier = Modifier.size(16.dp), tint = ApuBubbleMutedColor)
+                    }
+                }
             }
 
             // ── Поле ввода: подложка следует теме и пропускает обои (раунд 45).
@@ -1197,10 +1271,10 @@ fun GroupChatScreen(
                     val replyTarget = uiState.replyTo
                     if (replyTarget != null) {
                         val replyAuthor = if (replyTarget.isFromMe) {
-                            uiState.me?.displayName?.takeIf { it.isNotBlank() } ?: "Вы"
+                            uiState.me?.displayName?.takeIf { it.isNotBlank() } ?: stringResource(R.string.grp_you)
                         } else {
                             senderNames[replyTarget.senderId]?.takeIf { it.isNotBlank() }
-                                ?: ("Участник " + replyTarget.senderId.takeLast(4))
+                                ?: stringResource(R.string.name_member_fallback, replyTarget.senderId.takeLast(4))
                         }
                         ReplyStrip(
                             author = replyAuthor,
@@ -1219,17 +1293,32 @@ fun GroupChatScreen(
                                 modifier = Modifier.size(40.dp),
                             ) {
                                 if (uiState.isPreparingFile) {
-                                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                    ApuPremiumSpinner(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
                                 } else {
                                     Icon(
                                         Icons.Filled.AttachFile,
-                                        contentDescription = if (uiState.canAttach) "Прикрепить файл" else "Вложения недоступны",
+                                        contentDescription = if (uiState.canAttach) stringResource(R.string.chat_attach_file) else stringResource(R.string.grp_attach_unavailable),
                                         tint = if (uiState.canAttach) Color(0xFF5A6472) else Color(0xFF9AA3AF),
                                     )
                                 }
                             }
-                            ApuTextAction(
+                            IconButton(
+                                onClick = {
+                                    if (!uiState.canAttach) viewModel.onAttachLocked()
+                                    else voice.toggle()
+                                },
+                                enabled = !uiState.isPreparingFile && !uiState.sending,
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.Mic,
+                                    contentDescription = stringResource(R.string.voice_record),
+                                    tint = if (voice.recording) Color(0xFFE5484D) else Color(0xFF5A6472),
+                                )
+                            }
+                            ApuPremiumChip(
                                 label = "GIF",
+                                selected = false,
                                 onClick = {
                                     if (uiState.canAttach) {
                                         showGifCatalog = true
@@ -1245,13 +1334,16 @@ fun GroupChatScreen(
                             )
                         }
                     }
+                    if (voice.recording) {
+                        VoiceRecordBar(voice)
+                    }
                     ApuBubbleField(
                         value = uiState.draft,
                         onValueChange = { viewModel.onDraftChanged(it) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .onFocusChanged { inputFocused = it.isFocused },
-                        placeholder = { Text("Сообщение") },
+                        placeholder = { Text(stringResource(R.string.group_message_placeholder)) },
                         minLines = 1,
                         maxLines = 6,
                     )
@@ -1266,15 +1358,29 @@ fun GroupChatScreen(
                 val slowWaitSeconds = (uiState.slowModeWaitMs + 999L) / 1000L
                 val canSend = (uiState.draft.isNotBlank() || uiState.stagedFile != null) &&
                     !uiState.sending && !uiState.isPreparingFile && slowWaitSeconds <= 0L
-                ApuTextAction(
-                    label = if (slowWaitSeconds > 0L) "Подождите $slowWaitSeconds с" else "Отправить",
-                    onClick = {
-
-                        viewModel.send(uiState.draft)
-                    },
-                    enabled = canSend,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                val scheduledHere = scheduledAll.filter {
+                    it.isGroup && it.targetId == uiState.groupId && it.topicId == (uiState.selectedTopicId ?: "")
+                }
+                if (scheduledHere.isNotEmpty()) {
+                    com.vladimir.messenger.ui.components.ScheduledSendBanner(
+                        items = scheduledHere,
+                        onCancel = { id -> com.vladimir.messenger.worker.ScheduledSendWorker.cancel(storeContext, id) },
+                    )
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ApuPremiumButton(
+                        label = if (slowWaitSeconds > 0L) stringResource(R.string.slow_wait_seconds, slowWaitSeconds) else stringResource(R.string.action_send),
+                        onClick = { viewModel.send(uiState.draft) },
+                        style = DiagnosticsActionStyle.PRIMARY,
+                        enabled = canSend,
+                        modifier = Modifier.weight(1f),
+                    )
+                    ApuTextAction(
+                        label = stringResource(R.string.send_more),
+                        onClick = { showSendOptions = true },
+                        enabled = canSend,
+                    )
+                }
                 // р250: включённый режим объясняем словами - иначе кажется,
                 // что приложение «не пускает» без причины.
                 if (uiState.slowModeSeconds > 0) {
@@ -1321,8 +1427,8 @@ fun GroupChatScreen(
     if (showEditTopic && selectedTopic != null) {
         val topic = selectedTopic
         NewTopicDialog(
-            title = "Редактирование темы",
-            confirmLabel = "Сохранить",
+            title = stringResource(R.string.group_edit_topic),
+            confirmLabel = stringResource(R.string.admin_save),
             initialName = topic.name,
             initialIcon = topic.iconEmoji.ifBlank { TopicIconCatalog.DEFAULT },
             onDismiss = { showEditTopic = false },
@@ -1431,19 +1537,20 @@ private fun GroupRailAvatar(
     // отрисовке нельзя: десяток аватаров подряд подвешивал главный поток на
     // входе в группу и на возврате назад.
     val bmp = com.vladimir.messenger.ui.components.AvatarBitmaps.rememberAvatar(avatarB64)
+    // Выбранная группа: золотое кольцо и подъём, как у выбранной темы.
     Box(
         modifier = Modifier
             .size(52.dp)
+            .apuPremiumLift(if (selected) 5.dp else 2.dp, CircleShape)
+            .apuBubbleSurface(color = Color.White.copy(alpha = 0.92f), shape = CircleShape)
             .then(
                 if (selected) {
-                    Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
+                    Modifier.border(2.dp, apuGoldBrush(), CircleShape)
                 } else {
                     Modifier
                 }
             )
-            .padding(2.dp)
-            .clip(CircleShape)
-            .then(if (bmp == null) Modifier.background(Color(0xFFE8EEF5)) else Modifier),
+            .padding(2.dp),
         contentAlignment = Alignment.Center,
     ) {
         if (bmp != null) {
@@ -1463,67 +1570,65 @@ private fun GroupRailAvatar(
     }
 }
 
-// =============================================================================
-// Левая колонка внутри открытой темы: значки тем текущей группы
-// =============================================================================
-
+/** Полоса тем не отнимает ширину у сообщений и поля ввода. */
 @Composable
-private fun TopicRail(
+private fun TopicTabs(
     topics: List<TopicSummary>,
     currentTopicId: String?,
     onTopicClick: (String) -> Unit,
+    onAllClick: () -> Unit,
+    onCreateClick: (() -> Unit)?,
 ) {
-    LazyColumn(
-        // Та же колонка-подложка, что у значков групп: один стиль на обе.
-        modifier = Modifier
-            .width(76.dp)
-            .fillMaxHeight()
-            .apuBubbleSurface(color = Color(0xFFF5F7FA).copy(alpha = 0.72f))
-            .apuPremiumThread(inset = 10.dp),
-        contentPadding = PaddingValues(vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+    val state = rememberLazyListState()
+    val selectedIndex = topics.indexOfFirst { it.id == currentTopicId }
+    LaunchedEffect(currentTopicId, selectedIndex) {
+        if (selectedIndex >= 0) state.animateScrollToItem(selectedIndex)
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)
+            .apuBubbleSurface().padding(horizontal = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        items(topics, key = { it.id }) { topic ->
-            val selected = topic.id == currentTopicId
-            Box(
-                modifier = Modifier.clickable {
-                    if (!selected) onTopicClick(topic.id)
-                },
-            ) {
-                TopicRailIcon(topic = topic, selected = selected)
-                if (topic.unreadCount > 0) {
-                    Box(modifier = Modifier.align(Alignment.TopEnd)) {
-                        ApuNotificationBadge(topic.unreadCount)
-                    }
+        Text(
+            stringResource(R.string.group_all_topics),
+            color = if (currentTopicId == null) ApuBubbleAccentColor else ApuBubbleMutedColor,
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.clip(RoundedCornerShape(16.dp))
+                .selectable(selected = currentTopicId == null, role = Role.Tab, onClick = onAllClick)
+                .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 14.dp),
+        )
+        LazyRow(
+            state = state,
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            items(topics, key = { it.id }) { topic ->
+                val selected = topic.id == currentTopicId
+                Row(
+                    modifier = Modifier.widthIn(max = 220.dp).heightIn(min = 48.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(if (selected) ApuBubbleAccentColor.copy(alpha = .16f) else Color.Transparent)
+                        .selectable(selected = selected, role = Role.Tab, onClick = { onTopicClick(topic.id) })
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    TopicIconView(topic.iconEmoji.ifBlank { TopicIconCatalog.DEFAULT }, 24.dp)
+                    Text(topic.name, modifier = Modifier.weight(1f, fill = false),
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (selected) ApuBubbleAccentColor else ApuBubbleTextColor)
+                    if (topic.isClosed) Icon(Icons.Filled.Lock, stringResource(R.string.group_topic_closed_tab),
+                        modifier = Modifier.size(14.dp), tint = ApuBubbleMutedColor)
+                    ApuNotificationBadge(topic.unreadCount)
                 }
             }
         }
-    }
-}
-
-/** Кружок темы: её эмодзи, открытая тема обведена золотым. */
-@Composable
-private fun TopicRailIcon(topic: TopicSummary, selected: Boolean) {
-    Box(
-        modifier = Modifier
-            .size(52.dp)
-            .then(
-                if (selected) {
-                    Modifier.border(2.dp, MaterialTheme.colorScheme.primary, CircleShape)
-                } else {
-                    Modifier
-                }
-            )
-            .padding(2.dp)
-            .clip(CircleShape)
-            .background(Color(0xFFE8EEF5)),
-        contentAlignment = Alignment.Center,
-    ) {
-        TopicIconView(
-            topic.iconEmoji.ifBlank { TopicIconCatalog.DEFAULT },
-            30.dp,
-        )
+        if (onCreateClick != null) IconButton(onClick = onCreateClick) {
+            Icon(Icons.Filled.Add, stringResource(R.string.group_new_topic), tint = ApuBubbleAccentColor)
+        }
     }
 }
 
@@ -1554,7 +1659,7 @@ private fun JoinRequestsBanner(count: Int, expanded: Boolean, onClick: () -> Uni
         Text("👥", fontSize = 18.sp)
         Spacer(Modifier.width(8.dp))
         Text(
-            requestsLabel(count) + " на вступление",
+            requestsLabel(androidx.compose.ui.platform.LocalContext.current, count) + " " + stringResource(R.string.join_req_suffix),
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.primary,
         )
@@ -1598,7 +1703,7 @@ private fun JoinRequestsSheet(
         ApuSearchField(
             value = query,
             onValueChange = onQuery,
-            placeholder = "Поиск заявок",
+            placeholder = stringResource(R.string.group_search_requests),
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(8.dp))
@@ -1609,7 +1714,7 @@ private fun JoinRequestsSheet(
         }
         if (filtered.isEmpty()) {
             Text(
-                if (requests.isEmpty()) "Заявок пока нет" else "Никого не нашли по «" + clean + "»",
+                if (requests.isEmpty()) stringResource(R.string.group_no_requests) else stringResource(R.string.no_requests_found, clean),
                 color = Color(0xFF5A6472),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1661,7 +1766,7 @@ private fun JoinRequestRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    "подал(а) заявку " + topicTimeLabel(request.requestedAtMs),
+                    stringResource(R.string.grp_request_submitted, topicTimeLabel(request.requestedAtMs)),
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF5A6472),
                     maxLines = 1,
@@ -1675,26 +1780,22 @@ private fun JoinRequestRow(
                 onClick = { onDecide(request.nodeId, true) },
                 style = DiagnosticsActionStyle.PRIMARY,
             ) {
-                Text("Принять в группу")
+                Text(stringResource(R.string.group_accept))
             }
-            ApuTextAction(label = "Отклонить", onClick = { onDecide(request.nodeId, false) })
+            ApuTextAction(label = stringResource(R.string.admin_reject), onClick = { onDecide(request.nodeId, false) })
         }
     }
 }
 
 /** «1 заявка / 2 заявки / 28 заявок». */
-private fun requestsLabel(count: Int): String = when {
-    count % 10 == 1 && count % 100 != 11 -> "$count заявка"
-    count % 10 in 2..4 && count % 100 !in 12..14 -> "$count заявки"
-    else -> "$count заявок"
-}
+private fun requestsLabel(context: android.content.Context, count: Int): String =
+    context.resources.getQuantityString(R.plurals.join_requests, count, count)
 
 /** Раунд 143: «1 сообщение / 3 сообщения / 653 сообщения / 5 сообщений». */
+@Composable
 private fun messagesLabel(count: Int): String = when {
-    count <= 0 -> "Нет сообщений"
-    count % 10 == 1 && count % 100 != 11 -> "$count сообщение"
-    count % 10 in 2..4 && count % 100 !in 12..14 -> "$count сообщения"
-    else -> "$count сообщений"
+    count <= 0 -> stringResource(R.string.gc_no_messages)
+    else -> LocalContext.current.resources.getQuantityString(R.plurals.gc_messages_count, count, count)
 }
 
 @Composable
@@ -1736,7 +1837,7 @@ private fun TopicBubble(topic: TopicSummary, onClick: () -> Unit) {
                         Spacer(Modifier.width(4.dp))
                         Icon(
                             Icons.Filled.Lock,
-                            contentDescription = "Тема закрыта",
+                            contentDescription = stringResource(R.string.group_topic_closed),
                             modifier = Modifier.size(12.dp),
                             tint = Color(0xFF5A6472),
                         )
@@ -1854,18 +1955,14 @@ private fun MessageBubble(
     // Раунд 211: «три точки» на самом пузыре (владелец: и на текстовых тоже).
     // Не рисуем там, где точки уже есть у вложения: файл-карточка (р168)
     // и гифка-ссылка (р210).
-    val bubbleHasOwnDots = fileCard != null || remember(message.content) {
-        com.vladimir.messenger.data.gif.GifLibrary.isGifRef(
-            com.vladimir.messenger.util.ForwardMarker.stripHeader(
-                com.vladimir.messenger.util.InlineImage.stripImage(message.content)
-            )
-        )
-    }
     val time = remember(message.timestamp) {
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(message.timestamp))
     }
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        // Свайп для ответа - по всей строке, а не только по пузырю.
+        modifier = Modifier
+            .fillMaxWidth()
+            .swipeToReply { onReply() },
         horizontalArrangement = if (message.isFromMe) Arrangement.End else Arrangement.Start,
     ) {
         if (selectionMode) {
@@ -1878,18 +1975,12 @@ private fun MessageBubble(
             )
         }
         // Раунд 211: точки рядом с пузырём - у своего слева, у чужого справа.
-        if (!bubbleHasOwnDots && message.isFromMe) {
-            ApuMenuDots(
-                onClick = { showMenu = true },
-                modifier = Modifier.align(Alignment.CenterVertically),
-            )
-            Spacer(Modifier.width(2.dp))
-        }
         // Кнопке «Закрепить» справа нужно своё место: пузырь с карточкой
         // файла растягивается на все 300 dp, и на узком экране (лента рядом
         // с колонкой тем) кнопка выдавливалась за край - файл нельзя было
         // закрепить. Вес без заполнения: пузырь занимает не больше остатка.
-        Box(modifier = if (canPin) Modifier.weight(1f, fill = false) else Modifier) {
+        // Пузырь занимает всю свободную ширину строки (кнопок закрепа и точек рядом нет).
+        Box(modifier = Modifier.weight(1f, fill = false)) {
         // Раунд 169: стикер с копией на телефоне парит в чате - пузырь
         // без фона и тени, только картинка, время и реакции.
         val stickerFloat = fileCard != null && fileCard.previewFile != null &&
@@ -1899,8 +1990,7 @@ private fun MessageBubble(
             else if (message.isFromMe) messenger.messageBubbleOwnText else messenger.messageBubbleOtherText
         ApuBubbleCard(
             modifier = Modifier
-                .widthIn(max = 300.dp)
-                .swipeToReply { onReply() }
+                .widthIn(max = 340.dp)
                 .combinedClickable(
                     // В режиме выбора клик отмечает сообщение; иначе - реакции / меню действий.
                     onClick = { if (selectionMode) onToggleSelect() else showReactions = true },
@@ -1909,6 +1999,8 @@ private fun MessageBubble(
             backgroundColor = if (message.isFromMe) messenger.messageBubbleOwn else messenger.messageBubbleOther,
             contentColor = bubbleTextColor,
             transparent = stickerFloat,
+            // Объём пузыря, как в премиальных мессенджерах (стикеры остаются без фона).
+            premium = if (stickerFloat) null else 3.dp,
         ) {
             Column(modifier = Modifier.padding(8.dp)) {
                 if (!message.isFromMe) {
@@ -1956,7 +2048,7 @@ private fun MessageBubble(
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                     ) {
                         Text(
-                            "↩ Переслано из «" + fwdLabel + "»",
+                            stringResource(R.string.fwd_from_label, fwdLabel),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             textDecoration = TextDecoration.Underline,
@@ -1983,7 +2075,7 @@ private fun MessageBubble(
                     com.vladimir.messenger.util.InlineImage.extractB64(message.content)
                 }
                 val bodyText = remember(message.content, fileCard?.info) {
-                    val words = com.vladimir.messenger.util.InlineImage.stripImage(message.content)
+                    val words = com.vladimir.messenger.util.InlineImage.stripImage(com.vladimir.messenger.util.QuietMessage.strip(message.content))
                     // Раунд 203: маркер и шапку пересылки рисуем отдельно.
                     val clean = com.vladimir.messenger.util.ForwardMarker.stripHeader(words)
                     // Подпись «📎 имя (размер)» - для старых версий; здесь её
@@ -2020,7 +2112,7 @@ private fun MessageBubble(
                     attachedBitmap != null -> {
                         androidx.compose.foundation.Image(
                             bitmap = attachedBitmap.asImageBitmap(),
-                            contentDescription = "Картинка из сообщения",
+                            contentDescription = stringResource(R.string.group_message_image),
                             contentScale = androidx.compose.ui.layout.ContentScale.FillWidth,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -2033,7 +2125,7 @@ private fun MessageBubble(
                     }
                     imageUrl != null -> ImagePreview(
                         model = imageUrl,
-                        contentDescription = "Картинка из сообщения",
+                        contentDescription = stringResource(R.string.group_message_image),
                         modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp),
                     )
                     // Пост из одних фотографий: сами фото - в ленте канала, а
@@ -2041,11 +2133,22 @@ private fun MessageBubble(
                     bodyText.isBlank() &&
                         com.vladimir.messenger.util.InlineImage.photoCount(message.content) > 0 ->
                         Text(
-                            "Фото: " + com.vladimir.messenger.util.InlineImage.photoCount(message.content),
+                            stringResource(R.string.photo_count_label, com.vladimir.messenger.util.InlineImage.photoCount(message.content)),
                             color = bubbleTextColor.copy(alpha = 0.7f),
                         )
                     bodyText.isBlank() && fileCard != null -> Unit
                     else -> Text(bodyText)
+                }
+                // Карточка первой ссылки под обычным текстом (не приглашение и не картинка).
+                val bubbleLink = remember(bodyText) { firstLinkIn(bodyText) }
+                if (bubbleLink != null && fileCard == null && imageUrl == null &&
+                    attachedBitmap == null && !com.vladimir.messenger.data.gif.GifLibrary.isGifRef(bodyText) &&
+                    com.vladimir.messenger.data.group.GroupInviteLinks.parseTarget(bubbleLink) == null
+                ) {
+                    com.vladimir.messenger.ui.components.ApuLinkCard(
+                        url = bubbleLink,
+                        textColor = bubbleTextColor,
+                    )
                 }
                 if (fileCard != null) {
                     // Долгое нажатие на самой картинке = меню пузыря
@@ -2058,35 +2161,35 @@ private fun MessageBubble(
                         // Раунд 211: в точках карточки - весь функционал
                         // сообщения, как у текстовых пузырей.
                         messageActions = buildList {
-                            add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
+                            add(ApuAction(stringResource(R.string.channel_share_in_apu), Icons.Filled.Send) { onShareToApu() })
                             // р250: ответ - и в меню карточки файла (точки
                             // на вложении ведут в то же меню, что и пузырь).
-                            add(ApuAction("Ответить", Icons.AutoMirrored.Filled.Reply) { onReply() })
-                            add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
-                            add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
+                            add(ApuAction(stringResource(R.string.group_reply), Icons.AutoMirrored.Filled.Reply) { onReply() })
+                            add(ApuAction(stringResource(R.string.channel_add_reaction), Icons.Filled.EmojiEmotions) { showReactions = true })
+                            add(ApuAction(stringResource(R.string.channel_to_favorites), Icons.Filled.Star) { onSaveToFavorites() })
                             // Раунд 212 (аудит: в личке «Копировать всё» есть,
                             // тут не было) - текст сообщения в буфер обмена.
-                            add(ApuAction("Копировать текст", Icons.Filled.ContentCopy) {
+                            add(ApuAction(stringResource(R.string.channel_copy_text), Icons.Filled.ContentCopy) {
                                 val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                                     as android.content.ClipboardManager
                                 clipboard.setPrimaryClip(
-                                    android.content.ClipData.newPlainText("Сообщение", message.content)
+                                    android.content.ClipData.newPlainText(context.getString(R.string.group_message_placeholder), message.content)
                                 )
-                                Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
                             })
                             if (!message.isFromMe) {
-                                add(ApuAction("Профиль и репутация", Icons.Filled.Person) { onOpenAuthorProfile() })
+                                add(ApuAction(stringResource(R.string.channel_profile_reputation), Icons.Filled.Person) { onOpenAuthorProfile() })
                             }
                             add(
                                 ApuAction(
-                                    if (isSelected) "Снять выбор" else "Выбрать несколько",
+                                    if (isSelected) stringResource(R.string.channel_deselect) else stringResource(R.string.channel_select_many),
                                     Icons.Filled.CheckCircle,
                                 ) { onToggleSelect() }
                             )
                             if (canPin) {
                                 add(
                                     ApuAction(
-                                        if (message.isPinned) "Открепить" else "Закрепить",
+                                        if (message.isPinned) stringResource(R.string.channel_unpin) else stringResource(R.string.channel_pin),
                                         Icons.Filled.PushPin,
                                     ) { onTogglePin() }
                                 )
@@ -2094,13 +2197,13 @@ private fun MessageBubble(
                             if (canModerate || message.isFromMe) {
                                 add(
                                     ApuAction(
-                                        if (canModerate && !message.isFromMe) "Удалить и модерация…" else "Удалить…",
+                                        if (canModerate && !message.isFromMe) stringResource(R.string.channel_delete_moderate) else stringResource(R.string.channel_delete_ellipsis),
                                         Icons.Filled.Delete,
                                         destructive = true,
                                     ) { onDeleteForAll() }
                                 )
                             }
-                            add(ApuAction("Удалить только у себя", Icons.Filled.Delete, destructive = true) { onDeleteForMe() })
+                            add(ApuAction(stringResource(R.string.group_delete_for_me), Icons.Filled.Delete, destructive = true) { onDeleteForMe() })
                         },
                     )
                 }
@@ -2118,7 +2221,7 @@ private fun MessageBubble(
                     Text(time, style = MaterialTheme.typography.labelSmall, color = bubbleTextColor.copy(alpha = 0.65f))
                     if (message.isPinned) {
                         Spacer(Modifier.width(4.dp))
-                        Icon(Icons.Filled.PushPin, contentDescription = "Закреплено", modifier = Modifier.size(12.dp))
+                        Icon(Icons.Filled.PushPin, contentDescription = stringResource(R.string.group_pinned), modifier = Modifier.size(12.dp))
                     }
                 }
                 com.vladimir.messenger.ui.components.ReactionRow(
@@ -2132,26 +2235,26 @@ private fun MessageBubble(
             expanded = showMenu,
             onDismiss = { showMenu = false },
             actions = buildList {
-                add(ApuAction("Поделиться в APU", Icons.Filled.Send) { onShareToApu() })
+                add(ApuAction(stringResource(R.string.channel_share_in_apu), Icons.Filled.Send) { onShareToApu() })
                 // р250: ответ - первым пунктом, как в привычных мессенджерах.
-                add(ApuAction("Ответить", Icons.AutoMirrored.Filled.Reply) { onReply() })
-                add(ApuAction("Поставить реакцию", Icons.Filled.EmojiEmotions) { showReactions = true })
-                add(ApuAction("В избранное", Icons.Filled.Star) { onSaveToFavorites() })
+                add(ApuAction(stringResource(R.string.group_reply), Icons.AutoMirrored.Filled.Reply) { onReply() })
+                add(ApuAction(stringResource(R.string.channel_add_reaction), Icons.Filled.EmojiEmotions) { showReactions = true })
+                add(ApuAction(stringResource(R.string.channel_to_favorites), Icons.Filled.Star) { onSaveToFavorites() })
                 // Раунд 212: копирование - как в личном чате («Копировать всё»).
-                add(ApuAction("Копировать текст", Icons.Filled.ContentCopy) {
+                add(ApuAction(stringResource(R.string.channel_copy_text), Icons.Filled.ContentCopy) {
                     val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                         as android.content.ClipboardManager
                     clipboard.setPrimaryClip(
-                        android.content.ClipData.newPlainText("Сообщение", message.content)
+                        android.content.ClipData.newPlainText(context.getString(R.string.group_message_placeholder), message.content)
                     )
-                    Toast.makeText(context, "Скопировано", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.toast_copied), Toast.LENGTH_SHORT).show()
                 })
                 if (!message.isFromMe) {
-                    add(ApuAction("Профиль и репутация", Icons.Filled.Person) { onOpenAuthorProfile() })
+                    add(ApuAction(stringResource(R.string.channel_profile_reputation), Icons.Filled.Person) { onOpenAuthorProfile() })
                 }
                 add(
                     ApuAction(
-                        if (isSelected) "Снять выбор" else "Выбрать несколько",
+                        if (isSelected) stringResource(R.string.channel_deselect) else stringResource(R.string.channel_select_many),
                         Icons.Filled.CheckCircle,
                     ) { onToggleSelect() }
                 )
@@ -2160,7 +2263,7 @@ private fun MessageBubble(
                 if (canPin) {
                     add(
                         ApuAction(
-                            if (message.isPinned) "Открепить" else "Закрепить",
+                            if (message.isPinned) stringResource(R.string.channel_unpin) else stringResource(R.string.channel_pin),
                             Icons.Filled.PushPin,
                         ) { onTogglePin() }
                     )
@@ -2169,13 +2272,13 @@ private fun MessageBubble(
                 if (canModerate || message.isFromMe) {
                     add(
                         ApuAction(
-                            if (canModerate && !message.isFromMe) "Удалить и модерация…" else "Удалить…",
+                            if (canModerate && !message.isFromMe) stringResource(R.string.channel_delete_moderate) else stringResource(R.string.channel_delete_ellipsis),
                             Icons.Filled.Delete,
                             destructive = true,
                         ) { onDeleteForAll() }
                     )
                 }
-                add(ApuAction("Удалить только у себя", Icons.Filled.Delete, destructive = true) { onDeleteForMe() })
+                add(ApuAction(stringResource(R.string.group_delete_for_me), Icons.Filled.Delete, destructive = true) { onDeleteForMe() })
             },
         )
         if (showReactions) {
@@ -2194,22 +2297,6 @@ private fun MessageBubble(
             )
         }
         }
-        if (!bubbleHasOwnDots && !message.isFromMe) {
-            Spacer(Modifier.width(2.dp))
-            ApuMenuDots(
-                onClick = { showMenu = true },
-                modifier = Modifier.align(Alignment.CenterVertically),
-            )
-        }
-        if (canPin) {
-            IconButton(onClick = onTogglePin, modifier = Modifier.size(28.dp)) {
-                Icon(
-                    Icons.Filled.PushPin,
-                    contentDescription = if (message.isPinned) "Открепить" else "Закрепить",
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-        }
     }
 }
 
@@ -2218,8 +2305,8 @@ private fun NewTopicDialog(
     onDismiss: () -> Unit,
     onCreate: (String, String) -> Unit,
     // Раунд 260: тот же диалог работает и как «Редактирование темы».
-    title: String = "Новая тема",
-    confirmLabel: String = "Создать",
+    title: String = stringResource(R.string.group_new_topic),
+    confirmLabel: String = stringResource(R.string.chat_create),
     initialName: String = "",
     initialIcon: String = TopicIconCatalog.DEFAULT,
 ) {
@@ -2242,7 +2329,7 @@ private fun NewTopicDialog(
                 ApuBubbleField(
                     value = name,
                     onValueChange = { name = it },
-                    label = { Text("Название темы") },
+                    label = { Text(stringResource(R.string.group_topic_name)) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -2269,14 +2356,14 @@ private fun NewTopicDialog(
                     }
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        "Значок темы: " + TopicIconCatalog.describe(icon),
+                        androidx.compose.ui.res.stringResource(com.vladimir.messenger.R.string.topic_icon_label, topicIconName(icon)),
                         style = MaterialTheme.typography.titleSmall,
                         color = Color(0xFF5A6472),
                     )
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     // Раунд 258: без упоминаний чужих мессенджеров в интерфейсе.
-                    listOf("Эмодзи" to true, "Живые" to false)
+                    listOf(stringResource(R.string.input_emoji) to true, stringResource(R.string.grp_animated) to false)
                         .forEach { (label, mode) ->
                             val sel = emojiMode == mode
                             Text(
@@ -2351,16 +2438,17 @@ private fun NewTopicDialog(
                 enabled = name.isNotBlank(),
             )
         },
-        dismissButton = { ApuTextAction(label = "Отмена", onClick = onDismiss) },
+        dismissButton = { ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss) },
     )
 }
 
 /** р249: подпись индикатора «печатает…» в группе (1, 2 или больше человек). */
+@Composable
 private fun groupTypingLabel(names: List<String>): String = when (names.size) {
     0 -> ""
-    1 -> "${names[0]} печатает…"
-    2 -> "${names[0]} и ${names[1]} печатают…"
-    else -> "${names[0]}, ${names[1]} и ещё ${names.size - 2} печатают…"
+    1 -> stringResource(R.string.typing_one, names[0])
+    2 -> stringResource(R.string.typing_two, names[0], names[1])
+    else -> stringResource(R.string.typing_many, names[0], names[1], names.size - 2)
 }
 
 // =============================================================================
@@ -2399,7 +2487,7 @@ private fun QuoteBlock(
         Spacer(Modifier.width(6.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                author.ifBlank { "Сообщение" },
+                author.ifBlank { stringResource(R.string.group_message_placeholder) },
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary,
@@ -2407,7 +2495,7 @@ private fun QuoteBlock(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text.ifBlank { "Вложение" },
+                text.ifBlank { stringResource(R.string.grp_attachment) },
                 style = MaterialTheme.typography.bodySmall,
                 color = color.copy(alpha = 0.85f),
                 maxLines = 2,
@@ -2442,7 +2530,7 @@ private fun ReplyStrip(
         Spacer(Modifier.width(8.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                "Ответ $author",
+                stringResource(R.string.reply_to_author, author),
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary,
@@ -2450,7 +2538,7 @@ private fun ReplyStrip(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text.ifBlank { "Вложение" },
+                text.ifBlank { stringResource(R.string.grp_attachment) },
                 style = MaterialTheme.typography.bodySmall,
                 color = ApuBubbleTextColor,
                 maxLines = 1,
@@ -2460,7 +2548,7 @@ private fun ReplyStrip(
         IconButton(onClick = onClear, modifier = Modifier.size(28.dp)) {
             Icon(
                 Icons.Filled.Close,
-                contentDescription = "Отменить ответ",
+                contentDescription = stringResource(R.string.group_cancel_reply),
                 modifier = Modifier.size(16.dp),
                 tint = ApuBubbleMutedColor,
             )
@@ -2472,18 +2560,19 @@ private fun ReplyStrip(
  * Подпись под полем ввода, когда в группе включён медленный режим: человек
  * должен понимать, почему «Отправить» не нажимается.
  */
+@Composable
 private fun slowModeHint(seconds: Int, role: String?): String {
     val label = when (seconds) {
-        10 -> "10 секунд"
-        30 -> "30 секунд"
-        60 -> "1 минуту"
-        300 -> "5 минут"
-        900 -> "15 минут"
-        else -> "$seconds с"
+        10 -> stringResource(R.string.pause_10s)
+        30 -> stringResource(R.string.pause_30s)
+        60 -> stringResource(R.string.pause_1m)
+        300 -> stringResource(R.string.pause_5m)
+        900 -> stringResource(R.string.pause_15m)
+        else -> stringResource(R.string.pause_secs, seconds)
     }
     return if (com.vladimir.messenger.data.group.GroupRole.isAdminOrOwner(role.orEmpty())) {
-        "Медленный режим: участники пишут не чаще одного сообщения в $label (администраторы - без паузы)"
+        stringResource(R.string.gc_slow_admin, label)
     } else {
-        "Медленный режим: не чаще одного сообщения в $label"
+        stringResource(R.string.gc_slow_member, label)
     }
 }

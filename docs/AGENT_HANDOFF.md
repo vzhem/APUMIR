@@ -1,8 +1,11 @@
 === РУЧНОЙ ПЕРЕХОД ДЛЯ СЛЕДУЮЩЕГО АГЕНТА ===
-Сессионная ветка: arena/4f0b31c5-apumir (не переключать ветку).
-Публичный Latest release `v11.74.336`: https://github.com/vzhem/APUMIR/releases/tag/v11.74.336 . Старый tag v11.74.335 не перемещался.
-Исходный unresolved reference исправлен fail-closed validator-ом; исправлена Long-проверка chunk capacity; регрессионные тесты и release workflow укреплены. Ручной run #790 `38238290496` успешно прошёл целевые JVM suites и APK build.
-Tag workflow run `38240296358` на `v11.74.336` завершился success: targeted unit tests, `assembleRelease`, rotated-key re-sign, checksum generation, draft creation. Release опубликован как stable Latest после проверки API assets: APK 44,052,780 bytes; SHA256SUMS.txt 82 bytes. APK digest по GitHub API: `sha256:05eee186ccd7463f7daaacd690053760e77fb2c6e31f528d33970deb4f60e76b`.
-Публичные заметки утверждены; файл `docs/RELEASE_NOTES_v11.74.336.md` находится в tagged commit. Download бинарных assets из sandbox ограничен EOF на GitHub external storage; API метаданные assets доступны.
-Текущие локальные изменения — только обновление `AGENT_HANDOFF.md`, `AI_COLLABORATION_NOTES.md`, `PHONE_TEST_CHECKLIST.md` и `SWARM_HELPER_ROADMAP.md`; diff check, commit/push только на Arena-ветку. Не менять и не перемещать release tag.
-Нет проверки физического телефона, app/UI integration photo stories, battery/load/NAT/capacity. Не заявлять эти свойства.
+Сессионная ветка: `arena/4f0b31c5-apumir` (не переключать ветку).
+Публичный Latest пока `v11.74.336`: https://github.com/vzhem/APUMIR/releases/tag/v11.74.336 . Его tag и assets не изменялись; tag `v11.74.335` также не перемещался.
+
+## Причина расхождения после v11.74.329
+
+`v11.74.329` (`198e1da`) продолжал стабильную линию релизов. Следующий коммит `v11.74.330` (`3d37de6`) ошибочно ответвился напрямую от `4e5624c` — `main` на стабильном v11.74.206. У веток был общий предок v11.74.206; линия v329 содержала ещё 176 коммитов и 276 изменённых путей, включая интерфейс и ресурсы русского/английского языков. Поэтому .330–.336 собирались без изменений .207–.329, что и объясняет исчезновение доработок в APK, несмотря на сохранённые теги.
+
+Исправление: в эту Arena-ветку влит полный предок `v11.74.329`, затем сохранены доработки .330–.336 (content-addressed chunks, проверки и CI-фиксы). Конфликты StoryStore/StoryPhotoParts разрешены в пользу совместимой интеграции новых проверок с API и поведением историй из .329; тесты покрывают и новый, и старый формат фото-пакетов. Русские и английские UI-ресурсы и код между .207 и .329 теперь снова входят в дерево ветки.
+
+Новый публичный релиз не создавался: опубликованный `v11.74.336` по-прежнему указывает на старое дерево до восстановления. Не перемещать теги/ассеты и не публиковать APK, пока объединённая ветка не пройдёт CI и владелец не утвердит RU/EN заметки о фактически возвращённых функциях. В этой среде отсутствуют Java/Gradle и Rust/Cargo; локальные JVM/Android и native-тесты не запускались. Прошли `git diff --check`, unresolved-symbol scan (524 файла), Python source-contract suites и проверка RU/EN XML-ключей (1524 strings, 2 arrays, 3 plurals с каждой стороны). `check-chat-style.py` имеет 4 известных падения; те же падения воспроизводятся на отдельном архиве чистого `v11.74.329`, поэтому они не внесены этим merge. UI на устройстве не проверялся.

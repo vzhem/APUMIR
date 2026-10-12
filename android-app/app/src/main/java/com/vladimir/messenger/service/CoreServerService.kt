@@ -795,6 +795,13 @@ class CoreServerService : Service() {
             if (ok) {
                 val nodeId = RustBridge.nodeId()
                 Log.i(TAG, "Engine OK. NodeId=$nodeId")
+                // Environment updates remain bounded; no packet-triggered polling or new timer thread.
+                serviceScope.launch {
+                    while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                        RustBridge.refreshOnlineHelperPolicy()
+                        kotlinx.coroutines.delay(30_000)
+                    }
+                }
                 TransferDiagnostics.count(Counters.CORE_STARTS)
                 TransferDiagnostics.recordSuccess("core", "ядро поднято")
                 // Раунд 263: ядро поднято - сплэш может отпустить человека.
@@ -1154,6 +1161,7 @@ class CoreServerService : Service() {
                         com.vladimir.messenger.util.ChatPreviews.human(row.content) ?: "Сообщение",
                         true,
                         null,
+                        quiet = com.vladimir.messenger.util.QuietMessage.isQuiet(row.content),
                     )
                 }
             }
@@ -1826,7 +1834,8 @@ class CoreServerService : Service() {
                                     ?.take(200) ?: "Фото"
                             }
                             notificationHelper.showMessageNotification(
-                                msg.chatId, msg.senderId, text, true, topicId
+                                msg.chatId, msg.senderId, text, true, topicId,
+                                quiet = com.vladimir.messenger.util.QuietMessage.isQuiet(msg.content),
                             )
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to show notification: ${e.message}")

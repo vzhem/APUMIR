@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -52,7 +54,7 @@ fun MessageQuoteBlock(
         Spacer(Modifier.width(6.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                author.ifBlank { "Сообщение" },
+                author.ifBlank { stringResource(R.string.group_message_placeholder) },
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary,
@@ -60,7 +62,7 @@ fun MessageQuoteBlock(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text.ifBlank { "Вложение" },
+                text.ifBlank { stringResource(R.string.grp_attachment) },
                 style = MaterialTheme.typography.bodySmall,
                 color = color.copy(alpha = 0.85f),
                 maxLines = 2,
@@ -95,7 +97,7 @@ fun MessageReplyStrip(
         Spacer(Modifier.width(8.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                "Ответ $author",
+                stringResource(R.string.reply_to_author, author),
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary,
@@ -103,7 +105,7 @@ fun MessageReplyStrip(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text.ifBlank { "Вложение" },
+                text.ifBlank { stringResource(R.string.grp_attachment) },
                 style = MaterialTheme.typography.bodySmall,
                 color = ApuBubbleTextColor,
                 maxLines = 1,
@@ -111,7 +113,7 @@ fun MessageReplyStrip(
             )
         }
         IconButton(onClick = onClear, modifier = Modifier.then(Modifier)) {
-            Icon(Icons.Filled.Close, contentDescription = "Отменить ответ")
+            Icon(Icons.Filled.Close, contentDescription = stringResource(R.string.group_cancel_reply))
         }
     }
 }

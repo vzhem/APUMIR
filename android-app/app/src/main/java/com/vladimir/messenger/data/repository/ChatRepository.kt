@@ -697,6 +697,12 @@ class ChatRepository @Inject constructor(
         channel: MessageChannel = MessageChannel.UNKNOWN,
         recipientId: String = "",
     ) {
+        // История: пакет контакта сохраняем в ленту историй, в переписку не пускаем.
+        if (com.vladimir.messenger.data.story.StoryStore.isStoryPacket(content)) {
+            val name = chatDao.getChatsByContactId(senderId).firstOrNull()?.contactName.orEmpty()
+            com.vladimir.messenger.data.story.StoryStore.receive(senderId, name, content)
+            return
+        }
         // р239/р247: страховка на самом сохранении. Служебный пакет приложения
         // (например, «печатает…» или delivery ACK) в переписку не попадает ни
         // при каком пути приёма: даже если транспортный разборщик его не узнал,
@@ -1279,6 +1285,24 @@ class ChatRepository @Inject constructor(
 
 
     /** Rust send calls may wait for network work; never run them on a caller/UI dispatcher. */
+    /** Контакты личных чатов (для рассылки историй). */
+    suspend fun directContactIds(): List<String> =
+        chatDao.getAllChats().map { it.contactId }.filter { it.isNotBlank() }.distinct()
+
+    /**
+     * Пакет истории контакту: только доставка, без записи в переписку и без
+     * офлайн-очереди. Не дошло - история у контакта не появится (она живёт сутки).
+     */
+    suspend fun sendStoryPacket(peerId: String, content: String): Boolean {
+        if (peerId.isBlank()) return false
+        val actual = when {
+            peerId.startsWith("pk_") -> peerId
+            peerId.contains("node=pk_") -> "pk_" + peerId.substringAfter("node=pk_").substringBefore("&")
+            else -> peerId
+        }
+        return sendViaRust(UUID.randomUUID().toString(), "story", actual, content)
+    }
+
     private suspend fun sendViaRust(messageId: String, chatId: String, peerId: String, content: String): Boolean =
         withContext(Dispatchers.IO) {
             RustBridge.sendMessage(messageId, chatId, peerId, content)

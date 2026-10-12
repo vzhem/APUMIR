@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // GROUPQRINVITEDIALOG.KT — «Пригласить по QR коду» (раунд 213)
 // =============================================================================
@@ -49,7 +51,7 @@ fun GroupQrInviteDialog(
 ) {
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Пригласить по QR коду") },
+        title = { Text(stringResource(R.string.channel_invite_qr)) },
         text = {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -57,7 +59,7 @@ fun GroupQrInviteDialog(
             ) {
                 when {
                     loading -> {
-                        CircularProgressIndicator(
+                        ApuPremiumSpinner(
                             modifier = Modifier.size(26.dp),
                             strokeWidth = 3.dp,
                         )
@@ -65,9 +67,9 @@ fun GroupQrInviteDialog(
                     link == null -> {
                         Text(
                             if (isChannel) {
-                                "Приглашение недоступно: у канала ещё нет бессрочной ссылки. Создайте её в управлении каналом, вкладка «Ссылки»."
+                                stringResource(R.string.gqr_channel_no_link)
                             } else {
-                                "Приглашение недоступно: у группы ещё нет бессрочной ссылки. Создайте её в управлении группой, вкладка «Ссылки»."
+                                stringResource(R.string.gqr_group_no_link)
                             },
                             style = MaterialTheme.typography.bodyMedium,
                         )
@@ -85,12 +87,12 @@ fun GroupQrInviteDialog(
                             if (bitmap != null) {
                                 Image(
                                     bitmap = bitmap.asImageBitmap(),
-                                    contentDescription = "QR-код приглашения",
+                                    contentDescription = stringResource(R.string.admin_qr_desc),
                                     modifier = Modifier.size(250.dp),
                                 )
                             } else {
                                 Text(
-                                    "QR недоступен",
+                                    stringResource(R.string.admin_qr_unavailable),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Color(0xFF1E2430),
                                 )
@@ -99,9 +101,9 @@ fun GroupQrInviteDialog(
                         Spacer(Modifier.height(10.dp))
                         Text(
                             if (isChannel) {
-                                "Покажите этот код собеседнику: любой сканер QR откроет приглашение - можно подписаться на канал. Если у собеседника ещё нет APU, там же предложат скачать и установить приложение."
+                                stringResource(R.string.gqr_channel_hint)
                             } else {
-                                "Покажите этот код собеседнику: любой сканер QR откроет приглашение - можно войти в группу. Если у собеседника ещё нет APU, там же предложат скачать и установить приложение."
+                                stringResource(R.string.gqr_group_hint)
                             },
                             style = MaterialTheme.typography.bodySmall,
                             textAlign = TextAlign.Center,
@@ -121,7 +123,7 @@ fun GroupQrInviteDialog(
             }
         },
         confirmButton = {
-            ApuTextAction(label = "Закрыть", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_close), onClick = onDismiss)
         },
     )
 }

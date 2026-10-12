@@ -1,5 +1,9 @@
 package com.vladimir.messenger.ui.screens.qr
 
+import com.vladimir.messenger.ui.components.ApuSegmentedControl
+
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // QRSCANNERSCREEN.KT — раздел QR: сканировать чужой код или показать свой
 // =============================================================================
@@ -59,9 +63,9 @@ import com.vladimir.messenger.ui.components.ApuPremiumContentButton
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 /** Что показывает раздел QR прямо сейчас. */
-private enum class QrMode(val title: String) {
-    Scan("Сканировать"),
-    Mine("Мой код"),
+private enum class QrMode(@androidx.annotation.StringRes val titleRes: Int) {
+    Scan(R.string.qr_mode_scan),
+    Mine(R.string.qr_mode_mine),
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -87,10 +91,10 @@ fun QrScannerScreen(
                     // Прокрутка НЕ должна красить панель: под ней обои APU.
                     scrolledContainerColor = Color.Transparent,
                     ),
-                    title = { Text("QR-код") },
+                    title = { Text(stringResource(R.string.qr_title)) },
                     navigationIcon = {
                         IconButton(onClick = onBackClick) {
-                            Icon(Icons.Default.ArrowBack, "Назад")
+                            Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back))
                         }
                     },
                 )
@@ -102,32 +106,18 @@ fun QrScannerScreen(
                     .padding(paddingValues),
             ) {
                 // Выбор простой и заметный: две большие кнопки во всю ширину.
-                SingleChoiceSegmentedButtonRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                ) {
-                    QrMode.entries.forEachIndexed { index, item ->
-                        SegmentedButton(
-                            selected = mode == item,
-                            onClick = {
-                                scope.launch { pagerState.animateScrollToPage(index) }
-                            },
-                            shape = SegmentedButtonDefaults.itemShape(index, QrMode.entries.size),
-                            icon = {
-                                Icon(
-                                    if (item == QrMode.Scan) {
-                                        Icons.Default.QrCodeScanner
-                                    } else {
-                                        Icons.Default.QrCode2
-                                    },
-                                    contentDescription = null,
-                                )
-                            },
-                            label = { Text(item.title) },
-                        )
-                    }
-                }
+                ApuSegmentedControl(
+                    options = QrMode.entries,
+                    selected = mode,
+                    onSelect = { item ->
+                        scope.launch { pagerState.animateScrollToPage(QrMode.entries.indexOf(item)) }
+                    },
+                    label = { stringResource(it.titleRes) },
+                    icon = { item ->
+                        if (item == QrMode.Scan) Icons.Default.QrCodeScanner else Icons.Default.QrCode2
+                    },
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                )
 
                 HorizontalPager(
                     state = pagerState,
@@ -209,7 +199,7 @@ private fun ScanPane(onQrScanned: (String) -> Unit) {
                     .padding(16.dp),
             ) {
                 Text(
-                    text = "Наведите камеру на QR-код собеседника",
+                    text = stringResource(R.string.qr_scan_hint),
                     style = MaterialTheme.typography.titleSmall,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
@@ -225,7 +215,7 @@ private fun ScanPane(onQrScanned: (String) -> Unit) {
             ) {
                 ApuBubble {
                     Text(
-                        text = "Чтобы прочитать чужой код, разрешите APU пользоваться камерой.",
+                        text = stringResource(R.string.qr_camera_needed),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
@@ -234,7 +224,7 @@ private fun ScanPane(onQrScanned: (String) -> Unit) {
                     onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) },
                     style = DiagnosticsActionStyle.PRIMARY,
                 ) {
-                    Text("Разрешить камеру")
+                    Text(stringResource(R.string.qr_allow_camera))
                 }
             }
         }
@@ -286,8 +276,7 @@ private fun MyCodePane() {
         if (maybeLink == null || bitmap == null) {
             ApuBubble {
                 Text(
-                    "Код появится, когда профиль будет готов. Откройте приложение " +
-                        "чуть позже — ключи ещё создаются.",
+                    stringResource(R.string.qr_not_ready),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -300,7 +289,7 @@ private fun MyCodePane() {
 
         Image(
             bitmap = bitmap.asImageBitmap(),
-            contentDescription = "Мой QR-код",
+            contentDescription = stringResource(R.string.settings_my_qr),
             contentScale = ContentScale.Fit,
             modifier = Modifier
                 .fillMaxWidth()
@@ -312,7 +301,7 @@ private fun MyCodePane() {
 
         ApuBubble {
             Text(
-                displayName.ifBlank { "Мой профиль" },
+                displayName.ifBlank { stringResource(R.string.section_my_profile) },
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -324,7 +313,7 @@ private fun MyCodePane() {
                 )
             }
             Text(
-                "Покажите этот код собеседнику: камера телефона добавит вас в контакты, а если у него ещё нет APU - по этому же коду он скачает приложение.",
+                stringResource(R.string.qr_show_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = ApuBubbleMutedColor,
             )
@@ -344,7 +333,7 @@ private fun MyCodePane() {
             ) {
                 Icon(Icons.Default.ContentCopy, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text(if (copied) "Скопировано" else "Копировать")
+                Text(if (copied) stringResource(R.string.toast_copied) else stringResource(R.string.share_copy_btn))
             }
             ApuPremiumContentButton(
                 onClick = { showInviteShare = true },
@@ -353,7 +342,7 @@ private fun MyCodePane() {
             ) {
                 Icon(Icons.Default.Share, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("Поделиться")
+                Text(stringResource(R.string.admin_share))
             }
         }
 
@@ -363,14 +352,14 @@ private fun MyCodePane() {
     // Раунд 200: перед отправкой приглашения спрашиваем про APK.
     if (showInviteShare) {
         com.vladimir.messenger.ui.components.InviteAttachDialog(
-            title = "Пригласить в APU",
+            title = stringResource(R.string.chat_invite_apu),
             onDismiss = { showInviteShare = false },
             onShare = { attach ->
                 showInviteShare = false
                 val link = maybeLink
                 if (link.isNullOrBlank()) {
                     android.widget.Toast.makeText(
-                        context, "Личность ещё не создана",
+                        context, context.getString(R.string.qr_identity_not_ready),
                         android.widget.Toast.LENGTH_SHORT,
                     ).show()
                 } else {

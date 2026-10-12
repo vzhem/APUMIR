@@ -200,6 +200,7 @@ if python3 scripts/ci/check-chat-startup.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-pin-notice.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-splash-scene.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-settings-style.py >>"$LOG" 2>&1 && \
+   python3 scripts/ci/check-online-helper.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-saved-input.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-peer-rank.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-diagnostics-report.py >>"$LOG" 2>&1 && \
@@ -264,7 +265,7 @@ if (
         OLDV="$(grep -o 'bindings_contract_version = [0-9]*' "$REPO_ROOT/android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt" | grep -o '[0-9]*$' || true)"
         say "версия контракта uniffi: в git = ${OLDV:-?}, сгенерировано = ${NEWV:-?}"
         if [ -n "$NEWV" ] && [ -n "$OLDV" ] && [ "$NEWV" != "$OLDV" ]; then
-            say "::warning::линия uniffi изменилась ($OLDV -> $NEWV): на теге останется мост из git — перед релизом это надо перегенерировать"
+            say "::warning::линия uniffi изменилась ($OLDV -> $NEWV): релизный gate заблокирует несовместимый мост"
         fi
     else
         say "файл моста не найден или пуст"

@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import com.vladimir.messenger.R
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.RustBridge
@@ -35,7 +36,7 @@ data class SettingsUiState(
     /** Та же диагностика по-человечески (раунд 190): статус, путь, заминка. */
     val mqttHuman: String = "",
     /** Состояние нашего сервера: адрес, доступность и отклик. */
-    val serverStatus: String = "проверяю…",
+    val serverStatus: String = "",
     /** Строка о резервной копии адресов (для карточки «Сервер»). */
     val addrBookLine: String = "",
     /** Последний итог ручных действий с копией (для диалога). */
@@ -233,11 +234,11 @@ class SettingsViewModel @Inject constructor(
             val prepared = withContext(Dispatchers.IO) {
                 val temp = runCatching {
                     java.io.File.createTempFile("apu_pick_", ".apk", context.cacheDir)
-                }.getOrNull() ?: return@withContext quick.copy(error = "Не удалось открыть файл")
+                }.getOrNull() ?: return@withContext quick.copy(error = context.getString(R.string.st_open_failed))
                 try {
                     context.contentResolver.openInputStream(uri)?.use { input ->
                         temp.outputStream().use { output -> input.copyTo(output) }
-                    } ?: return@withContext quick.copy(error = "Не удалось открыть файл")
+                    } ?: return@withContext quick.copy(error = context.getString(R.string.st_open_failed))
                     // Версия — из самого APK; если архив не читается — из имени.
                     val version = runCatching {
                         context.packageManager.getPackageArchiveInfo(temp.absolutePath, 0)?.versionName
@@ -246,7 +247,7 @@ class SettingsViewModel @Inject constructor(
                     quick.copy(version = version, tempPath = temp.absolutePath)
                 } catch (error: Exception) {
                     temp.delete()
-                    quick.copy(error = "Ошибка чтения: ${error.message}")
+                    quick.copy(error = context.getString(R.string.st_read_error, error.message))
                 }
             }
             prepared.error?.let { message ->
@@ -285,7 +286,7 @@ class SettingsViewModel @Inject constructor(
     fun onMarkReceivedApkAsUpdate(transferId: String, version: String) {
         viewModelScope.launch {
             val result = runCatching { apkSeeder.markReceivedApkAsSeed(transferId, version, autoReseed = true) }
-                .getOrElse { "Ошибка: ${it.message}" }
+                .getOrElse { context.getString(R.string.st_error, it.message) }
             toastIf(result)
         }
     }
@@ -319,7 +320,7 @@ class SettingsViewModel @Inject constructor(
     fun onInstallUpdate() {
         viewModelScope.launch {
             val result = runCatching { apkSeeder.installReady() }
-                .getOrElse { "Не удалось запустить установку: ${it.message}" }
+                .getOrElse { context.getString(R.string.st_install_failed, it.message) }
             toastIf(result)
         }
     }
@@ -348,14 +349,13 @@ class SettingsViewModel @Inject constructor(
             val neighbors = apkOffers.value.size
             val message = when {
                 release != null && neighbors > 0 ->
-                    "Найдено в двух местах: официальный сайт v${release.version.removePrefix("v")} " +
-                        "и $neighbors сосед(ей) по сети — выберите в карточке, откуда скачать"
+                    context.getString(R.string.st_found_two, release.version.removePrefix("v"), neighbors)
                 release != null ->
-                    "Есть новая версия v${release.version.removePrefix("v")} на официальном сайте — кнопка в карточке"
+                    context.getString(R.string.st_new_version_official, release.version.removePrefix("v"))
                 neighbors > 0 ->
-                    "Соседи раздают новую версию — кнопка «Скачать» в карточке"
-                asked > 0 -> "Спрошено у $asked соседей; новых объявлений пока нет"
-                else -> "Обновлений не найдено (соседей в сети нет или они на этой же версии)"
+                    context.getString(R.string.st_neighbors_offer)
+                asked > 0 -> context.getString(R.string.st_asked_neighbors, asked)
+                else -> context.getString(R.string.st_no_updates)
             }
             android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
         }
@@ -374,20 +374,19 @@ class SettingsViewModel @Inject constructor(
                     // Раунд 132: дифф-патч - скачали разницу, установщик уже открыт.
                     android.widget.Toast.makeText(
                         context,
-                        "Обновление скачано компактно (только разница версий) - установщик открыт",
+                        context.getString(R.string.st_update_delta_done),
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
                 } else {
                     android.widget.Toast.makeText(
                         context,
-                        "Скачивание началось. Когда файл скачается, он сам появится в «Обновлениях» — " +
-                            "установка и раздача соседям начнутся сами",
+                        context.getString(R.string.st_download_started),
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
                 }
             }
             .onFailure {
-                android.widget.Toast.makeText(context, "Не удалось начать скачивание: ${it.message}", android.widget.Toast.LENGTH_LONG).show()
+                android.widget.Toast.makeText(context, context.getString(R.string.toast_download_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
             }
     }
 
@@ -468,9 +467,9 @@ class SettingsViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     serverStatus = when {
-                        health == null -> "недоступен — рой на запасных брокерах"
-                        health < 400 -> "доступен, ответ за ${health} мс"
-                        else -> " отвечает с ошибкой ($health)"
+                        health == null -> context.getString(R.string.svm_server_unavailable)
+                        health < 400 -> context.getString(R.string.svm_health_ok, health)
+                        else -> " " + context.getString(R.string.svm_health_error, health)
                     },
                 )
             }
@@ -482,21 +481,18 @@ class SettingsViewModel @Inject constructor(
         val at = addressBookBackup.lastBackupAtMs()
         val count = addressBookBackup.localEntryCount()
         val line = buildString {
-            append("В телефоне: ${count} адресов. ")
+            append(context.getString(R.string.ab_in_phone, count.toString()) + " ")
             append(
                 if (at > 0) {
-                    "Копия на сервере от " + android.text.format.DateFormat.getTimeFormat(context)
-                        .format(java.util.Date(at)) + ", " +
-                        android.text.format.DateFormat.getDateFormat(context)
-                            .format(java.util.Date(at)) + "."
+                    context.getString(R.string.ab_copy_from, android.text.format.DateFormat.getTimeFormat(context).format(java.util.Date(at)), android.text.format.DateFormat.getDateFormat(context).format(java.util.Date(at)))
                 } else {
-                    "Копии на сервере ещё нет."
+                    context.getString(R.string.st_no_server_copy)
                 }
             )
-            append(" Копия делается сама.")
+            append(" " + context.getString(R.string.ab_self_copy))
             // Раунд 126 (владелец): без лимита - просто число сохранивших.
             val fresh = addressBookSwarm.freshAckCount()
-            append(" Копий на других телефонах: $fresh.")
+            append(" " + context.getString(R.string.ab_other_copies, fresh.toString()))
         }
         _uiState.update { it.copy(addrBookLine = line) }
     }
@@ -504,9 +500,9 @@ class SettingsViewModel @Inject constructor(
     /** Кнопка «Создать копию» (диалог карточки «Сервер»). */
     fun backupAddressBookNow() {
         viewModelScope.launch {
-            _uiState.update { it.copy(addrBookMessage = "Сохраняю…") }
+            _uiState.update { it.copy(addrBookMessage = context.getString(R.string.st_saving)) }
             val result = runCatching { addressBookBackup.backupNow() }
-                .getOrElse { "Не получилось: ${it.message}" }
+                .getOrElse { context.getString(R.string.st_failed_msg, it.message) }
             _uiState.update { it.copy(addrBookMessage = result) }
             refreshAddrBookLine()
         }
@@ -515,9 +511,9 @@ class SettingsViewModel @Inject constructor(
     /** Кнопка «Восстановить» (диалог карточки «Сервер»). */
     fun restoreAddressBookNow() {
         viewModelScope.launch {
-            _uiState.update { it.copy(addrBookMessage = "Спрашиваю рой…") }
+            _uiState.update { it.copy(addrBookMessage = context.getString(R.string.st_asking_swarm)) }
             val result = runCatching { addressBookBackup.restoreNowForce() }
-                .getOrElse { "Не получилось: ${it.message}" }
+                .getOrElse { context.getString(R.string.st_failed_msg, it.message) }
             _uiState.update { it.copy(addrBookMessage = result) }
             refreshAddrBookLine()
         }
@@ -532,7 +528,7 @@ class SettingsViewModel @Inject constructor(
     fun onCancelStalledTransfers() {
         viewModelScope.launch {
             val cancelled = runCatching { fileTransferRouter.cancelStalledOutgoing() }.getOrDefault(-1)
-            val message = if (cancelled >= 0) "Остановлено зависших отправок: $cancelled" else "Не удалось выполнить очистку"
+            val message = if (cancelled >= 0) context.getString(R.string.st_cancelled_n, cancelled) else context.getString(R.string.st_cleanup_failed)
             android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
         }
     }
@@ -544,7 +540,7 @@ class SettingsViewModel @Inject constructor(
     fun onPurgeCompletedTransfers() {
         viewModelScope.launch {
             val purged = runCatching { fileTransferRouter.purgeCompletedTransfers() }.getOrDefault(-1)
-            val message = if (purged >= 0) "Очищено завершённых передач: $purged" else "Не удалось выполнить очистку"
+            val message = if (purged >= 0) context.getString(R.string.st_purged_n, purged) else context.getString(R.string.st_cleanup_failed)
             android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
         }
     }
@@ -705,20 +701,20 @@ class SettingsViewModel @Inject constructor(
         // ащита от быстрых нажатий (debounce 5 секунд)
         if (elapsed < 5000L) {
             val waitSec = ((5000L - elapsed) / 1000.0).toInt() + 1
-            Toast.makeText(context, "одождите $waitSec сек перед следующим запросом", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.toast_wait_seconds, waitSec), Toast.LENGTH_SHORT).show()
             return
         }
         
         lastGossipTrigger = now
-        Toast.makeText(context, "Собираю данные об абонентах...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, context.getString(R.string.toast_collecting_peers), Toast.LENGTH_SHORT).show()
         
         viewModelScope.launch {
             val ok = withContext(Dispatchers.IO) { RustBridge.triggerGossipDiscovery() }
             android.util.Log.i("SettingsVM", "Gossip trigger result: $ok")
             if (ok) {
-                Toast.makeText(context, "Gossip запущен", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.toast_gossip_started), Toast.LENGTH_SHORT).show()
             } else {
-                Toast.makeText(context, "шибка запуска gossip", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.toast_gossip_failed), Toast.LENGTH_SHORT).show()
             }
             // ерезагрузить UI чтобы показать обновлённое количество пиров
             loadSettings()

@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // GROUPFILECARD.KT - карточка файла сообщества (рой, этапы 9-10)
 // =============================================================================
@@ -35,6 +37,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Image as ImageIcon
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.MoreVert
+import com.vladimir.messenger.util.VoiceNote
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Save
@@ -174,6 +177,20 @@ fun GroupFileCard(
     messageActions: List<ApuAction> = emptyList(),
 ) {
     val info = state.info
+    // Голосовое (имя файла несёт волну) играем прямо в карточке; нужна локальная копия.
+    val voiceInfo = remember(info.displayName) { VoiceNote.parse(info.displayName) }
+    val voiceFile = state.previewFile
+    if (voiceInfo != null && voiceFile != null) {
+        VoiceFileCard(
+            state = state,
+            file = voiceFile,
+            info = voiceInfo,
+            isFromMe = isFromMe,
+            messageActions = messageActions,
+            onLongPress = onLongPress,
+        )
+        return
+    }
     val transfer = state.transfer
     val complete = transfer != null && transfer.direction == "INCOMING" && transfer.state == "COMPLETE"
     val previewPath = state.previewFile?.absolutePath
@@ -224,7 +241,13 @@ fun GroupFileCard(
                 if (stickerFloating) Modifier
                 else Modifier.apuBubbleSurface(color = if (isFromMe) messenger.messageBubbleOwn else messenger.messageBubbleOther)
             )
-            .padding(if (stickerFloating) 0.dp else 8.dp),
+            .padding(if (stickerFloating) 0.dp else 8.dp)
+            // Удержание где угодно на карточке (в т.ч. на строке «имя / Скачать»,
+            // пока стикер не загружен) открывает меню сообщения.
+            .then(
+                if (onLongPress != null) Modifier.combinedClickable(onClick = {}, onLongClick = onLongPress)
+                else Modifier
+            ),
     ) {
         val bitmap = previewBitmap
         if ((GroupFileMarker.isAnimatedImage(info) || GroupFileMarker.isSticker(info)) &&
@@ -283,42 +306,52 @@ fun GroupFileCard(
             // Кнопка «Скачать»: пока файл не просили и он не идёт.
             if (!isFromMe && transfer == null && !state.pending) {
                 IconButton(onClick = state.onDownload, modifier = Modifier.size(36.dp)) {
-                    Icon(Icons.Filled.Download, contentDescription = "Скачать", tint = ApuBubbleAccentColor)
+                    Icon(Icons.Filled.Download, contentDescription = stringResource(R.string.gf_download_cd), tint = ApuBubbleAccentColor)
                 }
             }
         }
-        val status = when {
-            isFromMe -> if (state.seeded > 0) "Получили: ${state.seeded}" else "Участники запросят файл у вас"
-            complete -> "Получено ✓"
-            state.stalled -> "Раздающий не отвечает (${transfer!!.completedChunks}/${transfer.chunkCount})"
+        val statusKind = when {
+            isFromMe -> if (state.seeded > 0) GfStatus.SEEDED else GfStatus.WAIT_REQUESTS
+            complete -> GfStatus.DONE
+            state.stalled -> GfStatus.STALLED
             transfer != null -> when (transfer.state) {
-                "FAILED" -> "Ошибка приёма — нажмите «Скачать» ещё раз"
-                "OFFERED", "TRANSFERRING", "VERIFYING" ->
-                    "Приём… ${transfer.completedChunks}/${transfer.chunkCount}"
-                else -> "Ожидание…"
+                "FAILED" -> GfStatus.FAILED
+                "OFFERED", "TRANSFERRING", "VERIFYING" -> GfStatus.RECEIVING
+                else -> GfStatus.WAITING
             }
-            state.pending -> "Запрошено, ждём раздающего…"
-            else -> ""
+            state.pending -> GfStatus.PENDING
+            else -> GfStatus.NONE
+        }
+        val status = when (statusKind) {
+            GfStatus.SEEDED -> stringResource(R.string.gf_status_seeded, state.seeded)
+            GfStatus.WAIT_REQUESTS -> stringResource(R.string.gf_status_wait_requests)
+            GfStatus.DONE -> stringResource(R.string.gf_status_done)
+            GfStatus.STALLED -> stringResource(R.string.gf_status_stalled, transfer?.completedChunks ?: 0, transfer?.chunkCount ?: 0)
+            GfStatus.FAILED -> stringResource(R.string.gf_status_failed)
+            GfStatus.RECEIVING -> stringResource(R.string.gf_status_receiving, transfer?.completedChunks ?: 0, transfer?.chunkCount ?: 0)
+            GfStatus.WAITING -> stringResource(R.string.gf_status_waiting)
+            GfStatus.PENDING -> stringResource(R.string.gf_status_pending)
+            GfStatus.NONE -> ""
         }
         // С картинкой на месте служебные строки не нужны: «Получено ✓»
         // очевидно, остальное покажем, только пока что-то идёт не так.
         val statusVisible = when {
-            !hasPreview -> status.isNotEmpty()
-            isFromMe -> status.startsWith("Получили") || status.startsWith("Раздающ")
-            else -> status.contains("…") || status.startsWith("Ошибка") || status.startsWith("Раздающ")
+            !hasPreview -> statusKind != GfStatus.NONE
+            isFromMe -> statusKind == GfStatus.SEEDED
+            else -> statusKind in setOf(GfStatus.RECEIVING, GfStatus.WAITING, GfStatus.PENDING, GfStatus.FAILED, GfStatus.STALLED)
         }
         if (statusVisible) {
             Text(status, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp), color = fileTextColor.copy(alpha = 0.75f))
         }
         if (transfer != null && !complete && transfer.chunkCount > 0 && transfer.state != "FAILED") {
-            LinearProgressIndicator(
-                progress = { (transfer.completedChunks.toFloat() / transfer.chunkCount.toFloat()).coerceIn(0f, 1f) },
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            ApuPremiumLinearProgress(
+                fraction = transfer.completedChunks.toFloat() / transfer.chunkCount.toFloat(),
+                modifier = Modifier.padding(top = 6.dp),
             )
         }
         if (transfer != null && (transfer.state == "FAILED" || state.stalled) && !isFromMe) {
             ApuTextAction(
-                label = if (state.stalled) "Спросить у другого" else "Скачать снова",
+                label = if (state.stalled) stringResource(R.string.gf_ask_other) else stringResource(R.string.gf_download_again),
                 onClick = state.onDownload,
             )
         }
@@ -342,7 +375,7 @@ fun GroupFileCard(
             ) {
                 Icon(
                     Icons.Filled.MoreVert,
-                    contentDescription = "Действия",
+                    contentDescription = stringResource(R.string.sv_actions),
                     tint = ApuBubbleAccentColor,
                     modifier = Modifier.size(20.dp),
                 )
@@ -358,14 +391,14 @@ fun GroupFileCard(
                 ) {
                     val save = state.onSave
                     if (save != null) {
-                        ApuActionBubble("Сохранить в папку", Icons.Filled.Save) {
+                        ApuActionBubble(stringResource(R.string.ft_save_folder), Icons.Filled.Save) {
                             showActions = false
                             save()
                         }
                     }
                     val share = state.onShare
                     if (share != null) {
-                        ApuActionBubble("Поделиться", Icons.Filled.Share) {
+                        ApuActionBubble(stringResource(R.string.admin_share), Icons.Filled.Share) {
                             showActions = false
                             share()
                         }
@@ -374,7 +407,7 @@ fun GroupFileCard(
                     if (favorite != null) {
                         // Раунд 211: у карточки в сообществе теперь и действия
                         // сообщения; файловое различаем подписью, как в личке.
-                        ApuActionBubble("Файл в избранное", Icons.Filled.Star) {
+                        ApuActionBubble(stringResource(R.string.chat_file_to_saved), Icons.Filled.Star) {
                             showActions = false
                             favorite()
                         }
@@ -405,3 +438,6 @@ fun fileIconFor(mediaType: String): ImageVector = when {
     mediaType == "application/pdf" -> Icons.Filled.Description
     else -> Icons.Filled.InsertDriveFile
 }
+
+/** Состояние строки статуса файла группы. Логика работает с кодами, а не с текстом (текст зависит от языка). */
+private enum class GfStatus { SEEDED, WAIT_REQUESTS, DONE, STALLED, FAILED, RECEIVING, WAITING, PENDING, NONE }

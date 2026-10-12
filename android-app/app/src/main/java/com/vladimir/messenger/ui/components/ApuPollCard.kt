@@ -1,5 +1,8 @@
 package com.vladimir.messenger.ui.components
 
+import com.vladimir.messenger.R
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -80,7 +83,7 @@ fun ApuPollCard(
             )
             Spacer(Modifier.width(6.dp))
             Text(
-                if (poll.anonymous) "Опрос · анонимный" else "Опрос",
+                if (poll.anonymous) stringResource(R.string.poll_anon) else stringResource(R.string.poll_label),
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = ApuBubbleAccentColor,
@@ -89,7 +92,7 @@ fun ApuPollCard(
                 Spacer(Modifier.width(6.dp))
                 Icon(
                     Icons.Filled.Lock,
-                    contentDescription = "Опрос закрыт",
+                    contentDescription = stringResource(R.string.poll_closed),
                     modifier = Modifier.size(14.dp),
                     tint = ApuBubbleMutedColor,
                 )
@@ -124,19 +127,20 @@ fun ApuPollCard(
                 modifier = Modifier.weight(1f),
             )
             if (canClose && !poll.closed) {
-                ApuTextAction(label = "Закрыть опрос", onClick = onClose)
+                ApuTextAction(label = stringResource(R.string.poll_close), onClick = onClose)
             }
         }
         // Кто как проголосовал: только в открытом опросе, и только тех, чей
         // голос уже доехал до этого телефона.
         if (!poll.anonymous && poll.voters.isNotEmpty()) {
+            val memberLabel = stringResource(R.string.poll_member)
             val names = poll.voters
                 .filter { it.choices.isNotEmpty() }
                 .take(3)
-                .joinToString(", ") { it.name.ifBlank { "Участник " + it.nodeId.takeLast(4) } }
+                .joinToString(", ") { it.name.ifBlank { memberLabel + " " + it.nodeId.takeLast(4) } }
             if (names.isNotBlank()) {
                 Text(
-                    names + if (poll.voters.size > 3) " и другие" else "",
+                    names + if (poll.voters.size > 3) " " + stringResource(R.string.poll_and_others) else "",
                     style = MaterialTheme.typography.labelSmall,
                     color = ApuBubbleMutedColor,
                     maxLines = 1,
@@ -201,7 +205,7 @@ private fun PollOptionRow(
                 Spacer(Modifier.width(4.dp))
                 Icon(
                     Icons.Filled.CheckCircle,
-                    contentDescription = "Ваш выбор",
+                    contentDescription = stringResource(R.string.poll_your_choice),
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.primary,
                 )
@@ -209,30 +213,25 @@ private fun PollOptionRow(
         }
         if (showResults) {
             Spacer(Modifier.height(4.dp))
-            LinearProgressIndicator(
-                progress = { (percent / 100f).coerceIn(0f, 1f) },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(2.dp)),
+            ApuPremiumLinearProgress(
+                fraction = percent / 100f,
+                thickness = 4.dp,
             )
         }
     }
 }
 
+@Composable
 private fun pollVotersLabel(poll: PollSummary): String {
+    val res = LocalContext.current.resources
     val count = poll.totalVoters
-    if (count == 0) return "Пока никто не голосовал"
-    val word = when {
-        count % 10 == 1 && count % 100 != 11 -> "человек"
-        count % 10 in 2..4 && count % 100 !in 12..14 -> "человека"
-        else -> "человек"
-    }
+    if (count == 0) return stringResource(R.string.poll_nobody_voted)
+    val people = res.getQuantityString(R.plurals.poll_voters_count, count, count)
     val votes = poll.totalVotes
     return if (poll.multiChoice && votes != count) {
-        "$count $word · $votes голосов"
+        "$people · " + res.getQuantityString(R.plurals.poll_votes_count, votes, votes)
     } else {
-        "$count $word"
+        people
     }
 }
 
@@ -272,10 +271,10 @@ class PollDraftState {
     }
 
     /** Что не так с черновиком; null - всё в порядке. */
-    fun problem(): String? {
-        if (question.isBlank()) return "Вопрос не может быть пустым"
+    fun problem(context: android.content.Context): String? {
+        if (question.isBlank()) return context.getString(R.string.poll_problem_question)
         if (filledOptions().size < GroupWire.MIN_POLL_OPTIONS) {
-            return "Нужно хотя бы ${GroupWire.MIN_POLL_OPTIONS} варианта ответа"
+            return context.resources.getQuantityString(R.plurals.poll_min_options, GroupWire.MIN_POLL_OPTIONS, GroupWire.MIN_POLL_OPTIONS)
         }
         return null
     }
@@ -293,7 +292,7 @@ fun PollDraftFields(
         ApuBubbleField(
             value = state.question,
             onValueChange = { state.question = it },
-            label = { Text("Вопрос") },
+            label = { Text(stringResource(R.string.poll_question_label)) },
             modifier = Modifier.fillMaxWidth(),
             maxLines = 3,
         )
@@ -303,7 +302,7 @@ fun PollDraftFields(
                 ApuBubbleField(
                     value = text,
                     onValueChange = { state.options[index] = it },
-                    label = { Text("Вариант ${index + 1}") },
+                    label = { Text(stringResource(R.string.poll_option_n, index + 1)) },
                     modifier = Modifier.weight(1f),
                     singleLine = true,
                 )
@@ -312,14 +311,14 @@ fun PollDraftFields(
         }
         if (state.options.size < GroupWire.MAX_POLL_OPTIONS) {
             ApuTextAction(
-                label = "+ Добавить вариант",
+                label = stringResource(R.string.poll_add_option),
                 onClick = { state.options.add("") },
                 modifier = Modifier.align(Alignment.Start),
             )
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "Анонимный",
+                stringResource(R.string.poll_anonymous),
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -327,14 +326,14 @@ fun PollDraftFields(
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "Несколько вариантов",
+                stringResource(R.string.poll_multi),
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyMedium,
             )
             ApuPremiumSwitch(checked = state.multiChoice, onCheckedChange = { state.multiChoice = it })
         }
         Text(
-            "Анонимный опрос показывает только числа: кто как проголосовал, не видно никому.",
+            stringResource(R.string.apc_anon_note),
             style = MaterialTheme.typography.labelSmall,
             color = ApuBubbleMutedColor,
         )
@@ -355,18 +354,19 @@ fun CreatePollDialog(
 ) {
     val state = remember { PollDraftState() }
     var problem by remember { mutableStateOf<String?>(null) }
+    val pollContext = LocalContext.current
 
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Новый опрос") },
+        title = { Text(stringResource(R.string.poll_new_title)) },
         text = {
             PollDraftFields(state = state, problem = problem)
         },
         confirmButton = {
             ApuTextAction(
-                label = "Создать",
+                label = stringResource(R.string.chat_create),
                 onClick = {
-                    val issue = state.problem()
+                    val issue = state.problem(pollContext)
                     if (issue != null) {
                         problem = issue
                         return@ApuTextAction
@@ -376,7 +376,7 @@ fun CreatePollDialog(
             )
         },
         dismissButton = {
-            ApuTextAction(label = "Отмена", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
         },
     )
 }

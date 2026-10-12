@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.groups
 
+import com.vladimir.messenger.R
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -328,16 +329,15 @@ class GroupChatViewModel @Inject constructor(
             (me?.isBanned != true && GroupPermissions.has(mask, GroupPermissions.Member.SEND_MEDIA))
         val hint = when {
             !byRank ->
-                "Отправка файлов, фото и видео открывается с ранга «Круг друзей» — " +
-                    "это 3 подтверждённых приглашения. Сейчас подтверждено: $qualified."
-            !byGroup -> "В этой группе участникам запрещено отправлять файлы"
+                appContext.getString(R.string.cdv_files_locked, qualified)
+            !byGroup -> appContext.getString(R.string.gc_files_forbidden)
             else -> ""
         }
         _uiState.update { it.copy(canAttach = byRank && byGroup, attachLockedHint = hint) }
     }
 
     fun onAttachLocked() {
-        _uiState.update { it.copy(error = it.attachLockedHint.ifBlank { "Вложения недоступны" }) }
+        _uiState.update { it.copy(error = it.attachLockedHint.ifBlank { appContext.getString(R.string.grp_attach_unavailable) }) }
     }
 
     /**
@@ -360,7 +360,7 @@ class GroupChatViewModel @Inject constructor(
                 _uiState.update { it.copy(stagedFile = info) }
             } catch (e: Exception) {
                 android.util.Log.w("GroupChatVM", "group file stage failed", e)
-                _uiState.update { it.copy(error = "Файл не приложен: ${e.message}") }
+                _uiState.update { it.copy(error = appContext.getString(R.string.gc_file_not_attached, e.message)) }
             } finally {
                 _uiState.update { it.copy(isPreparingFile = false) }
             }
@@ -401,26 +401,25 @@ class GroupChatViewModel @Inject constructor(
                         cached != null -> state.copy(
                             gifLoading = false,
                             gifError = null,
-                            gifNotice = "Сервер перегружен — показываю сохранённые гифки. " +
-                                "Скачать и отправить можно как обычно",
+                            gifNotice = appContext.getString(R.string.gif_server_busy) + " " + appContext.getString(R.string.sv_download_send_hint),
                             gifItems = cached.first,
                             gifNext = "",
                         )
                         more -> state.copy(
                             gifLoading = false,
                             gifError = null,
-                            gifNotice = "Сервер перегружен — «Ещё» пока недоступно",
+                            gifNotice = appContext.getString(R.string.cd_gif_more_unavailable),
                             gifNext = "",
                         )
                         else -> state.copy(
                             gifLoading = false,
-                            gifError = "Каталог гиф недоступен: сервер перегружен. Это временно — попробуйте позже",
+                            gifError = appContext.getString(R.string.gc_gif_catalog_down),
                         )
                     }
                 } else {
                     val (items, next) = result
                     if (items.isEmpty() && state.gifItems.isEmpty()) {
-                        state.copy(gifLoading = false, gifError = "Ничего не нашлось")
+                        state.copy(gifLoading = false, gifError = appContext.getString(R.string.gc_gif_nothing))
                     } else {
                         state.copy(
                             gifLoading = false,
@@ -560,16 +559,16 @@ class GroupChatViewModel @Inject constructor(
             if (swarm != null) {
                 autoFetchSticker(swarm)
                 pendingSwarmStickerSha = entry.sha256
-                _uiState.update { it.copy(swarmStatus = "Стикер подгружается из сети - сразу отправим") }
+                _uiState.update { it.copy(swarmStatus = appContext.getString(R.string.gc_sticker_loading)) }
             } else {
-                _uiState.update { it.copy(error = "Файл стикера пропал с телефона - докачать его неоткуда") }
+                _uiState.update { it.copy(error = appContext.getString(R.string.gc_sticker_lost)) }
             }
             return
         }
         viewModelScope.launch {
             _uiState.update { it.copy(isPreparingFile = true, error = null) }
             try {
-                val topicId = _uiState.value.selectedTopicId ?: error("Выберите тему")
+                val topicId = _uiState.value.selectedTopicId ?: error(appContext.getString(R.string.gc_choose_topic))
                 // Раунд 166: стикер - БАЙТАМИ (image/webp, имя «Стикер.webp»):
                 // раньше стейджился FileProvider-uri файла <sha>.img, MIME
                 // выходил не-картинка, и карточка в ленте была без картинки.
@@ -586,7 +585,7 @@ class GroupChatViewModel @Inject constructor(
                 refreshStickers()
             } catch (e: Exception) {
                 android.util.Log.w("GroupChatVM", "sticker send failed", e)
-                _uiState.update { it.copy(error = "Стикер не отправлен: ${e.message.orEmpty()}") }
+                _uiState.update { it.copy(error = appContext.getString(R.string.gc_sticker_not_sent, e.message.orEmpty())) }
             } finally {
                 _uiState.update { it.copy(isPreparingFile = false) }
             }
@@ -617,9 +616,9 @@ class GroupChatViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     swarmStatus = when (holder) {
-                        null -> "Сеть пока не отвечает - попробуйте позже"
-                        "" -> "Уже качаем этот стикер"
-                        else -> "Качается с $holder - сейчас отправим"
+                        null -> appContext.getString(R.string.cd_net_silent)
+                        "" -> appContext.getString(R.string.cd_already_downloading)
+                        else -> appContext.getString(R.string.cdv_downloading_from, holder)
                     },
                 )
             }
@@ -648,7 +647,7 @@ class GroupChatViewModel @Inject constructor(
     fun retryFetchSticker(swarm: com.vladimir.messenger.data.sticker.SwarmSticker) {
         viewModelScope.launch {
             com.vladimir.messenger.data.sticker.StickerLibrary.rememberWant(swarm.sha256)
-            _uiState.update { it.copy(swarmStatus = "Просим у всех держателей сети…") }
+            _uiState.update { it.copy(swarmStatus = appContext.getString(R.string.gc_asking)) }
             val holder = runCatching {
                 com.vladimir.messenger.data.sticker.StickerLibrary.requestSticker(
                     appContext, chatRepository, swarm.sha256, swarm.holders,
@@ -659,9 +658,9 @@ class GroupChatViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     swarmStatus = when (holder) {
-                        null -> "Сеть пока не отвечает - попробуйте позже"
-                        "" -> "Уже качаем этот стикер"
-                        else -> "Просили: $holder"
+                        null -> appContext.getString(R.string.cd_net_silent)
+                        "" -> appContext.getString(R.string.cd_already_downloading)
+                        else -> appContext.getString(R.string.cdv_asked_by, holder)
                     },
                 )
             }
@@ -790,7 +789,7 @@ class GroupChatViewModel @Inject constructor(
                 }.getOrNull()
             }
             if (added == null) {
-                _uiState.update { it.copy(swarmStatus = "Не вышло: нужен файл GIF до 30 МБ") }
+                _uiState.update { it.copy(swarmStatus = appContext.getString(R.string.gc_gif_too_big)) }
             } else {
                 runCatching {
                     com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
@@ -798,7 +797,7 @@ class GroupChatViewModel @Inject constructor(
                     )
                 }
                 onGifCatalogOpened()
-                _uiState.update { it.copy(swarmStatus = "Своя гифка добавлена - уже в нашей сети") }
+                _uiState.update { it.copy(swarmStatus = appContext.getString(R.string.gc_gif_added)) }
             }
         }
     }
@@ -813,9 +812,9 @@ class GroupChatViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     swarmStatus = when (result) {
-                        com.vladimir.messenger.data.repository.SaveResult.Saved -> "Добавлено в избранное"
-                        com.vladimir.messenger.data.repository.SaveResult.AlreadySaved -> "Уже в избранном"
-                        com.vladimir.messenger.data.repository.SaveResult.FileNotReady -> "Файл ещё не получен полностью"
+                        com.vladimir.messenger.data.repository.SaveResult.Saved -> appContext.getString(R.string.gc_saved_fav)
+                        com.vladimir.messenger.data.repository.SaveResult.AlreadySaved -> appContext.getString(R.string.cd_already_saved)
+                        com.vladimir.messenger.data.repository.SaveResult.FileNotReady -> appContext.getString(R.string.cd_file_incomplete)
                     },
                 )
             }
@@ -853,19 +852,19 @@ class GroupChatViewModel @Inject constructor(
                 if (sha == null) {
                     val bytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         botApi.downloadGif(item.gif)
-                    } ?: throw IllegalStateException("Гифка не скачалась")
+                    } ?: throw IllegalStateException(appContext.getString(R.string.gc_gif_not_downloaded))
                     val added = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         com.vladimir.messenger.data.gif.GifLibrary.add(
                             appContext, bytes, item.id, lastGifQuery, "gif_" + item.id + ".gif",
                         )
-                    } ?: throw IllegalStateException("Гифка не сохранилась")
+                    } ?: throw IllegalStateException(appContext.getString(R.string.gc_gif_not_saved))
                     sha = added.sha256
                 }
                 onDone()
                 sendGifRefToGroup(sha)
             } catch (e: Exception) {
                 android.util.Log.w("GroupChatVM", "gif attach failed", e)
-                _uiState.update { it.copy(error = "Гифка не отправлена: ${e.message}") }
+                _uiState.update { it.copy(error = appContext.getString(R.string.gc_gif_not_sent, e.message)) }
             }
         }
     }
@@ -881,7 +880,7 @@ class GroupChatViewModel @Inject constructor(
     fun requestFile(message: MessageEntity, info: com.vladimir.messenger.util.GroupFileMarker.Info) {
         viewModelScope.launch {
             runCatching { groupFiles.request(groupId, message.id, info, message.senderId, manual = true) }
-                .onFailure { e -> _uiState.update { it.copy(error = "Не удалось запросить файл: ${e.message}") } }
+                .onFailure { e -> _uiState.update { it.copy(error = appContext.getString(R.string.gc_request_failed, e.message)) } }
         }
     }
 
@@ -904,7 +903,7 @@ class GroupChatViewModel @Inject constructor(
         viewModelScope.launch {
             val ok = runCatching { fileTransferRouter.exportReceivedFile(transfer, target) }.getOrDefault(false)
             _uiState.update {
-                it.copy(error = if (ok) "Сохранено: ${transfer.displayName}" else "Не удалось сохранить файл")
+                it.copy(error = if (ok) appContext.getString(R.string.gc_saved_as, transfer.displayName) else appContext.getString(R.string.gc_save_failed))
             }
         }
     }
@@ -922,10 +921,10 @@ class GroupChatViewModel @Inject constructor(
                     .setType(mediaType.ifBlank { "application/octet-stream" })
                     .putExtra(android.content.Intent.EXTRA_STREAM, uri)
                     .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                val chooser = android.content.Intent.createChooser(intent, "Поделиться")
+                val chooser = android.content.Intent.createChooser(intent, appContext.getString(R.string.admin_share))
                     .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 ctx.startActivity(chooser)
-            }.onFailure { e -> _uiState.update { it.copy(error = "Не удалось поделиться: ${e.message}") } }
+            }.onFailure { e -> _uiState.update { it.copy(error = appContext.getString(R.string.gc_share_error, e.message)) } }
         }
     }
 
@@ -963,7 +962,7 @@ class GroupChatViewModel @Inject constructor(
     fun createPoll(draft: com.vladimir.messenger.data.group.PollDraft) {
         val topicId = _uiState.value.selectedTopicId
         if (topicId == null) {
-            _uiState.update { it.copy(error = "Выберите тему") }
+            _uiState.update { it.copy(error = appContext.getString(R.string.gc_choose_topic)) }
             return
         }
         val question = draft.question.trim()
@@ -973,7 +972,7 @@ class GroupChatViewModel @Inject constructor(
             .take(com.vladimir.messenger.data.group.GroupWire.MAX_POLL_OPTIONS)
             .map { it.take(com.vladimir.messenger.data.group.GroupWire.MAX_POLL_OPTION_CHARS) }
         if (question.isBlank() || options.size < com.vladimir.messenger.data.group.GroupWire.MIN_POLL_OPTIONS) {
-            _uiState.update { it.copy(error = "Нужны вопрос и хотя бы два варианта ответа") }
+            _uiState.update { it.copy(error = appContext.getString(R.string.gc_poll_needs)) }
             return
         }
         _uiState.update { it.copy(sending = true, error = null) }
@@ -1305,7 +1304,7 @@ class GroupChatViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             runCatching { groupRepository.setGroupMutedUntil(groupId, untilMs) }
                 .onFailure { error ->
-                    _uiState.update { it.copy(error = error.message ?: "Не удалось изменить уведомления") }
+                    _uiState.update { it.copy(error = error.message ?: appContext.getString(R.string.cd_notify_failed)) }
                 }
         }
     }
@@ -1366,7 +1365,28 @@ class GroupChatViewModel @Inject constructor(
         }
     }
 
-    fun send(text: String) {
+    /** Отложенная отправка текста группы в назначенное время (тема - выбранная). */
+    fun scheduleSend(context: android.content.Context, sendAtMs: Long, quiet: Boolean) {
+        val state = _uiState.value
+        val topicId = state.selectedTopicId ?: return
+        val text = state.draft.trim()
+        if (text.isEmpty() || state.stagedFile != null) return
+        com.vladimir.messenger.worker.ScheduledSendWorker.enqueue(
+            context,
+            com.vladimir.messenger.data.schedule.ScheduledSendStore.Item(
+                id = java.util.UUID.randomUUID().toString(),
+                isGroup = true,
+                targetId = groupId,
+                topicId = topicId,
+                text = text,
+                sendAtMs = sendAtMs,
+                quiet = quiet,
+            ),
+        )
+        onDraftChanged("")
+    }
+
+    fun send(text: String, quiet: Boolean = false) {
         val topicId = _uiState.value.selectedTopicId ?: return
         val staged = _uiState.value.stagedFile
         if (text.isBlank() && staged == null) return
@@ -1387,7 +1407,11 @@ class GroupChatViewModel @Inject constructor(
             // Файл (этап 9): в сообщении едет визитка и подпись «📎 имя
             // (размер)» - старые версии видят подпись, новые рисуют карточку;
             // сам файл участники просят у меня и друг у друга.
-            val body = if (staged == null) text else com.vladimir.messenger.util.GroupFileMarker.compose(text, staged)
+            val body = if (staged == null) {
+                if (quiet) com.vladimir.messenger.util.QuietMessage.wrap(text) else text
+            } else {
+                com.vladimir.messenger.util.GroupFileMarker.compose(text, staged)
+            }
             groupRepository.sendMessage(groupId, topicId, body, reply = reply)
                 .onFailure { e -> _uiState.update { it.copy(sending = false, error = e.message) } }
                 .onSuccess {
@@ -1407,7 +1431,7 @@ class GroupChatViewModel @Inject constructor(
     fun sendGifRefToGroup(sha256: String) {
         val topicId = _uiState.value.selectedTopicId
         if (topicId == null) {
-            _uiState.update { it.copy(error = "Выберите тему") }
+            _uiState.update { it.copy(error = appContext.getString(R.string.gc_choose_topic)) }
             return
         }
         _uiState.update { it.copy(sending = true, error = null) }
@@ -1677,7 +1701,7 @@ class GroupChatViewModel @Inject constructor(
                 ),
                 photos = listOfNotNull(com.vladimir.messenger.util.InlineImage.extractB64(text)),
             )
-            _uiState.update { it.copy(error = "Добавлено в избранное") }
+            _uiState.update { it.copy(error = appContext.getString(R.string.gc_saved_fav)) }
         }
     }
 
@@ -1767,7 +1791,7 @@ class GroupChatViewModel @Inject constructor(
         return if (!ref.isGroup) {
             val chat = chatRepository.forwardChatByContact(ref.id)
             if (chat == null) {
-                com.vladimir.messenger.util.ForwardMarker.Open.Missing("Этого человека нет в контактах на этом телефоне")
+                com.vladimir.messenger.util.ForwardMarker.Open.Missing(appContext.getString(R.string.cd_no_contact))
             } else {
                 com.vladimir.messenger.util.ForwardMarker.Open.Chat(chat.id, chat.contactName, chat.contactId)
             }
@@ -1787,7 +1811,7 @@ class GroupChatViewModel @Inject constructor(
                         )
                     )
                 } else {
-                    com.vladimir.messenger.util.ForwardMarker.Open.Missing("Нет ссылки-приглашения для этой группы")
+                    com.vladimir.messenger.util.ForwardMarker.Open.Missing(appContext.getString(R.string.cd_no_invite_link))
                 }
             } else {
                 com.vladimir.messenger.util.ForwardMarker.Open.Group(group.id, ref.topicId.takeIf { it.isNotBlank() })

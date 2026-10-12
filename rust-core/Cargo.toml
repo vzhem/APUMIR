@@ -101,3 +101,7 @@ debug     = true
 
 [target.'cfg(target_os = "android")'.dependencies]
 tracing-android = "0.2"
+
+[dev-dependencies]
+# Deterministic helper-race deadlines without real-time sleeps.
+tokio = { version = "1", features = ["test-util"] }

@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,6 +23,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -90,13 +93,21 @@ fun PeerProfileSheet(
     onRename: (() -> Unit)? = null,
     onCall: (() -> Unit)? = null,
     onCopyId: (() -> Unit)? = null,
+    /** Открыть историю собеседника; null - кнопки нет (историй нет). */
+    onStoryClick: (() -> Unit)? = null,
 ) {
     val avatars by AvatarStore.avatars.collectAsState()
+    val viewedStories by com.vladimir.messenger.data.story.StoryStore.seen.collectAsState()
+    val profileStories by com.vladimir.messenger.data.story.StoryStore.items.collectAsState()
+    val unseenStory = profileStories.any {
+        it.authorId == contactId && !it.mine && it.id !in viewedStories &&
+            System.currentTimeMillis() - it.createdAtMs < com.vladimir.messenger.data.story.StoryStore.LIFETIME_MS
+    }
 
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            ApuTextAction(label = "Закрыть", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_close), onClick = onDismiss)
         },
         title = null,
         text = {
@@ -113,7 +124,11 @@ fun PeerProfileSheet(
                     vip = vip,
                     size = 88.dp,
                     modifier = Modifier.then(
-                        if (vip) {
+                        if (onStoryClick != null) {
+                            Modifier.border(3.dp, if (unseenStory) Color(0xFFE6BE70) else Color(0xFF84909F), CircleShape)
+                                .clickable(onClickLabel = stringResource(R.string.story_open), onClick = onStoryClick)
+                                .padding(5.dp)
+                        } else if (vip) {
                             Modifier
                         } else {
                             Modifier.border(
@@ -149,7 +164,7 @@ fun PeerProfileSheet(
                     )
                 }
                 Text(
-                    if (isOnline) "в сети" else "не в сети",
+                    stringResource(if (isOnline) R.string.pps_online_short else R.string.pps_offline_short),
                     style = MaterialTheme.typography.labelMedium,
                     color = if (isOnline) {
                         MaterialTheme.colorScheme.primary
@@ -193,7 +208,7 @@ fun PeerProfileSheet(
                             } else {
                                 Icons.Filled.FavoriteBorder
                             },
-                            contentDescription = if (heartMine) "Убрать сердечко" else "Поставить сердечко",
+                            contentDescription = stringResource(if (heartMine) R.string.pps_heart_remove else R.string.pps_heart_add),
                             tint = HeartColor,
                             modifier = Modifier.size(20.dp),
                         )
@@ -283,16 +298,14 @@ fun PeerProfileSheet(
                         Text(
                             text = if (isWarning) {
                                 val clock = if (antiRatingUntilMs > 0) {
-                                    " Предупреждение временное — примерно до " +
-                                        warningClockTime(antiRatingUntilMs) + "."
+                                    " " + stringResource(R.string.pps_warn_until, warningClockTime(antiRatingUntilMs))
                                 } else {
-                                    " Предупреждение временное."
+                                    " " + stringResource(R.string.pps_warn_temp)
                                 }
-                                "⚠️ За короткое время пришло много жалоб (всего: $antiRatingCount)." +
-                                    " Репутация и приоритет узла в рое временно понижены." + clock
+                                stringResource(R.string.pps_warn_head, antiRatingCount) +
+                                    " " + stringResource(R.string.pps_warn_tail) + clock
                             } else {
-                                "Отметок анти-рейтинга у профиля: $antiRatingCount. " +
-                                    "Одиночные жалобы рейтинг не понижают — значение имеет только резкий рост."
+                                stringResource(R.string.pps_anti_rating_note, antiRatingCount)
                             },
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Medium,
@@ -315,7 +328,7 @@ fun PeerProfileSheet(
                 if (contactId.isNotBlank()) {
                     var idShown by remember { mutableStateOf(false) }
                     if (!idShown) {
-                        ApuTextAction(label = "Показать адрес узла", onClick = { idShown = true })
+                        ApuTextAction(label = stringResource(R.string.pp_show_addr), onClick = { idShown = true })
                     } else {
                         Box(
                             modifier = Modifier
@@ -338,7 +351,7 @@ fun PeerProfileSheet(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        "Адрес узла - нужен только для разбора неполадок",
+                                        stringResource(R.string.pps_node_address_hint),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = Color(0xFF5A6472),
                                     )
@@ -353,7 +366,7 @@ fun PeerProfileSheet(
                                 if (onCopyId != null) {
                                     Icon(
                                         Icons.Default.ContentCopy,
-                                        contentDescription = "Скопировать",
+                                        contentDescription = stringResource(R.string.action_copy),
                                         tint = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.size(18.dp),
                                     )
@@ -363,22 +376,29 @@ fun PeerProfileSheet(
                     }
                 }
 
-                if (onRename != null || onCall != null) {
+                if (onRename != null || onCall != null || onStoryClick != null) {
                     Spacer(Modifier.height(12.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly,
                     ) {
+                        if (onStoryClick != null) {
+                            ApuTextAction(
+                                label = stringResource(R.string.story_open),
+                                onClick = onStoryClick,
+                                icon = Icons.Default.Star,
+                            )
+                        }
                         if (onCall != null) {
                             ApuTextAction(
-                                label = "Позвонить",
+                                label = stringResource(R.string.menu_call),
                                 onClick = onCall,
                                 icon = Icons.Default.Call,
                             )
                         }
                         if (onRename != null) {
                             ApuTextAction(
-                                label = "Переименовать",
+                                label = stringResource(R.string.chat_rename),
                                 onClick = onRename,
                                 icon = Icons.Default.Edit,
                             )

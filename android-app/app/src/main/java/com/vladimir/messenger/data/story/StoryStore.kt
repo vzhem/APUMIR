@@ -186,16 +186,20 @@ object StoryStore {
         _items.value = list
         _seen.value = _seen.value.intersect(list.map { it.id }.toSet())
         prefs()?.edit()?.putStringSet(SEEN_KEY, _seen.value)?.apply()
+        // Serial writer preserves snapshot order. AtomicFile keeps the previous
+        // complete snapshot if Android stops the process during a write.
         val file = offlineFile() ?: return
         val snapshot = list.toList()
         diskWriter.execute {
+            var stream: java.io.FileOutputStream? = null
             try {
-                file.startWrite().use { stream ->
-                    stream.write(toJson(snapshot).toByteArray(Charsets.UTF_8))
-                    file.finishWrite(stream)
-                }
+                stream = file.startWrite()
+                stream.write(toJson(snapshot).toByteArray(Charsets.UTF_8))
+                file.finishWrite(stream)
                 prefs()?.edit()?.remove(KEY)?.apply()
-            } catch (_: Exception) { file.failWrite(file.startWrite()) }
+            } catch (_: Exception) {
+                stream?.let { file.failWrite(it) }
+            }
         }
     }
 

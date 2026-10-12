@@ -118,4 +118,46 @@ class StoryPhotoPartsTest {
         assertNull(parts.receiveLegacy(author, "bad", 0, 2, "AAAA", now))
         assertNull(parts.receiveLegacy(author, "bad", 1, 2, "BBBB", now + StoryPhotoParts.PENDING_TTL_MS + 1))
     }
+
+    @Test fun reorderedAndRepeatedLegacyPartsAreAssembled() {
+        val parts = StoryPhotoParts()
+        assertNull(parts.receive("alice", "s", 1, 2, "BBBB", 0))
+        assertNull(parts.receive("alice", "s", 1, 2, "BBBB", 1))
+        assertEquals("AAAABBBB", parts.receive("alice", "s", 0, 2, "AAAA", 2))
+    }
+
+    @Test fun legacySendersNeverShareParts() {
+        val parts = StoryPhotoParts()
+        assertNull(parts.receive("alice", "s", 0, 2, "AAAA", 0))
+        assertNull(parts.receive("bob", "s", 1, 2, "BBBB", 0))
+        assertEquals("AAAACCCC", parts.receive("alice", "s", 1, 2, "CCCC", 1))
+    }
+
+    @Test fun legacyInvalidAndExpiredPartsCannotComplete() {
+        val parts = StoryPhotoParts()
+        assertNull(parts.receive("a", "s", 0, 100000, "A", 0))
+        assertNull(parts.receive("a", "s", -1, 2, "A", 0))
+        assertNull(parts.receive("a", "s", 0, 2, "A".repeat(2401), 0))
+        assertNull(parts.receive("a", "s", 0, 2, "bad!", 0))
+        assertNull(parts.receive("a", "s", 0, 2, "AAAA", 0))
+        assertNull(parts.receive("a", "s", 1, 2, "BBBB", 300001))
+    }
+
+    @Test fun legacyFullPhotoRoundTrip() {
+        val photo = "ABCD".repeat(40000)
+        val chunks = photo.chunked(StoryPhotoParts.CHUNK)
+        val parts = StoryPhotoParts()
+        var result: String? = null
+        chunks.indices.reversed().forEach { i ->
+            result = parts.receive("a", "s", i, chunks.size, chunks[i], 0)
+        }
+        assertEquals(photo, result)
+    }
+
+    @Test fun legacyConflictingDuplicateInvalidatesAssembly() {
+        val parts = StoryPhotoParts()
+        assertNull(parts.receive("a", "s", 0, 2, "AAAA", 0))
+        assertNull(parts.receive("a", "s", 0, 2, "CCCC", 1))
+        assertNull(parts.receive("a", "s", 1, 2, "BBBB", 2))
+    }
 }

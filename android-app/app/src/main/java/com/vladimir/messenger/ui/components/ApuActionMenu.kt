@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // APUACTIONMENU.KT — единое меню «три точки» (раунд 211)
 // =============================================================================
@@ -52,47 +54,29 @@ data class ApuAction(
     val onClick: () -> Unit,
 )
 
-/** Золотой пузырь действия (раунд 168, теперь общий): иконка + подпись. */
+/**
+ * Пункт действия в стиле APU (раунд 168, теперь на общей объёмной кнопке):
+ * золотая кнопка с подъёмом, глянцем и переливом на нажатие. Опасное действие —
+ * красная. Все прежние вызовы работают без изменений; [maxLines] оставлен для
+ * совместимости (подпись в объёмной кнопке и так переносится по ширине).
+ */
 @Composable
 fun ApuActionBubble(
     label: String,
     icon: ImageVector,
     enabled: Boolean = true,
     destructive: Boolean = false,
-    /** Подпись кнопки переносится; в компактном меню можно оставить одну строку. */
-    maxLines: Int = 2,
+    @Suppress("UNUSED_PARAMETER") maxLines: Int = 2,
     onClick: () -> Unit,
 ) {
-    val contentColor = Color.White.copy(alpha = if (enabled) 1f else 0.52f)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(
-                (if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
-                    .copy(alpha = if (enabled) 1f else 0.5f)
-            )
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = contentColor,
-            modifier = Modifier.size(18.dp),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            label,
-            color = contentColor,
-            fontWeight = FontWeight.SemiBold,
-            style = MaterialTheme.typography.labelLarge,
-            maxLines = maxLines,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
-    }
+    ApuDiagnosticsActionButton(
+        label = label,
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        icon = icon,
+        style = if (destructive) DiagnosticsActionStyle.DANGER else DiagnosticsActionStyle.PRIMARY,
+        enabled = enabled,
+    )
     Spacer(Modifier.height(6.dp))
 }
 
@@ -156,7 +140,7 @@ fun ApuMenuDots(
     ) {
         Icon(
             imageVector = Icons.Default.MoreVert,
-            contentDescription = "Действия",
+            contentDescription = stringResource(R.string.sv_actions),
             tint = Color.White,
             modifier = Modifier.size(18.dp),
         )

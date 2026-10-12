@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -96,7 +98,7 @@ fun GifCatalogDialog(
 ) {
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Гифки") },
+        title = { Text(stringResource(R.string.gif_catalog_title)) },
         text = {
             GifCatalogBody(
                 myGifs = myGifs,
@@ -117,7 +119,7 @@ fun GifCatalogDialog(
             )
         },
         confirmButton = {
-            ApuTextAction(label = "Закрыть", onClick = onDismiss)
+            ApuTextAction(label = stringResource(R.string.action_close), onClick = onDismiss)
         },
     )
 }
@@ -154,15 +156,15 @@ fun GifCatalogBody(
     if (removeCandidate != null) {
         ApuSettingsDialog(
             onDismissRequest = { removeCandidate = null },
-            title = { Text("Удалить гифку?") },
+            title = { Text(stringResource(R.string.gif_delete_title)) },
             text = {
                 Text(
-                    "Гифка исчезнет из вашей библиотеки и из общего каталога сети на всех телефонах. У тех, кто уже успел её скачать, копия останется.",
+                    stringResource(R.string.gif_delete_text),
                 )
             },
             confirmButton = {
                 ApuTextAction(
-                    label = "Удалить",
+                    label = stringResource(R.string.action_delete),
                     onClick = {
                         val entry = removeCandidate
                         removeCandidate = null
@@ -172,7 +174,7 @@ fun GifCatalogBody(
                 )
             },
             dismissButton = {
-                ApuTextAction(label = "Отмена", onClick = { removeCandidate = null })
+                ApuTextAction(label = stringResource(R.string.action_cancel), onClick = { removeCandidate = null })
             },
         )
     }
@@ -196,11 +198,11 @@ fun GifCatalogBody(
             ApuSearchField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = "Поиск: котики, привет…",
+                placeholder = stringResource(R.string.gif_search_placeholder),
                 modifier = Modifier.weight(1f),
                 trailing = {
                     IconButton(onClick = { onSearch(query) }) {
-                        Icon(Icons.Filled.Search, contentDescription = "Найти")
+                        Icon(Icons.Filled.Search, contentDescription = stringResource(R.string.gif_find_cd))
                     }
                 },
             )
@@ -208,7 +210,7 @@ fun GifCatalogBody(
             val pickOwnGif = androidx.activity.compose.rememberLauncherForActivityResult(
                 androidx.activity.result.contract.ActivityResultContracts.GetContent(),
             ) { uri -> if (uri != null) onAddOwnGif(uri) }
-            ApuTextAction(label = "+ Своя", onClick = { pickOwnGif.launch("image/gif") })
+            ApuTextAction(label = stringResource(R.string.gif_own_btn), onClick = { pickOwnGif.launch("image/gif") })
         }
         Spacer(Modifier.height(8.dp))
 
@@ -241,10 +243,7 @@ fun GifCatalogBody(
         val nothingAtAll = myCells.isEmpty() && peerCells.isEmpty() && items.isEmpty() && error == null
         if (nothingAtAll) {
             Text(
-                "Пока пусто. Нажмите поиск - гифки из внешнего каталога; " +
-                    "скачанные оседают в нашей сети. Свою гифку добавьте кнопкой «+ Своя». " +
-                    "Каталоги телефонов обмениваются автоматически: чем дольше пользуетесь, " +
-                    "тем больше набор без внешнего ресурса.",
+                stringResource(R.string.gif_empty_hint),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -343,12 +342,12 @@ fun GifCatalogBody(
                         if (shown != null) {
                             AsyncImage(
                                 model = shown,
-                                contentDescription = "гифка сети",
+                                contentDescription = stringResource(R.string.gif_network_cd),
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxWidth().aspectRatio(1f),
                             )
                         } else {
-                            PlaceholderCell(label = "гифка")
+                            PlaceholderCell(label = stringResource(R.string.gif_placeholder_label))
                         }
                         NetDot(Modifier.align(Alignment.TopEnd))
                     }
@@ -387,12 +386,12 @@ fun GifCatalogBody(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center,
                 ) {
-                    CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                    ApuPremiumSpinner(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                 }
             } else if (next.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))
                 ApuTextAction(
-                    label = "Ещё",
+                    label = stringResource(R.string.chat_more),
                     onClick = onMore,
                     modifier = Modifier.align(Alignment.CenterHorizontally),
                 )
@@ -409,8 +408,7 @@ fun GifCatalogBody(
             )
             Spacer(Modifier.width(6.dp))
             Text(
-                "синяя точка - гифка уже в нашей сети: придёт с телефонов " +
-                    "своих, внешний каталог не тратится",
+                stringResource(R.string.gif_blue_dot),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

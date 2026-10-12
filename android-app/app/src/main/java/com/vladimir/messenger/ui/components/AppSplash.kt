@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import android.app.Activity
 import android.os.SystemClock
 import androidx.compose.animation.Crossfade
@@ -125,7 +127,7 @@ fun AppSplash(onFinished: () -> Unit) {
                 letterSpacing = 7.sp,
             )
             Spacer(Modifier.height(8.dp))
-            Text(text = "Цифровое ядро связи", color = SplashSteel, fontSize = 13.sp, letterSpacing = 0.5.sp)
+            Text(text = stringResource(R.string.splash_tagline_core), color = SplashSteel, fontSize = 13.sp, letterSpacing = 0.5.sp)
         }
         Column(
             modifier = Modifier.align(Alignment.BottomCenter)
@@ -144,7 +146,7 @@ fun AppSplash(onFinished: () -> Unit) {
             }
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "APU · сеть участников",
+                text = stringResource(R.string.splash_subtitle_network),
                 color = SplashSteel,
                 fontSize = 12.sp,
                 textAlign = TextAlign.Center,
@@ -174,14 +176,14 @@ fun CoreWarmBar() {
                 .background(SplashGold.copy(alpha = 0.10f))
                 .padding(horizontal = 16.dp, vertical = 3.dp),
         ) {
-            CircularProgressIndicator(
+            ApuPremiumSpinner(
                 modifier = Modifier.size(11.dp),
                 strokeWidth = 1.5.dp,
                 color = SplashGold,
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                text = "Ядро подключается…",
+                text = stringResource(R.string.splash_connecting),
                 color = SplashGold,
                 fontSize = 12.sp,
             )

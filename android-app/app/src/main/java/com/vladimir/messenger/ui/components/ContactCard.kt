@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.components
 
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 // =============================================================================
 // CONTACTCARD.KT — Карточка контакта / чата в списке
 // =============================================================================
@@ -154,7 +156,7 @@ fun ContactCard(
             // В адресной книге важнее статус присутствия, чем техническая
             // подпись «личный чат». В остальных списках остаётся тип пузыря.
             Text(
-                text     = presenceLabel ?: kind.label,
+                text     = presenceLabel ?: stringResource(kind.labelRes),
                 style    = MaterialTheme.typography.labelSmall,
                 color    = if (presenceLabel != null && chat.isContactOnline) {
                     StatusOnline
@@ -171,7 +173,7 @@ fun ContactCard(
             // как в больших мессенджерах: сразу видно, что текст не отправлен.
             if (draftText.isNotEmpty()) {
                 Text(
-                    text     = "Черновик: $draftText",
+                    text     = stringResource(R.string.contact_draft_prefix, draftText),
                     style    = MaterialTheme.typography.bodySmall,
                     color    = Color(0xFFC62828),
                     maxLines = 1,
@@ -182,7 +184,7 @@ fun ContactCard(
                     // Раунд 155: служебные строки (гифки/стикеры) -
                     // человеческими подписями.
                     text      = com.vladimir.messenger.util.ChatPreviews.human(chat.lastMessage)
-                        ?: "Нет сообщений",
+                        ?: stringResource(R.string.contact_no_messages),
                     style     = MaterialTheme.typography.bodySmall,
                     color     = Color(0xFF5A6472),
                     maxLines  = 1,
@@ -203,7 +205,7 @@ fun ContactCard(
             ) {
                 Icon(
                     Icons.Default.Share,
-                    contentDescription = "Поделиться контактом",
+                    contentDescription = stringResource(R.string.menu_share_contact),
                     tint = Color(0xFF5A6472),
                     modifier = Modifier.size(18.dp),
                 )
@@ -233,7 +235,7 @@ fun ContactCard(
                     Spacer(modifier = Modifier.width(4.dp))
                     Icon(
                         imageVector = Icons.Filled.PushPin,
-                        contentDescription = "Закреплено в главном списке",
+                        contentDescription = stringResource(R.string.chat_pinned_desc),
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(15.dp),
                     )
