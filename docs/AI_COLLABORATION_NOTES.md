@@ -12696,7 +12696,8 @@ XML 9 / 314 / 287.
 - Correction: add fail-closed validation for content hash syntax, content/chunk bounds,
   chunk count and expiry; use `Long` for `chunkSizeBytes * MAX_CHUNKS` to avoid `Int`
   overflow; remove obsolete test code and add regressions. Run the focused release-variant
-  JVM tests before `assembleRelease` in the release workflow.
+  JVM tests before `assembleRelease` in the release workflow. The APK artifact upload was also
+  moved after APK signing/checksum: its old pre-build position could never upload the APK.
 - Verification discipline: sandbox has no Java, so local Gradle success cannot be claimed.
   Use GitHub Actions on the fixed Arena branch first; do not create/move a release tag until
   the full build is green and the exact public notes have been approved.

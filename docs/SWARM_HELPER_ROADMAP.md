@@ -204,5 +204,7 @@ The tag build failed at `:app:compileReleaseKotlin` because `Assembler.receive()
 strict manifest checks, fixes an `Int` multiplication overflow in the maximum-chunk capacity
 check, removes obsolete test code that sat outside `ContentAddressedChunksTest`, and adds
 focused regressions. The release workflow now runs the story-photo/chunk JVM suites before APK
-assembly. GitHub verification is pending; no phone, battery, load, or NAT verification has been
-performed. Do not claim device behavior or measured swarm capacity from this repair.
+assembly. The APK artifact upload was moved after signing/checksum; its previous pre-build position
+could never capture the APK. GitHub verification is pending; no phone, battery, load, or NAT
+verification has been performed. Do not claim device behavior or measured swarm capacity from this
+repair.

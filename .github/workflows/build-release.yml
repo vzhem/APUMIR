@@ -126,15 +126,7 @@ jobs:
             echo "::warning::uniffi-bindgen failed - building with the committed bindings (new core functions, if any, are NOT visible to Kotlin)"
           fi
 
-      # Свежие мост и ядро - на вкладке Actions этого прогона (30 дней), на
-      # случай если сборка APK упадёт именно на них.
-      - name: Upload APK artifact (for release)
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: app-release.apk
-          path: android-app/app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: ignore
+      # Native bridge/core snapshot for debugging this run.
       - name: Upload core bindings (debug aid)
         uses: actions/upload-artifact@v4
         continue-on-error: true
@@ -260,6 +252,16 @@ jobs:
           APK_DIR=android-app/app/build/outputs/apk/release
           (cd "$APK_DIR" && sha256sum app-release.apk > SHA256SUMS.txt)
           cat "$APK_DIR/SHA256SUMS.txt"
+
+      # Upload the assembled, signed APK from this run (also for workflow_dispatch).
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: app-release.apk
+          path: android-app/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Create Release
         if: github.event_name != 'workflow_dispatch'
