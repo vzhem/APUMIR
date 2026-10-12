@@ -210,8 +210,10 @@ could never capture the APK. API dispatch from the Arena token returned HTTP 403
 tag` failed before unit tests/APK because it assumed every GITHUB_REF was a tag. The workflow fix
 was pushed as `47bfbec`: only tag refs rewrite versionName; branch dispatches keep Gradle's
 diagnostic version. Manual run 38234091924 then passed version sync but failed in the targeted Gradle
-tests before APK assembly. The raw Actions log download again returned EOF and the test step had not
-captured its own log; shared test/build log capture and failure-tail annotation are now added for the
-next rerun. API dispatch still returns 403, so the owner must launch from the Actions UI. Local
-Gradle is unavailable because Java is absent; no phone, battery, load, or NAT verification has been
-performed. Do not claim device behavior or measured swarm capacity from this repair.
+tests before APK assembly. Run 38236089509 did the same; its 4 KiB failure annotation contained only
+Kotlin warnings. Source review found a test fixture that encoded 4,001 bytes as 5,336 Base64 chars
+(three 2,400-char chunks) but asserted completion after only two chunks; the test now supplies the
+third chunk. Failure-tail reporting now filters warnings and stays under the annotation limit. API
+dispatch still returns 403, so the owner must launch from the Actions UI. Local Gradle is unavailable
+because Java is absent; no phone, battery, load, or NAT verification has been performed. Do not
+claim device behavior or measured swarm capacity from this repair.

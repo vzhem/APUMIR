@@ -187,14 +187,15 @@ jobs:
           from pathlib import Path
           import sys
 
-          # One sizeable annotation preserves the actual compiler diagnostics;
-          # Actions limits a step to ten annotations, so emitting one per line
-          # drops the useful part of a long Gradle tail.
-          text = "\n".join(
-              Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines()[-200:]
-          )
+          # Kotlin emits many warnings before test failures. Remove them and cap
+          # the annotation below GitHub's 4 KiB message limit so the root cause survives.
+          lines = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines()[-200:]
+          lines = [line for line in lines if not line.startswith("w: ")]
+          text = "\n".join(lines[-100:])
+          if len(text) > 3500:
+              text = "...[truncated]\n" + text[-3480:]
           escaped = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-          print(f"::error title=Gradle build tail::{escaped}")
+          print(f"::error title=Gradle failure tail::{escaped}")
           PY
 
       # ---- подпись релиза -------------------------------------------------

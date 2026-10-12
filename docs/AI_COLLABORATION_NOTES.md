@@ -12732,3 +12732,17 @@ XML 9 / 314 / 287.
   existing failure-tail annotation now reports test as well as build diagnostics.
 - Next: push the log-capture change, ask the owner to rerun workflow_dispatch, inspect the actual
   Gradle failure annotation, then continue. No APK or release exists.
+
+### Manual workflow_dispatch run 38236089509: legacy story test supplied too few chunks (2026-10-12)
+
+- Run #789 passed core/UniFFI and version sync, but the targeted JVM-test step failed. The
+  annotation was capped at 4 KiB and showed only compiler warnings, so the exact JUnit report was
+  not available from the Actions API.
+- Source review found a deterministic test-fixture error in
+  `StoryPhotoPartsTest.legacyPacketsAreReadWithStrictSizeAndBase64Checks`: 4,001 raw bytes encode
+  to 5,336 Base64 characters, i.e. three 2,400-character chunks, but the test asserted completion
+  after supplying only chunks 1 and 0. The test now supplies chunk 2 before asserting completion.
+- The failure-tail annotation now drops Kotlin `w:` lines and caps the message below GitHub's
+  annotation limit, so a remaining failure should expose its root cause.
+- Next: validate, push these fixes, and have the owner rerun workflow_dispatch. The full APK build
+  has not yet run; do not claim CI success or a release.

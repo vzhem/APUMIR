@@ -108,8 +108,10 @@ class StoryPhotoPartsTest {
         val photo = ContentAddressedChunks.encodeBase64(ByteArray(4_001) { (it * 3).toByte() })
         val chunks = photo.chunked(StoryPhotoParts.CHUNK)
         val parts = StoryPhotoParts()
+        assertEquals(3, chunks.size)
         assertNull(parts.receiveLegacy(author, "old-story", 1, chunks.size, chunks[1], now))
-        assertEquals(photo, parts.receiveLegacy(author, "old-story", 0, chunks.size, chunks[0], now + 1))
+        assertNull(parts.receiveLegacy(author, "old-story", 0, chunks.size, chunks[0], now + 1))
+        assertEquals(photo, parts.receiveLegacy(author, "old-story", 2, chunks.size, chunks[2], now + 2))
 
         assertNull(parts.receiveLegacy(author, "bad", 0, 2, "@@@@", now))
         assertNull(parts.receiveLegacy(author, "bad", 0, 2, "A".repeat(StoryPhotoParts.CHUNK + 1), now))
