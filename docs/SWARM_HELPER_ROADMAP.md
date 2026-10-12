@@ -181,7 +181,9 @@ cards НЕ реализованы сознательно (см. выше); во�
 - .330–.336 сохранены в истории/дереве fixed-ветки. Новый tag CI `38246638460` для v11.74.337
   прошёл на объединённом дереве: helper/core suites, 3 native ABI, UniFFI, Android targeted tests,
   assemble/sign/checksum и загрузка assets. v11.74.337 опубликован как Latest; старые теги/assets
-  не перемещались. CI не заменяет тест на физических устройствах.
+  не перемещались. CI не заменяет тест на физических устройствах. После .337 добавлен release
+  ancestry gate против последнего stable tag; он ещё не проверен tag-run (см.
+  `docs/RELEASE_LINEAGE_SAFETY.md`).
 
 ## Этап 3 — фотоистории с content-addressed чанками (частично реализовано)
 

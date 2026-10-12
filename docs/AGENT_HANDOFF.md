@@ -28,6 +28,10 @@ retaining .330–.336. Old tags/assets were not moved.
   APK/checksum were not downloaded for independent local verification.
 - `main` remains at v11.74.206; the CI generated-bindings back-push did not move it. Work and pushes
   remain on the fixed Arena branch.
+- Added a release-lineage gate to `.github/workflows/build-release.yml`: a tag must descend from the
+  latest published stable release, and Actions writes the baseline diff/path list to its summary.
+  This was added after .337 and has not yet been exercised by a tag run. See
+  `docs/RELEASE_LINEAGE_SAFETY.md`.
 
 ## Phone/helper scope and unverified work
 

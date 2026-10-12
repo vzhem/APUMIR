@@ -12861,3 +12861,14 @@ unchanged.
   the returned refusal decision is not enforced by the transport. The work is a bounded scaffold,
   not Stage 4 completion. No CI has run after this follow-up because local Java/Gradle/Cargo are
   absent; verify the new test in the next tag build before publication.
+
+### Release-lineage prevention gate (added after v11.74.337, 2026-10-12)
+
+- Added a pre-build step to the tag release workflow: fetch complete Git history, query GitHub's latest
+  published stable release (not `main`), and fail closed unless the candidate tag commit descends from
+  that release's commit. It also writes a baseline diff-stat and changed-path list to Actions summary.
+- The diagnostic `workflow_dispatch` path skips the ancestry gate because it cannot publish a release.
+- This gate was committed after the `.337` tag run, so it has not yet been exercised in GitHub Actions.
+  Validate it on the next tag before relying on it. Current details/checklist: `docs/RELEASE_LINEAGE_SAFETY.md`.
+- Recommended repository rulesets (protect release branch, prohibit force-push/deletion of `v*` tags,
+  require CI checks) are administrative settings and remain unverified; do not claim they are active.

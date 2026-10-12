@@ -49,6 +49,49 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          # The lineage gate below must be able to walk back to the last stable tag.
+          fetch-depth: 0
+
+      # Prevent a tag from rebuilding a branch that silently forked before the
+      # latest public release (the v330-from-v206 failure mode). Compare with
+      # GitHub's latest published stable release, not `main`, which may lag.
+      - name: Require ancestry from the latest stable release
+        if: github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          CURRENT_TAG="${GITHUB_REF#refs/tags/}"
+          LATEST_TAG="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq .tag_name)"
+          if [[ -z "$CURRENT_TAG" || -z "$LATEST_TAG" ]]; then
+            echo "::error::Could not identify current tag and latest published stable release"
+            exit 1
+          fi
+          if ! git rev-parse --verify --quiet "refs/tags/${LATEST_TAG}^{commit}" >/dev/null; then
+            echo "::error::Latest stable tag $LATEST_TAG is missing from the full checkout"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "refs/tags/${LATEST_TAG}^{commit}" "$GITHUB_SHA"; then
+            echo "::error::Release tag $CURRENT_TAG does not descend from latest stable $LATEST_TAG; refusing a disconnected release line"
+            exit 1
+          fi
+          echo "::notice::Release tag $CURRENT_TAG descends from latest stable $LATEST_TAG"
+          {
+            echo "### Release lineage and source delta"
+            echo "- Candidate tag: $CURRENT_TAG"
+            echo "- Latest published stable baseline: $LATEST_TAG"
+            echo "- Baseline-to-candidate diff:"
+            echo '```text'
+            git diff --shortstat "refs/tags/${LATEST_TAG}^{commit}" "$GITHUB_SHA"
+            git diff --name-status "refs/tags/${LATEST_TAG}^{commit}" "$GITHUB_SHA" > "$RUNNER_TEMP/release-paths.txt"
+            sed -n '1,200p' "$RUNNER_TEMP/release-paths.txt"
+            PATH_COUNT="$(wc -l < "$RUNNER_TEMP/release-paths.txt")"
+            if [[ "$PATH_COUNT" -gt 200 ]]; then
+              echo "... $((PATH_COUNT - 200)) more changed paths omitted"
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
