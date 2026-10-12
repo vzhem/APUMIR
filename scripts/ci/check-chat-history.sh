@@ -71,6 +71,8 @@ DIAG_REPORT="$BASE/main/java/com/vladimir/messenger/data/diagnostics/Diagnostics
 DIAG_MQTT="$BASE/main/java/com/vladimir/messenger/data/diagnostics/MqttLinkText.kt"
 DIAG_REPORT_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReportTest.kt"
 DIAG_MQTT_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/MqttLinkTextTest.kt"
+UPDATE_POLICY="$BASE/main/java/com/vladimir/messenger/service/UpdateCheckPolicy.kt"
+UPDATE_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/service/UpdateCheckerTest.kt"
 # Сроки хранения «потеряшек» (владелец 2026-10-07: тяжёлое — сутки, текст и
 # малое — неделя). Файл чистый, поэтому проверяется здесь же на runner.
 RETENTION="$BASE/main/java/com/vladimir/messenger/data/file/FileTransferRetention.kt"
@@ -81,6 +83,7 @@ RETENTION_TEST="$BASE/test/java/com/vladimir/messenger/data/file/FileTransferRet
     "$MODEL/Message.kt" "$MODEL/MessageStatus.kt" "$MODEL/MessageChannel.kt" "$OBSERVER" "$TEST" "$PIN_POLICY" "$PIN_TEST" "$SPLASH_MATH" "$SPLASH_TEST" "$SETTINGS_LAYOUT" "$SETTINGS_TEST" "$HEART_WIRE" "$HEART_TEST" "$GROUP_PERMS" "$GROUP_PERMS_TEST" \
     "$POST_MANIFEST" "$GROUP_WIRE" "$GROUP_WIRE_TEST" "$GROUP_WIRE_UPDATE_TEST" \
     "$DIAG_REPORT" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
+    "$UPDATE_POLICY" "$UPDATE_POLICY_TEST" \
     "$RETENTION" "$RETENTION_TEST"
 "$JAVA" -cp "$OUT/classes:$CP" org.junit.runner.JUnitCore \
     com.vladimir.messenger.ui.screens.chat.ChatHistoryObserverTest \
@@ -93,4 +96,5 @@ RETENTION_TEST="$BASE/test/java/com/vladimir/messenger/data/file/FileTransferRet
     com.vladimir.messenger.data.group.GroupWireUpdateTest \
     com.vladimir.messenger.data.diagnostics.DiagnosticsReportTest \
     com.vladimir.messenger.data.diagnostics.MqttLinkTextTest \
+    com.vladimir.messenger.service.UpdateCheckerTest \
     com.vladimir.messenger.data.file.FileTransferRetentionTest

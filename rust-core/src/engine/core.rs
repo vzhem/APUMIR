@@ -280,15 +280,16 @@ fn restore_relay_custody(
                     Err(RelayQueueError::OwnQueueFull { .. }) => own_full += 1,
                 }
             }
-            if total > 0 || restored > 0 {
-                tracing::info!(
-                    "MESH durable: restored {}/{} relay record(s) after startup (своих {}, чужих {})",
-                    restored,
-                    total,
-                    own_restored,
-                    restored - own_restored
-                );
-            }
+            // Always emit a startup snapshot, including zero. Diagnostics use it to
+            // distinguish this core lifetime from older counters still in logcat.
+            tracing::info!(
+                "MESH durable: restored {}/{} relay record(s) after startup (своих {}, чужих {}, own_capacity_evictions={})",
+                restored,
+                total,
+                own_restored,
+                restored - own_restored,
+                queue.stats().own_capacity_evictions
+            );
             if transient_dropped > 0 {
                 // Отдельной строкой: это не «потеря», а уборка служебного хлама,
                 // накопленного прошлыми сборками (сигналы и пакеты передачи
@@ -4033,15 +4034,16 @@ impl P2PCore {
                     // общее число ничего не говорило о своей переписке — теперь
                     // это видно и в журнале процесса, и в отчёте «Логи».
                     let stats = q.stats();
-                    if stats.total > 0 {
+                    if stats.total > 0 || stats.own_capacity_evictions > 0 {
                         tracing::info!(
-                            "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={} снято-по-ACK={}",
+                            "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={} снято-по-ACK={} вытеснено-своих={}",
                             stats.own,
                             stats.own_transients,
                             stats.foreign,
                             stats.total,
                             stats.recipients,
-                            q.delivered_removed()
+                            q.delivered_removed(),
+                            stats.own_capacity_evictions
                         );
                     }
                 }

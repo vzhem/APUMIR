@@ -133,17 +133,54 @@ class UpdateChecker @Inject constructor(
      * сведениями, а APK отдаёт со своего домена (/update/apk). Так обновление
      * находится и скачивается без VPN в жёстких сетях.
      */
-    suspend fun checkForUpdate(currentVersion: String, manual: Boolean = false): ReleaseInfo? =
-        withContext(Dispatchers.IO) {
-            checkGitHub(currentVersion) ?: relayIfDue(currentVersion, manual)
+    suspend fun checkForUpdate(
+        currentVersion: String,
+        manual: Boolean = false,
+        trigger: String = if (manual) "manual" else "foreground",
+    ): ReleaseInfo? = withContext(Dispatchers.IO) {
+        val trace = UpdateDiagnosticsStore.begin(context, currentVersion, trigger)
+        try {
+            val githubRelease = checkGitHub(currentVersion, trace)
+            if (githubRelease != null) {
+                trace.outcome = "update_available"
+                return@withContext githubRelease
+            }
+            // A valid GitHub response saying «up to date» is authoritative; no
+            // need to make a second request to the relay.
+            if (!shouldTryRelayFallback(trace.githubOutcome)) {
+                trace.outcome = resolveUpdateCheckOutcome(
+                    releaseFound = false,
+                    githubOutcome = trace.githubOutcome,
+                    relayOutcome = trace.relayOutcome,
+                )
+                return@withContext null
+            }
+
+            val relayRelease = relayIfDue(currentVersion, manual, trace)
+            trace.outcome = resolveUpdateCheckOutcome(
+                releaseFound = relayRelease != null,
+                githubOutcome = trace.githubOutcome,
+                relayOutcome = trace.relayOutcome,
+            )
+            relayRelease
+        } catch (error: Exception) {
+            trace.outcome = "unavailable"
+            throw error
+        } finally {
+            UpdateDiagnosticsStore.finish(context, trace)
         }
+    }
 
     /**
      * Раунд 195: relay-проверка по расписанию (авто) или сразу (кнопка).
      * Метка времени ставится ДО запроса: недоступный/лимитированный воркер
      * не долбится каждым открытием приложения - одну попытку за окно.
      */
-    private suspend fun relayIfDue(currentVersion: String, manual: Boolean): ReleaseInfo? {
+    private suspend fun relayIfDue(
+        currentVersion: String,
+        manual: Boolean,
+        trace: UpdateDiagnosticsStore.CheckTrace,
+    ): ReleaseInfo? {
         val prefs = context.getSharedPreferences(RELAY_CHECK_PREFS, Context.MODE_PRIVATE)
         if (!manual) {
             val now = System.currentTimeMillis()
@@ -155,126 +192,148 @@ class UpdateChecker @Inject constructor(
             }
             if (now - prefs.getLong(KEY_RELAY_CHECK_AT, 0L) < RELAY_CHECK_MIN_MS + jitter) {
                 Log.d(TAG, "relay check skipped: not due yet")
+                UpdateDiagnosticsStore.markSource(trace, "relay", "not_due")
                 return null
             }
             prefs.edit().putLong(KEY_RELAY_CHECK_AT, now).apply()
         }
-        return checkViaRelay(currentVersion)
+        return checkViaRelay(currentVersion, trace)
     }
 
-    /** Прямой запрос к GitHub Releases API (как раньше; null — недоступен). */
-    private suspend fun checkGitHub(currentVersion: String): ReleaseInfo? = withContext(Dispatchers.IO) {
+    /** Direct query to GitHub Releases API. */
+    private suspend fun checkGitHub(
+        currentVersion: String,
+        trace: UpdateDiagnosticsStore.CheckTrace,
+    ): ReleaseInfo? = withContext(Dispatchers.IO) {
         try {
             Log.i(TAG, "Checking for updates. Current: $currentVersion")
-            
             val url = "$GITHUB_API/$GITHUB_USER/$GITHUB_REPO/releases/latest"
-            val response = httpGet(url) ?: return@withContext null
-            
+            val response = httpGet(url, trace, "github") ?: return@withContext null
             val json = JSONObject(response)
-            val latestVersion = json.getString("tag_name")
-            
+            val latestVersion = json.optString("tag_name", "").trim()
+            if (latestVersion.isBlank()) {
+                UpdateDiagnosticsStore.markSource(trace, "github", "invalid_response")
+                return@withContext null
+            }
+            UpdateDiagnosticsStore.markSource(trace, "github", "response_received", latestVersion)
             Log.i(TAG, "Latest version: $latestVersion")
-            
-            // Сравниваем числовые компоненты версии (11.16 > 11.9).
-            if (isVersionNewer(currentVersion, latestVersion)) {
-                Log.i(TAG, "New version available: $latestVersion")
-                
-                // Берём только APK с ожидаемым именем. GitHub не гарантирует порядок
-                // assets, поэтому "первый .apk" может оказаться ручной/устаревшей сборкой.
-                val assets = json.getJSONArray("assets")
-                val canonicalName = "APU-$latestVersion.apk"
-                val oldCanonicalName = "P2P-Messenger-$latestVersion.apk"
-                var canonicalUrl: String? = null
-                var legacyUrl: String? = null
-                var apkSha256: String? = null
-                var patchUrl: String? = null
-                var patchFrom: String? = null
-                for (i in 0 until assets.length()) {
-                    val asset = assets.getJSONObject(i)
-                    val name = asset.getString("name")
-                    when {
-                        name.equals(canonicalName, ignoreCase = true) ||
-                            name.equals(oldCanonicalName, ignoreCase = true) -> {
-                            canonicalUrl = asset.getString("browser_download_url")
-                            // GitHub отдаёт «sha256:<hex>» - пригодится патчу.
+
+            // Compare numeric components (11.16 > 11.9), not lexicographic strings.
+            if (!isVersionNewer(currentVersion, latestVersion)) {
+                Log.i(TAG, "Current version is up to date")
+                UpdateDiagnosticsStore.markSource(trace, "github", "up_to_date", latestVersion)
+                return@withContext null
+            }
+            Log.i(TAG, "New version available: $latestVersion")
+
+            // Use a known asset name; GitHub's asset order is not guaranteed.
+            val assets = json.optJSONArray("assets")
+                ?: run {
+                    UpdateDiagnosticsStore.markSource(trace, "github", "asset_missing", latestVersion)
+                    return@withContext null
+                }
+            val canonicalName = "APU-$latestVersion.apk"
+            val oldCanonicalName = "P2P-Messenger-$latestVersion.apk"
+            var canonicalUrl: String? = null
+            var legacyUrl: String? = null
+            var apkSha256: String? = null
+            var patchUrl: String? = null
+            var patchFrom: String? = null
+            for (i in 0 until assets.length()) {
+                val asset = assets.optJSONObject(i) ?: continue
+                val name = asset.optString("name", "")
+                when {
+                    name.equals(canonicalName, ignoreCase = true) ||
+                        name.equals(oldCanonicalName, ignoreCase = true) -> {
+                        canonicalUrl = asset.optString("browser_download_url", "").takeIf { it.isNotBlank() }
+                        apkSha256 = asset.optString("digest", "")
+                            .removePrefix("sha256:").takeIf { it.length == 64 }
+                    }
+                    name.equals("app-release.apk", ignoreCase = true) -> {
+                        legacyUrl = asset.optString("browser_download_url", "").takeIf { it.isNotBlank() }
+                        if (apkSha256 == null) {
                             apkSha256 = asset.optString("digest", "")
                                 .removePrefix("sha256:").takeIf { it.length == 64 }
                         }
-                        name.equals("app-release.apk", ignoreCase = true) -> {
-                            legacyUrl = asset.getString("browser_download_url")
-                            if (apkSha256 == null) {
-                                apkSha256 = asset.optString("digest", "")
-                                    .removePrefix("sha256:").takeIf { it.length == 64 }
-                            }
-                        }
-                        name.startsWith("patch-") && name.endsWith(".bspatch") -> {
-                            // patch-11.74.27-to-11.74.28.bspatch
-                            val body = name.removePrefix("patch-")
-                                .removeSuffix(".bspatch")
-                            val from = body.substringBefore("-to-")
-                            val to = body.substringAfter("-to-", "")
-                            if (to == com.vladimir.messenger.data.update.ApkUpdate
-                                .normalize(latestVersion)
-                            ) {
-                                patchUrl = asset.getString("browser_download_url")
-                                patchFrom = from
-                            }
+                    }
+                    name.startsWith("patch-") && name.endsWith(".bspatch") -> {
+                        // patch-11.74.27-to-11.74.28.bspatch
+                        val body = name.removePrefix("patch-").removeSuffix(".bspatch")
+                        val from = body.substringBefore("-to-")
+                        val to = body.substringAfter("-to-", "")
+                        if (to == com.vladimir.messenger.data.update.ApkUpdate.normalize(latestVersion)) {
+                            patchUrl = asset.optString("browser_download_url", "").takeIf { it.isNotBlank() }
+                            patchFrom = from
                         }
                     }
                 }
-                // Older workflows use app-release.apk for the Actions-built artifact.
-                // Prefer it when a release also contains a manual canonical upload.
-                val downloadUrl = legacyUrl ?: canonicalUrl
-                
-                if (downloadUrl == null) {
-                    Log.w(TAG, "No supported APK asset found in release")
-                    return@withContext null
-                }
-                
-                ReleaseInfo(
-                    version = latestVersion,
-                    downloadUrl = downloadUrl,
-                    releaseNotes = humanNotes(json.optString("body", "")),
-                    publishedAt = json.optString("published_at", ""),
-                    patchUrl = patchUrl,
-                    patchFrom = patchFrom,
-                    apkSha256 = apkSha256,
-                )
-            } else {
-                Log.i(TAG, "Current version is up to date")
-                null
             }
-        } catch (e: Exception) {
-            Log.d(TAG, "Check for update skipped (no network)")  // тихая обработка
+            // Older Actions workflows name the release APK app-release.apk.
+            val downloadUrl = legacyUrl ?: canonicalUrl
+            if (downloadUrl == null) {
+                Log.w(TAG, "No supported APK asset found in release")
+                UpdateDiagnosticsStore.markSource(trace, "github", "asset_missing", latestVersion)
+                return@withContext null
+            }
+            UpdateDiagnosticsStore.markSource(trace, "github", "update_available", latestVersion)
+            ReleaseInfo(
+                version = latestVersion,
+                downloadUrl = downloadUrl,
+                releaseNotes = humanNotes(json.optString("body", "")),
+                publishedAt = json.optString("published_at", ""),
+                patchUrl = patchUrl,
+                patchFrom = patchFrom,
+                apkSha256 = apkSha256,
+            )
+        } catch (error: Exception) {
+            Log.d(TAG, "GitHub update check failed: ${error.message}")
+            UpdateDiagnosticsStore.markSource(
+                trace,
+                "github",
+                if (trace.githubHttpStatus == 200) "invalid_response" else "network_error",
+            )
             null
         }
     }
 
     /**
-     * Запасной путь: тот же вопрос через наш relay-домен. Отвечает worker
-     * (`/update/latest`): tag_name, notes, published_at и apk_url — ссылка
-     * на `/update/apk` того же домена, чтобы скачивание тоже прошло сквозь
-     * белый список. null — relay недоступен или версии нет/не новее.
+     * Fallback via the relay worker. Only aggregate outcome/version/status are
+     * retained for diagnostics; its URL and response body are not persisted.
      */
-    private suspend fun checkViaRelay(currentVersion: String): ReleaseInfo? = withContext(Dispatchers.IO) {
+    private suspend fun checkViaRelay(
+        currentVersion: String,
+        trace: UpdateDiagnosticsStore.CheckTrace,
+    ): ReleaseInfo? = withContext(Dispatchers.IO) {
         try {
-            val response = httpGet("$RELAY_BASE/update/latest") ?: return@withContext null
+            val response = httpGet("$RELAY_BASE/update/latest", trace, "relay")
+                ?: return@withContext null
             val json = JSONObject(response)
-            val latestVersion = json.optString("tag_name", "")
-            if (latestVersion.isBlank() || !isVersionNewer(currentVersion, latestVersion)) {
-                Log.i(TAG, "Relay: no newer version (${latestVersion.ifBlank { "?" }})")
+            val latestVersion = json.optString("tag_name", "").trim()
+            if (latestVersion.isBlank()) {
+                UpdateDiagnosticsStore.markSource(trace, "relay", "invalid_response")
+                return@withContext null
+            }
+            if (!isVersionNewer(currentVersion, latestVersion)) {
+                Log.i(TAG, "Relay: no newer version ($latestVersion)")
+                UpdateDiagnosticsStore.markSource(trace, "relay", "up_to_date", latestVersion)
                 return@withContext null
             }
             val apkUrl = json.optString("apk_url", "").ifBlank { "$RELAY_BASE/update/apk" }
             Log.i(TAG, "New version available via relay: $latestVersion")
+            UpdateDiagnosticsStore.markSource(trace, "relay", "update_available", latestVersion)
             ReleaseInfo(
                 version = latestVersion,
                 downloadUrl = apkUrl,
                 releaseNotes = humanNotes(json.optString("notes", "")),
-                publishedAt = json.optString("published_at", "")
+                publishedAt = json.optString("published_at", ""),
             )
-        } catch (e: Exception) {
-            Log.d(TAG, "Relay update check skipped: ${e.message}")
+        } catch (error: Exception) {
+            Log.d(TAG, "Relay update check failed: ${error.message}")
+            UpdateDiagnosticsStore.markSource(
+                trace,
+                "relay",
+                if (trace.relayHttpStatus == 200) "invalid_response" else "network_error",
+            )
             null
         }
     }
@@ -489,54 +548,39 @@ class UpdateChecker @Inject constructor(
         }
     }
 
-    private fun httpGet(url: String): String? {
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            setRequestProperty("Accept", "application/vnd.github.v3+json")
-            setRequestProperty("User-Agent", "APU-Update-Checker")
-            connectTimeout = HTTP_TIMEOUT
-            readTimeout = HTTP_TIMEOUT
+    private fun httpGet(
+        url: String,
+        trace: UpdateDiagnosticsStore.CheckTrace,
+        source: String,
+    ): String? {
+        val conn = try {
+            (URL(url).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                setRequestProperty("Accept", "application/vnd.github.v3+json")
+                setRequestProperty("User-Agent", "APU-Update-Checker")
+                connectTimeout = HTTP_TIMEOUT
+                readTimeout = HTTP_TIMEOUT
+            }
+        } catch (error: Exception) {
+            UpdateDiagnosticsStore.markNetworkFailure(trace, source)
+            Log.d(TAG, "Update endpoint unavailable: ${error.message}")
+            return null
         }
-        
+
         return try {
             val code = conn.responseCode
+            UpdateDiagnosticsStore.markHttp(trace, source, code)
             if (code != 200) {
                 Log.w(TAG, "HTTP GET $url returned $code")
                 return null
             }
             BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
-        } catch (e: Exception) {
-            Log.d(TAG, "Network unavailable: ${e.message}")  // тихая обработка, не ошибка
+        } catch (error: Exception) {
+            UpdateDiagnosticsStore.markNetworkFailure(trace, source)
+            Log.d(TAG, "Update endpoint unavailable: ${error.message}")
             null
         } finally {
             conn.disconnect()
         }
     }
-}
-
-internal fun isVersionNewer(current: String, latest: String): Boolean {
-    fun parse(value: String): List<Int>? {
-        val normalized = value
-            .trim()
-            .removePrefix("v")
-            .removePrefix("V")
-            .substringBefore('-')
-            .substringBefore('+')
-
-        if (normalized.isBlank()) return null
-        return normalized.split('.').map { part ->
-            part.toIntOrNull() ?: return null
-        }
-    }
-
-    val currentParts = parse(current) ?: return false
-    val latestParts = parse(latest) ?: return false
-    val componentCount = maxOf(currentParts.size, latestParts.size)
-
-    for (index in 0 until componentCount) {
-        val currentPart = currentParts.getOrElse(index) { 0 }
-        val latestPart = latestParts.getOrElse(index) { 0 }
-        if (latestPart != currentPart) return latestPart > currentPart
-    }
-    return false
 }

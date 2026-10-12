@@ -132,7 +132,7 @@ jobs:
         working-directory: ./rust-core
         run: |
           set -o pipefail
-          for suite in helper_policy helper_quality helper_delivery peer_assistance peer_exchange direct_transport; do
+          for suite in helper_policy helper_quality helper_delivery peer_assistance peer_exchange direct_transport mqtt_fanout; do
             LOG="$RUNNER_TEMP/helper-$suite.log"
             if ! RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --features mqtt-dual-broker --lib "network::$suite::tests" > "$LOG" 2>&1; then
               tail -150 "$LOG"
@@ -145,6 +145,16 @@ jobs:
           for i in range(0, len(text), 3000):
               print(f"::error title=Helper routing tests part {i // 3000 + 1}::{text[i:i + 3000]}")
           PY
+              exit 1
+            fi
+            tail -25 "$LOG"
+            grep '^test result:' "$LOG" >> "$GITHUB_STEP_SUMMARY"
+          done
+          # STUN fallback is pure/deterministic; don't depend on public DNS or live servers.
+          for test in stun_fallback_uses_next_endpoint_after_a_temporary_refusal all_stun_refusals_return_a_recoverable_error_after_all_attempts; do
+            LOG="$RUNNER_TEMP/stun-$test.log"
+            if ! RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --features mqtt-dual-broker --lib "network::ice::tests::$test" > "$LOG" 2>&1; then
+              tail -150 "$LOG"
               exit 1
             fi
             tail -25 "$LOG"

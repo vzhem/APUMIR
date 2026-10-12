@@ -48,6 +48,7 @@ class UpdateNotifier @Inject constructor(
         saveOfficialRelease(release)
         postOnce(
             version = release.version,
+            kind = "official",
             text = "Версия ${displayVersion(release.version)} доступна. Нажмите, чтобы скачать и установить.",
         )
     }
@@ -60,6 +61,7 @@ class UpdateNotifier @Inject constructor(
         val delivery = if (compact) "Доступен компактный пакет" else "Сосед раздаёт"
         postOnce(
             version = version,
+            kind = "peer",
             text = "$delivery обновления ${displayVersion(version)}. Нажмите, затем откройте Настройки → Обновления.",
         )
     }
@@ -120,15 +122,23 @@ class UpdateNotifier @Inject constructor(
         prefs().edit().putString(KEY_OFFICIAL_RELEASE, json.toString()).apply()
     }
 
-    private fun postOnce(version: String, text: String) {
+    private fun postOnce(version: String, kind: String, text: String) {
         val prefs = prefs()
-        if (prefs.getString(KEY_LAST_NOTIFIED_VERSION, null) == version) return
+        if (prefs.getString(KEY_LAST_NOTIFIED_VERSION, null) == version) {
+            UpdateDiagnosticsStore.recordNotification(context, version, kind, "already_notified")
+            return
+        }
         if (!canPostNotifications()) {
             Log.i(TAG, "Update ${displayVersion(version)} found, notification permission is unavailable")
+            UpdateDiagnosticsStore.recordNotification(context, version, kind, "permission_blocked")
             return
         }
 
         ensureChannel()
+        if (!isUpdateChannelEnabled()) {
+            UpdateDiagnosticsStore.recordNotification(context, version, kind, "channel_blocked")
+            return
+        }
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_OPEN_UPDATE, true)
@@ -152,9 +162,18 @@ class UpdateNotifier @Inject constructor(
         runCatching {
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
             prefs.edit().putString(KEY_LAST_NOTIFIED_VERSION, version).apply()
+            UpdateDiagnosticsStore.recordNotification(context, version, kind, "posted")
         }.onFailure { error ->
             Log.w(TAG, "Could not post update notification: ${error.message}")
+            UpdateDiagnosticsStore.recordNotification(context, version, kind, "post_failed")
         }
+    }
+
+    private fun isUpdateChannelEnabled(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
+        val channel = manager.getNotificationChannel(CHANNEL_ID) ?: return true
+        return channel.importance != NotificationManager.IMPORTANCE_NONE
     }
 
     private fun canPostNotifications(): Boolean {
