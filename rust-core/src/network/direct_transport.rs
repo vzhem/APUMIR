@@ -431,6 +431,12 @@ impl DirectTransport {
         self.shared.pool.get(peer_id.as_bytes()).await.is_some()
     }
 
+    /// Purely local pool check: an already-open direct connection is enough
+    /// to defer idle history probes, regardless of whether it is a contact.
+    pub async fn has_any_connection(&self) -> bool {
+        self.shared.pool.len().await > 0
+    }
+
     /// Забыть соединение с узлом: следующая отправка откроет новое.
     pub fn forget(&self, peer_id: &str) {
         let _ = self.tx.try_send(Command::Forget {

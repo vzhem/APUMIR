@@ -1,4 +1,9 @@
-//! Азбука адресов: постоянный файл «node_id → последний известный адрес».
+//! Азбука адресов: последний адрес + приватная история проверенных адресов.
+//!
+//! История НЕ рассылается по рою: для фона годятся только адреса, на которых
+//! лично состоялся подписанный APUX1-обмен по настоящему QUIC-соединению.
+//! Объявления MQTT/DHT и сообщения чужих узлов остаются подсказками, не
+//! доказательством живого маршрута. Сохранённый адрес не означает «в сети».
 //!
 //! Карта — `docs/ADDRESS_BOOK.md` (задача владельца 2026-09-18):
 //! все адреса сейчас живут только в памяти (`peer_addrs`), после
@@ -18,7 +23,7 @@
 //!
 //! Философия надёжности: азбука НИКОГДА не становится причиной
 //! падения/задержки движка — любая ошибка IO = warning и работа в память.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -27,7 +32,18 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-pub const BOOK_VERSION: u8 = 1;
+use crate::network::peer_exchange::{is_public_endpoint, valid_node_id};
+
+pub const BOOK_VERSION: u8 = 1; // расширение файла обратно совместимо: старые APK игнорируют history
+/// Только доказанные прямой подписью публичные адреса. После 30 дней не пробуем.
+pub const HISTORY_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
+pub const HISTORY_PER_PEER: usize = 4;
+pub const HISTORY_MAX_ENTRIES: usize = 2048;
+/// Повторная проверка одного и того же адреса за час не делает его «любимым».
+pub const HISTORY_HIT_INTERVAL_MS: i64 = 60 * 60 * 1000;
+/// Провал подключения не уничтожает историю: просто не сканируем снова в этот час.
+pub const HISTORY_FAILURE_COOLDOWN_MS: i64 = 60 * 60 * 1000;
+pub const HISTORY_PROBE_INTERVAL_MS: i64 = 60 * 60 * 1000;
 /// Узел, которого не видели 30 дней, убираем при следующей записи.
 pub const ENTRY_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 /// Больше «своих» у абонента физически не будет; файл ~100 КБ.
@@ -42,10 +58,81 @@ struct Entry {
     seen: i64,
 }
 
+/// Only a directly authenticated, session-bound peer exchange can add/increase this.
+/// Never exported to PEX gossip, HTTP registry, or the public contact list.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct HistoryEntry {
+    id: String,
+    addr: String,
+    signing_key: [u8; 32],
+    verified_at_ms: i64,
+    hits: u16,
+    #[serde(default)] last_hit_at_ms: i64,
+    #[serde(default)] failed_at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedAddress {
+    pub id: String,
+    pub addr: SocketAddr,
+    pub verified_at_ms: i64,
+    pub hits: u16,
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct FileV1 {
     v: u8,
     entries: Vec<Entry>,
+    // Additive v1 field: older APKs ignore it and continue reading the
+    // current-address list. Rollback may forget history but never addresses.
+    #[serde(default)]
+    history: Vec<HistoryEntry>,
+    #[serde(default)]
+    last_history_probe_ms: i64,
+}
+
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+
+fn valid_history_address(record: &HistoryEntry, now: i64) -> Option<SocketAddr> {
+    if !valid_node_id(&record.id) || record.hits == 0 || record.verified_at_ms <= 0
+        || record.verified_at_ms > now || now.saturating_sub(record.verified_at_ms) > HISTORY_TTL_MS
+        || record.signing_key == [0; 32]
+    { return None; }
+    record.addr.parse::<SocketAddr>().ok().filter(|addr| is_public_endpoint(*addr))
+}
+
+/// A recently verified address wins; within a recency bucket the address used
+/// successfully more often wins. These are priorities, NOT availability odds.
+fn history_rank(record: &HistoryEntry, now: i64) -> (u8, u16, i64) {
+    let age = now.saturating_sub(record.verified_at_ms);
+    let freshness = if age <= 2 * 60 * 60 * 1000 { 4 }
+        else if age <= DAY_MS { 3 } else if age <= 7 * DAY_MS { 2 } else { 1 };
+    (freshness, record.hits, record.verified_at_ms)
+}
+
+fn trim_history(history: &mut HashMap<(String, SocketAddr), HistoryEntry>, now: i64) {
+    history.retain(|_, record| valid_history_address(record, now).is_some());
+    // The newest verified route must survive even if four old, frequently
+    // used addresses have more hits: a newly roaming phone needs a way back.
+    let mut newest: HashMap<String, (SocketAddr, i64)> = HashMap::new();
+    for ((id, addr), record) in history.iter() {
+        if newest.get(id).map(|(old_addr, at)|
+            record.verified_at_ms > *at || (record.verified_at_ms == *at && addr > old_addr)
+        ).unwrap_or(true) {
+            newest.insert(id.clone(), (*addr, record.verified_at_ms));
+        }
+    }
+    let reserved: HashSet<_> = newest.into_iter().map(|(id, (addr, _))| (id, addr)).collect();
+    let mut ranked: Vec<_> = history.iter().map(|(key, record)|
+        (key.clone(), (reserved.contains(key), history_rank(record, now)))).collect();
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    let mut per_peer: HashMap<String, usize> = HashMap::new();
+    let mut kept = 0;
+    for (key, _) in ranked {
+        let count = per_peer.entry(key.0.clone()).or_default();
+        if *count >= HISTORY_PER_PEER || kept >= HISTORY_MAX_ENTRIES { history.remove(&key); }
+        else { *count += 1; kept += 1; }
+    }
 }
 
 pub struct AddressBook {
@@ -53,6 +140,9 @@ pub struct AddressBook {
     /// молча не пишется.
     path: Option<PathBuf>,
     entries: Mutex<HashMap<String, Entry>>,
+    history: Mutex<HashMap<(String, SocketAddr), HistoryEntry>>,
+    write_lock: Mutex<()>,
+    last_history_probe_ms: AtomicI64,
     last_save_ms: AtomicI64,
     generation: AtomicU64,
 }
@@ -63,6 +153,8 @@ impl AddressBook {
     /// предупреждение и пустая азбука (перезаполнится за минуты).
     pub fn open(path: Option<PathBuf>) -> Self {
         let mut entries: HashMap<String, Entry> = HashMap::new();
+        let mut history: HashMap<(String, SocketAddr), HistoryEntry> = HashMap::new();
+        let mut last_history_probe_ms = 0;
         if let Some(ref p) = path {
             match fs::read_to_string(p) {
                 Ok(text) => match serde_json::from_str::<FileV1>(&text) {
@@ -74,6 +166,21 @@ impl AddressBook {
                                     continue;
                                 }
                                 entries.insert(entry.id.clone(), entry);
+                            }
+                            // Histories from disk are hints only: even a recent timestamp is
+                            // never considered online. Verify ID, endpoint and owner key again.
+                            for record in file.history.into_iter().take(HISTORY_MAX_ENTRIES * 4) {
+                                if let Some(addr) = valid_history_address(&record, now_ms) {
+                                    let key = (record.id.clone(), addr);
+                                    let replace = history.get(&key).map(|old|
+                                        old.verified_at_ms < record.verified_at_ms).unwrap_or(true);
+                                    if replace { history.insert(key, record); }
+                                }
+                            }
+                            trim_history(&mut history, now_ms);
+                            // A clock moving backwards must not reset the budget.
+                            if file.last_history_probe_ms > 0 {
+                                last_history_probe_ms = file.last_history_probe_ms;
                             }
                         } else {
                             tracing::warn!(
@@ -109,13 +216,16 @@ impl AddressBook {
             }
         }
         tracing::info!(
-            "ADDRESS BOOK: loaded {} entries (path: {})",
-            entries.len(),
+            "ADDRESS BOOK: loaded {} entries, {} private verified endpoints (path: {})",
+            entries.len(), history.len(),
             path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "<memory only>".into())
         );
         Self {
             path,
             entries: Mutex::new(entries),
+            history: Mutex::new(history),
+            write_lock: Mutex::new(()),
+            last_history_probe_ms: AtomicI64::new(last_history_probe_ms),
             last_save_ms: AtomicI64::new(0),
             generation: AtomicU64::new(1),
         }
@@ -158,6 +268,96 @@ impl AddressBook {
         self.entries.lock().unwrap().iter().filter_map(|(id, entry)| {
             entry.addr.parse::<SocketAddr>().ok().map(|addr| (id.clone(), (addr, entry.seen)))
         }).collect()
+    }
+
+    /// Успешный обмен APUX1 с ПОДПИСЬЮ владельца и TLS exporter привязкой.
+    /// Никакое MQTT-presence или третьестороннее сообщение не зовёт этот метод.
+    /// Считаем не чаще раза в час, чтобы частые пульсы не изображали уверенность.
+    pub fn note_verified(&self, id: &str, addr: SocketAddr, signing_key: [u8; 32], now: i64) -> bool {
+        if !valid_node_id(id) || !is_public_endpoint(addr) || signing_key == [0; 32] || now <= 0 {
+            return false;
+        }
+        let mut history = self.history.lock().unwrap();
+        let key = (id.to_string(), addr);
+        let first_proof = !history.contains_key(&key);
+        let record = history.entry(key).or_insert_with(|| HistoryEntry {
+            id: id.to_string(), addr: addr.to_string(), signing_key,
+            verified_at_ms: now, hits: 0, last_hit_at_ms: 0, failed_at_ms: 0,
+        });
+        let owner_changed = record.signing_key != signing_key;
+        if owner_changed {
+            // New owner of the routing ID: never inherit the old key's reputation.
+            record.signing_key = signing_key;
+            record.hits = 0;
+            record.last_hit_at_ms = 0;
+            record.verified_at_ms = now;
+        }
+        let earned_hit = record.hits == 0
+            || now.saturating_sub(record.last_hit_at_ms) >= HISTORY_HIT_INTERVAL_MS;
+        if earned_hit {
+            record.hits = record.hits.saturating_add(1);
+            record.last_hit_at_ms = now;
+        }
+        record.verified_at_ms = now;
+        record.failed_at_ms = 0;
+        trim_history(&mut history, now);
+        drop(history);
+        // A preceding record() may have just written the old address snapshot:
+        // a new proof must survive an abrupt stop, even inside the debounce.
+        if first_proof || owner_changed || earned_hit { self.flush(); }
+        else { self.save_if_due(now); }
+        true
+    }
+
+    /// Failed *dial* of an address already proven in the past: one-hour cooldown.
+    /// An unverified WebSocket/gossip hint cannot add an address to history.
+    pub fn note_failed(&self, id: &str, addr: SocketAddr, now: i64) {
+        let mut history = self.history.lock().unwrap();
+        let mut changed = false;
+        if let Some(record) = history.get_mut(&(id.to_string(), addr)) {
+            if now > record.verified_at_ms && now > record.failed_at_ms {
+                record.failed_at_ms = now;
+                changed = true;
+            }
+        }
+        drop(history);
+        if changed { self.save_if_due(now); }
+    }
+
+    /// Private, bounded candidates for a rare direct background probe. The
+    /// caller supplies the locally pinned signing keys of its own contacts;
+    /// deleted/changed pins cannot inherit old addresses. No gossip export.
+    pub fn verified_candidates(&self, pins: &HashMap<String, [u8; 32]>, now: i64) -> Vec<VerifiedAddress> {
+        let history = self.history.lock().unwrap();
+        let mut ranked: Vec<_> = history.values().filter_map(|record| {
+            let addr = valid_history_address(record, now)?;
+            if pins.get(&record.id) != Some(&record.signing_key)
+                || (record.failed_at_ms > record.verified_at_ms &&
+                    now.saturating_sub(record.failed_at_ms) < HISTORY_FAILURE_COOLDOWN_MS) {
+                return None;
+            }
+            Some((history_rank(record, now), VerifiedAddress {
+                id: record.id.clone(), addr, verified_at_ms: record.verified_at_ms, hits: record.hits,
+            }))
+        }).collect();
+        ranked.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.id.cmp(&b.1.id))
+            .then_with(|| a.1.addr.cmp(&b.1.addr)));
+        ranked.into_iter().map(|(_, candidate)| candidate).collect()
+    }
+
+    /// Persist the global hourly probe budget across process restarts. Claim
+    /// only when an eligible candidate exists; the claim is conservative even
+    /// if a subsequent dial cannot start (rate limit/backoff).
+    pub fn claim_history_probe(&self, now: i64) -> bool {
+        let last = self.last_history_probe_ms.load(Ordering::Relaxed);
+        if now <= 0 || (last > 0 && now.saturating_sub(last) < HISTORY_PROBE_INTERVAL_MS) {
+            return false;
+        }
+        if self.last_history_probe_ms.compare_exchange(last, now, Ordering::AcqRel, Ordering::Relaxed).is_err() {
+            return false;
+        }
+        self.flush(); // one small disk write per hour, not per address
+        true
     }
 
     /// Узнать новый адрес узла (7 точек записи: DHT-ответ, mDNS ×3,
@@ -205,11 +405,15 @@ impl AddressBook {
         if changed { self.generation.fetch_add(1, Ordering::Relaxed); }
         // Троттлинг: не чаще раза в SAVE_DEBOUNCE_MS (flush при stop
         // всё равно добьёт хвост).
+        self.save_if_due(now_ms);
+        changed
+    }
+
+    fn save_if_due(&self, now_ms: i64) {
         let last = self.last_save_ms.load(Ordering::Relaxed);
         if self.path.is_some() && now_ms.saturating_sub(last) >= SAVE_DEBOUNCE_MS {
             let _ = self.save_locked_last(now_ms);
         }
-        changed
     }
 
     /// Немедленная запись (при stop движка).
@@ -226,6 +430,8 @@ impl AddressBook {
         let Some(ref p) = self.path else {
             return Ok(());
         };
+        // Multiple discovery/background threads can save the same .tmp concurrently.
+        let _write_guard = self.write_lock.lock().unwrap();
         let mut list: Vec<Entry> = self.entries.lock().unwrap().values().cloned().collect();
         // Уборка «неактуальных»: протухшее и избыток (самые свежие).
         list.retain(|e| now_ms.saturating_sub(e.seen) <= ENTRY_TTL_MS);
@@ -234,9 +440,15 @@ impl AddressBook {
             list.drain(0..(list.len() - MAX_ENTRIES));
         }
         let count = list.len();
+        let mut history: Vec<_> = self.history.lock().unwrap().values()
+            .filter(|r| valid_history_address(r, now_ms).is_some())
+            .cloned().collect();
+        history.sort_by(|a, b| a.id.cmp(&b.id).then_with(|| a.addr.cmp(&b.addr)));
         let file = FileV1 {
             v: BOOK_VERSION,
             entries: list,
+            history,
+            last_history_probe_ms: self.last_history_probe_ms.load(Ordering::Relaxed),
         };
         let text = serde_json::to_string(&file)
             .map_err(|e| format!("serialize: {e}"))?;
@@ -341,6 +553,8 @@ mod tests {
         let file = FileV1 {
             v: BOOK_VERSION,
             entries: vec![stale, fresh],
+            history: Vec::new(),
+            last_history_probe_ms: 0,
         };
         fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
         let book = AddressBook::open(Some(path.clone()));
@@ -365,6 +579,8 @@ mod tests {
         let file = FileV1 {
             v: BOOK_VERSION,
             entries,
+            history: Vec::new(),
+            last_history_probe_ms: 0,
         };
         fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
         let book = AddressBook::open(Some(path.clone()));
@@ -394,6 +610,8 @@ mod tests {
                     seen: now,
                 },
             ],
+            history: Vec::new(),
+            last_history_probe_ms: 0,
         };
         fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
         let book = AddressBook::open(Some(path.clone()));
@@ -402,6 +620,140 @@ mod tests {
         assert!(!seed.contains_key("bad"));
         let _ = fs::remove_file(path);
     }
+    fn node(n: u8) -> String { format!("pk_{}", format!("{n:02x}").repeat(32)) }
+    fn pins(id: &str, key: [u8; 32]) -> HashMap<String, [u8; 32]> {
+        HashMap::from([(id.to_string(), key)])
+    }
+
+    #[test]
+    fn verified_history_remembers_four_public_addresses_without_changing_current_route() {
+        let book = AddressBook::open(None);
+        let id = node(1); let key = [1; 32]; let now = 1_800_000_000_000_i64;
+        for n in 1..=6 {
+            let addr: SocketAddr = format!("8.8.4.{n}:7777").parse().unwrap();
+            book.record_observed_at(&id, addr, now);
+            assert!(book.note_verified(&id, addr, key, now + n as i64));
+        }
+        assert_eq!(book.seed_addrs().get(&id), Some(&"8.8.4.6:7777".parse().unwrap()));
+        let result = book.verified_candidates(&pins(&id, key), now + 7);
+        assert_eq!(result.len(), HISTORY_PER_PEER);
+        assert!(result.iter().any(|r| r.addr == "8.8.4.6:7777".parse::<SocketAddr>().unwrap()));
+        assert!(!result.iter().any(|r| r.addr == "8.8.4.1:7777".parse::<SocketAddr>().unwrap()));
+    }
+
+    #[test]
+    fn newest_verified_route_survives_when_four_old_routes_have_more_hits() {
+        let book = AddressBook::open(None);
+        let id = node(7); let key = [7; 32]; let now = 1_800_000_000_000_i64;
+        for n in 1..=4 {
+            let addr: SocketAddr = format!("8.8.4.{n}:7777").parse().unwrap();
+            book.note_verified(&id, addr, key, now);
+            book.note_verified(&id, addr, key, now + HISTORY_HIT_INTERVAL_MS);
+        }
+        let latest: SocketAddr = "8.8.4.5:7777".parse().unwrap();
+        book.note_verified(&id, latest, key, now + HISTORY_HIT_INTERVAL_MS + 1);
+        let candidates = book.verified_candidates(&pins(&id, key), now + HISTORY_HIT_INTERVAL_MS + 2);
+        assert_eq!(candidates.len(), HISTORY_PER_PEER);
+        assert!(candidates.iter().any(|r| r.addr == latest));
+    }
+
+    #[test]
+    fn direct_proof_is_required_and_frequency_does_not_count_heartbeats() {
+        let book = AddressBook::open(None);
+        let id = node(2); let now = 1_800_000_000_000_i64; let key = [2; 32];
+        let home: SocketAddr = "8.8.4.2:7777".parse().unwrap();
+        let mobile: SocketAddr = "1.1.1.2:7777".parse().unwrap();
+        // MQTT/third-party DHT observation must never become a verified history entry.
+        book.record_observed_at(&id, mobile, now);
+        assert!(book.verified_candidates(&pins(&id, key), now).is_empty());
+        book.note_verified(&id, home, key, now);
+        for n in 1..6 { book.note_verified(&id, home, key, now + n * 10_000); }
+        assert_eq!(book.verified_candidates(&pins(&id, key), now + 60_000)[0].hits, 1);
+        book.note_verified(&id, home, key, now + HISTORY_HIT_INTERVAL_MS);
+        assert_eq!(book.verified_candidates(&pins(&id, key), now + HISTORY_HIT_INTERVAL_MS)[0].hits, 2);
+        book.note_verified(&id, mobile, key, now + HISTORY_HIT_INTERVAL_MS);
+        let candidates = book.verified_candidates(&pins(&id, key), now + HISTORY_HIT_INTERVAL_MS);
+        assert_eq!(candidates[0].addr, home, "у адресов одинаковая свежесть, частый первым");
+        assert!(book.verified_candidates(&pins(&id, [3; 32]), now + HISTORY_HIT_INTERVAL_MS).is_empty(),
+            "после смены локального pin старое доверие не наследуется");
+    }
+
+    #[test]
+    fn failures_cool_down_a_historical_route_but_never_mark_peer_offline() {
+        let book = AddressBook::open(None);
+        let id = node(3); let key = [3; 32]; let now = 1_800_000_000_000_i64;
+        let addr: SocketAddr = "8.8.4.3:7777".parse().unwrap();
+        book.note_verified(&id, addr, key, now);
+        book.note_failed(&id, addr, now + 1);
+        assert!(book.verified_candidates(&pins(&id, key), now + 2).is_empty());
+        assert_eq!(book.verified_candidates(&pins(&id, key), now + HISTORY_FAILURE_COOLDOWN_MS + 1).len(), 1);
+        // Genuine bound reply overrides a delayed dial failure.
+        book.note_verified(&id, addr, key, now + 30);
+        book.note_failed(&id, addr, now + 20);
+        assert_eq!(book.verified_candidates(&pins(&id, key), now + 31).len(), 1);
+        assert!(book.verified_candidates(&pins(&id, key), now + HISTORY_TTL_MS + 31).is_empty());
+    }
+
+    #[test]
+    fn additive_v1_file_and_private_verified_history_survive_restart() {
+        let path = tmp_path("history"); let _ = fs::remove_file(&path);
+        let id = node(4); let now = crate::storage::models::now_ms(); let key = [4; 32];
+        // Existing APK's file contains no history at all: forward migration is safe.
+        let old = format!(r#"{{"v":1,"entries":[{{"id":"{id}","addr":"8.8.4.4:7777","seen":{now}}}]}}"#);
+        fs::write(&path, old).unwrap();
+        let book = AddressBook::open(Some(path.clone()));
+        assert_eq!(book.len(), 1);
+        book.note_verified(&id, "8.8.4.4:7777".parse().unwrap(), key, now);
+        assert!(book.claim_history_probe(now));
+        assert!(!book.claim_history_probe(now + HISTORY_PROBE_INTERVAL_MS - 1));
+        book.flush();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("\"history\""));
+        // Old serde FileV1 ignores unknown field; current address remains intact.
+        let reopened = AddressBook::open(Some(path.clone()));
+        assert_eq!(reopened.seed_addrs().get(&id), Some(&"8.8.4.4:7777".parse().unwrap()));
+        assert_eq!(reopened.verified_candidates(&pins(&id, key), now).len(), 1);
+        assert!(!reopened.claim_history_probe(now + HISTORY_PROBE_INTERVAL_MS - 1), "budget survives restart");
+        assert!(reopened.claim_history_probe(now + HISTORY_PROBE_INTERVAL_MS));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn private_lan_and_unsigned_hint_are_never_background_probes() {
+        let book = AddressBook::open(None);
+        let id = node(5); let now = 1_800_000_000_000_i64;
+        let lan: SocketAddr = "192.168.0.1:7777".parse().unwrap();
+        let public: SocketAddr = "8.8.4.5:7777".parse().unwrap();
+        assert!(!book.note_verified(&id, lan, [5; 32], now));
+        assert!(!book.note_verified("pk_fake", public, [5; 32], now));
+        book.record(&id, public);
+        assert!(book.verified_candidates(&pins(&id, [5; 32]), now).is_empty());
+    }
+
+    #[test]
+    fn disk_history_filters_expired_lan_invalid_id_and_changed_owner() {
+        let path = tmp_path("history_filter"); let _ = fs::remove_file(&path);
+        let now = crate::storage::models::now_ms(); let id = node(6); let key = [6; 32];
+        let entry = |id: String, addr: &str, at: i64| HistoryEntry {
+            id, addr: addr.into(), signing_key: key, verified_at_ms: at,
+            hits: 20, last_hit_at_ms: at, failed_at_ms: 0,
+        };
+        let file = FileV1 { v: BOOK_VERSION, entries: vec![],
+            history: vec![
+                entry(id.clone(), "8.8.4.6:7777", now),
+                entry(id.clone(), "192.168.1.6:7777", now),
+                entry(id.clone(), "1.1.1.6:7777", now - HISTORY_TTL_MS - 1),
+                entry("pk_fake".into(), "8.8.4.7:7777", now),
+            ], last_history_probe_ms: 0 };
+        fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
+        let book = AddressBook::open(Some(path.clone()));
+        let candidates = book.verified_candidates(&pins(&id, key), now);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].addr, "8.8.4.6:7777".parse().unwrap());
+        assert!(book.verified_candidates(&pins(&id, [7; 32]), now).is_empty());
+        let _ = fs::remove_file(path);
+    }
+
     #[test]
     fn relayed_observation_keeps_its_original_age_and_only_address_change_wakes_discovery() {
         let book = AddressBook::open(None);

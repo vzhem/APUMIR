@@ -967,6 +967,7 @@ impl P2PCore {
                     let directory = Arc::clone(&self.peer_exchange);
                     let addrs = Arc::clone(&peer_addrs_arc);
                     let book = Arc::clone(&self.address_book);
+                    let own_scope = Arc::clone(&self.presence_scope);
                     let own_addr = Arc::clone(&public_addr_arc);
                     let network = Arc::clone(&network_arc);
                     let events = Arc::clone(&events_arc);
@@ -995,7 +996,7 @@ impl P2PCore {
                                 }
                                 if let Some((peer, endpoint)) = effect.probe {
                                     if let Some(request) = directory.probe(&identity, public, &peer.claims.node_id, endpoint, now) {
-                                        Self::spawn_exchange_send(transport, Arc::clone(&identity), Arc::clone(&directory), request);
+                                        Self::spawn_exchange_send(transport, Arc::clone(&identity), Arc::clone(&directory), Arc::clone(&book), request);
                                     }
                                 }
                             }
@@ -1030,6 +1031,13 @@ impl P2PCore {
                             }
                         }
                         book.record(&effect.sender_id, effect.sender_endpoint);
+                        if own_scope.is_own(&effect.sender_id) {
+                            if let Some(owner_key) = directory.pinned_key(&effect.sender_id) {
+                                // The response is tied to the direct TLS session AND signed by
+                                // this pinned owner. Forwarded leases never touch private history.
+                                book.note_verified(&effect.sender_id, effect.sender_endpoint, owner_key, now);
+                            }
+                        }
                         let known = network.peers().into_iter().find(|p| p.peer_id == effect.sender_id);
                         let is_new = known.is_none();
                         let mut info = known.unwrap_or_else(|| PeerInfo::new(effect.sender_id.clone(), "Абонент".into()));
@@ -2152,8 +2160,21 @@ impl P2PCore {
         });
     }
 
+    /// An address already being tried by the ordinary directory is not an
+    /// idle-history alternative. No history entry ever becomes a gossip record.
+    fn idle_history_candidate(
+        book: &AddressBook, pins: &HashMap<String, [u8; 32]>,
+        addresses: &HashMap<String, SocketAddr>, now: i64,
+    ) -> Option<(String, SocketAddr)> {
+        book.verified_candidates(pins, now).into_iter().find(|record| {
+            addresses.get(&record.id).copied() != Some(record.addr)
+                && addresses.get(&format!("{}_public", record.id)).copied() != Some(record.addr)
+        }).map(|record| (record.id, record.addr))
+    }
+
     fn spawn_exchange_send(transport: DirectTransport, identity: Arc<crate::crypto::signing_identity::InstalledSigningIdentity>,
-        directory: Arc<PeerExchange>, request: crate::network::peer_exchange::PreparedExchange) {
+        directory: Arc<PeerExchange>, book: Arc<AddressBook>,
+        request: crate::network::peer_exchange::PreparedExchange) {
         tokio::spawn(async move {
             let directory_for_frame = Arc::clone(&directory);
             let request_for_frame = request.clone();
@@ -2162,7 +2183,11 @@ impl P2PCore {
                 request_for_frame.encode(&identity, binding)
             });
             let sent = transport.send_bound(&request.peer_id, Some(request.endpoint), factory).await;
-            directory.mark_send_result(&request.peer_id, request.endpoint, sent, crate::storage::models::now_ms());
+            let now = crate::storage::models::now_ms();
+            directory.mark_send_result(&request.peer_id, request.endpoint, sent, now);
+            if !sent && directory.authenticated_peer(&request.peer_id, now).is_none() {
+                book.note_failed(&request.peer_id, request.endpoint, now);
+            }
         });
     }
 
@@ -2178,13 +2203,16 @@ impl P2PCore {
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut generation = 0;
         let mut legacy_at = crate::storage::models::now_ms().saturating_add(20_000);
+        // Let ordinary fresh-address discovery run first. This does not wake the
+        // phone solely to scan: the task exists only while the engine is active.
+        let mut history_at = crate::storage::models::now_ms().saturating_add(60_000);
         loop {
             ticker.tick().await;
             let now = crate::storage::models::now_ms();
             let updated = book.generation();
             if updated != generation { generation = updated; directory.wake(); }
             directory.flush(false, now);
-            if !directory.due(now) && now < legacy_at { continue; }
+            if !directory.due(now) && now < legacy_at && now < history_at { continue; }
             let observations = book.observations();
             let addresses = addrs.lock().unwrap().clone();
             let wanted: Vec<String> = scope.all_own().into_iter().filter(|id| {
@@ -2207,7 +2235,30 @@ impl P2PCore {
                 }
                 let own = *public_addr.lock().unwrap();
                 for request in directory.plan(&identity, own, candidates, &wanted, now) {
-                    Self::spawn_exchange_send(transport.clone(), Arc::clone(&identity), Arc::clone(&directory), request);
+                    Self::spawn_exchange_send(transport.clone(), Arc::clone(&identity), Arc::clone(&directory), Arc::clone(&book), request);
+                }
+            }
+            // Only if no recently authenticated helper AND no live route to a contact:
+            // test one formerly verified address that is NOT the current candidate.
+            // Never flood 50 contacts, scan private LANs, or forward old IPs to others.
+            if now >= history_at {
+                history_at = now.saturating_add(60_000);
+                if directory.helpers(now).is_empty() && !transport.has_any_connection().await {
+                    let own = scope.all_own();
+                    if !own.is_empty() {
+                        let pins: HashMap<String, [u8; 32]> = own.iter().filter_map(|id|
+                            directory.pinned_key(id).map(|key| (id.clone(), key))).collect();
+                        if let Some((id, endpoint)) = Self::idle_history_candidate(&book, &pins, &addresses, now) {
+                            if book.claim_history_probe(now) {
+                                history_at = now.saturating_add(crate::resilience::address_book::HISTORY_PROBE_INTERVAL_MS);
+                                let own_addr = *public_addr.lock().unwrap();
+                                if let Some(request) = directory.probe(&identity, own_addr, &id, endpoint, now) {
+                                    tracing::debug!("PEX: one idle historical endpoint probe for {}", id);
+                                    Self::spawn_exchange_send(transport.clone(), Arc::clone(&identity), Arc::clone(&directory), Arc::clone(&book), request);
+                                }
+                            }
+                        }
+                    }
                 }
             }
             // Every enrolled node is an automatic coordinator; ask a small existing
@@ -6495,6 +6546,25 @@ mod tests {
             &Arc::new(CustodyHold::new()), &Arc::new(CustodyOffers::new()), false, None,
             &Arc::new(AddressBook::open(None)), reply_payload(&responder, &target, Some(fresh), &[]).into_bytes());
         assert_eq!(addrs.lock().unwrap().get(&target).copied(), Some(fresh));
+    }
+
+    #[test]
+    fn idle_history_uses_only_pinned_alternatives_not_current_or_public_alias() {
+        let book = AddressBook::open(None);
+        let id = format!("pk_{}", "aa".repeat(32));
+        let now = crate::storage::models::now_ms();
+        let old: SocketAddr = "8.8.4.4:7777".parse().unwrap();
+        let current: SocketAddr = "1.1.1.1:7777".parse().unwrap();
+        let key = [2; 32];
+        book.note_verified(&id, old, key, now);
+        book.note_verified(&id, current, key, now);
+        let pins = HashMap::from([(id.clone(), key)]);
+        let mut addresses = HashMap::from([(id.clone(), current)]);
+        assert_eq!(P2PCore::idle_history_candidate(&book, &pins, &addresses, now), Some((id.clone(), old)));
+        addresses.insert(format!("{}_public", id), old);
+        assert_eq!(P2PCore::idle_history_candidate(&book, &pins, &addresses, now), None);
+        addresses.clear();
+        assert_eq!(P2PCore::idle_history_candidate(&book, &HashMap::new(), &addresses, now), None);
     }
 
 }
