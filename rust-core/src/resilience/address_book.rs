@@ -662,6 +662,11 @@ mod tests {
         for n in 1..=4 {
             let addr: SocketAddr = format!("8.8.4.{n}:7777").parse().unwrap();
             book.note_verified(&id, addr, key, now);
+        }
+        // Time must progress monotonically: loading/pruning deliberately
+        // rejects a record whose verification appears to be in the future.
+        for n in 1..=4 {
+            let addr: SocketAddr = format!("8.8.4.{n}:7777").parse().unwrap();
             book.note_verified(&id, addr, key, now + HISTORY_HIT_INTERVAL_MS);
         }
         let latest: SocketAddr = "8.8.4.5:7777".parse().unwrap();
