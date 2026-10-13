@@ -202,12 +202,13 @@ sealed class Screen(val route: String) {
     }
 
     // Экран звонка: peerId заполнен = исходящий, пустой = нас позвали на входящий.
-    data object Call : Screen("call?peerId={peerId}&peerName={peerName}") {
+    data object Call : Screen("call?peerId={peerId}&peerName={peerName}&video={video}") {
         const val incoming: String = "call"
 
-        fun createOutgoing(peerId: String, peerName: String): String =
+        fun createOutgoing(peerId: String, peerName: String, video: Boolean = false): String =
             "call?peerId=" + java.net.URLEncoder.encode(peerId, "UTF-8") +
-                "&peerName=" + java.net.URLEncoder.encode(peerName, "UTF-8")
+                "&peerName=" + java.net.URLEncoder.encode(peerName, "UTF-8") +
+                "&video=" + if (video) "1" else "0"
     }
 }
 
@@ -498,6 +499,9 @@ fun MessengerNavGraph(
                 onCallClick = { cId, cName ->
                     navController.navigate(Screen.Call.createOutgoing(cId, cName))
                 },
+                onVideoCallClick = { cId, cName ->
+                    navController.navigate(Screen.Call.createOutgoing(cId, cName, video = true))
+                },
                 onAddContactInvite = { link ->
                     navController.navigate(Screen.AddContact.createRoute(android.net.Uri.encode(link)))
                 },
@@ -532,6 +536,11 @@ fun MessengerNavGraph(
                     type = NavType.StringType
                     nullable = true
                     defaultValue = ""
+                },
+                navArgument("video") {
+                    type = NavType.StringType
+                    nullable = true
+                    defaultValue = "0"
                 },
             ),
         ) {

@@ -202,6 +202,7 @@ class CallWireTest {
         assertEquals("c${callId}p2", CallWire.capabilitiesMessageId(callId, 2))
         assertTrue(CallWire.LOCAL_CODECS.contains(CallWire.CODEC_PCM_16K))
         assertTrue(CallWire.LOCAL_CODECS.contains(CallWire.CODEC_ADPCM_16K))
+        assertFalse(CallWire.LOCAL_CODECS.contains(CallWire.CODEC_JPEG_VIDEO))
     }
 
     @Test
@@ -272,6 +273,17 @@ class CallWireTest {
         assertFalse(CallWire.isValidIpLiteral("fe80::1%wlan0"))
         assertFalse(CallWire.isValidIpLiteral("example.com"))
         assertFalse(CallWire.isValidIpLiteral(""))
+    }
+
+    @Test
+    fun mediaFlagRoundTrip() {
+        val video = CallWire.parse(CallWire.buildMediaFlag(callId, video = true)) as CallWire.Packet.MediaFlag
+        assertTrue(video.video)
+        assertEquals(callId, video.callId)
+        val audio = CallWire.parse(CallWire.buildMediaFlag(callId, video = false)) as CallWire.Packet.MediaFlag
+        assertFalse(audio.video)
+        assertNull(CallWire.parse("APUCALL1|media|$callId|x"))
+        assertNull(CallWire.parse("APUCALL1|media|$callId"))
     }
 
     @Test

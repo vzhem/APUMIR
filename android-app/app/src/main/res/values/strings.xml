@@ -161,6 +161,10 @@
     <string name="menu_unpin">Открепить</string>
     <string name="menu_open_chat">Открыть чат</string>
     <string name="menu_call">Позвонить</string>
+    <string name="menu_video_call">Видеозвонок</string>
+    <string name="call_flip_camera">Сменить камеру</string>
+    <string name="call_camera_off">Выключить камеру</string>
+    <string name="call_camera_on">Включить камеру</string>
     <string name="menu_share_contact">Поделиться контактом</string>
     <string name="menu_unarchive">Вернуть из архива</string>
     <string name="menu_archive">В архив</string>

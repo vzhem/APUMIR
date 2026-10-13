@@ -6,8 +6,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.Ringtone
-import android.media.RingtoneManager
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -73,10 +71,17 @@ class CallManager @Inject constructor(
         val viaUdp: Boolean = false,
         /** Причина конца по-русски («Завершён», «Занято», …) — показываем и сворачиваемся. */
         val endText: String = "",
+        /** Видеозвонок: камера + JPEG-кадры рядом с голосом. */
+        val video: Boolean = false,
+        /** Свою камеру показываем собеседнику. */
+        val cameraOn: Boolean = false,
     )
 
     private val _uiState = kotlinx.coroutines.flow.MutableStateFlow(CallUiState())
     val uiState: kotlinx.coroutines.flow.StateFlow<CallUiState> = _uiState
+
+    private val _remoteVideo = kotlinx.coroutines.flow.MutableStateFlow<ByteArray?>(null)
+    val remoteVideo: kotlinx.coroutines.flow.StateFlow<ByteArray?> = _remoteVideo
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val random = SecureRandom()
@@ -114,7 +119,11 @@ class CallManager @Inject constructor(
     private var candidatesLinkSends = 0
     /** Самый большой seq пробы собеседника: повтор старой пробы с другого адреса не перехватит канал. */
     private var lastPeerProbeSeq = -1L
-    private var ringtone: Ringtone? = null
+    private val ringPlayer = CallRingPlayer(appContext)
+    @Volatile private var videoWanted = false
+    private var videoSeqIndex = 0L
+    private var sendVideoCrypto: CallMediaCrypto? = null
+    private var recvVideoCrypto: CallMediaCrypto? = null
     private var tickJob: Job? = null
     private var endedResetJob: Job? = null
     private var endTextOverride: String? = null
@@ -129,6 +138,7 @@ class CallManager @Inject constructor(
     private var handoverJob: Job? = null
     @Volatile private var handoverPeerId: String = ""
     @Volatile private var handoverPeerName: String = ""
+    @Volatile private var handoverVideo: Boolean = false
 
     /** р233: что о звонке уже рассказали партнёру (callId:фаза). */
     @Volatile private var mirrorStateKey: String? = null
@@ -141,6 +151,9 @@ class CallManager @Inject constructor(
 
     /** cand, пришедший раньше своего offer: то же самое. */
     private val earlyCands = LinkedHashMap<String, List<Pair<String, Int>>>()
+
+    /** media|v, пришедший раньше своего offer. */
+    private val earlyVideo = LinkedHashMap<String, Boolean>()
 
     /** Очередь исходящих голосовых кадров: поток микрофона не ждёт сеть. */
     private val frameOutQueue = java.util.concurrent.ArrayBlockingQueue<OutgoingFrame>(128)
@@ -187,6 +200,14 @@ class CallManager @Inject constructor(
             }
             // Пробы ходят только по UDP; с durable-пути — мусор.
             is CallWire.Packet.Probe -> Unit
+            is CallWire.Packet.MediaFlag -> synchronized(this) {
+                if (matchesCall(packet.callId)) {
+                    applyVideoFlag(packet.video)
+                } else if (!recentlyEnded.containsKey(packet.callId)) {
+                    earlyVideo[packet.callId] = packet.video
+                    trimEarly(earlyVideo)
+                }
+            }
         }
         return true
     }
@@ -258,6 +279,8 @@ class CallManager @Inject constructor(
             machine = sm
             peerCodecs = earlyCaps.remove(offer.callId) ?: emptySet()
             peerCandidates = earlyCands.remove(offer.callId) ?: emptyList()
+            videoWanted = earlyVideo.remove(offer.callId) == true
+            videoSeqIndex = 0L
             resetLinkCounters(outgoing = false)
             // Мост поднимаем сразу на offer: пока телефон звонит, соединение с
             // брокером уже стоит, и accept с голосом пойдут без задержки.
@@ -271,6 +294,9 @@ class CallManager @Inject constructor(
                 peerName = offer.callerName,
                 callId = offer.callId,
                 outgoing = false,
+                video = videoWanted,
+                speaker = videoWanted,
+                cameraOn = videoWanted,
             )
             startTicker()
             executeEffects(sm, listOf(CallStateMachine.Effect.SendRing))
@@ -325,6 +351,10 @@ class CallManager @Inject constructor(
 
     private fun onIncomingMedia(callId: String, seq: Long, codec: Int, cipher: ByteArray) {
         if (machine?.callId != callId) return
+        if (codec == CallWire.CODEC_JPEG_VIDEO) {
+            onIncomingVideo(seq, cipher)
+            return
+        }
         audioEngine?.incomingFrame(seq, codec, cipher)
         feedMachine { it.mediaFrame(nowMs()) }
     }
@@ -463,10 +493,18 @@ class CallManager @Inject constructor(
                     is CallWire.Packet.Accept -> onAcceptPacket(sm.peerId, signal)
                     is CallWire.Packet.Reject -> feedMachine { it.onReject(signal.reason, nowMs()) }
                     is CallWire.Packet.Bye -> feedMachine { it.onBye(signal.reason, nowMs()) }
+                    is CallWire.Packet.MediaFlag -> applyVideoFlag(signal.video)
                     else -> Unit
                 }
             }
             is CallLinkWire.Packet.Media -> {
+                if (packet.codec == CallWire.CODEC_JPEG_VIDEO) {
+                    var authentic = 0
+                    packet.frames.forEach { f -> if (onIncomingVideo(f.seq, f.cipher)) authentic++ }
+                    if (authentic == 0) return
+                    if (from == null) markPeerLinkAlive(callId) else udpChannel?.onPeerPacket(from)
+                    return
+                }
                 val engine = audioEngine ?: return
                 // Живость и адрес засчитываем только по кадрам, которые расшифровались
                 // медиа-ключом: чужая датаграмма не должна ни держать звонок, ни
@@ -492,6 +530,7 @@ class CallManager @Inject constructor(
         is CallWire.Packet.Capabilities -> signal.callId
         is CallWire.Packet.Candidates -> signal.callId
         is CallWire.Packet.Probe -> signal.callId
+        is CallWire.Packet.MediaFlag -> signal.callId
     }
 
     // ═════════════════════════════════════════════════════════════════════
@@ -595,7 +634,7 @@ class CallManager @Inject constructor(
     // ═════════════════════════════════════════════════════════════════════
 
     /** Исходящий звонок (кнопка в чате). Безопасно при повторном нажатии. */
-    fun startOutgoing(peerId: String, peerName: String) {
+    fun startOutgoing(peerId: String, peerName: String, video: Boolean = false) {
         val now = nowMs()
         synchronized(this) {
             val current = machine
@@ -609,7 +648,7 @@ class CallManager @Inject constructor(
                 // р233: тень - своей сессии нет. Просим движок и начинаем
                 // звонок сами, как только он поднимется.
                 if (MirrorHub.canClaimEngine()) {
-                    claimEngineForOutgoing(peerId, peerName)
+                    claimEngineForOutgoing(peerId, peerName, video)
                     return
                 }
                 _uiState.value = CallUiState(
@@ -617,6 +656,7 @@ class CallManager @Inject constructor(
                     peerId = peerId,
                     peerName = peerName,
                     outgoing = true,
+                    video = video,
                     endText = "Нет подключения к сети",
                 )
                 scheduleIdleReset()
@@ -631,6 +671,8 @@ class CallManager @Inject constructor(
             recvKey = null
             remoteHost = null
             remotePort = 0
+            videoWanted = video
+            videoSeqIndex = 0L
             endTextOverride = null
             peerCodecs = emptySet()
             resetLinkCounters(outgoing = true)
@@ -644,9 +686,13 @@ class CallManager @Inject constructor(
                 peerName = peerName,
                 callId = callId,
                 outgoing = true,
+                video = video,
+                speaker = video,
+                cameraOn = video,
             )
             startTicker()
             executeEffects(sm, sm.tick(now)) // offer #1 уходит сразу
+            applyRing(sm)
         }
     }
 
@@ -724,10 +770,40 @@ class CallManager @Inject constructor(
     }
 
     fun toggleSpeaker(): Boolean {
-        val engine = audioEngine ?: return false
-        val on = engine.toggleSpeaker()
+        val on = !_uiState.value.speaker
         _uiState.value = _uiState.value.copy(speaker = on)
+        ringPlayer.setSpeaker(on)
+        audioEngine?.setSpeaker(on)
         return on
+    }
+
+    fun toggleCamera(): Boolean {
+        if (!_uiState.value.video) return false
+        val on = !_uiState.value.cameraOn
+        _uiState.value = _uiState.value.copy(cameraOn = on)
+        return on
+    }
+
+    /** JPEG-кадр локальной камеры (уже pack: rotation + jpeg). */
+    fun sendVideoFrame(packed: ByteArray) {
+        if (!videoWanted || !_uiState.value.cameraOn || packed.isEmpty()) return
+        val crypto = sendVideoCrypto ?: return
+        val sm = machine ?: return
+        if (sm.phase != CallStateMachine.Phase.CONNECTING &&
+            sm.phase != CallStateMachine.Phase.ACTIVE
+        ) {
+            return
+        }
+        val seq = CallVideo.wireSeq(videoSeqIndex++)
+        val cipher = crypto.encrypt(seq, packed)
+        val pts = nowMs()
+        if (audioChannel.sendFrame(seq, pts, cipher, CallWire.CODEC_JPEG_VIDEO)) return
+        val packet = CallLinkWire.buildMedia(
+            CallWire.CODEC_JPEG_VIDEO,
+            listOf(CallLinkWire.MediaFrame(seq, cipher)),
+        ) ?: return
+        if (udpChannel?.send(packet) == true) return
+        brokerLink?.send(packet)
     }
 
     /** UI сообщает результат запроса RECORD_AUDIO: без микрофона звонок бессмысленен. */
@@ -779,6 +855,13 @@ class CallManager @Inject constructor(
                         CallWire.capabilitiesMessageId(sm.callId, effect.attempt),
                         CallWire.buildCapabilities(sm.callId, CallWire.LOCAL_CODECS),
                     )
+                    if (videoWanted) {
+                        sendSignal(
+                            sm.peerId,
+                            CallWire.mediaFlagMessageId(sm.callId),
+                            CallWire.buildMediaFlag(sm.callId, video = true),
+                        )
+                    }
                 }
 
                 CallStateMachine.Effect.SendRing -> {
@@ -917,6 +1000,11 @@ class CallManager @Inject constructor(
             return
         }
         audioEngine = engine
+        sendVideoCrypto = CallMediaCrypto(sk)
+        recvVideoCrypto = CallMediaCrypto(rk)
+        lastVideoSeq = -1L
+        ringPlayer.stop(restoreRoute = false)
+        engine.setSpeaker(_uiState.value.speaker)
         startFramesPump(sm)
         establishMediaChannel(sm)
     }
@@ -1150,6 +1238,9 @@ class CallManager @Inject constructor(
     private fun stopMedia(keepLink: Boolean = false) {
         runCatching { audioEngine?.stop() }
         audioEngine = null
+        sendVideoCrypto = null
+        recvVideoCrypto = null
+        _remoteVideo.value = null
         runCatching { audioChannel.closeCall() }
         audioChannel.activeCallId = null
         audioChannel.onFrame = null
@@ -1241,14 +1332,7 @@ class CallManager @Inject constructor(
         }
         notificationManager.notify(CALL_NOTIFICATION_ID, builder.build())
 
-        runCatching {
-            val tone = RingtoneManager.getRingtone(
-                appContext, RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
-            )
-            ringtone = tone
-            tone?.isLooping = true
-            tone?.play()
-        }
+        ringPlayer.ensureRingtone()
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 700, 900), 0))
@@ -1262,8 +1346,7 @@ class CallManager @Inject constructor(
 
     private fun cancelIncoming() {
         runCatching { notificationManager.cancel(CALL_NOTIFICATION_ID) }
-        runCatching { ringtone?.stop() }
-        ringtone = null
+        ringPlayer.stop(restoreRoute = false)
         runCatching { vibrator?.cancel() }
     }
 
@@ -1360,16 +1443,18 @@ class CallManager @Inject constructor(
      * Исходящий со второго устройства: своей сессии у тени нет, поэтому просим
      * движок у активного и, когда он поднимется, начинаем звонок сами.
      */
-    private fun claimEngineForOutgoing(peerId: String, peerName: String) {
+    private fun claimEngineForOutgoing(peerId: String, peerName: String, video: Boolean) {
         if (handoverPeerId == peerId) return
         if (!MirrorHub.claimEngine()) return
         handoverPeerId = peerId
         handoverPeerName = peerName
+        handoverVideo = video
         _uiState.value = CallUiState(
             phase = CallStateMachine.Phase.CONNECTING,
             peerId = peerId,
             peerName = peerName,
             outgoing = true,
+            video = video,
         )
         Log.i(TAG, "mirror: исходящий с тени - движок запрошен, ждём подъём")
         handoverJob?.cancel()
@@ -1379,8 +1464,10 @@ class CallManager @Inject constructor(
                 delay(700)
                 if (RustBridge.isRunning() && RustBridge.nodeId() != null) {
                     handoverPeerId = ""
+                    val wantVideo = handoverVideo
+                    handoverVideo = false
                     _uiState.value = CallUiState()
-                    startOutgoing(peerId, peerName)
+                    startOutgoing(peerId, peerName, video = wantVideo)
                     return@launch
                 }
             }
@@ -1468,6 +1555,10 @@ class CallManager @Inject constructor(
                     machine = null
                     closeBrokerLink() // звонок мог кончиться до медиа (отклонён, не ответили)
                     mirrorStateKey = null
+                    videoWanted = false
+                    sendVideoCrypto = null
+                    recvVideoCrypto = null
+                    _remoteVideo.value = null
                     _uiState.value = CallUiState()
                     recentlyEnded[finished.callId] = nowMs()
                     while (recentlyEnded.size > 32) {
@@ -1494,9 +1585,48 @@ class CallManager @Inject constructor(
             viaUdp = current.slowTransport && audioViaUdp,
             viaBroker = current.slowTransport && !audioViaUdp && peerLinkAlive,
             endText = endText,
+            video = videoWanted,
         )
+        applyRing(sm)
         publishMirrorState(sm)
         if (sm.phase == CallStateMachine.Phase.ENDED) scheduleIdleReset()
+    }
+
+    private fun applyVideoFlag(video: Boolean) {
+        videoWanted = video
+        val current = _uiState.value
+        _uiState.value = current.copy(
+            video = video,
+            cameraOn = if (video) current.cameraOn || !current.video else false,
+            speaker = if (video && !current.video) true else current.speaker,
+        )
+        if (video) {
+            ringPlayer.setSpeaker(_uiState.value.speaker)
+            audioEngine?.setSpeaker(_uiState.value.speaker)
+        }
+    }
+
+    private fun applyRing(sm: CallStateMachine) {
+        ringPlayer.setSpeaker(_uiState.value.speaker)
+        when {
+            sm.outgoing && CallRing.ringbackWhile(sm.phase) -> ringPlayer.ensureRingback()
+            !sm.outgoing && CallRing.ringtoneWhile(sm.phase) -> ringPlayer.ensureRingtone()
+            sm.phase == CallStateMachine.Phase.CONNECTING ||
+                sm.phase == CallStateMachine.Phase.ACTIVE ->
+                ringPlayer.stop(restoreRoute = false)
+            else -> ringPlayer.stop(restoreRoute = true)
+        }
+    }
+
+    private var lastVideoSeq = -1L
+
+    private fun onIncomingVideo(seq: Long, cipher: ByteArray): Boolean {
+        val crypto = recvVideoCrypto ?: return false
+        val plain = crypto.decrypt(seq, cipher) ?: return false
+        if (lastVideoSeq >= 0 && seq < lastVideoSeq) return true
+        lastVideoSeq = seq
+        _remoteVideo.value = plain
+        return true
     }
 
     private fun forceLocalEnd(reason: String) {

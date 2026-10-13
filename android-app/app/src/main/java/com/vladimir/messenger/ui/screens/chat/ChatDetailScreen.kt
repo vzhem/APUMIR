@@ -96,6 +96,7 @@ fun ChatDetailScreen(
     onBackClick: () -> Unit,
     onRenameClick: (contactId: String, currentName: String) -> Unit = { _, _ -> },
     onCallClick: (contactId: String, contactName: String) -> Unit = { _, _ -> },
+    onVideoCallClick: (contactId: String, contactName: String) -> Unit = { _, _ -> },
     /** Раунд 176: открыть добавление контакта по ссылке из карточки в чате. */
     onAddContactInvite: (String) -> Unit = {},
     /** Раунд 203: тап по источнику пересылки - открыть чат друга. */
@@ -438,16 +439,32 @@ fun ChatDetailScreen(
                             )
                         }
                     }
-                    // Аудиозвонок: активен только у контакта с node id (pk_…).
+                    // Аудио- и видеозвонок: только у контакта с node id (pk_…).
+                    val canCall = contactId.startsWith("pk_")
                     ApuHeaderIconBubble(
                         onClick = { onCallClick(contactId, contactName) },
                         contentDescription = stringResource(R.string.menu_call),
-                        enabled = contactId.startsWith("pk_"),
+                        enabled = canCall,
                     ) {
                         Icon(
                             Icons.Default.Call,
                             contentDescription = null,
-                            tint = if (contactId.startsWith("pk_")) {
+                            tint = if (canCall) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                Color(0xFF9AA3AF)
+                            },
+                        )
+                    }
+                    ApuHeaderIconBubble(
+                        onClick = { onVideoCallClick(contactId, contactName) },
+                        contentDescription = stringResource(R.string.menu_video_call),
+                        enabled = canCall,
+                    ) {
+                        Icon(
+                            Icons.Default.Videocam,
+                            contentDescription = null,
+                            tint = if (canCall) {
                                 MaterialTheme.colorScheme.primary
                             } else {
                                 Color(0xFF9AA3AF)

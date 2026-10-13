@@ -77,6 +77,14 @@ object CallWire {
      */
     const val KIND_PROBE = "probe"
 
+    /**
+     * Этот звонок с видео: `media|<callId>|v`. Старые сборки kind не знают
+     * и отбрасывают пакет — у них остаётся обычный аудиозвонок.
+     */
+    const val KIND_MEDIA_FLAG = "media"
+    const val MEDIA_VIDEO = "v"
+    const val MEDIA_AUDIO = "a"
+
     /** Версия голосового канала: v1 — выделенный TCP-сокет 42109 (udp1 добавится позже). */
     const val PROTO_TCP1 = "tcp1"
 
@@ -91,9 +99,10 @@ object CallWire {
     /** Offer старше этого возраста = пропущенный звонок, живой звонок не зажигаем. */
     const val OFFER_FRESH_MS = 60_000L
 
-    /** Кодеки кадров: 1 = PCM 16 кГц mono s16le (Opus = 2 — резерв), 3 = IMA ADPCM 16 кГц. */
+    /** Кодеки кадров: 1 = PCM 16 кГц mono s16le (Opus = 2 — резерв), 3 = IMA ADPCM 16 кГц, 4 = JPEG-видео. */
     const val CODEC_PCM_16K = 1
     const val CODEC_ADPCM_16K = 3
+    const val CODEC_JPEG_VIDEO = 4
 
     /** Что умеет эта сборка (уходит пакетом cap). */
     val LOCAL_CODECS: Set<Int> = setOf(CODEC_PCM_16K, CODEC_ADPCM_16K)
@@ -164,7 +173,10 @@ object CallWire {
         ) : Packet()
 
         /** Проба пробивания NAT; seen — «твои пробы до меня доходят». */
-        data class Probe(val callId: String, val seen: Boolean) : Packet()
+        data class Probe(val callId: String, val seen: Boolean)
+
+        /** Звонок с видео (v) или только голос (a). */
+        data class MediaFlag(val callId: String, val video: Boolean) : Packet()
     }
 
     fun isCallPacket(text: String?): Boolean =
@@ -283,6 +295,13 @@ object CallWire {
         requireValidCallId(callId)
         return "$PREFIX|$KIND_PROBE|$callId|${if (seen) 1 else 0}"
     }
+
+    fun buildMediaFlag(callId: String, video: Boolean): String {
+        requireValidCallId(callId)
+        return "$PREFIX|$KIND_MEDIA_FLAG|$callId|${if (video) MEDIA_VIDEO else MEDIA_AUDIO}"
+    }
+
+    fun mediaFlagMessageId(callId: String): String = "c${callId}m"
 
     // ── Детерминированные messageId для транспортной дедупликации ──────────
 
@@ -405,6 +424,17 @@ object CallWire {
                     endpoints += ip to port
                 }
                 Packet.Candidates(callId, endpoints)
+            } else {
+                null
+            }
+
+            KIND_MEDIA_FLAG -> if (parts.size == 4) {
+                val callId = parts[2].takeIf { isValidCallId(it) } ?: return null
+                when (parts[3]) {
+                    MEDIA_VIDEO -> Packet.MediaFlag(callId, true)
+                    MEDIA_AUDIO -> Packet.MediaFlag(callId, false)
+                    else -> null
+                }
             } else {
                 null
             }
