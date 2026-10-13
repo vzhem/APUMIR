@@ -2,14 +2,10 @@ package com.vladimir.messenger.ui.components
 
 import android.Manifest
 import android.graphics.BitmapFactory
-import android.graphics.Rect
-import android.graphics.drawable.ColorDrawable
 import android.content.pm.PackageManager
 import android.net.Uri
-import android.view.ViewGroup
-import android.view.ViewTreeObserver
-import android.view.WindowManager
 import android.text.format.DateUtils
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -17,7 +13,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
@@ -33,6 +28,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -47,6 +43,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
@@ -76,8 +73,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
-import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -167,7 +162,11 @@ private fun StoryBubble(title: String, avatar: String?, viewed: List<Boolean>, o
 
 /** Полноэкранный просмотр: удержание останавливает таймер; фон приложения — тоже. */
 @Composable
-fun StoryViewerDialog(stories: List<StoryStore.Story>, onDismiss: () -> Unit) {
+fun StoryViewerDialog(
+    stories: List<StoryStore.Story>,
+    onDismiss: () -> Unit,
+    onDeleteMine: ((String) -> Unit)? = null,
+) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) { delay(1_000); now = System.currentTimeMillis() }
@@ -186,6 +185,7 @@ fun StoryViewerDialog(stories: List<StoryStore.Story>, onDismiss: () -> Unit) {
     var progress by remember(current.id) { mutableFloatStateOf(0f) }
     var held by remember(current.id) { mutableStateOf(false) }
     var userPaused by remember(authorId) { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
     val owner = LocalLifecycleOwner.current
     var resumed by remember(owner) { mutableStateOf(owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     DisposableEffect(owner) {
@@ -295,6 +295,11 @@ fun StoryViewerDialog(stories: List<StoryStore.Story>, onDismiss: () -> Unit) {
                             Icon(if (userPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
                                 stringResource(if (userPaused) R.string.story_resume else R.string.story_pause), tint = Color.White)
                         }
+                        if (current.mine && onDeleteMine != null) {
+                            IconButton(onClick = { confirmDelete = true }) {
+                                Icon(Icons.Default.Delete, stringResource(R.string.story_delete), tint = Color.White)
+                            }
+                        }
                         IconButton(onClick = onDismiss) {
                             Icon(Icons.Default.Close, stringResource(R.string.action_close), tint = Color.White)
                         }
@@ -308,6 +313,21 @@ fun StoryViewerDialog(stories: List<StoryStore.Story>, onDismiss: () -> Unit) {
                     StoryNavigation(stringResource(R.string.story_next), next, Modifier.weight(1f))
                 }
             }
+        }
+    }
+    if (confirmDelete && current.mine && onDeleteMine != null) {
+        ApuPremiumDialog(
+            title = stringResource(R.string.story_delete_q),
+            onDismiss = { confirmDelete = false },
+            confirmLabel = stringResource(R.string.story_delete_confirm),
+            onConfirm = {
+                val id = current.id
+                confirmDelete = false
+                onDeleteMine.invoke(id)
+            },
+            confirmStyle = DiagnosticsActionStyle.DANGER,
+        ) {
+            Text(stringResource(R.string.story_delete_body))
         }
     }
 }
@@ -377,44 +397,30 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
      */
     val photoMissing = photoError && photo == null && !photoSkipped
     val focusManager = LocalFocusManager.current
-    Dialog(onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        val view = LocalView.current
-        val density = LocalDensity.current
-        val imeOverlapPx = rememberComposerImeOverlapPx()
-        val imeInsetPx = WindowInsets.ime.getBottom(density)
-        val imePadPx = maxOf(imeOverlapPx, imeInsetPx)
-        val imeOpen = imePadPx > 0
-        SideEffect {
-            val window = (view.parent as? DialogWindowProvider)?.window ?: return@SideEffect
-            // Compose Dialog по умолчанию WRAP_CONTENT по высоте — в альбоме
-            // кнопки уезжают за край. Держим окно на весь экран каждый кадр:
-            // иначе updateParameters снова ставит WRAP_CONTENT.
-            WindowCompat.setDecorFitsSystemWindows(window, false)
-            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            window.setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
-            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
-        }
-        fun hideKeyboard() {
-            keyboardController?.hide()
-            focusManager.clearFocus()
-        }
-        fun confirmPublish() {
-            if (!StoryPublish.confirmOnIme(text, photo, photoMissing, preparing)) {
-                hideKeyboard()
-                return
-            }
-            hideKeyboard()
+    val density = LocalDensity.current
+    BackHandler(onBack = onDismiss)
+    val imeOpen = WindowInsets.ime.getBottom(density) > 0
+    fun hideKeyboard() {
+        keyboardController?.hide()
+        focusManager.clearFocus()
+    }
+    fun confirmPublish() {
+        hideKeyboard()
+        if (!preparing && StoryPublish.canPublish(text, photo, photoMissing)) {
             onPublish(text.trim(), bg, photo)
         }
-        BoxWithConstraints(
-            Modifier
-                .fillMaxSize()
-                .background(Color(0xFF071426))
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(bottom = with(density) { imePadPx.toDp() }),
-        ) {
+    }
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xFF071426))
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+                onClick = {},
+            )
+            .safeDrawingPadding(),
+    ) {
             val heightDp = maxHeight.value.toInt()
             val showTools = StoryComposerLayout.showAccessoryTools(imeOpen, heightDp)
             val showCompact = StoryComposerLayout.showCompactToolRow(imeOpen, heightDp)
@@ -470,7 +476,7 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                     cursorBrush = SolidColor(storyGold),
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { confirmPublish() }),
+                    keyboardActions = KeyboardActions(onDone = { hideKeyboard() }),
                     decorationBox = { inner ->
                         if (text.isEmpty()) {
                             Text(
@@ -564,7 +570,6 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
             )
             }
         }
-    }
     if (showCamera) {
         StoryCameraDialog(
             onDismiss = { showCamera = false },
@@ -574,39 +579,6 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
             },
         )
     }
-}
-
-/**
- * Клавиатура в Compose Dialog часто не даёт WindowInsets.ime. Смотрим, насколько
- * низ нашего окна перекрыт видимым кадром экрана — это ловит IME даже когда
- * окно диалога WRAP_CONTENT и не ресайзится.
- */
-@Composable
-private fun rememberComposerImeOverlapPx(): Int {
-    val view = LocalView.current
-    var overlap by remember { mutableIntStateOf(0) }
-    DisposableEffect(view) {
-        val listener = ViewTreeObserver.OnGlobalLayoutListener {
-            val visible = Rect()
-            view.getWindowVisibleDisplayFrame(visible)
-            val loc = IntArray(2)
-            view.getLocationOnScreen(loc)
-            overlap = StoryComposerLayout.imeOverlapPx(
-                viewBottomOnScreen = loc[1] + view.height,
-                visibleFrameBottom = visible.bottom,
-                viewHeight = view.height,
-            )
-        }
-        val observer = view.viewTreeObserver
-        observer.addOnGlobalLayoutListener(listener)
-        listener.onGlobalLayout()
-        onDispose {
-            val current = view.viewTreeObserver
-            if (current.isAlive) current.removeOnGlobalLayoutListener(listener)
-            else if (observer.isAlive) observer.removeOnGlobalLayoutListener(listener)
-        }
-    }
-    return overlap
 }
 
 private fun Modifier.storyBackgroundSemantics(label: String, isSelected: Boolean): Modifier =

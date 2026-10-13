@@ -24,7 +24,9 @@ object StoryStore {
     private const val PREFS = "stories"
     private const val KEY = "items"
     private const val SEEN_KEY = "seen"
+    private const val TOMB_KEY = "revoked"
     private val lock = Any()
+    private val tombstones = HashMap<String, Long>()
     private var appContext: Context? = null
     private var loaded = false
     private val diskWriter = Executors.newSingleThreadExecutor()
@@ -49,6 +51,7 @@ object StoryStore {
                 if (stored == null && _items.value.isNotEmpty()) save(_items.value)
                 _seen.value = prefs()?.getStringSet(SEEN_KEY, null)?.toSet()
                     .orEmpty().intersect(active().map { it.id }.toSet())
+                loadTombstones(System.currentTimeMillis())
             }
         }
     }
@@ -85,6 +88,10 @@ object StoryStore {
             val kind = o.optString("kind")
             if (ts < now - LIFETIME_MS || ts > now + 300_000) {
                 photoParts.discard(authorId, id); return true
+            }
+            if (kind == StoryRevoke.KIND) {
+                applyRemoteRevoke(authorId, id, ts, now)
+                return true
             }
             if (kind == "photo" && o.has("content") && o.getLong("expiresAt") <= now) {
                 photoParts.discard(authorId, id); return true
@@ -129,6 +136,9 @@ object StoryStore {
         .put("id", story.id).put("name", story.authorName)
         .put("text", story.text).put("bg", story.bg).put("ts", story.createdAtMs).toString()
 
+    fun encodeRevoke(story: Story): String = PREFIX + JSONObject()
+        .put("id", story.id).put("kind", StoryRevoke.KIND).put("ts", story.createdAtMs).toString()
+
     fun encodePackets(story: Story): List<String> {
         val photo = story.photoB64 ?: return listOf(encode(story))
         val bytes = ContentAddressedChunks.decodeCanonicalBase64(photo)
@@ -159,12 +169,52 @@ object StoryStore {
         }
     }
 
-    fun revokeLocal(storyId: String): Boolean = synchronized(lock) {
-        if (storyId.length !in 1..100) return@synchronized false
-        val before = _items.value
-        if (before.none { it.mine && it.id == storyId }) return@synchronized false
-        save(before.filterNot { it.mine && it.id == storyId })
-        true
+    fun revokeLocal(storyId: String): Boolean = revokeMine(storyId) != null
+
+    /**
+     * Снять свою историю с ленты и вернуть снимок для рассылки `kind=revoke`.
+     * Без пакета друзья продолжали бы видеть историю до конца суток.
+     */
+    fun revokeMine(storyId: String): Story? = synchronized(lock) {
+        if (storyId.length !in 1..100) return@synchronized null
+        val story = _items.value.firstOrNull { it.mine && it.id == storyId } ?: return@synchronized null
+        applyRemoteRevoke(story.authorId, story.id, story.createdAtMs, System.currentTimeMillis())
+        story
+    }
+
+    private fun applyRemoteRevoke(authorId: String, storyId: String, createdAtMs: Long, nowMs: Long) {
+        synchronized(lock) {
+            photoParts.discard(authorId, storyId)
+            val until = StoryRevoke.tombstoneUntilMs(createdAtMs)
+            val key = StoryRevoke.key(authorId, storyId)
+            tombstones[key] = maxOf(tombstones[key] ?: 0L, until)
+            persistTombstones(nowMs)
+            save(StoryRevoke.remaining(_items.value, authorId, storyId))
+        }
+    }
+
+    private fun loadTombstones(nowMs: Long) {
+        tombstones.clear()
+        prefs()?.getStringSet(TOMB_KEY, null).orEmpty().forEach { raw ->
+            val parts = raw.split('|')
+            if (parts.size == 3) {
+                val until = parts[2].toLongOrNull() ?: return@forEach
+                tombstones[StoryRevoke.key(parts[0], parts[1])] = until
+            }
+        }
+        persistTombstones(nowMs)
+    }
+
+    private fun persistTombstones(nowMs: Long) {
+        val live = tombstones.filterValues { StoryRevoke.isActive(it, nowMs) }
+        tombstones.clear()
+        tombstones.putAll(live)
+        val stored = live.map { (key, until) ->
+            val nl = key.indexOf('\n')
+            if (nl <= 0) return@map null
+            "${key.substring(0, nl)}|${key.substring(nl + 1)}|$until"
+        }.filterNotNull().toSet()
+        prefs()?.edit()?.putStringSet(TOMB_KEY, stored)?.apply()
     }
 
     private fun isValidPhotoB64(value: String): Boolean {
@@ -194,6 +244,9 @@ object StoryStore {
 
     private fun add(story: Story) = synchronized(lock) {
         val now = System.currentTimeMillis()
+        persistTombstones(now)
+        val tomb = tombstones[StoryRevoke.key(story.authorId, story.id)]
+        if (tomb != null && StoryRevoke.isActive(tomb, now)) return
         val previous = _items.value.firstOrNull { it.id == story.id }
         val merged = mergeIncoming(previous, story)
         val kept = _items.value.filter { now - it.createdAtMs in 0 until LIFETIME_MS && it.id != merged.id }

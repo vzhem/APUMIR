@@ -42,6 +42,20 @@ class StoryOutboxTest {
     }
 
     @Test
+    fun aRevokePacketIsRetriedAcrossWaves() = runBlocking {
+        val packets = StoryOutbox.packets("story-1", listOf("revoke"))
+        val sent = mutableListOf<String>()
+        StoryOutbox.deliver(
+            packets = packets,
+            peers = listOf("alice"),
+            send = { _, packet -> sent += packet.content; false },
+            pause = { },
+            rounds = StoryOutbox.MAX_ROUNDS,
+        )
+        assertEquals(listOf("revoke", "revoke", "revoke"), sent)
+    }
+
+    @Test
     fun aSinglePacketStoryIsSentOnceEvenWhenTheTransportFails() = runBlocking {
         val packets = StoryOutbox.packets("story-1", listOf("hello"))
         val sent = mutableListOf<String>()

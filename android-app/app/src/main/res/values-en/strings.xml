@@ -1570,6 +1570,10 @@ The file is not on this phone</string>
     <string name="story_next">Next</string>
     <string name="story_background">Background %1$d</string>
     <string name="story_lifetime">Your story is available to friends for 24 hours</string>
+    <string name="story_delete">Delete story</string>
+    <string name="story_delete_q">Delete this story?</string>
+    <string name="story_delete_body">It will disappear for everyone who has seen it.</string>
+    <string name="story_delete_confirm">Delete for everyone</string>
     <string name="group_all_topics">All</string>
     <string name="group_topic_closed_tab">Topic closed</string>
     <string name="story_photo">Story photo</string>

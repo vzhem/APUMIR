@@ -12,14 +12,6 @@ package com.vladimir.messenger.ui.components
 internal object StoryPublish {
     fun canPublish(text: String, photoB64: String?, photoMissing: Boolean): Boolean =
         !photoMissing && (text.isNotBlank() || photoB64 != null)
-
-    /**
-     * Синяя галочка на клавиатуре — то же подтверждение, что кнопка
-     * «Опубликовать». Пустую историю галочка не отправляет: только прячет
-     * клавиатуру.
-     */
-    fun confirmOnIme(text: String, photoB64: String?, photoMissing: Boolean, preparing: Boolean): Boolean =
-        !preparing && canPublish(text, photoB64, photoMissing)
 }
 
 /**
@@ -29,8 +21,8 @@ internal object StoryPublish {
  * открытой клавиатуре или в альбоме (экран низкий), «Опубликовать» уезжает
  * за край — на скрине владельца в горизонтали всё спряталось внизу.
  *
- * Высоту клавиатуры в диалоге Compose часто не отдаёт WindowInsets.ime
- * (окно WRAP_CONTENT). Считаем перекрытие по видимому кадру экрана.
+ * Редактор рисуется поверх главного экрана (не отдельным Dialog): иначе
+ * клавиатура не отдаёт отступы, экран дрожит, а в альбоме остаётся узкая карточка.
  */
 internal object StoryComposerLayout {
     const val COMPACT_HEIGHT_DP = 520
@@ -40,13 +32,4 @@ internal object StoryComposerLayout {
 
     fun showCompactToolRow(imeOpen: Boolean, heightDp: Int): Boolean =
         !imeOpen && heightDp < COMPACT_HEIGHT_DP
-
-    /**
-     * Насколько низ нашего окна перекрыт клавиатурой. Навбар не считаем
-     * клавиатурой: порог 15% высоты, как в старом WindowVisibleDisplayFrame.
-     */
-    fun imeOverlapPx(viewBottomOnScreen: Int, visibleFrameBottom: Int, viewHeight: Int): Int {
-        val overlap = (viewBottomOnScreen - visibleFrameBottom).coerceAtLeast(0)
-        return if (viewHeight > 0 && overlap > viewHeight * 0.15f) overlap else 0
-    }
 }

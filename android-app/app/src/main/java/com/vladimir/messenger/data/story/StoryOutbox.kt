@@ -83,6 +83,27 @@ object StoryOutbox {
         val job = scope.launch {
             deliver(packets, peers, send, { delay(it) }, rounds)
         }
+        rememberJob(storyId, job)
+    }
+
+    /**
+     * Отзыв истории: один маленький пакет, но волны как у фото — офлайн-друг
+     * должен получить удаление, когда появится в сети.
+     */
+    fun startRevoke(
+        storyId: String,
+        packets: List<Packet>,
+        peers: List<String>,
+        send: suspend (peerId: String, packet: Packet) -> Boolean,
+    ) {
+        if (storyId.length !in 1..100 || packets.size != 1 || peers.isEmpty()) return
+        val job = scope.launch {
+            deliver(packets, peers, send, { delay(it) }, MAX_ROUNDS)
+        }
+        rememberJob(storyId, job)
+    }
+
+    private fun rememberJob(storyId: String, job: Job) {
         synchronized(lock) {
             jobs.remove(storyId)?.cancel()
             jobs[storyId] = job

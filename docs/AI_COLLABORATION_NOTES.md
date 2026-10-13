@@ -13035,3 +13035,21 @@ unchanged.
 - Тесты: `blueCheckPublishesWhenStoryIsReady`, `accessoryToolsHideInLandscapeHeight`,
   `imeOverlapDetectsKeyboard`.
 
+### Редактор истории: дрожание, галочка, альбом, удаление у всех (после 348)
+
+- Владелец: галочка не должна сразу публиковать — только прятать клавиатуру.
+  Тап по полю ввода дёргает экран раз 5 за полсекунды. В альбоме узкая карточка
+  слева сверху, клавиатура закрывает всё (скрин 11:53). Нужно досрочно удалить
+  историю — и чтобы она исчезла у всех.
+- Дрожание: паддинг по `getWindowVisibleDisplayFrame` на том же view, который
+  мы сжимаем — цикл overlap→padding→overlap=0. Compose Dialog при этом
+  WRAP_CONTENT, `setLayout(MATCH_PARENT)` не держится.
+- Исправление: редактор больше не Dialog, а полноэкранный слой поверх
+  `ChatListScreen` (отступы IME от активити). Галочка только `hideKeyboard`.
+  В альбоме компактный ряд фото + «Опубликовать».
+- Удаление: `kind=revoke` в `APUSTORY1`, `StoryStore.revokeMine` + надгробие
+  (повторные куски фото не воскрешают), `StoryOutbox.startRevoke` тремя волнами.
+  В просмотре своей истории — корзина. Старые сборки пакет не понимают: у них
+  история доживёт свои 24 часа.
+- Тесты: `StoryRevokeTest`, `StoryOutboxTest.aRevokePacketIsRetriedAcrossWaves`.
+

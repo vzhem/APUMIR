@@ -1583,6 +1583,10 @@
     <string name="story_next">Далее</string>
     <string name="story_background">Фон %1$d</string>
     <string name="story_lifetime">История доступна друзьям 24 часа</string>
+    <string name="story_delete">Удалить историю</string>
+    <string name="story_delete_q">Удалить эту историю?</string>
+    <string name="story_delete_body">Она сразу исчезнет у всех, кто её видел.</string>
+    <string name="story_delete_confirm">Удалить у всех</string>
     <string name="group_all_topics">Все</string>
     <string name="group_topic_closed_tab">Тема закрыта</string>
     <string name="story_photo">Фото истории</string>
