@@ -61,6 +61,7 @@ use crate::network::wire::MeshEnvelope;
 use crate::storage::relay_at_rest::{self as at_rest, RelayAtRestKeySource};
 use crate::storage::relay_store::RelayStore;
 use crate::network::adaptive_polling::AdaptivePolling;
+use crate::network::swarm_first::SwarmFirstPolicy;
 use crate::resilience::AddressBook;
 
 const MQTT_OUTBOUND_COMMAND_CAPACITY: usize = 256;
@@ -587,6 +588,8 @@ pub struct P2PCore {
     address_book: Arc<AddressBook>,
     /// Direct, signed address exchange and persistent reachability/TOFU history.
     peer_exchange: Arc<PeerExchange>,
+    /// External transport stays idle while a signed and connected neighbour is alive.
+    swarm_first: Arc<SwarmFirstPolicy>,
     peer_assistance: Arc<PeerAssistance>,
     /// K5-1: копии чужих сообщений, которые держим мы, пока получатель не
     /// появится (см. `network::custody_relay`).
@@ -643,6 +646,7 @@ impl P2PCore {
             address_lookup: Arc::new(AddressLookup::new()),
             address_book: Arc::new(AddressBook::open(address_book_path)),
             peer_exchange: Arc::new(PeerExchange::open(peer_exchange_path)),
+            swarm_first: Arc::new(SwarmFirstPolicy::new(crate::storage::models::now_ms())),
             peer_assistance: Arc::new(PeerAssistance::new()),
             custody_hold: Arc::new(CustodyHold::new()),
             custody_offers: Arc::new(CustodyOffers::new()),
@@ -710,6 +714,7 @@ impl P2PCore {
 
         self.node_id_str = Some(node_id.clone());
         self.peer_exchange.reset_session();
+        self.swarm_first.reset(crate::storage::models::now_ms());
 
         // Азбука адресов: загруженные при открытии записи сразу
         // становятся известными адресами. Дальше личное presence
@@ -1104,18 +1109,21 @@ impl P2PCore {
                                 Arc::clone(&self.presence_scope), Arc::clone(&self.address_book), Arc::clone(&self.peer_assistance),
                                 Arc::clone(&peer_addrs_arc), Arc::clone(&public_addr_arc),
                                 Arc::clone(&self.address_lookup), node_id.clone(),
+                                Arc::clone(&self.swarm_first),
                             ));
                         } else {
                             tracing::info!("PEER EXCHANGE: no real signing sidecar; legacy discovery retained");
                         }
                         // STUN с того же сокета: отражённый адрес = адрес,
                         // на котором мы реально слушаем.
+                        let policy_stun = Arc::clone(&self.swarm_first);
                         runtime.spawn(async move {
                             Self::run_stun_discovery(
                                 public_addr_stun,
                                 own_addr_changed_stun,
                                 Some(side),
                                 own_address_gossip,
+                                policy_stun,
                             )
                             .await;
                         });
@@ -1124,12 +1132,14 @@ impl P2PCore {
                         // Endpoint не поднялся: прямой путь недоступен,
                         // остаются брокер и relay. STUN - по-старому, с
                         // временного сокета, чтобы presence всё же нёс адрес.
+                        let policy_stun = Arc::clone(&self.swarm_first);
                         runtime.spawn(async move {
                             Self::run_stun_discovery(
                                 public_addr_stun,
                                 own_addr_changed_stun,
                                 None,
                                 None,
+                                policy_stun,
                             )
                             .await;
                         });
@@ -1156,6 +1166,7 @@ impl P2PCore {
                 let address_book_mqtt = Arc::clone(&self.address_book);
                 // K4-3: свой брокер из настроек (если задан) - первым.
                 let own_broker_mqtt = self.own_broker_endpoint();
+                let policy_mqtt = Arc::clone(&self.swarm_first);
                 std::thread::spawn(move || {
                     let rt = tokio::runtime::Builder::new_current_thread()
                         .enable_all()
@@ -1176,6 +1187,7 @@ impl P2PCore {
                             own_broker_mqtt,
                             address_book_mqtt,
                             mqtt_outbound_rx,
+                            policy_mqtt,
                         ).await;
                     });
                 });
@@ -2216,6 +2228,7 @@ impl P2PCore {
         transport: DirectTransport, directory: Arc<PeerExchange>, scope: Arc<PresenceScope>,
         book: Arc<AddressBook>, assistance: Arc<PeerAssistance>, addrs: Arc<Mutex<HashMap<String, SocketAddr>>>,
         public_addr: Arc<Mutex<Option<SocketAddr>>>, lookup: Arc<AddressLookup>, our_id: String,
+        swarm_first: Arc<SwarmFirstPolicy>,
     ) {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(5));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -2227,6 +2240,12 @@ impl P2PCore {
         loop {
             ticker.tick().await;
             let now = crate::storage::models::now_ms();
+            // Sample reachability even on a quiet tick: a directory entry or
+            // broker presence alone must NEVER suppress external fallback.
+            let helpers = directory.helpers(now);
+            let ids: Vec<&str> = helpers.iter()
+                .map(|helper| helper.identity.claims.node_id.as_str()).collect();
+            swarm_first.report(now, transport.has_authenticated_connection(&ids).await);
             let updated = book.generation();
             if updated != generation { generation = updated; directory.wake(); }
             directory.flush(false, now);
@@ -2723,6 +2742,52 @@ impl P2PCore {
         }
     }
 
+    /// Rebuild only non-expired ciphertext, with a rounded-down remaining TTL.
+    /// Never turn a short-lived call signal into a fresh long-lived record.
+    fn own_fallback_wire(msg: &RelayMessage, now_ms: i64) -> Option<String> {
+        if msg.is_expired_at(now_ms) { return None; }
+        let ttl_secs = msg.remaining_ttl_secs_at(now_ms);
+        if ttl_secs == 0 { return None; }
+        let wire = crate::network::wire::build_relay(
+            &msg.msg_id, &msg.recipient, &msg.origin_sender, &msg.chat_scope,
+            ttl_secs, msg.hop_count, &msg.e2e_payload,
+        );
+        (wire.len() <= MAX_MESH_RELAY_ENVELOPE_BYTES).then_some(wire)
+    }
+
+    /// Bounded recovery for origin messages retained while MQTT was asleep.
+    /// Rebuild the existing N-1 envelope with the REMAINING absolute TTL;
+    /// resumption must never silently extend a message's lifetime.
+    fn pending_own_fallback(
+        queue: &RelayQueue, own_id: &str, cursor: usize, now_ms: i64,
+    ) -> (Vec<(String, String, String)>, usize) {
+        const BATCH: usize = 16;
+        let (candidates, total) = queue.gossip_candidates(&[], cursor, BATCH);
+        let next = if total == 0 { 0 } else { (cursor + BATCH) % total };
+        let pending = candidates.into_iter().filter_map(|msg| {
+            if queue.is_own(&msg.msg_id) != Some(true) || msg.origin_sender != own_id {
+                return None;
+            }
+            let wire = Self::own_fallback_wire(&msg, now_ms)?;
+            Some((msg.msg_id, msg.recipient, wire))
+        }).collect();
+        (pending, next)
+    }
+
+    /// Do not open even a broker-selection TCP probe during direct discovery.
+    /// The receiver closes when P2PCore::stop drops its only sender, so a
+    /// sleeping fallback thread does not outlive an engine restart.
+    async fn await_transport_fallback(
+        policy: &SwarmFirstPolicy,
+        outbound: &tokio::sync::mpsc::Receiver<MqttOutboundCommand>,
+    ) -> bool {
+        loop {
+            if outbound.is_closed() { return false; }
+            if policy.transport_fallback_allowed(crate::storage::models::now_ms()) { return true; }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn run_mqtt_transport(
         events: Arc<EventBus>,
@@ -2738,6 +2803,7 @@ impl P2PCore {
         own_broker: Option<(String, u16)>,
         address_book: Arc<AddressBook>,
         mut outbound_rx: tokio::sync::mpsc::Receiver<MqttOutboundCommand>,
+        policy: Arc<SwarmFirstPolicy>,
     ) {
         use crate::network::mqtt_liveness::next_mqtt_restart_backoff_secs;
         use crate::network::mqtt_overflow::MQTT_LOSS_INTOLERANT_INBOX_CAPACITY;
@@ -2750,14 +2816,10 @@ impl P2PCore {
             not(feature = "mqtt-dual-broker")
         ))]
         let _secondary_observer = {
-            let observer =
-                crate::network::mqtt_secondary_observer::SecondaryBrokerObserver::spawn(&node_id);
-            let snapshot = observer.snapshot();
-            tracing::info!(
-                "MQTT SECONDARY SUPERVISOR: feature=enabled mode=observe_only state={} subscriptions=0 publishes=0",
-                snapshot.state.as_str()
-            );
-            observer
+            // Observe-only probes are not part of message delivery. A second
+            // unconditional broker connection would violate swarm-first even
+            // while the primary session was paused; do not spawn it.
+            tracing::info!("MQTT SECONDARY SUPERVISOR: observe-only connection disabled by swarm-first policy");
         };
 
         // Core owns the critical inbox and, under r4.4, duplicate/retained-target state across
@@ -2767,7 +2829,9 @@ impl P2PCore {
             MQTT_LOSS_INTOLERANT_INBOX_CAPACITY,
         ));
 
-        // Wait for STUN to complete
+        // Give saved addresses, mDNS and signed PEX their first bounded turn.
+        // This check precedes *all* MQTT probes, including WSS/own broker.
+        if !Self::await_transport_fallback(&policy, &outbound_rx).await { return; }
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
         let addr_str = {
@@ -2780,6 +2844,7 @@ impl P2PCore {
         let mut session_start_attempt = 1u64;
 
         let mut transport = loop {
+            if !Self::await_transport_fallback(&policy, &outbound_rx).await { return; }
             match Self::connect_ready_mqtt_session(
                 &node_id,
                 &display_name,
@@ -2817,14 +2882,11 @@ impl P2PCore {
         };
 
         session_restart_backoff_secs = 1;
-        Self::announce_mqtt_session(
-            &transport,
-            &display_name,
-            addr_str.as_deref(),
-            is_relay,
-            session_generation,
-        )
-        .await;
+        if policy.transport_fallback_allowed(crate::storage::models::now_ms()) {
+            Self::announce_mqtt_session(
+                &transport, &display_name, addr_str.as_deref(), is_relay, session_generation,
+            ).await;
+        }
 
         // Event loop: один оборот примерно раз в секунду (poll_event ждёт не
         // дольше секунды). Счётчик оборотов задаёт периодические задачи.
@@ -2901,6 +2963,13 @@ impl P2PCore {
         let mut seen_mesh_relay_order: VecDeque<String> = VecDeque::new();
         let mut delivered_mesh_relay_origins: HashMap<String, String> = HashMap::new();
         let mut delivered_mesh_relay_order: VecDeque<String> = VecDeque::new();
+        // Messages retained while the broker was asleep are reoffered only
+        // after fallback resumes, once per MQTT generation (bounded pages).
+        let mut published_own_in_generation = HashSet::new();
+        let mut own_reoffer_cursor = 0usize;
+        let mut last_own_reoffer_at = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_secs(60))
+            .unwrap_or_else(std::time::Instant::now);
 
         // M8-D: после restart восстанавливаем durable tombstones в RAM seen-set,
         // чтобы уже доставленные/очищенные relay ID не были повторно поставлены
@@ -2930,27 +2999,84 @@ impl P2PCore {
         }
 
         loop {
+            if outbound_rx.is_closed() { drop(transport); return; }
+            if !policy.transport_fallback_allowed(crate::storage::models::now_ms()) {
+                // A bound signed direct neighbour answered while the external
+                // session was running. Dropping MqttTransport aborts both broker
+                // eventloops and closes the subscriptions, not just publishes.
+                drop(transport);
+                tracing::info!("MQTT: direct swarm reached; external session paused");
+                session_generation = session_generation.saturating_add(1);
+                session_restart_backoff_secs = 1;
+                let mut attempt = 1u64;
+                transport = loop {
+                    if !Self::await_transport_fallback(&policy, &outbound_rx).await { return; }
+                    match Self::connect_ready_mqtt_session(
+                        &node_id, &display_name, Arc::clone(&mqtt_shared_state), own_broker.clone(),
+                    ).await {
+                        Ok(session) => break session,
+                        Err(error) => {
+                            tracing::warn!("MQTT: fallback resume attempt {} failed: {}", attempt, error);
+                            tokio::time::sleep(std::time::Duration::from_secs(session_restart_backoff_secs)).await;
+                            session_restart_backoff_secs = next_mqtt_restart_backoff_secs(
+                                session_restart_backoff_secs, MQTT_SESSION_RESTART_BACKOFF_MAX_SECS,
+                            );
+                            attempt = attempt.saturating_add(1);
+                        }
+                    }
+                };
+                session_restart_backoff_secs = 1;
+                tick = 0;
+                published_own_in_generation.clear();
+                own_reoffer_cursor = 0;
+                last_own_reoffer_at = std::time::Instant::now()
+                    .checked_sub(std::time::Duration::from_secs(60))
+                    .unwrap_or_else(std::time::Instant::now);
+                if policy.transport_fallback_allowed(crate::storage::models::now_ms()) {
+                    let addr = public_addr.lock().unwrap().map(|a| a.to_string());
+                    Self::announce_mqtt_session(
+                        &transport, &display_name, addr.as_deref(), addr.is_some(), session_generation,
+                    ).await;
+                }
+                continue;
+            }
             // M3(d): drain a bounded number of origin send commands into the already-running
             // persistent transport. `try_send` on the producer side never claims SENT; local
             // RelayQueue ownership remains the durability/retry source until a receipt arrives.
             for _ in 0..32 {
                 match outbound_rx.try_recv() {
                     Ok(MqttOutboundCommand::MeshRelay {
-                        recipient,
-                        envelope,
-                        message_id,
-                    }) => match transport.send_mesh_relay(&recipient, &envelope).await {
-                        Ok(()) => tracing::info!(
-                            "MESH origin: relay publish request queued {} for {}",
-                            message_id,
-                            recipient
-                        ),
-                        Err(error) => tracing::warn!(
-                            "MESH origin: relay publish request failed {} for {}: {}; retained locally",
-                            message_id,
-                            recipient,
-                            error
-                        ),
+                        recipient, envelope, message_id,
+                    }) => {
+                        if !policy.transport_fallback_allowed(crate::storage::models::now_ms()) {
+                            continue;
+                        }
+                        // Commands can sit behind direct search or a paused
+                        // session. Never publish their stale relative TTL.
+                        let refreshed = relay_queue.as_ref()
+                            .and_then(|q| q.own_message(&message_id))
+                            .filter(|m| m.origin_sender == node_id && m.recipient == recipient)
+                            .and_then(|m| Self::own_fallback_wire(&m, crate::storage::models::now_ms()));
+                        let wire = refreshed.or_else(|| {
+                            message_id.starts_with("ppres-").then_some(envelope)
+                        });
+                        let Some(wire) = wire else { continue; };
+                        match transport.send_mesh_relay(&recipient, &wire).await {
+                            Ok(()) => {
+                                if published_own_in_generation.len() >= 4_096 {
+                                    published_own_in_generation.clear();
+                                }
+                                published_own_in_generation.insert(message_id.clone());
+                                tracing::info!(
+                                    "MESH origin: relay publish request queued {} for {}",
+                                    message_id, recipient
+                                );
+                            }
+                            Err(error) => tracing::warn!(
+                                "MESH origin: relay publish request failed {} for {}: {}; retained locally",
+                                message_id, recipient, error
+                            ),
+                        }
                     },
                     Ok(MqttOutboundCommand::DeliveryAck {
                         recipient,
@@ -3005,6 +3131,24 @@ impl P2PCore {
                 }
             }
 
+            if last_own_reoffer_at.elapsed() >= std::time::Duration::from_secs(60) {
+                last_own_reoffer_at = std::time::Instant::now();
+                if let Some(q) = relay_queue.as_ref() {
+                    let (owned, next) = Self::pending_own_fallback(
+                        q, &node_id, own_reoffer_cursor, crate::storage::models::now_ms(),
+                    );
+                    own_reoffer_cursor = next;
+                    for (message_id, recipient, envelope) in owned {
+                        if !policy.transport_fallback_allowed(crate::storage::models::now_ms()) { break; }
+                        if published_own_in_generation.contains(&message_id) || !q.contains(&message_id) { continue; }
+                        if transport.send_mesh_relay(&recipient, &envelope).await.is_ok() {
+                            if published_own_in_generation.len() >= 4_096 { published_own_in_generation.clear(); }
+                            published_own_in_generation.insert(message_id);
+                        }
+                    }
+                }
+            }
+
             let polled_event = transport.poll_event().await;
 
             // Never discard an event already handed to core. If a terminal/stalled condition is
@@ -3032,6 +3176,7 @@ impl P2PCore {
                             retry_delay_secs
                         );
                         tokio::time::sleep(std::time::Duration::from_secs(retry_delay_secs)).await;
+                        if !Self::await_transport_fallback(&policy, &outbound_rx).await { return; }
 
                         match Self::connect_ready_mqtt_session(
                             &node_id,
@@ -3061,6 +3206,11 @@ impl P2PCore {
                     session_generation = next_generation;
                     session_restart_backoff_secs = 1;
                     tick = 0;
+                    published_own_in_generation.clear();
+                    own_reoffer_cursor = 0;
+                    last_own_reoffer_at = std::time::Instant::now()
+                        .checked_sub(std::time::Duration::from_secs(60))
+                        .unwrap_or_else(std::time::Instant::now);
                     // Адрес перечитываем: при восстановлении сессии (часто как раз
                     // после смены сети) стартовое значение уже устарело.
                     let recovered_addr = {
@@ -3068,14 +3218,12 @@ impl P2PCore {
                         pa.map(|a| a.to_string())
                     };
                     let recovered_is_relay = recovered_addr.is_some();
-                    Self::announce_mqtt_session(
-                        &transport,
-                        &display_name,
-                        recovered_addr.as_deref(),
-                        recovered_is_relay,
-                        session_generation,
-                    )
-                    .await;
+                    if policy.transport_fallback_allowed(crate::storage::models::now_ms()) {
+                        Self::announce_mqtt_session(
+                            &transport, &display_name, recovered_addr.as_deref(),
+                            recovered_is_relay, session_generation,
+                        ).await;
+                    }
                     tracing::info!(
                         "MQTT SESSION RECOVERED: generation={} ConnAck=true subscription_request=true",
                         session_generation
@@ -4274,11 +4422,54 @@ impl P2PCore {
             }
         }
     }
+    /// Both a direct signed reflector and (only in fallback) STUN can teach
+    /// us our OWN routable candidate. Send just the owner's signed lease;
+    /// peers must still probe it before calling the owner reachable.
+    fn note_own_public_endpoint(
+        addr: SocketAddr, source: &str,
+        public_addr: &Arc<Mutex<Option<SocketAddr>>>,
+        addr_changed_flag: &Arc<std::sync::atomic::AtomicBool>,
+        gossip: Option<&OwnAddressGossip>,
+    ) {
+        if !is_public_endpoint(addr) { return; }
+        let changed = {
+            let mut guard = public_addr.lock().unwrap();
+            let changed = *guard != Some(addr);
+            *guard = Some(addr);
+            changed
+        };
+        if !changed { return; }
+        addr_changed_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        tracing::info!("{}: my external address changed = {} — personal presence to own", source, addr);
+        if let Some(gossip) = gossip {
+            let now = crate::storage::models::now_ms();
+            gossip.directory.prioritize_own_address(now);
+            let mut offered = 0;
+            for helper in gossip.directory.helpers(now).into_iter()
+                .filter(|peer| is_public_endpoint(peer.endpoint)) {
+                if offered >= MAX_PARALLEL_EXCHANGES { break; }
+                if let Some(request) = gossip.directory.probe(
+                    &gossip.identity, Some(addr), &helper.identity.claims.node_id, helper.endpoint, now,
+                ) {
+                    offered += 1;
+                    Self::spawn_exchange_send(
+                        gossip.transport.clone(), Arc::clone(&gossip.identity),
+                        Arc::clone(&gossip.directory), Arc::clone(&gossip.book), request,
+                    );
+                }
+            }
+            if offered > 0 {
+                tracing::info!("PEX: fresh signed own candidate offered to {} neighbours", offered);
+            }
+        }
+    }
+
     async fn run_stun_discovery(
         public_addr: Arc<Mutex<Option<SocketAddr>>>,
         addr_changed_flag: Arc<std::sync::atomic::AtomicBool>,
         mut side: Option<crate::network::quic_client::UdpSideChannel>,
         gossip: Option<OwnAddressGossip>,
+        policy: Arc<SwarmFirstPolicy>,
     ) {
         use crate::network::direct_transport::stun_via_side_channel;
         use crate::network::ice::{StunClient, DEFAULT_STUN_SERVERS, STUN_TIMEOUT};
@@ -4295,7 +4486,24 @@ impl P2PCore {
         // временный сокет: адрес хуже, чем никакой, только для брокера.
         let mut backoff_secs = 15u64;
         loop {
-            tracing::info!("STUN: discovering external address...");
+            let now = crate::storage::models::now_ms();
+            if !policy.transport_fallback_allowed(now) {
+                // The peer's *signed, bound* response already reports which
+                // endpoint saw our QUIC socket. Do not contact STUN while
+                // that neighbour is still alive. No peer? The initial direct
+                // search gets 20 seconds before the first external probe.
+                if policy.has_live_peer(now) {
+                    if let Some(gossip) = gossip.as_ref() {
+                        if let Some(addr) = gossip.directory.observed_own_addr(now) {
+                            Self::note_own_public_endpoint(addr, "PEX reflector", &public_addr,
+                                &addr_changed_flag, Some(gossip));
+                        }
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                continue;
+            }
+            tracing::info!("STUN: fallback external address discovery...");
 
             let result: Option<SocketAddr> = match side.as_mut() {
                 Some(channel) => {
@@ -4311,50 +4519,11 @@ impl P2PCore {
 
             match result {
                 Some(addr) => {
-                    let changed = {
-                        let mut guard = public_addr.lock().unwrap();
-                        let changed = *guard != Some(addr);
-                        *guard = Some(addr);
-                        changed
-                    };
-                    if changed {
-                        // Задача владельца: свой адрес поменялся (или
-                        // узнался впервые после старта) — СРАЗУ рассказываем
-                        // всем «своим»: presence-поток снимет флаг и
-                        // рассылает personal presence со свежим адресом,
-                        // минуя 60-секундный цикл.
-                        addr_changed_flag
-                            .store(true, std::sync::atomic::Ordering::Relaxed);
-                        tracing::info!(
-                            "STUN: my external address changed = {} — immediate presence to all own",
-                            addr
-                        );
-                        if let Some(gossip) = gossip.as_ref() {
-                            // The old personal presence reaches contacts we can dial, but its
-                            // address is self-reported. Immediately offer our new OWNER-SIGNED
-                            // lease to authenticated neighbours instead of waiting up to 10 min
-                            // for the regular PEX refresh. They may pass it on only until expiry.
-                            let now = crate::storage::models::now_ms();
-                            gossip.directory.prioritize_own_address(now);
-                            let mut offered = 0;
-                            for helper in gossip.directory.helpers(now).into_iter()
-                                .filter(|peer| is_public_endpoint(peer.endpoint)) {
-                                if offered >= MAX_PARALLEL_EXCHANGES { break; }
-                                if let Some(request) = gossip.directory.probe(
-                                    &gossip.identity, Some(addr), &helper.identity.claims.node_id,
-                                    helper.endpoint, now,
-                                ) {
-                                    offered += 1;
-                                    Self::spawn_exchange_send(
-                                        gossip.transport.clone(), Arc::clone(&gossip.identity),
-                                        Arc::clone(&gossip.directory), Arc::clone(&gossip.book), request,
-                                    );
-                                }
-                            }
-                            if offered > 0 {
-                                tracing::info!("PEX: fresh signed own address offered to {} neighbours", offered);
-                            }
-                        }
+                    // If direct discovery succeeded during the STUN transaction,
+                    // do not promote this late external reply over its reflection.
+                    if policy.transport_fallback_allowed(crate::storage::models::now_ms()) {
+                        Self::note_own_public_endpoint(addr, "STUN", &public_addr,
+                            &addr_changed_flag, gossip.as_ref());
                     }
                     // Раз в минуту, а не в две: отображение на NAT у
                     // мобильных операторов живёт 30-60 с, и этот же запрос
@@ -4382,6 +4551,11 @@ impl P2PCore {
         // группы или контакт): ему адресованный presence, а не общий эфир.
         self.presence_scope
             .add_own(to_node_id, self.node_id_str.as_deref());
+        if !self.external_transport_allowed() {
+            self.peer_exchange.wake();
+            tracing::debug!("MQTT one-shot: refused while direct swarm is being searched or is live");
+            return false;
+        }
         if let Some(message_id) = payload.strip_prefix("ack|") {
             if let Some(sender) = self.mqtt_outbound_tx.as_ref() {
                 let queued = sender
@@ -4573,6 +4747,9 @@ impl P2PCore {
     }
 
     pub fn on_network_available(&self) {
+        self.swarm_first.reset(crate::storage::models::now_ms());
+        self.peer_exchange.reset_session();
+        *self.public_addr.lock().unwrap() = None;
         self.network.set_status(NetworkStatus::Connecting);
         self.events.emit(CoreEvent::NetworkStatusChanged {
             status: "connecting".into(),
@@ -4580,6 +4757,9 @@ impl P2PCore {
     }
 
     pub fn on_network_lost(&self) {
+        self.swarm_first.reset(crate::storage::models::now_ms());
+        self.peer_exchange.reset_session();
+        *self.public_addr.lock().unwrap() = None;
         self.network.set_status(NetworkStatus::Offline);
         self.events.emit(CoreEvent::NetworkStatusChanged {
             status: "offline".into(),
@@ -4632,6 +4812,18 @@ impl P2PCore {
         self.network.peer_count()
     }
 
+    /// Only a signed APUX1 session on an open direct QUIC connection counts.
+    /// `connected_peers` includes broker presence and must not gate egress.
+    pub fn has_live_swarm_peer(&self) -> bool {
+        self.state.is_running() && self.swarm_first.has_live_peer(crate::storage::models::now_ms())
+    }
+
+    /// False during initial direct search and while a verified neighbour is
+    /// alive. Android's other automatic external transports use this signal.
+    pub fn external_transport_allowed(&self) -> bool {
+        self.state.is_running() && self.swarm_first.transport_fallback_allowed(crate::storage::models::now_ms())
+    }
+
     /// Принудительно объявить себя и запросить присутствие остальных.
     /// Кнопка «Собрать данные об абонентах» раньше была заглушкой: она писала
     /// строку в лог и возвращала true, ничего не отправляя.
@@ -4642,6 +4834,10 @@ impl P2PCore {
         }
         self.peer_exchange.wake();
         let direct_available = self.direct.lock().unwrap().is_some();
+        if !self.swarm_first.transport_fallback_allowed(crate::storage::models::now_ms()) {
+            tracing::info!("Discovery: direct swarm first; MQTT announce deferred");
+            return direct_available;
+        }
         match self.mqtt_outbound_tx.as_ref() {
             Some(sender) => match sender.try_send(MqttOutboundCommand::AnnounceNow) {
                 Ok(()) => {
@@ -5055,30 +5251,37 @@ impl P2PCore {
                 }
             }
 
-            match self.mqtt_outbound_tx.as_ref() {
-                Some(sender) => match sender.try_send(MqttOutboundCommand::MeshRelay {
-                    recipient: recipient_id.clone(),
-                    envelope: prepared.envelope,
-                    message_id: message_id.clone(),
-                }) {
-                    Ok(()) => tracing::info!(
-                        "MESH origin: offline relay command accepted {} for {}",
-                        message_id,
-                        recipient_id
-                    ),
-                    Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => tracing::warn!(
-                        "MESH origin: outbound command queue full for {}; retained locally",
+            if !self.external_transport_allowed() {
+                // The ciphertext is retained in RelayQueue/RelayStore. A live
+                // neighbour may still find its owner; MQTT reoffers it only
+                // if all authenticated direct routes disappear later.
+                self.peer_exchange.wake();
+                tracing::info!("MESH origin: kept {} in swarm custody; external publish deferred", message_id);
+            } else {
+                match self.mqtt_outbound_tx.as_ref() {
+                    Some(sender) => match sender.try_send(MqttOutboundCommand::MeshRelay {
+                        recipient: recipient_id.clone(),
+                        envelope: prepared.envelope,
+                        message_id: message_id.clone(),
+                    }) {
+                        Ok(()) => tracing::info!(
+                            "MESH origin: offline relay command accepted {} for {}",
+                            message_id, recipient_id
+                        ),
+                        Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => tracing::warn!(
+                            "MESH origin: outbound command queue full for {}; retained locally",
+                            message_id
+                        ),
+                        Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => tracing::warn!(
+                            "MESH origin: outbound command queue closed for {}; retained locally",
+                            message_id
+                        ),
+                    },
+                    None => tracing::warn!(
+                        "MESH origin: MQTT outbound channel unavailable for {}; retained locally",
                         message_id
                     ),
-                    Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => tracing::warn!(
-                        "MESH origin: outbound command queue closed for {}; retained locally",
-                        message_id
-                    ),
-                },
-                None => tracing::warn!(
-                    "MESH origin: MQTT outbound channel unavailable for {}; retained locally",
-                    message_id
-                ),
+                }
             }
         }
 
@@ -5094,7 +5297,7 @@ impl P2PCore {
             my_addr.is_some(),
             crate::storage::models::now_ms(),
         );
-        if let Some(outbound) = self.mqtt_outbound_tx.as_ref() {
+        if let Some(outbound) = self.mqtt_outbound_tx.as_ref().filter(|_| self.external_transport_allowed()) {
             let queued = outbound.try_send(MqttOutboundCommand::MeshRelay {
                 recipient: recipient_id.clone(),
                 envelope: ppres,
@@ -5704,6 +5907,30 @@ mod tests {
         let mut e = make_engine();
         e.start();
         e
+    }
+
+    #[test]
+    fn paused_mqtt_reoffers_only_own_unexpired_ciphertext_with_remaining_ttl() {
+        let now = crate::network::relay_queue::utc_now_ms();
+        let queue = RelayQueue::new();
+        let own = RelayMessage::new_at_ms(now - 3_000,
+            "own-1".into(), "pk_b".into(), "pk_a".into(), "chat".into(), b"sealed".to_vec());
+        let expiry = own.expires_at_ms;
+        assert!(queue.enqueue_own(own).unwrap());
+        assert!(queue.enqueue(RelayMessage::new_at_ms(now,
+            "foreign-1".into(), "pk_c".into(), "pk_other".into(), "chat".into(), b"opaque".to_vec())).unwrap());
+        let (ready, _) = P2PCore::pending_own_fallback(&queue, "pk_a", 0, now + 6_000);
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].0, "own-1");
+        match crate::network::wire::parse(&ready[0].2).unwrap() {
+            MeshEnvelope::Relay { ttl_secs, e2e_payload, .. } => {
+                assert_eq!(ttl_secs, ((expiry - now - 6_000) / 1_000) as u64);
+                assert_eq!(e2e_payload, b"sealed");
+            }
+            other => panic!("expected existing relay wire, got {other:?}"),
+        }
+        assert!(P2PCore::pending_own_fallback(&queue, "pk_a", 0, expiry).0.is_empty());
+        assert!(P2PCore::pending_own_fallback(&queue, "pk_other", 0, now).0.is_empty());
     }
 
     #[test]

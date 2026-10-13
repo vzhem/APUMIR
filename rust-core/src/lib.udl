@@ -208,6 +208,10 @@ interface P2PCoreHandle {
 
     string network_status();
     u64 connected_peers();
+    // Not MQTT presence or a saved address: recently sampled signed QUIC neighbour.
+    boolean has_live_swarm_peer();
+    // Transport fallback after direct search; false until engine has started.
+    boolean external_transport_allowed();
     boolean trigger_gossip_discovery();
     void on_network_available();
     void on_network_lost();

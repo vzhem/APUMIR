@@ -249,6 +249,14 @@ impl P2PCoreHandle {
         self.inner.lock().unwrap().connected_peers() as u64
     }
 
+    pub fn has_live_swarm_peer(&self) -> bool {
+        self.inner.lock().unwrap().has_live_swarm_peer()
+    }
+
+    pub fn external_transport_allowed(&self) -> bool {
+        self.inner.lock().unwrap().external_transport_allowed()
+    }
+
     pub fn trigger_gossip_discovery(&self) -> bool {
         self.inner.lock().unwrap().trigger_gossip_discovery()
     }

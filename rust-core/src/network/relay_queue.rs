@@ -922,6 +922,13 @@ impl RelayQueue {
         self.entries.lock().unwrap().get(msg_id).map(|e| e.own)
     }
 
+    /// Snapshot of our own queued ciphertext (not a foreign relay). Used to
+    /// rebuild a broker fallback with its original absolute expiry.
+    pub fn own_message(&self, msg_id: &str) -> Option<RelayMessage> {
+        self.entries.lock().unwrap().get(msg_id)
+            .filter(|entry| entry.own).map(|entry| entry.message.clone())
+    }
+
     /// Можно ли заменить существующую запись этой новой копией собственного
     /// сообщения, не затронув чужой relay или другой маршрут с тем же ID.
     pub fn can_refresh_own(&self, msg: &RelayMessage) -> bool {
