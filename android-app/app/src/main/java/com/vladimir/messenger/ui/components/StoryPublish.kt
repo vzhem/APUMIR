@@ -13,3 +13,12 @@ internal object StoryPublish {
     fun canPublish(text: String, photoB64: String?, photoMissing: Boolean): Boolean =
         !photoMissing && (text.isNotBlank() || photoB64 != null)
 }
+
+/**
+ * Компоновка редактора истории. Кнопки фото и фона занимают много места
+ * под превью: если их оставить при открытой клавиатуре, «Опубликовать»
+ * уезжает вниз и нажать некуда (жалоба владельца на v11.74.346).
+ */
+internal object StoryComposerLayout {
+    fun showAccessoryTools(imeOpen: Boolean): Boolean = !imeOpen
+}

@@ -4,12 +4,17 @@ import android.Manifest
 import android.graphics.BitmapFactory
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.view.WindowManager
 import android.text.format.DateUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
@@ -26,14 +31,15 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
@@ -66,6 +72,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -364,72 +372,147 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
      * историю без картинки нельзя - у друзей была бы видна только подпись.
      */
     val photoMissing = photoError && photo == null && !photoSkipped
+    val focusManager = LocalFocusManager.current
     Dialog(onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        val view = LocalView.current
+        val density = LocalDensity.current
+        val imeOpen = WindowInsets.ime.getBottom(density) > 0
+        val showTools = StoryComposerLayout.showAccessoryTools(imeOpen)
+        SideEffect {
+            val window = (view.parent as? DialogWindowProvider)?.window ?: return@SideEffect
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
+        fun hideKeyboard() {
+            keyboardController?.hide()
+            focusManager.clearFocus()
+        }
         Column(Modifier.fillMaxSize().background(Color(0xFF071426)).safeDrawingPadding().imePadding()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.story_new), color = Color.White, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f).padding(start = 8.dp))
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, stringResource(R.string.action_close), tint = Color.White) }
             }
-            Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp)
-                .clip(RoundedCornerShape(24.dp)).background(storyBackgrounds[bg])
-                .padding(24.dp).verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) {
-                if (photo != null) StoryPhotoView(photo!!, Modifier.fillMaxSize())
-                BasicTextField(value = text, onValueChange = { text = it.take(200) }, modifier = Modifier.fillMaxWidth()
-                        .align(if (photo != null) Alignment.BottomCenter else Alignment.Center)
-                        .background(if (photo != null) Color.Black.copy(alpha = .5f) else Color.Transparent, RoundedCornerShape(16.dp))
-                        .padding(8.dp),
-                    textStyle = TextStyle(color = Color.White, fontSize = if (text.length > 120) 25.sp else 32.sp,
-                        fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center), cursorBrush = SolidColor(storyGold),
-                    decorationBox = { inner ->
-                        if (text.isEmpty()) Text(stringResource(if (photo != null) R.string.story_caption else R.string.story_placeholder), color = Color.White.copy(alpha = .6f),
-                            fontSize = 26.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
-                        inner()
-                    })
-            }
-            Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ApuPremiumButton(stringResource(R.string.story_choose_photo), { picker.launch("image/*") },
-                        enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
-                    ApuPremiumButton(stringResource(R.string.story_take_photo), { requestCamera() },
-                        enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
-                }
-                if (photo != null) ApuPremiumButton(stringResource(R.string.story_remove_photo),
-                    { photo = null; photoError = false; photoSkipped = false },
-                    enabled = !preparing, compact = true, modifier = Modifier.fillMaxWidth())
-                if (preparing) Text(stringResource(R.string.story_photo_preparing), color = Color.White)
-                if (photoError) Text(stringResource(R.string.story_photo_failed), color = Color(0xFFFF8A80),
-                    fontWeight = FontWeight.SemiBold)
-                // Прикрепление не удалось, снимка у истории нет: показываем это
-                // отдельно и не даём опубликовать молча - человек должен сам
-                // решить, отправлять ли историю без фото.
-                if (photoMissing) ApuPremiumButton(stringResource(R.string.story_publish_without_photo),
-                    { photoSkipped = true },
-                    enabled = !preparing, compact = true, modifier = Modifier.fillMaxWidth())
-                cameraError?.let { Text(stringResource(it), color = Color.White) }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        storyBackgrounds.forEachIndexed { i, brush ->
-                            Box(Modifier.size(48.dp).clip(CircleShape).clickable { bg = i }.padding(6.dp)
-                                .border(if (i == bg) 2.dp else 0.dp, if (i == bg) Color.White else Color.Transparent, CircleShape)
-                                .padding(4.dp).background(brush, CircleShape)
-                                .then(Modifier.storyBackgroundSemantics(stringResource(R.string.story_background, i + 1), i == bg)))
+            // Превью занимает всё свободное место. «Опубликовать» живёт НИЖЕ
+            // этого блока — клавиатура его не выталкивает за край экрана.
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(storyBackgrounds[bg])
+                    .pointerInput(imeOpen) {
+                        if (!imeOpen) return@pointerInput
+                        detectVerticalDragGestures { _, dragAmount ->
+                            if (dragAmount > 24f) hideKeyboard()
                         }
-                    }
-                    Text("${text.length}/200", color = Color.White.copy(alpha = .6f), style = MaterialTheme.typography.labelSmall)
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (photo != null) {
+                    StoryPhotoView(photo!!, Modifier.fillMaxSize(), ContentScale.Crop)
                 }
-                Text(stringResource(R.string.story_lifetime), color = Color.White.copy(alpha = .7f),
-                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp), textAlign = TextAlign.Center)
-                // Получателю нужна сборка, которая понимает фото-часть пакета: более
-                // старая версия APU покажет только подпись (см. заметки v11.74.321).
-                if (photo != null) Text(stringResource(R.string.story_photo_needs_update),
-                    color = Color.White.copy(alpha = .7f), style = MaterialTheme.typography.bodySmall,
-                    textAlign = TextAlign.Center)
-                ApuPremiumButton(label = stringResource(R.string.story_publish), onClick = { onPublish(text.trim(), bg, photo) },
-                    enabled = !preparing && StoryPublish.canPublish(text, photo, photoMissing),
-                    style = DiagnosticsActionStyle.PRIMARY, modifier = Modifier.fillMaxWidth())
+                val captionOnPhoto = photo != null
+                BasicTextField(
+                    value = text,
+                    onValueChange = { text = it.take(200) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(if (captionOnPhoto) Alignment.BottomCenter else Alignment.Center)
+                        .padding(12.dp)
+                        .background(
+                            if (captionOnPhoto) Color.Black.copy(alpha = .45f) else Color.Transparent,
+                            RoundedCornerShape(18.dp),
+                        )
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    textStyle = TextStyle(
+                        color = Color.White,
+                        fontSize = when {
+                            captionOnPhoto -> 18.sp
+                            text.length > 120 -> 25.sp
+                            else -> 32.sp
+                        },
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                    ),
+                    cursorBrush = SolidColor(storyGold),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { hideKeyboard() }),
+                    decorationBox = { inner ->
+                        if (text.isEmpty()) {
+                            Text(
+                                stringResource(if (captionOnPhoto) R.string.story_caption else R.string.story_placeholder),
+                                color = Color.White.copy(alpha = .6f),
+                                fontSize = if (captionOnPhoto) 16.sp else 26.sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        inner()
+                    },
+                )
             }
+            if (showTools) {
+                Column(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ApuPremiumButton(stringResource(R.string.story_choose_photo), { picker.launch("image/*") },
+                            enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
+                        ApuPremiumButton(stringResource(R.string.story_take_photo), { requestCamera() },
+                            enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
+                    }
+                    if (photo != null) ApuPremiumButton(stringResource(R.string.story_remove_photo),
+                        { photo = null; photoError = false; photoSkipped = false },
+                        enabled = !preparing, compact = true, modifier = Modifier.fillMaxWidth())
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            storyBackgrounds.forEachIndexed { i, brush ->
+                                Box(Modifier.size(36.dp).clip(CircleShape).clickable { bg = i }.padding(4.dp)
+                                    .border(if (i == bg) 2.dp else 0.dp, if (i == bg) Color.White else Color.Transparent, CircleShape)
+                                    .padding(3.dp).background(brush, CircleShape)
+                                    .then(Modifier.storyBackgroundSemantics(stringResource(R.string.story_background, i + 1), i == bg)))
+                            }
+                        }
+                        Text("${text.length}/200", color = Color.White.copy(alpha = .6f), style = MaterialTheme.typography.labelSmall)
+                    }
+                    Text(stringResource(R.string.story_lifetime), color = Color.White.copy(alpha = .7f),
+                        style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp), textAlign = TextAlign.Center)
+                    if (photo != null) Text(stringResource(R.string.story_photo_needs_update),
+                        color = Color.White.copy(alpha = .7f), style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center)
+                }
+            } else {
+                Text(
+                    "${text.length}/200",
+                    color = Color.White.copy(alpha = .6f),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+                    textAlign = TextAlign.End,
+                )
+            }
+            if (preparing) Text(stringResource(R.string.story_photo_preparing), color = Color.White,
+                modifier = Modifier.padding(horizontal = 16.dp))
+            if (photoError) Text(stringResource(R.string.story_photo_failed), color = Color(0xFFFF8A80),
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp))
+            if (photoMissing) ApuPremiumButton(stringResource(R.string.story_publish_without_photo),
+                { photoSkipped = true },
+                enabled = !preparing, compact = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+            cameraError?.let { Text(stringResource(it), color = Color.White, modifier = Modifier.padding(horizontal = 16.dp)) }
+            // Всегда над клавиатурой и системной панелью: не внутри прокрутки.
+            ApuPremiumButton(
+                label = stringResource(R.string.story_publish),
+                onClick = {
+                    hideKeyboard()
+                    onPublish(text.trim(), bg, photo)
+                },
+                enabled = !preparing && StoryPublish.canPublish(text, photo, photoMissing),
+                style = DiagnosticsActionStyle.PRIMARY,
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 10.dp),
+            )
         }
     }
     if (showCamera) {
@@ -447,14 +530,14 @@ private fun Modifier.storyBackgroundSemantics(label: String, isSelected: Boolean
     semantics { contentDescription = label; selected = isSelected }
 
 @Composable
-private fun StoryPhotoView(b64: String, modifier: Modifier) {
+private fun StoryPhotoView(b64: String, modifier: Modifier, contentScale: ContentScale = ContentScale.Fit) {
     val bytes = remember(b64) { runCatching { Base64.decode(b64, Base64.DEFAULT) }.getOrNull() }
     var fallback by remember(b64) { mutableStateOf<android.graphics.Bitmap?>(null) }
     var coilFailed by remember(b64) { mutableStateOf(false) }
     var fallbackFailed by remember(b64) { mutableStateOf(false) }
     if (bytes != null && !coilFailed) {
         AsyncImage(model = bytes, contentDescription = stringResource(R.string.story_photo),
-            modifier = modifier, contentScale = ContentScale.Fit, onError = { coilFailed = true })
+            modifier = modifier, contentScale = contentScale, onError = { coilFailed = true })
     }
     if (bytes == null || coilFailed) {
         // Coil не отдал картинку (или строка не разобралась): декодируем сами, чтобы
@@ -471,7 +554,7 @@ private fun StoryPhotoView(b64: String, modifier: Modifier) {
     val decoded = fallback
     if (decoded != null) {
         Image(bitmap = decoded.asImageBitmap(), contentDescription = stringResource(R.string.story_photo),
-            modifier = modifier, contentScale = ContentScale.Fit)
+            modifier = modifier, contentScale = contentScale)
     } else if (fallbackFailed) {
         Box(modifier, contentAlignment = Alignment.Center) {
             Text(stringResource(R.string.story_photo_unavailable), color = Color.White.copy(alpha = .85f),

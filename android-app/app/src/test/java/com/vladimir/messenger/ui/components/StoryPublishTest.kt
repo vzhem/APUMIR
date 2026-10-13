@@ -27,4 +27,9 @@ class StoryPublishTest {
         assertFalse(StoryPublish.canPublish("", photoB64 = null, photoMissing = false))
         assertFalse(StoryPublish.canPublish("   ", photoB64 = null, photoMissing = false))
     }
+
+    @Test fun accessoryToolsHideWhenKeyboardIsOpen() {
+        assertTrue(StoryComposerLayout.showAccessoryTools(imeOpen = false))
+        assertFalse(StoryComposerLayout.showAccessoryTools(imeOpen = true))
+    }
 }
