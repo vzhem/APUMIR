@@ -15,7 +15,8 @@
 //   /update/apk          — поток APK последнего релиза (белый список мобильных сетей);
 //   /mqtt                — НАШ MQTT-брокер (Durable Object MQTT_BRIDGE, привязка
 //                          в дашборде): единый рой для всех телефонов, без
-//                          сторонних брокеров (v11.74.7);
+//                          сторонних брокеров (v11.74.7). WebSocket Hibernation:
+//                          простой открытый сокет больше не держит DO активным;
 //   /mqtt/health         — обычный HTTPS-ответ (не WebSocket) о мосте: жив ли,
 //                          сколько клиентов и что происходило со кадрами.
 //                          Открывается с телефона в браузере — быстрая проверка
@@ -85,6 +86,16 @@
 
 const MQTT_MAX_CLIENTS = 400;
 const MQTT_MAX_PUBLISH_BYTES = 256 * 1024;
+const MQTT_MAX_BUFFER_BYTES = MQTT_MAX_PUBLISH_BYTES + 65536 + 8;
+// Cloudflare limits WebSocket attachments to 16 KiB. Small partial packets and
+// the core's empty LastWill live on the socket; larger ones spill into this
+// SQLite-backed DO's synchronous KV. Never rely on process memory across sleep.
+const MQTT_INLINE_BYTES = 2048;
+const MQTT_MAX_SUBS = 12;
+const MQTT_MAX_FILTER_BYTES = 256;
+const MQTT_MAX_RETAINED_TOPIC_BYTES = 1024;
+const MQTT_RETAINED_INDEX = "mqtt:retained:index";
+const MQTT_RETAINED_PREFIX = "mqtt:retained:topic:";
 // Версия моста для /mqtt/health: 1 — само-брокер v11.74.7;
 // 2 — исправлен разбор длины пакета (varint), отказ MQTT 5.0, счётчики,
 // громкая ошибка разбора кадра вместо тихого снятия клиента.
@@ -121,11 +132,18 @@ function topicMatch(filter, topic) {
 }
 
 class MqttClient {
-  constructor(ws) {
+  constructor(ws, saved = null, kv = null) {
     this.ws = ws;
-    this.subs = [];       // фильтры подписок
-    this.will = null;     // {topic, payload, retain}
-    this.buf = new Uint8Array(0);
+    this.id = saved?.id || crypto.randomUUID();
+    this.subs = saved?.subs || []; // фильтры подписок (в attachment)
+    this.bufKey = saved?.bufKey || null;
+    this.willKey = saved?.willKey || null;
+    // SQL-backed synchronous KV: big fragments survive sleep without exceeding
+    // the 16 KiB serializeAttachment limit. Keys are removed on completion/close.
+    this.buf = this.bufKey ? kv.get(this.bufKey) : saved?.buf || new Uint8Array(0);
+    this.will = this.willKey ? kv.get(this.willKey) : saved?.will || null;
+    if (!this.buf || (this.willKey && !this.will)) throw new Error("mqtt attachment state missing");
+    this.closed = false;
   }
   send(bytes) { try { this.ws.send(bytes); } catch (_) {} }
 }
@@ -137,13 +155,11 @@ export class MqttBridge {
     this.ensureMem();
   }
 
-  // SQLite-DO после спячки поднимается без полей из constructor: this.clients
-  // был undefined → this.clients.size кидал исключение → Cloudflare 1101 на
-  // /mqtt/health. Память поднимаем на каждый fetch.
+  // При пробуждении DO constructor вызывается заново. Живые сокеты возвращает
+  // state.getWebSockets(), их подписки/LastWill/неполный пакет — attachment или
+  // SQLite KV. Эти счётчики диагностические и сбрасываются при спячке.
   ensureMem() {
-    if (!this.clients) this.clients = new Set();
-    if (!this.retained) this.retained = new Map();
-    if (!this.mirror) this.mirror = new Set();
+    if (!this.clients) this.clients = new Map();
     if (!this.stats) {
       this.stats = {
         connects: 0,
@@ -159,39 +175,89 @@ export class MqttBridge {
     }
   }
 
+  mqttSockets() {
+    return this.state.getWebSockets("mqtt").filter((ws) => ws.readyState === 1);
+  }
+
+  clientFor(ws) {
+    this.ensureMem();
+    let client = this.clients.get(ws);
+    if (!client) {
+      const saved = ws.deserializeAttachment();
+      if (saved?.kind !== "mqtt") throw new Error("mqtt socket without attachment");
+      client = new MqttClient(ws, saved, this.state.storage.kv);
+      this.clients.set(ws, client);
+    }
+    return client;
+  }
+
+  saveClient(client) {
+    const kv = this.state.storage.kv;
+    const attachment = { kind: "mqtt", id: client.id, subs: client.subs,
+      buf: null, bufKey: null, will: null, willKey: null };
+    if (client.buf.length > MQTT_INLINE_BYTES) {
+      client.bufKey ||= "mqtt:buffer:" + client.id;
+      kv.put(client.bufKey, client.buf);
+      attachment.bufKey = client.bufKey;
+    } else {
+      attachment.buf = client.buf;
+      if (client.bufKey) kv.delete(client.bufKey);
+      client.bufKey = null;
+    }
+    if (client.will &&
+        new TextEncoder().encode(client.will.topic).length + client.will.payload.length > MQTT_INLINE_BYTES) {
+      if (!client.willKey) {
+        client.willKey = "mqtt:will:" + client.id;
+        kv.put(client.willKey, client.will);
+      }
+      attachment.willKey = client.willKey;
+    } else {
+      attachment.will = client.will;
+      if (client.willKey) kv.delete(client.willKey);
+      client.willKey = null;
+    }
+    client.ws.serializeAttachment(attachment);
+  }
+
+  // Retained presence/receipts must survive hibernation too. Values are stored
+  // individually (up to 256 KiB each); the bounded index preserves the former
+  // 512-topic eviction order. SQLite-backed DO KV is synchronous and atomic.
+  retainedTopics() {
+    return this.state.storage.kv.get(MQTT_RETAINED_INDEX) || [];
+  }
+
   async fetch(request) {
     this.ensureMem();
-    // р226: комната зеркала - простой звёздный ретранслятор текстовых кадров
-    // между устройствами одной личности. Без логики, без хранения.
     const url = new URL(request.url);
     if (url.pathname.startsWith("/mirror/")) {
       return this.mirrorJoin(request, url);
     }
     if (url.pathname === "/mqtt/health") {
+      const clients = this.mqttSockets().length;
       return json({
         ok: true,
         broker: "apu-mqtt-bridge",
         bridge_version: MQTT_BRIDGE_VERSION,
-        clients: this.clients.size,
+        hibernation: true,
+        clients,
         max_clients: MQTT_MAX_CLIENTS,
-        retained: this.retained.size,
-        subscribed: this.clients.size,
+        retained: this.retainedTopics().length,
+        subscribed: clients,
         stats: this.stats,
+        stats_note: "счётчики сбрасываются при спячке объекта; clients и retained точные",
       });
     }
-    if (this.clients.size >= MQTT_MAX_CLIENTS) {
+    if (this.mqttSockets().length >= MQTT_MAX_CLIENTS) {
       return json({ error: "broker busy" }, 503);
     }
     const pair = new WebSocketPair();
     const server = pair[1];
-    server.accept();
-    server.binaryType = "arraybuffer";
+    // НЕ server.accept(): обычный WS закрепляет DO в памяти на все сутки.
+    this.state.acceptWebSocket(server, ["mqtt"]);
     const client = new MqttClient(server);
-    this.clients.add(client);
+    this.clients.set(server, client);
+    this.saveClient(client);
     this.stats.connects += 1;
-    server.addEventListener("message", (event) => this.onMessage(client, event.data));
-    server.addEventListener("close", () => this.drop(client));
-    server.addEventListener("error", () => this.drop(client));
     // rumqttc требует эхо субпротокола mqtt. Cloudflare отвечает 500, если
     // выставить заголовок, а клиент его не просил.
     const requested = (request.headers.get("Sec-WebSocket-Protocol") || "")
@@ -199,11 +265,41 @@ export class MqttBridge {
       .map((s) => s.trim().toLowerCase());
     const headers = {};
     if (requested.includes("mqtt")) headers["Sec-WebSocket-Protocol"] = "mqtt";
-    return new Response(null, {
-      status: 101,
-      webSocket: pair[0],
-      headers,
-    });
+    return new Response(null, { status: 101, webSocket: pair[0], headers });
+  }
+
+  // CF вызывает эти методы после пробуждения даже для старых открытых WS.
+  webSocketMessage(ws, data) {
+    const saved = ws.deserializeAttachment();
+    if (saved?.kind === "mirror") {
+      this.mirrorMessage(ws, data);
+      return;
+    }
+    try {
+      const client = this.clientFor(ws);
+      this.onMessage(client, data);
+      if (!client.closed) this.saveClient(client);
+    } catch (error) {
+      console.error("MQTT bridge: cannot restore/save session", error);
+      try { ws.close(1011, "mqtt session state unavailable"); } catch (_) {}
+    }
+  }
+
+  webSocketClose(ws, code, reason) {
+    if (ws.deserializeAttachment()?.kind === "mqtt") {
+      try { this.drop(this.clientFor(ws)); }
+      catch (error) { console.error("MQTT bridge: close failed", error); }
+    }
+    // Старый compatibility_date не отвечает на WebSocket Close автоматически.
+    try { ws.close(code, reason); } catch (_) {}
+  }
+
+  webSocketError(ws, error) {
+    if (ws.deserializeAttachment()?.kind === "mqtt") {
+      try { this.drop(this.clientFor(ws)); }
+      catch (e) { console.error("MQTT bridge: socket error", e, error); }
+    }
+    try { ws.close(1011, "socket error"); } catch (_) {}
   }
 
   /// Один кадр от клиента. Раньше ошибка разбора молча снимала клиента, а
@@ -233,49 +329,58 @@ export class MqttBridge {
     const message = String((error && error.message) || error).slice(0, 160);
     this.stats.parse_errors += 1;
     this.stats.last_error = "frame parse error: " + message;
-    console.error("MQTT bridge: frame parse error (clients=" + this.clients.size + "): " + message);
+    console.error("MQTT bridge: frame parse error (clients=" + this.mqttSockets().length + "): " + message);
+    this.drop(client); // clear LastWill attachment before the Close event
     try { client.ws.close(1002, "mqtt frame parse error"); } catch (_) {}
-    this.drop(client);
   }
 
-  drop(client) {
+  drop(client, graceful = false) {
     this.ensureMem();
-    if (!this.clients.has(client)) return;
-    this.clients.delete(client);
-    this.stats.drops += 1;
-    if (client.will) {
-      this.publish(null, client.will.topic, client.will.payload, client.will.retain);
-      client.will = null;
+    if (client.closed) return;
+    client.closed = true;
+    const will = graceful ? null : client.will;
+    client.will = null;
+    client.buf = new Uint8Array(0);
+    // Clear will on the socket BEFORE fanout, so error+close cannot publish it
+    // twice, even if the DO sleeps between events.
+    try { this.saveClient(client); } catch (error) {
+      console.error("MQTT bridge: clear LastWill failed", error);
     }
+    const kv = this.state.storage.kv;
+    if (client.bufKey) kv.delete(client.bufKey);
+    if (client.willKey) kv.delete(client.willKey);
+    this.clients.delete(client.ws);
+    this.stats.drops += 1;
+    if (will) this.publish(client, will.topic, will.payload, will.retain);
   }
 
   // ---- р226: комната живого зеркала --------------------------------------
   async mirrorJoin(request, url) {
-    this.ensureMem();
     const dev = (url.searchParams.get("dev") || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32);
     if (!dev) return json({ error: "dev required" }, 400);
-    if (this.mirror.size >= 4) return json({ error: "room full" }, 503);
+    if (this.state.getWebSockets("mirror").filter((ws) => ws.readyState === 1).length >= 4) {
+      return json({ error: "room full" }, 503);
+    }
     const pair = new WebSocketPair();
     const server = pair[1];
-    server.accept();
-    const member = { sock: server, dev };
-    this.mirror.add(member);
-    server.addEventListener("message", (event) => {
-      if (typeof event.data !== "string") return;
-      if (event.data.length > 512 * 1024) return;
-      for (const other of this.mirror) {
-        if (other !== member) {
-          try { other.sock.send(event.data); } catch (_) { /* кадр не критичен */ }
-        }
-      }
-    });
-    const bye = () => { this.mirror.delete(member); };
-    server.addEventListener("close", bye);
-    server.addEventListener("error", bye);
+    this.state.acceptWebSocket(server, ["mirror"]);
+    server.serializeAttachment({ kind: "mirror", dev });
     return new Response(null, { status: 101, webSocket: pair[0] });
   }
 
+  mirrorMessage(from, data) {
+    if (typeof data !== "string" || data.length > 512 * 1024) return;
+    for (const other of this.state.getWebSockets("mirror")) {
+      if (other !== from && other.readyState === 1) {
+        try { other.send(data); } catch (_) { /* кадр не критичен */ }
+      }
+    }
+  }
+
   feed(client, chunk) {
+    if (client.buf.length + chunk.length > MQTT_MAX_BUFFER_BYTES) {
+      throw new Error("mqtt packet exceeds bridge buffer limit");
+    }
     const buf = new Uint8Array(client.buf.length + chunk.length);
     buf.set(client.buf); buf.set(chunk, client.buf.length);
     let pos = 0;
@@ -316,11 +421,11 @@ export class MqttBridge {
         // так клиент сразу видит причину, а не висит без ответа.
         try {
           client.send(new Uint8Array([0x20, 0x03, 0x00, 0x84, 0x00]));
-          client.ws.close(1000, "mqtt v5 unsupported");
         } catch (_) {}
         this.stats.v5_refused += 1;
         this.stats.last_error = "MQTT 5.0 CONNECT refused (bridge speaks 3.1.1)";
-        this.clients.delete(client);
+        this.drop(client, true);
+        try { client.ws.close(1000, "mqtt v5 unsupported"); } catch (_) {}
         return;
       }
       const flags = body[p]; p += 1;
@@ -356,12 +461,19 @@ export class MqttBridge {
         const flen = view.getUint16(p); p += 2;
         const filter = new TextDecoder().decode(body.slice(p, p + flen)); p += flen;
         p += 1; // requested qos
+        if (client.subs.length >= MQTT_MAX_SUBS ||
+            new TextEncoder().encode(filter).length > MQTT_MAX_FILTER_BYTES) {
+          granted.push(0x80); // SUBACK: фильтр не принят (лимит attachment)
+          continue;
+        }
         client.subs.push(filter);
         granted.push(0);
-        // Retained: всё совпавшее - сразу (retain бит стоит).
-        for (const entry of this.retained.values()) {
-          if (topicMatch(filter, entry.topic)) {
-            client.send(buildPublish(entry.topic, entry.payload, true));
+        // Retained хранится в SQLite KV и переживает любую спячку DO.
+        const kv = this.state.storage.kv;
+        for (const topic of this.retainedTopics()) {
+          if (topicMatch(filter, topic)) {
+            const payload = kv.get(MQTT_RETAINED_PREFIX + topic);
+            if (payload) client.send(buildPublish(topic, payload, true));
           }
         }
       }
@@ -371,26 +483,43 @@ export class MqttBridge {
     } else if (type === 12) { // PINGREQ
       client.send(new Uint8Array([0xd0, 0x00]));
     } else if (type === 14) { // DISCONNECT
-      client.will = null;
+      this.drop(client, true);
       try { client.ws.close(1000, "bye"); } catch (_) {}
-      this.clients.delete(client);
     }
   }
 
   publish(from, topic, payload, retain) {
     if (retain) {
-      if (payload.length === 0) this.retained.delete(topic);
-      else this.retained.set(topic, { topic, payload });
+      const kv = this.state.storage.kv;
+      const index = this.retainedTopics();
+      const at = index.indexOf(topic);
+      if (payload.length === 0) {
+        if (at !== -1) {
+          index.splice(at, 1);
+          kv.delete(MQTT_RETAINED_PREFIX + topic);
+          kv.put(MQTT_RETAINED_INDEX, index);
+        }
+      } else if (new TextEncoder().encode(topic).length <= MQTT_MAX_RETAINED_TOPIC_BYTES) {
+        kv.put(MQTT_RETAINED_PREFIX + topic, payload);
+        if (at === -1) {
+          index.push(topic);
+          if (index.length > 512) kv.delete(MQTT_RETAINED_PREFIX + index.shift());
+          kv.put(MQTT_RETAINED_INDEX, index);
+        }
+      } else {
+        // Без предела на длину темы индекс перестал бы помещаться в SQLite KV.
+        this.stats.last_error = "retained topic too long";
+        console.warn("MQTT bridge: retained topic exceeds limit");
+      }
     }
-    if (this.retained.size > 512) {
-      this.retained.delete(this.retained.keys().next().value);
-    }
-    for (const c of this.clients) {
-      if (c === from) continue; // себе эхо не шлем
-      for (const filter of c.subs) {
+    for (const ws of this.mqttSockets()) {
+      if (from && ws === from.ws) continue; // себе эхо не шлем
+      const subs = ws.deserializeAttachment()?.subs || [];
+      for (const filter of subs) {
         if (topicMatch(filter, topic)) {
-          c.send(buildPublish(topic, payload, false));
-          this.stats.publishes_out += 1;
+          try { ws.send(buildPublish(topic, payload, false));
+            this.stats.publishes_out += 1;
+          } catch (_) { /* получатель успел закрыться */ }
           break;
         }
       }
