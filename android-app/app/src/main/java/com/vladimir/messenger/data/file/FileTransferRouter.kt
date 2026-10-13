@@ -1509,7 +1509,10 @@ class FileTransferRouter @Inject constructor(
     suspend fun exportReceivedFile(
         transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity,
         target: android.net.Uri,
-    ): Boolean = exportFile(receivedFileFor(transfer) ?: return false, target)
+    ): Boolean {
+        val source = receivedFileFor(transfer) ?: return false
+        return exportFile(source, target)
+    }
 
     /** Копия локального файла в папку, которую человек выбрал в системном окне. */
     suspend fun exportFile(
