@@ -1583,6 +1583,9 @@ The file is not on this phone</string>
     <string name="story_camera_permission_denied">Allow camera access to take a photo.</string>
     <string name="story_camera_unavailable">Camera is unavailable on this device.</string>
     <string name="story_camera_capture_failed">Couldn’t take the photo. Try again.</string>
+    <string name="story_camera_flash_off">Flash off</string>
+    <string name="story_camera_flash_on">Flash on</string>
+    <string name="story_camera_flash_auto">Flash auto</string>
     <string name="story_remove_photo">Remove photo</string>
     <string name="story_caption">Caption (optional)</string>
     <string name="story_photo_preparing">Preparing photo…</string>

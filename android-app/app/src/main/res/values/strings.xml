@@ -1596,6 +1596,9 @@
     <string name="story_camera_permission_denied">Разрешите доступ к камере, чтобы сделать фото.</string>
     <string name="story_camera_unavailable">Камера недоступна на этом устройстве.</string>
     <string name="story_camera_capture_failed">Не удалось сделать фото. Попробуйте ещё раз.</string>
+    <string name="story_camera_flash_off">Вспышка выключена</string>
+    <string name="story_camera_flash_on">Вспышка включена</string>
+    <string name="story_camera_flash_auto">Вспышка авто</string>
     <string name="story_remove_photo">Убрать фото</string>
     <string name="story_caption">Подпись (необязательно)</string>
     <string name="story_photo_preparing">Подготавливаем фото…</string>
