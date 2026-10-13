@@ -19,6 +19,7 @@ use crate::network::file_session_receiver::InboundFileSessionServer;
 use crate::network::peer_assistance::{self, PeerAssistance, AssistOperation};
 use crate::network::peer_exchange::{
     Candidate as DiscoveryCandidate, PeerExchange, is_public_endpoint, valid_node_id,
+    MAX_PARALLEL_EXCHANGES,
 };
 use crate::network::file_wire::{FileChunkDataV1, FileFrameV1, FILE_WIRE_MAGIC};
 use crate::network::router::Router;
@@ -63,6 +64,15 @@ use crate::network::adaptive_polling::AdaptivePolling;
 use crate::resilience::AddressBook;
 
 const MQTT_OUTBOUND_COMMAND_CAPACITY: usize = 256;
+
+/// Give a newly discovered *own* public endpoint to directly authenticated
+/// neighbours. No third-party/MQTT address hint is ever promoted into this path.
+struct OwnAddressGossip {
+    identity: Arc<crate::crypto::signing_identity::InstalledSigningIdentity>,
+    transport: DirectTransport,
+    directory: Arc<PeerExchange>,
+    book: Arc<AddressBook>,
+}
 
 /// `ciphertext_chunk_len` is an existing stable FFI argument. The high bit is not a length; it is
 /// set only after the v2 FCAP exchange confirmed that both apps support the authenticated F4 direct
@@ -1082,6 +1092,12 @@ impl P2PCore {
                 match transport {
                     Some((transport, side)) => {
                         *direct_slot.lock().unwrap() = Some(transport.clone());
+                        let own_address_gossip = discovery_identity.as_ref().map(|identity| OwnAddressGossip {
+                            identity: Arc::clone(identity),
+                            transport: transport.clone(),
+                            directory: Arc::clone(&self.peer_exchange),
+                            book: Arc::clone(&self.address_book),
+                        });
                         if let Some(identity) = discovery_identity {
                             runtime.spawn(Self::run_peer_exchange(
                                 identity, transport, Arc::clone(&self.peer_exchange),
@@ -1099,6 +1115,7 @@ impl P2PCore {
                                 public_addr_stun,
                                 own_addr_changed_stun,
                                 Some(side),
+                                own_address_gossip,
                             )
                             .await;
                         });
@@ -1111,6 +1128,7 @@ impl P2PCore {
                             Self::run_stun_discovery(
                                 public_addr_stun,
                                 own_addr_changed_stun,
+                                None,
                                 None,
                             )
                             .await;
@@ -4260,6 +4278,7 @@ impl P2PCore {
         public_addr: Arc<Mutex<Option<SocketAddr>>>,
         addr_changed_flag: Arc<std::sync::atomic::AtomicBool>,
         mut side: Option<crate::network::quic_client::UdpSideChannel>,
+        gossip: Option<OwnAddressGossip>,
     ) {
         use crate::network::direct_transport::stun_via_side_channel;
         use crate::network::ice::{StunClient, DEFAULT_STUN_SERVERS, STUN_TIMEOUT};
@@ -4310,6 +4329,32 @@ impl P2PCore {
                             "STUN: my external address changed = {} — immediate presence to all own",
                             addr
                         );
+                        if let Some(gossip) = gossip.as_ref() {
+                            // The old personal presence reaches contacts we can dial, but its
+                            // address is self-reported. Immediately offer our new OWNER-SIGNED
+                            // lease to authenticated neighbours instead of waiting up to 10 min
+                            // for the regular PEX refresh. They may pass it on only until expiry.
+                            let now = crate::storage::models::now_ms();
+                            gossip.directory.prioritize_own_address(now);
+                            let mut offered = 0;
+                            for helper in gossip.directory.helpers(now).into_iter()
+                                .filter(|peer| is_public_endpoint(peer.endpoint)) {
+                                if offered >= MAX_PARALLEL_EXCHANGES { break; }
+                                if let Some(request) = gossip.directory.probe(
+                                    &gossip.identity, Some(addr), &helper.identity.claims.node_id,
+                                    helper.endpoint, now,
+                                ) {
+                                    offered += 1;
+                                    Self::spawn_exchange_send(
+                                        gossip.transport.clone(), Arc::clone(&gossip.identity),
+                                        Arc::clone(&gossip.directory), Arc::clone(&gossip.book), request,
+                                    );
+                                }
+                            }
+                            if offered > 0 {
+                                tracing::info!("PEX: fresh signed own address offered to {} neighbours", offered);
+                            }
+                        }
                     }
                     // Раз в минуту, а не в две: отображение на NAT у
                     // мобильных операторов живёт 30-60 с, и этот же запрос
