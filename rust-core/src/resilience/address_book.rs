@@ -41,8 +41,10 @@ pub const HISTORY_PER_PEER: usize = 4;
 pub const HISTORY_MAX_ENTRIES: usize = 2048;
 /// Повторная проверка одного и того же адреса за час не делает его «любимым».
 pub const HISTORY_HIT_INTERVAL_MS: i64 = 60 * 60 * 1000;
-/// Провал подключения не уничтожает историю: просто не сканируем снова в этот час.
-pub const HISTORY_FAILURE_COOLDOWN_MS: i64 = 60 * 60 * 1000;
+/// Пробованный адрес отступает на 6 ч, даже если QUIC принял кадр, но
+/// подписанный ответ так и не пришёл. Иначе одна «любимая» мёртвая точка
+/// вытеснила бы все альтернативы при глобальном бюджете 1 проба/час.
+pub const HISTORY_ENDPOINT_COOLDOWN_MS: i64 = 6 * 60 * 60 * 1000;
 pub const HISTORY_PROBE_INTERVAL_MS: i64 = 60 * 60 * 1000;
 /// Узел, которого не видели 30 дней, убираем при следующей записи.
 pub const ENTRY_TTL_MS: i64 = 30 * 24 * 60 * 60 * 1000;
@@ -68,6 +70,7 @@ struct HistoryEntry {
     verified_at_ms: i64,
     hits: u16,
     #[serde(default)] last_hit_at_ms: i64,
+    #[serde(default)] last_probe_at_ms: i64,
     #[serde(default)] failed_at_ms: i64,
 }
 
@@ -282,7 +285,8 @@ impl AddressBook {
         let first_proof = !history.contains_key(&key);
         let record = history.entry(key).or_insert_with(|| HistoryEntry {
             id: id.to_string(), addr: addr.to_string(), signing_key,
-            verified_at_ms: now, hits: 0, last_hit_at_ms: 0, failed_at_ms: 0,
+            verified_at_ms: now, hits: 0, last_hit_at_ms: 0,
+            last_probe_at_ms: 0, failed_at_ms: 0,
         });
         let owner_changed = record.signing_key != signing_key;
         if owner_changed {
@@ -299,6 +303,7 @@ impl AddressBook {
             record.last_hit_at_ms = now;
         }
         record.verified_at_ms = now;
+        record.last_probe_at_ms = 0;
         record.failed_at_ms = 0;
         trim_history(&mut history, now);
         drop(history);
@@ -331,9 +336,10 @@ impl AddressBook {
         let history = self.history.lock().unwrap();
         let mut ranked: Vec<_> = history.values().filter_map(|record| {
             let addr = valid_history_address(record, now)?;
-            if pins.get(&record.id) != Some(&record.signing_key)
-                || (record.failed_at_ms > record.verified_at_ms &&
-                    now.saturating_sub(record.failed_at_ms) < HISTORY_FAILURE_COOLDOWN_MS) {
+            let cooling = [record.last_probe_at_ms, record.failed_at_ms].iter().any(|at|
+                *at > 0 && *at >= record.verified_at_ms
+                    && now.saturating_sub(*at) < HISTORY_ENDPOINT_COOLDOWN_MS);
+            if pins.get(&record.id) != Some(&record.signing_key) || cooling {
                 return None;
             }
             Some((history_rank(record, now), VerifiedAddress {
@@ -348,7 +354,13 @@ impl AddressBook {
     /// Persist the global hourly probe budget across process restarts. Claim
     /// only when an eligible candidate exists; the claim is conservative even
     /// if a subsequent dial cannot start (rate limit/backoff).
-    pub fn claim_history_probe(&self, now: i64) -> bool {
+    pub fn claim_history_probe(&self, id: &str, addr: SocketAddr, now: i64) -> bool {
+        let mut history = self.history.lock().unwrap();
+        let Some(record) = history.get_mut(&(id.to_string(), addr)) else { return false; };
+        if valid_history_address(record, now).is_none()
+            || (record.last_probe_at_ms > 0 &&
+                now.saturating_sub(record.last_probe_at_ms) < HISTORY_ENDPOINT_COOLDOWN_MS)
+        { return false; }
         let last = self.last_history_probe_ms.load(Ordering::Relaxed);
         if now <= 0 || (last > 0 && now.saturating_sub(last) < HISTORY_PROBE_INTERVAL_MS) {
             return false;
@@ -356,7 +368,9 @@ impl AddressBook {
         if self.last_history_probe_ms.compare_exchange(last, now, Ordering::AcqRel, Ordering::Relaxed).is_err() {
             return false;
         }
-        self.flush(); // one small disk write per hour, not per address
+        record.last_probe_at_ms = now;
+        drop(history);
+        self.flush(); // one small disk write per hour; survives process restarts
         true
     }
 
@@ -679,6 +693,24 @@ mod tests {
     }
 
     #[test]
+    fn attempted_favourite_rotates_to_next_address_even_without_signed_reply() {
+        let book = AddressBook::open(None);
+        let id = node(8); let key = [8; 32]; let now = 1_800_000_000_000_i64;
+        let favourite: SocketAddr = "8.8.4.8:7777".parse().unwrap();
+        let alternate: SocketAddr = "1.1.1.8:7777".parse().unwrap();
+        book.note_verified(&id, favourite, key, now);
+        book.note_verified(&id, favourite, key, now + HISTORY_HIT_INTERVAL_MS);
+        book.note_verified(&id, alternate, key, now + HISTORY_HIT_INTERVAL_MS);
+        let at = now + HISTORY_HIT_INTERVAL_MS;
+        assert_eq!(book.verified_candidates(&pins(&id, key), at)[0].addr, favourite);
+        assert!(book.claim_history_probe(&id, favourite, at));
+        assert_eq!(book.verified_candidates(&pins(&id, key), at + 1)[0].addr, alternate);
+        assert!(!book.claim_history_probe(&id, alternate, at + 1), "global hourly budget");
+        assert!(book.claim_history_probe(&id, alternate, at + HISTORY_PROBE_INTERVAL_MS));
+        assert!(book.verified_candidates(&pins(&id, key), at + HISTORY_PROBE_INTERVAL_MS + 1).is_empty());
+    }
+
+    #[test]
     fn failures_cool_down_a_historical_route_but_never_mark_peer_offline() {
         let book = AddressBook::open(None);
         let id = node(3); let key = [3; 32]; let now = 1_800_000_000_000_i64;
@@ -686,7 +718,7 @@ mod tests {
         book.note_verified(&id, addr, key, now);
         book.note_failed(&id, addr, now + 1);
         assert!(book.verified_candidates(&pins(&id, key), now + 2).is_empty());
-        assert_eq!(book.verified_candidates(&pins(&id, key), now + HISTORY_FAILURE_COOLDOWN_MS + 1).len(), 1);
+        assert_eq!(book.verified_candidates(&pins(&id, key), now + HISTORY_ENDPOINT_COOLDOWN_MS + 1).len(), 1);
         // Genuine bound reply overrides a delayed dial failure.
         book.note_verified(&id, addr, key, now + 30);
         book.note_failed(&id, addr, now + 20);
@@ -703,18 +735,22 @@ mod tests {
         fs::write(&path, old).unwrap();
         let book = AddressBook::open(Some(path.clone()));
         assert_eq!(book.len(), 1);
-        book.note_verified(&id, "8.8.4.4:7777".parse().unwrap(), key, now);
-        assert!(book.claim_history_probe(now));
-        assert!(!book.claim_history_probe(now + HISTORY_PROBE_INTERVAL_MS - 1));
+        let addr: SocketAddr = "8.8.4.4:7777".parse().unwrap();
+        book.note_verified(&id, addr, key, now);
+        assert!(book.claim_history_probe(&id, addr, now));
+        assert!(!book.claim_history_probe(&id, addr, now + HISTORY_PROBE_INTERVAL_MS - 1));
         book.flush();
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("\"history\""));
         // Old serde FileV1 ignores unknown field; current address remains intact.
         let reopened = AddressBook::open(Some(path.clone()));
         assert_eq!(reopened.seed_addrs().get(&id), Some(&"8.8.4.4:7777".parse().unwrap()));
-        assert_eq!(reopened.verified_candidates(&pins(&id, key), now).len(), 1);
-        assert!(!reopened.claim_history_probe(now + HISTORY_PROBE_INTERVAL_MS - 1), "budget survives restart");
-        assert!(reopened.claim_history_probe(now + HISTORY_PROBE_INTERVAL_MS));
+        assert!(reopened.verified_candidates(&pins(&id, key), now).is_empty(),
+            "attempted address must rotate out across a restart");
+        assert!(!reopened.claim_history_probe(&id, addr, now + HISTORY_PROBE_INTERVAL_MS - 1),
+            "global budget survives restart");
+        assert!(reopened.verified_candidates(&pins(&id, key), now + HISTORY_ENDPOINT_COOLDOWN_MS).len() == 1);
+        assert!(reopened.claim_history_probe(&id, addr, now + HISTORY_ENDPOINT_COOLDOWN_MS));
         let _ = fs::remove_file(path);
     }
 
@@ -736,7 +772,7 @@ mod tests {
         let now = crate::storage::models::now_ms(); let id = node(6); let key = [6; 32];
         let entry = |id: String, addr: &str, at: i64| HistoryEntry {
             id, addr: addr.into(), signing_key: key, verified_at_ms: at,
-            hits: 20, last_hit_at_ms: at, failed_at_ms: 0,
+            hits: 20, last_hit_at_ms: at, last_probe_at_ms: 0, failed_at_ms: 0,
         };
         let file = FileV1 { v: BOOK_VERSION, entries: vec![],
             history: vec![

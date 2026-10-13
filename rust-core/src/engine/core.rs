@@ -2249,7 +2249,7 @@ impl P2PCore {
                         let pins: HashMap<String, [u8; 32]> = own.iter().filter_map(|id|
                             directory.pinned_key(id).map(|key| (id.clone(), key))).collect();
                         if let Some((id, endpoint)) = Self::idle_history_candidate(&book, &pins, &addresses, now) {
-                            if book.claim_history_probe(now) {
+                            if book.claim_history_probe(&id, endpoint, now) {
                                 history_at = now.saturating_add(crate::resilience::address_book::HISTORY_PROBE_INTERVAL_MS);
                                 let own_addr = *public_addr.lock().unwrap();
                                 if let Some(request) = directory.probe(&identity, own_addr, &id, endpoint, now) {
