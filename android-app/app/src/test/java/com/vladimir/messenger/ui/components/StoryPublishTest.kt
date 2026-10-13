@@ -39,4 +39,10 @@ class StoryPublishTest {
         assertFalse(StoryComposerLayout.showCompactToolRow(imeOpen = true, heightDp = 360))
         assertTrue(StoryComposerLayout.showAccessoryTools(imeOpen = false, heightDp = 800))
     }
+
+    @Test fun ownCircleCombinesViewAndAddLikeTelegram() {
+        assertFalse(StoryStrip.showsSeparateAddButton())
+        assertTrue(StoryStrip.selfOpensViewer(hasOwnStory = true))
+        assertFalse(StoryStrip.selfOpensViewer(hasOwnStory = false))
+    }
 }

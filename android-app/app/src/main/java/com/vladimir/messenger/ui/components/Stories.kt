@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.text.format.DateUtils
+import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -23,12 +24,16 @@ import kotlinx.coroutines.Dispatchers
 import android.util.Base64
 import com.vladimir.messenger.data.story.StoryPhoto
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -60,7 +65,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
@@ -99,6 +106,7 @@ fun StoriesStrip(
 ) {
     val seen by StoryStore.seen.collectAsStateWithLifecycle()
     val avatars by AvatarStore.avatars.collectAsStateWithLifecycle()
+    val profileName by com.vladimir.messenger.ui.theme.UsernameHolder.name.collectAsStateWithLifecycle()
     val mine = stories.filter { it.mine }
     val byAuthor = stories.filter { !it.mine }.groupBy { it.authorId }.values
         .map { it.sortedBy { s -> s.createdAtMs } }
@@ -109,21 +117,20 @@ fun StoriesStrip(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        // Отдельный плюс доступен и когда собственная история уже опубликована.
-        item(key = "add-story") {
-            Column(Modifier.width(72.dp).clickable(onClick = onAddClick), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.size(64.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
-                    .border(1.dp, storyGold.copy(alpha = .5f), CircleShape), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.Add, stringResource(R.string.story_new), tint = MaterialTheme.colorScheme.primary)
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(stringResource(R.string.story_new), style = MaterialTheme.typography.labelSmall,
-                    maxLines = 2, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis)
-            }
-        }
-        if (mine.isNotEmpty()) item(key = "mine") {
-            StoryBubble(stringResource(R.string.story_mine), avatars[mine.first().authorId], mine.map { true }) {
-                onOpenAuthor(mine.first().authorId)
+        // Как в Telegram: свой кружок один. Плюс на нём — добавить, кружок —
+        // смотреть (если история уже есть).
+        item(key = "mine") {
+            val hasOwn = mine.isNotEmpty()
+            StoryBubble(
+                title = stringResource(R.string.story_mine),
+                avatar = null,
+                viewed = if (hasOwn) mine.map { true } else emptyList(),
+                self = true,
+                selfName = profileName,
+                onAddClick = onAddClick,
+            ) {
+                if (StoryStrip.selfOpensViewer(hasOwn)) onOpenAuthor(mine.first().authorId)
+                else onAddClick()
             }
         }
         items(byAuthor, key = { it.first().authorId }) { list ->
@@ -135,28 +142,122 @@ fun StoriesStrip(
 }
 
 @Composable
-private fun StoryBubble(title: String, avatar: String?, viewed: List<Boolean>, onClick: () -> Unit) {
-    Column(Modifier.width(72.dp).clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(64.dp), contentAlignment = Alignment.Center) {
-            Canvas(Modifier.fillMaxSize()) {
-                val count = viewed.size.coerceAtMost(30)
-                val step = 360f / count.coerceAtLeast(1)
-                val gap = if (count == 1) 0f else 4f
-                val stroke = 2.5.dp.toPx()
-                // Очень большие подборки объединяются в кольцо без исчезающих сегментов.
-                repeat(count) { i ->
-                    drawArc(if (if (viewed.size > 30) viewed.all { it } else viewed[i]) Color(0xFF84909F) else storyGold,
-                        -90f + i * step + gap / 2, step - gap, false,
-                        topLeft = Offset(stroke / 2, stroke / 2),
-                        size = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke),
-                        style = Stroke(stroke))
+private fun StoryBubble(
+    title: String,
+    avatar: String?,
+    viewed: List<Boolean>,
+    onClick: () -> Unit,
+    self: Boolean = false,
+    selfName: String? = null,
+    onAddClick: (() -> Unit)? = null,
+) {
+    Column(
+        Modifier.width(if (self) 80.dp else 72.dp).then(if (self) Modifier else Modifier.clickable(onClick = onClick)),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(Modifier.size(if (self) 72.dp else 64.dp)) {
+            Box(
+                Modifier
+                    .size(64.dp)
+                    .align(Alignment.TopStart)
+                    .then(if (self) Modifier.clickable(onClick = onClick) else Modifier),
+                contentAlignment = Alignment.Center,
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val count = viewed.size.coerceAtMost(30)
+                    val stroke = 2.5.dp.toPx()
+                    if (count == 0) {
+                        drawCircle(
+                            color = storyGold.copy(alpha = .45f),
+                            radius = (size.minDimension - stroke) / 2f,
+                            style = Stroke(stroke),
+                        )
+                    } else {
+                        val step = 360f / count.coerceAtLeast(1)
+                        val gap = if (count == 1) 0f else 4f
+                        // Очень большие подборки объединяются в кольцо без исчезающих сегментов.
+                        repeat(count) { i ->
+                            drawArc(
+                                if (if (viewed.size > 30) viewed.all { it } else viewed[i]) Color(0xFF84909F) else storyGold,
+                                -90f + i * step + gap / 2, step - gap, false,
+                                topLeft = Offset(stroke / 2, stroke / 2),
+                                size = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke),
+                                style = Stroke(stroke),
+                            )
+                        }
+                    }
+                }
+                if (self) {
+                    MyAvatar(
+                        displayName = selfName.orEmpty().ifBlank { title },
+                        modifier = Modifier.size(54.dp),
+                        size = 54,
+                    )
+                } else {
+                    PeerAvatar(name = title, avatarB64 = avatar, size = 54.dp)
                 }
             }
-            PeerAvatar(name = title, avatarB64 = avatar, size = 54.dp)
+            if (self && onAddClick != null) {
+                StoryAddBadge(
+                    onClick = onAddClick,
+                    modifier = Modifier.align(Alignment.BottomEnd),
+                )
+            }
         }
         Spacer(Modifier.height(6.dp))
-        Text(title, style = MaterialTheme.typography.labelSmall, maxLines = 1,
-            overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+        Text(
+            title,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = if (self) Modifier.clickable(onClick = onClick) else Modifier,
+        )
+    }
+}
+
+/** Золотой объёмный плюс, выпирает из своего кружка. */
+@Composable
+private fun StoryAddBadge(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val view = LocalView.current
+    LaunchedEffect(pressed) {
+        if (pressed) view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+    }
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.88f else 1f,
+        animationSpec = tween(durationMillis = 110),
+        label = "story-add-press",
+    )
+    val lift by animateDpAsState(
+        targetValue = if (pressed) 2.dp else 8.dp,
+        animationSpec = tween(durationMillis = 110),
+        label = "story-add-lift",
+    )
+    val shape = CircleShape
+    Box(
+        modifier
+            .size(24.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .apuPremiumLift(lift, shape, ApuGold.copy(alpha = 0.55f))
+            .clip(shape)
+            .background(apuGoldBrush())
+            .border(1.5.dp, Color.White, shape)
+            .apuPremiumGloss(shape, intensity = 1.05f, topFraction = 0.7f)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Default.Add,
+            contentDescription = stringResource(R.string.story_new),
+            tint = ApuGoldInk,
+            modifier = Modifier.size(14.dp),
+        )
     }
 }
 
@@ -186,6 +287,7 @@ fun StoryViewerDialog(
     var held by remember(current.id) { mutableStateOf(false) }
     var userPaused by remember(authorId) { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    var pendingDeleteId by remember { mutableStateOf<String?>(null) }
     val owner = LocalLifecycleOwner.current
     var resumed by remember(owner) { mutableStateOf(owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     DisposableEffect(owner) {
@@ -196,16 +298,23 @@ fun StoryViewerDialog(
         onDispose { owner.lifecycle.removeObserver(observer) }
     }
     val avatars by AvatarStore.avatars.collectAsStateWithLifecycle()
-    val previous: () -> Unit = { if (index > 0) selectedId = activeStories[index - 1].id else progress = 0f }
-    val next: () -> Unit = { if (index < activeStories.lastIndex) selectedId = activeStories[index + 1].id else onDismiss() }
+    val profileName by com.vladimir.messenger.ui.theme.UsernameHolder.name.collectAsStateWithLifecycle()
+    val previous: () -> Unit = {
+        if (confirmDelete) return
+        if (index > 0) selectedId = activeStories[index - 1].id else progress = 0f
+    }
+    val next: () -> Unit = {
+        if (confirmDelete) return
+        if (index < activeStories.lastIndex) selectedId = activeStories[index + 1].id else onDismiss()
+    }
     val nextNow by rememberUpdatedState(next)
     val previousNow by rememberUpdatedState(previous)
     val dismissNow by rememberUpdatedState(onDismiss)
     val setHeldNow by rememberUpdatedState<(Boolean) -> Unit>({ held = it })
     // Не отмечаем собственные истории. Это локальный статус, не счётчик просмотров автора.
     LaunchedEffect(current.id) { if (!current.mine) StoryStore.markSeen(current.id) }
-    LaunchedEffect(current.id, held, userPaused, resumed) {
-        if (held || userPaused || !resumed) return@LaunchedEffect
+    LaunchedEffect(current.id, held, userPaused, confirmDelete, resumed) {
+        if (StoryPlayback.frozen(held, userPaused, confirmDelete, resumed)) return@LaunchedEffect
         val duration = StoryPlayback.durationMs(current.text.length)
         var last = withFrameMillis { it }
         while (progress < 1f) {
@@ -283,8 +392,15 @@ fun StoryViewerDialog(
                         }
                     }
                     Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        PeerAvatar(if (current.mine) stringResource(R.string.story_you) else current.authorName,
-                            avatars[current.authorId], 40.dp)
+                        if (current.mine) {
+                            MyAvatar(
+                                displayName = profileName.orEmpty().ifBlank { stringResource(R.string.story_you) },
+                                modifier = Modifier.size(40.dp),
+                                size = 40,
+                            )
+                        } else {
+                            PeerAvatar(current.authorName, avatars[current.authorId], 40.dp)
+                        }
                         Column(Modifier.weight(1f).padding(start = 10.dp)) {
                             Text(if (current.mine) stringResource(R.string.story_you) else current.authorName,
                                 color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -296,7 +412,11 @@ fun StoryViewerDialog(
                                 stringResource(if (userPaused) R.string.story_resume else R.string.story_pause), tint = Color.White)
                         }
                         if (current.mine && onDeleteMine != null) {
-                            IconButton(onClick = { confirmDelete = true }) {
+                            IconButton(onClick = {
+                                userPaused = true
+                                pendingDeleteId = current.id
+                                confirmDelete = true
+                            }) {
                                 Icon(Icons.Default.Delete, stringResource(R.string.story_delete), tint = Color.White)
                             }
                         }
@@ -321,8 +441,9 @@ fun StoryViewerDialog(
             onDismiss = { confirmDelete = false },
             confirmLabel = stringResource(R.string.story_delete_confirm),
             onConfirm = {
-                val id = current.id
+                val id = pendingDeleteId ?: current.id
                 confirmDelete = false
+                pendingDeleteId = null
                 onDeleteMine.invoke(id)
             },
             confirmStyle = DiagnosticsActionStyle.DANGER,

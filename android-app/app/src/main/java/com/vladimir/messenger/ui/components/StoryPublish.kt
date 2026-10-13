@@ -33,3 +33,12 @@ internal object StoryComposerLayout {
     fun showCompactToolRow(imeOpen: Boolean, heightDp: Int): Boolean =
         !imeOpen && heightDp < COMPACT_HEIGHT_DP
 }
+
+/**
+ * Полоса историй как в Telegram: свой кружок один, плюс на нём.
+ * Отдельной «Новой истории» нет — просмотр и добавление живут вместе.
+ */
+internal object StoryStrip {
+    fun showsSeparateAddButton(): Boolean = false
+    fun selfOpensViewer(hasOwnStory: Boolean): Boolean = hasOwnStory
+}
