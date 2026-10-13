@@ -1238,6 +1238,7 @@
     <string name="fsl_sending">Передача…%1$s</string>
     <string name="fsl_recv_custodian">Приём от хранителя…%1$s</string>
     <string name="fsl_recv">Приём…%1$s</string>
+    <string name="fsl_stalled">Приём остановился…%1$s</string>
     <string name="fsl_preparing">Подготовка…</string>
     <string name="fsl_queued">В очереди (дождётся получателя)</string>
     <string name="fsl_incoming">Входящий файл…</string>

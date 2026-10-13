@@ -51,6 +51,16 @@ class FakeFileTransferDao : FileTransferDao {
             }
             .sortedBy { it.createdAtMs }
 
+    override suspend fun getActiveIncoming(nowMs: Long): List<FileTransferEntity> =
+        transfers.values
+            .filter {
+                it.direction == "INCOMING" &&
+                    it.state in setOf("OFFERED", "TRANSFERRING") &&
+                    it.expiresAtMs > nowMs
+            }
+            .sortedBy { it.updatedAtMs }
+            .take(16)
+
     override suspend fun insertTransferIgnore(transfer: FileTransferEntity): Long {
         if (transfers.containsKey(transfer.transferId)) return -1L
         transfers[transfer.transferId] = transfer

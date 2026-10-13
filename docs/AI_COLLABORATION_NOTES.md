@@ -12968,3 +12968,29 @@ unchanged.
   Щипок меняет `CameraControl.setZoomRatio`, тап — `FocusMeteringAction` с кольцом,
   двойной тап/кнопка переключает камеру, вспышка циклится при наличии блока.
 - Тесты: `StoryCameraControlsTest`.
+
+### Файлы в личном чате: зависание на 3/6 (2026-10-13)
+
+- Жалоба на v11.74.344: JPEG в личном чате у получателя «Приём… 3/6», у отправителя
+  «6/6 ушло», статус «в сети» пропал. Это не камера историй.
+- Три слоя в коде. (1) `FileTransferSender.sendItem`: если задан `directTransport`
+  (в проде всегда) и он вернул false — сразу `RecipientOfflineException`, durable
+  `transport.send` не вызывался. (2) Обрыв F4/QUIC в `sendBinaryChunk` — то же
+  исключение, без текстового пути. Тест `binaryFailurePausesTransferLikeOfflineRecipient`
+  это закреплял. (3) `FileTransferRouter.directSend` после LAN/UDP/QUIC клал в
+  брокер только при `isPeerOnline` (TTL 200 с, тяжёлый пульс раз в 30 с, reaper
+  `peer_lost` снимает online). Пропавший статус = насос файла стоит, хотя MQTT
+  ещё жив.
+- Исправление в v11.74.345: `sendItem` при неудаче прямого пути идёт в durable;
+  пауза только если и брокер отказал. Бинарный обрыв падает в текстовый `sendItem`.
+  `directSend` всегда пробует брокер, без пульса «в сети». Получатель
+  `remindIncompleteIncoming` раз в 10 с повторяет ACK по недособранным входящим
+  (насос `pumpOutgoing`). Пузырь: «Приём остановился… N/M», если `updatedAtMs`
+  старше 45 с.
+- Тесты: `FileTransferSenderTest` (fallback на брокер, бинарный срыв → текст,
+  оба пути отказали → WAITING_RECIPIENT), `FileTransferReceiverTest` (повтор ACK).
+  Оба suite добавлены в `build-release.yml`. Локального Java нет — зелень смотреть
+  по CI тега.
+- Не переоткрывать 343/344. Групповой сидер по-прежнему не должен вываливать
+  мегабайты в MQTT; окно `MAX_INFLIGHT_MESSAGES` остаётся. Custody по-прежнему
+  смотрит `isPeerOnline`.

@@ -338,28 +338,24 @@ class FileTransferRouter @Inject constructor(
                         lastDirectMode[recipientId] = "quic"
                         true
                     } else {
-                        // Прямого нет вовсе: если собеседник в сети по
-                        // presence — через durable-брокера (по мобильной
-                        // медленно, но передача не «умирает»). Оффлайновый
-                        // собеседник не грузим: пауза как раньше.
-                        if (isPeerOnline(recipientId)) {
-                            val viaBroker = runCatching {
-                                runBlocking {
-                                    transportLocal.send(
-                                        "frag-" + System.nanoTime(),
-                                        FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE,
-                                        recipientId,
-                                        payload,
-                                    )
-                                }
-                            }.getOrDefault(false)
-                            if (viaBroker) {
-                                lastDirectMode[recipientId] = "broker"
+                        // Прямого нет: куски всё равно кладём в durable-брокер.
+                        // Раньше здесь требовался пульс «в сети» — стоило ему
+                        // пропасть, фото зависало на половине (3/6), хотя
+                        // абонент был на связи, а отправитель уже видел «ушло».
+                        val viaBroker = runCatching {
+                            runBlocking {
+                                transportLocal.send(
+                                    "frag-" + System.nanoTime(),
+                                    FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE,
+                                    recipientId,
+                                    payload,
+                                )
                             }
-                            viaBroker
-                        } else {
-                            false
+                        }.getOrDefault(false)
+                        if (viaBroker) {
+                            lastDirectMode[recipientId] = "broker"
                         }
+                        viaBroker
                     }
                 }
             }
@@ -757,6 +753,8 @@ class FileTransferRouter @Inject constructor(
             if (summary != null && (summary.packetsSent > 0 || summary.transfersPumped > 0)) {
                 lastOutgoingActivityAt = System.currentTimeMillis()
             }
+            runCatching { receiver.remindIncompleteIncoming() }
+                .onFailure { Log.w(TAG, "incoming ACK remind failed: ${it.message}") }
             pumpCustody()
             runCatching { groupSeeder.pump() }
                 .onFailure { Log.w(TAG, "group seed pump failed: ${it.message}") }

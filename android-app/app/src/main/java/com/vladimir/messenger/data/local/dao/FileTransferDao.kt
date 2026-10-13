@@ -74,6 +74,22 @@ interface FileTransferDao {
     )
     suspend fun getActiveOutgoing(nowMs: Long): List<FileTransferEntity>
 
+    /**
+     * Недособранные входящие: получатель периодически повторяет ACK,
+     * иначе отправитель после обрыва прямого канала не сдвигает окно.
+     */
+    @Query(
+        """
+        SELECT * FROM file_transfers
+        WHERE direction = 'INCOMING'
+          AND state IN ('OFFERED', 'TRANSFERRING')
+          AND expiresAtMs > :nowMs
+        ORDER BY updatedAtMs ASC
+        LIMIT 16
+        """
+    )
+    suspend fun getActiveIncoming(nowMs: Long): List<FileTransferEntity>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertTransferIgnore(transfer: FileTransferEntity): Long
 

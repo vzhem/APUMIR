@@ -368,19 +368,23 @@ fun FileTransferBubble(
                 )
             }
             if (transfer.state == "TRANSFERRING" && transfer.transferredBytes > 0) {
-                val elapsedMs = System.currentTimeMillis() - transfer.createdAtMs
-                if (elapsedMs > 1000) {
-                    val bytesPerSec = (
-                        transfer.transferredBytes.toDouble() * 1_000.0 / elapsedMs.toDouble()
-                    ).coerceAtMost(Long.MAX_VALUE.toDouble()).toLong()
-                    if (bytesPerSec > 0) {
-                        val remaining = transfer.totalBytes - transfer.transferredBytes
-                        val etaSec = remaining / bytesPerSec
-                        Text(
-                            stringResource(R.string.transfer_speed_eta_tpl, formatSpeed(androidx.compose.ui.platform.LocalContext.current, bytesPerSec), formatEta(androidx.compose.ui.platform.LocalContext.current, etaSec)),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = contentColor.copy(alpha = 0.7f),
-                        )
+                val now = System.currentTimeMillis()
+                val stalled = now - transfer.updatedAtMs > 45_000L
+                if (!stalled) {
+                    val elapsedMs = now - transfer.createdAtMs
+                    if (elapsedMs > 1000) {
+                        val bytesPerSec = (
+                            transfer.transferredBytes.toDouble() * 1_000.0 / elapsedMs.toDouble()
+                        ).coerceAtMost(Long.MAX_VALUE.toDouble()).toLong()
+                        if (bytesPerSec > 0) {
+                            val remaining = transfer.totalBytes - transfer.transferredBytes
+                            val etaSec = remaining / bytesPerSec
+                            Text(
+                                stringResource(R.string.transfer_speed_eta_tpl, formatSpeed(androidx.compose.ui.platform.LocalContext.current, bytesPerSec), formatEta(androidx.compose.ui.platform.LocalContext.current, etaSec)),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = contentColor.copy(alpha = 0.7f),
+                            )
+                        }
                     }
                 }
             }
@@ -443,6 +447,8 @@ private fun stateLabel(
         "OFFERED" -> stringResource(R.string.fsl_incoming)
         "TRANSFERRING" -> if (transfer.direction == "OUTGOING") {
             stringResource(R.string.fsl_sending, ofChunks)
+        } else if (System.currentTimeMillis() - transfer.updatedAtMs > 45_000L) {
+            stringResource(R.string.fsl_stalled, ofChunks)
         } else if (transfer.custodianNodeId.isNotBlank()) {
             stringResource(R.string.fsl_recv_custodian, ofChunks)
         } else {

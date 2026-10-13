@@ -142,6 +142,8 @@ class FileTransferReceiver(
     private val wantSeq = HashMap<String, Long>()
     /** Когда инвентарь уходил в последний раз: не чаще [INVENTORY_INTERVAL_MS], кроме появления нового хранителя. */
     private val inventorySentAt = HashMap<String, Long>()
+    /** Повтор ACK недособранной личной передачи — не чаще инвентаря. */
+    private val ackRemindedAt = HashMap<String, Long>()
     /** transferId -> (хранитель -> когда от него последний раз пришёл кусок): кто из хранителей жив. */
     private val holderSeenAt = HashMap<String, MutableMap<String, Long>>()
     /** transferId -> (хранитель -> когда его последний раз просили о кусках): молчащий после просьбы - выбыл. */
@@ -2220,6 +2222,25 @@ class FileTransferReceiver(
             totalBytes: Long,
             fileSha256: String,
         )
+    }
+
+    /**
+     * Повтор ACK по личным входящим, которые ещё не собраны. После обрыва
+     * прямого канала отправитель ждёт contiguous ACK, а единственное
+     * подтверждение могло застрять в очереди — без напоминания окно стоит.
+     */
+    suspend fun remindIncompleteIncoming() {
+        mutex.withLock {
+            val now = nowMs()
+            for (row in transferDao.getActiveIncoming(now)) {
+                val last = ackRemindedAt[row.transferId]
+                if (last != null && now - last < INVENTORY_INTERVAL_MS) continue
+                ackRemindedAt[row.transferId] = now
+                val contiguous = contiguousPrefixes[row.transferId]
+                    ?: discoverContiguousPrefix(row.transferId)
+                sendFileAck(row.transferId, contiguous)
+            }
+        }
     }
 
     companion object {

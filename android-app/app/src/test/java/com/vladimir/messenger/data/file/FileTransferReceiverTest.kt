@@ -570,6 +570,21 @@ class FileTransferReceiverTest {
         assertEquals(0, seen.size)
     }
 
+    @Test
+    fun remindIncompleteIncomingResendsAck() = runTest {
+        val receiver = receiver()
+        deliver(receiver, offerTexts())
+        deliver(receiver, chunkTexts(0, plaintext.copyOfRange(0, chunkSize)))
+        val before = sentAckContiguous()
+        assertTrue(before.contains(1L))
+
+        receiver.remindIncompleteIncoming()
+
+        val after = sentAckContiguous()
+        assertTrue(after.size > before.size)
+        assertEquals(1L, after.last())
+    }
+
     private fun fcapText(payload: ByteArray): String =
         FileTransferWire.encodeEncodedPacket(
             FileTransferPacketCodec.encode(

@@ -250,6 +250,8 @@ jobs:
             --tests com.vladimir.messenger.data.story.StoryStoreMergeTest \
             --tests com.vladimir.messenger.ui.components.StoryCameraControlsTest \
             --tests com.vladimir.messenger.data.diagnostics.DiagnosticsReportTest \
+            --tests com.vladimir.messenger.data.file.FileTransferSenderTest \
+            --tests com.vladimir.messenger.data.file.FileTransferReceiverTest \
             --no-daemon > "$RUNNER_TEMP/gradle-release.log" 2>&1
           status=$?
           cat "$RUNNER_TEMP/gradle-release.log"

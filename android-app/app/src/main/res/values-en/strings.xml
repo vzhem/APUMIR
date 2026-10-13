@@ -1229,6 +1229,7 @@
     <string name="fsl_sending">Sending…%1$s</string>
     <string name="fsl_recv_custodian">Receiving from a keeper…%1$s</string>
     <string name="fsl_recv">Receiving…%1$s</string>
+    <string name="fsl_stalled">Transfer stalled…%1$s</string>
     <string name="fsl_preparing">Preparing…</string>
     <string name="fsl_queued">Queued (waiting for the recipient)</string>
     <string name="fsl_incoming">Incoming file…</string>
