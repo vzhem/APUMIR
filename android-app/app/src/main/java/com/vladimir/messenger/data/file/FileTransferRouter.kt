@@ -1509,8 +1509,14 @@ class FileTransferRouter @Inject constructor(
     suspend fun exportReceivedFile(
         transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity,
         target: android.net.Uri,
+    ): Boolean = exportFile(receivedFileFor(transfer) ?: return false, target)
+
+    /** Копия локального файла в папку, которую человек выбрал в системном окне. */
+    suspend fun exportFile(
+        source: java.io.File,
+        target: android.net.Uri,
     ): Boolean {
-        val source = receivedFileFor(transfer) ?: return false
+        if (!source.isFile) return false
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
                 val output = appContext.contentResolver.openOutputStream(target) ?: return@runCatching false
@@ -1624,3 +1630,9 @@ class FileTransferRouter @Inject constructor(
         }
     }
 }
+
+/** Имя в системном «Сохранить как» и локальный файл, который копируем на телефон. */
+data class PendingFileExport(
+    val displayName: String,
+    val source: java.io.File,
+)

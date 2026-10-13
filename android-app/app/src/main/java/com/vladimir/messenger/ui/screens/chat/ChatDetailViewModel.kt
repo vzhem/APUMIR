@@ -85,7 +85,7 @@ data class ChatDetailUiState(
     val antiRatingWarning: Boolean = false,
     val antiRatingUntilMs: Long = 0,
     val scrollToBottom: Boolean = false,
-    val pendingSave: FileTransferEntity? = null,
+    val pendingSave: com.vladimir.messenger.data.file.PendingFileExport? = null,
     /** Non-null asks the screen to open Android's system picker for an explicit file retry. */
     val pendingRetryFilePickerId: String? = null,
     /** Ранг ещё не открыл вложения: кнопка объяснит это сразу, а не после выбора файла. */
@@ -1617,21 +1617,40 @@ class ChatDetailViewModel @Inject constructor(
         }
     }
 
+    /** Локальный файл, который можно скопировать на телефон (принятый, голос, стикер). */
+    fun saveableFile(transfer: FileTransferEntity): java.io.File? {
+        fileTransferRouter.receivedFileFor(transfer)?.takeIf { it.isFile }?.let { return it }
+        if (com.vladimir.messenger.util.VoiceNote.parse(transfer.displayName) != null) {
+            previewFileFor(transfer)?.takeIf { it.isFile }?.let { return it }
+        }
+        if (transfer.displayName.startsWith("Стикер")) {
+            stickerLibrary.fileOf(transfer.fileSha256)?.takeIf { it.isFile }?.let { return it }
+        }
+        return null
+    }
+
     fun requestSaveReceivedFile(transfer: FileTransferEntity) {
-        if (transfer.direction != "INCOMING" || transfer.state != "COMPLETE") return
-        _uiState.update { it.copy(pendingSave = transfer) }
+        val file = saveableFile(transfer) ?: return
+        _uiState.update {
+            it.copy(
+                pendingSave = com.vladimir.messenger.data.file.PendingFileExport(
+                    transfer.displayName,
+                    file,
+                ),
+            )
+        }
     }
 
     fun onSaveTargetPicked(target: android.net.Uri?) {
-        val transfer = _uiState.value.pendingSave
+        val pending = _uiState.value.pendingSave
         _uiState.update { it.copy(pendingSave = null) }
-        if (target == null || transfer == null) return
+        if (target == null || pending == null) return
         viewModelScope.launch {
-            val ok = runCatching { fileTransferRouter.exportReceivedFile(transfer, target) }
+            val ok = runCatching { fileTransferRouter.exportFile(pending.source, target) }
                 .getOrDefault(false)
             _uiState.update {
                 it.copy(
-                    error = if (ok) appContext.getString(R.string.cd_saved_as, transfer.displayName) else appContext.getString(R.string.cd_save_failed),
+                    error = if (ok) appContext.getString(R.string.cd_saved_as, pending.displayName) else appContext.getString(R.string.cd_save_failed),
                 )
             }
         }

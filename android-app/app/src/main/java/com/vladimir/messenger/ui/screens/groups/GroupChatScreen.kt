@@ -78,6 +78,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Star
 import androidx.activity.compose.BackHandler
@@ -1075,7 +1076,7 @@ fun GroupChatScreen(
                             receivedFileFor = { viewModel.receivedFileFor(it) },
                             authorCopyFor = { viewModel.authorCopyFor(it) },
                             onDownload = { viewModel.requestFile(message, card) },
-                            onSave = { viewModel.requestSaveReceivedFile(it) },
+                            onSave = { name, file -> viewModel.requestSaveFile(name, file) },
                             onShare = { f -> viewModel.shareFile(f, card.displayName, card.mediaType) },
                             onFavorite = { viewModel.saveFileToFavorites(it) },
                             servedCount = uiState.servedFiles[GroupFileMarker.key(uiState.groupId, card.sha256)] ?: 0,
@@ -2238,6 +2239,9 @@ private fun MessageBubble(
                 add(ApuAction(stringResource(R.string.channel_share_in_apu), Icons.Filled.Send) { onShareToApu() })
                 // р250: ответ - первым пунктом, как в привычных мессенджерах.
                 add(ApuAction(stringResource(R.string.group_reply), Icons.AutoMirrored.Filled.Reply) { onReply() })
+                fileCard?.onSave?.let { save ->
+                    add(ApuAction(stringResource(R.string.ft_save_folder), Icons.Filled.Save) { save() })
+                }
                 add(ApuAction(stringResource(R.string.channel_add_reaction), Icons.Filled.EmojiEmotions) { showReactions = true })
                 add(ApuAction(stringResource(R.string.channel_to_favorites), Icons.Filled.Star) { onSaveToFavorites() })
                 // Раунд 212: копирование - как в личном чате («Копировать всё»).

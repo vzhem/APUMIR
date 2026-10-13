@@ -395,9 +395,7 @@ fun FileTransferBubble(
                     modifier = Modifier.padding(top = 6.dp),
                 )
             }
-            if (!(previewBitmap != null && isImage) &&
-                transfer.state == "COMPLETE" && transfer.direction == "INCOMING" && onSaveClick != null
-            ) {
+            if (!(previewBitmap != null && isImage) && onSaveClick != null) {
                 ApuTextAction(label = stringResource(R.string.ft_save_folder), onClick = onSaveClick)
             }
             // У документов и видео превью нет, меню картинки тоже - поэтому

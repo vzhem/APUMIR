@@ -731,10 +731,7 @@ fun ChatDetailScreen(
                                     messageStatus = row.message?.status,
                                     previewFile = viewModel.previewFileFor(transfer),
                                     onShareClick = { viewModel.shareTransferFile(transfer) },
-                                    onSaveClick = if (
-                                        transfer.direction == "INCOMING" &&
-                                        transfer.state == "COMPLETE"
-                                    ) {
+                                    onSaveClick = if (viewModel.saveableFile(transfer) != null) {
                                         { viewModel.requestSaveReceivedFile(transfer) }
                                     } else {
                                         null
@@ -1014,6 +1011,19 @@ fun ChatDetailScreen(
                         it.messageId == message.id &&
                             it.direction == "INCOMING" &&
                             it.state == "COMPLETE"
+                    }
+                    val folderFile = uiState.transfers.firstOrNull {
+                        it.messageId == message.id && viewModel.saveableFile(it) != null
+                    }
+                    if (folderFile != null) {
+                        com.vladimir.messenger.ui.components.ApuActionBubble(
+                            stringResource(R.string.ft_save_folder),
+                            androidx.compose.material.icons.Icons.Filled.Save,
+                        ) {
+                            viewModel.requestSaveReceivedFile(folderFile)
+                            showCopyDialog = null
+                            resetSelection()
+                        }
                     }
                     if (savedMessageFile != null) {
                         com.vladimir.messenger.ui.components.ApuActionBubble(
