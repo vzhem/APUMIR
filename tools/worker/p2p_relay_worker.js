@@ -131,27 +131,36 @@ class MqttClient {
 }
 
 export class MqttBridge {
-  constructor() {
-    this.clients = new Set();
-    this.retained = new Map(); // topic -> {topic, payload}
-    this.mirror = new Set(); // р226: участники комнаты зеркала (только в инстансах "mirror:*")
-    // Счётчики здоровья моста. Нужны, чтобы по /mqtt/health с телефона было
-    // видно не только "жив", но и что именно происходило: дошли ли CONNECT,
-    // сколько раз кадр не разобрался (см. громкую ошибку в message-листенере).
-    this.stats = {
-      connects: 0,
-      connacks: 0,
-      subscribes: 0,
-      publishes_in: 0,
-      publishes_out: 0,
-      parse_errors: 0,
-      drops: 0,
-      v5_refused: 0,
-      last_error: null,
-    };
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+    this.ensureMem();
+  }
+
+  // SQLite-DO после спячки поднимается без полей из constructor: this.clients
+  // был undefined → this.clients.size кидал исключение → Cloudflare 1101 на
+  // /mqtt/health. Память поднимаем на каждый fetch.
+  ensureMem() {
+    if (!this.clients) this.clients = new Set();
+    if (!this.retained) this.retained = new Map();
+    if (!this.mirror) this.mirror = new Set();
+    if (!this.stats) {
+      this.stats = {
+        connects: 0,
+        connacks: 0,
+        subscribes: 0,
+        publishes_in: 0,
+        publishes_out: 0,
+        parse_errors: 0,
+        drops: 0,
+        v5_refused: 0,
+        last_error: null,
+      };
+    }
   }
 
   async fetch(request) {
+    this.ensureMem();
     // р226: комната зеркала - простой звёздный ретранслятор текстовых кадров
     // между устройствами одной личности. Без логики, без хранения.
     const url = new URL(request.url);
@@ -202,6 +211,7 @@ export class MqttBridge {
   /// "Network timeout" и уходил на публичные брокеры, а причина нигде не была
   /// видна. Теперь ошибка всегда идёт через failFrame (счётчики + лог + закрытие).
   onMessage(client, data) {
+    this.ensureMem();
     let chunk;
     try {
       chunk = typeof data === "string" ? new TextEncoder().encode(data) : new Uint8Array(data);
@@ -219,6 +229,7 @@ export class MqttBridge {
   /// Ошибка разбора кадра: громко (лог + счётчики) и с закрытием WebSocket -
   /// клиент должен увидеть отказ сразу, а не ждать таймаута в тишине.
   failFrame(client, error) {
+    this.ensureMem();
     const message = String((error && error.message) || error).slice(0, 160);
     this.stats.parse_errors += 1;
     this.stats.last_error = "frame parse error: " + message;
@@ -228,6 +239,7 @@ export class MqttBridge {
   }
 
   drop(client) {
+    this.ensureMem();
     if (!this.clients.has(client)) return;
     this.clients.delete(client);
     this.stats.drops += 1;
@@ -239,6 +251,7 @@ export class MqttBridge {
 
   // ---- р226: комната живого зеркала --------------------------------------
   async mirrorJoin(request, url) {
+    this.ensureMem();
     const dev = (url.searchParams.get("dev") || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 32);
     if (!dev) return json({ error: "dev required" }, 400);
     if (this.mirror.size >= 4) return json({ error: "room full" }, 503);
@@ -482,9 +495,13 @@ export default {
     // телефон мог ДО подключения проверить, что мост жив и развёрнут (без
     // ожидания 20 с на ConnAck), а владелец - открыть в браузере на телефоне.
     if (path === "/mqtt/health") {
-      if (!env.MQTT_BRIDGE) return json({ ok: false, error: "MQTT_BRIDGE binding is not configured" }, 501);
-      const healthStub = env.MQTT_BRIDGE.idFromName("mqtt-bridge");
-      return env.MQTT_BRIDGE.get(healthStub).fetch(request);
+      try {
+        if (!env.MQTT_BRIDGE) return json({ ok: false, error: "MQTT_BRIDGE binding is not configured" }, 501);
+        const healthStub = env.MQTT_BRIDGE.idFromName("mqtt-bridge");
+        return await env.MQTT_BRIDGE.get(healthStub).fetch(request);
+      } catch (e) {
+        return json({ ok: false, error: "mqtt health failed", detail: String(e).slice(0, 200) }, 502);
+      }
     }
 
     if ((request.headers.get("Upgrade") || "").toLowerCase() === "websocket") {
