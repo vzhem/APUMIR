@@ -13019,3 +13019,19 @@ unchanged.
   компактнее (18 sp). Диалог: `SOFT_INPUT_ADJUST_RESIZE`.
 - Тест: `StoryPublishTest.accessoryToolsHideWhenKeyboardIsOpen`.
 
+### Редактор истории: галочка и альбом (после 347)
+
+- Владелец на 347: синяя галочка на клавиатуре не подтверждает; в горизонтали
+  всё прячется в нижней части (скрин 10:30 — превью без «Опубликовать»).
+- Галочка: `BasicTextField` без `singleLine` — ImeAction.Done рисуется, но
+  `onDone` не приходит. Плюс onDone только прятал клавиатуру, не публиковал.
+  Теперь `singleLine = true`, галочка = «Опубликовать» (`confirmOnIme`).
+- Альбом: Compose Dialog ставит высоту WRAP_CONTENT; колонка не на весь экран,
+  кнопки рисуются ниже окна. `WindowInsets.ime` в диалоге часто 0, поэтому
+  347 не поднимал контент над клавиатурой.
+- Исправление: каждый кадр `setLayout(MATCH_PARENT, MATCH_PARENT)` и
+  `ADJUST_NOTHING`; высоту IME считаем по `getWindowVisibleDisplayFrame`.
+  В низкой высоте (альбом) — компактный ряд фото, «Опубликовать» всегда внизу.
+- Тесты: `blueCheckPublishesWhenStoryIsReady`, `accessoryToolsHideInLandscapeHeight`,
+  `imeOverlapDetectsKeyboard`.
+

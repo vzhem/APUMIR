@@ -2,8 +2,12 @@ package com.vladimir.messenger.ui.components
 
 import android.Manifest
 import android.graphics.BitmapFactory
+import android.graphics.Rect
+import android.graphics.drawable.ColorDrawable
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.text.format.DateUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -377,18 +381,44 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val view = LocalView.current
         val density = LocalDensity.current
-        val imeOpen = WindowInsets.ime.getBottom(density) > 0
-        val showTools = StoryComposerLayout.showAccessoryTools(imeOpen)
+        val imeOverlapPx = rememberComposerImeOverlapPx()
+        val imeInsetPx = WindowInsets.ime.getBottom(density)
+        val imePadPx = maxOf(imeOverlapPx, imeInsetPx)
+        val imeOpen = imePadPx > 0
         SideEffect {
             val window = (view.parent as? DialogWindowProvider)?.window ?: return@SideEffect
+            // Compose Dialog по умолчанию WRAP_CONTENT по высоте — в альбоме
+            // кнопки уезжают за край. Держим окно на весь экран каждый кадр:
+            // иначе updateParameters снова ставит WRAP_CONTENT.
             WindowCompat.setDecorFitsSystemWindows(window, false)
-            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+            window.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            window.setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
         }
         fun hideKeyboard() {
             keyboardController?.hide()
             focusManager.clearFocus()
         }
-        Column(Modifier.fillMaxSize().background(Color(0xFF071426)).safeDrawingPadding().imePadding()) {
+        fun confirmPublish() {
+            if (!StoryPublish.confirmOnIme(text, photo, photoMissing, preparing)) {
+                hideKeyboard()
+                return
+            }
+            hideKeyboard()
+            onPublish(text.trim(), bg, photo)
+        }
+        BoxWithConstraints(
+            Modifier
+                .fillMaxSize()
+                .background(Color(0xFF071426))
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(bottom = with(density) { imePadPx.toDp() }),
+        ) {
+            val heightDp = maxHeight.value.toInt()
+            val showTools = StoryComposerLayout.showAccessoryTools(imeOpen, heightDp)
+            val showCompact = StoryComposerLayout.showCompactToolRow(imeOpen, heightDp)
+            Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.story_new), color = Color.White, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f).padding(start = 8.dp))
@@ -438,8 +468,9 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                         textAlign = TextAlign.Center,
                     ),
                     cursorBrush = SolidColor(storyGold),
+                    singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { hideKeyboard() }),
+                    keyboardActions = KeyboardActions(onDone = { confirmPublish() }),
                     decorationBox = { inner ->
                         if (text.isEmpty()) {
                             Text(
@@ -485,6 +516,27 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                         color = Color.White.copy(alpha = .7f), style = MaterialTheme.typography.bodySmall,
                         textAlign = TextAlign.Center)
                 }
+            } else if (showCompact) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    ApuPremiumButton(stringResource(R.string.story_choose_photo), { picker.launch("image/*") },
+                        enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
+                    ApuPremiumButton(stringResource(R.string.story_take_photo), { requestCamera() },
+                        enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
+                    if (photo != null) ApuPremiumButton(stringResource(R.string.story_remove_photo),
+                        { photo = null; photoError = false; photoSkipped = false },
+                        enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
+                }
+                Text(
+                    "${text.length}/200",
+                    color = Color.White.copy(alpha = .6f),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    textAlign = TextAlign.End,
+                )
             } else {
                 Text(
                     "${text.length}/200",
@@ -505,14 +557,12 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
             // Всегда над клавиатурой и системной панелью: не внутри прокрутки.
             ApuPremiumButton(
                 label = stringResource(R.string.story_publish),
-                onClick = {
-                    hideKeyboard()
-                    onPublish(text.trim(), bg, photo)
-                },
+                onClick = { confirmPublish() },
                 enabled = !preparing && StoryPublish.canPublish(text, photo, photoMissing),
                 style = DiagnosticsActionStyle.PRIMARY,
                 modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 10.dp),
             )
+            }
         }
     }
     if (showCamera) {
@@ -524,6 +574,39 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
             },
         )
     }
+}
+
+/**
+ * Клавиатура в Compose Dialog часто не даёт WindowInsets.ime. Смотрим, насколько
+ * низ нашего окна перекрыт видимым кадром экрана — это ловит IME даже когда
+ * окно диалога WRAP_CONTENT и не ресайзится.
+ */
+@Composable
+private fun rememberComposerImeOverlapPx(): Int {
+    val view = LocalView.current
+    var overlap by remember { mutableIntStateOf(0) }
+    DisposableEffect(view) {
+        val listener = ViewTreeObserver.OnGlobalLayoutListener {
+            val visible = Rect()
+            view.getWindowVisibleDisplayFrame(visible)
+            val loc = IntArray(2)
+            view.getLocationOnScreen(loc)
+            overlap = StoryComposerLayout.imeOverlapPx(
+                viewBottomOnScreen = loc[1] + view.height,
+                visibleFrameBottom = visible.bottom,
+                viewHeight = view.height,
+            )
+        }
+        val observer = view.viewTreeObserver
+        observer.addOnGlobalLayoutListener(listener)
+        listener.onGlobalLayout()
+        onDispose {
+            val current = view.viewTreeObserver
+            if (current.isAlive) current.removeOnGlobalLayoutListener(listener)
+            else if (observer.isAlive) observer.removeOnGlobalLayoutListener(listener)
+        }
+    }
+    return overlap
 }
 
 private fun Modifier.storyBackgroundSemantics(label: String, isSelected: Boolean): Modifier =
