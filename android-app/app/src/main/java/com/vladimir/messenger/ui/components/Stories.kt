@@ -146,10 +146,10 @@ private fun StoryBubble(
     title: String,
     avatar: String?,
     viewed: List<Boolean>,
-    onClick: () -> Unit,
     self: Boolean = false,
     selfName: String? = null,
     onAddClick: (() -> Unit)? = null,
+    onClick: () -> Unit,
 ) {
     Column(
         Modifier.width(if (self) 80.dp else 72.dp).then(if (self) Modifier else Modifier.clickable(onClick = onClick)),
@@ -300,12 +300,14 @@ fun StoryViewerDialog(
     val avatars by AvatarStore.avatars.collectAsStateWithLifecycle()
     val profileName by com.vladimir.messenger.ui.theme.UsernameHolder.name.collectAsStateWithLifecycle()
     val previous: () -> Unit = {
-        if (confirmDelete) return
-        if (index > 0) selectedId = activeStories[index - 1].id else progress = 0f
+        if (!confirmDelete) {
+            if (index > 0) selectedId = activeStories[index - 1].id else progress = 0f
+        }
     }
     val next: () -> Unit = {
-        if (confirmDelete) return
-        if (index < activeStories.lastIndex) selectedId = activeStories[index + 1].id else onDismiss()
+        if (!confirmDelete) {
+            if (index < activeStories.lastIndex) selectedId = activeStories[index + 1].id else onDismiss()
+        }
     }
     val nextNow by rememberUpdatedState(next)
     val previousNow by rememberUpdatedState(previous)
