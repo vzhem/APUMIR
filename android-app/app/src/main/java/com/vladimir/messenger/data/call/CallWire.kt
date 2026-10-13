@@ -173,7 +173,7 @@ object CallWire {
         ) : Packet()
 
         /** Проба пробивания NAT; seen — «твои пробы до меня доходят». */
-        data class Probe(val callId: String, val seen: Boolean)
+        data class Probe(val callId: String, val seen: Boolean) : Packet()
 
         /** Звонок с видео (v) или только голос (a). */
         data class MediaFlag(val callId: String, val video: Boolean) : Packet()
