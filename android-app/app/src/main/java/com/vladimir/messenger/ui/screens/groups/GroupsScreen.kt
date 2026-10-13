@@ -42,12 +42,10 @@ import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Forum
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Campaign
@@ -740,50 +738,56 @@ private fun CreateGroupDialog(
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = {
-            Row(
+            Text(
+                text = if (isChannel) stringResource(R.string.chat_new_channel) else stringResource(R.string.chat_new_group),
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        text = {
+            Column(
+                // ApuSettingsDialog уже прокручивает карточку. Вложенный
+                // verticalScroll здесь получает бесконечную высоту и роняет
+                // приложение в момент открытия (плюс на «Сообществах»).
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .border(1.5.dp, ApuBubbleAccentColor.copy(alpha = 0.38f), CircleShape)
-                        .padding(4.dp),
-                    contentAlignment = Alignment.Center,
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (title.isNotBlank()) {
-                        GroupAvatar(
-                            groupId = title.trim(),
-                            title = title,
-                            size = 44.dp,
-                        )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(ApuBubbleAccentColor.copy(alpha = 0.12f)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = if (isChannel) Icons.Filled.Campaign else Icons.Filled.Groups,
-                                contentDescription = null,
-                                tint = ApuBubbleAccentColor,
-                                modifier = Modifier.size(24.dp),
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .border(1.5.dp, ApuBubbleAccentColor.copy(alpha = 0.38f), CircleShape)
+                            .padding(4.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (title.isNotBlank()) {
+                            GroupAvatar(
+                                groupId = title.trim(),
+                                title = title,
+                                size = 44.dp,
                             )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(ApuBubbleAccentColor.copy(alpha = 0.12f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = if (isChannel) Icons.Filled.Campaign else Icons.Filled.Groups,
+                                    contentDescription = null,
+                                    tint = ApuBubbleAccentColor,
+                                    modifier = Modifier.size(24.dp),
+                                )
+                            }
                         }
                     }
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (isChannel) stringResource(R.string.chat_new_channel) else stringResource(R.string.chat_new_group),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = ApuBubbleTextColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Spacer(Modifier.width(12.dp))
                     Text(
                         text = if (isChannel) {
                             stringResource(R.string.groups_channel_desc)
@@ -792,17 +796,9 @@ private fun CreateGroupDialog(
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = ApuBubbleMutedColor,
+                        modifier = Modifier.weight(1f),
                     )
                 }
-            }
-        },
-        text = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
                 // Выбор вида сообщества сверху — как в современных мессенджерах:
                 // сразу видно «Группа» или «Канал», без лишнего переключателя внизу.
                 CommunityTypeChoices(

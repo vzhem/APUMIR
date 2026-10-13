@@ -1,8 +1,11 @@
 package com.vladimir.messenger
 
+import android.app.KeyguardManager
+import android.app.NotificationManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.view.WindowManager
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.ViewConfiguration
@@ -22,8 +25,12 @@ import com.vladimir.messenger.data.group.GroupInviteLinks
 import com.vladimir.messenger.data.group.invitePromptFor
 import com.vladimir.messenger.data.link.LinkShortener
 import com.vladimir.messenger.data.link.ShortLinks
+import com.vladimir.messenger.data.call.CallIncoming
+import com.vladimir.messenger.data.call.CallManager
+import com.vladimir.messenger.data.call.CallStateMachine
 import com.vladimir.messenger.service.CoreServerService
 import com.vladimir.messenger.service.UpdateChecker
+import com.vladimir.messenger.ui.navigation.NavCallEntryPoint
 import com.vladimir.messenger.service.UpdateNotifier
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuTextAction
@@ -146,6 +153,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        applyIncomingCallWake(intent)
         handleDeepLinkIntent(intent)
         maybeCheckForUpdates()
     }
@@ -168,6 +176,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        applyIncomingCallWake(intent)
         handleNotificationTap(intent)
         handleUpdateNotificationTap(intent)
         broadcastPeerRankIfNeeded()
@@ -431,9 +440,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        applyIncomingCallWake(intent)
 
         requestNotificationPermission()
         requestIgnoreBatteryOptimizations()
+        requestFullScreenIntentPermission()
         startCoreService()
         checkForUpdates()
         // Раунд 251: убираем из «Скачанных» наш мусор `.trashed-*APU*` -
@@ -673,6 +684,74 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             requestNotificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         }
+    }
+
+    /**
+     * Входящий звонок поверх блокировки: без этого полноэкранное уведомление
+     * на Android 10+ не зажигает экран и не снимает ключ.
+     */
+    private fun applyIncomingCallWake(intent: Intent?) {
+        val launch = CallIncoming.isIncomingLaunch(
+            intent?.getStringExtra(CallManager.EXTRA_OPEN_CALL),
+            intent?.getBooleanExtra(CallIncoming.EXTRA_ANSWER, false) == true,
+        )
+        val ringing = runCatching {
+            EntryPointAccessors.fromApplication(applicationContext, NavCallEntryPoint::class.java)
+                .callManager().uiState.value.phase == CallStateMachine.Phase.INCOMING
+        }.getOrDefault(false)
+        val on = launch || ringing
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(on)
+            setTurnScreenOn(on)
+        } else {
+            @Suppress("DEPRECATION")
+            if (on) {
+                window.addFlags(
+                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                        WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+                )
+            } else {
+                window.clearFlags(
+                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                        WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+                )
+            }
+        }
+        if (on) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                runCatching {
+                    getSystemService(KeyguardManager::class.java)
+                        ?.requestDismissKeyguard(this, null)
+                }
+            }
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    /** Android 14+: без этого системного права входящий звонок не выходит на весь экран. */
+    private fun requestFullScreenIntentPermission() {
+        if (Build.VERSION.SDK_INT < 34) return
+        val nm = getSystemService(NotificationManager::class.java) ?: return
+        if (nm.canUseFullScreenIntent()) return
+        val pm = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+        // Не наслаивать второе системное окно на запрос оптимизации батареи.
+        if (!pm.isIgnoringBatteryOptimizations(packageName)) return
+        val prefs = getSharedPreferences("p2p_prefs", MODE_PRIVATE)
+        if (prefs.getBoolean("fsi_asked", false)) return
+        prefs.edit().putBoolean("fsi_asked", true).apply()
+        runCatching {
+            startActivity(
+                Intent(android.provider.Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT).apply {
+                    data = Uri.parse("package:$packageName")
+                },
+            )
+        }.onFailure { Log.w("MainActivity", "full-screen intent settings: ${it.message}") }
     }
 
     private companion object {

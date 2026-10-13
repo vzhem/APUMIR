@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.vladimir.messenger.data.call.CallIncoming
 import com.vladimir.messenger.data.call.CallStateMachine
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
@@ -90,6 +91,19 @@ fun CallScreen(
         if (!hasMicPermission()) micLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
     LaunchedEffect(Unit) { viewModel.ensureStarted() }
+
+    // «Принять» с системного уведомления: тот же путь, что кнопка на экране.
+    val autoAnswer = (context as? android.app.Activity)?.intent
+        ?.getBooleanExtra(CallIncoming.EXTRA_ANSWER, false) == true
+    LaunchedEffect(autoAnswer, state.phase) {
+        if (!autoAnswer || state.phase != CallStateMachine.Phase.INCOMING) return@LaunchedEffect
+        (context as? android.app.Activity)?.intent?.removeExtra(CallIncoming.EXTRA_ANSWER)
+        if (hasMicPermission()) viewModel.accept()
+        else {
+            pendingAccept = true
+            micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
 
     // Конец: показываем причину русским текстом и уходим. Если за эти полторы
     // секунды начался НОВЫЙ звонок (быстрый перезвон), экран не сворачиваем.

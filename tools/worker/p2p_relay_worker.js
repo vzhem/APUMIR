@@ -183,11 +183,17 @@ export class MqttBridge {
     server.addEventListener("message", (event) => this.onMessage(client, event.data));
     server.addEventListener("close", () => this.drop(client));
     server.addEventListener("error", () => this.drop(client));
-    // rumqttc требует эхо субпротокола mqtt.
+    // rumqttc требует эхо субпротокола mqtt. Cloudflare отвечает 500, если
+    // выставить заголовок, а клиент его не просил.
+    const requested = (request.headers.get("Sec-WebSocket-Protocol") || "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase());
+    const headers = {};
+    if (requested.includes("mqtt")) headers["Sec-WebSocket-Protocol"] = "mqtt";
     return new Response(null, {
       status: 101,
       webSocket: pair[0],
-      headers: { "Sec-WebSocket-Protocol": "mqtt" },
+      headers,
     });
   }
 
@@ -482,6 +488,7 @@ export default {
     }
 
     if ((request.headers.get("Upgrade") || "").toLowerCase() === "websocket") {
+      try {
       if (!env.MQTT_BRIDGE) {
         return json({ error: "MQTT_BRIDGE binding is not configured" }, 501);
       }
@@ -497,6 +504,9 @@ export default {
       }
       const stub = env.MQTT_BRIDGE.idFromName("mqtt-bridge");
       return env.MQTT_BRIDGE.get(stub).fetch(request);
+      } catch (e) {
+        return json({ error: "mqtt upgrade failed", detail: String(e).slice(0, 160) }, 502);
+      }
     }
 
     noteRoute(routeName(path) + (request.method === "GET" ? "" : " POST"));

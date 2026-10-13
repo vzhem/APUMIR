@@ -14,8 +14,6 @@ import android.os.Vibrator
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import com.vladimir.messenger.MainActivity
-import com.vladimir.messenger.MessengerApplication
 import com.vladimir.messenger.R
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.mirror.MirrorHub
@@ -1204,26 +1202,44 @@ class CallManager @Inject constructor(
     /** р233: звонок ringing-экраном и уведомлением (свой или зеркальный). */
     private fun showIncomingAlert(callId: String, peerName: String) {
         ensureCallChannel()
-        val intent = Intent(appContext, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        CallIncoming.wakeScreen(appContext)
+        val display = peerName.ifBlank { callId.takeLast(8) }
+        val open = incomingCallActivityIntent(appContext, callId)
+        val answer = incomingCallActivityIntent(appContext, callId, answer = true)
+        val decline = Intent(appContext, IncomingCallReceiver::class.java).apply {
+            action = CallIncoming.ACTION_DECLINE
             putExtra(EXTRA_OPEN_CALL, callId)
         }
-        val pending = PendingIntent.getActivity(
-            appContext, CALL_REQUEST_CODE, intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val notification = NotificationCompat.Builder(appContext, CALL_CHANNEL_ID)
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val pendingOpen = PendingIntent.getActivity(appContext, CALL_REQUEST_CODE, open, flags)
+        val pendingAnswer = PendingIntent.getActivity(appContext, CALL_REQUEST_CODE + 1, answer, flags)
+        val pendingDecline = PendingIntent.getBroadcast(appContext, CALL_REQUEST_CODE + 2, decline, flags)
+        val caller = androidx.core.app.Person.Builder()
+            .setName(display)
+            .setImportant(true)
+            .build()
+        val builder = NotificationCompat.Builder(appContext, CallIncoming.CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Входящий звонок")
-            .setContentText(peerName.ifBlank { callId.takeLast(8) })
+            .setContentText(display)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setOngoing(true)
             .setAutoCancel(false)
-            .setFullScreenIntent(pending, true)
-            .setContentIntent(pending)
-            .build()
-        notificationManager.notify(CALL_NOTIFICATION_ID, notification)
+            .setFullScreenIntent(pendingOpen, true)
+            .setContentIntent(pendingOpen)
+            .setTimeoutAfter(CallStateMachine.INCOMING_USER_WAIT_MS)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setStyle(
+                NotificationCompat.CallStyle.forIncomingCall(caller, pendingDecline, pendingAnswer),
+            )
+        } else {
+            builder
+                .addAction(R.drawable.ic_notification, "Отклонить", pendingDecline)
+                .addAction(R.drawable.ic_notification, "Принять", pendingAnswer)
+        }
+        notificationManager.notify(CALL_NOTIFICATION_ID, builder.build())
 
         runCatching {
             val tone = RingtoneManager.getRingtone(
@@ -1384,12 +1400,13 @@ class CallManager @Inject constructor(
     private fun ensureCallChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = android.app.NotificationChannel(
-                CALL_CHANNEL_ID, "Звонки APU", NotificationManager.IMPORTANCE_HIGH,
+                CallIncoming.CHANNEL_ID, "Звонки APU", NotificationManager.IMPORTANCE_HIGH,
             ).apply {
                 description = "Входящие звонки"
                 setSound(null, null)      // звук играет наш Ringtone (управляем сами)
                 enableVibration(false)    // вибрация наша
                 setShowBadge(false)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             }
             notificationManager.createNotificationChannel(channel)
         }
@@ -1539,7 +1556,6 @@ class CallManager @Inject constructor(
     companion object {
         private const val TAG = "CallManager"
         const val EXTRA_OPEN_CALL = "apu_open_call"
-        private const val CALL_CHANNEL_ID = "apu_calls"
         private const val CALL_NOTIFICATION_ID = 7001
         private const val CALL_REQUEST_CODE = 77
         private const val TICK_MS = 500L

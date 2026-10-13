@@ -9,6 +9,8 @@ import android.content.Intent
 import android.net.wifi.WifiManager
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
+import com.vladimir.messenger.data.call.CallIncoming
 import android.util.Log
 import com.vladimir.messenger.domain.model.MessageChannel
 import com.vladimir.messenger.data.relay.RelayEnvelope
@@ -87,6 +89,7 @@ class CoreServerService : Service() {
     @Inject lateinit var proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private var lastWakeLockAtElapsed = 0L
     private var multicastLock: WifiManager.MulticastLock? = null
     private var networkMonitor: NetworkMonitor? = null
     private val serviceJob = kotlinx.coroutines.SupervisorJob()
@@ -501,7 +504,11 @@ class CoreServerService : Service() {
         val powerManager = getSystemService(POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK, "P2PMessenger::CoreWakeLock"
-        ).apply { acquire(10 * 60 * 1000L) }
+        ).apply {
+            setReferenceCounted(false)
+            acquire(CallIncoming.CORE_WAKE_LOCK_MS)
+        }
+        lastWakeLockAtElapsed = SystemClock.elapsedRealtime()
 
         try {
             val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
@@ -624,6 +631,12 @@ class CoreServerService : Service() {
                     // момент приёма (была офлайн или без активного партнёра).
                     runCatching { pumpMirrorFiles() }
                         .onFailure { Log.w(TAG, "file bytes pump failed: ${it.message}") }
+                }
+                val wakeHeld = wakeLock?.isHeld == true
+                val wakeAge = SystemClock.elapsedRealtime() - lastWakeLockAtElapsed
+                if (CallIncoming.shouldRefreshWakeLock(wakeHeld, wakeAge)) {
+                    runCatching { wakeLock?.acquire(CallIncoming.CORE_WAKE_LOCK_MS) }
+                    lastWakeLockAtElapsed = SystemClock.elapsedRealtime()
                 }
                 sincePump++
                 kotlinx.coroutines.delay(30_000L)
