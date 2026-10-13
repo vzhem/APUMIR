@@ -573,15 +573,23 @@ class MainActivity : ComponentActivity() {
                                 MainActivityEntryPoint::class.java
                             )
                             val checker = entryPoint.updateChecker()
-                            checker.downloadApk(currentUpdate)
-                            updateRelease = null
-                            
-                            // Показать подсказку: файл сам встанет в настройки
-                            android.widget.Toast.makeText(
-                                applicationContext,
-                                "Скачивание началось. Когда файл скачается, он сам появится в «Настройки → Обновления».",
-                                android.widget.Toast.LENGTH_LONG
-                            ).show()
+                            lifecycleScope.launch {
+                                val attempt = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                    runCatching { checker.downloadApk(currentUpdate) }
+                                }
+                                attempt.onSuccess { id ->
+                                    updateRelease = null
+                                    val message = if (id == -1L) "Патч собран — открылся установщик"
+                                        else "Скачивание началось. Готовый файл появится в «Настройки → Обновления»."
+                                    android.widget.Toast.makeText(applicationContext, message, android.widget.Toast.LENGTH_LONG).show()
+                                }.onFailure { error ->
+                                    android.widget.Toast.makeText(
+                                        applicationContext,
+                                        error.message ?: "Рой доступен: внешнюю загрузку отложили",
+                                        android.widget.Toast.LENGTH_LONG,
+                                    ).show()
+                                }
+                            }
                         },
                         onDismissClick = {
                             // Отложили «Позже»: эту версию в этой сессии

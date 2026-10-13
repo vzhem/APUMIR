@@ -32,6 +32,7 @@ import android.util.Log
 import com.vladimir.messenger.data.channel.PostViewWire
 import com.vladimir.messenger.data.file.FileExchangeKeyStore
 import com.vladimir.messenger.data.gif.GifLibrary
+import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.group.GroupInviteLinks
 import com.vladimir.messenger.data.heart.HeartWire
 import com.vladimir.messenger.data.reaction.ReactionWire
@@ -1472,7 +1473,7 @@ class MirrorChannel(
     // ── Транспорт ────────────────────────────────────────────────────────────
 
     private fun connect() {
-        if (closedByUs) return
+        if (closedByUs || !RustBridge.externalTransportAllowed()) return
         try {
             val room = shelfNow()
             val previous = currentShelf
@@ -1503,6 +1504,7 @@ class MirrorChannel(
     }
 
     private fun sendJson(obj: JSONObject): Boolean {
+        if (!RustBridge.externalTransportAllowed()) return false
         val ws = wsRef.get() ?: return false
         return try {
             ws.send(obj.toString())
@@ -1581,6 +1583,13 @@ class MirrorChannel(
         var lastHb = 0L
         while (kotlin.coroutines.coroutineContext.isActive) {
             val now = System.currentTimeMillis()
+            if (!RustBridge.externalTransportAllowed()) {
+                // An already-open mirror WebSocket is external transport too;
+                // do not leave its ping loop alive when a direct peer appears.
+                runCatching { wsRef.getAndSet(null)?.cancel() }
+            } else if (wsRef.get() == null && !closedByUs) {
+                connect()
+            }
             runCatching { myMaxTs = bridge.maxMessageTimestamp() }
             // р243: свой адрес нужен на каждом сообщении и на каждом нажатии
             // клавиши, но не должен стоить вызова в ядро там - держим кэш.
@@ -2127,6 +2136,10 @@ class MirrorChannel(
     // ── WebSocketListener ────────────────────────────────────────────────────
 
     override fun onOpen(webSocket: WebSocket, response: Response) {
+        if (!RustBridge.externalTransportAllowed() || wsRef.get() !== webSocket) {
+            webSocket.cancel()
+            return
+        }
         backoffMs = 2_000L
         sendJson(hello())
         // р246: канал ожил - сразу показать партнёру свой профиль.
@@ -2164,6 +2177,10 @@ class MirrorChannel(
     }
 
     override fun onMessage(webSocket: WebSocket, text: String) {
+        if (wsRef.get() !== webSocket || !RustBridge.externalTransportAllowed()) {
+            webSocket.cancel()
+            return
+        }
         try {
             val obj = JSONObject(text)
             when (obj.optString("t")) {

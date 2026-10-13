@@ -1,6 +1,7 @@
 package com.vladimir.messenger.service
 
 import android.util.Log
+import com.vladimir.messenger.data.RustBridge
 import kotlinx.coroutines.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -49,6 +50,10 @@ class CloudflareRelay(
         pollJob = scope.launch(Dispatchers.IO) {
             Log.i(TAG, "Cloudflare relay v2 started: $baseUrl for $myNodeId")
             while (running && isActive) {
+                if (!RustBridge.externalTransportAllowed()) {
+                    delay(1_000)
+                    continue
+                }
                 try {
                     val ok = pollMessages()
                     if (ok) {
@@ -86,6 +91,7 @@ class CloudflareRelay(
     suspend fun sendMessage(recipientNodeId: String, payload: String): Boolean {
         return withContext(Dispatchers.IO) {
             for (attempt in 0..1) {
+                if (!RustBridge.externalTransportAllowed()) return@withContext false
                 try {
                     val conn = URL("$baseUrl/send").openConnection() as HttpURLConnection
                     conn.requestMethod = "POST"
@@ -118,6 +124,7 @@ class CloudflareRelay(
      * Poll входящих. Возвращает true если poll успешен.
      */
     private fun pollMessages(): Boolean {
+        if (!RustBridge.externalTransportAllowed()) return true
         val conn = try {
             URL("$baseUrl/poll?node=$myNodeId")
                 .openConnection() as HttpURLConnection
@@ -180,6 +187,7 @@ class CloudflareRelay(
 
     suspend fun isAvailable(): Boolean {
         return withContext(Dispatchers.IO) {
+            if (!RustBridge.externalTransportAllowed()) return@withContext false
             try {
                 val conn = URL("$baseUrl/health").openConnection() as HttpURLConnection
                 conn.connectTimeout = 15000

@@ -6,8 +6,12 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.util.Log
+import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.update.ApkUpdate
+import com.vladimir.messenger.data.update.ApkUpdateStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -68,6 +72,67 @@ class UpdateChecker @Inject constructor(
      * файл и запомнить метаданные; вся раздача — в фоне у сида.
      */
     var onPatchKept: ((patchFile: File, fromVersion: String, toVersion: String, apkSha256: String) -> Unit)? = null
+
+    /** Installed by ApkSeeder (which already owns the signed peer update protocol). */
+    @Volatile var askSwarmForUpdate: (suspend () -> Int)? = null
+
+    @Volatile private var scannedInCurrentSwarmWindow = false
+
+    /** DownloadManager lives outside this process. Even if a download was
+     * enqueued on a valid fallback path, cancel it when the direct swarm
+     * returns; do not mistake a one-time permission check for supervision. */
+    fun suspendExternalDownloadsForSwarm() {
+        if (RustBridge.externalTransportAllowed()) {
+            scannedInCurrentSwarmWindow = false
+            return
+        }
+        if (scannedInCurrentSwarmWindow) return
+        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager ?: return
+        runCatching {
+            val active = DownloadManager.STATUS_PENDING or DownloadManager.STATUS_RUNNING or
+                DownloadManager.STATUS_PAUSED
+            val ids = ArrayList<Long>()
+            val activeCursor = manager.query(DownloadManager.Query().setFilterByStatus(active))
+                ?: return@runCatching
+            activeCursor.use { cursor ->
+                val idColumn = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)
+                val titleColumn = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
+                while (cursor.moveToNext()) {
+                    val title = if (titleColumn >= 0) cursor.getString(titleColumn).orEmpty() else ""
+                    // Query is scoped to our app, but it may also own a user-
+                    // initiated unrelated download: cancel only APU updates.
+                    if (title.startsWith("APU v")) ids += cursor.getLong(idColumn)
+                }
+            }
+            for (id in ids) {
+                manager.remove(id)
+                Log.i(TAG, "Official download $id cancelled: direct swarm/search available")
+            }
+            scannedInCurrentSwarmWindow = true
+        }.onFailure { Log.w(TAG, "DownloadManager swarm barrier failed: ${it.message}") }
+    }
+
+    fun downloadSucceeded(downloadId: Long): Boolean = runCatching {
+        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+        manager.query(DownloadManager.Query().setFilterById(downloadId))?.use { cursor ->
+            cursor.moveToFirst() && cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) ==
+                DownloadManager.STATUS_SUCCESSFUL
+        } ?: false
+    }.getOrDefault(false)
+
+    private fun directSwarmHasNewer(currentVersion: String): Boolean {
+        val live = RustBridge.liveSwarmPeerIds().toSet()
+        if (live.isEmpty()) return false
+        val now = System.currentTimeMillis()
+        val store = ApkUpdateStore(File(context.noBackupFilesDir, ApkUpdate.DIR_NAME))
+        return store.loadOffers().any { offer ->
+            offer.nodeId in live && ApkUpdate.isNewer(offer.version, currentVersion) &&
+                now - offer.atMs in 0L..(5L * 60_000L)
+        } || store.loadPatchOffers().any { offer ->
+            offer.nodeId in live && ApkUpdate.isNewer(offer.toVersion, currentVersion) &&
+                now - offer.atMs in 0L..(5L * 60_000L)
+        }
+    }
 
     data class ReleaseInfo(
         val version: String,
@@ -140,6 +205,27 @@ class UpdateChecker @Inject constructor(
     ): ReleaseInfo? = withContext(Dispatchers.IO) {
         val trace = UpdateDiagnosticsStore.begin(context, currentVersion, trigger)
         try {
+            // Ask for the *version and available bytes*, not merely "is a
+            // peer online?". A live neighbour offering a newer APK/patch
+            // makes the official HTTP lookup redundant for this check.
+            if (!RustBridge.isRunning()) {
+                trace.outcome = "swarm_search_pending"
+                return@withContext null
+            }
+            if (!directSwarmHasNewer(currentVersion)) {
+                runCatching { askSwarmForUpdate?.invoke() }
+                    .onFailure { Log.w(TAG, "peer update query failed: ${it.message}") }
+            }
+            val until = android.os.SystemClock.elapsedRealtime() + 20_000L
+            while (!directSwarmHasNewer(currentVersion) && !RustBridge.externalTransportAllowed() &&
+                android.os.SystemClock.elapsedRealtime() < until
+            ) {
+                delay(500L)
+            }
+            if (directSwarmHasNewer(currentVersion) || !RustBridge.externalTransportAllowed()) {
+                trace.outcome = "swarm_first_no_http"
+                return@withContext null
+            }
             val githubRelease = checkGitHub(currentVersion, trace)
             if (githubRelease != null) {
                 trace.outcome = "update_available"
@@ -343,6 +429,9 @@ class UpdateChecker @Inject constructor(
      * @return ID загрузки
      */
     fun downloadApk(releaseInfo: ReleaseInfo): Long {
+        if (directSwarmHasNewer(currentAppVersion()) || !RustBridge.externalTransportAllowed()) {
+            throw IllegalStateException("Обновление сначала запрашивается у прямого роя")
+        }
         // Раунд 132: если мой телефон ровно той версии, от которой сделан
         // дифф-патч, - качаем РАЗНИЦУ (в разы меньше APK), собираем полный
         // файл у себя, сверяем sha256 релиза и сразу запускаем установку.
@@ -373,9 +462,17 @@ class UpdateChecker @Inject constructor(
             setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
         }
         
+        if (directSwarmHasNewer(currentAppVersion()) || !RustBridge.externalTransportAllowed()) {
+            throw IllegalStateException("Рой ответил до начала внешней загрузки")
+        }
         val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val downloadId = downloadManager.enqueue(request)
-        
+        scannedInCurrentSwarmWindow = false
+        // A signed neighbour may have answered between permission and enqueue.
+        if (!RustBridge.externalTransportAllowed()) {
+            downloadManager.remove(downloadId)
+            throw IllegalStateException("Рой появился во время запуска загрузки — внешняя загрузка отменена")
+        }
         Log.i(TAG, "Download started: ID=$downloadId")
         return downloadId
     }
@@ -481,6 +578,7 @@ class UpdateChecker @Inject constructor(
      */
     private fun downloadViaPatch(releaseInfo: ReleaseInfo): Boolean {
         val patchUrl = releaseInfo.patchUrl ?: return false
+        if (!RustBridge.externalTransportAllowed()) return false
         val expectedSha = releaseInfo.apkSha256 ?: return false
         val base = File(context.applicationInfo.sourceDir ?: return false)
         if (!base.isFile) return false
@@ -501,7 +599,15 @@ class UpdateChecker @Inject constructor(
             }
             conn.inputStream.use { input ->
                 patchFile.outputStream().use { output ->
-                    input.copyTo(output, 64 * 1024)
+                    val buffer = ByteArray(64 * 1024)
+                    while (true) {
+                        if (!RustBridge.externalTransportAllowed()) {
+                            throw java.io.IOException("Прямой рой вернулся; загрузка патча прервана")
+                        }
+                        val bytes = input.read(buffer)
+                        if (bytes < 0) break
+                        output.write(buffer, 0, bytes)
+                    }
                 }
             }
         } finally {
@@ -553,6 +659,10 @@ class UpdateChecker @Inject constructor(
         trace: UpdateDiagnosticsStore.CheckTrace,
         source: String,
     ): String? {
+        if (!RustBridge.externalTransportAllowed()) {
+            UpdateDiagnosticsStore.markSource(trace, source, "swarm_available")
+            return null
+        }
         val conn = try {
             (URL(url).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"

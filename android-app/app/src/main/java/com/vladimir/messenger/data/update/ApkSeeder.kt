@@ -258,6 +258,7 @@ class ApkSeeder @Inject constructor(
         updateChecker.onPatchKept = { patchFile, fromV, toV, apkSha ->
             scope.launch { runCatching { adoptPatchFromSite(patchFile, fromV, toV, apkSha) } }
         }
+        updateChecker.askSwarmForUpdate = { askNeighbors() }
     }
 
     /** Восстановить состояние с диска; не дороже одного раза (повтор при сбое). */
@@ -747,7 +748,7 @@ class ApkSeeder @Inject constructor(
     suspend fun askNeighbors(): Int {
         val version = ApkUpdate.normalize(currentAppVersion())
         if (ApkUpdate.parseVersion(version) == null) return 0
-        val targets = knownNodes()
+        val targets = com.vladimir.messenger.data.RustBridge.liveSwarmPeerIds().take(8)
         if (targets.isEmpty()) return 0
         runCatching {
             delivery.deliver(ApkUpdate.CHAT_ID, GroupWire.buildUpdateAsk(version), targets)
@@ -768,11 +769,11 @@ class ApkSeeder @Inject constructor(
         if (now - lastAutoAskAtMs < AUTO_ASK_INTERVAL_MS) return
         if (pending != null || patchPending != null) return
         if (_offers.value.isNotEmpty() || _patchOffers.value.isNotEmpty()) return
-        lastAutoAskAtMs = now
         val version = ApkUpdate.normalize(currentAppVersion())
         if (ApkUpdate.parseVersion(version) == null) return
-        val targets = knownNodes().take(AUTO_ASK_FANOUT)
+        val targets = com.vladimir.messenger.data.RustBridge.liveSwarmPeerIds().take(AUTO_ASK_FANOUT)
         if (targets.isEmpty()) return
+        lastAutoAskAtMs = now
         runCatching {
             delivery.deliver(ApkUpdate.CHAT_ID, GroupWire.buildUpdateAsk(version), targets)
         }.onFailure { Log.w(TAG, "auto update ask failed: ${it.message}") }

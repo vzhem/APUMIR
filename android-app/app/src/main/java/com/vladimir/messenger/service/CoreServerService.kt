@@ -62,10 +62,12 @@ class CoreServerService : Service() {
     @Inject lateinit var mtProxyRepository: MtProxyRepository
     @Inject lateinit var notificationHelper: NotificationHelper
     @Inject lateinit var botApi: BotApi
+    @Inject lateinit var updateChecker: UpdateChecker
     @Inject lateinit var fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter
     @Inject lateinit var identityBackup: com.vladimir.messenger.data.security.IdentityBackup
     @Inject lateinit var addressBookBackup: com.vladimir.messenger.data.backup.AddressBookBackup
     @Inject lateinit var addressBookSwarm: com.vladimir.messenger.data.backup.AddressBookSwarmBackup
+    @Inject lateinit var linkShortener: com.vladimir.messenger.data.link.LinkShortener
     @Inject lateinit var readReceipts: com.vladimir.messenger.data.receipt.ReadReceiptRepository
     @Inject lateinit var messageDeletion: com.vladimir.messenger.data.repository.MessageDeletionRepository
     @Inject lateinit var hearts: com.vladimir.messenger.data.heart.HeartRepository
@@ -360,6 +362,7 @@ class CoreServerService : Service() {
         if (runCatching { postViews.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { hearts.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { addressBookSwarm.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { linkShortener.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { readReceipts.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { referralAttributionRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         // Ранг собеседника (APURANK1): знак VIP у имени. Поглощается здесь же,
@@ -817,6 +820,16 @@ class CoreServerService : Service() {
                 }
                 TransferDiagnostics.count(Counters.CORE_STARTS)
                 TransferDiagnostics.recordSuccess("core", "ядро поднято")
+                // DownloadManager is a separate Android process: an APK
+                // queued on fallback can continue using GitHub long after a
+                // signed peer appears, unless we cancel the active job.
+                serviceScope.launch {
+                    while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                        runCatching { updateChecker.suspendExternalDownloadsForSwarm() }
+                            .onFailure { Log.w(TAG, "Update download barrier: ${it.message}") }
+                        kotlinx.coroutines.delay(2_500L)
+                    }
+                }
                 // Раунд 263: ядро поднято - сплэш может отпустить человека.
                 CoreStatus.markReady()
 
@@ -858,6 +871,22 @@ class CoreServerService : Service() {
                     }
                 }
 
+                // A first-installation book is recovered ONLY after the core
+                // has had time to discover direct mDNS/signed neighbours.
+                serviceScope.launch {
+                    kotlinx.coroutines.delay(25_000L)
+                    while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                        runCatching { addressBookBackup.autoRestoreIfEmpty() }
+                            .onFailure { Log.w(TAG, "AddressBook post-search restore: ${it.message}") }
+                        // A snapshot learned from the fallback server must go
+                        // to the next reachable signed neighbour promptly;
+                        // it is not enough to wait for the hourly backup loop.
+                        runCatching { addressBookBackup.swarmHourlyTick() }
+                            .onFailure { Log.w(TAG, "AddressBook peer distribution: ${it.message}") }
+                        kotlinx.coroutines.delay(60_000L)
+                    }
+                }
+
                 // Облачная копия азбуки: первая через 3 минуты (адреса уже
                 // насобирались), дальше каждый час; шлём только если файл
                 // менялся (см. AddressBookBackup.backupIfDue).
@@ -866,9 +895,6 @@ class CoreServerService : Service() {
                     while (true) {
                         runCatching { addressBookBackup.backupIfDue() }
                             .onFailure { Log.w(TAG, "AddressBook backup failed: ${it.message}") }
-                        runCatching { addressBookBackup.swarmHourlyTick() }
-                        runCatching { addressBookBackup.autoRestoreIfEmpty() }
-                            .onFailure { Log.w(TAG, "AddressBook swarm tick: ${it.message}") }
                         kotlinx.coroutines.delay(60 * 60 * 1000L)
                     }
                 }
@@ -894,10 +920,10 @@ class CoreServerService : Service() {
                     Log.i(TAG, "TG relay message from $senderId")
                     // TODO: обработать входящее сообщение из TG
                 }
-                telegramRelay?.start()
-
-
-                Log.i(TAG, "Telegram relay enabled")
+                // No inbound handler exists here yet (above is TODO). Polling
+                // Telegram every five seconds cannot deliver a message and
+                // must not bypass swarm discovery just because a token exists.
+                Log.i(TAG, "Telegram relay inactive: inbound delivery not implemented")
             }
 
             // Cloudflare Workers relay (основной запасной канал)
@@ -2304,6 +2330,13 @@ class CoreServerService : Service() {
                         } catch (e: Exception) {
                             Log.w(TAG, "Swarm backup ACK failed: " + e.message)
                         }
+                        return
+                    }
+
+                    // On-demand short-link mapping from a directly signed peer.
+                    // Keep both paths in step so APUSHORT1 never creates a chat.
+                    if (linkShortener.routeIncoming(senderId, text)) {
+                        runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
                         return
                     }
 

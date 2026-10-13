@@ -1,6 +1,7 @@
 package com.vladimir.messenger.service
 
 import android.util.Log
+import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.repository.MtProxyRepository
 import com.vladimir.messenger.domain.model.ProxyType
 import kotlinx.coroutines.*
@@ -52,6 +53,10 @@ class TelegramRelay(
         pollJob = scope.launch(Dispatchers.IO) {
             Log.i(TAG, "Telegram relay started for $myNodeId")
             while (running && isActive) {
+                if (!RustBridge.externalTransportAllowed()) {
+                    delay(1_000)
+                    continue
+                }
                 try {
                     refreshProxyIfNeeded()
                     pollUpdates()
@@ -166,6 +171,7 @@ class TelegramRelay(
 
     suspend fun sendMessage(recipientChatId: String, payload: String): Boolean {
         return withContext(Dispatchers.IO) {
+            if (!RustBridge.externalTransportAllowed()) return@withContext false
             try {
                 val url = "$API_BASE/bot$botToken/sendMessage"
                 val body = JSONObject().apply {
@@ -189,6 +195,7 @@ class TelegramRelay(
     }
 
     private fun httpGet(urlStr: String): String? {
+        if (!RustBridge.externalTransportAllowed()) return null
         val conn = (URL(urlStr).openConnection(currentProxy ?: Proxy.NO_PROXY) as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = HTTP_TIMEOUT
@@ -210,6 +217,7 @@ class TelegramRelay(
     }
 
     private fun httpPost(urlStr: String, body: String): Int {
+        if (!RustBridge.externalTransportAllowed()) return 0
         val conn = (URL(urlStr).openConnection(currentProxy ?: Proxy.NO_PROXY) as HttpURLConnection).apply {
             requestMethod = "POST"
             doOutput = true

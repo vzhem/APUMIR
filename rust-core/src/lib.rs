@@ -233,12 +233,20 @@ impl P2PCoreHandle {
         self.inner.lock().unwrap().set_presence_audience(ids)
     }
 
+    pub fn import_address_book_json(&self, json: String) -> i32 {
+        self.inner.lock().unwrap().import_address_book_json(&json)
+    }
+
     pub fn node_id(&self) -> Option<String> {
         self.inner.lock().unwrap().node_id()
     }
 
     pub fn public_key(&self) -> Option<String> {
         self.inner.lock().unwrap().public_key()
+    }
+
+    pub fn observed_public_ip(&self) -> Option<String> {
+        self.inner.lock().unwrap().observed_public_ip()
     }
 
     pub fn network_status(&self) -> String {
@@ -251,6 +259,10 @@ impl P2PCoreHandle {
 
     pub fn has_live_swarm_peer(&self) -> bool {
         self.inner.lock().unwrap().has_live_swarm_peer()
+    }
+
+    pub fn live_swarm_peer_ids(&self) -> Vec<String> {
+        self.inner.lock().unwrap().live_swarm_peer_ids()
     }
 
     pub fn external_transport_allowed(&self) -> bool {

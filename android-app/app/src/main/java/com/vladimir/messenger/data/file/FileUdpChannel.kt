@@ -97,11 +97,12 @@ class FileUdpChannel internal constructor(
      * Кандидаты (блокирует до ~3 с, звать с рабочего потока): STUN-отражение,
      * глобальные IPv6, IPv4 Wi-Fi.
      */
-    fun gatherCandidates(): List<Pair<String, Int>> {
+    fun gatherCandidates(allowExternalStun: Boolean = false): List<Pair<String, Int>> {
         val s = socket ?: return emptyList()
         val port = s.localPort
         val result = LinkedHashMap<String, Int>()
-        val reflexive = queryStun(s)
+        val reflexive = if (allowExternalStun &&
+            com.vladimir.messenger.data.RustBridge.externalTransportAllowed()) queryStun(s) else null
         if (reflexive != null) result[literal(reflexive.address)] = reflexive.port
         localAddresses().forEach { address -> result.putIfAbsent(literal(address), port) }
         val list = result.entries.take(FileUdpWire.MAX_CANDIDATES).map { it.key to it.value }
@@ -292,6 +293,7 @@ class FileUdpChannel internal constructor(
     // ── STUN и адреса (тот же подход, что в CallUdpChannel) ─────────────────
 
     private fun queryStun(s: DatagramSocket): InetSocketAddress? {
+        if (!com.vladimir.messenger.data.RustBridge.externalTransportAllowed()) return null
         val txId = ByteArray(StunCodec.TX_ID_BYTES).also { random.nextBytes(it) }
         val latch = CountDownLatch(1)
         stunTxId = txId
@@ -300,9 +302,11 @@ class FileUdpChannel internal constructor(
         val request = StunCodec.bindingRequest(txId)
         var sent = 0
         for (target in resolveStunServers()) {
+            if (!com.vladimir.messenger.data.RustBridge.externalTransportAllowed()) break
             if (runCatching { s.send(DatagramPacket(request, request.size, target)) }.isSuccess) sent++
         }
         if (sent == 0) {
+            stunLatch = null
             Log.i(TAG, "stun unavailable for $shortId (dns/blocked) — local addresses only")
             return null
         }
@@ -319,6 +323,7 @@ class FileUdpChannel internal constructor(
         Companion.STUN_SERVERS.forEach { (host, port) ->
             Thread({
                 try {
+                    if (!com.vladimir.messenger.data.RustBridge.externalTransportAllowed()) return@Thread
                     val addresses = runCatching { InetAddress.getAllByName(host) }.getOrNull()
                     val target = addresses?.firstOrNull { it is Inet4Address }
                     if (target != null) out += InetSocketAddress(target, port)
@@ -448,7 +453,9 @@ class FileUdpChannels(
                 lastUfseekAtMs[peerNodeId] = now
                 Thread({
                     val binding = myBindingProvider() ?: return@Thread
-                    val candidates = channel.gatherCandidates()
+                    val candidates = channel.gatherCandidates(
+                        allowExternalStun = com.vladimir.messenger.data.RustBridge.externalTransportAllowed(),
+                    )
                     if (candidates.isEmpty()) return@Thread
                     val text = FileUdpWire.buildUdpSignal(FileUdpWire.KIND_UFSEEK, binding, candidates, channel.tag)
                     runCatching { sendSignal(peerNodeId, text) }
@@ -483,7 +490,9 @@ class FileUdpChannels(
         val replyWithUfcand = signal.kind == FileUdpWire.KIND_UFSEEK
         Thread({
             val binding = myBindingProvider()
-            val candidates = channel.gatherCandidates()
+            val candidates = channel.gatherCandidates(
+                allowExternalStun = com.vladimir.messenger.data.RustBridge.externalTransportAllowed(),
+            )
             if (replyWithUfcand && binding != null && candidates.isNotEmpty()) {
                 val text = FileUdpWire.buildUdpSignal(FileUdpWire.KIND_UFCAND, binding, candidates, channel.tag)
                 runCatching { sendSignal(senderNodeId, text) }

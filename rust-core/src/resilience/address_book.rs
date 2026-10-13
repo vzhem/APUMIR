@@ -253,6 +253,50 @@ impl AddressBook {
         self.len() == 0
     }
 
+    /// Merge a decrypted owner backup *while the engine is running*. The core,
+    /// not Android, owns this file: Android replacing it behind the writer's
+    /// back loses new observations and leaves peer_addrs stale until restart.
+    /// Returned hints still need signed QUIC proof; never mark them live.
+    pub fn merge_backup_json(&self, json: &str) -> Result<Vec<(String, SocketAddr)>, String> {
+        if json.len() > 2 * 1024 * 1024 { return Err("address book too large".into()); }
+        let file: FileV1 = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        if file.v != BOOK_VERSION { return Err("unsupported address book version".into()); }
+        let now = crate::storage::models::now_ms();
+        let mut added = Vec::new();
+        {
+            let mut entries = self.entries.lock().unwrap();
+            for entry in file.entries.into_iter().take(MAX_ENTRIES * 4) {
+                if entries.len() >= MAX_ENTRIES { break; }
+                let Ok(addr) = entry.addr.parse::<SocketAddr>() else { continue; };
+                if !valid_node_id(&entry.id) || addr.port() == 0
+                    || addr.ip().is_unspecified() || addr.ip().is_multicast()
+                    || entry.seen <= 0 || entry.seen > now
+                    || now.saturating_sub(entry.seen) > ENTRY_TTL_MS
+                    || entries.contains_key(&entry.id) { continue; }
+                added.push((entry.id.clone(), addr));
+                entries.insert(entry.id.clone(), entry);
+            }
+        }
+        let mut history_added = false;
+        {
+            let mut history = self.history.lock().unwrap();
+            for record in file.history.into_iter().take(HISTORY_MAX_ENTRIES * 4) {
+                let Some(addr) = valid_history_address(&record, now) else { continue; };
+                let key = (record.id.clone(), addr);
+                if !history.contains_key(&key) {
+                    history.insert(key, record);
+                    history_added = true;
+                }
+            }
+            if history_added { trim_history(&mut history, now); }
+        }
+        if !added.is_empty() || history_added {
+            self.generation.fetch_add(1, Ordering::Relaxed);
+            self.flush();
+        }
+        Ok(added)
+    }
+
     /// Адреса для seed в `peer_addrs` при старте движка.
     /// Непаршащиеся строки пропускаются (запись отвалится сама).
     pub fn seed_addrs(&self) -> HashMap<String, SocketAddr> {
@@ -488,6 +532,33 @@ mod tests {
             std::process::id(),
             tag
         ))
+    }
+
+    #[test]
+    fn merge_backup_seeds_missing_hints_without_overwriting_new_observations() {
+        let path = tmp_path("merge_swarm_backup");
+        let _ = fs::remove_file(&path);
+        let book = AddressBook::open(Some(path.clone()));
+        let now = crate::storage::models::now_ms();
+        let first = format!("pk_{}", "a".repeat(64));
+        let next = format!("pk_{}", "b".repeat(64));
+        book.record(&first, "10.0.0.1:7777".parse().unwrap());
+        let backup = serde_json::json!({
+            "v": BOOK_VERSION,
+            "entries": [
+                {"id": first.clone(), "addr": "198.51.100.2:5555", "seen": now - 1_000},
+                {"id": next.clone(), "addr": "10.0.0.3:5555", "seen": now - 1_000},
+                {"id": "bogus", "addr": "10.0.0.4:5555", "seen": now},
+            ]
+        }).to_string();
+        assert_eq!(book.merge_backup_json(&backup).unwrap(),
+            vec![(next.clone(), "10.0.0.3:5555".parse().unwrap())]);
+        assert_eq!(book.seed_addrs().get(&first), Some(&"10.0.0.1:7777".parse().unwrap()));
+        assert_eq!(book.merge_backup_json(&backup).unwrap().len(), 0);
+        let reloaded = AddressBook::open(Some(path.clone()));
+        assert!(reloaded.seed_addrs().contains_key(&next));
+        assert!(book.merge_backup_json("{bad-json").is_err());
+        let _ = fs::remove_file(path);
     }
 
     #[test]

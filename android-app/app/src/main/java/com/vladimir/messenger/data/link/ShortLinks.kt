@@ -1,6 +1,7 @@
 package com.vladimir.messenger.data.link
 
 import com.vladimir.messenger.data.group.GroupInviteLinks
+import java.security.MessageDigest
 import java.util.regex.Pattern
 
 /**
@@ -45,6 +46,21 @@ object ShortLinks {
     )
 
     fun isValidCode(code: String?): Boolean = code != null && CODE.matches(code)
+
+    /** Verify a peer's answer against the worker's actual SHA-256 alphabet.
+     *  A plausible URL alone must not turn an untrusted P2P answer into a
+     *  different group's invitation (or poison our persistent link cache). */
+    fun matchesWorkerCode(code: String, target: String): Boolean {
+        if (!isValidCode(code) || !isAllowedTarget(target)) return false
+        val digest = MessageDigest.getInstance("SHA-256").digest(target.toByteArray(Charsets.UTF_8))
+        if (code.length > digest.size) return false
+        val computed = buildString {
+            for (i in code.indices) append(WORKER_ALPHABET[(digest[i].toInt() and 0xff) % WORKER_ALPHABET.length])
+        }
+        return code == computed
+    }
+
+    private const val WORKER_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
 
     /** Короткая ссылка на нашем хосте по коду.
      *  Раунд 157: apumir.app НЕ принадлежит владельцу - ссылки только

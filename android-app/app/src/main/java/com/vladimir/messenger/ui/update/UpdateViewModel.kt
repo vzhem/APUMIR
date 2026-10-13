@@ -11,6 +11,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.service.UpdateChecker
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -64,10 +66,15 @@ class UpdateViewModel @Inject constructor(
 
     fun downloadUpdate() {
         val release = _uiState.value.updateAvailable ?: return
-        
-        _uiState.update { it.copy(isDownloading = true) }
-        
-        downloadId = updateChecker.downloadApk(release)
+        _uiState.update { it.copy(isDownloading = true, error = null) }
+        viewModelScope.launch {
+            try {
+                downloadId = withContext(Dispatchers.IO) { updateChecker.downloadApk(release) }
+                if (downloadId == -1L) _uiState.update { it.copy(isDownloading = false) }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isDownloading = false, error = e.message) }
+            }
+        }
     }
 
     fun dismissUpdate() {
@@ -79,9 +86,14 @@ class UpdateViewModel @Inject constructor(
             override fun onReceive(context: Context, intent: Intent) {
                 val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
                 if (id == downloadId) {
-                    android.util.Log.i("UpdateViewModel", "Download complete, opening installer")
-                    _uiState.update { it.copy(isDownloading = false) }
-                    updateChecker.installApk(downloadId)
+                    viewModelScope.launch {
+                        val ok = withContext(Dispatchers.IO) { updateChecker.downloadSucceeded(id) }
+                        _uiState.update { it.copy(
+                            isDownloading = false,
+                            error = if (ok) null else "Загрузка прервана: рой снова доступен или сеть недоступна",
+                        ) }
+                        if (ok) updateChecker.installApk(id)
+                    }
                 }
             }
         }

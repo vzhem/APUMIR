@@ -455,6 +455,11 @@ object RustBridge {
             ?.also { cachedPublicKey = it }
     }
 
+    fun observedPublicIp(): String? {
+        if (isMainThread()) return null
+        return engine?.let { runCatching { it.observedPublicIp() }.getOrNull() }
+    }
+
     fun networkStatus(): String {
         if (isMainThread()) return cachedNetworkStatus
         val liveStatus = engine?.let { runCatching { it.networkStatus() }.getOrNull() }
@@ -467,6 +472,25 @@ object RustBridge {
         val livePeers = engine?.let { runCatching { it.connectedPeers().toLong() }.getOrNull() }
         if (livePeers != null) cachedConnectedPeers = livePeers
         return livePeers ?: cachedConnectedPeers
+    }
+
+    /** Counts only an open QUIC session with a signed/bound APUX1 response.
+     * Queries that might authorize network I/O must run off the UI thread. */
+    fun hasLiveSwarmPeer(): Boolean {
+        if (isMainThread()) return false
+        return engine?.let { runCatching { it.hasLiveSwarmPeer() }.getOrNull() } ?: false
+    }
+
+    fun liveSwarmPeerIds(): List<String> {
+        if (isMainThread()) return emptyList()
+        return engine?.let { runCatching { it.liveSwarmPeerIds() }.getOrNull() } ?: emptyList()
+    }
+
+    /** Call on IO for an authoritative answer; a UI-thread cache is never an
+     * authorization to open an external connection. */
+    fun externalTransportAllowed(): Boolean {
+        if (isMainThread()) return false
+        return engine?.let { runCatching { it.externalTransportAllowed() }.getOrNull() } ?: false
     }
 
     fun triggerGossipDiscovery(): Boolean {
@@ -494,6 +518,16 @@ object RustBridge {
         } catch (e: Exception) {
             android.util.Log.w(TAG, "setPresenceAudience failed: ${e.message}")
             0u
+        }
+    }
+
+    /** Owner-decrypted backup enters the live core without racing its disk writer. */
+    fun importAddressBookJson(json: String): Int {
+        if (rejectMainThreadCall("importAddressBookJson")) return -1
+        return try { engine?.importAddressBookJson(json) ?: -1 }
+        catch (e: Exception) {
+            Log.w(TAG, "importAddressBookJson failed: ${e.message}")
+            -1
         }
     }
 

@@ -65,6 +65,9 @@ class TelegramChannelScraper @Inject constructor(
      * Собрать прокси со всех источников.
      */
     suspend fun collectAll(): List<ScrapeResult> = withContext(Dispatchers.IO) {
+        if (!com.vladimir.messenger.data.RustBridge.externalTransportAllowed()) {
+            return@withContext emptyList()
+        }
         val results = mutableListOf<ScrapeResult>()
 
         // 1. GitHub raw (сначала — они обычно работают без прокси)
@@ -189,6 +192,7 @@ class TelegramChannelScraper @Inject constructor(
     }
 
     private suspend fun fetchText(url: String, proxy: Proxy): String? = withContext(Dispatchers.IO) {
+        if (!com.vladimir.messenger.data.RustBridge.externalTransportAllowed()) return@withContext null
         val conn = (URL(url).openConnection(proxy) as HttpURLConnection).apply {
             requestMethod = "GET"
             setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")

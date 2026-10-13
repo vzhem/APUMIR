@@ -16,8 +16,8 @@
 # build-release.yml), затем ./gradlew :app:compileReleaseKotlin --no-daemon.
 # Перед Kotlin генерируем мост из текущего UDL. Native runtime проверяет релизный gate.
 #
-# Статус блокировки решает ci-core-check.sh: пока шаг не доказал стабильность,
-# его падение = warning + комментарий (паттерн K6, как у cargo test).
+# Статус блокировки решает ci-core-check.sh: после проверки стабильности
+# шаг блокирующий. Ошибки Kotlin не должны скрываться зелёным Rust CI.
 # ============================================================================
 
 set -uo pipefail
@@ -83,7 +83,8 @@ cd android-app || exit 1
 # задача). FileTransferRankPolicyTest держит порог элиты: «Проводник» (10-й
 # ранг) уже VIP (решение владельца 2026-10-07).
 ./gradlew :app:testDebugUnitTest --no-daemon --console=plain \
-    --tests '*RankWireTest*' --tests '*FileTransferRankPolicyTest*' --tests '*OnlineHelperPolicyTest*'
+    --tests '*RankWireTest*' --tests '*FileTransferRankPolicyTest*' --tests '*OnlineHelperPolicyTest*' \
+    --tests '*ShortLinksTest*'
 TESTS_STATUS=$?
 
 # ---- почему тесты упали: словами в лог, а не «красный шаг без причины» -------

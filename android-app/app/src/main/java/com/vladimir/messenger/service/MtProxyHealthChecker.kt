@@ -1,6 +1,7 @@
 package com.vladimir.messenger.service
 
 import android.util.Log
+import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.repository.MtProxyRepository
 import com.vladimir.messenger.domain.model.MtProtoProxy
 import com.vladimir.messenger.domain.model.ProxyType
@@ -40,6 +41,10 @@ class MtProxyHealthChecker @Inject constructor(
      * Проверить один прокси. Возвращает результат.
      */
     suspend fun checkOne(proxy: MtProtoProxy): CheckResult = withContext(Dispatchers.IO) {
+        // A skipped probe is NOT evidence that a proxy failed; do not purge it.
+        if (!RustBridge.externalTransportAllowed()) {
+            return@withContext CheckResult(proxy, false, 0L, "прямой рой: внешний прокси не нужен")
+        }
         val start = System.currentTimeMillis()
         try {
             when (proxy.type) {
@@ -165,6 +170,7 @@ class MtProxyHealthChecker @Inject constructor(
      * Проверяет топ-50: активный + недавние + с успешными проверками.
      */
     suspend fun checkAll(): List<CheckResult> = coroutineScope {
+        if (!RustBridge.externalTransportAllowed()) return@coroutineScope emptyList()
         val all = repo.getAll()
         
         // Выбираем топ-50 для проверки:

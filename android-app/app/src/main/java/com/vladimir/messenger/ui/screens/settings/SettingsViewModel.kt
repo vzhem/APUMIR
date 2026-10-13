@@ -368,8 +368,11 @@ class SettingsViewModel @Inject constructor(
      */
     fun onDownloadOfficialRelease() {
         val release = _officialRelease.value ?: return
-        runCatching { updateChecker.downloadApk(release) }
-            .onSuccess { id ->
+        viewModelScope.launch {
+            val attempt = withContext(Dispatchers.IO) {
+                runCatching { updateChecker.downloadApk(release) }
+            }
+            attempt.onSuccess { id ->
                 if (id == -1L) {
                     // Раунд 132: дифф-патч - скачали разницу, установщик уже открыт.
                     android.widget.Toast.makeText(
@@ -388,6 +391,7 @@ class SettingsViewModel @Inject constructor(
             .onFailure {
                 android.widget.Toast.makeText(context, context.getString(R.string.toast_download_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
             }
+        }
     }
 
     private fun toastIf(message: String) {
@@ -597,10 +601,17 @@ class SettingsViewModel @Inject constructor(
             // мобильный трафик не дёргаем при каждом открытии профиля.
             val publicIp = withContext(Dispatchers.IO) {
                 val now = System.currentTimeMillis()
-                val cached = lastPublicIp
-                if (cached != null && now - lastPublicIpAt < publicIpTtlMs) {
-                    cached
+                val reflected = com.vladimir.messenger.data.RustBridge.observedPublicIp()
+                if (reflected != null) {
+                    lastPublicIp = reflected
+                    lastPublicIpAt = now
+                    reflected
+                } else if (!com.vladimir.messenger.data.RustBridge.externalTransportAllowed()) {
+                    null // no peer reflection yet: do not display a stale address
+                } else if (lastPublicIp != null && now - lastPublicIpAt < publicIpTtlMs) {
+                    lastPublicIp
                 } else {
+                    val cached = lastPublicIp
                     runCatching {
                         val conn = java.net.URL("https://api.ipify.org?text=true")
                             .openConnection() as java.net.HttpURLConnection

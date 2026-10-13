@@ -27,6 +27,27 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory {
      */
     override fun newImageLoader(): coil.ImageLoader =
         coil.ImageLoader.Builder(this)
+            // Coil downloads GIF catalog previews independently of BotApi.
+            // Intercept before DNS/connect, not at an already-connected socket;
+            // deny redirects so they cannot escape the same gate.
+            .okHttpClient {
+                okhttp3.OkHttpClient.Builder()
+                    .followRedirects(false)
+                    .followSslRedirects(false)
+                    .addInterceptor { chain ->
+                        // Image URLs in messages/catalogs are untrusted. A host
+                        // spelling like "10.evil.example" must not pass as a
+                        // LAN address, and resolving names here would itself
+                        // leak DNS. Local pictures use file/content/byte data,
+                        // not HTTP; refuse *all* automatic HTTP previews while
+                        // an authenticated swarm route exists.
+                        if (!com.vladimir.messenger.data.RustBridge.externalTransportAllowed()) {
+                            throw java.io.IOException("swarm-first: automatic HTTP image deferred")
+                        }
+                        chain.proceed(chain.request())
+                    }
+                    .build()
+            }
             .components {
                 // API 28+: системный декодер (GIF и анимированный WebP);
                 // младше: встроенный декодер GIF (minSdk 26-27).

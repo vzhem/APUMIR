@@ -16,14 +16,19 @@ package com.vladimir.messenger.data.translate
 import android.content.Context
 import com.google.android.gms.tasks.Task
 import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.common.model.RemoteModelManager
 import com.google.mlkit.nl.languageid.LanguageIdentification
 import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.TranslateRemoteModel
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.Translator
 import com.google.mlkit.nl.translate.TranslatorOptions
+import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.util.GroupInviteCardSender
 import com.vladimir.messenger.util.ContactCardSender
 import com.vladimir.messenger.util.ImageLinkDetector
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -92,7 +97,9 @@ object MessageTranslator {
             android.util.Log.w("MessageTranslator", "Перевод не выполнен: " + e.javaClass.simpleName)
             null
         }
-        synchronized(cache) { cache[key] = result }
+        // A missing language model may become available later (via a direct
+        // copy or, only in fallback, Google). A deferred null is not a fact.
+        if (result != null) synchronized(cache) { cache[key] = result }
         return result
     }
 
@@ -104,7 +111,18 @@ object MessageTranslator {
         if (source == target) return null
 
         val translator = translatorFor(source, target)
-        translator.downloadModelIfNeeded(DownloadConditions.Builder().build()).awaitResult()
+        // downloadModelIfNeeded() can initiate an *untracked* Play-services
+        // download. Check both installed models first; while the direct swarm
+        // is live we may use cached models but must not trigger Google I/O.
+        val models = RemoteModelManager.getInstance()
+        val installed = listOf(source, target).distinct().all { language ->
+            models.isModelDownloaded(TranslateRemoteModel.Builder(language).build()).awaitResult()
+        }
+        if (!installed) {
+            val fallback = withContext(Dispatchers.IO) { RustBridge.externalTransportAllowed() }
+            if (!fallback) return null
+            translator.downloadModelIfNeeded(DownloadConditions.Builder().build()).awaitResult()
+        }
         val translated = translator.translate(text).awaitResult() ?: return null
         return MessageTranslation(text = translated, sourceCode = source)
     }

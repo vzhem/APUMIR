@@ -117,6 +117,8 @@ class CallManager @Inject constructor(
     @Volatile private var peerCandidates: List<Pair<String, Int>> = emptyList()
     @Volatile private var audioViaUdp = false
     private var candidatesLinkSends = 0
+    /** STUN для UDP звонка пробуем лишь после общего окна поиска роя. */
+    private var udpStunAttempted = false
     /** Самый большой seq пробы собеседника: повтор старой пробы с другого адреса не перехватит канал. */
     private var lastPeerProbeSeq = -1L
     private val ringPlayer = CallRingPlayer(appContext)
@@ -372,10 +374,14 @@ class CallManager @Inject constructor(
 
     /** Поднять мост для звонка (идемпотентно). Ключ моста — производная от медиа-ключа звонящего. */
     private fun openBrokerLink(sm: CallStateMachine, callerMediaKey: ByteArray) {
-        if (brokerLink != null) return
+        // UDP uses the same crypto even while the external broker is asleep.
+        if (linkCrypto == null) {
+            linkCallerKey = callerMediaKey
+            linkCrypto = CallMediaCrypto(CallLinkWire.deriveLinkKey(callerMediaKey))
+        }
+        if (brokerLink != null || audioChannel.isOpen() || udpChannel?.isOpen() == true ||
+            !RustBridge.externalTransportAllowed()) return
         val myId = audioChannel.myNodeId.takeIf { it.startsWith("pk_") } ?: RustBridge.nodeId() ?: return
-        linkCallerKey = callerMediaKey
-        linkCrypto = CallMediaCrypto(CallLinkWire.deriveLinkKey(callerMediaKey))
         // Счётчик nonce задаётся один раз на звонок (resetLinkCounters) и при
         // переоткрытии моста НЕ сбрасывается: ключ тот же на весь звонок.
         peerLinkAlive = false
@@ -384,6 +390,8 @@ class CallManager @Inject constructor(
             callId = sm.callId,
             myNodeId = myId,
             peerNodeId = sm.peerId,
+            externalAllowed = { RustBridge.externalTransportAllowed() &&
+                !audioChannel.isOpen() && udpChannel?.isOpen() != true },
             onPacket = { bytes -> onLinkPacket(sm.callId, bytes) },
             onState = { state -> onLinkState(sm.callId, state) },
         )
@@ -407,6 +415,15 @@ class CallManager @Inject constructor(
             }
             CallBrokerLink.LinkState.CONNECTING -> Unit
         }
+    }
+
+    /** Live authenticated swarm neighbour replaces the independent call broker immediately. */
+    private fun suspendBrokerForSwarm() {
+        val link = brokerLink ?: return
+        brokerLink = null
+        peerLinkAlive = false
+        link.close()
+        _uiState.value = _uiState.value.copy(viaBroker = false)
     }
 
     /**
@@ -563,6 +580,29 @@ class CallManager @Inject constructor(
             sendSignal(sm.peerId, CallWire.candidatesMessageId(sm.callId, if (sm.outgoing) 1 else 0), text)
             if (peerLinkAlive) sendCandidatesViaLink(sm.callId)
             // Кандидаты собеседника могли прийти раньше наших: пробивать можно сразу.
+            synchronized(this@CallManager) { startProbingIfReady(sm) }
+        }
+    }
+
+    /** One STUN query only after direct/swarm discovery failed; announce NEW candidate ID. */
+    private fun refreshUdpCandidatesOnFallback(sm: CallStateMachine) {
+        if (udpStunAttempted || sm.phase == CallStateMachine.Phase.ENDED ||
+            audioChannel.isOpen() || udpChannel?.isOpen() == true) return
+        val udp = udpChannel ?: return
+        udpStunAttempted = true
+        scope.launch(Dispatchers.IO) {
+            if (!RustBridge.externalTransportAllowed()) return@launch
+            val candidates = runCatching { udp.gatherCandidates(allowExternalStun = true) }
+                .getOrDefault(emptyList())
+            if (machine !== sm || udpChannel !== udp || candidates.isEmpty() ||
+                !RustBridge.externalTransportAllowed() || candidates == myCandidates) return@launch
+            myCandidates = candidates
+            val text = runCatching { CallWire.buildCandidates(sm.callId, candidates) }.getOrNull() ?: return@launch
+            // Initial (local) candidates used the normal ID; a different ID
+            // prevents durable dedup from swallowing the newly discovered address.
+            val id = CallWire.candidatesMessageId(sm.callId, if (sm.outgoing) 1 else 0) + "-stun"
+            sendSignal(sm.peerId, id, text)
+            if (peerLinkAlive) sendCandidatesViaLink(sm.callId)
             synchronized(this@CallManager) { startProbingIfReady(sm) }
         }
     }
@@ -1258,6 +1298,7 @@ class CallManager @Inject constructor(
         audioViaUdp = false
         myCandidates = emptyList()
         peerCandidates = emptyList()
+        udpStunAttempted = false
         val link = brokerLink
         brokerLink = null
         linkCrypto = null
@@ -1279,6 +1320,7 @@ class CallManager @Inject constructor(
         lastGreetAtMs = 0L
         lastPeerProbeSeq = -1L
         candidatesLinkSends = 0
+        udpStunAttempted = false
         audioViaUdp = false
     }
 
@@ -1519,8 +1561,17 @@ class CallManager @Inject constructor(
             while (isActive) {
                 delay(TICK_MS)
                 val now = nowMs()
+                val fallback = RustBridge.externalTransportAllowed()
                 val ticked = synchronized(this@CallManager) {
                     val sm = machine ?: return@synchronized null
+                    val directMedia = audioChannel.isOpen() || udpChannel?.isOpen() == true
+                    if (!fallback || directMedia) {
+                        suspendBrokerForSwarm()
+                    } else if (sm.phase != CallStateMachine.Phase.ENDED) {
+                        linkCallerKey?.let { key -> if (brokerLink == null) openBrokerLink(sm, key) }
+                        refreshUdpCandidatesOnFallback(sm)
+                        reopenBrokerLinkIfDead(sm, now)
+                    }
                     // Приветствие по мосту (QoS0, может потеряться; собеседник мог
                     // подписаться позже нас): повторяем, пока он не ответил.
                     val link = brokerLink
@@ -1530,7 +1581,6 @@ class CallManager @Inject constructor(
                         lastGreetAtMs = now
                         sendLinkControl(CallWire.buildCapabilities(sm.callId, CallWire.LOCAL_CODECS))
                     }
-                    reopenBrokerLinkIfDead(sm, now)
                     sm to sm.tick(now)
                 } ?: continue
                 val sm = ticked.first

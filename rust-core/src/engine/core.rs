@@ -2245,7 +2245,7 @@ impl P2PCore {
             let helpers = directory.helpers(now);
             let ids: Vec<&str> = helpers.iter()
                 .map(|helper| helper.identity.claims.node_id.as_str()).collect();
-            swarm_first.report(now, transport.has_authenticated_connection(&ids).await);
+            swarm_first.report(now, transport.authenticated_connection_ids(&ids).await);
             let updated = book.generation();
             if updated != generation { generation = updated; directory.wake(); }
             directory.flush(false, now);
@@ -4746,6 +4746,15 @@ impl P2PCore {
         self.crypto.public_key()
     }
 
+    /// Own public IP, reflected by a signed direct peer if available; only
+    /// otherwise by the external STUN fallback. Never export peer addresses.
+    pub fn observed_public_ip(&self) -> Option<String> {
+        let now = crate::storage::models::now_ms();
+        let reflected = self.peer_exchange.observed_own_addr(now);
+        reflected.or_else(|| *self.public_addr.lock().unwrap())
+            .map(|addr| addr.ip().to_string())
+    }
+
     pub fn on_network_available(&self) {
         self.swarm_first.reset(crate::storage::models::now_ms());
         self.peer_exchange.reset_session();
@@ -4816,6 +4825,11 @@ impl P2PCore {
     /// `connected_peers` includes broker presence and must not gate egress.
     pub fn has_live_swarm_peer(&self) -> bool {
         self.state.is_running() && self.swarm_first.has_live_peer(crate::storage::models::now_ms())
+    }
+
+    pub fn live_swarm_peer_ids(&self) -> Vec<String> {
+        if !self.state.is_running() { return Vec::new(); }
+        self.swarm_first.live_peer_ids(crate::storage::models::now_ms())
     }
 
     /// False during initial direct search and while a verified neighbour is
@@ -5853,6 +5867,26 @@ impl P2PCore {
             .own_broker
             .as_deref()
             .and_then(crate::network::multi_broker::parse_broker_endpoint)
+    }
+
+    /// Merge a retrieved, owner-decrypted address book atomically into the
+    /// running core's memory and on-disk state. Hints are NOT availability.
+    pub fn import_address_book_json(&self, json: &str) -> i32 {
+        if !self.is_running() { return -1; }
+        match self.address_book.merge_backup_json(json) {
+            Ok(added) => {
+                let count = added.len() as i32;
+                let mut peers = self.peer_addrs.lock().unwrap();
+                for (id, addr) in added { peers.entry(id).or_insert(addr); }
+                drop(peers);
+                if count > 0 { self.peer_exchange.wake(); }
+                count
+            }
+            Err(e) => {
+                tracing::warn!("ADDRESS BOOK: rejected restored snapshot: {}", e);
+                -1
+            }
+        }
     }
 
     pub fn set_presence_audience(&self, ids: Vec<String>) -> u32 {
