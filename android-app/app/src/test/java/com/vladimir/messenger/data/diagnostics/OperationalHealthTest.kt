@@ -105,4 +105,11 @@ class OperationalHealthTest {
             "Relay-очередь: снято-по-ACK=10",
         )))
     }
+    @Test fun metadataReadsAreBoundedByOpenedBytesNotStaleFileLength() {
+        val utf8 = "я".repeat(10).toByteArray(Charsets.UTF_8)
+        assertEquals("я".repeat(10), readBoundedDiagnosticText(utf8.inputStream(), 20))
+        var rejected = false
+        try { readBoundedDiagnosticText(utf8.inputStream(), 19) } catch (_: IllegalArgumentException) { rejected = true }
+        assertTrue(rejected)
+    }
 }

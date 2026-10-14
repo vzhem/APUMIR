@@ -104,7 +104,7 @@ application story receipt. Остальные контакты вне текущ
 
 ## Проверка
 
-Pure JVM: OperationalHealthTest (9), StoryDeliveryQueueTest (7), новый revoke UUID
+Pure JVM: OperationalHealthTest (10), StoryDeliveryQueueTest (7), новый revoke UUID
 тест StoryOutboxTest, новые privacy/report tests. Подключены standalone compiler и
 Android CI filter. Android relay fixtures дополнены full-vs-sample expiry проверкой;
 их компиляция не является запуском на устройстве. Source guards проверяют bounds,

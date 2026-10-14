@@ -35,9 +35,10 @@ object OperationalDiagnostics {
             persistence = "ready"
             runCatching {
                 val source = file!!.baseFile
-                if (!source.exists()) return@runCatching
-                require(source.length() <= 32768)
-                val json = JSONObject(file!!.openRead().bufferedReader().use { it.readText() })
+                val json = JSONObject(file!!.openRead().use { input ->
+                    require(source.length() <= 32768)
+                    readBoundedDiagnosticText(input, 32768)
+                })
                 val history = json.optJSONArray("phases") ?: JSONArray()
                 require(history.length() <= 64)
                 for (i in 0 until history.length()) {
@@ -51,7 +52,12 @@ object OperationalDiagnostics {
                     baselineLiveRows = json.optLong("baselineLive", -1).takeIf { it >= 0 }
                     baselineExpiredRows = json.optLong("baselineExpired", -1).takeIf { it >= 0 }
                 }
-            }.onFailure { phases.clear(); baselineAt = null; baselineBytes = null; persistence = "read_failed" }
+            }.onFailure {
+                val target = file!!.baseFile
+                if (target.exists() || File(target.path + ".bak").exists()) {
+                    phases.clear(); baselineAt = null; baselineBytes = null; persistence = "read_failed"
+                }
+            }
         }
         phase(DiagnosticPhase.PROCESS_START)
     }

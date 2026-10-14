@@ -1070,6 +1070,9 @@ class DiagnosticsContractsTest(unittest.TestCase):
             self.assertNotIn(forbidden, journal)
         for marker in ("story.createdAtMs", "queue.due(now)", "queue.contains(entry)", "queue.result(entry", "revoke:", "throw cancelled", "262144"):
             self.assertIn(marker, sender)
+        self.assertIn("readBoundedDiagnosticText(input, 262144)", sender)
+        self.assertNotIn("if (!target.baseFile.exists())", sender)
+        self.assertIn("readBoundedDiagnosticText(input, 32768)", journal)
         for forbidden in ("http://", "https://", "ensureKey(", "reset("):
             self.assertNotIn(forbidden, sender)
         self.assertIn("StoryStore.persistForDelivery()", repo)

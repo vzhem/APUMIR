@@ -2,6 +2,7 @@ package com.vladimir.messenger.data.story
 
 import android.content.Context
 import android.util.AtomicFile
+import com.vladimir.messenger.data.diagnostics.readBoundedDiagnosticText
 import com.vladimir.messenger.data.diagnostics.OperationalCounter
 import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
 import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
@@ -26,16 +27,20 @@ internal object DurableStorySender {
         status = "ready"
         runCatching {
             val target = file!!
-            if (!target.baseFile.exists()) return@runCatching
-            require(target.baseFile.length() <= 262144)
-            val array = JSONArray(target.openRead().bufferedReader().use { it.readText() })
+            val array = JSONArray(target.openRead().use { input ->
+                require(target.baseFile.length() <= 262144)
+                readBoundedDiagnosticText(input, 262144)
+            })
             require(array.length() <= StoryDeliveryQueue.MAX_ENTRIES)
             queue = StoryDeliveryQueue((0 until array.length()).map { index ->
                 val row = array.getJSONObject(index)
                 StoryDeliveryEntry(row.getString("story"), row.getString("owner"), row.getString("peer"),
                     row.getLong("created"), row.optBoolean("revoke"), row.optInt("part"), row.optLong("due"))
             })
-        }.onFailure { status = "read_failed" }
+        }.onFailure {
+            val target = file!!.baseFile
+            if (target.exists() || File(target.path + ".bak").exists()) status = "read_failed"
+        }
     }
     private fun save(): Boolean {
         val target = file ?: return false
