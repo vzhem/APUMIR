@@ -1130,4 +1130,23 @@ class DiagnosticsReportTest {
         assertTrue(report.contains("storage_audit=ready"))
     }
 
+    @Test fun runtimeAndValidatedNetworkFactsReachTheFullReport() {
+        val report = DiagnosticsReport.render(facts().copy(
+            networkValidated = false,
+            networkCaptivePortal = true,
+            dataSaverStatus = 3,
+            backgroundRestricted = true,
+            runtimeHealth = RuntimeHealthSnapshot(
+                ui = UiResponsiveness(true, 4, 1, 1, 2200, null),
+                exitStatus = ExitHistoryStatus.UNSUPPORTED,
+            ),
+        ), emptyList(), emptyList())
+        assertTrue(report.contains("validated_by_android=false"))
+        assertTrue(report.contains("captive_portal=true"))
+        assertTrue(report.contains("background_restricted=true"))
+        assertTrue(report.contains("[отзывчивость и работа служб]"))
+        assertTrue(report.contains("ui_max_completed_lag_ms=2200"))
+        assertTrue(report.contains("os_exit_history=unsupported"))
+    }
+
 }

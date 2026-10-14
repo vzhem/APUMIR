@@ -1,5 +1,8 @@
 package com.vladimir.messenger.service
 
+import com.vladimir.messenger.data.diagnostics.RuntimeDiagnostics
+import com.vladimir.messenger.data.diagnostics.DiagnosticOperation
+
 import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -266,7 +269,7 @@ class CoreServerService : Service() {
                 chatId = chatId,
                 recipientNodeId = peerId,
             )
-            fileTransferRouter.pumpOutgoing()
+            RuntimeDiagnostics.measure(DiagnosticOperation.FILE_PUMP) { fileTransferRouter.pumpOutgoing() }
             Log.i(TAG, "GIF ${sha256.take(12)} served to ${peerId.takeLast(8)} (silent)")
         } catch (e: Exception) {
             if (e.message.orEmpty().contains("binding is not pinned")) {
@@ -493,7 +496,7 @@ class CoreServerService : Service() {
                 chatId = chatId,
                 recipientNodeId = peerId,
             )
-            fileTransferRouter.pumpOutgoing()
+            RuntimeDiagnostics.measure(DiagnosticOperation.FILE_PUMP) { fileTransferRouter.pumpOutgoing() }
             Log.i(TAG, "Sticker ${sha256.take(12)} served to ${peerId.takeLast(8)} (silent)")
         } catch (e: Exception) {
             if (e.message.orEmpty().contains("binding is not pinned")) {
@@ -1954,9 +1957,11 @@ class CoreServerService : Service() {
                 // и ACK-окно отправителя почти не двигалось. В простое шаг
                 // прежний (POLL_INTERVAL_MS), пустые опросы дёшевы.
                 val busy = try {
-                    val events = RustBridge.drainEvents()
-                    events.forEach { event -> handleEvent(event) }
-                    RustBridge.pendingEvents() > 0L || events.size >= BUSY_BATCH
+                    RuntimeDiagnostics.measure(DiagnosticOperation.CORE_EVENTS) {
+                        val events = RustBridge.drainEvents()
+                        events.forEach { event -> handleEvent(event) }
+                        RustBridge.pendingEvents() > 0L || events.size >= BUSY_BATCH
+                    }
                 } catch (ex: Exception) {
                     Log.e(TAG, "Event polling error", ex)
                     false
@@ -1986,14 +1991,14 @@ class CoreServerService : Service() {
             var chatQueueCycle = 0
             while (isActive) {
                 try {
-                    fileTransferRouter.pumpOutgoing()
+                    RuntimeDiagnostics.measure(DiagnosticOperation.FILE_PUMP) { fileTransferRouter.pumpOutgoing() }
                 } catch (ex: Exception) {
                     Log.w(TAG, "File pump error: ${ex.message}")
                 }
                 // Файлы группы роем (этап 9): повторить свои просьбы, отдать
                 // из очереди, освободить куски отданного.
                 try {
-                    groupFiles.pump()
+                    RuntimeDiagnostics.measure(DiagnosticOperation.GROUP_FILE_PUMP) { groupFiles.pump() }
                 } catch (ex: Exception) {
                     Log.w(TAG, "Group file pump error: ${ex.message}")
                 }
@@ -2001,19 +2006,19 @@ class CoreServerService : Service() {
                 // новой версии, обновить карточку «Обновления», объявить
                 // о своей раздаче.
                 try {
-                    apkSeeder.pump()
+                    RuntimeDiagnostics.measure(DiagnosticOperation.APK_PUMP) { apkSeeder.pump() }
                 } catch (ex: Exception) {
                     Log.w(TAG, "Apk seeder pump error: ${ex.message}")
                 }
                 // Раунд 137: недоставленные «удалить у всех» - личные (до ack)
                 // и групповые (эпидемией через помпу репозитория).
                 try {
-                    messageDeletion.pump()
+                    RuntimeDiagnostics.measure(DiagnosticOperation.DIRECT_DELETE_PUMP) { messageDeletion.pump() }
                 } catch (ex: Exception) {
                     Log.w(TAG, "Deletion pump error: ${ex.message}")
                 }
                 try {
-                    groupRepository.pumpDeletions()
+                    RuntimeDiagnostics.measure(DiagnosticOperation.GROUP_DELETE_PUMP) { groupRepository.pumpDeletions() }
                 } catch (ex: Exception) {
                     Log.w(TAG, "Group deletion pump error: ${ex.message}")
                 }
@@ -2023,7 +2028,7 @@ class CoreServerService : Service() {
                 chatQueueCycle++
                 if (chatQueueCycle % 3 == 0) {
                     try {
-                        chatRepository.pumpQueuedOffline()
+                        RuntimeDiagnostics.measure(DiagnosticOperation.CHAT_RETRY_PUMP) { chatRepository.pumpQueuedOffline() }
                     } catch (ex: Exception) {
                         Log.w(TAG, "Chat queue pump error: ${ex.message}")
                     }
@@ -2035,8 +2040,6 @@ class CoreServerService : Service() {
 
     private suspend fun handleEvent(event: CoreEventFfi) {
         Log.d(TAG, "Event: ${event.eventType}")
-        Log.d(TAG, "📥 Event: ${event.eventType}")
-        Log.d(TAG, "📥 Event: ${event.eventType}")
         when (event.eventType) {
             // K3: бинарный кусок файла по прямому QUIC (APUF-кадр из ядра).
             // Это не сообщение переписки: текста, чата и отправителя в
@@ -2636,7 +2639,7 @@ class CoreServerService : Service() {
                                 Log.e(TAG, "Retry failed", e)
                             }
                             try {
-                                fileTransferRouter.pumpOutgoing()
+                                RuntimeDiagnostics.measure(DiagnosticOperation.FILE_PUMP) { fileTransferRouter.pumpOutgoing() }
                                 fileTransferRouter.resumeWaitingForRecipient()
                             } catch (e: Exception) {
                                 Log.w(TAG, "File pump after peer discovery failed: ${e.message}")
@@ -2712,7 +2715,7 @@ class CoreServerService : Service() {
                     }
                     serviceScope.launch {
                         try {
-                            fileTransferRouter.pumpOutgoing()
+                            RuntimeDiagnostics.measure(DiagnosticOperation.FILE_PUMP) { fileTransferRouter.pumpOutgoing() }
                         } catch (e: Exception) {
                             Log.w(TAG, "File pump after network connect failed: ${e.message}")
                         }

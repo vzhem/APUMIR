@@ -712,8 +712,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "fun noteMessageOutgoing(",
             "fun noteDeliveryAck(",
             "fun noteSealedNotOpened(",
-            "IdentitySigningKeyStore.mode(context)",
-            "FileExchangeKeyStore.mode(context)",
+            "DiagnosticKeyProbe.read(context, KEY_MODE_BUDGET_MS)",
             "RustBridge.liveSwarmPeerIds()",
             "RustBridge.externalTransportAllowed()",
             "fun noteCryptoBootstrap(",
@@ -1013,7 +1012,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             self.assertNotIn(forbidden, inspector)
         collector = source(DIAG / "TransferDiagnostics.kt")
         self.assertGreater(collector.index("RelayStorageInspector.collect("), collector.index("onPartial?.invoke("))
-        self.assertIn("facts.copy(relayStorage = storage)", collector)
+        self.assertIn("facts.copy(relayStorage = storage, runtimeHealth = health)", collector)
         report = source(DIAG / "DiagnosticsReport.kt")
         self.assertIn("append(facts.relayStorage.render())", report)
         for lang in ("values", "values-en"):
@@ -1024,6 +1023,37 @@ class DiagnosticsContractsTest(unittest.TestCase):
             self.assertNotIn("message queue", queue)
         script = source(ROOT / "scripts/ci/check-chat-history.sh")
         self.assertIn("RelayStorageDiagnosticsTest", script)
+
+    def test_runtime_health_is_bounded_wired_and_payload_free(self):
+        model = source(DIAG / "RuntimeHealth.kt")
+        monitor = source(DIAG / "RuntimeDiagnostics.kt")
+        probe = source(DIAG / "DiagnosticKeyProbe.kt")
+        collector = source(DIAG / "TransferDiagnostics.kt")
+        app = source(MAIN / "MessengerApplication.kt")
+        report = source(DIAG / "DiagnosticsReport.kt")
+        for marker in ("active.size >= 32", "candidate.ticket !== ticket", "pending != null", "if (!active", "exitHistory.take(3)"):
+            self.assertIn(marker, model)
+        for marker in ("generation.get() != epoch", "main.removeCallbacksAndMessages(probeToken)", "isInteractive", "scheduled?.cancel(false)", "60_000L", "throw cancelled", "throw error", "operations.finish(ticket, outcome)"):
+            self.assertIn(marker, monitor)
+        for forbidden in (".description", ".traceInputStream", ".processName", ".pid", "getStackTrace", "allStackTraces"):
+            self.assertNotIn(forbidden, monitor)
+        self.assertGreater(app.index("RuntimeDiagnostics.install(this)"), app.index("DeviceIdentityMarker.discardIfRestored"))
+        self.assertIn("RuntimeDiagnostics.memoryTrim(level)", app)
+        self.assertIn("append(facts.runtimeHealth.render())", report)
+        self.assertIn("RuntimeDiagnostics.snapshot(context.applicationContext)", collector)
+        for marker in ("existing != null && !existing.isDone", "newSingleThreadExecutor", "TimeUnit.MILLISECONDS", "TimeoutException", "IdentitySigningKeyStore.mode(app)", "FileExchangeKeyStore.mode(app)"):
+            self.assertIn(marker, probe)
+        for forbidden in (".cancel(", "ensureKey(", "reset(", "recreate("):
+            self.assertNotIn(forbidden, probe)
+        self.assertIn("RuntimeHealthTest", source(ROOT / "scripts/ci/check-chat-history.sh"))
+
+    def test_network_capabilities_are_not_confused_with_delivery(self):
+        collector = source(DIAG / "TransferDiagnostics.kt")
+        report = source(DIAG / "DiagnosticsReport.kt")
+        for marker in ("NET_CAPABILITY_VALIDATED", "NET_CAPABILITY_CAPTIVE_PORTAL", "isPrivateDnsActive", "restrictBackgroundStatus", "isBackgroundRestricted"):
+            self.assertIn(marker, collector)
+        self.assertIn("validated_by_android=", report)
+        self.assertIn("не замер скорости", report)
 
     def test_ci_runs_the_pure_kotlin_diagnostics_tests(self):
         script = source(ROOT / "scripts/ci/check-chat-history.sh")

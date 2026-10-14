@@ -232,6 +232,14 @@ data class DiagnosticsFacts(
     /** Состояние последней проверки/уведомления о версии; без URL и текста релиза. */
     val updateDiagnostics: UpdateDiagnosticFacts = UpdateDiagnosticFacts.EMPTY,
     val relayStorage: RelayStorageDiagnostics = RelayStorageDiagnostics(),
+    val runtimeHealth: RuntimeHealthSnapshot = RuntimeHealthSnapshot(),
+    val networkValidated: Boolean? = null,
+    val networkCaptivePortal: Boolean? = null,
+    val privateDnsActive: Boolean? = null,
+    val dataSaverStatus: Int? = null,
+    val backgroundRestricted: Boolean? = null,
+    val linkDownKbps: Int? = null,
+    val linkUpKbps: Int? = null,
     /** Только безопасные статусы: без ID, открытых/секретных ключей и имён файлов. */
     val signingSeedMode: String = "unknown",
     val installedSigningMode: String = "unknown",
@@ -684,6 +692,8 @@ object DiagnosticsReport {
         appendMqtt(facts)
         appendHelperRoutes(facts)
         appendMessages(facts)
+        append(facts.runtimeHealth.render())
+        appendLine()
         append(facts.relayStorage.render())
         appendLine()
         appendTransfers(facts)
@@ -1014,6 +1024,10 @@ object DiagnosticsReport {
         appendLine("internet=${facts.networkInternet}")
         appendLine("metered=${facts.networkMetered}")
         appendLine("vpn=${facts.networkVpn}")
+        appendLine("validated_by_android=${facts.networkValidated ?: "unknown"} · captive_portal=${facts.networkCaptivePortal ?: "unknown"}")
+        appendLine("private_dns_active=${facts.privateDnsActive ?: "unknown"} · data_saver_status=${facts.dataSaverStatus ?: -1} (1=off, 2=whitelisted, 3=enabled)")
+        appendLine("background_restricted=${facts.backgroundRestricted ?: "unknown"}")
+        appendLine("link_down_kbps=${facts.linkDownKbps ?: -1} · link_up_kbps=${facts.linkUpKbps ?: -1} (оценка Android, не замер скорости)")
         appendLine("notifications=${if (facts.notificationsAllowed) "разрешены" else "запрещены"}")
         appendLine("proxy_tunnel=${if (facts.proxyTunnel) "включён" else "выключен"}")
         appendLine("swarm=${facts.swarmMode}")

@@ -15,8 +15,6 @@ import android.os.StatFs
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.local.dao.FileTransferDao
-import com.vladimir.messenger.data.file.FileExchangeKeyStore
-import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import com.vladimir.messenger.data.swarm.OnlineHelperSettings
 import com.vladimir.messenger.data.swarm.ServerMode
 import com.vladimir.messenger.data.swarm.SwarmSettings
@@ -335,17 +333,14 @@ object TransferDiagnostics {
             journal.toList() to counters.toMap()
         }
         onStage?.invoke(STAGE_DEVICE)
-        val quickFacts = gatherFacts(
-            context = context.applicationContext,
-            createdAtMs = createdAtMs,
-            counters = journalSnapshot.second,
-            logcat = LogcatScan.EMPTY,
-        )
+        val quickFacts = RuntimeDiagnostics.measure(DiagnosticOperation.REPORT_FACTS) {
+            gatherFacts(context.applicationContext, createdAtMs, journalSnapshot.second, LogcatScan.EMPTY)
+        }
         onPartial?.invoke(
             snapshotOf(quickFacts, journalSnapshot.first, listOf(LOGCAT_PENDING_LINE), createdAtMs),
         )
         onStage?.invoke(STAGE_LOGCAT)
-        val logcat = scanLogcat()
+        val logcat = RuntimeDiagnostics.measure(DiagnosticOperation.LOGCAT_READ) { scanLogcat() }
         // Из журнала процесса в факты попадают только агрегаты: уровни W/E,
         // исходы STUN, состояние очереди и сигналы ядра. Сырые строки отдельно
         // фильтруются/редактируются; телефон второй раз не опрашиваем.
@@ -372,9 +367,13 @@ object TransferDiagnostics {
         onStage?.invoke(STAGE_REPORT)
         // On-demand storage inspection runs AFTER the immediately visible partial report.
         // No background polling, no cleanup, no identity/key-store access.
-        val storage = runCatching { RelayStorageInspector.collect(context.applicationContext) }
+        val storage = runCatching {
+            RuntimeDiagnostics.measure(DiagnosticOperation.STORAGE_AUDIT) { RelayStorageInspector.collect(context.applicationContext) }
+        }
             .getOrDefault(RelayStorageDiagnostics(status = "unavailable"))
-        snapshotOf(facts.copy(relayStorage = storage), journalSnapshot.first, logcat.lines, createdAtMs)
+        val health = runCatching { RuntimeDiagnostics.snapshot(context.applicationContext) }
+            .getOrDefault(RuntimeHealthSnapshot())
+        snapshotOf(facts.copy(relayStorage = storage, runtimeHealth = health), journalSnapshot.first, logcat.lines, createdAtMs)
     }
 
     private fun snapshotOf(
@@ -417,18 +416,9 @@ object TransferDiagnostics {
         }
         // Read-only key modes: neither creates a seed nor serializes a binding into the report.
         // Do not infer the cause of a failed open from a known sender binding alone.
-        val signingSeedMode = kotlinx.coroutines.withTimeoutOrNull(KEY_MODE_BUDGET_MS) {
-            withContext(Dispatchers.IO) {
-                runCatching { IdentitySigningKeyStore.mode(context).name.lowercase() }
-                    .getOrDefault("unavailable")
-            }
-        } ?: "timeout"
-        val fileExchangeMode = kotlinx.coroutines.withTimeoutOrNull(KEY_MODE_BUDGET_MS) {
-            withContext(Dispatchers.IO) {
-                runCatching { FileExchangeKeyStore.mode(context).name.lowercase() }
-                    .getOrDefault("unavailable")
-            }
-        } ?: "timeout"
+        val keyModes = DiagnosticKeyProbe.read(context, KEY_MODE_BUDGET_MS)
+        val signingSeedMode = keyModes.first
+        val fileExchangeMode = keyModes.second
         val installedSigningMode = safeNative { uniffi.p2p_core.identitySigningMode() }
         val boot = cryptoBootState
         val running = runCatching { RustBridge.isRunning() }.getOrDefault(false)
@@ -456,6 +446,15 @@ object TransferDiagnostics {
             networkInternet = network.internet,
             networkMetered = network.metered,
             networkVpn = network.vpn,
+            networkValidated = network.validated,
+            networkCaptivePortal = network.captivePortal,
+            privateDnsActive = network.privateDns,
+            dataSaverStatus = network.dataSaver,
+            backgroundRestricted = runCatching {
+                if (Build.VERSION.SDK_INT >= 28) (context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager).isBackgroundRestricted else null
+            }.getOrNull(),
+            linkDownKbps = network.downKbps,
+            linkUpKbps = network.upKbps,
             notificationsAllowed = notificationsAllowed(context),
             proxyTunnel = context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
                 .getBoolean("proxy_tunnel_enabled", true),
@@ -610,6 +609,12 @@ object TransferDiagnostics {
         val internet: Boolean,
         val metered: Boolean,
         val vpn: Boolean,
+        val validated: Boolean? = null,
+        val captivePortal: Boolean? = null,
+        val privateDns: Boolean? = null,
+        val dataSaver: Int? = null,
+        val downKbps: Int? = null,
+        val upKbps: Int? = null,
     )
 
     private fun networkFacts(context: Context): NetworkFacts {
@@ -634,6 +639,12 @@ object TransferDiagnostics {
             internet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET),
             metered = !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED),
             vpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN),
+            validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED),
+            captivePortal = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL),
+            privateDns = runCatching { if (Build.VERSION.SDK_INT >= 28) manager.getLinkProperties(network)?.isPrivateDnsActive else null }.getOrNull(),
+            dataSaver = runCatching { manager.restrictBackgroundStatus }.getOrNull(),
+            downKbps = caps.linkDownstreamBandwidthKbps.takeIf { it > 0 },
+            upKbps = caps.linkUpstreamBandwidthKbps.takeIf { it > 0 },
         )
     }
 
