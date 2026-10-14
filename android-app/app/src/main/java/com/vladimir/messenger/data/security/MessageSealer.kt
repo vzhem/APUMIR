@@ -161,6 +161,14 @@ object MessageSealer {
             .getOrNull()
     }
 
+    /** Call only AFTER open succeeds: bind the authenticated envelope signer to transport metadata.
+     * A different group member must not forge stored receipts for another recipient.
+     */
+    fun openedByExpectedSender(wire: String, expectedSender: String): Boolean = runCatching {
+        val senderBinding = SealedWire.senderBinding(wire) ?: return@runCatching false
+        uniffi.p2p_core.fileExchangeBindingNodeId(senderBinding) == expectedSender
+    }.getOrDefault(false)
+
     /**
      * Манифест обеих сторон обязан совпадать байт в байт, иначе ядро не отдаст
      * ключ и сообщение молча не откроется.

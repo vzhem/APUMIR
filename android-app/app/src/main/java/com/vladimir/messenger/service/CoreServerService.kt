@@ -1057,7 +1057,7 @@ class CoreServerService : Service() {
                                         // конверта не создаётся.
                                         val knownChat = chatRepository.getChatByContactId(senderId)
                                         val isDeliveryAck = DeliveryAckWire.isPacket(cfContent)
-                                        if (routeIncomingEnvelope(senderId, knownChat?.id ?: "", messageId, cfContent, SealedWire.isSealed(parsed.content))) {
+                                        if (routeIncomingEnvelope(senderId, knownChat?.id ?: "", messageId, cfContent, SealedWire.isSealed(parsed.content) && MessageSealer.openedByExpectedSender(parsed.content, senderId))) {
                                             Log.i(TAG, "CF service envelope handled msgId=$messageId")
                                             // Never generate an ACK-of-ACK. RelayEnvelope's own
                                             // custody receipt below remains a separate protocol.
@@ -2176,7 +2176,7 @@ class CoreServerService : Service() {
 
                 Log.i(TAG, "Message from $senderId in chat $chatId (sealed=$sealed)")
 
-                if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, sealed)) {
+                if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, sealed && MessageSealer.openedByExpectedSender(rawText, senderId))) {
                     runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
                     return
                 }

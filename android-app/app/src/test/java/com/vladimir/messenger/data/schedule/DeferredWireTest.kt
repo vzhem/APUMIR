@@ -66,6 +66,20 @@ class DeferredWireTest {
         assertEquals(max, DeferredWire.parse(DeferredWire.encode(max)))
     }
 
+    @Test fun senderBindingExtractionIsBoundedAndRejectsMalformedEnvelopeVersions() {
+        val binding = byteArrayOf(4, 5, 6)
+        val envelope = ByteArray(203 + binding.size)
+        envelope[0] = 1
+        envelope[2] = binding.size.toByte()
+        binding.copyInto(envelope, 3)
+        fun wire(bytes: ByteArray) = SealedWire.encode(bytes, ByteArray(12), byteArrayOf(1))
+        assertArrayEquals(binding, SealedWire.senderBinding(wire(envelope)))
+        assertNull(SealedWire.senderBinding(wire(envelope.copyOf(envelope.size - 1))))
+        envelope[0] = 2
+        assertNull(SealedWire.senderBinding(wire(envelope)))
+        assertNull(SealedWire.senderBinding("not sealed"))
+    }
+
     @Test fun largestWireLeavesRoomForSealingAndRelayBase64() {
         // Rust FileKeyEnvelopeV1: max binding 512 bytes + 203 bytes of framing.
         // Reserve another 2 KiB for relay metadata, IDs and framing.
