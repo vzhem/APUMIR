@@ -100,4 +100,9 @@ if [ -d "$RESULTS" ]; then
 else
     echo "---- test results (testDebugUnitTest): отчётов нет ----"
 fi
+# Compile the Android renderer/device tests too. This does NOT run them:
+# geometry, RTL, large-font and touch behaviour still need a device/emulator.
+if [ "$TESTS_STATUS" -eq 0 ]; then
+    ./gradlew :app:compileDebugAndroidTestKotlin --no-daemon --console=plain || exit 1
+fi
 exit "$TESTS_STATUS"

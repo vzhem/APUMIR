@@ -289,7 +289,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
         ui = source(DIAG_UI)
         for marker in (
             "Brush.sweepGradient(",
-            "animateDpAsState(",
+            "animationSpec = tween(durationMillis = 100)",
             "animateFloatAsState(",
             "collectIsPressedAsState()",
             "drawWithCache",
@@ -438,6 +438,13 @@ class DiagnosticsContractsTest(unittest.TestCase):
             with self.subTest(danger_button_stop=danger_stop):
                 self.assertGreaterEqual(contrast(danger_ink, rgb(danger_stop)), 4.5)
 
+        # Modern secondary actions: dark ink on calm neutral surfaces.
+        for background in ("FFFFFF", "F7F8FA"):
+            self.assertGreaterEqual(contrast(rgb("25354A"), rgb(background)), 4.5)
+        self.assertIn("ApuBubbleMutedColor: Color = HintBubbleMutedColor", checks.source("components/ApuBubble.kt"))
+        quiet_ink = checks.color(checks.source("components/HintBubble.kt"), "HintBubbleMutedColor")
+        self.assertGreaterEqual(contrast(quiet_ink, rgb("F1F3F7")), 4.5)
+
         # 2) Тёмная консоль: светлый текст и яркие краски ошибок на её подложке.
         surface = palette("DiagConsoleSurface")
         for ink in ("DiagConsoleText", "DiagConsoleTitle", "DiagConsoleWarn", "DiagConsoleBad"):
@@ -463,9 +470,32 @@ class DiagnosticsContractsTest(unittest.TestCase):
 
         # 5) Объём и блеск на месте: тень (диагностика), блик, отклик на нажатие.
         for marker in ("fun Modifier.diagnosticsGloss(", "fun Modifier.diagnosticsLift(",
-                       "shadow(elevation", "drawWithCache", "graphicsLayer { scaleX = scale"):
+                       "shadow(elevation", "drawWithCache", "scaleX = scale"):
             with self.subTest(marker=marker):
                 self.assertIn(marker, ui)
+
+    def test_action_labels_are_centred_without_icon_bias(self):
+        ui = source(DIAG_UI)
+        button = ui[ui.index("fun ApuDiagnosticsActionButton("):ui.index("private fun Modifier.clickableDiag(")]
+        for marker in (
+            "contentAlignment = Alignment.Center",
+            "textAlign = TextAlign.Center",
+            "Modifier.padding(horizontal = labelGutter)",
+            "Modifier.align(Alignment.CenterStart).size(20.dp)",
+            "progress || (icon != null && !compact)",
+            "heightIn(min = 52.dp)",
+            "RoundedCornerShape(16.dp)",
+            ".clickableDiag(interaction, enabled, onClick)",
+        ):
+            self.assertIn(marker, button)
+        self.assertNotIn("Column(", button)  # no icon stacked above an off-centre label
+        self.assertNotIn(".diagnosticsGloss(", button)
+        self.assertNotIn(".apuShineSweep(", button)
+        self.assertNotIn(".height(52.dp)", button)  # large fonts must be allowed to grow
+        screen = source(SCREEN)
+        actions = screen[screen.index("// На узком экране четыре кнопки"):screen.index("muteScope?.let { scope ->")]
+        self.assertEqual(actions.count(".height(IntrinsicSize.Min)"), 2)
+        self.assertEqual(actions.count("Modifier.weight(1f).fillMaxHeight()"), 4)
 
     def test_logs_window_keeps_the_house_style(self):
         """Окно «Логи»: яркий премиальный вид на house-подложке."""
@@ -502,7 +532,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
                 self.assertIn(marker, ui)
         # Краски берутся у house style, а не выдумываются на месте.
         self.assertIn("diagnosticsLevelColor(level)", ui)
-        self.assertIn("ApuBubbleAccentColor", ui)
+        self.assertIn("Color(0xFF25354A)", ui)
         self.assertIn("ApuSettingsDangerColor", ui)
         # Яркое — в заливках, читаемое — в тексте: оба набора обязаны жить рядом.
         self.assertIn("fun diagnosticsLevelInkColor(", ui)

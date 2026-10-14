@@ -1642,7 +1642,7 @@ private fun SettingsTabContent(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         val logsTitle = stringResource(R.string.settings_logs_title)
@@ -1652,7 +1652,7 @@ private fun SettingsTabContent(
                         ApuDiagnosticsActionButton(
                             label = stringResource(R.string.action_send),
                             icon = DiagnosticsActionIcons.Send,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
                             style = DiagnosticsActionStyle.PRIMARY,
                             compact = true,
                             onClick = {
@@ -1666,7 +1666,7 @@ private fun SettingsTabContent(
                         ApuDiagnosticsActionButton(
                             label = stringResource(R.string.action_copy),
                             icon = DiagnosticsActionIcons.Copy,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
                             compact = true,
                             onClick = {
                                 if (reportText.isNotBlank()) {
@@ -1683,13 +1683,13 @@ private fun SettingsTabContent(
                         )
                     }
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         ApuDiagnosticsActionButton(
                             label = stringResource(R.string.action_refresh),
                             icon = DiagnosticsActionIcons.Refresh,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
                             style = DiagnosticsActionStyle.QUIET,
                             compact = true,
                             onClick = {
@@ -1700,7 +1700,7 @@ private fun SettingsTabContent(
                         )
                         ApuDiagnosticsActionButton(
                             label = stringResource(R.string.action_close),
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
                             style = DiagnosticsActionStyle.QUIET,
                             compact = true,
                             onClick = { showTransferLogsDialog = false },
