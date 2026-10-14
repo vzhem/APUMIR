@@ -89,6 +89,8 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
         com.vladimir.messenger.service.UpdateNotifier(applicationContext).ensureChannel()
         scheduleUpdateChecks()
         scheduleBoundedRelayWake()
+        runCatching { com.vladimir.messenger.data.maintenance.AutomaticMaintenance.schedule(this) }
+            .onFailure { Log.w("MessengerApp", "Maintenance scheduling deferred", it) }
         // Restore work after a crash between committing a hidden letter and enqueueing its timer.
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO).launch {
             runCatching {

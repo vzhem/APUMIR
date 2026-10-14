@@ -173,4 +173,16 @@ class FileTransferChunkStoreTest {
             // expected
         }
     }
+    @Test
+    fun freshOrphanDirectoryGetsCreationGraceBeforeAutomaticDeletion() {
+        val store = FileTransferChunkStore(root)
+        store.storeManifest(transferId, ByteArray(128))
+        val now = System.currentTimeMillis()
+        assertFalse(store.isOldOrphan(transferId, now))
+        root.resolve(transferId).setLastModified(now - 8L * 24 * 60 * 60 * 1000)
+        assertTrue(store.isOldOrphan(transferId, now))
+        root.resolve(transferId).setLastModified(now + 1000)
+        assertFalse(store.isOldOrphan(transferId, now))
+    }
+
 }

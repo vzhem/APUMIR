@@ -125,7 +125,7 @@ const SQL_COUNT_FOR: &str = "SELECT COUNT(*) FROM relay_messages WHERE recipient
 const SQL_CONTAINS: &str = "SELECT COUNT(*) FROM relay_messages WHERE msg_id = ?1";
 
 const SQL_TOMBSTONE_ADD: &str = "
-INSERT OR REPLACE INTO relay_tombstones (msg_id, removed_at_ms)
+INSERT OR IGNORE INTO relay_tombstones (msg_id, removed_at_ms)
 VALUES (?1, ?2)
 ";
 const SQL_TOMBSTONE_HAS: &str = "SELECT COUNT(*) FROM relay_tombstones WHERE msg_id = ?1";
@@ -136,13 +136,10 @@ ORDER BY removed_at_ms DESC
 LIMIT ?1
 ";
 const SQL_TOMBSTONE_PRUNE: &str = "
-DELETE FROM relay_tombstones
-WHERE removed_at_ms <= ?1
-   OR msg_id NOT IN (
-       SELECT msg_id FROM relay_tombstones
-       ORDER BY removed_at_ms DESC
-       LIMIT ?2
-   )
+DELETE FROM relay_tombstones WHERE msg_id IN (
+    SELECT msg_id FROM relay_tombstones WHERE removed_at_ms <= ?1
+    ORDER BY removed_at_ms LIMIT ?2
+)
 ";
 
 // ═══════════════════════════════════════════════════════════════════
@@ -273,6 +270,10 @@ pub enum RelayStoreError {
 
     #[error("RelayStore record encode/decode: {0}")]
     Encode(#[from] bincode::Error),
+
+    #[error("relay foreign durable budget exhausted")]
+    Capacity,
+
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -310,12 +311,17 @@ impl RelayStore {
 
     fn migrate(&self) -> SqlResult<()> {
         let conn = self.conn.lock().unwrap();
-        conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+        conn.busy_timeout(std::time::Duration::from_millis(100))?;
+        let empty: i64 = conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table'", [], |r| r.get(0))?;
+        if empty == 0 { conn.execute_batch("PRAGMA auto_vacuum=INCREMENTAL;")?; }
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA journal_size_limit=8388608;")?;
         conn.execute_batch("PRAGMA foreign_keys=ON;")?;
         conn.execute_batch(MIGRATION_RELAY_V1)?;
         // M8-C: encrypted records + quarantine (таблицы V2; создание пустых
         // таблиц не меняет поведение V1-пути и безопасно при повторе).
         conn.execute_batch(MIGRATION_RELAY_V2)?;
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS relay_maintenance (id INTEGER PRIMARY KEY CHECK(id=1), last_compact_ms INTEGER NOT NULL);
+            INSERT OR IGNORE INTO relay_maintenance VALUES (1,0);")?;
         Ok(())
     }
 
@@ -441,7 +447,7 @@ impl RelayStore {
         let mut conn = self.conn.lock().unwrap();
         let tx: Transaction<'_> = conn.transaction()?;
         let removed = tx.execute(SQL_REMOVE, params![msg_id])?;
-        tx.execute(SQL_TOMBSTONE_ADD, params![msg_id, now_ms])?;
+        if removed > 0 { tx.execute(SQL_TOMBSTONE_ADD, params![msg_id, now_ms])?; }
         tx.commit()?;
         Ok(removed > 0)
     }
@@ -476,11 +482,11 @@ impl RelayStore {
         Ok(c > 0)
     }
 
-    /// Ограничить число tombstone-ов: удалить старше `cutoff_ms` и оставить не
-    /// более `max_keep` самых свежих. Возвращает число удалённых.
-    pub fn prune_tombstones(&self, cutoff_ms: i64, max_keep: usize) -> Result<usize, RelayStoreError> {
+    /// Remove only old markers, bounded by `max_delete`. Fresh replay guards
+    /// are never evicted merely to meet a count cap.
+    pub fn prune_tombstones(&self, cutoff_ms: i64, max_delete: usize) -> Result<usize, RelayStoreError> {
         let conn = self.conn.lock().unwrap();
-        let n = conn.execute(SQL_TOMBSTONE_PRUNE, params![cutoff_ms, max_keep as i64])?;
+        let n = conn.execute(SQL_TOMBSTONE_PRUNE, params![cutoff_ms, max_delete as i64])?;
         Ok(n)
     }
 
@@ -524,6 +530,82 @@ impl RelayStore {
             params![msg.msg_id, msg.recipient, msg.expires_at_ms, envelope],
         )?;
         Ok(n > 0)
+    }
+
+    /// Admission limit for NEW foreign custody; existing IDs remain first-wins.
+    /// Own outbox does not use this limit. No live record is deleted for quota.
+    pub fn store_foreign_encrypted(
+        &self, keys: &dyn RelayAtRestKeySource, msg: &RelayMessage, now_ms: i64,
+    ) -> Result<bool, RelayStoreError> {
+        msg.validate_durable(now_ms)?;
+        let sensitive = encode_sensitive(msg)?;
+        let aad = build_record_aad(&msg.msg_id, &msg.recipient, msg.expires_at_ms);
+        let envelope = encrypt_record(&keys.current_key()?, &aad, &sensitive)?;
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let exists: i64 = tx.query_row("SELECT COUNT(*) FROM relay_records_enc WHERE msg_id=?1", params![msg.msg_id], |r| r.get(0))?;
+        if exists > 0 { return Ok(false); }
+        let count: i64 = tx.query_row(SQL_COUNT_ENC, [], |r| r.get(0))?;
+        let pages: i64 = tx.query_row("PRAGMA page_count", [], |r| r.get(0))?;
+        let free: i64 = tx.query_row("PRAGMA freelist_count", [], |r| r.get(0))?;
+        let size: i64 = tx.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+        if count >= 20_000 || (pages - free).saturating_mul(size).saturating_add(envelope.len() as i64) >= 256 * 1024 * 1024 {
+            return Err(RelayStoreError::Capacity);
+        }
+        let inserted = tx.execute(SQL_STORE_ENC, params![msg.msg_id, msg.recipient, msg.expires_at_ms, envelope])?;
+        tx.commit()?;
+        Ok(inserted > 0)
+    }
+
+    /// Engine-owned maintenance. Serialized with writers, bounded SQL work and
+    /// interruptible compaction. Never opens another DB or decrypts live data.
+    pub fn automatic_maintenance(&self, now_ms: i64) -> Result<(usize, usize, usize, bool), RelayStoreError> {
+        let conn = match self.conn.try_lock() { Ok(c) => c, Err(_) => return Ok((0,0,0,false)) };
+        let started = std::time::Instant::now();
+        conn.progress_handler(10_000, Some(move || started.elapsed() > std::time::Duration::from_secs(5)));
+        let result = (|| {
+            let expired = conn.execute("DELETE FROM relay_records_enc WHERE msg_id IN (SELECT msg_id FROM relay_records_enc WHERE expires_at_ms<=?1 ORDER BY expires_at_ms LIMIT 5000)", params![now_ms])?
+                + conn.execute("DELETE FROM relay_messages WHERE msg_id IN (SELECT msg_id FROM relay_messages WHERE expires_at_ms<=?1 ORDER BY expires_at_ms LIMIT 5000)", params![now_ms])?;
+            let quarantine = conn.execute("DELETE FROM relay_quarantine WHERE msg_id IN (SELECT msg_id FROM relay_quarantine WHERE expires_at_ms<=?1 ORDER BY expires_at_ms LIMIT 5000)", params![now_ms])?;
+            // Max relay TTL is seven days. Keep another full day of replay grace;
+            // never cap away fresh markers just because a count was reached.
+            let retention = crate::network::relay_queue::ttl_to_ms(crate::network::relay_queue::DEFAULT_RELAY_TTL).saturating_add(24 * 60 * 60 * 1000);
+            let cutoff = now_ms.saturating_sub(retention);
+            let tombstones = conn.execute(SQL_TOMBSTONE_PRUNE, params![cutoff, 5000])?;
+            let mut compacted = false;
+            if let Some(path) = conn.path().filter(|p| !p.is_empty() && *p != ":memory:") {
+                let pages: i64 = conn.query_row("PRAGMA page_count", [], |r| r.get(0))?;
+                let free: i64 = conn.query_row("PRAGMA freelist_count", [], |r| r.get(0))?;
+                let size: i64 = conn.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+                let mode: i64 = conn.query_row("PRAGMA auto_vacuum", [], |r| r.get(0))?;
+                let last: i64 = conn.query_row("SELECT last_compact_ms FROM relay_maintenance WHERE id=1", [], |r| r.get(0))?;
+                let parent = Path::new(path).parent().unwrap_or(Path::new("."));
+                let available = fs2::available_space(parent).unwrap_or(0);
+                let db_bytes = pages.saturating_mul(size).max(0) as u64;
+                if free * size >= 64 * 1024 * 1024 && free >= pages / 2
+                    && (last == 0 || now_ms.saturating_sub(last) >= 24 * 60 * 60 * 1000)
+                    && available > db_bytes.saturating_mul(2).saturating_add(64 * 1024 * 1024) {
+                    conn.execute("UPDATE relay_maintenance SET last_compact_ms=?1 WHERE id=1", params![now_ms])?;
+                    if mode != 2 {
+                        conn.execute_batch("PRAGMA auto_vacuum=INCREMENTAL; VACUUM;")?;
+                    } else {
+                        // Incremental mode: bounded page movement, never full VACUUM.
+                        conn.execute_batch("PRAGMA incremental_vacuum(16384);")?;
+                    }
+                    compacted = true;
+                }
+                // Small continuous reclamation on already-incremental stores.
+                if mode == 2 && free > 0 && !compacted {
+                    conn.execute_batch("PRAGMA incremental_vacuum(256);")?;
+                }
+                // Serialized writes, 100ms busy timeout: readers may defer a
+                // checkpoint, never force their removal. SQLite owns WAL/SHM.
+                conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+            }
+            Ok((expired, quarantine, tombstones, compacted))
+        })();
+        conn.progress_handler(0, None::<fn() -> bool>);
+        result
     }
 
     /// Явно заменить/добавить зашифрованную запись при пользовательском повторе.
@@ -646,7 +728,7 @@ impl RelayStore {
         let mut conn = self.conn.lock().unwrap();
         let tx: Transaction<'_> = conn.transaction()?;
         let removed = tx.execute(SQL_REMOVE_ENC, params![msg_id])?;
-        tx.execute(SQL_TOMBSTONE_ADD, params![msg_id, now_ms])?;
+        if removed > 0 { tx.execute(SQL_TOMBSTONE_ADD, params![msg_id, now_ms])?; }
         tx.commit()?;
         Ok(removed > 0)
     }
@@ -1090,7 +1172,7 @@ mod tests {
     // ── Tombstones ──────────────────────────────────────────────────
 
     #[test]
-    fn test_tombstone_prune_by_age_and_cap() {
+    fn test_tombstone_prune_by_age_preserves_all_fresh_markers() {
         let s = store();
         for (i, ts) in [100i64, 200, 300, 400, 500].iter().enumerate() {
             s.record_tombstone(&format!("t{}", i), *ts).unwrap();
@@ -1101,12 +1183,12 @@ mod tests {
         s.prune_tombstones(250, 100).unwrap();
         assert_eq!(s.tombstone_count().unwrap(), 3);
 
-        // По cap: оставить 2 самых свежих.
+        // A small batch limit is NOT permission to delete fresh markers.
         s.prune_tombstones(0, 2).unwrap();
-        assert_eq!(s.tombstone_count().unwrap(), 2);
+        assert_eq!(s.tombstone_count().unwrap(), 3);
         assert!(s.has_tombstone("t3").unwrap());
         assert!(s.has_tombstone("t4").unwrap());
-        assert!(!s.has_tombstone("t2").unwrap());
+        assert!(s.has_tombstone("t2").unwrap());
     }
 
     #[test]
@@ -1542,6 +1624,108 @@ mod tests {
             assert!(s.store_encrypted(&keys(), &repeated_body, now).unwrap());
         }
         assert_eq!(s.count_encrypted().unwrap(), 101);
+    }
+
+    #[test]
+    fn maintenance_is_bounded_replay_safe_and_preserves_live_ciphertext() {
+        let s = store();
+        let now = 20 * 24 * 60 * 60 * 1000;
+        let live = relay("own-pending", "pk_b", now);
+        s.store_encrypted(&keys(), &live, now).unwrap();
+        s.store_encrypted(&keys(), &relay("expired", "pk_b", now - 7_200_000), now - 7_200_000).unwrap();
+        s.store(&relay("legacy-expired", "pk_b", now - 7_200_000), now - 7_200_000).unwrap();
+        s.record_tombstone("fresh-replay-guard", now - 7 * 24 * 60 * 60 * 1000).unwrap();
+        {
+            let mut c = s.conn.lock().unwrap();
+            let tx = c.transaction().unwrap();
+            for i in 0..5001 { tx.execute(SQL_TOMBSTONE_ADD, params![format!("old-{i}"), now - 9 * 24 * 60 * 60 * 1000]).unwrap(); }
+            tx.commit().unwrap();
+        }
+        let first = s.automatic_maintenance(now).unwrap();
+        assert_eq!(first, (2, 0, 5000, false));
+        assert_eq!(s.tombstone_count().unwrap(), 2);
+        assert!(s.has_tombstone("fresh-replay-guard").unwrap());
+        let second = s.automatic_maintenance(now).unwrap();
+        assert_eq!(second, (0, 0, 1, false));
+        let loaded = s.load_unexpired_encrypted(&keys(), now, 10).unwrap();
+        assert_eq!(loaded.records, vec![live]);
+    }
+
+    #[test]
+    fn repeated_unknown_cleanup_has_no_markers_and_first_seen_age_is_stable() {
+        let s = store();
+        for now in 0..1000 { assert!(!s.remove_encrypted_and_tombstone("unknown", now).unwrap()); }
+        assert_eq!(s.tombstone_count().unwrap(), 0);
+        s.record_tombstone("known", 1).unwrap();
+        s.record_tombstone("known", 1000).unwrap();
+        assert_eq!(s.prune_tombstones(2, 10).unwrap(), 1);
+    }
+
+    #[test]
+    fn foreign_admission_budget_does_not_evict_or_reject_own_pending() {
+        let s = store();
+        let now = 1_000_000;
+        s.store_encrypted(&keys(), &relay("own-pending", "pk_b", now), now).unwrap();
+        {
+            let mut c = s.conn.lock().unwrap();
+            let tx = c.transaction().unwrap();
+            for i in 0..19_999 { tx.execute(SQL_STORE_ENC, params![format!("synthetic-{i}"), "pk_c", now + 3_600_000, b"synthetic".as_slice()]).unwrap(); }
+            tx.commit().unwrap();
+        }
+        assert!(matches!(s.store_foreign_encrypted(&keys(), &relay("new-foreign", "pk_c", now), now), Err(RelayStoreError::Capacity)));
+        assert_eq!(s.count_encrypted().unwrap(), 20_000);
+        assert!(s.contains_encrypted("own-pending").unwrap());
+        assert!(s.store_encrypted(&keys(), &relay("another-own", "pk_b", now), now).unwrap());
+        assert_eq!(s.count_encrypted().unwrap(), 20_001);
+    }
+
+    #[test]
+    fn automatic_legacy_compaction_reclaims_disk_without_changing_live_record() {
+        let dir = std::env::temp_dir().join(format!("apu-maintenance-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&dir).unwrap();
+        let path = dir.join("synthetic.sqlite");
+        // Legacy NONE-mode store with >64MiB reclaimable physical pages.
+        {
+            let mut c = Connection::open(&path).unwrap();
+            c.execute_batch(MIGRATION_RELAY_V1).unwrap();
+            c.execute_batch(MIGRATION_RELAY_V2).unwrap();
+            let tx = c.transaction().unwrap();
+            for i in 0..70 { tx.execute(SQL_STORE_ENC, params![format!("old-{i}"), "pk_c", 1, vec![0u8; 1024 * 1024]]).unwrap(); }
+            tx.commit().unwrap();
+        }
+        {
+            let s = RelayStore::open(&path).unwrap();
+            let now = 1_000_000;
+            let live = relay("own-live", "pk_b", now);
+            s.store_encrypted(&keys(), &live, now).unwrap();
+            let before = std::fs::metadata(&path).unwrap().len();
+            let result = s.automatic_maintenance(now).unwrap();
+            assert_eq!(result.0, 70);
+            assert!(result.3, "legacy store must automatically compact with sufficient headroom");
+            let after = std::fs::metadata(&path).unwrap().len();
+            assert!(after < before / 2, "actual physical DB size must shrink");
+            assert_eq!(s.load_unexpired_encrypted(&keys(), now, 10).unwrap().records, vec![live]);
+            assert_eq!(s.conn.lock().unwrap().query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0)).unwrap(), "ok");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn interrupted_vacuum_rolls_back_without_deleting_live_payload() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(MIGRATION_RELAY_V1).unwrap();
+        c.execute_batch(MIGRATION_RELAY_V2).unwrap();
+        for i in 0..100 { c.execute(SQL_STORE_ENC, params![format!("live-{i}"), "pk_c", 999999, vec![42u8; 8192]]).unwrap(); }
+        let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = calls.clone();
+        c.progress_handler(10, Some(move || counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) > 20));
+        assert!(c.execute_batch("VACUUM").is_err());
+        c.progress_handler(0, None::<fn() -> bool>);
+        assert!(calls.load(std::sync::atomic::Ordering::Relaxed) > 20);
+        assert_eq!(c.query_row(SQL_COUNT_ENC, [], |r| r.get::<_, i64>(0)).unwrap(), 100);
+        let body: Vec<u8> = c.query_row("SELECT envelope FROM relay_records_enc WHERE msg_id='live-0'", [], |r| r.get(0)).unwrap();
+        assert_eq!(body, vec![42u8; 8192]);
+        assert_eq!(c.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0)).unwrap(), "ok");
     }
 
 }

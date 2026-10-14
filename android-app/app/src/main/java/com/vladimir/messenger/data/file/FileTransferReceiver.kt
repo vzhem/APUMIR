@@ -129,6 +129,12 @@ class FileTransferReceiver(
     }
 
     private val mutex = Mutex()
+
+    /** Housekeeping never races a receive/finalize operation or waits behind it. */
+    internal suspend fun <T> tryMaintenance(block: suspend () -> T): T? {
+        if (!mutex.tryLock()) return null
+        return try { block() } finally { mutex.unlock() }
+    }
     private val pendingItems = LinkedHashMap<String, PendingItem>()
     private val bufferedChunks = LinkedHashMap<String, MutableMap<Long, ByteArray>>()
     /** One bounded progress cursor per active transfer; never one heap entry per file chunk. */

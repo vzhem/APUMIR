@@ -112,4 +112,17 @@ class OperationalHealthTest {
         try { readBoundedDiagnosticText(utf8.inputStream(), 19) } catch (_: IllegalArgumentException) { rejected = true }
         assertTrue(rejected)
     }
+    @Test fun automaticMaintenanceWindowHasSeparateMarkerAndCompactionCounters() {
+        val window = RelayCleanupWindow.parse(listOf(
+            "MESH maintenance: expired=5 quarantine=2 tombstones=5000 compacted=true",
+            "MESH maintenance: expired=0 quarantine=0 tombstones=30 compacted=false",
+            "MESH maintenance: deferred or interrupted; live data preserved",
+        ))
+        assertEquals(5L, window.expiredRemoved)
+        assertEquals(2L, window.quarantineRemoved)
+        assertEquals(5030L, window.tombstonesRemoved)
+        assertEquals(1L, window.compactions)
+        assertEquals(1L, window.failures)
+    }
+
 }

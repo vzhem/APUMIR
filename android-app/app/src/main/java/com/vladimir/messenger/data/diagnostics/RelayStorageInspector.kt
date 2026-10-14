@@ -77,7 +77,7 @@ internal object RelayStorageInspector {
                     pageSize = scalar("PRAGMA page_size"), pages = scalar("PRAGMA page_count"),
                     freePages = scalar("PRAGMA freelist_count"), autoVacuumMode = scalar("PRAGMA auto_vacuum"),
                     unknownTables = scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT IN " +
-                        "('relay_messages','relay_records_enc','relay_quarantine','relay_tombstones','relay_schema_version','android_metadata','sqlite_sequence')").toInt(),
+                        "('relay_messages','relay_records_enc','relay_quarantine','relay_tombstones','relay_schema_version','relay_maintenance','android_metadata','sqlite_sequence')").toInt(),
                 )
                 val tables = mutableListOf<RelayTableDiagnostic>()
                 for (kind in RelayTableKind.entries) {

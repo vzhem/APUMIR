@@ -820,6 +820,25 @@ impl P2PCore {
                 tracing::error!("Failed to create tokio runtime: {}", e);
             }
             Ok(runtime) => {
+                // Independent of MQTT, gossip and the diagnostic screen.
+                if let Some(custody) = relay_custody2.clone() {
+                    let maintenance_queue = relay_queue2.clone();
+                    runtime.spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                        loop {
+                            if let Some(ref queue) = maintenance_queue { queue.cleanup_expired(); }
+                            let store = custody.clone();
+                            let outcome = tokio::task::spawn_blocking(move || store.store.automatic_maintenance(crate::network::relay_queue::utc_now_ms())).await;
+                            match outcome {
+                                Ok(Ok((expired, quarantine, tombstones, compacted))) => tracing::info!(
+                                    "MESH maintenance: expired={} quarantine={} tombstones={} compacted={}", expired, quarantine, tombstones, compacted),
+                                _ => tracing::warn!("MESH maintenance: deferred or interrupted; live data preserved"),
+                            }
+                            tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                        }
+                    });
+                }
+
                 let (mqtt_outbound_tx, mqtt_outbound_rx) =
                     tokio::sync::mpsc::channel(MQTT_OUTBOUND_COMMAND_CAPACITY);
                 self.mqtt_outbound_tx = Some(mqtt_outbound_tx);
@@ -3648,6 +3667,7 @@ impl P2PCore {
                                                 // запрет повторного хранения), но UI-доставку
                                                 // он больше не блокирует.
                                                 if let Some(ref custody) = relay_custody {
+                                                    if !crate::network::relay_queue::message_kind(&msg_id, "", b"").is_transient() {
                                                     let now_durable =
                                                         crate::network::relay_queue::utc_now_ms();
                                                     if let Err(e) =
@@ -3659,6 +3679,7 @@ impl P2PCore {
                                                             e
                                                         );
                                                     }
+                                                }
                                                 }
                                                 tracing::info!(
                                                     "MESH relay: {} delivered to local recipient",
@@ -3747,6 +3768,13 @@ impl P2PCore {
                                             e2e_payload,
                                             std::time::Duration::from_secs(bounded_ttl_secs),
                                         );
+                                        let kind = crate::network::relay_queue::message_kind(&message.msg_id, &message.chat_scope, &message.e2e_payload);
+                                        let cap = match kind {
+                                            crate::network::relay_queue::RelayPayloadKind::ServiceSignal => Some(crate::network::relay_queue::TRANSIENT_SIGNAL_TTL),
+                                            crate::network::relay_queue::RelayPayloadKind::FilePacket => Some(crate::network::relay_queue::FILE_PACKET_TTL),
+                                            _ => None,
+                                        };
+                                        if let Some(ttl) = cap { message.expires_at_ms = message.expires_at_ms.min(message.created_at_ms.saturating_add(crate::network::relay_queue::ttl_to_ms(ttl))); }
                                         message.hop_count = hop;
 
                                         match message.next_hop() {
@@ -3777,7 +3805,9 @@ impl P2PCore {
                                                     Some(custody) => {
                                                         let now_durable =
                                                             crate::network::relay_queue::utc_now_ms();
-                                                        if custody
+                                                        if crate::network::relay_queue::message_kind(&next_hop_message.msg_id, &next_hop_message.chat_scope, &next_hop_message.e2e_payload).is_transient() {
+                                                            true
+                                                        } else if custody
                                                             .store
                                                             .has_tombstone(&next_hop_message.msg_id)
                                                             .unwrap_or(false)
@@ -3788,11 +3818,11 @@ impl P2PCore {
                                                             );
                                                             false
                                                         } else {
-                                                            match custody.store.store_encrypted(
-                                                                &*custody.keys,
-                                                                &next_hop_message,
-                                                                now_durable,
-                                                            ) {
+                                                            // All NEW inbound copies use admission control:
+                                                            // claimed origin alone cannot bypass a disk budget.
+                                                            // Existing own IDs pass first-wins dedup; local
+                                                            // outgoing sends retain their protected store path.
+                                                            match custody.store.store_foreign_encrypted(&*custody.keys, &next_hop_message, now_durable) {
                                                                 Ok(_) => true,
                                                                 Err(e) => {
                                                                     tracing::warn!(

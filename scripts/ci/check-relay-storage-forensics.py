@@ -53,19 +53,20 @@ class RelayStorageForensics(unittest.TestCase):
             insert(self.db, f"fresh-id-{n}")
         self.assertEqual(200, count(self.db))
 
-    def test_repeated_marker_deduplicates_but_refreshes_its_age(self):
+    def test_repeated_marker_deduplicates_without_refreshing_its_age(self):
         for n in range(200):
             self.db.execute(sql("SQL_TOMBSTONE_ADD"), ("same-id", n))
         self.assertEqual(1, count(self.db, "relay_tombstones"))
-        self.assertEqual(199, self.db.execute("SELECT removed_at_ms FROM relay_tombstones").fetchone()[0])
+        self.assertEqual(0, self.db.execute("SELECT removed_at_ms FROM relay_tombstones").fetchone()[0])
 
-    def test_marker_can_be_created_without_a_retained_record(self):
-        # Mirrors remove_encrypted_and_tombstone's unconditional INSERT.
+    def test_unknown_cleanup_does_not_create_a_permanent_marker(self):
+        # Mirrors remove_encrypted_and_tombstone's conditional INSERT.
         with self.db:
             removed = self.db.execute(sql("SQL_REMOVE_ENC"), ("unknown-id",)).rowcount
-            self.db.execute(sql("SQL_TOMBSTONE_ADD"), ("unknown-id", 100))
+            if removed:
+                self.db.execute(sql("SQL_TOMBSTONE_ADD"), ("unknown-id", 100))
         self.assertEqual(0, removed)
-        self.assertEqual(1, count(self.db, "relay_tombstones"))
+        self.assertEqual(0, count(self.db, "relay_tombstones"))
 
     def test_record_expiry_does_not_itself_prune_markers(self):
         insert(self.db, "expired")

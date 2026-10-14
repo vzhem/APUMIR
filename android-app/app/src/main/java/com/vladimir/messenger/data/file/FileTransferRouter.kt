@@ -65,6 +65,7 @@ class FileTransferRouter @Inject constructor(
     private val routerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     /** Serializes sender pumps with explicit replacement/re-preparation of one outgoing message. */
     private val outgoingTransferMutex = Mutex()
+    private val expirySweepMutex = Mutex()
     private val sender: FileTransferSender
     private val receiver: FileTransferReceiver
     private val custodySender: FileCustodySender
@@ -756,6 +757,9 @@ class FileTransferRouter @Inject constructor(
         // вызов с главного потока (ViewModel при отправке) давал
         // «Приложение не отвечает» вплоть до убийства системы.
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            runCatching { purgeExpiredTransfers(now) }
+                .onFailure { Log.w(TAG, "File maintenance deferred") }
             outgoingTransferMutex.lock()
             try {
             if (!RustBridge.isRunning()) {
@@ -865,9 +869,6 @@ class FileTransferRouter @Inject constructor(
             val origin = custodySender.pumpOrigin()
             val forward = custodySender.pumpForwarding()
             val swept = custodySender.sweep()
-            // Потеряшки: просроченное убираем здесь же, чтобы строка, куски и
-            // принятый недокачанный файл уходили вместе.
-            purgeExpiredTransfers(now)
             if (origin.originPumped > 0 || forward.forwarded > 0 || swept > 0) {
                 Log.i(
                     TAG,
@@ -969,6 +970,16 @@ class FileTransferRouter @Inject constructor(
         nowMs: Long = System.currentTimeMillis(),
         force: Boolean = false,
     ): Pair<Int, Int> {
+        if (!expirySweepMutex.tryLock()) return 0 to 0
+        try {
+            if (!outgoingTransferMutex.tryLock()) return 0 to 0
+            try {
+                return receiver.tryMaintenance { purgeExpiredTransfersLocked(nowMs, force) } ?: (0 to 0)
+            } finally { outgoingTransferMutex.unlock() }
+        } finally { expirySweepMutex.unlock() }
+    }
+
+    private suspend fun purgeExpiredTransfersLocked(nowMs: Long, force: Boolean): Pair<Int, Int> {
         // Диск и база: не чаще раза в 10 минут, иначе уборка дороже пользы.
         if (!force && nowMs - lastExpiredSweepAt < EXPIRED_SWEEP_INTERVAL_MS) return 0 to 0
         lastExpiredSweepAt = nowMs
@@ -981,9 +992,11 @@ class FileTransferRouter @Inject constructor(
             if (row.direction == "OUTGOING") {
                 runCatching { chatRepository.markOutgoingFileExpired(row.messageId) }
             }
-            runCatching { chunkStore.deleteTransfer(row.transferId) }
-            runCatching { receivedStore.deleteTransfer(row.transferId) }
-            runCatching { FileTransferKeyVault.deleteKey(appContext, row.transferId) }
+            // Keep the expired DAO row until physical deletion succeeds, so
+            // an IO failure is retried instead of becoming an untracked orphan.
+            if (!runCatching { chunkStore.deleteTransfer(row.transferId) }.getOrDefault(false)) continue
+            if (!runCatching { receivedStore.deleteTransfer(row.transferId) }.getOrDefault(false)) continue
+            if (runCatching { FileTransferKeyVault.deleteKey(appContext, row.transferId) }.isFailure) continue
             if (row.direction == "OUTGOING") deleteOutgoingPreview(row.transferId)
             transferDao.deleteTransfer(row.transferId)
             removedRows++
@@ -992,9 +1005,13 @@ class FileTransferRouter @Inject constructor(
         // 2) Диск: осиротевшие копии и копии просроченных завершённых передач.
         var freedCopies = 0
         for (transferId in runCatching { chunkStore.transferIds() }.getOrDefault(emptyList())) {
-            val row = runCatching { transferDao.getTransfer(transferId) }.getOrNull()
+            if (freedCopies >= EXPIRED_PURGE_BATCH) break
+            // Fail closed: a DAO error is not proof of orphanhood.
+            val row = try { transferDao.getTransfer(transferId) }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { continue }
             if (row == null) {
-                if (chunkStore.deleteTransfer(transferId)) freedCopies++
+                if (chunkStore.isOldOrphan(transferId, nowMs) && chunkStore.deleteTransfer(transferId)) freedCopies++
                 continue
             }
             // Чужое хранение (CUSTODY) убирает свой проход: у него отдельные

@@ -555,7 +555,7 @@ object RustBridge {
             // текст. Прямой QUIC защищён TLS, но путь через ретранслятор идёт
             // по чужому брокеру, где открытый текст читается кем угодно.
             val payload = sealOutgoing(recipientId, text) ?: return false
-            val sentDirectly = engine?.sendMessage(messageId, chatId, recipientId, payload) == true
+            val sentDirectly = engine?.sendMessage(com.vladimir.messenger.data.security.EphemeralControl.transportId(messageId, recipientId, text), chatId, recipientId, payload) == true
             Log.i(TAG, "Rust send result: direct=$sentDirectly sealed=${payload !== text}")
             sentDirectly
         } catch (ex: Exception) {

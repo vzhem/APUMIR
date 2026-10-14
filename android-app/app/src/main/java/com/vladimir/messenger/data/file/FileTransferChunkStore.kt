@@ -205,6 +205,14 @@ class FileTransferChunkStore(
         return !directory.exists()
     }
 
+    /** Grace protects preparation that has not committed its DAO row yet. */
+    @Synchronized
+    fun isOldOrphan(transferId: String, nowMs: Long): Boolean {
+        validateTransferId(transferId)
+        val modified = transferDirectory(transferId, create = false).lastModified()
+        return modified > 0 && nowMs >= modified && nowMs - modified >= 7L * 24 * 60 * 60 * 1000
+    }
+
     @Synchronized
     /**
      * Передачи, чьи зашифрованные куски лежат на диске. Нужно уборке
@@ -215,11 +223,17 @@ class FileTransferChunkStore(
     fun transferIds(): List<String> {
         val root = rootDirectory(create = false)
         if (!root.isDirectory) return emptyList()
-        return root.listFiles()
-            ?.filter { it.isDirectory }
-            ?.mapNotNull { directory -> runCatching { validateTransferId(directory.name); directory.name }.getOrNull() }
-            ?.sorted()
-            ?: emptyList()
+        val ids = ArrayList<String>()
+        Files.newDirectoryStream(root.toPath()).use { entries ->
+            var examined = 0
+            for (path in entries) {
+                if (examined++ >= 4096) break
+                if (Files.isSymbolicLink(path) || !Files.isDirectory(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) continue
+                val id = path.fileName.toString()
+                if (TRANSFER_ID.matches(id)) ids.add(id)
+            }
+        }
+        return ids.sorted()
     }
 
     fun currentStoredBytes(): Long {

@@ -29,8 +29,8 @@ object DownloadTrashCleanup {
         val cr = context.contentResolver
         runCatching {
             val uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            val selection = "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?"
-            val args = arrayOf(".trashed-%APU%")
+            val selection = "${MediaStore.Downloads.DISPLAY_NAME} LIKE ? AND ${MediaStore.MediaColumns.OWNER_PACKAGE_NAME}=? AND ${MediaStore.Downloads.DATE_MODIFIED}<?"
+            val args = arrayOf(".trashed-%APU%", context.packageName, ((System.currentTimeMillis() - 24L * 60 * 60 * 1000) / 1000).toString())
             var deleted = 0
             var freed = 0L
             cr.query(
@@ -38,9 +38,10 @@ object DownloadTrashCleanup {
                 arrayOf(MediaStore.Downloads._ID, MediaStore.Downloads.SIZE),
                 selection,
                 args,
-                null,
+                "${MediaStore.Downloads.DATE_MODIFIED} DESC",
             )?.use { c ->
-                while (c.moveToNext()) {
+                var scanned = 0
+                while (scanned++ < 128 && c.moveToNext()) {
                     val id = c.getLong(0)
                     val size = if (c.isNull(1)) 0L else c.getLong(1)
                     val rowUri = ContentUris.withAppendedId(uri, id)
@@ -74,8 +75,8 @@ object DownloadTrashCleanup {
         val cr = context.contentResolver
         runCatching {
             val uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            val selection = "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?"
-            val args = arrayOf("APU-v%.apk")
+            val selection = "${MediaStore.Downloads.DISPLAY_NAME} LIKE ? AND ${MediaStore.MediaColumns.OWNER_PACKAGE_NAME}=? AND ${MediaStore.Downloads.DATE_MODIFIED}<?"
+            val args = arrayOf("APU-v%.apk", context.packageName, ((System.currentTimeMillis() - 24L * 60 * 60 * 1000) / 1000).toString())
             val ids = mutableListOf<Long>()
             val names = mutableListOf<String>()
             val dates = mutableListOf<Long>()
@@ -88,16 +89,16 @@ object DownloadTrashCleanup {
                 ),
                 selection,
                 args,
-                null,
+                "${MediaStore.Downloads.DATE_MODIFIED} DESC",
             )?.use { c ->
-                while (c.moveToNext()) {
+                while (ids.size < 128 && c.moveToNext()) {
                     ids.add(c.getLong(0))
                     names.add(c.getString(1) ?: "")
                     dates.add(if (c.isNull(2)) 0L else c.getLong(2))
                 }
             }
             if (ids.isEmpty()) return
-            val installed = com.vladimir.messenger.BuildConfig.VERSION_NAME
+            val installed = com.vladimir.messenger.BuildConfig.VERSION_NAME.removePrefix("v")
             val order = ids.indices.sortedByDescending { dates[it] }
             var keptNewest = false
             var deleted = 0
