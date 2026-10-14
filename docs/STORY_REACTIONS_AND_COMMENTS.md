@@ -152,8 +152,17 @@ ts, a, b, c`.
   `check-android-compile.sh` (`--tests '*StoryFeedback*Test*'`).
 - 13 новых строк добавлены в `values` и `values-en` (по 1576 записей, паритет
   проверен).
-- `tools/sandbox/check_unresolved_symbols.py`: 596 файлов, 0 подозрительных
+- `tools/sandbox/check_unresolved_symbols.py`: 595 файлов, 0 подозрительных
   имён. Source-контракты НЕ заменяют компиляцию Kotlin и проверку на телефоне.
+- CI `ci-core-check`, прогон 38607472010 на d29d385 — SUCCESS (15 м 10 с):
+  `cargo check` + uniffi, неразрешённые имена, все source-контракты, чистая
+  компиляция kotlinc и 331 JVM-тест, `:app:compileReleaseKotlin`,
+  `:app:testDebugUnitTest` с новыми тестами откликов и
+  `compileDebugAndroidTestKotlin`. Первый прогон 38607039780 упал на одном
+  новом тесте очереди (проверка отсрочки брала «сейчас» позже прежнего срока,
+  поэтому `maxOf` честно давал 6010 вместо 6000); поведение очереди не
+  менялось, исправлен тест.
+- На телефонах НЕ проверено: сценарий ниже обязателен до выпуска.
 
 Грабли, найденные по ходу: имя типа в проекте не должно совпадать с именем
 Compose/stdlib. Книга откликов объявляла `data class Row`, из-за чего `Row`
