@@ -1619,4 +1619,13 @@
     <string name="swarm_mode_unlimited">Без ограничений</string>
     <string name="settings_online_helper">Помогать соединению</string>
     <string name="settings_online_helper_body">Пересылать зашифрованные пакеты между телефонами без хранения на диске. Режим раздачи ограничивает нагрузку. При выключении уже принятые пакеты могут завершить путь; ваши отправки и получение работают.</string>
+    <string name="send_custom_time">Выбрать дату и время</string>
+    <string name="send_schedule_confirm">Запланировать</string>
+    <string name="send_date_label">Дата (ДД.ММ.ГГГГ)</string>
+    <string name="send_time_label">Время (ЧЧ:ММ, 24 часа)</string>
+    <string name="send_open_calendar">Открыть календарь</string>
+    <string name="send_open_clock">Выбрать время</string>
+    <string name="send_time_zone">Часовой пояс: %1$s</string>
+    <string name="send_time_invalid">Укажите существующую дату и время в будущем.</string>
+    <string name="send_schedule_delivery_hint">Отправка начнётся не раньше выбранного времени. Android или отсутствие связи могут её задержать.</string>
 </resources>

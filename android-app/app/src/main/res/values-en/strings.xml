@@ -1606,4 +1606,13 @@ The file is not on this phone</string>
     <string name="swarm_mode_unlimited">Unlimited</string>
     <string name="settings_online_helper">Help other phones connect</string>
     <string name="settings_online_helper_body">Forward encrypted packets between phones without storing them on disk. The seeding mode limits the load. Turning this off lets accepted packets finish; your own sending and receiving stay enabled.</string>
+    <string name="send_custom_time">Choose date and time</string>
+    <string name="send_schedule_confirm">Schedule</string>
+    <string name="send_date_label">Date (DD.MM.YYYY)</string>
+    <string name="send_time_label">Time (HH:MM, 24-hour)</string>
+    <string name="send_open_calendar">Open calendar</string>
+    <string name="send_open_clock">Choose time</string>
+    <string name="send_time_zone">Time zone: %1$s</string>
+    <string name="send_time_invalid">Enter a valid date and time in the future.</string>
+    <string name="send_schedule_delivery_hint">Sending starts no earlier than the selected time. Android or lack of connectivity may delay it.</string>
 </resources>

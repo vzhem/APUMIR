@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,8 +38,15 @@ fun SendOptionsDialog(
     onDismiss: () -> Unit,
     onPick: (SendChoice) -> Unit,
 ) {
-    var quiet by remember { mutableStateOf(false) }
-    val now = System.currentTimeMillis()
+    var quiet by rememberSaveable { mutableStateOf(false) }
+    var customTime by rememberSaveable { mutableStateOf(false) }
+    if (customTime) {
+        CustomSendTimeDialog(
+            onDismiss = { customTime = false },
+            onConfirm = { onPick(SendChoice(quiet, it)) },
+        )
+        return
+    }
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.send_options_title)) },
@@ -56,13 +64,16 @@ fun SendOptionsDialog(
                     onPick(SendChoice(quiet, null))
                 }
                 ApuActionBubble(stringResource(R.string.send_in_15), Icons.Filled.Schedule) {
-                    onPick(SendChoice(quiet, now + 15 * 60_000L))
+                    onPick(SendChoice(quiet, System.currentTimeMillis() + 15 * 60_000L))
                 }
                 ApuActionBubble(stringResource(R.string.send_in_hour), Icons.Filled.Schedule) {
-                    onPick(SendChoice(quiet, now + 60 * 60_000L))
+                    onPick(SendChoice(quiet, System.currentTimeMillis() + 60 * 60_000L))
+                }
+                ApuActionBubble(stringResource(R.string.send_custom_time), Icons.Filled.Schedule) {
+                    customTime = true
                 }
                 ApuActionBubble(stringResource(R.string.send_tomorrow), Icons.Filled.Schedule) {
-                    onPick(SendChoice(quiet, tomorrowNineMs(now)))
+                    onPick(SendChoice(quiet, tomorrowNineMs(System.currentTimeMillis())))
                 }
             }
         },

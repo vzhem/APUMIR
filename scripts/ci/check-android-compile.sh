@@ -82,7 +82,8 @@ cd android-app || exit 1
 ./gradlew :app:testDebugUnitTest --no-daemon --console=plain \
     --tests '*RankWireTest*' --tests '*FileTransferRankPolicyTest*' --tests '*OnlineHelperPolicyTest*' \
     --tests '*ShortLinksTest*' --tests '*DiagnosticsReportTest*' \
-    --tests '*GroupFileSeederTest*' --tests '*FileTransferWireTest*'
+    --tests '*GroupFileSeederTest*' --tests '*FileTransferWireTest*' \
+    --tests '*SendTimePolicyTest*'
 TESTS_STATUS=$?
 
 # ---- почему тесты упали: словами в лог, а не «красный шаг без причины» -------
