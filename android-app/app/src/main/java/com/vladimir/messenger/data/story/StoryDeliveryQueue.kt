@@ -24,7 +24,8 @@ internal class StoryDeliveryQueue(entries: List<StoryDeliveryEntry> = emptyList(
         rows.removeAll { now - it.createdAtMs >= TTL_MS || it.createdAtMs > now + 300_000 }
         return old - rows.size
     }
-    fun due(now: Long): List<StoryDeliveryEntry> = rows.filter { it.nextAttemptAtMs <= now }.take(16)
+    fun due(now: Long, owner: String? = null): List<StoryDeliveryEntry> =
+        rows.filter { it.nextAttemptAtMs <= now && (owner == null || it.owner == owner) }.take(16)
     fun contains(entry: StoryDeliveryEntry): Boolean = entry in rows
     fun result(entry: StoryDeliveryEntry, accepted: Boolean, packetCount: Int, now: Long) {
         val index = rows.indexOf(entry)

@@ -58,4 +58,11 @@ class StoryDeliveryQueueTest {
         assertFalse(queue.snapshot().any { it.storyId == "s" && !it.revoke })
         assertTrue(queue.snapshot().any { it.storyId == "s" && it.revoke })
     }
+    @Test fun previousOwnerJobsCannotStarveCurrentOwnerBeforeBatchLimit() {
+        val queue = StoryDeliveryQueue()
+        queue.enqueue("old", "previous-owner", (1..20).map { "old-$it" }, 1000, false)
+        queue.enqueue("new", "current-owner", listOf("friend"), 1000, false)
+        assertEquals("new", queue.due(1000, "current-owner").single().storyId)
+        assertEquals(21, queue.snapshot().size) // No silent deletion of old-owner metadata.
+    }
 }

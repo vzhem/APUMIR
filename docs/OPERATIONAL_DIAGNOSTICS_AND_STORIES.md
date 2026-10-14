@@ -84,7 +84,8 @@ MQTT topics (включая нестандартные имена узлов) и
   metadata; максимум 256 recipient jobs / 256 КиБ, без копирования тела истории;
 - service pump делает максимум 16 пакетов за цикл, fair rotation; failure остаётся
   pending, retry через 60с, TTL — сутки от создания истории;
-- sender restart восстанавливает очередь; wrong-owner записи не отправляются;
+- sender restart восстанавливает очередь; wrong-owner записи не отправляются
+  и фильтруются ДО batch-limit, не блокируя текущую личность;
 - полный transport-accepted wave удаляет recipient job, но НЕ называется
   подтверждением сохранения/показа у друга; нового app-level story ACK нет;
 - revoke заменяет pending publish; stale result не может удалить новую revoke
@@ -109,7 +110,7 @@ application story receipt. Остальные контакты вне текущ
 
 ## Проверка
 
-Pure JVM: OperationalHealthTest (10), StoryDeliveryQueueTest (7), новый revoke UUID
+Pure JVM: OperationalHealthTest (10), StoryDeliveryQueueTest (8), новый revoke UUID
 тест StoryOutboxTest, новые privacy/report tests. Подключены standalone compiler и
 Android CI filter. Android relay fixtures дополнены full-vs-sample expiry проверкой;
 их компиляция не является запуском на устройстве. Source guards проверяют bounds,

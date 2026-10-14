@@ -78,7 +78,7 @@ internal object DurableStorySender {
             val expired = queue.purge(now)
             OperationalDiagnostics.tracker.count(OperationalCounter.STORY_EXPIRED, expired.toLong())
             if (expired > 0) save()
-            queue.due(now).filter { it.owner == ownId }
+            queue.due(now, ownId)
         }
         // At most 16 packets per service pump, fair rotation across recipients.
         val packetCache = HashMap<String, List<String>>()
