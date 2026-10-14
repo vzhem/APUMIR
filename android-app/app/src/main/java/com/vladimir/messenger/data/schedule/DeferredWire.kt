@@ -10,8 +10,9 @@ object DeferredWire {
     const val PROBE_PREFIX = "APUGRP1|deferprobe1|"
     const val READY_PREFIX = "APUGRP1|deferready1|"
     const val MAX_TEXT_BYTES = 34_000
-    // Reserve room for MessageSealer's base64 + key envelope inside the 64 KiB mesh record.
-    private const val MAX_WIRE_CHARS = 46_000
+    // Text is the raw final field (split with a limit), avoiding a third base64 expansion.
+    // Reserve room for sealing + the mesh relay's own base64 inside its 64 KiB frame.
+    private const val MAX_WIRE_BYTES = 34_500
     private val idPattern = Regex("[a-zA-Z0-9_-]{1,100}")
     private val hashPattern = Regex("[0-9a-f]{64}")
 
@@ -32,18 +33,19 @@ object DeferredWire {
         require(valid(letter))
         val wire = DATA_PREFIX + listOf(
             letter.id, letter.showAtMs.toString(), b64(letter.groupId), b64(letter.topicId),
-            b64(letter.senderName), b64(letter.text),
+            b64(letter.senderName), letter.text,
         ).joinToString("|")
-        require(wire.length <= MAX_WIRE_CHARS)
+        require(wire.toByteArray(Charsets.UTF_8).size <= MAX_WIRE_BYTES)
         return wire
     }
 
     fun parse(text: String): Letter? {
-        if (!text.startsWith(DATA_PREFIX) || text.length > MAX_WIRE_CHARS) return null
+        if (!text.startsWith(DATA_PREFIX) || text.length > MAX_WIRE_BYTES ||
+            text.toByteArray(Charsets.UTF_8).size > MAX_WIRE_BYTES) return null
         return runCatching {
-            val p = text.removePrefix(DATA_PREFIX).split('|')
+            val p = text.removePrefix(DATA_PREFIX).split('|', limit = 6)
             if (p.size != 6) return@runCatching null
-            Letter(p[0], p[1].toLong(), unb64(p[2]), unb64(p[3]), unb64(p[4]), unb64(p[5]))
+            Letter(p[0], p[1].toLong(), unb64(p[2]), unb64(p[3]), unb64(p[4]), p[5])
                 .takeIf { valid(it) && encode(it) == text }
         }.getOrNull()
     }

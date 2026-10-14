@@ -1,6 +1,8 @@
 package com.vladimir.messenger.data.schedule
 
 import com.vladimir.messenger.data.group.GroupWire
+import com.vladimir.messenger.data.security.SealedWire
+import java.util.Base64
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -48,8 +50,8 @@ class DeferredWireTest {
 
     @Test fun rejectsMalformedPacketsBoundsDatesAndNestedFields() {
         val wire = DeferredWire.encode(letter)
-        listOf(wire + "|extra", wire.replace("1900000000000", "0"), wire.replace("1900000000000", "-1"),
-            wire.replace("1900000000000", "9223372036854775807"), wire.dropLast(1) + "%", "APUGRP1|defer1|bad")
+        listOf(wire.replace("1900000000000", "0"), wire.replace("1900000000000", "-1"),
+            wire.replace("1900000000000", "9223372036854775807"), wire.replace("Z3JvdXAtMQ", "***"), "APUGRP1|defer1|bad")
             .forEach { assertNull(it, DeferredWire.parse(it)) }
         assertNull(DeferredWire.parseReceipt("ack|${letter.id}"))
         assertNull(DeferredWire.parseReceipt(DeferredWire.ACK_PREFIX + letter.id + "|wrong"))
@@ -59,9 +61,17 @@ class DeferredWireTest {
 
     @Test fun rejectsOversizedPayloadBeforeEncodingOrDecoding() {
         assertTrue(runCatching { DeferredWire.encode(letter.copy(text = "x".repeat(34_001))) }.isFailure)
-        assertNull(DeferredWire.parse(DeferredWire.DATA_PREFIX + "x".repeat(46_001)))
+        assertNull(DeferredWire.parse(DeferredWire.DATA_PREFIX + "x".repeat(34_501)))
         val max = letter.copy(text = "x".repeat(34_000))
         assertEquals(max, DeferredWire.parse(DeferredWire.encode(max)))
+    }
+
+    @Test fun largestWireLeavesRoomForSealingAndRelayBase64() {
+        // Rust FileKeyEnvelopeV1: max binding 512 bytes + 203 bytes of framing.
+        // Reserve another 2 KiB for relay metadata, IDs and framing.
+        val sealed = SealedWire.encode(ByteArray(715), ByteArray(12), ByteArray(34_500 + 16))
+        val relayBytes = Base64.getEncoder().encode(sealed.toByteArray(Charsets.UTF_8)).size + 2048
+        assertTrue("relay size=$relayBytes", relayBytes < 64 * 1024)
     }
 
     @Test fun timerNeverRevealsEarlyAndCanRevealOfflineAfterRestartOrLateArrival() {
