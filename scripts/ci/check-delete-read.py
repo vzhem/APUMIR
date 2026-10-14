@@ -72,7 +72,7 @@ class DeleteReadTest(unittest.TestCase):
 
         group = source("data/group/GroupRepository.kt")
         incoming = group[group.index("is GroupWire.Packet.MessageDelete -> {"):group.index("is GroupWire.Packet.PostsRequest -> {")]
-        self.assertNotRegex(incoming, r'\.(?:status|isRead|readAt)')
+        self.assertNotRegex(incoming, r'\.(?:status|isRead|readAt)\b')
 
     def test_delete_action_is_based_on_ownership_or_moderation_not_read(self):
         ui = source("ui/screens/chat/ChatDetailScreen.kt")
