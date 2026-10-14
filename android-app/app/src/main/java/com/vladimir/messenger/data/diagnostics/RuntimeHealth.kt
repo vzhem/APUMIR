@@ -112,7 +112,9 @@ class UiResponsivenessTracker {
     @Synchronized fun snapshot(now: Long) = UiResponsiveness(active, samples, late, overdue, maxLag,
         pending?.let { (now - it.second).coerceAtLeast(0) })
 
-    companion object { const val LATE_MS = 1500L }
+    companion object {
+        const val LATE_MS = 1500L
+    }
 }
 
 data class RuntimeHealthSnapshot(
