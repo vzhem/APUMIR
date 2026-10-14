@@ -1160,6 +1160,15 @@ class DiagnosticsReportTest {
         assertEquals("W", DiagnosticsPrivacy.logcatSeverity(safe))
     }
 
+    @Test fun uuidIdentityFieldsDoNotLeakTheirDashedTails() {
+        val id = "1234abcd-5678-4abc-9def-123456789abc"
+        for (field in listOf("msgId", "msg", "sender", "peer", "recipient", "from", "to")) {
+            val safe = DiagnosticsPrivacy.redact("$field=$id bytes=1207")
+            assertEquals("$field=[id] bytes=1207", safe)
+            assertEquals(safe, DiagnosticsPrivacy.redact(safe))
+        }
+    }
+
     @Test fun operationalMetricsAndSafeKeyReasonsReachReport() {
         val state = OperationalSnapshot(counters = mapOf(OperationalCounter.STORY_PACKET_DEFERRED to 3L))
         val report = DiagnosticsReport.render(facts().copy(operationalHealth = state,

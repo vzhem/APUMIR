@@ -487,10 +487,11 @@ object DiagnosticsPrivacy {
     /** Не копировать в отчёт идентификаторы контактов/сообщений и сетевые адреса. */
     fun redact(text: String): String = text
         .replace(processThreadPrefixRegex) { "${it.groupValues[1]}0 0 " }
+        // Whole UUID first: short-hex field masking must not leave its dashed tail.
+        .replace(uuidRegex, "[id]")
         .replace(shortIdentityFieldRegex) { "${it.groupValues[1]}[id]" }
         .replace(mqttTopicRegex, "topic=[route]")
         .replace(contactRegex, "[contact]")
-        .replace(uuidRegex, "[id]")
         .replace(messageHashRegex, "[id]")
         .replace(transferHexRegex, "[transfer]")
         .replace(fromHexRegex) { match -> "${match.groupValues[1]}[contact]" }

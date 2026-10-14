@@ -134,7 +134,7 @@ object StoryStore {
         require(photoB64 == null || isValidPhotoB64(photoB64))
         val story = Story(
             java.util.UUID.randomUUID().toString(), authorId, "",
-            text.trim(), bg.coerceIn(0, BG_COUNT - 1), System.currentTimeMillis(), true, photoB64)
+            text.take(200), bg.coerceIn(0, BG_COUNT - 1), System.currentTimeMillis(), true, photoB64)
         add(story); return story
     }
 

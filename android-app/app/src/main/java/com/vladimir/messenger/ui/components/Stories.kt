@@ -14,7 +14,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.layout.ContentScale
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
@@ -37,19 +36,17 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.KeyboardHide
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -63,7 +60,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -72,7 +68,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -368,17 +363,8 @@ fun StoryViewerDialog(
                         }
                     }, contentAlignment = Alignment.Center) {
                     Crossfade(targetState = current, label = "story-content") { story ->
-                        Box(Modifier.fillMaxSize().padding(28.dp),
-                            contentAlignment = Alignment.Center) {
-                            if (story.photoB64 != null) {
-                                StoryPhotoView(story.photoB64, Modifier.fillMaxSize())
-                                if (story.text.isNotBlank()) Text(story.text, color = Color.White,
-                                    modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                                        .background(Color.Black.copy(alpha = .55f), RoundedCornerShape(16.dp)).padding(12.dp),
-                                    textAlign = TextAlign.Center, fontSize = 20.sp)
-                            } else Text(story.text, color = Color.White, fontSize = if (story.text.length > 120) 25.sp else 32.sp,
-                                lineHeight = if (story.text.length > 120) 34.sp else 42.sp,
-                                fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+                        Box(Modifier.fillMaxSize().padding(top = 96.dp, bottom = 64.dp), contentAlignment = Alignment.Center) {
+                            StoryContentCanvas(story.text, story.photoB64, storyBackgrounds[story.bg.coerceIn(storyBackgrounds.indices)])
                         }
                     }
                 }
@@ -530,7 +516,7 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
     fun confirmPublish() {
         hideKeyboard()
         if (!preparing && StoryPublish.canPublish(text, photo, photoMissing)) {
-            onPublish(text.trim(), bg, photo)
+            onPublish(text, bg, photo)
         }
     }
     BoxWithConstraints(
@@ -551,6 +537,9 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.story_new), color = Color.White, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f).padding(start = 8.dp))
+                if (imeOpen) IconButton(onClick = { hideKeyboard() }) {
+                    Icon(Icons.Default.KeyboardHide, stringResource(R.string.story_hide_keyboard), tint = Color.White)
+                }
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, stringResource(R.string.action_close), tint = Color.White) }
             }
             // Превью занимает всё свободное место. «Опубликовать» живёт НИЖЕ
@@ -561,7 +550,6 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 4.dp)
                     .clip(RoundedCornerShape(24.dp))
-                    .background(storyBackgrounds[bg])
                     .pointerInput(imeOpen) {
                         if (!imeOpen) return@pointerInput
                         detectVerticalDragGestures { _, dragAmount ->
@@ -570,48 +558,11 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                     },
                 contentAlignment = Alignment.Center,
             ) {
-                if (photo != null) {
-                    StoryPhotoView(photo!!, Modifier.fillMaxSize(), ContentScale.Crop)
-                }
-                val captionOnPhoto = photo != null
-                BasicTextField(
-                    value = text,
-                    onValueChange = { text = it.take(200) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(if (captionOnPhoto) Alignment.BottomCenter else Alignment.Center)
-                        .padding(12.dp)
-                        .background(
-                            if (captionOnPhoto) Color.Black.copy(alpha = .45f) else Color.Transparent,
-                            RoundedCornerShape(18.dp),
-                        )
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    textStyle = TextStyle(
-                        color = Color.White,
-                        fontSize = when {
-                            captionOnPhoto -> 18.sp
-                            text.length > 120 -> 25.sp
-                            else -> 32.sp
-                        },
-                        fontWeight = FontWeight.SemiBold,
-                        textAlign = TextAlign.Center,
-                    ),
-                    cursorBrush = SolidColor(storyGold),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                    keyboardActions = KeyboardActions(onDone = { hideKeyboard() }),
-                    decorationBox = { inner ->
-                        if (text.isEmpty()) {
-                            Text(
-                                stringResource(if (captionOnPhoto) R.string.story_caption else R.string.story_placeholder),
-                                color = Color.White.copy(alpha = .6f),
-                                fontSize = if (captionOnPhoto) 16.sp else 26.sp,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                        inner()
-                    },
+                StoryContentCanvas(
+                    text = text,
+                    photoB64 = photo,
+                    background = storyBackgrounds[bg],
+                    onTextChange = { text = StoryPublish.editorText(it) },
                 )
             }
             if (showTools) {
@@ -708,7 +659,7 @@ private fun Modifier.storyBackgroundSemantics(label: String, isSelected: Boolean
     semantics { contentDescription = label; selected = isSelected }
 
 @Composable
-private fun StoryPhotoView(b64: String, modifier: Modifier, contentScale: ContentScale = ContentScale.Fit) {
+internal fun StoryPhotoView(b64: String, modifier: Modifier, contentScale: ContentScale = ContentScale.Fit) {
     val bytes = remember(b64) { runCatching { Base64.decode(b64, Base64.DEFAULT) }.getOrNull() }
     var fallback by remember(b64) { mutableStateOf<android.graphics.Bitmap?>(null) }
     var coilFailed by remember(b64) { mutableStateOf(false) }

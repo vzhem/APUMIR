@@ -203,6 +203,7 @@ if python3 scripts/ci/check-chat-startup.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-online-helper.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-saved-input.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-peer-rank.py >>"$LOG" 2>&1 && \
+   python3 scripts/ci/check-story-editor.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-diagnostics-report.py >>"$LOG" 2>&1 && \
    bash scripts/ci/check-chat-history.sh >>"$LOG" 2>&1; then
     say "local-first chat history: OK"

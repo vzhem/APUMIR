@@ -1635,4 +1635,5 @@
     <string name="send_predelivery_waiting">Ожидает предварительной передачи</string>
     <string name="send_cancel_requested">Запрос отмены в очереди. Подтвердили: %1$d из %2$d.</string>
     <string name="send_cancel_best_effort">При отмене отправим запрос удаления. Если получатель без связи, сообщение может успеть появиться.</string>
+    <string name="story_hide_keyboard">Скрыть клавиатуру</string>
 </resources>

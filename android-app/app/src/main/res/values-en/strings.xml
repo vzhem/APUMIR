@@ -1622,4 +1622,5 @@ The file is not on this phone</string>
     <string name="send_predelivery_waiting">Waiting for early transfer</string>
     <string name="send_cancel_requested">Cancellation request queued. Confirmed: %1$d of %2$d.</string>
     <string name="send_cancel_best_effort">Cancellation sends a deletion request. An offline recipient may still see the message before the request arrives.</string>
+    <string name="story_hide_keyboard">Hide keyboard</string>
 </resources>

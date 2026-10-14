@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.components
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -9,6 +10,23 @@ import org.junit.Test
  * должно превращаться в тихую публикацию истории без снимка.
  */
 class StoryPublishTest {
+    @Test fun editorPreservesManualLineBreaksAndSpacing() {
+        val text = "  Первая строка\n\nВторая строка\n"
+        assertEquals(text, StoryPublish.editorText(text))
+        assertTrue(StoryPublish.canPublish(text, null, false))
+        assertFalse(StoryPublish.canPublish("\n  \n", null, false))
+    }
+
+    @Test fun pastedLineEndingsAreNormalizedBeforeTheLimit() {
+        assertEquals("а\nб\nв", StoryPublish.editorText("а\r\nб\rв"))
+        assertEquals(200, StoryPublish.editorText("а".repeat(220)).length)
+    }
+
+    @Test fun limitDoesNotSplitAnEmoji() {
+        val prefix = "а".repeat(199)
+        assertEquals(prefix, StoryPublish.editorText(prefix + "😀"))
+    }
+
     @Test fun failedAttachmentCannotBePublishedSilently() {
         assertFalse(StoryPublish.canPublish("подпись", photoB64 = null, photoMissing = true))
         assertFalse(StoryPublish.canPublish("", photoB64 = null, photoMissing = true))

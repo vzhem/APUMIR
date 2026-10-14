@@ -10,6 +10,12 @@ package com.vladimir.messenger.ui.components
  * явный выбор «опубликовать без фото», и это правило проверяется тестом.
  */
 internal object StoryPublish {
+    /** Keep manual line breaks/spaces; normalize pasted line endings, never split an emoji. */
+    fun editorText(value: String): String {
+        val bounded = value.replace("\r\n", "\n").replace('\r', '\n').take(200)
+        return if (bounded.lastOrNull()?.isHighSurrogate() == true) bounded.dropLast(1) else bounded
+    }
+
     fun canPublish(text: String, photoB64: String?, photoMissing: Boolean): Boolean =
         !photoMissing && (text.isNotBlank() || photoB64 != null)
 }

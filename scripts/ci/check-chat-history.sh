@@ -7,6 +7,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 python3 "$ROOT/scripts/ci/check-deferred-cancel.py"
 python3 "$ROOT/scripts/ci/check-delete-read.py"
+python3 "$ROOT/scripts/ci/check-story-editor.py"
 OUT="$ROOT/target/chat-history-check"
 mkdir -p "$OUT/compiler" "$OUT/runtime" "$OUT/classes"
 read -r KOTLIN COROUTINES JUNIT < <(python3 - "$ROOT/android-app/gradle/libs.versions.toml" <<'PY'
@@ -104,6 +105,8 @@ SELF_SEED_POLICY="$BASE/main/java/com/vladimir/messenger/data/update/SelfSeedRet
 SELF_SEED_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/data/update/SelfSeedRetryPolicyTest.kt"
 # Сроки хранения «потеряшек» (владелец 2026-10-07: тяжёлое — сутки, текст и
 # малое — неделя). Файл чистый, поэтому проверяется здесь же на runner.
+STORY_PUBLISH="$BASE/main/java/com/vladimir/messenger/ui/components/StoryPublish.kt"
+STORY_PUBLISH_TEST="$BASE/test/java/com/vladimir/messenger/ui/components/StoryPublishTest.kt"
 RETENTION="$BASE/main/java/com/vladimir/messenger/data/file/FileTransferRetention.kt"
 RETENTION_TEST="$BASE/test/java/com/vladimir/messenger/data/file/FileTransferRetentionTest.kt"
 "$JAVA" -cp "$OUT/compiler/*:$OUT/runtime/kotlin-stdlib-$KOTLIN.jar" \
@@ -116,10 +119,11 @@ RETENTION_TEST="$BASE/test/java/com/vladimir/messenger/data/file/FileTransferRet
     "$CALL_WIRE" "$FILE_CODEC" "$FILE_WIRE" "$FILE_UDP" "$SEALED_WIRE" "$OUTGOING_POLICY" "$OUTGOING_POLICY_TEST" \
     "$DEFERRED_WIRE" "$DEFERRED_POLICY" "$DEFERRED_WIRE_TEST" "$DEFERRED_POLICY_TEST" \
     "$SELF_SEED_POLICY" "$SELF_SEED_POLICY_TEST" "$SEND_TIME_POLICY" "$SEND_TIME_TEST" \
-    "$RETENTION" "$RETENTION_TEST"
+    "$STORY_PUBLISH" "$STORY_PUBLISH_TEST" "$RETENTION" "$RETENTION_TEST"
 "$JAVA" -cp "$OUT/classes:$CP" org.junit.runner.JUnitCore \
     com.vladimir.messenger.ui.screens.chat.ChatHistoryObserverTest \
     com.vladimir.messenger.data.local.MessagePinPolicyTest \
+    com.vladimir.messenger.ui.components.StoryPublishTest \
     com.vladimir.messenger.ui.components.SplashOrbitGeometryTest \
     com.vladimir.messenger.ui.components.ApuSettingsLayoutTest \
     com.vladimir.messenger.data.heart.HeartWireTest \
