@@ -185,6 +185,7 @@ class GroupRepository(
      * работали манифесты роя.
      */
     private val pollDao: com.vladimir.messenger.data.local.dao.GroupPollDao? = null,
+    private val isDeferredCancelled: (String, String) -> Boolean = { _, _ -> false },
 ) {
 
     /** Раунд 137: что уже ретранслировали (и когда) - без повторного шторма. */
@@ -3331,6 +3332,7 @@ class GroupRepository(
                 // конверте: иначе закреп и ответы не найдут его на этом
                 // телефоне. Для старых конвертов остаётся транспортный id.
                 val localId = packet.messageId.ifBlank { messageId }
+                if (isDeferredCancelled(senderId, localId)) return
                 if (messageDao.messageExists(localId)) return
                 val now = clock()
                 // Досылка старого поста: отправитель пересылает чужой пост, автор
@@ -3372,6 +3374,7 @@ class GroupRepository(
                     }
                 }
                 val authorId = if (relayed) packet.authorId else senderId
+                if (isDeferredCancelled(authorId, localId)) return
                 val authorMember = groupDao.getMember(packet.groupId, authorId)
                 if (authorMember != null) {
                     if (authorMember.isBanned) return
@@ -3407,6 +3410,10 @@ class GroupRepository(
                     )
                 )
                 if (inserted == -1L) return // fallback and offline reveal can arrive concurrently
+                if (isDeferredCancelled(authorId, localId)) {
+                    messageDao.deleteByIdChatAndSender(localId, packet.groupId, authorId)
+                    return
+                }
                 // р250: цитата ответа могла приехать раньше самого сообщения -
                 // забираем её из буфера (как куски поста ждут манифест).
                 pendingReplies.take { it.packet.messageId == localId }.forEach { applyReply(it.packet) }

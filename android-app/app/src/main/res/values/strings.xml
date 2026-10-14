@@ -1629,8 +1629,9 @@
     <string name="send_time_invalid">Укажите существующую дату и время в будущем.</string>
     <string name="send_schedule_delivery_hint">Скрытая копия передаётся заранее. После её сохранения связь в момент показа не нужна. Android может задержать показ; выключенный телефон покажет сообщение после включения.</string>
 
-    <string name="send_predelivery_hint">Отложенный текст передаётся заранее и скрыт до выбранного времени. После начала передачи отмена недоступна: получатель может быть без связи.</string>
+    <string name="send_predelivery_hint">Отложенный текст передаётся заранее и скрыт до выбранного времени. Отмена отправит запрос удаления; результат зависит от связи у получателя.</string>
     <string name="send_predelivery_stored">Скрытая копия сохранена: %1$d из %2$d. Показ — в выбранное время.</string>
     <string name="send_predelivery_waiting">Ожидает предварительной передачи</string>
-    <string name="send_predelivery_no_cancel">Передача начата; отмена недоступна</string>
+    <string name="send_cancel_requested">Запрос отмены в очереди. Подтвердили: %1$d из %2$d.</string>
+    <string name="send_cancel_best_effort">При отмене отправим запрос удаления. Если получатель без связи, сообщение может успеть появиться.</string>
 </resources>

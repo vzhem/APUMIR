@@ -29,6 +29,7 @@ import javax.inject.Singleton
 
 @Singleton
 class ChatRepository @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
     private val chatDao: ChatDao,
     private val messageDao: MessageDao,
     private val groupDao: GroupDao,
@@ -643,6 +644,8 @@ class ChatRepository @Inject constructor(
 
     /** Отправленное с зеркала (эхо или доган): своя строка «отправлено». */
     suspend fun applyMirrorSent(row: MirrorRow) {
+        if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context,
+                com.vladimir.messenger.data.schedule.DeferredInboxStore.owner(context), row.id)) return
         // Служебный пакет не показываем и как своё сообщение. Если он всё же
         // попал в журнал зеркала, ACK по-прежнему обновляет исходящую строку.
         if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(row.content)) {
@@ -716,6 +719,7 @@ class ChatRepository @Inject constructor(
         channel: MessageChannel = MessageChannel.UNKNOWN,
         recipientId: String = "",
     ) {
+        if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId)) return
         // История: пакет контакта сохраняем в ленту историй, в переписку не пускаем.
         if (com.vladimir.messenger.data.story.StoryStore.isStoryPacket(content)) {
             val name = chatDao.getChatsByContactId(senderId).firstOrNull()?.contactName.orEmpty()
@@ -762,6 +766,10 @@ class ChatRepository @Inject constructor(
         )
         // A due-time fallback may race the local hidden-inbox reveal.
         if (messageDao.insertMessageIgnore(entity) == -1L) return
+        if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId)) {
+            messageDao.deleteByIdChatAndSender(messageId, chatId, senderId)
+            return
+        }
         chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
         // Раунд 150: бейдж непрочитанных на пузыре личного чата.
         // Раунд 156: служебные конверты роя (стикеры/миниатюры) - не

@@ -1616,8 +1616,9 @@ The file is not on this phone</string>
     <string name="send_time_invalid">Enter a valid date and time in the future.</string>
     <string name="send_schedule_delivery_hint">A hidden copy is transferred early. Once saved, it can appear offline. Android may delay display; a powered-off phone shows it after it starts.</string>
 
-    <string name="send_predelivery_hint">Scheduled text is transferred early and hidden until the selected time. Once transfer starts, cancellation is unavailable: the recipient may be offline.</string>
+    <string name="send_predelivery_hint">Scheduled text is transferred early and hidden until the selected time. Cancellation sends a deletion request; the result depends on recipient connectivity.</string>
     <string name="send_predelivery_stored">Hidden copy saved: %1$d of %2$d. Visible at the selected time.</string>
     <string name="send_predelivery_waiting">Waiting for early transfer</string>
-    <string name="send_predelivery_no_cancel">Transfer started; cancellation unavailable</string>
+    <string name="send_cancel_requested">Cancellation request queued. Confirmed: %1$d of %2$d.</string>
+    <string name="send_cancel_best_effort">Cancellation sends a deletion request. An offline recipient may still see the message before the request arrives.</string>
 </resources>

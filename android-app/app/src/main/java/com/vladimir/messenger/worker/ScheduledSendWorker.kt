@@ -90,6 +90,10 @@ class ScheduledSendWorker @AssistedInject constructor(
 
         private fun scheduleWork(context: Context, item: ScheduledSendStore.Item) {
             val manager = WorkManager.getInstance(context.applicationContext)
+            if (item.cancelRequested) {
+                enqueueCancellation(context, item.id)
+                return
+            }
             if (item.preDeliver && item.sendAtMs > System.currentTimeMillis()) {
                 val early = OneTimeWorkRequest.Builder(ScheduledSendWorker::class.java)
                     .setInputData(Data.Builder().putString(KEY_ID, item.id).putBoolean(KEY_EARLY, true).build())
@@ -105,12 +109,22 @@ class ScheduledSendWorker @AssistedInject constructor(
             manager.enqueueUniqueWork(workName(item.id), ExistingWorkPolicy.KEEP, request)
         }
 
-        /** Once early transfer starts, offline recipients cannot be guaranteed to receive a cancellation. */
+        /** Cancellation remains available after transfer. Persist intent first, then send/retry it. */
         fun cancel(context: Context, id: String) {
-            if (!ScheduledSendStore.cancelBeforeTransfer(context, id)) return
+            val pending = ScheduledSendStore.requestCancel(context, id)
             val manager = WorkManager.getInstance(context.applicationContext)
             manager.cancelUniqueWork(workName(id))
             manager.cancelUniqueWork("scheduled_early_$id")
+            if (pending != null) enqueueCancellation(context, id)
+        }
+
+        private fun enqueueCancellation(context: Context, id: String) {
+            val request = OneTimeWorkRequest.Builder(ScheduledSendWorker::class.java)
+                .setInputData(Data.Builder().putString(KEY_ID, id).build())
+                .setBackoffCriteria(BackoffPolicy.LINEAR, 30, TimeUnit.SECONDS)
+                .build()
+            WorkManager.getInstance(context.applicationContext)
+                .enqueueUniqueWork("scheduled_cancel_$id", ExistingWorkPolicy.KEEP, request)
         }
 
         private fun workName(id: String) = "scheduled_send_$id"

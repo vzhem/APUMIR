@@ -39,6 +39,31 @@ class DeferredWireTest {
         assertTrue(DeferredWire.isPacket(ready))
     }
 
+    @Test fun cancellationHasItsOwnBoundedRequestAndConfirmationNotAStoredReceipt() {
+        val wire = DeferredWire.cancel(letter)
+        val request = DeferredWire.parseCancel(wire)!!
+        assertEquals(letter.id, request.id)
+        assertEquals(DeferredWire.digest(DeferredWire.encode(letter)), request.digest)
+        val ack = DeferredWire.cancelAck(request)
+        assertEquals(request, DeferredWire.parseCancelAck(ack))
+        assertNull(DeferredWire.parseReceipt(wire))
+        assertNull(DeferredWire.parseReceipt(ack))
+        assertNull(DeferredWire.parseCancelAck(DeferredWire.receipt(letter)))
+        assertNull(GroupWire.parse(wire))
+        assertNull(GroupWire.parse(ack))
+        assertTrue(DeferredWire.isPacket(wire))
+        assertTrue(DeferredWire.isPacket(ack))
+        assertTrue(wire.length < 220)
+        assertNull(DeferredWire.parseCancel(wire + "|extra"))
+        assertNull(DeferredWire.parseCancel(DeferredWire.CANCEL_PREFIX + letter.id + "|bad"))
+    }
+
+    @Test fun lateContinuationPartsHaveTheSameCancellationIdentityAsTheirHead() {
+        assertEquals(letter.id, DeferredWire.headId(letter.id))
+        (1..8).forEach { assertEquals(letter.id, DeferredWire.headId("${letter.id}_part$it")) }
+        assertEquals("${letter.id}_party", DeferredWire.headId("${letter.id}_party"))
+    }
+
     @Test fun receiptBindsIdAndEveryPayloadField() {
         val receipt = DeferredWire.parseReceipt(DeferredWire.receipt(letter))!!
         assertEquals(letter.id, receipt.id)

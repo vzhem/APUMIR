@@ -36,6 +36,8 @@ object ScheduledSendStore {
         val lastError: String = "",
         val nextPeer: Int = 0,
         val ackedPackets: List<String> = emptyList(),
+        val cancelRequested: Boolean = false,
+        val cancelAcked: List<String> = emptyList(),
 
     )
 
@@ -86,12 +88,26 @@ object ScheduledSendStore {
         next
     }
 
-    fun cancelBeforeTransfer(context: Context, id: String): Boolean = synchronized(lock) {
+    /** Completion and a user's cancellation request must not race and lose the request. */
+    fun completeDelivery(context: Context, id: String): Boolean = synchronized(lock) {
         load(context)
-        val item = _items.value.firstOrNull { it.id == id } ?: return@synchronized false
-        if (item.started) return@synchronized false
+        val item = _items.value.firstOrNull { it.id == id } ?: return@synchronized true
+        if (item.cancelRequested) return@synchronized false
         save(context, _items.value.filterNot { it.id == id })
         true
+    }
+
+    /** Persist intent BEFORE stopping timers or sending requests; an in-flight packet may still arrive. */
+    fun requestCancel(context: Context, id: String): Item? = synchronized(lock) {
+        load(context)
+        val item = _items.value.firstOrNull { it.id == id } ?: return@synchronized null
+        if (!item.started || item.wire.isEmpty() || item.recipients.orEmpty().isEmpty()) {
+            save(context, _items.value.filterNot { it.id == id })
+            return@synchronized null
+        }
+        val next = item.copy(cancelRequested = true, nextPeer = 0, lastError = "")
+        save(context, _items.value.map { if (it.id == id) next else it })
+        next
     }
 
     private fun save(context: Context, list: List<Item>) {
@@ -124,7 +140,9 @@ object ScheduledSendStore {
                     .put("ownerId", item.ownerId)
                     .put("lastError", item.lastError)
                     .put("nextPeer", item.nextPeer)
-                    .put("ackedPackets", JSONArray(item.ackedPackets)),
+                    .put("ackedPackets", JSONArray(item.ackedPackets))
+                    .put("cancelRequested", item.cancelRequested)
+                    .put("cancelAcked", JSONArray(item.cancelAcked)),
             )
         }
         return array.toString()
@@ -154,6 +172,8 @@ object ScheduledSendStore {
                     ownerId = o.optString("ownerId", ""),
                     lastError = o.optString("lastError", ""),
                     nextPeer = o.optInt("nextPeer", 0),
+                    cancelRequested = o.optBoolean("cancelRequested", false),
+                    cancelAcked = o.optJSONArray("cancelAcked")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(),
                     ackedPackets = o.optJSONArray("ackedPackets")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(),
                 )
             }

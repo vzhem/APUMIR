@@ -46,6 +46,56 @@ class DeferredInboxStorageInstrumentedTest {
         KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(alias)
     }
 
+    @Test fun cancellationBeforeDataSurvivesReopenAndSuppressesLateCopiesAndParts() {
+        val cancel = DeferredWire.parseCancel(DeferredWire.cancel(letter))!!
+        assertTrue(storage.cancel(context, sender, cancel))
+        val key = storage.entryKey(context, sender, letter.id)
+        assertEquals(listOf(key to 0L), storage.pending(context))
+        assertNotNull(storage.cancellation(context, key))
+        assertFalse(storage.put(context, sender, letter))
+        assertTrue(storage.isCancelled(context, sender, "${letter.id}_part1"))
+        storage.completeCancellation(context, key)
+        storage.close()
+        storage = DeferredInboxStorage(alias, database)
+        assertTrue(storage.isCancelled(context, sender, letter.id))
+        assertFalse(storage.put(context, sender, letter))
+        assertTrue(storage.pending(context).isEmpty())
+    }
+
+    @Test fun cancellationReleasesHiddenPayloadAndOldTimerCannotUndoIt() {
+        assertTrue(storage.put(context, sender, letter))
+        val key = storage.entryKey(context, sender, letter.id)
+        val cancel = DeferredWire.parseCancel(DeferredWire.cancel(letter))!!
+        assertFalse(storage.cancel(context, sender, cancel.copy(digest = "0".repeat(64))))
+        assertEquals(letter, storage.get(context, key)!!.letter)
+        assertTrue(storage.cancel(context, sender, cancel))
+        storage.complete(context, key) // stale reveal completion must not turn cancellation into normal completion
+        assertNull(storage.get(context, key))
+        assertTrue(storage.isCancelled(context, sender, letter.id))
+        assertNotNull(storage.cancellation(context, key))
+        assertFalse(storage.put(context, sender, letter))
+    }
+
+    @Test fun anotherSenderCannotCancelTheOriginalSendersHiddenCopy() {
+        assertTrue(storage.put(context, sender, letter))
+        val cancel = DeferredWire.parseCancel(DeferredWire.cancel(letter))!!
+        assertTrue(storage.cancel(context, "pk_otherpeer01", cancel))
+        assertFalse(storage.isCancelled(context, sender, letter.id))
+        assertEquals(letter, storage.get(context, storage.entryKey(context, sender, letter.id))!!.letter)
+    }
+
+    @Test fun cancellationAfterRevealStillQueuesVisibleCleanupAndIsIdempotent() {
+        assertTrue(storage.put(context, sender, letter))
+        val key = storage.entryKey(context, sender, letter.id)
+        storage.complete(context, key)
+        val cancel = DeferredWire.parseCancel(DeferredWire.cancel(letter))!!
+        assertTrue(storage.cancel(context, sender, cancel))
+        assertNotNull(storage.cancellation(context, key))
+        storage.completeCancellation(context, key)
+        assertTrue(storage.cancel(context, sender, cancel))
+        assertFalse(storage.put(context, sender, letter))
+    }
+
     @Test fun committedHiddenCopySurvivesReopenWithoutAnyChatOrNetworkAccess() {
         assertTrue(storage.put(context, sender, letter))
         val key = storage.entryKey(context, sender, letter.id)

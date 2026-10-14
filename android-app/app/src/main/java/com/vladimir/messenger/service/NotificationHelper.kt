@@ -57,7 +57,9 @@ class NotificationHelper @Inject constructor(
         topicId: String?,
         /** Тихое сообщение (префикс в тексте): уведомление без звука и вибрации. */
         quiet: Boolean = false,
+        messageId: String? = null,
     ) {
+        if (messageId != null && com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId)) return
         val messageText = com.vladimir.messenger.util.QuietMessage.strip(rawText)
         val silent = quiet || com.vladimir.messenger.util.QuietMessage.isQuiet(rawText)
         android.util.Log.d("NotificationHelper", "showMessageNotification called: chatId=$chatId, senderId=${senderId.take(16)}, isIncoming=$isIncoming")
@@ -110,6 +112,7 @@ class NotificationHelper @Inject constructor(
             .setPriority(if (silent) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_HIGH)
             .setSilent(silent)
             .setAutoCancel(true)
+            .addExtras(android.os.Bundle().apply { putString("apu_message_id", messageId) })
             .setContentIntent(pendingIntent)
             .build()
         
@@ -153,6 +156,13 @@ class NotificationHelper @Inject constructor(
     /**
      * Отменить все уведомления для чата (когда пользователь открыл чат).
      */
+    /** Do not dismiss a newer, unrelated message notification in the same chat. */
+    fun cancelMessageNotification(messageId: String) {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.activeNotifications.filter { it.notification.extras.getString("apu_message_id") == messageId }
+            .forEach { manager.cancel(it.tag, it.id) }
+    }
+
     fun cancelChatNotifications(chatId: String) {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val notificationId = MESSAGE_NOTIFICATION_BASE_ID + chatId.hashCode().mod(1000)

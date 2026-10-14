@@ -41,7 +41,7 @@ class DeferredRevealWorker @AssistedInject constructor(
                 .setInitialDelay((showAtMs - System.currentTimeMillis()).coerceAtLeast(0L), TimeUnit.MILLISECONDS)
                 .setBackoffCriteria(BackoffPolicy.LINEAR, 30, TimeUnit.SECONDS)
                 .build()
-            WorkManager.getInstance(context).enqueueUniqueWork("deferred_reveal_$key", ExistingWorkPolicy.KEEP, request)
+            WorkManager.getInstance(context).enqueueUniqueWork("deferred_reveal_$key", if (showAtMs == 0L) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP, request)
         }
     }
 }

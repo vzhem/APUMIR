@@ -337,6 +337,11 @@ interface GroupDao {
     )
     suspend fun registerTopicMessage(topicId: String, preview: String, atMs: Long)
 
+    @Query("UPDATE group_topics SET messageCount = MAX(0, messageCount - 1), " +
+        "unreadCount = MIN(unreadCount, MAX(0, messageCount - 1)), " +
+        "lastMessagePreview = :preview, lastMessageAtMs = :atMs WHERE id = :topicId")
+    suspend fun refreshDeferredTopicAfterDelete(topicId: String, preview: String, atMs: Long)
+
     @Query("UPDATE group_topics SET unreadCount = unreadCount + 1 WHERE id = :topicId")
     suspend fun incrementTopicUnread(topicId: String)
 

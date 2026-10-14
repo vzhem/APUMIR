@@ -102,16 +102,18 @@ fun ScheduledSendBanner(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (item.preDeliver) {
-                        val status = if (item.started) {
+                        val status = if (item.cancelRequested) {
+                            stringResource(R.string.send_cancel_requested, item.cancelAcked.size, item.recipients.orEmpty().size)
+                        } else if (item.started) {
                             stringResource(R.string.send_predelivery_stored, item.confirmed.size, item.recipients.orEmpty().size)
                         } else stringResource(R.string.send_predelivery_waiting)
                         Text(status, style = MaterialTheme.typography.bodySmall)
-                        if (item.started) Text(stringResource(R.string.send_predelivery_no_cancel), style = MaterialTheme.typography.bodySmall)
+                        if (item.started || item.cancelRequested) Text(stringResource(R.string.send_cancel_best_effort), style = MaterialTheme.typography.bodySmall)
                     }
                     if (item.lastError.isNotEmpty()) Text(item.lastError, style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error)
                 }
-                if (!item.started) {
+                if (!item.cancelRequested) {
                     TextButton(onClick = { onCancel(item.id) }) {
                         Text(stringResource(R.string.send_scheduled_cancel))
                     }

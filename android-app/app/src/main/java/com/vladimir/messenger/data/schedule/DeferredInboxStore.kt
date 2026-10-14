@@ -26,6 +26,10 @@ object DeferredInboxStore {
     fun get(context: Context, key: String): DeferredInboxStorage.Entry? = storage.get(context, key)
     fun owns(context: Context, messageId: String): Boolean = storage.owns(context, messageId)
     fun complete(context: Context, key: String) = storage.complete(context, key)
+    fun cancel(context: Context, sender: String, request: DeferredWire.Receipt): Boolean = storage.cancel(context, sender, request)
+    fun cancellation(context: Context, key: String): DeferredInboxStorage.Cleanup? = storage.cancellation(context, key)
+    fun completeCancellation(context: Context, key: String) = storage.completeCancellation(context, key)
+    fun isCancelled(context: Context, sender: String, id: String): Boolean = storage.isCancelled(context, sender, id)
 }
 
 /** Independently constructible for real SQLite/Keystore device regression tests. */
@@ -34,6 +38,7 @@ class DeferredInboxStorage(
     private val databaseFile: File? = null,
 ) {
     data class Entry(val key: String, val owner: String, val sender: String, val letter: DeferredWire.Letter)
+    data class Cleanup(val sender: String, val messageId: String)
     private val lock = Any()
     private var helper: SQLiteOpenHelper? = null
 
@@ -67,8 +72,8 @@ class DeferredInboxStorage(
         val key = entryKey(context, sender, letter.id)
         val digest = DeferredWire.digest(wire)
         val db = db(context)
-        db.query("inbox", arrayOf("digest"), "entry_key=?", arrayOf(key), null, null, null).use {
-            if (it.moveToFirst()) return@synchronized it.getString(0) == digest
+        db.query("inbox", arrayOf("digest", "done"), "entry_key=?", arrayOf(key), null, null, null).use {
+            if (it.moveToFirst()) return@synchronized it.getString(0) == digest && it.getInt(1) < 2
         }
         // Bounded per peer and globally, reject without ACK rather than evict unshown messages.
         db.rawQuery("SELECT COUNT(*) FROM inbox WHERE owner=? AND done=0", arrayOf(owner)).use {
@@ -89,7 +94,7 @@ class DeferredInboxStorage(
     }
 
     fun pending(context: Context): List<Pair<String, Long>> = synchronized(lock) {
-        db(context).query("inbox", arrayOf("entry_key", "show_at"), "owner=? AND done=0",
+        db(context).query("inbox", arrayOf("entry_key", "show_at"), "owner=? AND done IN (0,2)",
             arrayOf(owner(context)), null, null, "show_at ASC").use { cursor ->
             buildList { while (cursor.moveToNext()) add(cursor.getString(0) to cursor.getLong(1)) }
         }
@@ -111,7 +116,57 @@ class DeferredInboxStorage(
 
     fun complete(context: Context, key: String) = synchronized(lock) {
         db(context).update("inbox", ContentValues().apply { put("done", 1); putNull("payload") },
-            "entry_key=? AND owner=?", arrayOf(key, owner(context)))
+            "entry_key=? AND owner=? AND done=0", arrayOf(key, owner(context)))
+        Unit
+    }
+
+    /** Sender-scoped durable tombstone also handles cancellation arriving BEFORE the data. */
+    fun cancel(context: Context, sender: String, request: DeferredWire.Receipt): Boolean = synchronized(lock) {
+        val owner = owner(context)
+        check(owner.startsWith("pk_"))
+        val db = db(context)
+        val entryKey = entryKey(context, sender, request.id)
+        val exists = db.query("inbox", arrayOf("digest"), "entry_key=?", arrayOf(entryKey), null, null, null).use {
+            if (it.moveToFirst()) {
+                if (it.getString(0) != request.digest) return@synchronized false
+                true
+            } else false
+        }
+        if (!exists) {
+            db.rawQuery("SELECT COUNT(*) FROM inbox WHERE owner=? AND done>=2", arrayOf(owner)).use {
+                it.moveToFirst(); if (it.getInt(0) >= 16384) return@synchronized false
+            }
+            db.rawQuery("SELECT COUNT(*) FROM inbox WHERE owner=? AND sender=? AND done>=2", arrayOf(owner, sender)).use {
+                it.moveToFirst(); if (it.getInt(0) >= 1024) return@synchronized false
+            }
+            db.insertOrThrow("inbox", null, ContentValues().apply {
+                put("entry_key", entryKey); put("owner", owner); put("sender", sender)
+                put("message_id", request.id); put("digest", request.digest); put("show_at", 0L)
+                put("done", 2); putNull("payload")
+            })
+        } else {
+            db.update("inbox", ContentValues().apply { put("done", 2); put("show_at", 0L); putNull("payload") },
+                "entry_key=?", arrayOf(entryKey))
+        }
+        true
+    }
+
+    fun isCancelled(context: Context, sender: String, id: String): Boolean = synchronized(lock) {
+        if (!id.startsWith("deferred_")) return@synchronized false
+        db(context).rawQuery("SELECT 1 FROM inbox WHERE owner=? AND sender=? AND message_id=? AND done>=2 LIMIT 1",
+            arrayOf(owner(context), sender, DeferredWire.headId(id))).use { it.moveToFirst() }
+    }
+
+    fun cancellation(context: Context, key: String): Cleanup? = synchronized(lock) {
+        db(context).query("inbox", arrayOf("sender", "message_id"), "entry_key=? AND owner=? AND done=2",
+            arrayOf(key, owner(context)), null, null, null).use {
+            if (!it.moveToFirst()) null else Cleanup(it.getString(0), it.getString(1))
+        }
+    }
+
+    fun completeCancellation(context: Context, key: String) = synchronized(lock) {
+        db(context).update("inbox", ContentValues().apply { put("done", 3) },
+            "entry_key=? AND owner=? AND done=2", arrayOf(key, owner(context)))
         Unit
     }
 

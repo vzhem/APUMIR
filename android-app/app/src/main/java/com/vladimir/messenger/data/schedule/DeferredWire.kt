@@ -9,6 +9,8 @@ object DeferredWire {
     const val ACK_PREFIX = "APUGRP1|deferack1|"
     const val PROBE_PREFIX = "APUGRP1|deferprobe1|"
     const val READY_PREFIX = "APUGRP1|deferready1|"
+    const val CANCEL_PREFIX = "APUGRP1|defercancel1|"
+    const val CANCEL_ACK_PREFIX = "APUGRP1|defercancelack1|"
     const val MAX_TEXT_BYTES = 34_000
     // Text is the raw final field (split with a limit), avoiding a third base64 expansion.
     // Reserve room for sealing + the mesh relay's own base64 inside its 64 KiB frame.
@@ -27,7 +29,8 @@ object DeferredWire {
     data class Receipt(val id: String, val digest: String)
 
     fun isPacket(text: String): Boolean = text.startsWith(DATA_PREFIX) || text.startsWith(ACK_PREFIX) ||
-        text.startsWith(PROBE_PREFIX) || text.startsWith(READY_PREFIX)
+        text.startsWith(PROBE_PREFIX) || text.startsWith(READY_PREFIX) ||
+        text.startsWith(CANCEL_PREFIX) || text.startsWith(CANCEL_ACK_PREFIX)
 
     fun encode(letter: Letter): String {
         require(valid(letter))
@@ -54,6 +57,14 @@ object DeferredWire {
 
     fun probe(letter: Letter): String = PROBE_PREFIX + letter.id + "|" + digest(encode(letter))
     fun ready(probe: Receipt): String = READY_PREFIX + probe.id + "|" + probe.digest
+    fun cancel(letter: Letter): String = CANCEL_PREFIX + letter.id + "|" + digest(encode(letter))
+    fun cancelAck(cancel: Receipt): String = CANCEL_ACK_PREFIX + cancel.id + "|" + cancel.digest
+    fun parseCancel(text: String): Receipt? = parseControl(text, CANCEL_PREFIX)
+    fun parseCancelAck(text: String): Receipt? = parseControl(text, CANCEL_ACK_PREFIX)
+
+    /** Continuation rows are owned by the same cancellation as their head. */
+    fun headId(messageId: String): String = messageId.replace(Regex("_part[1-8]$"), "")
+
     fun parseProbe(text: String): Receipt? = parseControl(text, PROBE_PREFIX)
     fun parseReady(text: String): Receipt? = parseControl(text, READY_PREFIX)
     fun parseReceipt(text: String): Receipt? = parseControl(text, ACK_PREFIX)

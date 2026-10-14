@@ -1249,6 +1249,7 @@ class CoreServerService : Service() {
                         true,
                         null,
                         quiet = com.vladimir.messenger.util.QuietMessage.isQuiet(row.content),
+                        messageId = row.id,
                     )
                 }
             }
@@ -1934,6 +1935,7 @@ class CoreServerService : Service() {
                             notificationHelper.showMessageNotification(
                                 msg.chatId, msg.senderId, text, true, topicId,
                                 quiet = com.vladimir.messenger.util.QuietMessage.isQuiet(msg.content),
+                                messageId = msg.id,
                             )
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to show notification: ${e.message}")

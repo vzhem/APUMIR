@@ -116,6 +116,9 @@ object GroupsModule {
         signerDao = signerDao,
         // р250: опросы, ответы на сообщения и медленный режим групп/каналов.
         pollDao = pollDao,
+        isDeferredCancelled = { sender, id ->
+            com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, sender, id)
+        },
         signManifest = { manifest ->
             com.vladimir.messenger.data.swarm.PostSigner.sign(context.applicationContext, manifest)
         },
