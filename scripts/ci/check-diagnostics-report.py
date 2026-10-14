@@ -1002,6 +1002,29 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn("for test in stun_fallback_uses_next_endpoint_after_a_temporary_refusal", workflow)
         self.assertIn("all_stun_refusals_return_a_recoverable_error_after_all_attempts; do", workflow)
 
+    def test_relay_storage_audit_is_read_only_bounded_and_after_partial(self):
+        inspector = source(DIAG / "RelayStorageInspector.kt")
+        for marker in ("OPEN_READONLY", "NO_LOCALIZED_COLLATORS", "CancellationSignal()",
+                       "SAMPLE_ROWS_PER_TABLE = 512", "MAX_TOTAL_SAMPLE_ROWS = 2048",
+                       "QUERY_BUDGET_MS = 2000L", "timer.shutdownNow()", "length($payloadColumn)"):
+            self.assertIn(marker, inspector)
+        for forbidden in (".getBlob(", ".readBytes(", ".execSQL(", "openOrCreateDatabase(",
+                          "IdentitySigningKeyStore", "FileExchangeKeyStore", "decrypt(", "VACUUM", "wal_checkpoint"):
+            self.assertNotIn(forbidden, inspector)
+        collector = source(DIAG / "TransferDiagnostics.kt")
+        self.assertGreater(collector.index("RelayStorageInspector.collect("), collector.index("onPartial?.invoke("))
+        self.assertIn("facts.copy(relayStorage = storage)", collector)
+        report = source(DIAG / "DiagnosticsReport.kt")
+        self.assertIn("append(facts.relayStorage.render())", report)
+        for lang in ("values", "values-en"):
+            xml = source(ROOT / f"android-app/app/src/main/res/{lang}/strings.xml")
+            self.assertIn('name="space_relay_note"', xml)
+            queue = re.search(r'<string name="space_queue">(.*?)</string>', xml).group(1)
+            self.assertNotIn("очередь сообщений", queue)
+            self.assertNotIn("message queue", queue)
+        script = source(ROOT / "scripts/ci/check-chat-history.sh")
+        self.assertIn("RelayStorageDiagnosticsTest", script)
+
     def test_ci_runs_the_pure_kotlin_diagnostics_tests(self):
         script = source(ROOT / "scripts/ci/check-chat-history.sh")
         self.assertIn("DiagnosticsReportTest.kt", script)

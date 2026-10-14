@@ -1330,7 +1330,7 @@ private fun SettingsTabContent(
                         if (used == null) {
                             stringResource(R.string.settings_counting_space)
                         } else {
-                            stringResource(R.string.space_used_head, StoragePolicy.format(used.total), StoragePolicy.format(used.chunkBytes)) + (if (held > 0L) stringResource(R.string.space_held, StoragePolicy.format(held)) else "") + stringResource(R.string.space_received, StoragePolicy.format(used.receivedBytes)) + (if (used.groupFileBytes > 0L) stringResource(R.string.space_group_files, StoragePolicy.format(used.groupFileBytes)) else "") + stringResource(R.string.space_queue, StoragePolicy.format(used.relayBytes)) + stringResource(R.string.space_free_tail, StoragePolicy.format(free), StoragePolicy.format(StoragePolicy.FREE_RESERVE_BYTES))
+                            stringResource(R.string.space_used_head, StoragePolicy.format(used.total), StoragePolicy.format(used.chunkBytes)) + (if (held > 0L) stringResource(R.string.space_held, StoragePolicy.format(held)) else "") + stringResource(R.string.space_received, StoragePolicy.format(used.receivedBytes)) + (if (used.groupFileBytes > 0L) stringResource(R.string.space_group_files, StoragePolicy.format(used.groupFileBytes)) else "") + stringResource(R.string.space_queue, StoragePolicy.format(used.relayBytes)) + stringResource(R.string.space_free_tail, StoragePolicy.format(free), StoragePolicy.format(StoragePolicy.FREE_RESERVE_BYTES)) + stringResource(R.string.space_relay_note)
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,

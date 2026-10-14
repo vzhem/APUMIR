@@ -370,7 +370,11 @@ object TransferDiagnostics {
             )
         }
         onStage?.invoke(STAGE_REPORT)
-        snapshotOf(facts, journalSnapshot.first, logcat.lines, createdAtMs)
+        // On-demand storage inspection runs AFTER the immediately visible partial report.
+        // No background polling, no cleanup, no identity/key-store access.
+        val storage = runCatching { RelayStorageInspector.collect(context.applicationContext) }
+            .getOrDefault(RelayStorageDiagnostics(status = "unavailable"))
+        snapshotOf(facts.copy(relayStorage = storage), journalSnapshot.first, logcat.lines, createdAtMs)
     }
 
     private fun snapshotOf(

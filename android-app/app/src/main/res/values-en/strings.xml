@@ -1378,8 +1378,9 @@
     <string name="space_held">, of which others’ data held here %1$s</string>
     <string name="space_received">", received files %1$s, "</string>
     <string name="space_group_files">"my files shared in communities %1$s, "</string>
-    <string name="space_queue">"message queue %1$s). "</string>
-    <string name="space_free_tail">Free on the phone: %1$s; the last %2$s is never used.</string>
+    <string name="space_queue">"relay database with journal %1$s). "</string>
+    <string name="space_relay_note">" Database file size is not pending-message size. The slider limits the file buffer, not SQLite. Details are in Logs."</string>
+    <string name="space_free_tail">Free on device: %1$s; the file buffer leaves a %2$s reserve.</string>
     <string name="profile_return_hint">You can return to the current profile at any time: on the sign-in screen, open the “I’m already registered” tab and use your nickname @%1$s and your password.</string>
     <string name="seed_preparing_tpl">Preparing to share update v%1$s</string>
     <string name="seed_sharing_tpl">Sharing update v%1$s</string>

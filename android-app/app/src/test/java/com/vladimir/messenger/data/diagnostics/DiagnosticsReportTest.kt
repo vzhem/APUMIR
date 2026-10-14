@@ -1124,4 +1124,10 @@ class DiagnosticsReportTest {
         }
         assertEquals(report, rebuilt)
     }
+    @Test fun storageAuditAppearsInTheSharedReportWithoutPayloads() {
+        val report = DiagnosticsReport.render(facts().copy(relayStorage = RelayStorageDiagnostics(status = "ready")), emptyList(), emptyList())
+        assertTrue(report.contains("[хранилище пересылки]"))
+        assertTrue(report.contains("storage_audit=ready"))
+    }
+
 }

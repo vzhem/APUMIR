@@ -231,6 +231,7 @@ data class DiagnosticsFacts(
     val helperRoutes: HelperRouteDiagnostics = HelperRouteDiagnostics.EMPTY,
     /** Состояние последней проверки/уведомления о версии; без URL и текста релиза. */
     val updateDiagnostics: UpdateDiagnosticFacts = UpdateDiagnosticFacts.EMPTY,
+    val relayStorage: RelayStorageDiagnostics = RelayStorageDiagnostics(),
     /** Только безопасные статусы: без ID, открытых/секретных ключей и имён файлов. */
     val signingSeedMode: String = "unknown",
     val installedSigningMode: String = "unknown",
@@ -683,6 +684,8 @@ object DiagnosticsReport {
         appendMqtt(facts)
         appendHelperRoutes(facts)
         appendMessages(facts)
+        append(facts.relayStorage.render())
+        appendLine()
         appendTransfers(facts)
         appendSession(facts)
         appendJournal(journal, facts)

@@ -1391,8 +1391,9 @@
     <string name="space_held">, из них чужих на хранении %1$s</string>
     <string name="space_received">", принятые файлы %1$s, "</string>
     <string name="space_group_files">"мои файлы для раздачи в сообществах %1$s, "</string>
-    <string name="space_queue">"очередь сообщений %1$s). "</string>
-    <string name="space_free_tail">Свободно на телефоне: %1$s; последние %2$s не занимаются никогда.</string>
+    <string name="space_queue">"база пересылки с журналом %1$s). "</string>
+    <string name="space_relay_note">" Размер файлов БД — не размер ожидающих сообщений. Ползунок ограничивает файловый буфер, не SQLite. Подробности — в «Логах»."</string>
+    <string name="space_free_tail">Свободно на телефоне: %1$s; файловый буфер оставляет запас %2$s.</string>
     <string name="profile_return_hint">Вернуться в текущий профиль можно в любой момент: на экране входа вкладка «Я уже зарегистрирован», никнейм @%1$s и ваш пароль.</string>
     <string name="seed_preparing_tpl">Готовлю раздачу обновления v%1$s</string>
     <string name="seed_sharing_tpl">Раздаю обновление v%1$s</string>

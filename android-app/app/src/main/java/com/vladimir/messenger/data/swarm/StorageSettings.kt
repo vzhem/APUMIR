@@ -96,7 +96,8 @@ object StorageSettings {
         val chunkBytes: Long,
         /** Принятые расшифрованные файлы до сохранения владельцем в папку. */
         val receivedBytes: Long,
-        /** Очередь сообщений для узлов, которых нет в сети (ядро, apu_relay.sqlite). */
+        /** Physical file lengths: relay SQLite + WAL + SHM, NOT live pending message bytes.
+         * Includes indexes, reusable pages and WAL versions. Not governed by the chunk-store quota. */
         val relayBytes: Long,
         /** Мои копии файлов, приложенных к сообщениям сообществ, для раздачи (рой, этап 9). */
         val groupFileBytes: Long = 0L,
