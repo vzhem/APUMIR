@@ -524,13 +524,47 @@ pub fn payload_kind(payload: &[u8]) -> RelayPayloadKind {
     RelayPayloadKind::Correspondence
 }
 
+/// Файловый фрагмент из Android direct→broker fallback может быть запечатан
+/// внешним APUSEAL1-конвертом. Префикс тела тогда не виден Rust-очереди.
+/// ID FileTransferWire маркирует файловый пакет и в обычном chat scope;
+/// ID `frag-`/`lan-`/`udp-sig-` действует только в служебном scope `direct`.
+/// Остальные сообщения, в том числе переписка и HELLO, живут в резерве
+/// переписки. Старые decimal и новые hash-ID фрагментов равноправны.
+pub fn message_kind(message_id: &str, chat_scope: &str, payload: &[u8]) -> RelayPayloadKind {
+    // FileTransferWire uses `f` + 32 lowercase hex bytes of transfer ID + a
+    // bounded packet-kind suffix (offer/chunk/ACK/want/cancel/FCAP). Its text
+    // is sealed before Rust sees it, even in a normal one-to-one chat scope.
+    if let Some(rest) = message_id.strip_prefix('f') {
+        if rest.len() > 32
+            && rest.as_bytes()[..32].iter().all(u8::is_ascii_hexdigit)
+            && matches!(rest.as_bytes()[32], b'o' | b'c' | b'a' | b'k' | b'w' | b'g' | b'x')
+        {
+            return RelayPayloadKind::FilePacket;
+        }
+    }
+    if chat_scope == "direct" {
+        if message_id.starts_with("frag-") {
+            return RelayPayloadKind::FilePacket;
+        }
+        // LAN-запрос/ответ и UDP-кандидаты — тоже APUSEAL1 после Android.
+        // В таком виде payload_kind не распознаёт их префиксы.
+        if message_id.starts_with("lan-seek-")
+            || message_id.starts_with("lan-")
+            || message_id.starts_with("udp-sig-")
+        {
+            return RelayPayloadKind::ServiceSignal;
+        }
+    }
+    payload_kind(payload)
+}
+
 /// Запись очереди: само сообщение, признак «своё» и категория тела.
 ///
 /// Признаки живут ТОЛЬКО в RAM: durable-формат (`SensitiveRelayRecordV1`) и wire
 /// не меняются, поэтому старая запись на диске читается как прежде. При
 /// восстановлении после перезапуска «своё» определяется заново — по
-/// `origin_sender == наш узел`, а категория — по телу (см.
-/// `engine::core::restore_relay_custody`).
+/// `origin_sender == наш узел`, а категория — по телу и служебному ID/scope
+/// (см. `engine::core::restore_relay_custody`).
 struct QueueEntry {
     message: RelayMessage,
     /// true = сообщение этого узла (своя переписка). Такие записи
@@ -648,7 +682,7 @@ impl RelayQueue {
         }
 
         let msg_id = msg.msg_id.clone();
-        let kind = payload_kind(&msg.e2e_payload);
+        let kind = message_kind(&msg.msg_id, &msg.chat_scope, &msg.e2e_payload);
         let mut entries = self.entries.lock().unwrap();
         if let Some(existing) = entries.get(&msg_id) {
             if !existing.own
@@ -698,7 +732,7 @@ impl RelayQueue {
 
         let now_ms = utc_now_ms();
         // До перемещения сообщения в запись (см. комментарий в enqueue_foreign).
-        let kind = payload_kind(&msg.e2e_payload);
+        let kind = message_kind(&msg.msg_id, &msg.chat_scope, &msg.e2e_payload);
 
         // Сначала — просроченное своё (освобождает запас без потерь).
         if self.own_count_locked(&entries) >= self.max_own_total
@@ -797,7 +831,7 @@ impl RelayQueue {
 
         // Категорию считаем ДО перемещения сообщения в запись: обращение к
         // `msg` после `message: msg` — ошибка компиляции (borrow of moved value).
-        let kind = payload_kind(&msg.e2e_payload);
+        let kind = message_kind(&msg.msg_id, &msg.chat_scope, &msg.e2e_payload);
         entries.insert(
             msg.msg_id.clone(),
             QueueEntry {
@@ -1414,6 +1448,60 @@ mod tests {
             RelayPayloadKind::Correspondence
         );
         assert_eq!(payload_kind(&[0x00, 0xFF, 0x10]), RelayPayloadKind::Correspondence);
+    }
+
+    #[test]
+    fn sealed_file_fragment_uses_transient_reserve_without_reclassifying_chats() {
+        let sealed = b"APUSEAL1|opaque-ciphertext";
+        assert_eq!(payload_kind(sealed), RelayPayloadKind::Correspondence);
+        assert_eq!(
+            message_kind("frag-123456789012345", "direct", sealed),
+            RelayPayloadKind::FilePacket,
+        );
+        assert_eq!(
+            message_kind("frag-123456789012345", "chat-1", sealed),
+            RelayPayloadKind::Correspondence,
+        );
+        assert_eq!(
+            message_kind("f0123456789abcdef0123456789abcdefc0f0", "chat-1", sealed),
+            RelayPayloadKind::FilePacket,
+        );
+        assert_eq!(
+            message_kind("f0123456789abcdef0123456789abcdefa3", "chat-1", sealed),
+            RelayPayloadKind::FilePacket,
+        );
+        assert_eq!(
+            message_kind("f0123456789abcdef0123456789abcdefz3", "chat-1", sealed),
+            RelayPayloadKind::Correspondence,
+        );
+        assert_eq!(
+            message_kind("fh0123456789abcdef0123456789abcdef", "chat-1", sealed),
+            RelayPayloadKind::Correspondence,
+        );
+        assert_eq!(
+            message_kind("chat-123", "direct", sealed),
+            RelayPayloadKind::Correspondence,
+        );
+        for id in ["lan-seek-123456789012345", "lan-123456789012345", "udp-sig-123456789012345"] {
+            assert_eq!(message_kind(id, "direct", sealed), RelayPayloadKind::ServiceSignal);
+            assert_eq!(message_kind(id, "chat-1", sealed), RelayPayloadKind::Correspondence);
+        }
+
+        let q = RelayQueue::with_all_limits(10, 10, 10, 2);
+        let file = RelayMessage::new(
+            "frag-123456789012345".into(),
+            "pk_b".into(),
+            "pk_origin".into(),
+            "direct".into(),
+            sealed.to_vec(),
+        );
+        assert!(q.enqueue_own(file.clone()).unwrap());
+        assert!(!q.enqueue_own(file.clone()).unwrap(), "повтор с тем же ID не занимает новый слот");
+        assert!(q.refresh_own(file).unwrap());
+        assert!(q.enqueue_own(own_msg("letter-1", "pk_b")).unwrap());
+        assert_eq!(q.stats().own, 1);
+        assert_eq!(q.stats().own_transients, 1);
+        assert_eq!(q.stats().own_capacity_evictions, 0);
     }
 
     #[test]

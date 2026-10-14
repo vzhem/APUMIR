@@ -291,7 +291,7 @@ class FileTransferRouter @Inject constructor(
                     }
             },
         )
-        val directSend: (String, String) -> Boolean = { recipientId, payload ->
+        val sendFilePayload: (String, String, Boolean) -> Boolean = { recipientId, payload, allowBroker ->
             // F4-F: LAN direct channel first (phone-to-phone TCP over shared
             // Wi-Fi). Falls back to the QUIC direct path when LAN is not
             // available. Mesh signalling is used to find the endpoint, and
@@ -337,15 +337,21 @@ class FileTransferRouter @Inject constructor(
                     if (quicOk) {
                         lastDirectMode[recipientId] = "quic"
                         true
+                    } else if (!allowBroker) {
+                        // APK-раздача не должна занимать relay-очередь мегабайтами
+                        // или повторными offer: ждём живого прямого канала.
+                        TransferDiagnostics.count(Counters.APK_DIRECT_UNREACHABLE)
+                        false
                     } else {
-                        // Прямого нет: куски всё равно кладём в durable-брокер.
-                        // Раньше здесь требовался пульс «в сети» — стоило ему
-                        // пропасть, фото зависало на половине (3/6), хотя
-                        // абонент был на связи, а отправитель уже видел «ушло».
+                        TransferDiagnostics.count(Counters.FILE_BROKER_FALLBACK_ATTEMPTS)
+                        // Для обычных файлов сохраняем fallback, нужный для фото
+                        // без прямого канала. Повтор одного и того же фрагмента
+                        // получает тот же ID: дедупликация Rust вместо потока
+                        // новых записей в «своей» очереди на каждой попытке.
                         val viaBroker = runCatching {
                             runBlocking {
                                 transportLocal.send(
-                                    "frag-" + System.nanoTime(),
+                                    FileTransferWire.relayFallbackMessageId(recipientId, payload),
                                     FileTransferChatRouting.DIRECT_TRANSPORT_SCOPE,
                                     recipientId,
                                     payload,
@@ -359,6 +365,12 @@ class FileTransferRouter @Inject constructor(
                     }
                 }
             }
+        }
+        val directSend: (String, String) -> Boolean = { to, packet ->
+            sendFilePayload(to, packet, true)
+        }
+        val apkDirectOnly: (String, String) -> Boolean = { to, packet ->
+            sendFilePayload(to, packet, false)
         }
         val senderLocal = FileTransferSender(
             transferDao = transferDao,
@@ -404,6 +416,7 @@ class FileTransferRouter @Inject constructor(
             transferDao = transferDao,
             chunkStore = chunkStore,
             directTransport = directSend,
+            apkDirectTransport = apkDirectOnly,
             ownBindingProvider = { FileExchangeKeyStore.publicBinding(appContext) },
             wrapKey = { transferIdHex, requester ->
                 // Автору ключ общей копии сделала подготовка; получившему -

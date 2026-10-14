@@ -235,6 +235,11 @@ data class DiagnosticsFacts(
     val signingSeedMode: String = "unknown",
     val installedSigningMode: String = "unknown",
     val fileExchangeMode: String = "unknown",
+    /** Отличают timeout при старте от позднего READY в глобальном реестре. */
+    val signingInstallBeforeCore: String = "unknown",
+    val fileExchangeInstallBeforeCore: String = "unknown",
+    /** Только сравнение в памяти; ни один routing ID в отчёт не попадает. */
+    val signingMatchesCoreRouting: Boolean? = null,
     /** Подтверждённые подписанным APUX1 прямые QUIC-соседи, НЕ connected_peers. */
     val liveDirectSwarmPeers: Int? = null,
     /** Решение Rust policy в момент снимка, не свидетельство фактического HTTP-запроса. */
@@ -339,6 +344,10 @@ object Counters {
     const val FILE_STARTED_IN = "file_started_in"
     const val FILE_COMPLETED = "file_completed"
     const val FILE_FAILED = "file_failed"
+    /** Попытки отправить фрагмент через Rust при отсутствии прямого канала, НЕ факт enqueue. */
+    const val FILE_BROKER_FALLBACK_ATTEMPTS = "file_broker_fallback_attempts"
+    /** APK не имеет broker fallback для содержимого: отсутствие прямого пути. */
+    const val APK_DIRECT_UNREACHABLE = "apk_direct_unreachable"
     const val NETWORK_CHANGES = "network_changes"
     const val CORE_STARTS = "core_starts"
     const val CORE_FAILURES = "core_failures"
@@ -756,15 +765,24 @@ object DiagnosticsReport {
         }
 
         if (facts.installedSigningMode != "unknown" || facts.fileExchangeMode != "unknown") {
-            val ready = facts.installedSigningMode == "legacy+ed25519-sidecar-v1" &&
-                facts.fileExchangeMode == "ready"
+            // A later read-only Keystore check cannot repair a missing identity
+            // captured at engine init: display OK only after both bounded
+            // installs and the running core's routing ID were verified.
+            val ready = facts.coreRunning &&
+                facts.installedSigningMode == "legacy+ed25519-sidecar-v1" &&
+                facts.fileExchangeMode == "ready" &&
+                facts.signingInstallBeforeCore == "ready" &&
+                facts.fileExchangeInstallBeforeCore == "ready" &&
+                facts.signingMatchesCoreRouting == true
             lines += DiagnosticsLine(
                 if (ready) DiagnosticsLevel.OK else DiagnosticsLevel.WARN,
                 "Локальные ключи",
                 "подпись ${safeDiagnosticToken(facts.installedSigningMode)}, " +
                     "обмен ${safeDiagnosticToken(facts.fileExchangeMode)}; " +
-                    "seed Keystore ${safeDiagnosticToken(facts.signingSeedMode)} " +
-                    "(наличие не доказывает совпадение routing ID)",
+                    "seed Keystore ${safeDiagnosticToken(facts.signingSeedMode)}; " +
+                    "до ядра подпись/обмен ${safeDiagnosticToken(facts.signingInstallBeforeCore)}/" +
+                    "${safeDiagnosticToken(facts.fileExchangeInstallBeforeCore)}; " +
+                    "совпадение с routing ID ${facts.signingMatchesCoreRouting?.toString() ?: "unknown"}",
             )
         }
         if (facts.liveDirectSwarmPeers != null) {
@@ -1061,7 +1079,10 @@ object DiagnosticsReport {
         appendLine("external_transport_allowed_now=${facts.externalTransportAllowed?.toString() ?: "unknown"} (политика на момент снимка, не факт обращения)")
         appendLine("signing_seed_keystore=${safeDiagnosticToken(facts.signingSeedMode)}")
         appendLine("installed_signing_identity=${safeDiagnosticToken(facts.installedSigningMode)}")
+        appendLine("signing_install_before_core=${safeDiagnosticToken(facts.signingInstallBeforeCore)}")
+        appendLine("signing_routing_matches_core=${facts.signingMatchesCoreRouting?.toString() ?: "unknown"} (без идентификаторов)")
         appendLine("file_exchange_keystore=${safeDiagnosticToken(facts.fileExchangeMode)}")
+        appendLine("file_exchange_install_before_core=${safeDiagnosticToken(facts.fileExchangeInstallBeforeCore)}")
         appendLine("pending_events=${facts.pendingEvents}")
         appendLine("relay_custody=${facts.relayCustody} · quarantine=${facts.relayQuarantine}")
         appendLine("core_starts=${facts.coreRestarts}")
@@ -1246,6 +1267,8 @@ object DiagnosticsReport {
         appendLine("завершено=${sums.completed}")
         appendLine("ошибок=${sums.failed} (за всё время работы приложения)")
         appendLine("отменено=${sums.cancelled}")
+        appendLine("file_broker_fallback_attempts=${facts.counters[Counters.FILE_BROKER_FALLBACK_ATTEMPTS] ?: 0L} (сессия; не доказательство постановки в relay)")
+        appendLine("apk_direct_unreachable=${facts.counters[Counters.APK_DIRECT_UNREACHABLE] ?: 0L} (сессия; APK-пакет в брокер не отправлялся)")
         facts.failureCodes.forEach { failure ->
             appendLine("ошибка.${failure.code}=${failure.count} — ${TransferErrorText.explain(failure.code)}")
         }
@@ -1292,7 +1315,8 @@ object DiagnosticsReport {
         appendLine("отказов старта ядра=${c[Counters.CORE_FAILURES] ?: 0L}")
         val known = setOf(
             Counters.FILE_STARTED_OUT, Counters.FILE_STARTED_IN, Counters.FILE_COMPLETED,
-            Counters.FILE_FAILED, Counters.F4_NEGOTIATED, Counters.F4_RANGES_SENT,
+            Counters.FILE_FAILED, Counters.FILE_BROKER_FALLBACK_ATTEMPTS,
+            Counters.APK_DIRECT_UNREACHABLE, Counters.F4_NEGOTIATED, Counters.F4_RANGES_SENT,
             Counters.F4_RANGES_RECEIVED, Counters.F4_BYTES_SENT, Counters.F4_BYTES_RECEIVED,
             Counters.F4_RANGE_FAILURES, Counters.F4_UDP_FALLBACK, Counters.NETWORK_CHANGES,
             Counters.CORE_STARTS,

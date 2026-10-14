@@ -75,16 +75,14 @@ chmod +x android-app/gradlew
 cd android-app || exit 1
 ./gradlew :app:compileReleaseKotlin --no-daemon --console=plain || exit 1
 
-# ---- JVM-тесты ранга и элиты (чистая логика, без Android) -------------------
-# Разбор APURANK1 и порог VIP - единственные места передачи ранга, которые
-# можно проверить без телефона: тесты гоняются тем же gradle, что уже поднят
-# выше, и стоят секунды. Фильтр узкий нарочно - полный прогон тестов приложения
-# сюда не входит (в песочнице владельца его нет, и трогать чужие тесты не наша
-# задача). FileTransferRankPolicyTest держит порог элиты: «Проводник» (10-й
-# ранг) уже VIP (решение владельца 2026-10-07).
+# ---- JVM-регрессии, связанные с изменениями ветки --------------------------
+# Кроме прежних проверок ранга/роя, гоняем диагностику ключей и правило
+# «APK без broker-фрагментов» + стабильность ID обычных файлов. Это реальные
+# unit-тесты после компиляции Kotlin, не подмена полной сборки релизного APK.
 ./gradlew :app:testDebugUnitTest --no-daemon --console=plain \
     --tests '*RankWireTest*' --tests '*FileTransferRankPolicyTest*' --tests '*OnlineHelperPolicyTest*' \
-    --tests '*ShortLinksTest*'
+    --tests '*ShortLinksTest*' --tests '*DiagnosticsReportTest*' \
+    --tests '*GroupFileSeederTest*' --tests '*FileTransferWireTest*'
 TESTS_STATUS=$?
 
 # ---- почему тесты упали: словами в лог, а не «красный шаг без причины» -------

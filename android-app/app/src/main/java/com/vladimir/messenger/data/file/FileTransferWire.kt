@@ -1,5 +1,6 @@
 package com.vladimir.messenger.data.file
 
+import java.security.MessageDigest
 import java.util.Base64
 
 /**
@@ -27,6 +28,28 @@ object FileTransferWire {
 
     /** High bit carried only across the existing Rust FFI boundary, never in APUF wire bytes. */
     const val F4_PREFERRED_CIPHERTEXT_LENGTH_FLAG = Int.MIN_VALUE
+
+    /**
+     * One ID per recipient and on-wire fragment, even on a retry sealed with
+     * fresh randomness. Never hash the sealed envelope: the sealer uses a new
+     * nonce for each attempt. The `frag-` marker also keeps sealed fragments
+     * out of the Rust queue's correspondence reserve.
+     */
+    fun relayFallbackMessageId(recipientId: String, packet: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        digest.update(recipientId.toByteArray(Charsets.UTF_8))
+        digest.update(0.toByte())
+        val bytes = digest.digest(packet.toByteArray(Charsets.UTF_8))
+        val hex = "0123456789abcdef"
+        return buildString(5 + bytes.size * 2) {
+            append("frag-")
+            for (byte in bytes) {
+                val value = byte.toInt() and 0xff
+                append(hex[value ushr 4])
+                append(hex[value and 15])
+            }
+        }
+    }
 
     fun isFilePacketText(text: String): Boolean =
         text.length <= MAX_WIRE_CHARS && text.startsWith(PREFIX)

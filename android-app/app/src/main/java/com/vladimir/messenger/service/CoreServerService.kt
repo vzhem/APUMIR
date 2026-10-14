@@ -728,36 +728,54 @@ class CoreServerService : Service() {
             // competing operations previously had the same 4s deadline and could leave the
             // running core permanently in legacy-only mode until a restart.
             localCryptoReadyAtStartup = false
-            val signing = if (prefs.getBoolean("identity_created", false)) {
+            val identityCreated = prefs.getBoolean("identity_created", false)
+            // Wrap nullable installer results: null from withTimeoutOrNull means a timeout,
+            // whereas a completed installer may also return null (unavailable/mismatch).
+            val signingAttempt = if (identityCreated) {
                 kotlinx.coroutines.withTimeoutOrNull(8_000) {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         IdentitySigningKeyStore.installIntoCore(applicationContext, legacyRoutingId)
                     }
+                    Unit to result
                 }
-            } else {
-                null
+            } else null
+            val signing = signingAttempt?.second
+            val signingInstall = when {
+                !identityCreated -> "skipped_no_identity"
+                signingAttempt == null -> "timeout"
+                signing == null -> "unavailable"
+                else -> "ready"
             }
             Log.i(
                 TAG,
                 "Identity signing mode: ${signing?.mode ?: "legacy-only"}, " +
                     "keyId=${signing?.keyId?.take(12) ?: "none"}"
             )
-            val fileExchange = if (signing != null) {
+            val fileAttempt = if (signing != null) {
                 kotlinx.coroutines.withTimeoutOrNull(8_000) {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                         IdentitySigningKeyStore.existingVerifiedBinding(applicationContext)?.let { identityBinding ->
                             FileExchangeKeyStore.initialize(applicationContext, legacyRoutingId, identityBinding)
                         }
                     }
+                    Unit to result
                 }
             } else null
+            val fileExchange = fileAttempt?.second
+            val fileExchangeInstall = when {
+                signing == null -> "skipped_no_signing"
+                fileAttempt == null -> "timeout"
+                fileExchange == null -> "unavailable"
+                else -> "ready"
+            }
             Log.i(
                 TAG,
                 "File exchange identity: ${if (fileExchange != null) "ready" else "unavailable"}, " +
                     "key=${fileExchange?.publicKeySha256Prefix ?: "none"}"
             )
             localCryptoReadyAtStartup = signing != null && fileExchange != null
-            if (signing == null && prefs.getBoolean("identity_created", false)) {
+            TransferDiagnostics.noteCryptoBootstrap(signingInstall, fileExchangeInstall, null)
+            if (signing == null && identityCreated) {
                 TransferDiagnostics.recordWarning("crypto", "подписывающий ключ не установлен до старта ядра; прямой подписанный рой недоступен")
             }
             if (signing != null && fileExchange == null) {
@@ -824,6 +842,14 @@ class CoreServerService : Service() {
             if (ok) {
                 val nodeId = RustBridge.nodeId()
                 Log.i(TAG, "Engine OK. NodeId=$nodeId")
+                if (signing != null) {
+                    val matchesCoreRouting = nodeId != null && legacyRoutingId == nodeId
+                    TransferDiagnostics.noteCryptoBootstrap(signingInstall, fileExchangeInstall, matchesCoreRouting)
+                    if (!matchesCoreRouting) {
+                        localCryptoReadyAtStartup = false
+                        TransferDiagnostics.recordWarning("crypto", "подписывающая identity не совпала с routing ID запущенного ядра; прямые подписанные маршруты недоступны")
+                    }
+                }
                 // Environment updates remain bounded; no packet-triggered polling or new timer thread.
                 serviceScope.launch {
                     while (kotlinx.coroutines.currentCoroutineContext().isActive) {

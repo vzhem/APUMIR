@@ -50,6 +50,9 @@ class DiagnosticsReportTest {
         signingSeedMode: String = "unknown",
         installedSigningMode: String = "unknown",
         fileExchangeMode: String = "unknown",
+        signingInstallBeforeCore: String = "unknown",
+        fileExchangeInstallBeforeCore: String = "unknown",
+        signingMatchesCoreRouting: Boolean? = null,
         liveDirectSwarmPeers: Int? = null,
         externalTransportAllowed: Boolean? = null,
     ) = DiagnosticsFacts(
@@ -115,6 +118,9 @@ class DiagnosticsReportTest {
         signingSeedMode = signingSeedMode,
         installedSigningMode = installedSigningMode,
         fileExchangeMode = fileExchangeMode,
+        signingInstallBeforeCore = signingInstallBeforeCore,
+        fileExchangeInstallBeforeCore = fileExchangeInstallBeforeCore,
+        signingMatchesCoreRouting = signingMatchesCoreRouting,
         liveDirectSwarmPeers = liveDirectSwarmPeers,
         externalTransportAllowed = externalTransportAllowed,
     )
@@ -230,6 +236,8 @@ class DiagnosticsReportTest {
             signingSeedMode = "unavailable",
             installedSigningMode = "legacy-only",
             fileExchangeMode = "unavailable",
+            signingInstallBeforeCore = "timeout",
+            fileExchangeInstallBeforeCore = "skipped_no_signing",
             liveDirectSwarmPeers = 0,
             externalTransportAllowed = true,
         )
@@ -242,7 +250,9 @@ class DiagnosticsReportTest {
         val report = DiagnosticsReport.render(facts, emptyList(), emptyList())
         assertTrue(report.contains("signing_seed_keystore=unavailable"))
         assertTrue(report.contains("installed_signing_identity=legacy-only"))
+        assertTrue(report.contains("signing_install_before_core=timeout"))
         assertTrue(report.contains("file_exchange_keystore=unavailable"))
+        assertTrue(report.contains("file_exchange_install_before_core=skipped_no_signing"))
         assertTrue(report.contains("signed_direct_swarm_peers=0"))
         assertTrue(report.contains("external_transport_allowed_now=true (политика на момент снимка, не факт обращения)"))
         assertTrue(report.contains("из них при неготовой локальной identity при старте=1271"))
@@ -257,6 +267,9 @@ class DiagnosticsReportTest {
             signingSeedMode = "ready",
             installedSigningMode = "legacy+ed25519-sidecar-v1",
             fileExchangeMode = "ready",
+            signingInstallBeforeCore = "ready",
+            fileExchangeInstallBeforeCore = "ready",
+            signingMatchesCoreRouting = true,
             liveDirectSwarmPeers = 1,
             externalTransportAllowed = false,
         )
@@ -268,6 +281,37 @@ class DiagnosticsReportTest {
         assertTrue(direct.value.contains("внешний транспорт сейчас не разрешён"))
         val report = DiagnosticsReport.render(reportFacts, emptyList(), emptyList())
         assertTrue(report.contains("external_transport_allowed_now=false (политика на момент снимка, не факт обращения)"))
+        assertTrue(report.contains("signing_routing_matches_core=true (без идентификаторов)"))
+    }
+
+    @Test
+    fun lateReadyKeyModesWithoutVerifiedPreEngineInstallAreNotGreen() {
+        val line = DiagnosticsReport.summaryLines(facts(
+            signingSeedMode = "ready",
+            installedSigningMode = "legacy+ed25519-sidecar-v1",
+            fileExchangeMode = "ready",
+            signingInstallBeforeCore = "timeout",
+            fileExchangeInstallBeforeCore = "skipped_no_signing",
+        )).first { it.title == "Локальные ключи" }
+        assertEquals(DiagnosticsLevel.WARN, line.level)
+        assertTrue(line.value.contains("до ядра подпись/обмен timeout/skipped_no_signing"))
+    }
+
+    @Test
+    fun readySeedWithDifferentCoreRoutingIsNotReportedAsWorkingSigningIdentity() {
+        val facts = facts(
+            signingSeedMode = "ready",
+            installedSigningMode = "legacy+ed25519-sidecar-v1",
+            fileExchangeMode = "ready",
+            signingInstallBeforeCore = "ready",
+            fileExchangeInstallBeforeCore = "ready",
+            signingMatchesCoreRouting = false,
+        )
+        val line = DiagnosticsReport.summaryLines(facts).first { it.title == "Локальные ключи" }
+        assertEquals(DiagnosticsLevel.WARN, line.level)
+        assertTrue(line.value.contains("совпадение с routing ID false"))
+        assertTrue(DiagnosticsReport.render(facts, emptyList(), emptyList())
+            .contains("signing_routing_matches_core=false (без идентификаторов)"))
     }
 
     /**
@@ -736,6 +780,20 @@ class DiagnosticsReportTest {
         assertEquals(4L, sums.completed)
         assertEquals(5L, sums.failed)
         assertEquals(6L, sums.cancelled)
+    }
+
+    @Test
+    fun fileFallbackDiagnosticsSeparateAttemptsFromActualQueueAdmission() {
+        val text = DiagnosticsReport.render(
+            facts(counters = mapOf(
+                Counters.FILE_BROKER_FALLBACK_ATTEMPTS to 12L,
+                Counters.APK_DIRECT_UNREACHABLE to 3L,
+            )),
+            emptyList(),
+            emptyList(),
+        )
+        assertTrue(text.contains("file_broker_fallback_attempts=12 (сессия; не доказательство постановки в relay)"))
+        assertTrue(text.contains("apk_direct_unreachable=3 (сессия; APK-пакет в брокер не отправлялся)"))
     }
 
     @Test

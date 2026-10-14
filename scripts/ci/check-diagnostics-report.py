@@ -643,6 +643,9 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "external_transport_allowed_now=",
             "signing_seed_keystore=",
             "installed_signing_identity=",
+            "signing_install_before_core=",
+            "file_exchange_install_before_core=",
+            "signing_routing_matches_core=",
             "file_exchange_keystore=",
             "const val MSG_IN_BAD_SENDER = ",
             "const val MSG_PEER_KEY_CHANGED = ",
@@ -683,6 +686,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "FileExchangeKeyStore.mode(context)",
             "RustBridge.liveSwarmPeerIds()",
             "RustBridge.externalTransportAllowed()",
+            "fun noteCryptoBootstrap(",
             "fun noteBadSender(",
             "fun notePeerKeyChanged(",
             "fun noteMessageSendFailed(",
@@ -709,6 +713,8 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "senderKeyKnown = known,",
             "staleKeyCopy = leftover,",
             "localIdentityUnavailable = !localCryptoReadyAtStartup,",
+            "matchesCoreRouting = nodeId != null && legacyRoutingId == nodeId",
+            "TransferDiagnostics.noteCryptoBootstrap(signingInstall, fileExchangeInstall, matchesCoreRouting)",
             "isWorkingRecently(applicationContext, senderId)",
             "TransferDiagnostics.noteBadSender()",
         ):
@@ -838,6 +844,30 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "убрано {} служебных записей" in core,
             "накопленные сигналы убираются при восстановлении",
         )
+
+    def test_sealed_file_fragments_cannot_fill_the_correspondence_reserve(self):
+        queue = source(ROOT / "rust-core/src/network/relay_queue.rs")
+        offline = source(ROOT / "rust-core/src/network/offline_send.rs")
+        core = source(ROOT / "rust-core/src/engine/core.rs")
+        router = source(MAIN / "data/file/FileTransferRouter.kt")
+        wire = source(MAIN / "data/file/FileTransferWire.kt")
+        seeder = source(MAIN / "data/file/GroupFileSeeder.kt")
+        report = source(DIAG / "DiagnosticsReport.kt")
+        for marker in (
+            "pub fn message_kind(message_id: &str, chat_scope: &str, payload: &[u8])",
+            'message_id.starts_with("frag-")',
+            "rest.as_bytes()[..32].iter().all(u8::is_ascii_hexdigit)",
+            "fn sealed_file_fragment_uses_transient_reserve_without_reclassifying_chats()",
+        ):
+            self.assertIn(marker, queue)
+        self.assertIn("message_kind(message_id, chat_scope, payload)", offline)
+        self.assertIn("message_kind(\n            &message_id,", core)
+        self.assertIn("FileTransferWire.relayFallbackMessageId(recipientId, payload)", router)
+        self.assertIn('append("frag-")', wire)
+        self.assertIn("apkDirectTransport = apkDirectOnly", router)
+        self.assertIn("if (transfer.chatId == ApkUpdate.CHAT_ID) apkDirectTransport else directTransport", seeder)
+        self.assertIn("file_broker_fallback_attempts=", report)
+        self.assertIn("apk_direct_unreachable=", report)
 
     def test_mqtt_is_explained_by_one_shared_parser(self):
         view_model = source(VIEW_MODEL)

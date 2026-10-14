@@ -65,6 +65,18 @@ object TransferDiagnostics {
     /** A failing KeyMint must not stall the first, immediately visible report snapshot. */
     private const val KEY_MODE_BUDGET_MS = 1_500L
 
+    /** Snapshot of bounded pre-engine installs; read-only mode alone can change AFTER core init. */
+    private data class CryptoBootState(
+        val signingInstall: String = "unknown",
+        val fileExchangeInstall: String = "unknown",
+        val signingMatchesCoreRouting: Boolean? = null,
+    )
+    @Volatile private var cryptoBootState = CryptoBootState()
+
+    fun noteCryptoBootstrap(signingInstall: String, fileExchangeInstall: String, signingMatchesCoreRouting: Boolean?) {
+        cryptoBootState = CryptoBootState(signingInstall, fileExchangeInstall, signingMatchesCoreRouting)
+    }
+
     /**
      * Строка вместо раздела журнала процесса, пока он читается: в быстрой
      * части отчёта честнее сказать «читается», чем «строк нет».
@@ -414,6 +426,7 @@ object TransferDiagnostics {
             }
         } ?: "timeout"
         val installedSigningMode = safeNative { uniffi.p2p_core.identitySigningMode() }
+        val boot = cryptoBootState
         val running = runCatching { RustBridge.isRunning() }.getOrDefault(false)
         val liveDirect = if (running) runCatching { RustBridge.liveSwarmPeerIds().size }.getOrNull() else null
         val externalAllowed = if (running) runCatching { RustBridge.externalTransportAllowed() }.getOrNull() else null
@@ -453,6 +466,9 @@ object TransferDiagnostics {
             signingSeedMode = signingSeedMode,
             installedSigningMode = installedSigningMode,
             fileExchangeMode = fileExchangeMode,
+            signingInstallBeforeCore = boot.signingInstall,
+            fileExchangeInstallBeforeCore = boot.fileExchangeInstall,
+            signingMatchesCoreRouting = boot.signingMatchesCoreRouting,
             liveDirectSwarmPeers = liveDirect,
             externalTransportAllowed = externalAllowed,
             updateDiagnostics = runCatching {

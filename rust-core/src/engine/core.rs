@@ -250,12 +250,15 @@ fn restore_relay_custody(
             let mut own_full = 0usize;
             let mut transient_dropped = 0usize;
             for record in outcome.records {
-                // Владелец 2026-10-07: в хранилище успели накопиться сигналы
-                // прошлых сборок (они там лежали НЕДЕЛЮ). Категория видна по
-                // телу (сигналы идут незапечатанными) — такие записи убираем
-                // сразу, чтобы они не занимали резерв переписки после
-                // перезапуска и не вытесняли настоящие сообщения.
-                if crate::network::relay_queue::payload_kind(&record.e2e_payload).is_transient() {
+                // Старые служебные записи, в том числе запечатанные файловые
+                // фрагменты с `frag-` ID и scope `direct`, переживали неделю.
+                // При восстановлении убираем только распознанные служебные
+                // пакеты; пользовательскую переписку не трогаем.
+                if crate::network::relay_queue::message_kind(
+                    &record.msg_id,
+                    &record.chat_scope,
+                    &record.e2e_payload,
+                ).is_transient() {
                     if let Some(custody) = relay_custody {
                         let _ = custody.store.remove_encrypted(&record.msg_id);
                     }
@@ -5094,7 +5097,11 @@ impl P2PCore {
         // пакет файловой передачи) - НЕ переписка. Держать его неделю на диске
         // незачем: к моменту доставки он уже не значит ничего, а место в
         // резерве «своих» занимает и вытесняет настоящие сообщения.
-        let payload_kind = crate::network::relay_queue::payload_kind(text.as_bytes());
+        let payload_kind = crate::network::relay_queue::message_kind(
+            &message_id,
+            &chat_id,
+            text.as_bytes(),
+        );
 
         let relay_inserted = match self.relay_queue.as_ref() {
             Some(queue) if refresh_retention && !queue.can_refresh_own(&prepared.message) => {
