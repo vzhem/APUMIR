@@ -18,8 +18,22 @@ import javax.crypto.spec.GCMParameterSpec
  * A committed row is the prerequisite for a stored receipt. Completed IDs remain tombstones.
  */
 object DeferredInboxStore {
+    private val storage = DeferredInboxStorage()
+    fun owner(context: Context): String = storage.owner(context)
+    fun entryKey(context: Context, sender: String, messageId: String): String = storage.entryKey(context, sender, messageId)
+    fun put(context: Context, sender: String, letter: DeferredWire.Letter): Boolean = storage.put(context, sender, letter)
+    fun pending(context: Context): List<Pair<String, Long>> = storage.pending(context)
+    fun get(context: Context, key: String): DeferredInboxStorage.Entry? = storage.get(context, key)
+    fun owns(context: Context, messageId: String): Boolean = storage.owns(context, messageId)
+    fun complete(context: Context, key: String) = storage.complete(context, key)
+}
+
+/** Independently constructible for real SQLite/Keystore device regression tests. */
+class DeferredInboxStorage(
+    private val keyAlias: String = "apu_deferred_inbox_v1",
+    private val databaseFile: File? = null,
+) {
     data class Entry(val key: String, val owner: String, val sender: String, val letter: DeferredWire.Letter)
-    private const val KEY_ALIAS = "apu_deferred_inbox_v1"
     private val lock = Any()
     private var helper: SQLiteOpenHelper? = null
 
@@ -27,7 +41,7 @@ object DeferredInboxStore {
         if (helper == null) {
             helper = object : SQLiteOpenHelper(
                 context.applicationContext,
-                File(context.noBackupFilesDir, "deferred_inbox.sqlite").absolutePath, null, 1,
+                (databaseFile ?: File(context.noBackupFilesDir, "deferred_inbox.sqlite")).absolutePath, null, 1,
             ) {
                 override fun onCreate(db: SQLiteDatabase) {
                     db.execSQL("CREATE TABLE inbox (entry_key TEXT PRIMARY KEY, owner TEXT NOT NULL, sender TEXT NOT NULL, message_id TEXT NOT NULL, show_at INTEGER NOT NULL, digest TEXT NOT NULL, payload BLOB, done INTEGER NOT NULL DEFAULT 0)")
@@ -101,11 +115,16 @@ object DeferredInboxStore {
         Unit
     }
 
+    fun close() = synchronized(lock) {
+        helper?.close()
+        helper = null
+    }
+
     private fun key(): SecretKey {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (store.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
+        (store.getKey(keyAlias, null) as? SecretKey)?.let { return it }
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
-            init(KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+            init(KeyGenParameterSpec.Builder(keyAlias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setKeySize(256).build())
         }.generateKey()

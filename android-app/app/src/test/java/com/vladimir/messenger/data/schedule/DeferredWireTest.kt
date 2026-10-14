@@ -22,6 +22,21 @@ class DeferredWireTest {
         assertNull(GroupWire.parse(DeferredWire.encode(direct)))
     }
 
+    @Test fun capabilityProbeIsSmallAndCannotBeMistakenForAStoredReceipt() {
+        val probe = DeferredWire.probe(letter)
+        assertTrue(probe.length < 220)
+        assertTrue(GroupWire.isGroupPacket(probe))
+        assertNull(GroupWire.parse(probe))
+        val parsed = DeferredWire.parseProbe(probe)!!
+        val ready = DeferredWire.ready(parsed)
+        assertEquals(parsed, DeferredWire.parseReady(ready))
+        assertNull(DeferredWire.parseReceipt(probe))
+        assertNull(DeferredWire.parseReceipt(ready))
+        assertNull(GroupWire.parse(ready))
+        assertTrue(DeferredWire.isPacket(probe))
+        assertTrue(DeferredWire.isPacket(ready))
+    }
+
     @Test fun receiptBindsIdAndEveryPayloadField() {
         val receipt = DeferredWire.parseReceipt(DeferredWire.receipt(letter))!!
         assertEquals(letter.id, receipt.id)
@@ -43,9 +58,9 @@ class DeferredWireTest {
     }
 
     @Test fun rejectsOversizedPayloadBeforeEncodingOrDecoding() {
-        assertTrue(runCatching { DeferredWire.encode(letter.copy(text = "x".repeat(44_001))) }.isFailure)
-        assertNull(DeferredWire.parse(DeferredWire.DATA_PREFIX + "x".repeat(63_001)))
-        val max = letter.copy(text = "x".repeat(44_000))
+        assertTrue(runCatching { DeferredWire.encode(letter.copy(text = "x".repeat(34_001))) }.isFailure)
+        assertNull(DeferredWire.parse(DeferredWire.DATA_PREFIX + "x".repeat(46_001)))
+        val max = letter.copy(text = "x".repeat(34_000))
         assertEquals(max, DeferredWire.parse(DeferredWire.encode(max)))
     }
 

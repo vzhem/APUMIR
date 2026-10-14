@@ -3392,7 +3392,7 @@ class GroupRepository(
                     relayed && packet.sentAtMs in 1L..now -> packet.sentAtMs
                     else -> now
                 }
-                messageDao.insertMessage(
+                val inserted = messageDao.insertMessageIgnore(
                     MessageEntity(
                         id = localId,
                         chatId = packet.groupId,
@@ -3406,6 +3406,7 @@ class GroupRepository(
                         topicId = packet.topicId,
                     )
                 )
+                if (inserted == -1L) return // fallback and offline reveal can arrive concurrently
                 // р250: цитата ответа могла приехать раньше самого сообщения -
                 // забираем её из буфера (как куски поста ждут манифест).
                 pendingReplies.take { it.packet.messageId == localId }.forEach { applyReply(it.packet) }

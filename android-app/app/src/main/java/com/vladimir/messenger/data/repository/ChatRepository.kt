@@ -688,6 +688,12 @@ class ChatRepository @Inject constructor(
         chatDao.updateLastMessage(chat.id, com.vladimir.messenger.util.ChatPreviews.human(row.content) ?: row.content, row.timestamp)
     }
 
+    suspend fun scheduledRecipient(chatId: String): String? {
+        val raw = chatDao.getChatById(chatId)?.contactId ?: return null
+        val peer = if (raw.contains("node=pk_")) "pk_" + raw.substringAfter("node=pk_").substringBefore("&") else raw
+        return peer.takeIf { NodeIds.isNodeId(it) }
+    }
+
     /** Local sender copy for pre-delivery. Network retries remain owned by ScheduledSendWorker. */
     suspend fun revealScheduledOutgoing(chatId: String, messageId: String, text: String, confirmed: Boolean) {
         if (messageDao.messageExists(messageId)) return
@@ -754,7 +760,8 @@ class ChatRepository @Inject constructor(
             status = MessageStatus.DELIVERED.name,
             recipientId = recipientId,
         )
-        messageDao.insertMessageIgnore(entity)
+        // A due-time fallback may race the local hidden-inbox reveal.
+        if (messageDao.insertMessageIgnore(entity) == -1L) return
         chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
         // Раунд 150: бейдж непрочитанных на пузыре личного чата.
         // Раунд 156: служебные конверты роя (стикеры/миниатюры) - не

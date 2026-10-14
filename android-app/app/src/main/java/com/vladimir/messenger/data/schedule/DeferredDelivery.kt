@@ -11,6 +11,9 @@ import com.vladimir.messenger.util.NodeIds
 import com.vladimir.messenger.util.QuietMessage
 import com.vladimir.messenger.worker.DeferredRevealWorker
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -26,6 +29,7 @@ class DeferredDelivery @Inject constructor(
     private val groups: GroupRepository,
     private val notifications: NotificationHelper,
 ) {
+    private val immediateScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val senderMutex = Mutex()
     private val revealMutex = Mutex()
     private var assistCursor = 0
@@ -37,18 +41,29 @@ class DeferredDelivery @Inject constructor(
         if (!DeferredWire.isPacket(text)) return@withContext false
         // Malformed/unauthenticated reserved packets are consumed, never fall through to chat.
         if (!authenticated || !NodeIds.isNodeId(sender)) return@withContext true
-        val receipt = DeferredWire.parseReceipt(text)
+        val storedReceipt = DeferredWire.parseReceipt(text)
+        val readyReceipt = DeferredWire.parseReady(text)
+        val probe = DeferredWire.parseProbe(text)
+        val receipt = storedReceipt ?: readyReceipt
         if (receipt != null) {
             val item = ScheduledSendStore.get(context, receipt.id.removePrefix("deferred_"))
             if (item != null && DeferredDeliveryPolicy.acceptsReceipt(receipt, item.id, item.ownerId,
                     DeferredInboxStore.owner(context), item.recipients.orEmpty(), sender, item.wire)) {
                 ScheduledSendStore.update(context, item.id) {
-                    it.copy(confirmed = (it.confirmed + sender).distinct(), lastError = "")
+                    if (storedReceipt != null) it.copy(confirmed = (it.confirmed + sender).distinct(), lastError = "")
+                    else it.copy(ready = (it.ready + sender).distinct())
                 }
-                if (!item.isGroup) {
-                    chats.markOutgoingMessageDelivered("deferred_${item.id}")
+                if (storedReceipt != null && !item.isGroup) chats.markOutgoingMessageDelivered("deferred_${item.id}")
+                if (readyReceipt != null) immediateScope.launch {
+                    try { pump(item.id, earlyOnly = false) }
+                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (error: Exception) { android.util.Log.w("DeferredDelivery", "Immediate pass deferred to durable work", error) }
                 }
             }
+        } else if (probe != null) {
+            // A tiny unknown-kind probe is safe even for legacy mirror receivers. No body is sent
+            // to a peer until it explicitly advertises support; READY does not confirm storage.
+            RustBridge.sendMessage(DeferredWire.transportId(probe.id, sender, "ready"), chatId, sender, DeferredWire.ready(probe))
         } else {
             val letter = DeferredWire.parse(text) ?: return@withContext true
             // The stable logical message ID is separate from the transport's deduplication ID.
@@ -77,7 +92,7 @@ class DeferredDelivery @Inject constructor(
                 val content = if (item.quiet) QuietMessage.wrap(item.text) else item.text
                 val plan = if (item.isGroup) groups.prepareDeferred(item.targetId, item.topicId, content) else null
                 val recipients = plan?.recipients ?: listOf(
-                    chats.getChatById(item.targetId)?.contactId?.takeIf { NodeIds.isNodeId(it) }
+                    chats.scheduledRecipient(item.targetId)
                         ?: error("Собеседник не найден"),
                 ).filter { it != owner }
                 val letter = DeferredWire.Letter("deferred_${item.id}", item.sendAtMs,
@@ -96,7 +111,10 @@ class DeferredDelivery @Inject constructor(
             if (!DeferredWire.due(letter.showAtMs, now)) {
                 for ((index, peer) in DeferredDeliveryPolicy.batch(item.recipients.orEmpty(), item.nextPeer, item.confirmed)) {
                     ScheduledSendStore.update(context, id) { it.copy(nextPeer = index + 1) }
-                    send(DeferredWire.transportId(letter.id, peer, "early"), item.targetId, peer, item.wire)
+                    val ready = peer in ScheduledSendStore.get(context, id)?.ready.orEmpty()
+                    val kind = if (ready) "early" else "probe"
+                    val payload = if (ready) item.wire else DeferredWire.probe(letter)
+                    send(DeferredWire.transportId(letter.id, peer, kind), item.targetId, peer, payload)
                 }
                 return@withLock item.recipients.orEmpty().all { it in item.confirmed }
             }
@@ -203,7 +221,7 @@ class DeferredDelivery @Inject constructor(
                 chatId = chat.id
             }
             val row = chats.getMessageById(letter.id)
-            if (row != null && !row.isFromMe) {
+            if (row != null && !row.isFromMe && row.chatId == chatId && row.senderId == entry.sender) {
                 notifications.showMessageNotification(chatId, entry.sender,
                     ChatPreviews.human(letter.text)?.take(200).orEmpty(), true,
                     letter.topicId.takeIf { it.isNotEmpty() }, quiet = QuietMessage.isQuiet(letter.text))

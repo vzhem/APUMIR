@@ -7,8 +7,11 @@ import java.util.Base64
 object DeferredWire {
     const val DATA_PREFIX = "APUGRP1|defer1|"
     const val ACK_PREFIX = "APUGRP1|deferack1|"
-    const val MAX_TEXT_BYTES = 44_000
-    private const val MAX_WIRE_CHARS = 63_000
+    const val PROBE_PREFIX = "APUGRP1|deferprobe1|"
+    const val READY_PREFIX = "APUGRP1|deferready1|"
+    const val MAX_TEXT_BYTES = 34_000
+    // Reserve room for MessageSealer's base64 + key envelope inside the 64 KiB mesh record.
+    private const val MAX_WIRE_CHARS = 46_000
     private val idPattern = Regex("[a-zA-Z0-9_-]{1,100}")
     private val hashPattern = Regex("[0-9a-f]{64}")
 
@@ -22,7 +25,8 @@ object DeferredWire {
     )
     data class Receipt(val id: String, val digest: String)
 
-    fun isPacket(text: String): Boolean = text.startsWith(DATA_PREFIX) || text.startsWith(ACK_PREFIX)
+    fun isPacket(text: String): Boolean = text.startsWith(DATA_PREFIX) || text.startsWith(ACK_PREFIX) ||
+        text.startsWith(PROBE_PREFIX) || text.startsWith(READY_PREFIX)
 
     fun encode(letter: Letter): String {
         require(valid(letter))
@@ -46,9 +50,15 @@ object DeferredWire {
 
     fun receipt(letter: Letter): String = ACK_PREFIX + letter.id + "|" + digest(encode(letter))
 
-    fun parseReceipt(text: String): Receipt? {
-        if (!text.startsWith(ACK_PREFIX) || text.length > 220) return null
-        val parts = text.removePrefix(ACK_PREFIX).split('|')
+    fun probe(letter: Letter): String = PROBE_PREFIX + letter.id + "|" + digest(encode(letter))
+    fun ready(probe: Receipt): String = READY_PREFIX + probe.id + "|" + probe.digest
+    fun parseProbe(text: String): Receipt? = parseControl(text, PROBE_PREFIX)
+    fun parseReady(text: String): Receipt? = parseControl(text, READY_PREFIX)
+    fun parseReceipt(text: String): Receipt? = parseControl(text, ACK_PREFIX)
+
+    private fun parseControl(text: String, prefix: String): Receipt? {
+        if (!text.startsWith(prefix) || text.length > 220) return null
+        val parts = text.removePrefix(prefix).split('|')
         return if (parts.size == 2 && idPattern.matches(parts[0]) && hashPattern.matches(parts[1])) {
             Receipt(parts[0], parts[1])
         } else null

@@ -29,6 +29,7 @@ object ScheduledSendStore {
         val started: Boolean = false,
         val recipients: List<String>? = null,
         val confirmed: List<String> = emptyList(),
+        val ready: List<String> = emptyList(),
         val handedOff: List<String> = emptyList(),
         val wire: String = "",
         val ownerId: String = "",
@@ -117,6 +118,7 @@ object ScheduledSendStore {
                     .put("started", item.started)
                     .put("recipients", item.recipients?.let { JSONArray(it) })
                     .put("confirmed", JSONArray(item.confirmed))
+                    .put("ready", JSONArray(item.ready))
                     .put("handedOff", JSONArray(item.handedOff))
                     .put("wire", item.wire)
                     .put("ownerId", item.ownerId)
@@ -145,6 +147,7 @@ object ScheduledSendStore {
                     preDeliver = o.optBoolean("preDeliver", false),
                     started = o.optBoolean("started", false),
                     recipients = o.optJSONArray("recipients")?.let { a -> (0 until a.length()).map { a.getString(it) } },
+                    ready = o.optJSONArray("ready")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(),
                     confirmed = o.optJSONArray("confirmed")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(),
                     handedOff = o.optJSONArray("handedOff")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty(),
                     wire = o.optString("wire", ""),
