@@ -202,12 +202,21 @@ interface P2PCoreHandle {
     // только редкий маяк (раз в 10 минут) и лишь когда узлов в сети много
     // (меньше 50 - поведение прежнее, до K4). Возвращает число принятых.
     u32 set_presence_audience(sequence<string> ids);
+    // Merge an owner-decrypted restored snapshot into the running address book.
+    // -1 means invalid/engine stopped; >=0 is the number of new address hints.
+    i32 import_address_book_json(string json);
 
     string? node_id();
     string? public_key();
+    string? observed_public_ip();
 
     string network_status();
     u64 connected_peers();
+    // Not MQTT presence or a saved address: recently sampled signed QUIC neighbour.
+    boolean has_live_swarm_peer();
+    sequence<string> live_swarm_peer_ids();
+    // Transport fallback after direct search; false until engine has started.
+    boolean external_transport_allowed();
     boolean trigger_gossip_discovery();
     void on_network_available();
     void on_network_lost();

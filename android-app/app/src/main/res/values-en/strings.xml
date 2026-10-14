@@ -152,6 +152,10 @@
     <string name="menu_unpin">Unpin</string>
     <string name="menu_open_chat">Open chat</string>
     <string name="menu_call">Call</string>
+    <string name="menu_video_call">Video call</string>
+    <string name="call_flip_camera">Switch camera</string>
+    <string name="call_camera_off">Turn camera off</string>
+    <string name="call_camera_on">Turn camera on</string>
     <string name="menu_share_contact">Share contact</string>
     <string name="menu_unarchive">Restore from archive</string>
     <string name="menu_archive">Archive</string>
@@ -192,7 +196,7 @@
     <string name="chat_attach_file">Attach file</string>
     <string name="chat_attach_rank_hint">Attachments open from the “Circle of friends” rank</string>
     <string name="chat_input_placeholder">Message...</string>
-    <string name="chat_resend_key">Send my key again</string>
+    <string name="chat_resend_key">Resend my public key</string>
     <string name="chat_history_retry_hint">Try opening the history again</string>
     <string name="action_retry">Retry</string>
     <!-- Контакты -->
@@ -816,7 +820,7 @@
     <string name="sync_devices_find">Devices find each other automatically: the sender and the receiver only need the same nickname and password — no addresses to enter.</string>
     <string name="sync_auto_every6">It looks for a copy in the background about every 6 hours. The first transfer asks for confirmation before any data is replaced.</string>
     <!-- Пакет 27: подсказки чата, QR, аватара, гифок и никнейма -->
-    <string name="chat_peer_key_stale">Messages from this contact won’t open: they still have an old copy of your key (after a reinstall or profile restore). Ask them to scan your QR code again — “My QR” in your profile.</string>
+    <string name="chat_peer_key_stale">Several incoming envelopes could not be opened. The cause is unknown: they may be for someone else, your local key may be unavailable, or the keys may differ. You can resend only your public key; do not reset keys or rescan a QR code based on this alone.</string>
     <string name="chat_own_node">This is your own node — the contact isn’t here. Devices of one account sync automatically (Settings → “Sync diagnostics”).</string>
     <string name="qr_not_ready">The code will appear once your profile is ready. Open the app a little later — the keys are still being created.</string>
     <string name="avatar_crop_hint">Drag the photo with your finger and pinch to zoom. Whatever is visible in the circle becomes your avatar.</string>
@@ -1229,6 +1233,7 @@
     <string name="fsl_sending">Sending…%1$s</string>
     <string name="fsl_recv_custodian">Receiving from a keeper…%1$s</string>
     <string name="fsl_recv">Receiving…%1$s</string>
+    <string name="fsl_stalled">Transfer stalled…%1$s</string>
     <string name="fsl_preparing">Preparing…</string>
     <string name="fsl_queued">Queued (waiting for the recipient)</string>
     <string name="fsl_incoming">Incoming file…</string>
@@ -1561,6 +1566,7 @@ The file is not on this phone</string>
     <string name="story_new">New story</string>
     <string name="story_placeholder">What is new? Up to 200 characters</string>
     <string name="story_publish">Publish</string>
+    <string name="story_publish_without_photo">Publish without photo</string>
     <string name="story_open">Story</string>
     <string name="story_pause">Pause</string>
     <string name="story_resume">Resume</string>
@@ -1568,6 +1574,10 @@ The file is not on this phone</string>
     <string name="story_next">Next</string>
     <string name="story_background">Background %1$d</string>
     <string name="story_lifetime">Your story is available to friends for 24 hours</string>
+    <string name="story_delete">Delete story</string>
+    <string name="story_delete_q">Delete this story?</string>
+    <string name="story_delete_body">It will disappear for everyone who has seen it.</string>
+    <string name="story_delete_confirm">Delete for everyone</string>
     <string name="group_all_topics">All</string>
     <string name="group_topic_closed_tab">Topic closed</string>
     <string name="story_photo">Story photo</string>
@@ -1582,10 +1592,15 @@ The file is not on this phone</string>
     <string name="story_camera_permission_denied">Allow camera access to take a photo.</string>
     <string name="story_camera_unavailable">Camera is unavailable on this device.</string>
     <string name="story_camera_capture_failed">Couldn’t take the photo. Try again.</string>
+    <string name="story_camera_flash_off">Flash off</string>
+    <string name="story_camera_flash_on">Flash on</string>
+    <string name="story_camera_flash_auto">Flash auto</string>
     <string name="story_remove_photo">Remove photo</string>
     <string name="story_caption">Caption (optional)</string>
     <string name="story_photo_preparing">Preparing photo…</string>
     <string name="story_photo_failed">Could not open the photo. Choose another.</string>
+    <string name="story_photo_unavailable">The photo could not be opened on this phone</string>
+    <string name="story_photo_needs_update">Friends will see the photo on the new APU version</string>
     <string name="swarm_mode_normal">Normal</string>
     <string name="swarm_mode_economy">Economy</string>
     <string name="swarm_mode_unlimited">Unlimited</string>

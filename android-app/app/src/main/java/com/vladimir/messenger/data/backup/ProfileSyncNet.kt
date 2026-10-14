@@ -40,6 +40,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.vladimir.messenger.MainActivity
 import com.vladimir.messenger.R
+import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.group.GroupInviteLinks
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -170,6 +171,9 @@ object ProfileSyncNet {
      * главного потока. Пароль после вызова обнуляется.
      */
     fun uploadBlocking(context: Context, backup: ProfileBackup, password: CharArray): UploadResult {
+        if (!RustBridge.externalTransportAllowed()) {
+            return UploadResult.Failed("Сначала ищем рой; внешняя копия пока не требуется")
+        }
         val nick = nickOf(context)
         val slot = slot(nick) ?: return UploadResult.NoIdentity
         val code = code(nick, password) ?: return UploadResult.BadPassword
@@ -191,6 +195,10 @@ object ProfileSyncNet {
         val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
         if (b64.length > MAX_B64_CHARS) {
             return UploadResult.TooBig((bytes.size / (1024L * 1024L)).toInt() + 1)
+        }
+        // The snapshot may take seconds to assemble: re-check before any HTTP.
+        if (!RustBridge.externalTransportAllowed()) {
+            return UploadResult.Failed("Рой снова доступен; внешняя копия отложена")
         }
         // Выкладываем с меткой устройства: авто-режим отличит свою копию от чужой.
         val conn = (URL(baseUrl() + slot).openConnection() as HttpURLConnection).apply {
@@ -227,6 +235,7 @@ object ProfileSyncNet {
     suspend fun meta(context: Context): NetMeta? =
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             val slot = slot(nickOf(context)) ?: return@withContext null
+            if (!RustBridge.externalTransportAllowed()) return@withContext null
             try {
                 val conn = (URL(baseUrl() + slot + "?meta=1").openConnection() as HttpURLConnection).apply {
                     requestMethod = "GET"
@@ -255,6 +264,9 @@ object ProfileSyncNet {
             val nick = nickOf(context)
             val slot = slot(nick) ?: return@withContext FetchResult.Failed("задайте ник в «Защите личности»")
             val code = code(nick, password) ?: return@withContext FetchResult.WrongPassword
+            if (!RustBridge.externalTransportAllowed()) {
+                return@withContext FetchResult.Failed("Сначала ищем рой; внешний сервер отложен")
+            }
             val conn = (URL(baseUrl() + slot).openConnection() as HttpURLConnection).apply {
                 requestMethod = "GET"
                 setRequestProperty("X-Apu-Code", code)

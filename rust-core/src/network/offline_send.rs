@@ -71,7 +71,7 @@ pub fn prepare_offline_relay(
     // минуты, пакет передачи — до конца передачи; иначе они забивали резерв
     // «своих» и вытесняли настоящую переписку. Срок уезжает и в конверт (ttl
     // в секундах), поэтому соседние узлы видят его же.
-    let ttl = match crate::network::relay_queue::payload_kind(payload) {
+    let ttl = match crate::network::relay_queue::message_kind(message_id, chat_scope, payload) {
         crate::network::relay_queue::RelayPayloadKind::ServiceSignal => {
             crate::network::relay_queue::TRANSIENT_SIGNAL_TTL
         }
@@ -128,6 +128,18 @@ mod tests {
         .unwrap();
         let signal_ms = signal.message.expires_at_ms - signal.message.created_at_ms;
         assert_eq!(signal_ms, ttl_to_ms(TRANSIENT_SIGNAL_TTL));
+        let sealed_signal = prepare_offline_relay(
+            "lan-seek-123456789012345",
+            "pk_recipient",
+            "pk_origin",
+            "direct",
+            b"APUSEAL1|opaque",
+        )
+        .unwrap();
+        assert_eq!(
+            sealed_signal.message.expires_at_ms - sealed_signal.message.created_at_ms,
+            ttl_to_ms(TRANSIENT_SIGNAL_TTL),
+        );
 
         let packet = prepare_offline_relay(
             "msg-pkt",
@@ -139,6 +151,35 @@ mod tests {
         .unwrap();
         let packet_ms = packet.message.expires_at_ms - packet.message.created_at_ms;
         assert_eq!(packet_ms, ttl_to_ms(FILE_PACKET_TTL));
+
+        // Android direct→broker fallback запечатывает файл, поэтому префикс
+        // тела уже не виден; служебный ID в scope direct всё равно даёт
+        // полчаса (такой же TTL уйдёт соседу внутри envelope).
+        let sealed = prepare_offline_relay(
+            "frag-123456789012345",
+            "pk_recipient",
+            "pk_origin",
+            "direct",
+            b"APUSEAL1|opaque",
+        )
+        .unwrap();
+        assert_eq!(sealed.message.expires_at_ms - sealed.message.created_at_ms, ttl_to_ms(FILE_PACKET_TTL));
+        match wire::parse(&sealed.envelope).unwrap() {
+            MeshEnvelope::Relay { ttl_secs, .. } => assert_eq!(ttl_secs, FILE_PACKET_TTL.as_secs()),
+            other => panic!("ожидали relay-конверт, получили {other:?}"),
+        }
+        let sealed_chat_fragment = prepare_offline_relay(
+            "f0123456789abcdef0123456789abcdefc0f0",
+            "pk_recipient",
+            "pk_origin",
+            "chat-1",
+            b"APUSEAL1|opaque",
+        )
+        .unwrap();
+        assert_eq!(
+            sealed_chat_fragment.message.expires_at_ms - sealed_chat_fragment.message.created_at_ms,
+            ttl_to_ms(FILE_PACKET_TTL),
+        );
 
         // Переписка живёт как прежде - неделю (проверяем, что срок не укорочен).
         let letter = prepare_offline_relay(

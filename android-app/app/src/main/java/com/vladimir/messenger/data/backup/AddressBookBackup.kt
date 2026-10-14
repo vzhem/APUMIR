@@ -3,6 +3,7 @@ package com.vladimir.messenger.data.backup
 import android.content.Context
 import android.util.Base64
 import android.util.Log
+import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.service.BotApi
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -45,9 +46,12 @@ class AddressBookBackup @Inject constructor(
         private const val KEY_LAST_BACKUP_SHA = "addrbook_backup_sha"
         private const val KEY_LAST_RESTORE_AT = "addrbook_restore_at"
         private const val AUTO_INTERVAL_MS = 6L * 60 * 60 * 1000
-        /** Раунд 194: молча спрашивать рой при пустой азбуке - не чаще раза в 6 часов. */
+        /** Retry a missing book when a *new* signed neighbour becomes reachable. */
         private const val KEY_LAST_SWARM_RESTORE_AT = "addrbook_swarm_restore_at"
-        private const val SWARM_RESTORE_RETRY_MS = 6L * 60 * 60 * 1000
+        private const val KEY_LAST_SWARM_RESTORE_PEERS = "addrbook_swarm_restore_peers"
+        private const val SWARM_RESTORE_RETRY_MS = 10L * 60 * 1000
+        private const val KEY_LAST_SERVER_RESTORE_AT = "addrbook_server_restore_at"
+        private const val SERVER_RESTORE_RETRY_MS = 30L * 60 * 1000
 
         fun shelfFor(nodeId: String): String = "addrbook|$nodeId"
 
@@ -117,57 +121,41 @@ class AddressBookBackup @Inject constructor(
         if (!file.isFile || file.length() < 4) return@withContext "Азбука пуста — копировать нечего"
         val plain = runCatching { file.readText() }.getOrNull()
             ?: return@withContext "Азбука не читается"
-        val sealed = encrypt(plain.toByteArray(Charsets.UTF_8), privateKey)
+        val plainBytes = plain.toByteArray(Charsets.UTF_8)
+        val sealed = encrypt(plainBytes, privateKey)
             ?: return@withContext "Не удалось зашифровать копию"
+        val snapshotSha = MessageDigest.getInstance("SHA-256").digest(plainBytes)
+            .joinToString("") { "%02x".format(it) }
+        // A send being queued is not storage. Wait briefly for a holder's ACK
+        // naming this exact ciphertext before concluding that this snapshot
+        // exists in the swarm. The owner keeps retrying if no one confirms.
+        val extra = runCatching { swarm.distribute(sealed, force = true, snapshotSha = snapshotSha) }
+            .getOrNull().orEmpty()
+        if (swarm.awaitConfirmedSnapshot(sealed)) {
+            prefs().edit().putLong(KEY_LAST_BACKUP_AT, System.currentTimeMillis())
+                .putString(KEY_LAST_BACKUP_SHA, snapshotSha).apply()
+            return@withContext "Копия сохранена у хранителя роя (${localEntryCount()} адресов)"
+        }
+        if (!RustBridge.externalTransportAllowed()) {
+            return@withContext "Копия $extra; подтверждения ещё нет, сервер не трогаем, пока рой доступен"
+        }
         val ok = botApi.storeAddressBook(shelfFor(nodeId), sealed)
         if (ok) {
-            prefs().edit()
-                .putLong(KEY_LAST_BACKUP_AT, System.currentTimeMillis())
-                .putString(KEY_LAST_BACKUP_SHA, fileSha(file))
-                .apply()
-            val extra = runCatching { swarm.distribute(sealed, force = true) }.getOrNull().orEmpty()
-            buildString {
-                append("Копия сохранена на сервере (${localEntryCount()} адресов)")
-                if (extra.isNotBlank()) append(", ").append(extra)
-            }
+            prefs().edit().putLong(KEY_LAST_BACKUP_AT, System.currentTimeMillis())
+                .putString(KEY_LAST_BACKUP_SHA, snapshotSha).apply()
+            "Копия сохранена на резервном сервере (${localEntryCount()} адресов); $extra"
         } else {
-            // Сервер не отвечает — раздаём копию по рою хотя бы так.
-            val extra = runCatching { swarm.distribute(sealed, force = true) }.getOrNull().orEmpty()
-            buildString {
-                append("Сервер недоступен — попробую снова позже")
-                if (extra.startsWith("роздана")) append("; копия ").append(extra)
-            }
+            "Копия $extra; запасной сервер недоступен — повторю позже"
         }
     }
 
     /**
-     * Восстановить азбуку с сервера. Вызывается ДО создания движка
-     * ([com.vladimir.messenger.data.RustBridge.initialize]) на свежей
-     * установке: существующий файл не перезаписываем.
+     * Startup must NOT fetch the server before even attempting mDNS and
+     * verified saved addresses. Start the empty core; autoRestoreIfEmpty then
+     * asks actual neighbours and only falls back after the direct-search window.
+     * Its merged hints enter the running engine through importAddressBookJson.
      */
-    suspend fun restoreBeforeStart(): String = withContext(Dispatchers.IO) {
-        val file = bookFile(context)
-        if (file.isFile && file.length() >= 4) return@withContext ""
-        val nodeId = prefs().getString("node_id", null)
-            ?: prefs().getString("existing_public_key", null)
-            ?: return@withContext ""
-        val privateKey = privateKey() ?: return@withContext ""
-        val sealed = botApi.fetchAddressBook(shelfFor(nodeId)) ?: return@withContext ""
-        val plainBytes = decrypt(sealed, privateKey)
-            ?: return@withContext "copy-decrypt-failed"
-        val plainText = String(plainBytes, Charsets.UTF_8)
-        val parsed = runCatching { JSONObject(plainText) }.getOrNull()
-        if (parsed == null || !parsed.has("entries")) return@withContext "copy-invalid"
-        val tmp = File(file.parentFile, "$FILE_NAME.tmp")
-        tmp.writeText(plainText)
-        if (!tmp.renameTo(file)) {
-            file.writeText(plainText)
-            tmp.delete()
-        }
-        prefs().edit().putLong(KEY_LAST_RESTORE_AT, System.currentTimeMillis()).apply()
-        Log.i(TAG, "Address book restored from server (${parsed.optJSONArray("entries")?.length() ?: 0} entries)")
-        ""
-    }
+    suspend fun restoreBeforeStart(): String = ""
 
     /**
      * Ручное восстановление из настроек: ТОЛЬКО по явному нажатию —
@@ -183,6 +171,9 @@ class AddressBookBackup @Inject constructor(
         // Обычное восстановление больше не тратит запросы лимитированного воркера.
         val fromSwarm = askSwarm(privateKey)
         if (fromSwarm != null) return@withContext fromSwarm
+        if (!RustBridge.externalTransportAllowed()) {
+            return@withContext "Рой пока доступен или поиск ещё идёт; резервный сервер не опрашиваем"
+        }
         val sealed = botApi.fetchAddressBook(shelfFor(nodeId))
         if (sealed == null) {
             return@withContext "Рой молчал, на сервере копии нет — попробуйте позже"
@@ -195,7 +186,8 @@ class AddressBookBackup @Inject constructor(
         if (added == 0) {
             return@withContext "Нового ничего: все ${localEntryCount()} адресов уже в азбуке"
         }
-        "В азбуку добавлено $added адресов (стало ${localEntryCount()}) — вступит в силу после перезапуска приложения"
+        "В азбуку добавлено $added адресов (стало ${localEntryCount()}) — " +
+            if (RustBridge.isRunning()) "прямой поиск уже запущен" else "вступит в силу после перезапуска"
     }
 
     /**
@@ -206,6 +198,15 @@ class AddressBookBackup @Inject constructor(
      * @return сколько адресов добавлено.
      */
     private suspend fun mergeIntoLocalBook(parsed: JSONObject): Int = withContext(Dispatchers.IO) {
+        if (RustBridge.isRunning()) {
+            val added = RustBridge.importAddressBookJson(parsed.toString())
+            if (added < 0) {
+                Log.w(TAG, "running core rejected address book; refusing to overwrite its live file")
+                return@withContext 0
+            }
+            if (added > 0) prefs().edit().putLong(KEY_LAST_RESTORE_AT, System.currentTimeMillis()).apply()
+            return@withContext added
+        }
         val file = bookFile(context)
         val local = if (file.isFile && file.length() >= 4) {
             runCatching { JSONObject(file.readText()) }.getOrNull()
@@ -279,38 +280,74 @@ class AddressBookBackup @Inject constructor(
         if (added == 0) {
             return "Рой отдал ${envelopes.size} копий, но нового ничего: все адреса уже в азбуке"
         }
-        return "Из ${envelopes.size} копий роя в азбуку добавлено $added адресов (стало ${localEntryCount()}) — вступит в силу после перезапуска приложения"
+        return "Из ${envelopes.size} копий роя в азбуку добавлено $added адресов (стало ${localEntryCount()}) — " +
+            if (RustBridge.isRunning()) "прямой поиск уже запущен" else "вступит в силу после перезапуска"
     }
 
     /**
-     * Раунд 194: своя азбука пуста (свежая установка, файл потерян) -
-     * молча спросить рой и влить копии. Сервер остаётся для самой первой
-     * загрузки (restoreBeforeStart до старта движка, когда роя у узла ещё
-     * нет). Не чаще [SWARM_RESTORE_RETRY_MS]; зовёт петля сервиса.
+     * Empty local book: first request *this snapshot* from swarm holders,
+     * then ask only the address-book shelf if direct discovery found no
+     * authenticated peer. The restored hints enter the already-running core.
      */
     suspend fun autoRestoreIfEmpty(): Unit = withContext(Dispatchers.IO) {
-        val file = bookFile(context)
-        if (file.isFile && file.length() > 4) return@withContext
+        if (localEntryCount() > 0) return@withContext
         val privateKey = privateKey() ?: return@withContext
+        val nodeId = prefs().getString("node_id", null) ?: return@withContext
         val now = System.currentTimeMillis()
-        if (now - prefs().getLong(KEY_LAST_SWARM_RESTORE_AT, 0L) < SWARM_RESTORE_RETRY_MS) return@withContext
-        prefs().edit().putLong(KEY_LAST_SWARM_RESTORE_AT, now).apply()
-        val result = askSwarm(privateKey)
-        Log.i(TAG, "swarm auto-restore: ${result ?: "рой молчал"}")
+        val live = RustBridge.liveSwarmPeerIds().sorted().joinToString("|")
+        // Do not burn the six-hour throttle simply because startup happened
+        // before the first signed PEX response. A newly reached neighbour is
+        // worth asking even if a different one answered recently.
+        if (live.isNotEmpty() &&
+            (live != prefs().getString(KEY_LAST_SWARM_RESTORE_PEERS, null) ||
+                now - prefs().getLong(KEY_LAST_SWARM_RESTORE_AT, 0L) >= SWARM_RESTORE_RETRY_MS)
+        ) {
+            prefs().edit().putLong(KEY_LAST_SWARM_RESTORE_AT, now)
+                .putString(KEY_LAST_SWARM_RESTORE_PEERS, live).apply()
+            val result = askSwarm(privateKey)
+            if (result != null) {
+                Log.i(TAG, "swarm auto-restore: $result")
+                return@withContext
+            }
+        }
+        if (!RustBridge.externalTransportAllowed()) {
+            Log.i(TAG, "address book backup: live swarm/search, external shelf asleep")
+            return@withContext
+        }
+        if (now - prefs().getLong(KEY_LAST_SERVER_RESTORE_AT, 0L) < SERVER_RESTORE_RETRY_MS) return@withContext
+        prefs().edit().putLong(KEY_LAST_SERVER_RESTORE_AT, now).apply()
+        val sealed = botApi.fetchAddressBook(shelfFor(nodeId)) ?: return@withContext
+        val parsed = parseEnvelope(sealed, privateKey) ?: return@withContext
+        val added = mergeIntoLocalBook(parsed)
+        Log.i(TAG, "address book fallback restored $added missing address hints")
     }
 
-    /** Свежий конверт для раздачи по рою (шифруем на месте). */
-    suspend fun currentEnvelope(): String? = withContext(Dispatchers.IO) {
-        val privateKey = privateKey() ?: return@withContext null
+    /** The digest and encrypted copy MUST describe the same read of the file. */
+    private fun currentSnapshot(): Pair<String, String>? {
+        val privateKey = privateKey() ?: return null
         val file = bookFile(context)
-        if (!file.isFile || file.length() < 4) return@withContext null
-        val plain = runCatching { file.readText() }.getOrNull() ?: return@withContext null
-        encrypt(plain.toByteArray(Charsets.UTF_8), privateKey)
+        if (!file.isFile || file.length() < 4) return null
+        val plain = runCatching { file.readBytes() }.getOrNull() ?: return null
+        val envelope = encrypt(plain, privateKey) ?: return null
+        val sha = MessageDigest.getInstance("SHA-256").digest(plain)
+            .joinToString("") { "%02x".format(it) }
+        return envelope to sha
     }
 
-    /** Ежечасный тик: обновить копии на телефонах роя. */
-    suspend fun swarmHourlyTick() {
-        swarm.hourlyTick(currentEnvelope())
+    @Volatile private var lastSwarmShareKey = ""
+    @Volatile private var lastSwarmShareAt = 0L
+
+    /** Re-offer new data to new live neighbours within a minute, without a per-minute fan-out. */
+    suspend fun swarmHourlyTick() = withContext(Dispatchers.IO) {
+        val live = RustBridge.liveSwarmPeerIds().sorted()
+        if (live.isEmpty()) return@withContext
+        val (envelope, sha) = currentSnapshot() ?: return@withContext
+        val key = sha + "|" + live.joinToString("|")
+        val now = System.currentTimeMillis()
+        if (key == lastSwarmShareKey && now - lastSwarmShareAt < 10L * 60_000L) return@withContext
+        swarm.hourlyTick(envelope, sha)
+        lastSwarmShareKey = key
+        lastSwarmShareAt = now
     }
 
     /**

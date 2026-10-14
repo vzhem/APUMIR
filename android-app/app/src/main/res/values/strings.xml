@@ -161,6 +161,10 @@
     <string name="menu_unpin">Открепить</string>
     <string name="menu_open_chat">Открыть чат</string>
     <string name="menu_call">Позвонить</string>
+    <string name="menu_video_call">Видеозвонок</string>
+    <string name="call_flip_camera">Сменить камеру</string>
+    <string name="call_camera_off">Выключить камеру</string>
+    <string name="call_camera_on">Включить камеру</string>
     <string name="menu_share_contact">Поделиться контактом</string>
     <string name="menu_unarchive">Вернуть из архива</string>
     <string name="menu_archive">В архив</string>
@@ -201,7 +205,7 @@
     <string name="chat_attach_file">Прикрепить файл</string>
     <string name="chat_attach_rank_hint">Вложения откроются с ранга «Круг друзей»</string>
     <string name="chat_input_placeholder">Сообщение...</string>
-    <string name="chat_resend_key">Отправить мой ключ ещё раз</string>
+    <string name="chat_resend_key">Отправить открытый ключ</string>
     <string name="chat_history_retry_hint">Попробуйте открыть историю ещё раз</string>
     <string name="action_retry">Повторить</string>
     <!-- Контакты -->
@@ -825,7 +829,7 @@
     <string name="sync_devices_find">Устройства находят себя сами: и отправителю, и приёмнику достаточно одного ника и пароля - вводить адреса не нужно.</string>
     <string name="sync_auto_every6">Раз в ~6 часов ищет копию в фоне. При первом переносе спросит подтверждение перед заменой данных</string>
     <!-- Пакет 27: подсказки чата, QR, аватара, гифок и никнейма -->
-    <string name="chat_peer_key_stale">Сообщения от собеседника не открываются: у него осталась прежняя копия вашего ключа (переустановка или восстановление профиля). Пусть он заново отсканирует ваш QR-код — «Мой QR» в профиле.</string>
+    <string name="chat_peer_key_stale">Несколько входящих конвертов не открылось. Причина неизвестна: пакет мог быть не вам, локальный ключ мог стать недоступен, либо ключи не совпали. Можно повторно отправить собеседнику только свой открытый ключ; не сбрасывайте ключи и не пересканируйте QR по одному этому признаку.</string>
     <string name="chat_own_node">Это ваш собственный узел — собеседника здесь нет. Устройства одного аккаунта синхронизируются сами (Настройки → «Диагностика синхронизации»).</string>
     <string name="qr_not_ready">Код появится, когда профиль будет готов. Откройте приложение чуть позже — ключи ещё создаются.</string>
     <string name="avatar_crop_hint">Двигайте фото пальцем и приближайте щипком. В аватар попадёт то, что видно в круге.</string>
@@ -1238,6 +1242,7 @@
     <string name="fsl_sending">Передача…%1$s</string>
     <string name="fsl_recv_custodian">Приём от хранителя…%1$s</string>
     <string name="fsl_recv">Приём…%1$s</string>
+    <string name="fsl_stalled">Приём остановился…%1$s</string>
     <string name="fsl_preparing">Подготовка…</string>
     <string name="fsl_queued">В очереди (дождётся получателя)</string>
     <string name="fsl_incoming">Входящий файл…</string>
@@ -1574,6 +1579,7 @@
     <string name="story_new">Новая история</string>
     <string name="story_placeholder">Что нового? До 200 знаков</string>
     <string name="story_publish">Опубликовать</string>
+    <string name="story_publish_without_photo">Опубликовать без фото</string>
     <string name="story_open">История</string>
     <string name="story_pause">Пауза</string>
     <string name="story_resume">Продолжить</string>
@@ -1581,6 +1587,10 @@
     <string name="story_next">Далее</string>
     <string name="story_background">Фон %1$d</string>
     <string name="story_lifetime">История доступна друзьям 24 часа</string>
+    <string name="story_delete">Удалить историю</string>
+    <string name="story_delete_q">Удалить эту историю?</string>
+    <string name="story_delete_body">Она сразу исчезнет у всех, кто её видел.</string>
+    <string name="story_delete_confirm">Удалить у всех</string>
     <string name="group_all_topics">Все</string>
     <string name="group_topic_closed_tab">Тема закрыта</string>
     <string name="story_photo">Фото истории</string>
@@ -1595,10 +1605,15 @@
     <string name="story_camera_permission_denied">Разрешите доступ к камере, чтобы сделать фото.</string>
     <string name="story_camera_unavailable">Камера недоступна на этом устройстве.</string>
     <string name="story_camera_capture_failed">Не удалось сделать фото. Попробуйте ещё раз.</string>
+    <string name="story_camera_flash_off">Вспышка выключена</string>
+    <string name="story_camera_flash_on">Вспышка включена</string>
+    <string name="story_camera_flash_auto">Вспышка авто</string>
     <string name="story_remove_photo">Убрать фото</string>
     <string name="story_caption">Подпись (необязательно)</string>
     <string name="story_photo_preparing">Подготавливаем фото…</string>
     <string name="story_photo_failed">Не удалось открыть фото. Выберите другое.</string>
+    <string name="story_photo_unavailable">Фото не открылось на этом телефоне</string>
+    <string name="story_photo_needs_update">Фото увидят друзья на новой версии APU</string>
     <string name="swarm_mode_normal">Обычный</string>
     <string name="swarm_mode_economy">Экономный</string>
     <string name="swarm_mode_unlimited">Без ограничений</string>

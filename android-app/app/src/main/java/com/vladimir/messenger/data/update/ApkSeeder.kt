@@ -21,6 +21,8 @@ import com.vladimir.messenger.data.local.dao.ContactDao
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.security.MessageSealer
+import com.vladimir.messenger.data.security.IdentitySigningKeyStore
+import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.swarm.SwarmPeerDirectory
 import com.vladimir.messenger.service.UpdateChecker
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -85,6 +87,8 @@ class ApkSeeder @Inject constructor(
     private val store = ApkUpdateStore(seedRoot)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
+    /** Serializes init and pump auto-seeding even before the shared preparation mutex. */
+    private val selfSeedMutex = Mutex()
 
     // ── Состояние для настроек ──────────────────────────────────────────────
 
@@ -258,6 +262,7 @@ class ApkSeeder @Inject constructor(
         updateChecker.onPatchKept = { patchFile, fromV, toV, apkSha ->
             scope.launch { runCatching { adoptPatchFromSite(patchFile, fromV, toV, apkSha) } }
         }
+        updateChecker.askSwarmForUpdate = { askNeighbors() }
     }
 
     /** Восстановить состояние с диска; не дороже одного раза (повтор при сбое). */
@@ -353,8 +358,12 @@ class ApkSeeder @Inject constructor(
                     expectedSha256 = sha,
                 )
             } catch (error: Exception) {
-                Log.w(TAG, "seed prepare failed for $sha: ${error.message}")
-                null
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                _seed.value = null
+                val kind = error.javaClass.simpleName.take(64)
+                Log.w(TAG, "seed preparation failed (kind=$kind)")
+                TransferDiagnostics.recordWarning("update", "раздача APK не подготовлена: ошибка $kind")
+                return@withLock "Не удалось подготовить раздачу ($kind); повтор позже"
             }
             if (prepared == null) {
                 _seed.value = null
@@ -747,7 +756,7 @@ class ApkSeeder @Inject constructor(
     suspend fun askNeighbors(): Int {
         val version = ApkUpdate.normalize(currentAppVersion())
         if (ApkUpdate.parseVersion(version) == null) return 0
-        val targets = knownNodes()
+        val targets = com.vladimir.messenger.data.RustBridge.liveSwarmPeerIds().take(8)
         if (targets.isEmpty()) return 0
         runCatching {
             delivery.deliver(ApkUpdate.CHAT_ID, GroupWire.buildUpdateAsk(version), targets)
@@ -768,11 +777,11 @@ class ApkSeeder @Inject constructor(
         if (now - lastAutoAskAtMs < AUTO_ASK_INTERVAL_MS) return
         if (pending != null || patchPending != null) return
         if (_offers.value.isNotEmpty() || _patchOffers.value.isNotEmpty()) return
-        lastAutoAskAtMs = now
         val version = ApkUpdate.normalize(currentAppVersion())
         if (ApkUpdate.parseVersion(version) == null) return
-        val targets = knownNodes().take(AUTO_ASK_FANOUT)
+        val targets = com.vladimir.messenger.data.RustBridge.liveSwarmPeerIds().take(AUTO_ASK_FANOUT)
         if (targets.isEmpty()) return
+        lastAutoAskAtMs = now
         runCatching {
             delivery.deliver(ApkUpdate.CHAT_ID, GroupWire.buildUpdateAsk(version), targets)
         }.onFailure { Log.w(TAG, "auto update ask failed: ${it.message}") }
@@ -955,22 +964,20 @@ class ApkSeeder @Inject constructor(
      * останавливал раздачу («Остановить раздачу»), не вмешиваемся, пока он
      * сам не пометит файл. Раздача старее моей — снимается, текущая важнее.
      */
-    suspend fun ensureSelfSeeding() {
-        if (store.loadAutoSeedOptOut()) return
+    suspend fun ensureSelfSeeding(): Unit = selfSeedMutex.withLock {
+        if (store.loadAutoSeedOptOut()) return@withLock
         val current = ApkUpdate.normalize(currentAppVersion())
-        if (ApkUpdate.parseVersion(current) == null) return
+        if (ApkUpdate.parseVersion(current) == null) return@withLock
         val seed = store.loadSeed()
         if (seed != null) {
             val seedVsCurrent = ApkUpdate.compareVersions(seed.version, current)
             if (seedVsCurrent != null && seedVsCurrent == 0) {
-                // Раздаю ровно свою версию: проверяю, что строка раздачи жива.
                 val row = transferDao.getForFile(ApkUpdate.CHAT_ID, seed.sha256)
                     .firstOrNull { router.groupSeeder.canSeed(it, router::hasTransferKey) }
-                if (row != null) return
+                if (row != null) return@withLock
                 Log.i(TAG, "self-seed: строка раздачи v$current потеряна - достраиваю")
-                // Падаем ниже: пересоберём копию и строку заново.
             } else if (seedVsCurrent == null || seedVsCurrent > 0) {
-                return
+                return@withLock
             } else {
                 dropSeedCopy(seed)
                 store.saveSeed(null)
@@ -978,14 +985,48 @@ class ApkSeeder @Inject constructor(
                 Log.i(TAG, "self-seed: прежняя раздача v${seed.version} устарела, снимаю")
             }
         }
+        val now = System.currentTimeMillis()
+        val retry = appContext.getSharedPreferences(SELF_SEED_RETRY_PREFS, Context.MODE_PRIVATE)
+        if (!SelfSeedRetryPolicy.mayAttempt(
+                current,
+                retry.getString(SELF_SEED_RETRY_VERSION, null),
+                retry.getLong(SELF_SEED_RETRY_AT, 0L),
+                now,
+            )) return@withLock
+
+        // A prepared copy without a signing/file-exchange identity cannot wrap its key for a
+        // requester. Do not repeatedly hash/copy/encrypt the entire installed APK in this state.
+        // Read-only modes must not create new identities or silently rotate a broken Keystore key.
+        val keysReady = runCatching {
+            IdentitySigningKeyStore.mode(appContext) == IdentitySigningKeyStore.Mode.READY &&
+                uniffi.p2p_core.identitySigningMode() == "legacy+ed25519-sidecar-v1" &&
+                FileExchangeKeyStore.mode(appContext) == FileExchangeKeyStore.Mode.READY &&
+                FileExchangeKeyStore.publicBinding(appContext)?.let {
+                    uniffi.p2p_core.fileExchangeBindingNodeId(it) == RustBridge.nodeId()
+                } == true
+        }.getOrDefault(false)
+        // Record before preparation: even a process death mid-hash must not cause a hot loop.
+        if (!retry.edit().putString(SELF_SEED_RETRY_VERSION, current)
+                .putLong(SELF_SEED_RETRY_AT, now).commit()) {
+            Log.w(TAG, "self-seed deferred: cannot persist retry budget")
+            return@withLock
+        }
+        if (!keysReady) {
+            _seed.value = null
+            Log.w(TAG, "self-seed deferred: local identity unavailable; retry after cooldown")
+            TransferDiagnostics.recordWarning("update", "самосев отложен: локальная подписывающая/файловая identity не готова")
+            return@withLock
+        }
         val source = File(appContext.applicationInfo.sourceDir)
-        if (!source.isFile) return
+        if (!source.isFile) return@withLock
         val error = startSeeding(source, current, source.length(), "APU-v$current.apk", autoReseed = true)
         if (error.isNotBlank()) {
-            Log.w(TAG, "self-seed v$current не вышел: $error")
+            Log.w(TAG, "self-seed v$current deferred: $error")
         } else {
+            retry.edit().remove(SELF_SEED_RETRY_VERSION).remove(SELF_SEED_RETRY_AT).apply()
             Log.i(TAG, "self-seed: раздаю собственный APK v$current")
         }
+        Unit
     }
 
     /**
@@ -1692,6 +1733,9 @@ class ApkSeeder @Inject constructor(
 
     companion object {
         private const val TAG = "ApkSeeder"
+        private const val SELF_SEED_RETRY_PREFS = "apu_self_seed_retry"
+        private const val SELF_SEED_RETRY_VERSION = "version"
+        private const val SELF_SEED_RETRY_AT = "attempt_at_ms"
 
         /** Объявление раздачи: не чаще раза в столько. */
         const val ANNOUNCE_INTERVAL_MS = 10L * 60 * 1000

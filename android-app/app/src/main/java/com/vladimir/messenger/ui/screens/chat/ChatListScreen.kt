@@ -164,6 +164,7 @@ fun ChatListScreen(
     var shareCardFor by remember { mutableStateOf<com.vladimir.messenger.domain.model.Chat?>(null) }
     var qrInvite by remember { mutableStateOf<Pair<String, String>?>(null) }
     var muteTarget by remember { mutableStateOf<NotificationMuteTarget?>(null) }
+    var storyComposer by remember { mutableStateOf(false) }
 
     // Листалка разделов. Страницы едут за пальцем, поэтому выбранный раздел и
     // страница обязаны ходить парой: тап по чипсу листает страницу, а
@@ -206,7 +207,7 @@ fun ChatListScreen(
     // страница, поэтому жест возвращает на вкладку «Все». Приложение
     // закрывается как обычно, только когда уже стоишь на «Все»
     // (владелец, 2026-09-17).
-    BackHandler(enabled = pagerState.settledPage != 0) {
+    BackHandler(enabled = !storyComposer && pagerState.settledPage != 0) {
         pagerScope.launch { pagerState.animateScrollToPage(0) }
     }
 
@@ -392,7 +393,8 @@ fun ChatListScreen(
                     val section = uiState.sections.getOrNull(page) ?: return@HorizontalPager
                     SectionPage(
                         section = section,
-                        onPublishStory = { text, bg, photo -> viewModel.publishStory(text, bg, photo) },
+                        onAddStory = { storyComposer = true },
+                        onDeleteStory = viewModel::deleteStory,
                         // Готовый список раздела, посчитанный в фоне. Раньше
                         // здесь шёл пересчёт прямо во время отрисовки - при
                         // сотнях чатов это подвешивало жест листания.
@@ -443,6 +445,15 @@ fun ChatListScreen(
             }
         }
     }
+        if (storyComposer) {
+            com.vladimir.messenger.ui.components.StoryComposerDialog(
+                onDismiss = { storyComposer = false },
+                onPublish = { text, bg, photo ->
+                    viewModel.publishStory(text, bg, photo)
+                    storyComposer = false
+                },
+            )
+        }
     }
 
     // Раунд 158: группа/канал для рассылки приглашения контактам APU.
@@ -1013,8 +1024,8 @@ private fun InviteActionBubble(
 @Composable
 private fun SectionPage(
     section: InboxSection,
-    /** Публикация своей истории (ViewModel списка чатов). */
-    onPublishStory: (String, Int, String?) -> Unit = { _, _, _ -> },
+    onAddStory: () -> Unit = {},
+    onDeleteStory: (String) -> Unit = {},
     items: List<InboxItem>,
     isSearchActive: Boolean,
     /**
@@ -1055,22 +1066,13 @@ private fun SectionPage(
     val storiesAll by com.vladimir.messenger.data.story.StoryStore.items.collectAsStateWithLifecycle()
     val storiesNow = remember(storiesAll) { com.vladimir.messenger.data.story.StoryStore.active() }
     val showStories = section == InboxSection.All || section == InboxSection.Chats
-    var storyComposer by remember { mutableStateOf(false) }
     var storyOpenAuthor by remember { mutableStateOf<String?>(null) }
-    if (storyComposer) {
-        com.vladimir.messenger.ui.components.StoryComposerDialog(
-            onDismiss = { storyComposer = false },
-            onPublish = { text, bg, photo ->
-                onPublishStory(text, bg, photo)
-                storyComposer = false
-            },
-        )
-    }
     storyOpenAuthor?.let { authorId ->
         com.vladimir.messenger.ui.components.StoryViewerDialog(
             stories = storiesAll.filter { it.authorId == authorId && System.currentTimeMillis() - it.createdAtMs < com.vladimir.messenger.data.story.StoryStore.LIFETIME_MS }
                 .sortedBy { it.createdAtMs },
             onDismiss = { storyOpenAuthor = null },
+            onDeleteMine = onDeleteStory,
         )
     }
     val openAdmin = section == InboxSection.AdminGroups ||
@@ -1217,7 +1219,7 @@ private fun SectionPage(
                     if (showStories) item(key = "stories") {
                         com.vladimir.messenger.ui.components.StoriesStrip(
                             stories = storiesNow,
-                            onAddClick = { storyComposer = true },
+                            onAddClick = onAddStory,
                             onOpenAuthor = { storyOpenAuthor = it },
                         )
                     }

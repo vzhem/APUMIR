@@ -72,6 +72,16 @@ class ShortLinksTest {
         assertFalse(ShortLinks.isAllowedTarget(null))
     }
 
+    @Test
+    fun `peer mapping matches worker digest before it can be cached`() {
+        val target = "p2pmessenger://add?node_id=pk_0123&name=Me"
+        // SHA-256 digest in the worker's 54-symbol alphabet, not hex/base64.
+        assertTrue(ShortLinks.matchesWorkerCode("NLAD6j9GND", target))
+        assertFalse(ShortLinks.matchesWorkerCode("NLAD6j9GND", "p2pmessenger://add?node_id=pk_9999&name=Me"))
+        assertFalse(ShortLinks.matchesWorkerCode("NLAD6j9GND", "https://evil.example/"))
+        assertFalse(ShortLinks.matchesWorkerCode("nlAD6j9GND", target))
+    }
+
     /** Полная ссылка, которую прячем за кодом, разбирается обратно как приглашение. */
     @Test
     fun `deep link round-trips through GroupInviteLinks`() {

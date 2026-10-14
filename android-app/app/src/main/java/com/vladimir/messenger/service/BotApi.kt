@@ -2,6 +2,7 @@ package com.vladimir.messenger.service
 
 import android.content.Context
 import android.util.Log
+import com.vladimir.messenger.data.RustBridge
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -173,6 +174,7 @@ class BotApi @Inject constructor(
      * Скачать выбранную гифку (байты с CDN каталога). null - не вышло.
      */
     suspend fun downloadGif(url: String): ByteArray? = withContext(Dispatchers.IO) {
+        if (!RustBridge.externalTransportAllowed()) return@withContext null
         try {
             require(url.startsWith("https://")) { "Only https" }
             val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
@@ -263,6 +265,15 @@ class BotApi @Inject constructor(
      *         сервер недоступен.
      */
     suspend fun fetchIdentityVault(shelf: String): String? = withContext(Dispatchers.IO) {
+        // A brand-new installation with NO identity cannot address/decrypt a
+        // swarm copy; this one explicitly requested recovery is the bootstrap
+        // exception. Once an engine exists it obeys the normal direct gate.
+        val localPrefs = context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+        val hasIdentity = localPrefs.getBoolean("identity_created", false) ||
+            localPrefs.contains("existing_public_key") || localPrefs.contains("node_id")
+        if ((hasIdentity || RustBridge.isRunning()) && !RustBridge.externalTransportAllowed()) {
+            return@withContext null
+        }
         try {
             // Раунд 207: сервер отвечает {"error":"not found"} на пустую полку
             // и {"vault":…} на занятую. Пустая полка и недоступная сеть - разные
@@ -354,6 +365,7 @@ class BotApi @Inject constructor(
     }
 
     private fun postJson(url: String, body: String, timeoutMs: Int = HTTP_TIMEOUT): String? {
+        if (!RustBridge.externalTransportAllowed()) return null
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             setRequestProperty("Content-Type", "application/json")
@@ -378,6 +390,7 @@ class BotApi @Inject constructor(
     }
 
     private fun getJson(url: String, timeoutMs: Int = HTTP_TIMEOUT): String? {
+        if (!RustBridge.externalTransportAllowed()) return null
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = timeoutMs

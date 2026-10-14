@@ -107,8 +107,8 @@ data class GroupChatUiState(
     val myGifs: List<com.vladimir.messenger.data.gif.GifLibEntry> = emptyList(),
     val swarmGifs: List<com.vladimir.messenger.data.gif.SwarmGif> = emptyList(),
     val swarmStatus: String? = null,
-    /** Принятый файл, который человек просит сохранить в папку (системное окно). */
-    val pendingSave: com.vladimir.messenger.data.local.entity.FileTransferEntity? = null,
+    /** Файл, который человек просит сохранить на телефон (системное окно). */
+    val pendingSave: com.vladimir.messenger.data.file.PendingFileExport? = null,
     // ── р250: ответы на сообщения ──
     /** Сообщение, на которое отвечаем: цитата показывается над полем ввода. */
     val replyTo: MessageEntity? = null,
@@ -892,18 +892,25 @@ class GroupChatViewModel @Inject constructor(
         fileTransferRouter.receivedFileFor(transfer)
 
     fun requestSaveReceivedFile(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity) {
-        if (transfer.direction != "INCOMING" || transfer.state != "COMPLETE") return
-        _uiState.update { it.copy(pendingSave = transfer) }
+        val file = receivedFileFor(transfer) ?: return
+        requestSaveFile(transfer.displayName, file)
+    }
+
+    fun requestSaveFile(displayName: String, file: java.io.File) {
+        if (!file.isFile) return
+        _uiState.update {
+            it.copy(pendingSave = com.vladimir.messenger.data.file.PendingFileExport(displayName, file))
+        }
     }
 
     fun onSaveTargetPicked(target: android.net.Uri?) {
-        val transfer = _uiState.value.pendingSave
+        val pending = _uiState.value.pendingSave
         _uiState.update { it.copy(pendingSave = null) }
-        if (target == null || transfer == null) return
+        if (target == null || pending == null) return
         viewModelScope.launch {
-            val ok = runCatching { fileTransferRouter.exportReceivedFile(transfer, target) }.getOrDefault(false)
+            val ok = runCatching { fileTransferRouter.exportFile(pending.source, target) }.getOrDefault(false)
             _uiState.update {
-                it.copy(error = if (ok) appContext.getString(R.string.gc_saved_as, transfer.displayName) else appContext.getString(R.string.gc_save_failed))
+                it.copy(error = if (ok) appContext.getString(R.string.gc_saved_as, pending.displayName) else appContext.getString(R.string.gc_save_failed))
             }
         }
     }

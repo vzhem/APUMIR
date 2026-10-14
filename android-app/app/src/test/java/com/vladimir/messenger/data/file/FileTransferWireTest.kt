@@ -49,6 +49,19 @@ class FileTransferWireTest {
     }
 
     @Test
+    fun relayFallbackReusesIdForSameFragmentButNotForAnotherRecipientOrFragment() {
+        val packet = FileTransferWire.encodeEncodedPacket(FileTransferPacketCodec.encode(samplePacket()))
+        val id = FileTransferWire.relayFallbackMessageId("pk_recipient", packet)
+        assertEquals(id, FileTransferWire.relayFallbackMessageId("pk_recipient", packet))
+        assertTrue(id.startsWith("frag-"))
+        assertEquals(69, id.length)
+        assertTrue(id.length <= FileTransferWire.MAX_MESSAGE_ID_BYTES)
+        assertFalse(id.contains('|'))
+        assertFalse(id == FileTransferWire.relayFallbackMessageId("pk_other", packet))
+        assertFalse(id == FileTransferWire.relayFallbackMessageId("pk_recipient", packet + "A"))
+    }
+
+    @Test
     fun messageIdsAreDeterministicAndDelimiterSafe() {
         assertEquals(
             FileTransferWire.chunkMessageId(transferIdHex, 3, 0),

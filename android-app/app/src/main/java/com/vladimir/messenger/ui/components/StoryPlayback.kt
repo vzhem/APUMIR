@@ -9,6 +9,13 @@ internal object StoryPlayback {
     fun advance(progress: Float, frameMs: Long, durationMs: Long): Float =
         (progress + frameMs.coerceIn(0L, 100L).toFloat() / durationMs.coerceAtLeast(1L)).coerceIn(0f, 1f)
 
+    /**
+     * Диалог «удалить?» должен останавливать ленту. Иначе за время подтверждения
+     * долистывается следующая история, и корзина снимает уже её.
+     */
+    fun frozen(held: Boolean, userPaused: Boolean, confirmDelete: Boolean, resumed: Boolean): Boolean =
+        held || userPaused || confirmDelete || !resumed
+
     enum class Gesture { NONE, PREVIOUS, NEXT, DISMISS }
 
     fun gesture(dx: Float, dy: Float, dragged: Boolean, cancelled: Boolean, elapsedMs: Long,

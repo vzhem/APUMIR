@@ -22,8 +22,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -31,6 +34,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -41,11 +45,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.vladimir.messenger.data.call.CallIncoming
 import com.vladimir.messenger.data.call.CallStateMachine
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
@@ -68,6 +74,7 @@ fun CallScreen(
     viewModel: CallViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val remoteVideo by viewModel.remoteVideo.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     // Микрофон: запрос со входом на экран; «Принять» без разрешения — сначала запрос.
@@ -85,11 +92,37 @@ fun CallScreen(
     fun hasMicPermission(): Boolean = ContextCompat.checkSelfPermission(
         context, Manifest.permission.RECORD_AUDIO,
     ) == PackageManager.PERMISSION_GRANTED
+    fun hasCameraPermission(): Boolean = ContextCompat.checkSelfPermission(
+        context, Manifest.permission.CAMERA,
+    ) == PackageManager.PERMISSION_GRANTED
+    var cameraGranted by remember { mutableStateOf(hasCameraPermission()) }
+    val cameraLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        cameraGranted = granted
+        if (granted && state.video && !state.cameraOn) viewModel.toggleCamera()
+    }
 
     LaunchedEffect(Unit) {
         if (!hasMicPermission()) micLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
+    LaunchedEffect(state.video) {
+        if (state.video && !cameraGranted) cameraLauncher.launch(Manifest.permission.CAMERA)
+    }
     LaunchedEffect(Unit) { viewModel.ensureStarted() }
+
+    // «Принять» с системного уведомления: тот же путь, что кнопка на экране.
+    val autoAnswer = (context as? android.app.Activity)?.intent
+        ?.getBooleanExtra(CallIncoming.EXTRA_ANSWER, false) == true
+    LaunchedEffect(autoAnswer, state.phase) {
+        if (!autoAnswer || state.phase != CallStateMachine.Phase.INCOMING) return@LaunchedEffect
+        (context as? android.app.Activity)?.intent?.removeExtra(CallIncoming.EXTRA_ANSWER)
+        if (hasMicPermission()) viewModel.accept()
+        else {
+            pendingAccept = true
+            micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
 
     // Конец: показываем причину русским текстом и уходим. Если за эти полторы
     // секунды начался НОВЫЙ звонок (быстрый перезвон), экран не сворачиваем.
@@ -120,8 +153,31 @@ fun CallScreen(
         }
     }
 
+    val view = LocalView.current
+    DisposableEffect(state.video, state.phase) {
+        val keep = state.video &&
+            state.phase != CallStateMachine.Phase.ENDED &&
+            state.phase != CallStateMachine.Phase.IDLE
+        view.keepScreenOn = keep
+        onDispose { view.keepScreenOn = false }
+    }
+
+    var frontCamera by remember { mutableStateOf(true) }
+    val mediaLive = state.phase == CallStateMachine.Phase.CONNECTING ||
+        state.phase == CallStateMachine.Phase.ACTIVE
+    val inCall = state.phase != CallStateMachine.Phase.ENDED &&
+        state.phase != CallStateMachine.Phase.IDLE
+    val showLocalCamera = state.video && state.cameraOn && cameraGranted && inCall
+    val showCameraOffPip = state.video && inCall && !showLocalCamera
+
     Box(modifier = Modifier.fillMaxSize()) {
         ChatWallpaper()
+        if (state.video) {
+            CallRemoteFrame(
+                packed = remoteVideo,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
         Scaffold(containerColor = Color.Transparent) { padding ->
             Column(
                 modifier = Modifier
@@ -158,7 +214,7 @@ fun CallScreen(
 
                 Text(
                     statusText(state, nowMs),
-                    color = ApuBubbleMutedColor,
+                    color = if (state.video) Color.White.copy(alpha = 0.9f) else ApuBubbleMutedColor,
                     style = MaterialTheme.typography.bodyLarge,
                 )
                 if (state.phase == CallStateMachine.Phase.ACTIVE && state.recovering) {
@@ -180,27 +236,29 @@ fun CallScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(48.dp))
+                if (!state.video) {
+                    Spacer(modifier = Modifier.height(48.dp))
 
-                // Аватар-круг с первой буквой: объёмное золотое кольцо и
-                // блеск по верхней кромке (тот же приём, что у знака VIP и у
-                // золотых плиток), буква остаётся на своей подложке и читается.
-                Box(
-                    modifier = Modifier
-                        .size(132.dp)
-                        .apuPremiumLift(10.dp, CircleShape, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primaryContainer)
-                        .border(3.dp, apuGoldBrush(), CircleShape)
-                        .apuPremiumGloss(CircleShape, intensity = 0.5f, topFraction = 0.55f),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        state.peerName.firstOrNull()?.uppercase() ?: "?",
-                        style = MaterialTheme.typography.displayLarge,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        fontWeight = FontWeight.Bold,
-                    )
+                    // Аватар-круг с первой буквой: объёмное золотое кольцо и
+                    // блеск по верхней кромке (тот же приём, что у знака VIP и у
+                    // золотых плиток), буква остаётся на своей подложке и читается.
+                    Box(
+                        modifier = Modifier
+                            .size(132.dp)
+                            .apuPremiumLift(10.dp, CircleShape, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f))
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer)
+                            .border(3.dp, apuGoldBrush(), CircleShape)
+                            .apuPremiumGloss(CircleShape, intensity = 0.5f, topFraction = 0.55f),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            state.peerName.firstOrNull()?.uppercase() ?: "?",
+                            style = MaterialTheme.typography.displayLarge,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.weight(1f))
@@ -224,9 +282,59 @@ fun CallScreen(
                     },
                     onMute = viewModel::toggleMute,
                     onSpeaker = viewModel::toggleSpeaker,
+                    onCamera = {
+                        if (state.cameraOn) {
+                            viewModel.toggleCamera()
+                        } else if (!cameraGranted) {
+                            cameraLauncher.launch(Manifest.permission.CAMERA)
+                        } else {
+                            viewModel.toggleCamera()
+                        }
+                    },
                 )
 
                 Spacer(modifier = Modifier.height(72.dp))
+            }
+        }
+        if (showLocalCamera || showCameraOffPip) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 16.dp, bottom = 140.dp)
+                    .size(width = 108.dp, height = 144.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, Color.White.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+                    .background(Color(0xFF1A1A1A)),
+            ) {
+                if (showLocalCamera) {
+                    CallLocalPreview(
+                        send = mediaLive,
+                        front = frontCamera,
+                        onJpeg = { viewModel.sendVideoFrame(it) },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    IconButton(
+                        onClick = { frontCamera = !frontCamera },
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .size(36.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Cameraswitch,
+                            contentDescription = stringResource(R.string.call_flip_camera),
+                            tint = Color.White,
+                        )
+                    }
+                } else {
+                    Icon(
+                        Icons.Default.VideocamOff,
+                        contentDescription = stringResource(R.string.call_camera_on),
+                        tint = Color.White.copy(alpha = 0.7f),
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .size(36.dp),
+                    )
+                }
             }
         }
     }
@@ -239,9 +347,11 @@ private fun CallButtons(
     onRed: () -> Unit,
     onMute: () -> Unit,
     onSpeaker: () -> Unit,
+    onCamera: () -> Unit,
 ) {
+    val gap = if (state.video) 16.dp else 32.dp
     Row(
-        horizontalArrangement = Arrangement.spacedBy(32.dp),
+        horizontalArrangement = Arrangement.spacedBy(gap),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         when (state.phase) {
@@ -262,19 +372,9 @@ private fun CallButtons(
                 }
             }
 
-            CallStateMachine.Phase.ACTIVE -> {
-                RoundCallButton(
-                    background = if (state.muted) MaterialTheme.colorScheme.error
-                    else Color(0xFFF5F7FA).copy(alpha = 0.95f),
-                    description = if (state.muted) stringResource(R.string.call_mic_on) else stringResource(R.string.call_mic_off),
-                    onClick = onMute,
-                ) {
-                    Icon(
-                        if (state.muted) Icons.Default.MicOff else Icons.Default.Mic,
-                        if (state.muted) stringResource(R.string.call_mic_on) else stringResource(R.string.call_mic_off),
-                        tint = if (state.muted) Color.White else ApuBubbleMutedColor,
-                    )
-                }
+            CallStateMachine.Phase.ACTIVE, CallStateMachine.Phase.CONNECTING -> {
+                MuteCallButton(state, onMute)
+                if (state.video) CameraCallButton(state, onCamera)
                 RoundCallButton(
                     background = MaterialTheme.colorScheme.error,
                     description = stringResource(R.string.call_end),
@@ -283,24 +383,14 @@ private fun CallButtons(
                 ) {
                     Icon(Icons.Default.CallEnd, stringResource(R.string.call_end), tint = Color.White)
                 }
-                RoundCallButton(
-                    background = if (state.speaker) MaterialTheme.colorScheme.primary
-                    else Color(0xFFF5F7FA).copy(alpha = 0.95f),
-                    description = if (state.speaker) stringResource(R.string.call_speaker_off) else stringResource(R.string.call_speaker),
-                    onClick = onSpeaker,
-                ) {
-                    Icon(
-                        Icons.Default.VolumeUp,
-                        stringResource(R.string.call_speaker),
-                        tint = if (state.speaker) MaterialTheme.colorScheme.onPrimary
-                        else ApuBubbleMutedColor,
-                    )
-                }
+                SpeakerCallButton(state, onSpeaker)
             }
 
             else -> {
-                // OFFERING / RINGING / CONNECTING / ENDED: только красная трубка.
+                // OFFERING / RINGING: гудки в трубку; динамик — отдельная кнопка.
                 if (state.phase != CallStateMachine.Phase.ENDED) {
+                    if (state.video) CameraCallButton(state, onCamera)
+                    SpeakerCallButton(state, onSpeaker)
                     RoundCallButton(
                         background = MaterialTheme.colorScheme.error,
                         description = stringResource(R.string.call_cancel),
@@ -312,6 +402,64 @@ private fun CallButtons(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MuteCallButton(
+    state: com.vladimir.messenger.data.call.CallManager.CallUiState,
+    onMute: () -> Unit,
+) {
+    RoundCallButton(
+        background = if (state.muted) MaterialTheme.colorScheme.error
+        else Color(0xFFF5F7FA).copy(alpha = 0.95f),
+        description = if (state.muted) stringResource(R.string.call_mic_on) else stringResource(R.string.call_mic_off),
+        onClick = onMute,
+    ) {
+        Icon(
+            if (state.muted) Icons.Default.MicOff else Icons.Default.Mic,
+            if (state.muted) stringResource(R.string.call_mic_on) else stringResource(R.string.call_mic_off),
+            tint = if (state.muted) Color.White else ApuBubbleMutedColor,
+        )
+    }
+}
+
+@Composable
+private fun SpeakerCallButton(
+    state: com.vladimir.messenger.data.call.CallManager.CallUiState,
+    onSpeaker: () -> Unit,
+) {
+    RoundCallButton(
+        background = if (state.speaker) MaterialTheme.colorScheme.primary
+        else Color(0xFFF5F7FA).copy(alpha = 0.95f),
+        description = if (state.speaker) stringResource(R.string.call_speaker_off) else stringResource(R.string.call_speaker),
+        onClick = onSpeaker,
+    ) {
+        Icon(
+            Icons.Default.VolumeUp,
+            stringResource(R.string.call_speaker),
+            tint = if (state.speaker) MaterialTheme.colorScheme.onPrimary
+            else ApuBubbleMutedColor,
+        )
+    }
+}
+
+@Composable
+private fun CameraCallButton(
+    state: com.vladimir.messenger.data.call.CallManager.CallUiState,
+    onCamera: () -> Unit,
+) {
+    RoundCallButton(
+        background = if (!state.cameraOn) MaterialTheme.colorScheme.error
+        else Color(0xFFF5F7FA).copy(alpha = 0.95f),
+        description = if (state.cameraOn) stringResource(R.string.call_camera_off) else stringResource(R.string.call_camera_on),
+        onClick = onCamera,
+    ) {
+        Icon(
+            if (state.cameraOn) Icons.Default.Videocam else Icons.Default.VideocamOff,
+            if (state.cameraOn) stringResource(R.string.call_camera_off) else stringResource(R.string.call_camera_on),
+            tint = if (state.cameraOn) ApuBubbleMutedColor else Color.White,
+        )
     }
 }
 

@@ -17,10 +17,14 @@ class FileTransferSenderTest {
     private val transportSends = mutableListOf<Pair<String, String>>() // messageId to recipient
     private val transferIdHex = "0123456789abcdef0123456789abcdef"
     private var now = 1_000_000L
+    private var transportDeliver = true
+    private var useDirect = false
+    private var directOk = false
+    private val directCalls = mutableListOf<String>()
 
     private val transport = PacketTransport { messageId, _, recipientNodeId, _ ->
         transportSends += messageId to recipientNodeId
-        true
+        transportDeliver
     }
 
     private val binding = ByteArray(96) { 7 }
@@ -48,6 +52,14 @@ class FileTransferSenderTest {
         transport = transport,
         ownBindingProvider = { binding.copyOf() },
         nowMs = { now },
+        directTransport = if (useDirect) {
+            { peer, _ ->
+                directCalls += peer
+                directOk
+            }
+        } else {
+            null
+        },
         binaryTransport = if (withBinary) binaryTransport else null,
     )
 
@@ -56,6 +68,13 @@ class FileTransferSenderTest {
         chunkRoot = Files.createTempDirectory("apu-sender-chunks-").toFile()
         chunkStore = FileTransferChunkStore(chunkRoot)
         dao = FakeFileTransferDao()
+        transportDeliver = true
+        useDirect = false
+        directOk = false
+        directCalls.clear()
+        transportSends.clear()
+        binarySends.clear()
+        binaryDeliver = true
     }
 
     @After
@@ -319,7 +338,7 @@ class FileTransferSenderTest {
     }
 
     @Test
-    fun binaryFailurePausesTransferLikeOfflineRecipient() = runTest {
+    fun binaryFailureFallsBackToTextChunks() = runTest {
         dao.insertNewTransfer(entity(chunkCount = 2, chunkSize = 1024, totalBytes = 2048))
         stage(chunkCount = 2, chunkSize = 1024, lastChunkBytes = 1024)
         binaryDeliver = false
@@ -329,10 +348,40 @@ class FileTransferSenderTest {
             pumpOnce()
         }
 
-        assertEquals("WAITING_RECIPIENT", dao.getTransfer(transferIdHex)!!.state)
-        // Оффер ушёл (передачу принять есть что), текстовых кусков не было.
+        assertEquals("SENT", dao.getTransfer(transferIdHex)!!.state)
         assertTrue(transportSends.any { it.first == FileTransferWire.offerMessageId(transferIdHex, 0) })
-        assertTrue(transportSends.none { Regex("c\\d+f\\d+$").containsMatchIn(it.first) })
+        assertTrue(transportSends.any { it.first == FileTransferWire.chunkMessageId(transferIdHex, 0, 0) })
+        assertTrue(transportSends.any { it.first == FileTransferWire.chunkMessageId(transferIdHex, 1, 0) })
         assertTrue(binarySends.isNotEmpty())
+    }
+
+    @Test
+    fun directTransportFailureFallsBackToDurableBroker() = runTest {
+        dao.insertNewTransfer(entity(chunkCount = 2, chunkSize = 1024, totalBytes = 2048))
+        stage(chunkCount = 2, chunkSize = 1024, lastChunkBytes = 1024)
+        useDirect = true
+        directOk = false
+
+        sender().pumpOnce()
+
+        assertEquals("SENT", dao.getTransfer(transferIdHex)!!.state)
+        assertTrue(directCalls.isNotEmpty())
+        assertTrue(transportSends.any { it.first == FileTransferWire.chunkMessageId(transferIdHex, 0, 0) })
+        assertTrue(transportSends.any { it.first == FileTransferWire.chunkMessageId(transferIdHex, 1, 0) })
+    }
+
+    @Test
+    fun durableFailureAfterDirectFailurePausesTransfer() = runTest {
+        dao.insertNewTransfer(entity(chunkCount = 2, chunkSize = 1024, totalBytes = 2048))
+        stage(chunkCount = 2, chunkSize = 1024, lastChunkBytes = 1024)
+        useDirect = true
+        directOk = false
+        transportDeliver = false
+
+        sender().pumpOnce()
+
+        assertEquals("WAITING_RECIPIENT", dao.getTransfer(transferIdHex)!!.state)
+        assertTrue(directCalls.isNotEmpty())
+        assertTrue(transportSends.isNotEmpty())
     }
 }

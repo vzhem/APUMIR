@@ -282,6 +282,12 @@ class CallAudioEngine(context: Context) {
         return speakerOn
     }
 
+    fun setSpeaker(on: Boolean): Boolean {
+        speakerOn = on
+        applyRouting()
+        return speakerOn
+    }
+
     private fun applyRouting() {
         try {
             audioManager.isSpeakerphoneOn = speakerOn

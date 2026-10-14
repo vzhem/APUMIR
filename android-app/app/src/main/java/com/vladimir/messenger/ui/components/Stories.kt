@@ -1,23 +1,21 @@
 package com.vladimir.messenger.ui.components
 
 import android.Manifest
+import android.graphics.BitmapFactory
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.text.format.DateUtils
-import android.view.Surface
+import android.view.HapticFeedbackConstants
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -26,24 +24,31 @@ import kotlinx.coroutines.Dispatchers
 import android.util.Base64
 import com.vladimir.messenger.data.story.StoryPhoto
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
@@ -57,9 +62,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
@@ -98,6 +106,7 @@ fun StoriesStrip(
 ) {
     val seen by StoryStore.seen.collectAsStateWithLifecycle()
     val avatars by AvatarStore.avatars.collectAsStateWithLifecycle()
+    val profileName by com.vladimir.messenger.ui.theme.UsernameHolder.name.collectAsStateWithLifecycle()
     val mine = stories.filter { it.mine }
     val byAuthor = stories.filter { !it.mine }.groupBy { it.authorId }.values
         .map { it.sortedBy { s -> s.createdAtMs } }
@@ -108,21 +117,20 @@ fun StoriesStrip(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        // Отдельный плюс доступен и когда собственная история уже опубликована.
-        item(key = "add-story") {
-            Column(Modifier.width(72.dp).clickable(onClick = onAddClick), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.size(64.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
-                    .border(1.dp, storyGold.copy(alpha = .5f), CircleShape), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.Add, stringResource(R.string.story_new), tint = MaterialTheme.colorScheme.primary)
-                }
-                Spacer(Modifier.height(6.dp))
-                Text(stringResource(R.string.story_new), style = MaterialTheme.typography.labelSmall,
-                    maxLines = 2, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis)
-            }
-        }
-        if (mine.isNotEmpty()) item(key = "mine") {
-            StoryBubble(stringResource(R.string.story_mine), avatars[mine.first().authorId], mine.map { true }) {
-                onOpenAuthor(mine.first().authorId)
+        // Как в Telegram: свой кружок один. Плюс на нём — добавить, кружок —
+        // смотреть (если история уже есть).
+        item(key = "mine") {
+            val hasOwn = mine.isNotEmpty()
+            StoryBubble(
+                title = stringResource(R.string.story_mine),
+                avatar = null,
+                viewed = if (hasOwn) mine.map { true } else emptyList(),
+                self = true,
+                selfName = profileName,
+                onAddClick = onAddClick,
+            ) {
+                if (StoryStrip.selfOpensViewer(hasOwn)) onOpenAuthor(mine.first().authorId)
+                else onAddClick()
             }
         }
         items(byAuthor, key = { it.first().authorId }) { list ->
@@ -134,34 +142,132 @@ fun StoriesStrip(
 }
 
 @Composable
-private fun StoryBubble(title: String, avatar: String?, viewed: List<Boolean>, onClick: () -> Unit) {
-    Column(Modifier.width(72.dp).clickable(onClick = onClick), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(64.dp), contentAlignment = Alignment.Center) {
-            Canvas(Modifier.fillMaxSize()) {
-                val count = viewed.size.coerceAtMost(30)
-                val step = 360f / count.coerceAtLeast(1)
-                val gap = if (count == 1) 0f else 4f
-                val stroke = 2.5.dp.toPx()
-                // Очень большие подборки объединяются в кольцо без исчезающих сегментов.
-                repeat(count) { i ->
-                    drawArc(if (if (viewed.size > 30) viewed.all { it } else viewed[i]) Color(0xFF84909F) else storyGold,
-                        -90f + i * step + gap / 2, step - gap, false,
-                        topLeft = Offset(stroke / 2, stroke / 2),
-                        size = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke),
-                        style = Stroke(stroke))
+private fun StoryBubble(
+    title: String,
+    avatar: String?,
+    viewed: List<Boolean>,
+    self: Boolean = false,
+    selfName: String? = null,
+    onAddClick: (() -> Unit)? = null,
+    onClick: () -> Unit,
+) {
+    Column(
+        Modifier.width(if (self) 80.dp else 72.dp).then(if (self) Modifier else Modifier.clickable(onClick = onClick)),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(Modifier.size(if (self) 72.dp else 64.dp)) {
+            Box(
+                Modifier
+                    .size(64.dp)
+                    .align(Alignment.TopStart)
+                    .then(if (self) Modifier.clickable(onClick = onClick) else Modifier),
+                contentAlignment = Alignment.Center,
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val count = viewed.size.coerceAtMost(30)
+                    val stroke = 2.5.dp.toPx()
+                    if (count == 0) {
+                        drawCircle(
+                            color = storyGold.copy(alpha = .45f),
+                            radius = (size.minDimension - stroke) / 2f,
+                            style = Stroke(stroke),
+                        )
+                    } else {
+                        val step = 360f / count.coerceAtLeast(1)
+                        val gap = if (count == 1) 0f else 4f
+                        // Очень большие подборки объединяются в кольцо без исчезающих сегментов.
+                        repeat(count) { i ->
+                            drawArc(
+                                if (if (viewed.size > 30) viewed.all { it } else viewed[i]) Color(0xFF84909F) else storyGold,
+                                -90f + i * step + gap / 2, step - gap, false,
+                                topLeft = Offset(stroke / 2, stroke / 2),
+                                size = androidx.compose.ui.geometry.Size(size.width - stroke, size.height - stroke),
+                                style = Stroke(stroke),
+                            )
+                        }
+                    }
+                }
+                if (self) {
+                    MyAvatar(
+                        displayName = selfName.orEmpty().ifBlank { title },
+                        modifier = Modifier.size(54.dp),
+                        size = 54,
+                    )
+                } else {
+                    PeerAvatar(name = title, avatarB64 = avatar, size = 54.dp)
                 }
             }
-            PeerAvatar(name = title, avatarB64 = avatar, size = 54.dp)
+            if (self && onAddClick != null) {
+                StoryAddBadge(
+                    onClick = onAddClick,
+                    modifier = Modifier.align(Alignment.BottomEnd),
+                )
+            }
         }
         Spacer(Modifier.height(6.dp))
-        Text(title, style = MaterialTheme.typography.labelSmall, maxLines = 1,
-            overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+        Text(
+            title,
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = if (self) Modifier.clickable(onClick = onClick) else Modifier,
+        )
+    }
+}
+
+/** Золотой объёмный плюс, выпирает из своего кружка. */
+@Composable
+private fun StoryAddBadge(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val view = LocalView.current
+    LaunchedEffect(pressed) {
+        if (pressed) view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+    }
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.88f else 1f,
+        animationSpec = tween(durationMillis = 110),
+        label = "story-add-press",
+    )
+    val lift by animateDpAsState(
+        targetValue = if (pressed) 2.dp else 8.dp,
+        animationSpec = tween(durationMillis = 110),
+        label = "story-add-lift",
+    )
+    val shape = CircleShape
+    Box(
+        modifier
+            .size(24.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .apuPremiumLift(lift, shape, ApuGold.copy(alpha = 0.55f))
+            .clip(shape)
+            .background(apuGoldBrush())
+            .border(1.5.dp, Color.White, shape)
+            .apuPremiumGloss(shape, intensity = 1.05f, topFraction = 0.7f)
+            .clickable(
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Default.Add,
+            contentDescription = stringResource(R.string.story_new),
+            tint = ApuGoldInk,
+            modifier = Modifier.size(14.dp),
+        )
     }
 }
 
 /** Полноэкранный просмотр: удержание останавливает таймер; фон приложения — тоже. */
 @Composable
-fun StoryViewerDialog(stories: List<StoryStore.Story>, onDismiss: () -> Unit) {
+fun StoryViewerDialog(
+    stories: List<StoryStore.Story>,
+    onDismiss: () -> Unit,
+    onDeleteMine: ((String) -> Unit)? = null,
+) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
         while (true) { delay(1_000); now = System.currentTimeMillis() }
@@ -180,6 +286,8 @@ fun StoryViewerDialog(stories: List<StoryStore.Story>, onDismiss: () -> Unit) {
     var progress by remember(current.id) { mutableFloatStateOf(0f) }
     var held by remember(current.id) { mutableStateOf(false) }
     var userPaused by remember(authorId) { mutableStateOf(false) }
+    var confirmDelete by remember { mutableStateOf(false) }
+    var pendingDeleteId by remember { mutableStateOf<String?>(null) }
     val owner = LocalLifecycleOwner.current
     var resumed by remember(owner) { mutableStateOf(owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     DisposableEffect(owner) {
@@ -190,16 +298,25 @@ fun StoryViewerDialog(stories: List<StoryStore.Story>, onDismiss: () -> Unit) {
         onDispose { owner.lifecycle.removeObserver(observer) }
     }
     val avatars by AvatarStore.avatars.collectAsStateWithLifecycle()
-    val previous: () -> Unit = { if (index > 0) selectedId = activeStories[index - 1].id else progress = 0f }
-    val next: () -> Unit = { if (index < activeStories.lastIndex) selectedId = activeStories[index + 1].id else onDismiss() }
+    val profileName by com.vladimir.messenger.ui.theme.UsernameHolder.name.collectAsStateWithLifecycle()
+    val previous: () -> Unit = {
+        if (!confirmDelete) {
+            if (index > 0) selectedId = activeStories[index - 1].id else progress = 0f
+        }
+    }
+    val next: () -> Unit = {
+        if (!confirmDelete) {
+            if (index < activeStories.lastIndex) selectedId = activeStories[index + 1].id else onDismiss()
+        }
+    }
     val nextNow by rememberUpdatedState(next)
     val previousNow by rememberUpdatedState(previous)
     val dismissNow by rememberUpdatedState(onDismiss)
     val setHeldNow by rememberUpdatedState<(Boolean) -> Unit>({ held = it })
     // Не отмечаем собственные истории. Это локальный статус, не счётчик просмотров автора.
     LaunchedEffect(current.id) { if (!current.mine) StoryStore.markSeen(current.id) }
-    LaunchedEffect(current.id, held, userPaused, resumed) {
-        if (held || userPaused || !resumed) return@LaunchedEffect
+    LaunchedEffect(current.id, held, userPaused, confirmDelete, resumed) {
+        if (StoryPlayback.frozen(held, userPaused, confirmDelete, resumed)) return@LaunchedEffect
         val duration = StoryPlayback.durationMs(current.text.length)
         var last = withFrameMillis { it }
         while (progress < 1f) {
@@ -277,8 +394,15 @@ fun StoryViewerDialog(stories: List<StoryStore.Story>, onDismiss: () -> Unit) {
                         }
                     }
                     Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        PeerAvatar(if (current.mine) stringResource(R.string.story_you) else current.authorName,
-                            avatars[current.authorId], 40.dp)
+                        if (current.mine) {
+                            MyAvatar(
+                                displayName = profileName.orEmpty().ifBlank { stringResource(R.string.story_you) },
+                                modifier = Modifier.size(40.dp),
+                                size = 40,
+                            )
+                        } else {
+                            PeerAvatar(current.authorName, avatars[current.authorId], 40.dp)
+                        }
                         Column(Modifier.weight(1f).padding(start = 10.dp)) {
                             Text(if (current.mine) stringResource(R.string.story_you) else current.authorName,
                                 color = Color.White, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -288,6 +412,15 @@ fun StoryViewerDialog(stories: List<StoryStore.Story>, onDismiss: () -> Unit) {
                         IconButton(onClick = { userPaused = !userPaused }) {
                             Icon(if (userPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
                                 stringResource(if (userPaused) R.string.story_resume else R.string.story_pause), tint = Color.White)
+                        }
+                        if (current.mine && onDeleteMine != null) {
+                            IconButton(onClick = {
+                                userPaused = true
+                                pendingDeleteId = current.id
+                                confirmDelete = true
+                            }) {
+                                Icon(Icons.Default.Delete, stringResource(R.string.story_delete), tint = Color.White)
+                            }
                         }
                         IconButton(onClick = onDismiss) {
                             Icon(Icons.Default.Close, stringResource(R.string.action_close), tint = Color.White)
@@ -302,6 +435,22 @@ fun StoryViewerDialog(stories: List<StoryStore.Story>, onDismiss: () -> Unit) {
                     StoryNavigation(stringResource(R.string.story_next), next, Modifier.weight(1f))
                 }
             }
+        }
+    }
+    if (confirmDelete && current.mine && onDeleteMine != null) {
+        ApuPremiumDialog(
+            title = stringResource(R.string.story_delete_q),
+            onDismiss = { confirmDelete = false },
+            confirmLabel = stringResource(R.string.story_delete_confirm),
+            onConfirm = {
+                val id = pendingDeleteId ?: current.id
+                confirmDelete = false
+                pendingDeleteId = null
+                onDeleteMine.invoke(id)
+            },
+            confirmStyle = DiagnosticsActionStyle.DANGER,
+        ) {
+            Text(stringResource(R.string.story_delete_body))
         }
     }
 }
@@ -323,6 +472,10 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
     var photo by remember { mutableStateOf<String?>(null) }
     var preparing by remember { mutableStateOf(false) }
     var photoError by remember { mutableStateOf(false) }
+    // «Опубликовать без фото» - осознанный выбор человека после неудачного
+    // прикрепления. Без него кнопка публикации ждёт фото: иначе история молча
+    // уходила текстом, и у друзей вместо снимка была только подпись.
+    var photoSkipped by remember { mutableStateOf(false) }
     var cameraError by remember { mutableStateOf<Int?>(null) }
     var showCamera by remember { mutableStateOf(false) }
     val context = LocalContext.current
@@ -333,6 +486,7 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
         scope.launch {
             preparing = true
             photoError = false
+            photoSkipped = false
             cameraError = null
             try {
                 photo = withContext(Dispatchers.IO) { StoryPhoto.prepare(context, uri) }
@@ -360,60 +514,185 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
         if (hasPermission) showCamera = true
         else cameraPermission.launch(Manifest.permission.CAMERA)
     }
-    Dialog(onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        Column(Modifier.fillMaxSize().background(Color(0xFF071426)).safeDrawingPadding().imePadding()) {
+    /**
+     * Прикрепление не удалось и другого фото в редакторе нет: молча отправлять
+     * историю без картинки нельзя - у друзей была бы видна только подпись.
+     */
+    val photoMissing = photoError && photo == null && !photoSkipped
+    val focusManager = LocalFocusManager.current
+    val density = LocalDensity.current
+    BackHandler(onBack = onDismiss)
+    val imeOpen = WindowInsets.ime.getBottom(density) > 0
+    fun hideKeyboard() {
+        keyboardController?.hide()
+        focusManager.clearFocus()
+    }
+    fun confirmPublish() {
+        hideKeyboard()
+        if (!preparing && StoryPublish.canPublish(text, photo, photoMissing)) {
+            onPublish(text.trim(), bg, photo)
+        }
+    }
+    BoxWithConstraints(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xFF071426))
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() },
+                onClick = {},
+            )
+            .safeDrawingPadding(),
+    ) {
+            val heightDp = maxHeight.value.toInt()
+            val showTools = StoryComposerLayout.showAccessoryTools(imeOpen, heightDp)
+            val showCompact = StoryComposerLayout.showCompactToolRow(imeOpen, heightDp)
+            Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.story_new), color = Color.White, fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f).padding(start = 8.dp))
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, stringResource(R.string.action_close), tint = Color.White) }
             }
-            Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp)
-                .clip(RoundedCornerShape(24.dp)).background(storyBackgrounds[bg])
-                .padding(24.dp).verticalScroll(rememberScrollState()), contentAlignment = Alignment.Center) {
-                if (photo != null) StoryPhotoView(photo!!, Modifier.fillMaxSize())
-                BasicTextField(value = text, onValueChange = { text = it.take(200) }, modifier = Modifier.fillMaxWidth()
-                        .align(if (photo != null) Alignment.BottomCenter else Alignment.Center)
-                        .background(if (photo != null) Color.Black.copy(alpha = .5f) else Color.Transparent, RoundedCornerShape(16.dp))
-                        .padding(8.dp),
-                    textStyle = TextStyle(color = Color.White, fontSize = if (text.length > 120) 25.sp else 32.sp,
-                        fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center), cursorBrush = SolidColor(storyGold),
+            // Превью занимает всё свободное место. «Опубликовать» живёт НИЖЕ
+            // этого блока — клавиатура его не выталкивает за край экрана.
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(storyBackgrounds[bg])
+                    .pointerInput(imeOpen) {
+                        if (!imeOpen) return@pointerInput
+                        detectVerticalDragGestures { _, dragAmount ->
+                            if (dragAmount > 24f) hideKeyboard()
+                        }
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (photo != null) {
+                    StoryPhotoView(photo!!, Modifier.fillMaxSize(), ContentScale.Crop)
+                }
+                val captionOnPhoto = photo != null
+                BasicTextField(
+                    value = text,
+                    onValueChange = { text = it.take(200) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .align(if (captionOnPhoto) Alignment.BottomCenter else Alignment.Center)
+                        .padding(12.dp)
+                        .background(
+                            if (captionOnPhoto) Color.Black.copy(alpha = .45f) else Color.Transparent,
+                            RoundedCornerShape(18.dp),
+                        )
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    textStyle = TextStyle(
+                        color = Color.White,
+                        fontSize = when {
+                            captionOnPhoto -> 18.sp
+                            text.length > 120 -> 25.sp
+                            else -> 32.sp
+                        },
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                    ),
+                    cursorBrush = SolidColor(storyGold),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { hideKeyboard() }),
                     decorationBox = { inner ->
-                        if (text.isEmpty()) Text(stringResource(if (photo != null) R.string.story_caption else R.string.story_placeholder), color = Color.White.copy(alpha = .6f),
-                            fontSize = 26.sp, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+                        if (text.isEmpty()) {
+                            Text(
+                                stringResource(if (captionOnPhoto) R.string.story_caption else R.string.story_placeholder),
+                                color = Color.White.copy(alpha = .6f),
+                                fontSize = if (captionOnPhoto) 16.sp else 26.sp,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                         inner()
-                    })
+                    },
+                )
             }
-            Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (showTools) {
+                Column(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ApuPremiumButton(stringResource(R.string.story_choose_photo), { picker.launch("image/*") },
+                            enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
+                        ApuPremiumButton(stringResource(R.string.story_take_photo), { requestCamera() },
+                            enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
+                    }
+                    if (photo != null) ApuPremiumButton(stringResource(R.string.story_remove_photo),
+                        { photo = null; photoError = false; photoSkipped = false },
+                        enabled = !preparing, compact = true, modifier = Modifier.fillMaxWidth())
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            storyBackgrounds.forEachIndexed { i, brush ->
+                                Box(Modifier.size(36.dp).clip(CircleShape).clickable { bg = i }.padding(4.dp)
+                                    .border(if (i == bg) 2.dp else 0.dp, if (i == bg) Color.White else Color.Transparent, CircleShape)
+                                    .padding(3.dp).background(brush, CircleShape)
+                                    .then(Modifier.storyBackgroundSemantics(stringResource(R.string.story_background, i + 1), i == bg)))
+                            }
+                        }
+                        Text("${text.length}/200", color = Color.White.copy(alpha = .6f), style = MaterialTheme.typography.labelSmall)
+                    }
+                    Text(stringResource(R.string.story_lifetime), color = Color.White.copy(alpha = .7f),
+                        style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp), textAlign = TextAlign.Center)
+                    if (photo != null) Text(stringResource(R.string.story_photo_needs_update),
+                        color = Color.White.copy(alpha = .7f), style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center)
+                }
+            } else if (showCompact) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     ApuPremiumButton(stringResource(R.string.story_choose_photo), { picker.launch("image/*") },
                         enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
                     ApuPremiumButton(stringResource(R.string.story_take_photo), { requestCamera() },
                         enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
+                    if (photo != null) ApuPremiumButton(stringResource(R.string.story_remove_photo),
+                        { photo = null; photoError = false; photoSkipped = false },
+                        enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
                 }
-                if (photo != null) ApuPremiumButton(stringResource(R.string.story_remove_photo), { photo = null },
-                    enabled = !preparing, compact = true, modifier = Modifier.fillMaxWidth())
-                if (preparing) Text(stringResource(R.string.story_photo_preparing), color = Color.White)
-                if (photoError) Text(stringResource(R.string.story_photo_failed), color = Color.White)
-                cameraError?.let { Text(stringResource(it), color = Color.White) }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        storyBackgrounds.forEachIndexed { i, brush ->
-                            Box(Modifier.size(48.dp).clip(CircleShape).clickable { bg = i }.padding(6.dp)
-                                .border(if (i == bg) 2.dp else 0.dp, if (i == bg) Color.White else Color.Transparent, CircleShape)
-                                .padding(4.dp).background(brush, CircleShape)
-                                .then(Modifier.storyBackgroundSemantics(stringResource(R.string.story_background, i + 1), i == bg)))
-                        }
-                    }
-                    Text("${text.length}/200", color = Color.White.copy(alpha = .6f), style = MaterialTheme.typography.labelSmall)
-                }
-                Text(stringResource(R.string.story_lifetime), color = Color.White.copy(alpha = .7f),
-                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp), textAlign = TextAlign.Center)
-                ApuPremiumButton(label = stringResource(R.string.story_publish), onClick = { onPublish(text.trim(), bg, photo) },
-                    enabled = !preparing && (text.isNotBlank() || photo != null), style = DiagnosticsActionStyle.PRIMARY, modifier = Modifier.fillMaxWidth())
+                Text(
+                    "${text.length}/200",
+                    color = Color.White.copy(alpha = .6f),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    textAlign = TextAlign.End,
+                )
+            } else {
+                Text(
+                    "${text.length}/200",
+                    color = Color.White.copy(alpha = .6f),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp),
+                    textAlign = TextAlign.End,
+                )
+            }
+            if (preparing) Text(stringResource(R.string.story_photo_preparing), color = Color.White,
+                modifier = Modifier.padding(horizontal = 16.dp))
+            if (photoError) Text(stringResource(R.string.story_photo_failed), color = Color(0xFFFF8A80),
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp))
+            if (photoMissing) ApuPremiumButton(stringResource(R.string.story_publish_without_photo),
+                { photoSkipped = true },
+                enabled = !preparing, compact = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
+            cameraError?.let { Text(stringResource(it), color = Color.White, modifier = Modifier.padding(horizontal = 16.dp)) }
+            // Всегда над клавиатурой и системной панелью: не внутри прокрутки.
+            ApuPremiumButton(
+                label = stringResource(R.string.story_publish),
+                onClick = { confirmPublish() },
+                enabled = !preparing && StoryPublish.canPublish(text, photo, photoMissing),
+                style = DiagnosticsActionStyle.PRIMARY,
+                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 10.dp),
+            )
             }
         }
-    }
     if (showCamera) {
         StoryCameraDialog(
             onDismiss = { showCamera = false },
@@ -425,202 +704,39 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
     }
 }
 
-@Composable
-private fun StoryCameraDialog(
-    onDismiss: () -> Unit,
-    onCaptured: (StoryPhoto.CaptureTarget) -> Unit,
-) {
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val cameraProviderFuture = remember(context) { ProcessCameraProvider.getInstance(context) }
-    val mainExecutor = remember(context) { ContextCompat.getMainExecutor(context) }
-    val previewView = remember(context) {
-        PreviewView(context).apply {
-            scaleType = PreviewView.ScaleType.FILL_CENTER
-            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-        }
-    }
-    var lensFacing by androidx.compose.runtime.saveable.rememberSaveable {
-        mutableIntStateOf(CameraSelector.LENS_FACING_BACK)
-    }
-    var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
-    var cameraReady by remember { mutableStateOf(false) }
-    var canSwitchCamera by remember { mutableStateOf(false) }
-    var isTakingPhoto by remember { mutableStateOf(false) }
-    var cameraError by remember { mutableStateOf<Int?>(null) }
-
-    DisposableEffect(cameraProviderFuture, lifecycleOwner, lensFacing, previewView) {
-        var active = true
-        var providerForCleanup: ProcessCameraProvider? = null
-        imageCapture = null
-        cameraReady = false
-        canSwitchCamera = false
-        cameraError = null
-
-        val listener = Runnable {
-            if (active) {
-                try {
-                    val provider = cameraProviderFuture.get()
-                    providerForCleanup = provider
-                    if (active) {
-                        val selector = CameraSelector.Builder()
-                            .requireLensFacing(lensFacing)
-                            .build()
-                        if (!provider.hasCamera(selector)) {
-                            val fallbackFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-                                CameraSelector.LENS_FACING_FRONT
-                            } else {
-                                CameraSelector.LENS_FACING_BACK
-                            }
-                            val fallbackSelector = CameraSelector.Builder()
-                                .requireLensFacing(fallbackFacing)
-                                .build()
-                            if (provider.hasCamera(fallbackSelector)) {
-                                lensFacing = fallbackFacing
-                            } else {
-                                cameraError = R.string.story_camera_unavailable
-                            }
-                        } else {
-                            val preview = Preview.Builder().build().also {
-                                it.setSurfaceProvider(previewView.surfaceProvider)
-                            }
-                            val capture = ImageCapture.Builder()
-                                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                                .setTargetRotation(previewView.display?.rotation ?: Surface.ROTATION_0)
-                                .build()
-                            provider.unbindAll()
-                            if (active) {
-                                provider.bindToLifecycle(lifecycleOwner, selector, preview, capture)
-                                imageCapture = capture
-                                cameraReady = true
-                                val otherFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-                                    CameraSelector.LENS_FACING_FRONT
-                                } else {
-                                    CameraSelector.LENS_FACING_BACK
-                                }
-                                canSwitchCamera = runCatching {
-                                    provider.hasCamera(
-                                        CameraSelector.Builder().requireLensFacing(otherFacing).build(),
-                                    )
-                                }.getOrDefault(false)
-                            }
-                        }
-                    }
-                } catch (_: Exception) {
-                    if (active) {
-                        imageCapture = null
-                        cameraReady = false
-                        canSwitchCamera = false
-                        cameraError = R.string.story_camera_unavailable
-                    }
-                }
-            }
-        }
-        cameraProviderFuture.addListener(listener, mainExecutor)
-
-        onDispose {
-            active = false
-            imageCapture = null
-            cameraReady = false
-            canSwitchCamera = false
-            providerForCleanup?.unbindAll()
-        }
-    }
-
-    fun takePhoto() {
-        val capture = imageCapture ?: return
-        if (isTakingPhoto) return
-        isTakingPhoto = true
-        cameraError = null
-        val target = try {
-            StoryPhoto.createCaptureTarget(context)
-        } catch (_: Exception) {
-            isTakingPhoto = false
-            cameraError = R.string.story_camera_unavailable
-            return
-        }
-        capture.targetRotation = previewView.display?.rotation ?: Surface.ROTATION_0
-        val options = ImageCapture.OutputFileOptions.Builder(target.file).build()
-        try {
-            capture.takePicture(options, mainExecutor, object : ImageCapture.OnImageSavedCallback {
-                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                    isTakingPhoto = false
-                    onCaptured(target)
-                }
-
-                override fun onError(exception: ImageCaptureException) {
-                    target.delete()
-                    isTakingPhoto = false
-                    cameraError = R.string.story_camera_capture_failed
-                }
-            })
-        } catch (_: Exception) {
-            target.delete()
-            isTakingPhoto = false
-            cameraError = R.string.story_camera_capture_failed
-        }
-    }
-
-    Dialog(
-        onDismissRequest = { if (!isTakingPhoto) onDismiss() },
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
-    ) {
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
-            AndroidView(factory = { previewView }, modifier = Modifier.fillMaxSize())
-            Column(Modifier.fillMaxSize().safeDrawingPadding().padding(12.dp)) {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onDismiss, enabled = !isTakingPhoto) {
-                        Icon(Icons.Default.Close, stringResource(R.string.action_close), tint = Color.White)
-                    }
-                    Spacer(Modifier.weight(1f))
-                    Text(
-                        stringResource(if (lensFacing == CameraSelector.LENS_FACING_BACK) R.string.story_camera_back else R.string.story_camera_front),
-                        color = Color.White,
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                    IconButton(
-                        onClick = {
-                            imageCapture = null
-                            cameraReady = false
-                            lensFacing = if (lensFacing == CameraSelector.LENS_FACING_BACK) {
-                                CameraSelector.LENS_FACING_FRONT
-                            } else {
-                                CameraSelector.LENS_FACING_BACK
-                            }
-                        },
-                        enabled = cameraReady && canSwitchCamera && !isTakingPhoto,
-                    ) {
-                        Icon(Icons.Default.Cameraswitch, stringResource(R.string.story_camera_switch), tint = Color.White)
-                    }
-                }
-                Spacer(Modifier.weight(1f))
-                cameraError?.let { errorId ->
-                    Text(stringResource(errorId), color = Color.White, modifier = Modifier.align(Alignment.CenterHorizontally)
-                        .background(Color.Black.copy(alpha = .6f), RoundedCornerShape(12.dp)).padding(12.dp))
-                }
-                if (cameraError == null && !cameraReady) {
-                    Text(stringResource(R.string.story_camera_starting), color = Color.White,
-                        modifier = Modifier.align(Alignment.CenterHorizontally))
-                }
-                ApuPremiumButton(
-                    label = stringResource(if (isTakingPhoto) R.string.story_camera_capturing else R.string.story_camera_capture),
-                    onClick = { takePhoto() },
-                    enabled = cameraReady && !isTakingPhoto,
-                    progress = isTakingPhoto,
-                    style = DiagnosticsActionStyle.PRIMARY,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-    }
-}
-
 private fun Modifier.storyBackgroundSemantics(label: String, isSelected: Boolean): Modifier =
     semantics { contentDescription = label; selected = isSelected }
 
 @Composable
-private fun StoryPhotoView(b64: String, modifier: Modifier) {
+private fun StoryPhotoView(b64: String, modifier: Modifier, contentScale: ContentScale = ContentScale.Fit) {
     val bytes = remember(b64) { runCatching { Base64.decode(b64, Base64.DEFAULT) }.getOrNull() }
-    AsyncImage(model = bytes, contentDescription = stringResource(R.string.story_photo),
-        modifier = modifier, contentScale = ContentScale.Fit)
+    var fallback by remember(b64) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var coilFailed by remember(b64) { mutableStateOf(false) }
+    var fallbackFailed by remember(b64) { mutableStateOf(false) }
+    if (bytes != null && !coilFailed) {
+        AsyncImage(model = bytes, contentDescription = stringResource(R.string.story_photo),
+            modifier = modifier, contentScale = contentScale, onError = { coilFailed = true })
+    }
+    if (bytes == null || coilFailed) {
+        // Coil не отдал картинку (или строка не разобралась): декодируем сами, чтобы
+        // у получателя вместо фото не оставалось пустое место с одной подписью.
+        LaunchedEffect(b64) {
+            val decoded = bytes?.let { raw ->
+                withContext(Dispatchers.IO) {
+                    runCatching { BitmapFactory.decodeByteArray(raw, 0, raw.size) }.getOrNull()
+                }
+            }
+            if (decoded == null) fallbackFailed = true else fallback = decoded
+        }
+    }
+    val decoded = fallback
+    if (decoded != null) {
+        Image(bitmap = decoded.asImageBitmap(), contentDescription = stringResource(R.string.story_photo),
+            modifier = modifier, contentScale = contentScale)
+    } else if (fallbackFailed) {
+        Box(modifier, contentAlignment = Alignment.Center) {
+            Text(stringResource(R.string.story_photo_unavailable), color = Color.White.copy(alpha = .85f),
+                textAlign = TextAlign.Center, fontSize = 18.sp)
+        }
+    }
 }

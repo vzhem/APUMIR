@@ -73,6 +73,17 @@ DIAG_REPORT_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/Diagno
 DIAG_MQTT_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/MqttLinkTextTest.kt"
 UPDATE_POLICY="$BASE/main/java/com/vladimir/messenger/service/UpdateCheckPolicy.kt"
 UPDATE_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/service/UpdateCheckerTest.kt"
+# Fail-closed личных сообщений и безопасный cooldown тяжёлого самосева:
+# чистые Kotlin-правила проверяются тем же runner без Android SDK.
+CALL_WIRE="$BASE/main/java/com/vladimir/messenger/data/call/CallWire.kt"
+FILE_CODEC="$BASE/main/java/com/vladimir/messenger/data/file/FileTransferPacketCodec.kt"
+FILE_WIRE="$BASE/main/java/com/vladimir/messenger/data/file/FileTransferWire.kt"
+FILE_UDP="$BASE/main/java/com/vladimir/messenger/data/file/FileUdpWire.kt"
+SEALED_WIRE="$BASE/main/java/com/vladimir/messenger/data/security/SealedWire.kt"
+OUTGOING_POLICY="$BASE/main/java/com/vladimir/messenger/data/security/OutgoingPayloadPolicy.kt"
+OUTGOING_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/data/security/OutgoingPayloadPolicyTest.kt"
+SELF_SEED_POLICY="$BASE/main/java/com/vladimir/messenger/data/update/SelfSeedRetryPolicy.kt"
+SELF_SEED_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/data/update/SelfSeedRetryPolicyTest.kt"
 # Сроки хранения «потеряшек» (владелец 2026-10-07: тяжёлое — сутки, текст и
 # малое — неделя). Файл чистый, поэтому проверяется здесь же на runner.
 RETENTION="$BASE/main/java/com/vladimir/messenger/data/file/FileTransferRetention.kt"
@@ -84,6 +95,8 @@ RETENTION_TEST="$BASE/test/java/com/vladimir/messenger/data/file/FileTransferRet
     "$POST_MANIFEST" "$GROUP_WIRE" "$GROUP_WIRE_TEST" "$GROUP_WIRE_UPDATE_TEST" \
     "$DIAG_REPORT" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
     "$UPDATE_POLICY" "$UPDATE_POLICY_TEST" \
+    "$CALL_WIRE" "$FILE_CODEC" "$FILE_WIRE" "$FILE_UDP" "$SEALED_WIRE" "$OUTGOING_POLICY" "$OUTGOING_POLICY_TEST" \
+    "$SELF_SEED_POLICY" "$SELF_SEED_POLICY_TEST" \
     "$RETENTION" "$RETENTION_TEST"
 "$JAVA" -cp "$OUT/classes:$CP" org.junit.runner.JUnitCore \
     com.vladimir.messenger.ui.screens.chat.ChatHistoryObserverTest \
@@ -97,4 +110,6 @@ RETENTION_TEST="$BASE/test/java/com/vladimir/messenger/data/file/FileTransferRet
     com.vladimir.messenger.data.diagnostics.DiagnosticsReportTest \
     com.vladimir.messenger.data.diagnostics.MqttLinkTextTest \
     com.vladimir.messenger.service.UpdateCheckerTest \
+    com.vladimir.messenger.data.security.OutgoingPayloadPolicyTest \
+    com.vladimir.messenger.data.update.SelfSeedRetryPolicyTest \
     com.vladimir.messenger.data.file.FileTransferRetentionTest

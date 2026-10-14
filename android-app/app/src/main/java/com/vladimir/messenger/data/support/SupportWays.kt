@@ -88,6 +88,11 @@ object SupportWays {
             val prefs = prefs(context)
             val age = System.currentTimeMillis() - prefs.getLong(KEY_FETCHED_AT, 0L)
             if (!force && age < CACHE_TTL_MS) return@withContext cached(context)
+            // No peer protocol for these optional details yet; use the local
+            // copy while a direct route exists instead of waking the worker.
+            if (!com.vladimir.messenger.data.RustBridge.externalTransportAllowed()) {
+                return@withContext cached(context)
+            }
 
             val body = runCatching {
                 val conn = (URL(url()).openConnection() as HttpURLConnection).apply {

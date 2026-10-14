@@ -86,7 +86,7 @@ def call_spans(text: str, name: str) -> list:
 class DiagnosticsContractsTest(unittest.TestCase):
     def test_report_keeps_the_privacy_promise(self):
         report = source(DIAG / "DiagnosticsReport.kt")
-        self.assertIn('const val SCHEMA = "apu-diag/4"', report)
+        self.assertIn('const val SCHEMA = "apu-diag/5"', report)
         for part in (
             "Приватность", "текст переписки", "имена файлов", "ключи", "contact ID", "UUID сообщений",
         ):
@@ -131,7 +131,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
         core = (ROOT / "rust-core/src/engine/core.rs").read_text()
         assistance = (ROOT / "rust-core/src/network/peer_assistance.rs").read_text()
         race = (ROOT / "rust-core/src/network/helper_delivery.rs").read_text()
-        self.assertIn('const val SCHEMA = "apu-diag/4"', report)
+        self.assertIn('const val SCHEMA = "apu-diag/5"', report)
         self.assertIn("HelperRouteDiagnosticsParser.parse(all)", collector)
         self.assertIn('"ONLINE_HELPER"', collector)
         for marker in (
@@ -578,6 +578,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             # 2026-10-07: «мои сообщения доходят, а от него нет» — направление
             # переписки и причины потери входящих должны быть в отчёте.
             "summarySpotsOutgoingWithoutIncoming",
+            "cubotReportShowsLocalCryptoAndRealSwarmWithoutDiagnosingPeerFromFailedOpens",
             "messageSectionShowsDirectionsAndReasons",
             "quietSessionIsNotAWarning",
             "healthyExchangeReadsAsOk",
@@ -609,6 +610,25 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn('appendLine("раздаётся=${sums.seeding}")', report)
         self.assertIn("TransferErrorText.explain(failure.code)", report)
 
+    def test_private_payload_fails_closed_and_auto_seed_has_a_durable_retry_budget(self):
+        bridge = source(MAIN / "data/RustBridge.kt")
+        policy = source(MAIN / "data/security/OutgoingPayloadPolicy.kt")
+        seeder = source(MAIN / "data/update/ApkSeeder.kt")
+        self.assertIn("val payload = sealOutgoing(recipientId, text) ?: return false", bridge)
+        self.assertIn("val sealed = sealOutgoing(recipientId, payload) ?: return false", bridge)
+        self.assertIn("OutgoingPayloadPolicy.prepare(recipientId, text)", bridge)
+        self.assertNotIn("MessageSealer.seal(context, recipientId, text) ?: text", bridge)
+        self.assertIn("return result.takeIf { SealedWire.decode(it) != null }", policy)
+        self.assertIn("FileTransferWire.decodeHelloBinding(text)", policy)
+        self.assertIn("selfSeedMutex.withLock", seeder)
+        self.assertIn("SelfSeedRetryPolicy.mayAttempt(", seeder)
+        self.assertIn("IdentitySigningKeyStore.mode(appContext) == IdentitySigningKeyStore.Mode.READY", seeder)
+        self.assertIn("FileExchangeKeyStore.mode(appContext) == FileExchangeKeyStore.Mode.READY", seeder)
+        self.assertIn(".putLong(SELF_SEED_RETRY_AT, now).commit()", seeder)
+        script = source(ROOT / "scripts/ci/check-chat-history.sh")
+        for test in ("OutgoingPayloadPolicyTest.kt", "SelfSeedRetryPolicyTest.kt"):
+            self.assertIn(test, script)
+
     def test_messages_report_both_directions_and_reasons(self):
         """Жалоба «от него не приходит» должна разбираться по отчёту, а не на слух."""
         report = source(DIAG / "DiagnosticsReport.kt")
@@ -617,7 +637,16 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "const val MSG_OUT = ",
             "const val MSG_ACK = ",
             "const val MSG_IN_NOT_OPENED = ",
+            "const val MSG_IN_LOCAL_CRYPTO_UNAVAILABLE = ",
             "const val MSG_IN_NOT_OPENED_STALE = ",
+            "signed_direct_swarm_peers=",
+            "external_transport_allowed_now=",
+            "signing_seed_keystore=",
+            "installed_signing_identity=",
+            "signing_install_before_core=",
+            "file_exchange_install_before_core=",
+            "signing_routing_matches_core=",
+            "file_exchange_keystore=",
             "const val MSG_IN_BAD_SENDER = ",
             "const val MSG_PEER_KEY_CHANGED = ",
             "const val MSG_SEND_FAILED = ",
@@ -625,8 +654,9 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "private fun messageLine(",
             "private fun StringBuilder.appendMessages(",
             "входящих показано=",
-            "не вскрылось (чужая переписка или устаревший ключ)=",
-            "не вскрылось: старые копии в пути (ключ уже рабочий)=",
+            "не вскрылось (попытки; адресат/причина не подтверждены)=",
+            "из них при неготовой локальной identity при старте=",
+            "не вскрылось рядом с успешным открытием (возможны копии в пути)=",
             "ядро передало сигналов=",
             "пересылка: отброшено из-за полной очереди=",
             "очередь ядра: своё ждёт получателя=",
@@ -637,9 +667,9 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "уровни в ограниченной выборке logcat:",
             "лимит на получателя был исчерпан",
             "смена ключа у собеседника (раз)=",
-            "отложено до сети (уйдёт само)=",
+            "отложено (ожидает связь/ключи; число попыток)=",
             "не ушло (узел отказал или нет сети)=",
-            "отсканируйте его QR-код заново",
+            "личность собеседника вне приложения перед обновлением QR",
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, report)
@@ -652,6 +682,11 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "fun noteMessageOutgoing(",
             "fun noteDeliveryAck(",
             "fun noteSealedNotOpened(",
+            "IdentitySigningKeyStore.mode(context)",
+            "FileExchangeKeyStore.mode(context)",
+            "RustBridge.liveSwarmPeerIds()",
+            "RustBridge.externalTransportAllowed()",
+            "fun noteCryptoBootstrap(",
             "fun noteBadSender(",
             "fun notePeerKeyChanged(",
             "fun noteMessageSendFailed(",
@@ -672,11 +707,14 @@ class DiagnosticsContractsTest(unittest.TestCase):
         service = source(MAIN / "service/CoreServerService.kt")
         for marker in (
             "TransferDiagnostics.noteMessageIncoming()",
-            # Различитель «старая копия в пути / рассинхрон ключа» на приёме:
-            # ключ доказанно рабочий, если от собеседника недавно что-то открылось.
+            # Недавно успешное открытие и локальная готовность снижают ложные
+            # предупреждения; ни то, ни другое не доказывает рассинхрон ключа.
             "noteSealedNotOpened(",
             "senderKeyKnown = known,",
             "staleKeyCopy = leftover,",
+            "localIdentityUnavailable = !localCryptoReadyAtStartup,",
+            "matchesCoreRouting = nodeId != null && legacyRoutingId == nodeId",
+            "TransferDiagnostics.noteCryptoBootstrap(signingInstall, fileExchangeInstall, matchesCoreRouting)",
             "isWorkingRecently(applicationContext, senderId)",
             "TransferDiagnostics.noteBadSender()",
         ):
@@ -806,6 +844,30 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "убрано {} служебных записей" in core,
             "накопленные сигналы убираются при восстановлении",
         )
+
+    def test_sealed_file_fragments_cannot_fill_the_correspondence_reserve(self):
+        queue = source(ROOT / "rust-core/src/network/relay_queue.rs")
+        offline = source(ROOT / "rust-core/src/network/offline_send.rs")
+        core = source(ROOT / "rust-core/src/engine/core.rs")
+        router = source(MAIN / "data/file/FileTransferRouter.kt")
+        wire = source(MAIN / "data/file/FileTransferWire.kt")
+        seeder = source(MAIN / "data/file/GroupFileSeeder.kt")
+        report = source(DIAG / "DiagnosticsReport.kt")
+        for marker in (
+            "pub fn message_kind(message_id: &str, chat_scope: &str, payload: &[u8])",
+            'message_id.starts_with("frag-")',
+            "rest.as_bytes()[..32].iter().all(u8::is_ascii_hexdigit)",
+            "fn sealed_file_fragment_uses_transient_reserve_without_reclassifying_chats()",
+        ):
+            self.assertIn(marker, queue)
+        self.assertIn("message_kind(message_id, chat_scope, payload)", offline)
+        self.assertIn("message_kind(\n            &message_id,", core)
+        self.assertIn("FileTransferWire.relayFallbackMessageId(recipientId, payload)", router)
+        self.assertIn('append("frag-")', wire)
+        self.assertIn("apkDirectTransport = apkDirectOnly", router)
+        self.assertIn("if (transfer.chatId == ApkUpdate.CHAT_ID) apkDirectTransport else directTransport", seeder)
+        self.assertIn("file_broker_fallback_attempts=", report)
+        self.assertIn("apk_direct_unreachable=", report)
 
     def test_mqtt_is_explained_by_one_shared_parser(self):
         view_model = source(VIEW_MODEL)

@@ -98,11 +98,14 @@ class CallUdpChannel(
      * Собрать кандидатов (блокирует до STUN_WAIT_MS, звать не с главного потока):
      * отражённый адрес от STUN, глобальные IPv6, IPv4 Wi-Fi. Порядок = предпочтение.
      */
-    fun gatherCandidates(): List<Pair<String, Int>> {
+    fun gatherCandidates(allowExternalStun: Boolean = false): List<Pair<String, Int>> {
         val s = socket ?: return emptyList()
         val port = s.localPort
         val result = LinkedHashMap<String, Int>()
-        val reflexive = queryStun(s)
+        // First exchange locally reachable candidates. STUN gets a turn only
+        // after the shared core policy has exhausted its direct search.
+        val reflexive = if (allowExternalStun &&
+            com.vladimir.messenger.data.RustBridge.externalTransportAllowed()) queryStun(s) else null
         if (reflexive != null) result[literal(reflexive.address)] = reflexive.port
         localAddresses().forEach { address -> result.putIfAbsent(literal(address), port) }
         val list = result.entries.take(CallWire.MAX_CANDIDATES).map { it.key to it.value }
@@ -281,6 +284,7 @@ class CallUdpChannel(
     // ── STUN и адреса ───────────────────────────────────────────────────────
 
     private fun queryStun(s: DatagramSocket): InetSocketAddress? {
+        if (!com.vladimir.messenger.data.RustBridge.externalTransportAllowed()) return null
         val txId = ByteArray(StunCodec.TX_ID_BYTES).also { random.nextBytes(it) }
         val latch = CountDownLatch(1)
         stunTxId = txId
@@ -290,9 +294,11 @@ class CallUdpChannel(
         var sent = 0
         val resolved = resolveStunServers()
         for (target in resolved) {
+            if (!com.vladimir.messenger.data.RustBridge.externalTransportAllowed()) break
             if (runCatching { s.send(DatagramPacket(request, request.size, target)) }.isSuccess) sent++
         }
         if (sent == 0) {
+            stunLatch = null
             Log.i(TAG, "stun unavailable (dns/blocked) — candidates are local addresses only")
             return null
         }
@@ -313,6 +319,7 @@ class CallUdpChannel(
         STUN_SERVERS.forEach { (host, port) ->
             Thread({
                 try {
+                    if (!com.vladimir.messenger.data.RustBridge.externalTransportAllowed()) return@Thread
                     val addresses = runCatching { InetAddress.getAllByName(host) }.getOrNull()
                     // IPv4-адрес сервера: отражение нужно именно для IPv4-NAT.
                     val target = addresses?.firstOrNull { it is Inet4Address }

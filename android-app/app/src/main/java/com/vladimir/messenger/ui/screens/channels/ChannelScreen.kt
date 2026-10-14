@@ -55,6 +55,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.layout.Spacer
@@ -679,7 +680,7 @@ fun ChannelScreen(
                                         receivedFileFor = { viewModel.receivedFileFor(it) },
                                         authorCopyFor = { viewModel.authorCopyFor(it) },
                                         onDownload = { viewModel.requestFile(post) },
-                                        onSave = { viewModel.requestSaveReceivedFile(it) },
+                                        onSave = { name, file -> viewModel.requestSaveFile(name, file) },
                                         onShare = { f -> viewModel.shareFile(f, info.displayName, info.mediaType) },
                                         servedCount = uiState.servedFiles[GroupFileMarker.key(uiState.channelId, info.sha256)] ?: 0,
                                         onFavorite = { viewModel.saveFileToFavorites(it) },
@@ -1022,6 +1023,9 @@ private fun PostCard(
                             // Раунд 212: пересылка поста внутрь APU - раньше
                             // был только системный «Поделиться» наружу.
                             add(ApuAction(stringResource(R.string.channel_share_in_apu), Icons.Filled.Send) { onShareToApu() })
+                            fileCard?.onSave?.let { save ->
+                                add(ApuAction(stringResource(R.string.ft_save_folder), Icons.Filled.Save) { save() })
+                            }
                             add(ApuAction(stringResource(R.string.channel_add_reaction), Icons.Filled.EmojiEmotions) { showReactions = true })
                             add(ApuAction(stringResource(R.string.channel_to_favorites), Icons.Filled.Star) { onSaveToFavorites() })
                             add(ApuAction(stringResource(R.string.channel_share_ellipsis), Icons.Filled.Share) { onSharePost() })

@@ -267,6 +267,8 @@ struct State {
     last_inbound: HashMap<String, i64>,
     self_lease: Option<AddressLease>,
     observed_own: Option<(SocketAddr, i64)>,
+    /// Briefly retry sending a changed own lease, even if an old request was pending.
+    urgent_own_until_ms: i64,
     next_round_ms: i64,
     saved_at_ms: i64,
     target_cursor: usize,
@@ -369,9 +371,19 @@ impl PeerExchange {
     /// Retry the plan, NOT failures/cooldowns. Repeated manual triggers cannot cause a storm.
     pub fn wake(&self) { self.wake.store(true, Ordering::Relaxed); }
 
+    /// A changed *own* public endpoint is time-sensitive. For two minutes a
+    /// healthy peer may be refreshed after 60 seconds instead of ten minutes,
+    /// so a previously pending exchange cannot swallow the update. Failures,
+    /// the two in-flight slots and the six-per-minute quota still apply.
+    pub fn prioritize_own_address(&self, now: i64) {
+        self.state.lock().unwrap().urgent_own_until_ms = now.saturating_add(ONLINE_WINDOW_MS);
+        self.wake();
+    }
+
     pub fn reset_session(&self) {
         let mut s = self.state.lock().unwrap();
         s.pending.clear(); s.authenticated.clear(); s.next_round_ms = 0; s.observed_own = None; s.self_lease = None;
+        s.urgent_own_until_ms = 0;
         self.wake();
     }
 
@@ -513,6 +525,7 @@ impl PeerExchange {
             let start = s.target_cursor % all_targets.len();
             (0..all_targets.len().min(MAX_TARGETS)).map(|step| all_targets[(start + step) % all_targets.len()].clone()).collect()
         };
+        let urgent_self = s.urgent_own_until_ms > now;
         // Keep a small primary neighbourhood. Once two authenticated public peers are healthy,
         // an idle device must not keep dialing the whole Internet directory behind their cooldowns.
         let primary: HashSet<String> = candidates.iter().filter(|c| {
@@ -527,7 +540,7 @@ impl PeerExchange {
             if s.pending.len() >= MAX_PARALLEL_EXCHANGES || s.sent.len() >= MAX_REQUESTS_PER_MINUTE { break; }
             if s.pending.contains_key(&c.node_id) { continue; }
             if s.attempts.get(&(c.node_id.clone(), c.endpoint)).map(|a| {
-                let urgent_refresh = !target_list.is_empty() && a.failures == 0 && a.verified_at_ms > 0
+                let urgent_refresh = (!target_list.is_empty() || urgent_self) && a.failures == 0 && a.verified_at_ms > 0
                     && now.saturating_sub(a.verified_at_ms) >= 60_000;
                 now < a.retry_at_ms && !urgent_refresh
             }).unwrap_or(false) { continue; }
@@ -550,7 +563,7 @@ impl PeerExchange {
         if !out.is_empty() && !all_targets.is_empty() {
             s.target_cursor = (s.target_cursor + MAX_TARGETS) % all_targets.len();
         }
-        s.next_round_ms = now.saturating_add(if target_list.is_empty() { HEALTHY_REFRESH_MS } else { 5_000 });
+        s.next_round_ms = now.saturating_add(if target_list.is_empty() && !urgent_self { HEALTHY_REFRESH_MS } else { 5_000 });
         out
     }
 
@@ -994,6 +1007,59 @@ mod tests {
         round_trip(&a, &da, &b, &db, NOW);
         assert_eq!(da.observed_own_addr(NOW), Some(addr(1)));
         assert_eq!(da.observed_own_addr(NOW + ONLINE_WINDOW_MS + 1), None);
+    }
+
+    #[test]
+    fn fresh_owner_signed_external_address_reaches_a_neighbour_then_another_peer() {
+        let a = identity(1); let b = identity(2); let c = identity(3);
+        let da = PeerExchange::open(None);
+        let db = PeerExchange::open(None);
+        let dc = PeerExchange::open(None);
+        round_trip(&a, &da, &b, &db, NOW);
+        let changed_at = NOW + 31_000; // inbound replay guard is 30 seconds
+        assert_eq!(da.helpers(changed_at).len(), 1);
+        // STUN observed OUR new endpoint. A direct bound probe can bypass the
+        // healthy 10-minute refresh delay but cannot bypass the shared budgets.
+        let request = da.probe(&a, Some(addr(3)), b.legacy_routing_node_id(), addr(2), changed_at)
+            .expect("known signed neighbour may receive an urgent update");
+        assert!(request.claims.records.iter().any(|record|
+            record.lease.claims.node_id == a.legacy_routing_node_id()
+                && record.lease.claims.endpoint == addr(3)
+                && record.lease.verify(changed_at)
+        ));
+        assert!(da.bind_request(&request, BINDING, addr(2)));
+        let at_b = db.handle(&b, &request.encode(&a, BINDING).unwrap(), BINDING,
+            addr(3), Some(addr(2)), changed_at).unwrap();
+        da.handle(&a, &at_b.response.unwrap(), BINDING, addr(2), Some(addr(3)), changed_at).unwrap();
+        assert!(db.candidates(changed_at).iter().any(|(id, endpoint, _)|
+            id == a.legacy_routing_node_id() && *endpoint == addr(3)));
+
+        // The neighbour forwards the *owner's* signed lease, not its own
+        // unsigned recollection. The next peer treats it as a candidate only.
+        let learned = round_trip(&c, &dc, &b, &db, changed_at + 31_000);
+        assert!(learned.candidates.iter().any(|(id, endpoint, _)|
+            id == a.legacy_routing_node_id() && *endpoint == addr(3)));
+        assert!(dc.authenticated_peer(a.legacy_routing_node_id(), changed_at + 31_000).is_none());
+    }
+
+    #[test]
+    fn own_address_priority_survives_a_busy_slot_without_bypassing_failure_backoff() {
+        let a = identity(1); let b = identity(2);
+        let da = PeerExchange::open(None); let db = PeerExchange::open(None);
+        round_trip(&a, &da, &b, &db, NOW);
+        da.prioritize_own_address(NOW + 1);
+        // A recently authenticated peer isn't needlessly dialed again.
+        assert!(da.plan(&a, Some(addr(3)), vec![candidate(2, NOW)], &[], NOW + 31_000).is_empty());
+        // The unchanged ten-minute cooldown is bypassed only after a minute,
+        // within the short urgent window, with our NEW signed lease attached.
+        let due = da.plan(&a, Some(addr(3)), vec![candidate(2, NOW)], &[], NOW + 61_000);
+        assert_eq!(due.len(), 1);
+        assert!(due[0].claims.records.iter().any(|r|
+            r.lease.claims.node_id == a.legacy_routing_node_id()
+                && r.lease.claims.endpoint == addr(3)));
+        da.mark_send_result(&due[0].peer_id, due[0].endpoint, false, NOW + 61_000);
+        da.wake();
+        assert!(da.plan(&a, Some(addr(3)), vec![candidate(2, NOW)], &[], NOW + 62_000).is_empty());
     }
 
     #[test]

@@ -181,6 +181,11 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
+        <!-- «Отклонить» с уведомления входящего звонка (явный broadcast). -->
+        <receiver
+            android:name=".data.call.IncomingCallReceiver"
+            android:exported="false" />
+
 
         <receiver
             android:name=".service.NetworkChangeReceiver"

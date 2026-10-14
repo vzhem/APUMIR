@@ -12,7 +12,18 @@ internal class StoryPhotoParts {
         const val MAX_PARTS = 67
         const val MAX_PENDING_SENDERS = 16
         const val MAX_PENDING_PER_SENDER = 2
-        const val PENDING_TTL_MS = 300_000L
+        /**
+         * Сколько держим недособранную историю.
+         *
+         * Части приходят волнами: relay отдаёт накопленное, когда телефон
+         * получателя проснётся, и между волнами легко проходит больше пяти
+         * минут. Прежнее окно в 300 000 мс обнуляло сборку, а дошедшие позже
+         * части начинали её заново - собрать фото уже не получалось, и у друга
+         * оно не появлялось никогда. Окно равно сроку жизни самой истории:
+         * дольше хранить нечего, а память и так ограничена числом сборок и их
+         * размером.
+         */
+        const val PENDING_TTL_MS = 24L * 60L * 60L * 1_000L + 300_000L
         const val MAX_CONTENT_CHARS = 256 * 1024
         const val MAX_EXPIRY_HORIZON_MS = 24L * 60L * 60L * 1_000L + 300_000L
         private const val CONTENT_PENDING_ENTRIES = MAX_PENDING_SENDERS

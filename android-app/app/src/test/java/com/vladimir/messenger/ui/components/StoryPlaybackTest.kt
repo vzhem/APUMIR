@@ -11,6 +11,11 @@ class StoryPlaybackTest {
         assertEquals(10_000L, StoryPlayback.durationMs(500))
     }
 
+    @Test fun deleteConfirmFreezesPlaybackEvenIfNotPausedByHand() {
+        assertEquals(true, StoryPlayback.frozen(held = false, userPaused = false, confirmDelete = true, resumed = true))
+        assertEquals(false, StoryPlayback.frozen(held = false, userPaused = false, confirmDelete = false, resumed = true))
+    }
+
     @Test fun progressIsClampedAndDoesNotSkipAfterASuspendedFrame() {
         assertEquals(.01f, StoryPlayback.advance(0f, 50L, 5_000L), .0001f)
         assertEquals(.02f, StoryPlayback.advance(0f, 20_000L, 5_000L), .0001f)

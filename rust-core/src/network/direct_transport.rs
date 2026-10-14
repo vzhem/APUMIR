@@ -431,6 +431,23 @@ impl DirectTransport {
         self.shared.pool.get(peer_id.as_bytes()).await.is_some()
     }
 
+    /// A non-mutating sample of the QUIC pool for actual signed PEX peers.
+    /// Do not mistake MQTT presence, address-book entries or unauthenticated
+    /// pooled connections for live swarm reachability.
+    pub async fn has_authenticated_connection(&self, peer_ids: &[&str]) -> bool {
+        self.shared.pool.has_any_live_of(peer_ids).await
+    }
+
+    pub async fn authenticated_connection_ids(&self, peer_ids: &[&str]) -> Vec<String> {
+        self.shared.pool.live_of(peer_ids).await
+    }
+
+    /// Purely local pool check: an already-open direct connection is enough
+    /// to defer idle history probes, regardless of whether it is a contact.
+    pub async fn has_any_connection(&self) -> bool {
+        self.shared.pool.len().await > 0
+    }
+
     /// Забыть соединение с узлом: следующая отправка откроет новое.
     pub fn forget(&self, peer_id: &str) {
         let _ = self.tx.try_send(Command::Forget {

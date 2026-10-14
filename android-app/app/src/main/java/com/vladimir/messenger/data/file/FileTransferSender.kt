@@ -45,7 +45,7 @@ class FileTransferSender(
      */
     private val binaryTransport: ((String, String, Long, Int, Int, ByteArray) -> Boolean)? = null,
 ) {
-    /** Получатель офлайн — файл ждёт когда он появится (только прямая доставка). */
+    /** Ни прямой канал, ни брокер не приняли кадр — передача ждёт следующего цикла. */
     class RecipientOfflineException(val transferId: String) : Exception("Recipient offline")
 
     data class PumpSummary(
@@ -224,7 +224,23 @@ class FileTransferSender(
                 ?: throw IllegalStateException("Chunk $chunkIndex missing for $transferIdHex")
             try {
                 sentPackets += if (useBinary) {
-                    sendBinaryChunk(transfer, transferIdHex, chunkIndex, ciphertext)
+                    try {
+                        sendBinaryChunk(transfer, transferIdHex, chunkIndex, ciphertext)
+                    } catch (_: RecipientOfflineException) {
+                        // Прямой кадр оборвался: тот же кусок — текстовым путём
+                        // (LAN / брокер). Иначе фото зависает на половине, а
+                        // отправитель уже считает «всё ушло».
+                        sendItem(
+                            FileTransferPacketCodec.Type.CHUNK,
+                            transferIdHex,
+                            itemIndex = chunkIndex,
+                            payload = ciphertext,
+                            messageIdFor = { fragment ->
+                                FileTransferWire.chunkMessageId(transferIdHex, chunkIndex, fragment)
+                            },
+                            transfer = transfer,
+                        )
+                    }
                 } else {
                     sendItem(
                         FileTransferPacketCodec.Type.CHUNK,
@@ -261,29 +277,33 @@ class FileTransferSender(
         val fragments = FileTransferPacketCodec.fragment(type, transferId, itemIndex, payload)
         for ((fragmentIndex, encodedFragment) in fragments.withIndex()) {
             val text = FileTransferWire.encodeEncodedPacket(encodedFragment)
-            // Параллельный QUIC-поток: сначала пробуем БЕЗ relay queue (быстро, без
-            // блокировки текстовой очереди); если получатель недоступен напрямую —
-            // обычный sendMessage (durable relay, медленно но надёжно).
+            // Сначала прямой путь (LAN/UDP/QUIC). Если его нет — durable
+            // брокер: иначе при пропавшем «в сети» фото остаётся на 3/6,
+            // хотя отправитель уже показал «ушло».
+            var delivered = false
             if (directTransport != null) {
                 val startedAt = nowMs()
-                val directOk = directTransport.invoke(transfer.peerNodeId, text)
-                // Скорость и надёжность узла берём из настоящей отправки:
-                // объявить себя быстрым нельзя, можно только им быть.
+                delivered = directTransport.invoke(transfer.peerNodeId, text)
                 runCatching {
                     onDirectSend(
                         transfer.peerNodeId,
                         text.length.toLong(),
                         (nowMs() - startedAt).coerceAtLeast(1),
-                        directOk,
+                        delivered,
                     )
                 }
-                if (!directOk) {
-                    Log.i(TAG, "Recipient not directly reachable — pausing transfer")
+            }
+            if (!delivered) {
+                delivered = transport.send(
+                    messageIdFor(fragmentIndex),
+                    transfer.chatId,
+                    transfer.peerNodeId,
+                    text,
+                )
+                if (!delivered) {
+                    Log.i(TAG, "Recipient not reachable — pausing transfer")
                     throw RecipientOfflineException(transfer.transferId)
                 }
-            } else {
-                // Direct transport not configured (tests) — use regular path
-                transport.send(messageIdFor(fragmentIndex), transfer.chatId, transfer.peerNodeId, text)
             }
         }
         return fragments.size

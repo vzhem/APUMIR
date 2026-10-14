@@ -105,7 +105,7 @@ data class FileCardState(
             receivedFileFor: (FileTransferEntity) -> java.io.File?,
             authorCopyFor: (sha256: String) -> java.io.File?,
             onDownload: () -> Unit,
-            onSave: (FileTransferEntity) -> Unit,
+            onSave: (displayName: String, file: java.io.File) -> Unit,
             onShare: (file: java.io.File) -> Unit,
             /** Раунд 124: добавить файл в избранное (когда он принят). */
             onFavorite: ((FileTransferEntity) -> Unit)? = null,
@@ -125,7 +125,7 @@ data class FileCardState(
                 complete -> receivedFileFor(transfer!!)
                 isFromMe -> authorCopyFor(info.sha256)
                 else -> null
-            }
+            }?.takeIf { it.isFile }
             return FileCardState(
                 info = info,
                 transfer = transfer,
@@ -139,10 +139,8 @@ data class FileCardState(
                         GroupFileMarker.isSticker(info)
                 },
                 onDownload = onDownload,
-                onSave = if (complete) {
-                    { onSave(transfer!!) }
-                } else {
-                    null
+                onSave = localFile?.let { file ->
+                    { onSave(info.displayName, file) }
                 },
                 onShare = localFile?.let { f -> { onShare(f) } },
                 onFavorite = if (complete && onFavorite != null) {
@@ -363,7 +361,9 @@ fun GroupFileCard(
                 previewPath != null)
         val hasActions = state.onSave != null || state.onShare != null ||
             state.onFavorite != null || messageActions.isNotEmpty()
-        if (cardHasPreview && hasActions) {
+        // Без картинки точки не накрывают кнопку «Скачать»: меню файла
+        // показываем, когда копия уже на телефоне, либо как раньше у превью.
+        if (hasActions && (cardHasPreview || state.onSave != null || state.onShare != null)) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)

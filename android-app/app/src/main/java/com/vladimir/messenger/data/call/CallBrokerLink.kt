@@ -34,6 +34,7 @@ class CallBrokerLink(
     private val callId: String,
     private val myNodeId: String,
     private val peerNodeId: String,
+    private val externalAllowed: () -> Boolean,
     private val onPacket: (ByteArray) -> Unit,
     private val onState: (LinkState) -> Unit,
 ) {
@@ -76,7 +77,7 @@ class CallBrokerLink(
 
     /** Отправить пакет собеседнику (в его тему). false = мост закрыт или пакет не влезает. */
     fun send(packet: ByteArray): Boolean {
-        if (closed) return false
+        if (closed || !externalAllowed()) return false
         val wire = MqttPacket.publish(peerTopic, packet) ?: return false
         return enqueueWire(wire)
     }
@@ -99,7 +100,9 @@ class CallBrokerLink(
         val s = socket
         socket = null
         if (s != null) {
-            runCatching { s.getOutputStream().write(MqttPacket.DISCONNECT) }
+            // Closing the socket must not *transmit* a DISCONNECT frame after
+            // a signed direct neighbour made the external route unnecessary.
+            if (externalAllowed()) runCatching { s.getOutputStream().write(MqttPacket.DISCONNECT) }
             runCatching { s.close() }
         }
         writerThread?.interrupt()
@@ -112,7 +115,7 @@ class CallBrokerLink(
     private fun runReader() {
         var connected: Socket? = null
         for ((host, port) in BROKERS) {
-            if (closed) break
+            if (closed || !externalAllowed()) break
             connected = runCatching { connect(host, port) }
                 .onFailure { Log.w(TAG, "link connect $host failed: ${it.message}") }
                 .getOrNull()
@@ -122,14 +125,15 @@ class CallBrokerLink(
             }
         }
         val s = connected
-        if (s == null || closed) {
+        if (s == null || closed || !externalAllowed()) {
             runCatching { s?.close() }
             close()
             return
         }
         synchronized(this) {
-            if (closed) {
+            if (closed || !externalAllowed()) {
                 runCatching { s.close() }
+                close()
                 return
             }
             socket = s
@@ -156,17 +160,21 @@ class CallBrokerLink(
     private fun connect(host: String, port: Int): Socket {
         val s = Socket()
         try {
+            if (!externalAllowed()) throw IOException("swarm reachable: external call broker suspended")
             s.tcpNoDelay = true
             s.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
+            if (!externalAllowed()) throw IOException("swarm recovered during broker connect")
             s.soTimeout = HANDSHAKE_TIMEOUT_MS
             val out = s.getOutputStream()
             val input = DataInputStream(s.getInputStream())
             // ≤ 23 знаков: столько любой брокер обязан принять по MQTT 3.1.1.
             val clientId = "apc" + myNodeId.takeLast(10) + callId.take(10)
+            if (!externalAllowed()) throw IOException("swarm recovered before call handshake")
             out.write(MqttPacket.connect(clientId, KEEP_ALIVE_SEC))
             out.flush()
             val (first, body) = readPacket(input)
             if (!MqttPacket.connackAccepted(first, body)) throw IOException("CONNACK refused")
+            if (!externalAllowed()) throw IOException("swarm recovered before call subscribe")
             out.write(MqttPacket.subscribe(1, myTopic, 0))
             out.flush()
             // Ждём SUBACK; редкий чужой пакет до него (retained мусор) пропускаем.
@@ -191,8 +199,9 @@ class CallBrokerLink(
 
     @Throws(IOException::class)
     private fun readLoop(input: DataInputStream) {
-        while (!closed) {
+        while (!closed && externalAllowed()) {
             val (first, body) = readPacket(input)
+            if (!externalAllowed()) return
             lastInboundAtMs = System.currentTimeMillis()
             when (MqttPacket.packetType(first)) {
                 MqttPacket.TYPE_PUBLISH -> {
@@ -214,8 +223,9 @@ class CallBrokerLink(
         val out: OutputStream = BufferedOutputStream(s.getOutputStream(), 16 * 1024)
         var lastPingAtMs = System.currentTimeMillis()
         try {
-            while (!closed) {
+            while (!closed && externalAllowed()) {
                 val packet = outQueue.poll(PING_EVERY_MS, TimeUnit.MILLISECONDS)
+                if (!externalAllowed()) break
                 val now = System.currentTimeMillis()
                 // PINGREQ по расписанию независимо от нагрузки: PINGRESP — единственный
                 // ответ брокера на односторонний поток QoS0, по нему видно, жив ли он.
@@ -239,6 +249,7 @@ class CallBrokerLink(
             }
         } catch (e: Exception) {
             if (!closed) Log.w(TAG, "link write ended: ${e.javaClass.simpleName}: ${e.message}")
+        } finally {
             close()
         }
     }

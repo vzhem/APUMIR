@@ -142,6 +142,8 @@ class FileTransferReceiver(
     private val wantSeq = HashMap<String, Long>()
     /** Когда инвентарь уходил в последний раз: не чаще [INVENTORY_INTERVAL_MS], кроме появления нового хранителя. */
     private val inventorySentAt = HashMap<String, Long>()
+    /** Повтор ACK недособранной личной передачи — не чаще инвентаря. */
+    private val ackRemindedAt = HashMap<String, Long>()
     /** transferId -> (хранитель -> когда от него последний раз пришёл кусок): кто из хранителей жив. */
     private val holderSeenAt = HashMap<String, MutableMap<String, Long>>()
     /** transferId -> (хранитель -> когда его последний раз просили о кусках): молчащий после просьбы - выбыл. */
@@ -218,11 +220,9 @@ class FileTransferReceiver(
                 )
                 return if (newlyPinned) HelloResult.PINNED_NEW else HelloResult.PINNED_ALREADY
             } catch (error: Exception) {
-                // Самый частый случай - собеседник переустановил приложение и
-                // прислал НОВЫЙ ключ, а у нас закреплён старый. Пин намеренно
-                // не сбрасывается сам: так подмену ключа не отличить от
-                // переустановки. Лечится пересканированием QR собеседника,
-                // поэтому подсказка пишется прямо здесь.
+                // A verified HELLO can present a binding different from the TOFU pin. This
+                // could be a restored peer or an impersonation: never reset the pin automatically
+                // or infer a reinstall from a failed decrypt. Verify identity out of band first.
                 val changed = error.message?.contains("key changed") == true
                 if (changed) {
                     // Диагностика: в журнале «Логи» появится строка словами, а не
@@ -231,9 +231,8 @@ class FileTransferReceiver(
                         .notePeerKeyChanged()
                     Log.w(
                         TAG,
-                        "File HELLO from $senderId REJECTED: exchange key changed " +
-                            "(peer reinstalled?). Messages to this peer cannot be sealed " +
-                            "until the QR code is scanned again.",
+                        "File HELLO from $senderId REJECTED: signed exchange binding differs " +
+                            "from pinned binding; verify identity before updating the pin.",
                     )
                 } else {
                     Log.w(TAG, "File HELLO from $senderId rejected: ${error.message}")
@@ -2220,6 +2219,25 @@ class FileTransferReceiver(
             totalBytes: Long,
             fileSha256: String,
         )
+    }
+
+    /**
+     * Повтор ACK по личным входящим, которые ещё не собраны. После обрыва
+     * прямого канала отправитель ждёт contiguous ACK, а единственное
+     * подтверждение могло застрять в очереди — без напоминания окно стоит.
+     */
+    suspend fun remindIncompleteIncoming() {
+        mutex.withLock {
+            val now = nowMs()
+            for (row in transferDao.getActiveIncoming(now)) {
+                val last = ackRemindedAt[row.transferId]
+                if (last != null && now - last < INVENTORY_INTERVAL_MS) continue
+                ackRemindedAt[row.transferId] = now
+                val contiguous = contiguousPrefixes[row.transferId]
+                    ?: discoverContiguousPrefix(row.transferId)
+                sendFileAck(row.transferId, contiguous)
+            }
+        }
     }
 
     companion object {

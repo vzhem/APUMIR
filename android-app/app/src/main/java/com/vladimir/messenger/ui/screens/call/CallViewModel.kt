@@ -26,9 +26,11 @@ class CallViewModel @Inject constructor(
     private val peerName: String = savedStateHandle.get<String>("peerName").orEmpty().let { raw ->
         runCatching { java.net.URLDecoder.decode(raw, "UTF-8") }.getOrDefault(raw)
     }
+    private val video: Boolean = savedStateHandle.get<String>("video") == "1"
     private var autoStarted = false
 
     val uiState: StateFlow<CallManager.CallUiState> = callManager.uiState
+    val remoteVideo: StateFlow<ByteArray?> = callManager.remoteVideo
 
     /** Разовый автозапуск исходящего звонка при создании экрана. */
     fun ensureStarted() {
@@ -36,7 +38,7 @@ class CallViewModel @Inject constructor(
         autoStarted = true
         if (peerId.isBlank()) return
         if (callManager.uiState.value.phase == CallStateMachine.Phase.IDLE) {
-            callManager.startOutgoing(peerId, peerName)
+            callManager.startOutgoing(peerId, peerName, video = video)
         }
     }
 
@@ -44,5 +46,7 @@ class CallViewModel @Inject constructor(
     fun hangupOrReject() = callManager.hangupOrReject()
     fun toggleMute() = callManager.toggleMute()
     fun toggleSpeaker() = callManager.toggleSpeaker()
+    fun toggleCamera() = callManager.toggleCamera()
     fun micDenied() = callManager.onMicPermissionDenied()
+    fun sendVideoFrame(packed: ByteArray) = callManager.sendVideoFrame(packed)
 }

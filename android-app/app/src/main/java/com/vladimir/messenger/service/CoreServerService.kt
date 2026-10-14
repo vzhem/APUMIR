@@ -9,6 +9,8 @@ import android.content.Intent
 import android.net.wifi.WifiManager
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
+import com.vladimir.messenger.data.call.CallIncoming
 import android.util.Log
 import com.vladimir.messenger.domain.model.MessageChannel
 import com.vladimir.messenger.data.relay.RelayEnvelope
@@ -60,10 +62,12 @@ class CoreServerService : Service() {
     @Inject lateinit var mtProxyRepository: MtProxyRepository
     @Inject lateinit var notificationHelper: NotificationHelper
     @Inject lateinit var botApi: BotApi
+    @Inject lateinit var updateChecker: UpdateChecker
     @Inject lateinit var fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter
     @Inject lateinit var identityBackup: com.vladimir.messenger.data.security.IdentityBackup
     @Inject lateinit var addressBookBackup: com.vladimir.messenger.data.backup.AddressBookBackup
     @Inject lateinit var addressBookSwarm: com.vladimir.messenger.data.backup.AddressBookSwarmBackup
+    @Inject lateinit var linkShortener: com.vladimir.messenger.data.link.LinkShortener
     @Inject lateinit var readReceipts: com.vladimir.messenger.data.receipt.ReadReceiptRepository
     @Inject lateinit var messageDeletion: com.vladimir.messenger.data.repository.MessageDeletionRepository
     @Inject lateinit var hearts: com.vladimir.messenger.data.heart.HeartRepository
@@ -87,6 +91,7 @@ class CoreServerService : Service() {
     @Inject lateinit var proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private var lastWakeLockAtElapsed = 0L
     private var multicastLock: WifiManager.MulticastLock? = null
     private var networkMonitor: NetworkMonitor? = null
     private val serviceJob = kotlinx.coroutines.SupervisorJob()
@@ -112,6 +117,8 @@ class CoreServerService : Service() {
     private val PRESENCE_SWEEP_MS = 60_000L
     private val FILE_PUMP_INTERVAL_MS = 20000L
     private val INITIAL_FILE_PUMP_DELAY_MS = 5000L
+    /** Boot-time readiness only: a failed key unlock cannot be diagnosed as a peer-key change. */
+    @Volatile private var localCryptoReadyAtStartup = false
 
     // Раунд 121: свой каталог гифок роя (APUGIF1).
     private val gifCatalogSentAt = mutableMapOf<String, Long>()
@@ -357,6 +364,7 @@ class CoreServerService : Service() {
         if (runCatching { postViews.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { hearts.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { addressBookSwarm.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { linkShortener.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { readReceipts.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { referralAttributionRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         // Ранг собеседника (APURANK1): знак VIP у имени. Поглощается здесь же,
@@ -501,7 +509,11 @@ class CoreServerService : Service() {
         val powerManager = getSystemService(POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK, "P2PMessenger::CoreWakeLock"
-        ).apply { acquire(10 * 60 * 1000L) }
+        ).apply {
+            setReferenceCounted(false)
+            acquire(CallIncoming.CORE_WAKE_LOCK_MS)
+        }
+        lastWakeLockAtElapsed = SystemClock.elapsedRealtime()
 
         try {
             val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
@@ -625,6 +637,12 @@ class CoreServerService : Service() {
                     runCatching { pumpMirrorFiles() }
                         .onFailure { Log.w(TAG, "file bytes pump failed: ${it.message}") }
                 }
+                val wakeHeld = wakeLock?.isHeld == true
+                val wakeAge = SystemClock.elapsedRealtime() - lastWakeLockAtElapsed
+                if (CallIncoming.shouldRefreshWakeLock(wakeHeld, wakeAge)) {
+                    runCatching { wakeLock?.acquire(CallIncoming.CORE_WAKE_LOCK_MS) }
+                    lastWakeLockAtElapsed = SystemClock.elapsedRealtime()
+                }
                 sincePump++
                 kotlinx.coroutines.delay(30_000L)
             }
@@ -705,10 +723,67 @@ class CoreServerService : Service() {
             val legacyRoutingId = existingPubKey
                 ?: prefs.getString("node_id", null)
                 .orEmpty()
-            // Раунд 261: независимые пред-шаги идут ПАРАЛЛЕЛЬНО: движок ждёт
-            // самый медленный, а не сумму всех. Битый Keystore (KeyMint может
-            // виснуть надолго) не задерживает старт: у каждого шага потолок,
-            // по таймауту - честный деград в legacy/RAM-only.
+            // The signed identity is captured ONCE when Rust starts. Give its Keystore unlock
+            // priority over relay custody and address-book restoration on a cold KeyMint;
+            // competing operations previously had the same 4s deadline and could leave the
+            // running core permanently in legacy-only mode until a restart.
+            localCryptoReadyAtStartup = false
+            val identityCreated = prefs.getBoolean("identity_created", false)
+            // Wrap nullable installer results: null from withTimeoutOrNull means a timeout,
+            // whereas a completed installer may also return null (unavailable/mismatch).
+            val signingAttempt = if (identityCreated) {
+                kotlinx.coroutines.withTimeoutOrNull(8_000) {
+                    val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        IdentitySigningKeyStore.installIntoCore(applicationContext, legacyRoutingId)
+                    }
+                    Unit to result
+                }
+            } else null
+            val signing = signingAttempt?.second
+            val signingInstall = when {
+                !identityCreated -> "skipped_no_identity"
+                signingAttempt == null -> "timeout"
+                signing == null -> "unavailable"
+                else -> "ready"
+            }
+            Log.i(
+                TAG,
+                "Identity signing mode: ${signing?.mode ?: "legacy-only"}, " +
+                    "keyId=${signing?.keyId?.take(12) ?: "none"}"
+            )
+            val fileAttempt = if (signing != null) {
+                kotlinx.coroutines.withTimeoutOrNull(8_000) {
+                    val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        IdentitySigningKeyStore.existingVerifiedBinding(applicationContext)?.let { identityBinding ->
+                            FileExchangeKeyStore.initialize(applicationContext, legacyRoutingId, identityBinding)
+                        }
+                    }
+                    Unit to result
+                }
+            } else null
+            val fileExchange = fileAttempt?.second
+            val fileExchangeInstall = when {
+                signing == null -> "skipped_no_signing"
+                fileAttempt == null -> "timeout"
+                fileExchange == null -> "unavailable"
+                else -> "ready"
+            }
+            Log.i(
+                TAG,
+                "File exchange identity: ${if (fileExchange != null) "ready" else "unavailable"}, " +
+                    "key=${fileExchange?.publicKeySha256Prefix ?: "none"}"
+            )
+            localCryptoReadyAtStartup = signing != null && fileExchange != null
+            TransferDiagnostics.noteCryptoBootstrap(signingInstall, fileExchangeInstall, null)
+            if (signing == null && identityCreated) {
+                TransferDiagnostics.recordWarning("crypto", "подписывающий ключ не установлен до старта ядра; прямой подписанный рой недоступен")
+            }
+            if (signing != null && fileExchange == null) {
+                TransferDiagnostics.recordWarning("crypto", "ключ обмена недоступен при старте; личные конверты и файлы могут не открываться")
+            }
+
+            // The other bounded pre-start tasks may now run in parallel: they cannot evict
+            // the signing identity from the current core's snapshot.
             val atRestDeferred = async {
                 (kotlinx.coroutines.withTimeoutOrNull(4_000) {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -723,34 +798,6 @@ class CoreServerService : Service() {
                     }
                 }.onFailure { Log.w(TAG, "AddressBook restore failed: ${it.message}") }
             }
-            val signing = if (prefs.getBoolean("identity_created", false)) {
-                kotlinx.coroutines.withTimeoutOrNull(4_000) {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        IdentitySigningKeyStore.installIntoCore(applicationContext, legacyRoutingId)
-                    }
-                }
-            } else {
-                null
-            }
-            Log.i(
-                TAG,
-                "Identity signing mode: ${signing?.mode ?: "legacy-only"}, " +
-                    "keyId=${signing?.keyId?.take(12) ?: "none"}"
-            )
-            val fileExchange = if (signing != null) {
-                kotlinx.coroutines.withTimeoutOrNull(4_000) {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        IdentitySigningKeyStore.existingVerifiedBinding(applicationContext)?.let { identityBinding ->
-                            FileExchangeKeyStore.initialize(applicationContext, legacyRoutingId, identityBinding)
-                        }
-                    }
-                }
-            } else null
-            Log.i(
-                TAG,
-                "File exchange identity: ${if (fileExchange != null) "ready" else "unavailable"}, " +
-                    "key=${fileExchange?.publicKeySha256Prefix ?: "none"}"
-            )
 
             // M8-C slice 3: Android Keystore мост. Устанавливаем at-rest ключ
             // СТРОГО ДО старта движка. Недоступность ключа = честный RAM-only
@@ -795,6 +842,14 @@ class CoreServerService : Service() {
             if (ok) {
                 val nodeId = RustBridge.nodeId()
                 Log.i(TAG, "Engine OK. NodeId=$nodeId")
+                if (signing != null) {
+                    val matchesCoreRouting = nodeId != null && legacyRoutingId == nodeId
+                    TransferDiagnostics.noteCryptoBootstrap(signingInstall, fileExchangeInstall, matchesCoreRouting)
+                    if (!matchesCoreRouting) {
+                        localCryptoReadyAtStartup = false
+                        TransferDiagnostics.recordWarning("crypto", "подписывающая identity не совпала с routing ID запущенного ядра; прямые подписанные маршруты недоступны")
+                    }
+                }
                 // Environment updates remain bounded; no packet-triggered polling or new timer thread.
                 serviceScope.launch {
                     while (kotlinx.coroutines.currentCoroutineContext().isActive) {
@@ -804,6 +859,16 @@ class CoreServerService : Service() {
                 }
                 TransferDiagnostics.count(Counters.CORE_STARTS)
                 TransferDiagnostics.recordSuccess("core", "ядро поднято")
+                // DownloadManager is a separate Android process: an APK
+                // queued on fallback can continue using GitHub long after a
+                // signed peer appears, unless we cancel the active job.
+                serviceScope.launch {
+                    while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                        runCatching { updateChecker.suspendExternalDownloadsForSwarm() }
+                            .onFailure { Log.w(TAG, "Update download barrier: ${it.message}") }
+                        kotlinx.coroutines.delay(2_500L)
+                    }
+                }
                 // Раунд 263: ядро поднято - сплэш может отпустить человека.
                 CoreStatus.markReady()
 
@@ -845,6 +910,22 @@ class CoreServerService : Service() {
                     }
                 }
 
+                // A first-installation book is recovered ONLY after the core
+                // has had time to discover direct mDNS/signed neighbours.
+                serviceScope.launch {
+                    kotlinx.coroutines.delay(25_000L)
+                    while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                        runCatching { addressBookBackup.autoRestoreIfEmpty() }
+                            .onFailure { Log.w(TAG, "AddressBook post-search restore: ${it.message}") }
+                        // A snapshot learned from the fallback server must go
+                        // to the next reachable signed neighbour promptly;
+                        // it is not enough to wait for the hourly backup loop.
+                        runCatching { addressBookBackup.swarmHourlyTick() }
+                            .onFailure { Log.w(TAG, "AddressBook peer distribution: ${it.message}") }
+                        kotlinx.coroutines.delay(60_000L)
+                    }
+                }
+
                 // Облачная копия азбуки: первая через 3 минуты (адреса уже
                 // насобирались), дальше каждый час; шлём только если файл
                 // менялся (см. AddressBookBackup.backupIfDue).
@@ -853,9 +934,6 @@ class CoreServerService : Service() {
                     while (true) {
                         runCatching { addressBookBackup.backupIfDue() }
                             .onFailure { Log.w(TAG, "AddressBook backup failed: ${it.message}") }
-                        runCatching { addressBookBackup.swarmHourlyTick() }
-                        runCatching { addressBookBackup.autoRestoreIfEmpty() }
-                            .onFailure { Log.w(TAG, "AddressBook swarm tick: ${it.message}") }
                         kotlinx.coroutines.delay(60 * 60 * 1000L)
                     }
                 }
@@ -881,10 +959,10 @@ class CoreServerService : Service() {
                     Log.i(TAG, "TG relay message from $senderId")
                     // TODO: обработать входящее сообщение из TG
                 }
-                telegramRelay?.start()
-
-
-                Log.i(TAG, "Telegram relay enabled")
+                // No inbound handler exists here yet (above is TODO). Polling
+                // Telegram every five seconds cannot deliver a message and
+                // must not bypass swarm discovery just because a token exists.
+                Log.i(TAG, "Telegram relay inactive: inbound delivery not implemented")
             }
 
             // Cloudflare Workers relay (основной запасной канал)
@@ -957,6 +1035,7 @@ class CoreServerService : Service() {
                                             .noteSealedNotOpened(
                                                 senderKeyKnown = knownHere,
                                                 staleKeyCopy = leftoverHere,
+                                                localIdentityUnavailable = !localCryptoReadyAtStartup,
                                             )
                                     } else {
                                         // Ключ рабочий: гасим плашку и запоминаем
@@ -2053,18 +2132,13 @@ class CoreServerService : Service() {
                             .noteSealedNotOpened(
                                 senderKeyKnown = known,
                                 staleKeyCopy = leftover,
+                                localIdentityUnavailable = !localCryptoReadyAtStartup,
                             )
-                        if (known && !leftover) {
-                            // Ключ собеседника нам известен — значит, проблема на
-                            // его стороне: он запечатал для нашей ПРЕЖНЕЙ копии
-                            // ключа. Две вещи для человека, а не для отчёта:
-                            // 1) пометка у этого чата («не открывается, что
-                            //    делать») — её читает экран переписки;
-                            // 2) мягкий сигнал собеседнику: отдать ему свой ключ
-                            //    ещё раз (не чаще раза в минуту на узел). Если у
-                            //    него закреплена старая копия, его приложение
-                            //    скажет ему то же самое, и пересканирование QR
-                            //    починит переписку.
+                        if (known && !leftover && localCryptoReadyAtStartup) {
+                            // An unopened envelope cannot prove the recipient or a stale peer
+                            // key. Offer a neutral warning only if our own keys were available
+                            // at boot. Re-announcing our signed PUBLIC binding is safe; never
+                            // reset a key or tell the user to rescan QR based on this alone.
                             com.vladimir.messenger.data.security.KeyDesyncNotice
                                 .note(applicationContext, senderId)
                             runCatching { fileTransferRouter.requestExchangeBinding(senderId) }
@@ -2291,6 +2365,13 @@ class CoreServerService : Service() {
                         } catch (e: Exception) {
                             Log.w(TAG, "Swarm backup ACK failed: " + e.message)
                         }
+                        return
+                    }
+
+                    // On-demand short-link mapping from a directly signed peer.
+                    // Keep both paths in step so APUSHORT1 never creates a chat.
+                    if (linkShortener.routeIncoming(senderId, text)) {
+                        runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
                         return
                     }
 

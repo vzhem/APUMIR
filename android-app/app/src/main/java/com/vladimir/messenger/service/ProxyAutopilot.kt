@@ -46,6 +46,9 @@ class ProxyAutopilot @Inject constructor(
             .getBoolean("proxy_tunnel_enabled", true)
 
     suspend fun cycle(forceCollect: Boolean = false): CycleSummary {
+        if (!com.vladimir.messenger.data.RustBridge.externalTransportAllowed()) {
+            return CycleSummary(0, 0, 0, 0, null, null)
+        }
         if (!tunnelEnabledByUser()) {
             com.vladimir.messenger.data.RustBridge.clearMqttSocks5Proxy()
             Log.d(TAG, "Cycle skipped: proxy tunnel disabled by user")

@@ -218,9 +218,8 @@ fi
 # ── 1b. полная компиляция Kotlin приложения (грабли тегов v171/v175) ────────
 # :app:compileReleaseKotlin раньше выполнялся только в сборке тега, и теги
 # v11.74.171 (дважды) и v11.74.175 умирали именно там, а логи из песочницы не
-# скачиваются. Теперь та же задача компилируется на runner каждого PR, и
-# ошибка уходит комментарием. Пока шаг не доказал стабильность - его падение
-# не блокирует прогон (паттерн K6): warning + комментарий к PR.
+# скачиваются. Шаг теперь блокирующий: успех Rust при сломанном Kotlin ABI
+# не даёт права объявлять всю APK проверенной.
 begin "android compileReleaseKotlin"
 ANDROID_OK=0
 if bash scripts/ci/check-android-compile.sh >>"$LOG" 2>&1; then
@@ -231,9 +230,11 @@ else
 fi
 strip_ansi
 if [ "$ANDROID_OK" = 0 ]; then
+    FAILED=1
+    FAILED_STEP="android compileReleaseKotlin"
     report
     comment_to_pr
-    say "::warning::compileReleaseKotlin упал на runner - разбор в комментарии к PR"
+    exit 1
 fi
 
 # ── 2. компиляция ядра ─────────────────────────────────────────────────────

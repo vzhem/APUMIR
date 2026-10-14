@@ -213,7 +213,10 @@ class CallAudioChannel private constructor() {
             val payload = ByteArray(length - FRAME_HEADER_BYTES)
             input.readFully(payload)
             val codecId = codec.toInt()
-            if (codecId == CallWire.CODEC_PCM_16K || codecId == CallWire.CODEC_ADPCM_16K) {
+            if (codecId == CallWire.CODEC_PCM_16K ||
+                codecId == CallWire.CODEC_ADPCM_16K ||
+                codecId == CallWire.CODEC_JPEG_VIDEO
+            ) {
                 onFrame?.invoke(seq, ptsMs, codecId, payload)
             }
         }

@@ -231,6 +231,19 @@ data class DiagnosticsFacts(
     val helperRoutes: HelperRouteDiagnostics = HelperRouteDiagnostics.EMPTY,
     /** Состояние последней проверки/уведомления о версии; без URL и текста релиза. */
     val updateDiagnostics: UpdateDiagnosticFacts = UpdateDiagnosticFacts.EMPTY,
+    /** Только безопасные статусы: без ID, открытых/секретных ключей и имён файлов. */
+    val signingSeedMode: String = "unknown",
+    val installedSigningMode: String = "unknown",
+    val fileExchangeMode: String = "unknown",
+    /** Отличают timeout при старте от позднего READY в глобальном реестре. */
+    val signingInstallBeforeCore: String = "unknown",
+    val fileExchangeInstallBeforeCore: String = "unknown",
+    /** Только сравнение в памяти; ни один routing ID в отчёт не попадает. */
+    val signingMatchesCoreRouting: Boolean? = null,
+    /** Подтверждённые подписанным APUX1 прямые QUIC-соседи, НЕ connected_peers. */
+    val liveDirectSwarmPeers: Int? = null,
+    /** Решение Rust policy в момент снимка, не свидетельство фактического HTTP-запроса. */
+    val externalTransportAllowed: Boolean? = null,
 )
 
 /** Агрегаты обычных сообщений; file chunks intentionally stay on file-transfer diagnostics. */
@@ -331,6 +344,10 @@ object Counters {
     const val FILE_STARTED_IN = "file_started_in"
     const val FILE_COMPLETED = "file_completed"
     const val FILE_FAILED = "file_failed"
+    /** Попытки отправить фрагмент через Rust при отсутствии прямого канала, НЕ факт enqueue. */
+    const val FILE_BROKER_FALLBACK_ATTEMPTS = "file_broker_fallback_attempts"
+    /** APK не имеет broker fallback для содержимого: отсутствие прямого пути. */
+    const val APK_DIRECT_UNREACHABLE = "apk_direct_unreachable"
     const val NETWORK_CHANGES = "network_changes"
     const val CORE_STARTS = "core_starts"
     const val CORE_FAILURES = "core_failures"
@@ -349,18 +366,13 @@ object Counters {
     /** Подтверждения доставки наших сообщений — «вторая галочка». */
     const val MSG_ACK = "msg_ack"
 
-    /**
-     * Входящие конверты, которые не вскрылись: чужая переписка (мы лишь
-     * ретранслятор) либо собеседник запечатал для нашего прежнего ключа.
-     */
+    /** Попытки открыть sealed-пакеты: не уникальные сообщения и не доказанная потеря. */
     const val MSG_IN_NOT_OPENED = "msg_in_not_opened"
 
-    /**
-     * Из них — старые копии, отправленные до обмена ключами: ключ уже
-     * доказанно рабочий (что-то открылось), а эти конверты просто застряли в
-     * пути. Владелец 2026-10-07: после обмена QR переписка работает, а такие
-     * хвосты продолжают лететь и раньше выглядели как «опять не вскрылось».
-     */
+    /** Из них получены, пока подписывающая/файловая identity не была готова при старте. */
+    const val MSG_IN_LOCAL_CRYPTO_UNAVAILABLE = "msg_in_local_crypto_unavailable"
+
+    /** Конверты рядом с успешным открытием от того же узла (возможно копии в пути). */
     const val MSG_IN_NOT_OPENED_STALE = "msg_in_not_opened_stale"
 
     /** Пакеты с отправителем не-узлом: обрывок служебной строки, отброшен. */
@@ -638,7 +650,7 @@ object DiagnosticsPrivacy {
 /** Сборка текста отчёта и строк сводки. Ничего не читает сама — только форматирует. */
 object DiagnosticsReport {
     /** Версия формата отчёта: по ней видно, что файл разобран теми же правилами. */
-    const val SCHEMA = "apu-diag/4"
+    const val SCHEMA = "apu-diag/5"
 
     private const val MAX_JOURNAL_LINES = 240
 
@@ -752,6 +764,40 @@ object DiagnosticsReport {
             )
         }
 
+        if (facts.installedSigningMode != "unknown" || facts.fileExchangeMode != "unknown") {
+            // A later read-only Keystore check cannot repair a missing identity
+            // captured at engine init: display OK only after both bounded
+            // installs and the running core's routing ID were verified.
+            val ready = facts.coreRunning &&
+                facts.installedSigningMode == "legacy+ed25519-sidecar-v1" &&
+                facts.fileExchangeMode == "ready" &&
+                facts.signingInstallBeforeCore == "ready" &&
+                facts.fileExchangeInstallBeforeCore == "ready" &&
+                facts.signingMatchesCoreRouting == true
+            lines += DiagnosticsLine(
+                if (ready) DiagnosticsLevel.OK else DiagnosticsLevel.WARN,
+                "Локальные ключи",
+                "подпись ${safeDiagnosticToken(facts.installedSigningMode)}, " +
+                    "обмен ${safeDiagnosticToken(facts.fileExchangeMode)}; " +
+                    "seed Keystore ${safeDiagnosticToken(facts.signingSeedMode)}; " +
+                    "до ядра подпись/обмен ${safeDiagnosticToken(facts.signingInstallBeforeCore)}/" +
+                    "${safeDiagnosticToken(facts.fileExchangeInstallBeforeCore)}; " +
+                    "совпадение с routing ID ${facts.signingMatchesCoreRouting?.toString() ?: "unknown"}",
+            )
+        }
+        if (facts.liveDirectSwarmPeers != null) {
+            lines += DiagnosticsLine(
+                if (facts.liveDirectSwarmPeers > 0) DiagnosticsLevel.OK else DiagnosticsLevel.INFO,
+                "Прямой рой",
+                "подтверждённых соседей ${facts.liveDirectSwarmPeers} (connected_peers=${facts.connectedPeers} не гарантирует прямой канал); " +
+                    "внешний транспорт сейчас ${when (facts.externalTransportAllowed) {
+                        true -> "разрешён"
+                        false -> "не разрешён"
+                        null -> "неизвестно"
+                    }}",
+            )
+        }
+
         // ── Переписка ───────────────────────────────────────────────────────
         lines += messageLine(facts)
 
@@ -840,6 +886,7 @@ object DiagnosticsReport {
         val sent = c[Counters.MSG_OUT] ?: 0L
         val acked = c[Counters.MSG_ACK] ?: 0L
         val notOpened = c[Counters.MSG_IN_NOT_OPENED] ?: 0L
+        val localOpenFailures = c[Counters.MSG_IN_LOCAL_CRYPTO_UNAVAILABLE] ?: 0L
         val queued = c[Counters.MSG_QUEUED_OFFLINE] ?: 0L
         val failed = c[Counters.MSG_SEND_FAILED] ?: 0L
         val ownEvictions = facts.relayQueueOwnEvictions
@@ -869,19 +916,23 @@ object DiagnosticsReport {
             }
         }
         val notes = buildString {
-            if (queued > 0L) append(" · отложено до сети $queued")
+            if (queued > 0L) append(" · отложено до сети $queued (возможно, ждёт и ключей; это попытки)")
             if (failed > 0L) append(" · не ушло $failed")
             append(queueNotes)
         }
         return when {
-            // Смена ключа перевешивает остальные исходы: пока не отсканируют
-            // QR заново, переписка не восстановится сама, и любой другой текст
-            // в этой строке увёл бы человека не туда.
+            localOpenFailures > 0L -> DiagnosticsLine(
+                DiagnosticsLevel.WARN,
+                "Сообщения",
+                "не вскрылось $notOpened попыток (из них $localOpenFailures при неготовых " +
+                    "локальных ключах); это не доказывает смену ключа собеседника" + notes,
+            )
+            // Only a verified HELLO with a different pinned binding proves a peer-key mismatch.
             facts.peerKeyChangedAtMs > 0L -> DiagnosticsLine(
                 DiagnosticsLevel.WARN,
                 "Сообщения",
-                "у собеседника новый ключ шифрования (переустановка приложения) — " +
-                    "пока не отсканируете его QR-код заново, переписка не вскроется" +
+                "подписанный ключ собеседника не совпал с закреплённым; " +
+                    "проверьте его личность по другому каналу перед обновлением QR" +
                     ageSuffix(facts, facts.peerKeyChangedAtMs, "замечено"),
             )
             // Самая дорогая для владельца картина: свои сообщения уходят и
@@ -897,13 +948,13 @@ object DiagnosticsReport {
                 DiagnosticsLevel.WARN,
                 "Сообщения",
                 ("принято $saved, отправлено $sent, подтверждено $acked · " +
-                    "не вскрылось $notOpened (чужая переписка или устаревший ключ)") + notes,
+                    "не вскрылось $notOpened попыток (адресат и причина не подтверждены)") + notes,
             )
             saved == 0L && sent == 0L && queued > 0L -> DiagnosticsLine(
                 DiagnosticsLevel.INFO,
                 "Сообщения",
-                "переписки ещё не было · отправлено ничего · отложено до сети $queued " +
-                    "(уйдут сами, когда появится связь)" + queueNotes,
+                "переписки ещё не было · отправлено ничего · отложено до сети/ключей $queued " +
+                    "(повторится в фоне при восстановлении условий)" + queueNotes,
             )
             saved == 0L && sent == 0L -> DiagnosticsLine(
                 DiagnosticsLevel.INFO,
@@ -1023,7 +1074,15 @@ object DiagnosticsReport {
         }
         appendLine("ready=${facts.coreReady}")
         appendLine("network=${networkText(facts.networkStatus)}")
-        appendLine("connected_peers=${facts.connectedPeers}")
+        appendLine("connected_peers=${facts.connectedPeers} (не число подтверждённых прямых соседей)")
+        appendLine("signed_direct_swarm_peers=${facts.liveDirectSwarmPeers?.toString() ?: "unknown"} (живые подтверждённые APUX1)")
+        appendLine("external_transport_allowed_now=${facts.externalTransportAllowed?.toString() ?: "unknown"} (политика на момент снимка, не факт обращения)")
+        appendLine("signing_seed_keystore=${safeDiagnosticToken(facts.signingSeedMode)}")
+        appendLine("installed_signing_identity=${safeDiagnosticToken(facts.installedSigningMode)}")
+        appendLine("signing_install_before_core=${safeDiagnosticToken(facts.signingInstallBeforeCore)}")
+        appendLine("signing_routing_matches_core=${facts.signingMatchesCoreRouting?.toString() ?: "unknown"} (без идентификаторов)")
+        appendLine("file_exchange_keystore=${safeDiagnosticToken(facts.fileExchangeMode)}")
+        appendLine("file_exchange_install_before_core=${safeDiagnosticToken(facts.fileExchangeInstallBeforeCore)}")
         appendLine("pending_events=${facts.pendingEvents}")
         appendLine("relay_custody=${facts.relayCustody} · quarantine=${facts.relayQuarantine}")
         appendLine("core_starts=${facts.coreRestarts}")
@@ -1094,14 +1153,15 @@ object DiagnosticsReport {
         appendLine("входящих показано=${c[Counters.MSG_IN] ?: 0L}")
         appendLine("исходящих отправлено=${c[Counters.MSG_OUT] ?: 0L}")
         appendLine("подтверждений доставки=${c[Counters.MSG_ACK] ?: 0L}")
-        appendLine("отложено до сети (уйдёт само)=${c[Counters.MSG_QUEUED_OFFLINE] ?: 0L}")
+        appendLine("отложено (ожидает связь/ключи; число попыток)=${c[Counters.MSG_QUEUED_OFFLINE] ?: 0L}")
         appendLine("не ушло (узел отказал или нет сети)=${c[Counters.MSG_SEND_FAILED] ?: 0L}")
         appendLine("последнее входящее=${lastSeenText(facts, facts.lastIncomingAtMs)}")
         appendLine("последнее исходящее=${lastSeenText(facts, facts.lastOutgoingAtMs)}")
         appendLine("последнее подтверждение=${lastSeenText(facts, facts.lastAckAtMs)}")
-        appendLine("не вскрылось (чужая переписка или устаревший ключ)=$notOpened")
+        appendLine("не вскрылось (попытки; адресат/причина не подтверждены)=$notOpened")
+        appendLine("из них при неготовой локальной identity при старте=${c[Counters.MSG_IN_LOCAL_CRYPTO_UNAVAILABLE] ?: 0L}")
         appendLine(
-            "не вскрылось: старые копии в пути (ключ уже рабочий)=" +
+            "не вскрылось рядом с успешным открытием (возможны копии в пути)=" +
                 "${c[Counters.MSG_IN_NOT_OPENED_STALE] ?: 0L}",
         )
         appendLine(
@@ -1151,19 +1211,19 @@ object DiagnosticsReport {
         )
         if (facts.peerKeyChangedAtMs > 0L) {
             appendLine(
-                "  ↳ собеседник прислал новый ключ, а закреплён прежний — так и выглядит " +
-                    "«от него не приходят»: отсканируйте его QR-код заново",
+                "  ↳ подписанный HELLO не совпал с закреплённым ключом; проверьте " +
+                    "личность собеседника вне приложения перед обновлением QR",
             )
         }
         if (notOpened > 0L) {
             appendLine(
-                "  ↳ входящие не вскрываются: собеседник запечатал не нашим ключом — " +
-                    "у него устаревшая копия ключа (переустановка, восстановление профиля)",
+                "  ↳ это попытки, не число уникальных сообщений: неизвестно, кому " +
+                    "адресованы пакеты и почему они не открылись; не сбрасывайте ключи по этому счётчику",
             )
         } else if ((c[Counters.MSG_IN_NOT_OPENED_STALE] ?: 0L) > 0L) {
             appendLine(
-                "  ↳ не вскрылись только старые копии: они отправлены до обмена ключами, " +
-                    "текущая переписка открывается — делать ничего не нужно",
+                "  ↳ рядом с успешным открытием были нераскрытые конверты; " +
+                    "возможны чужой транзит или задержавшиеся копии",
             )
         }
         if (facts.relayQueueFull > 0L) {
@@ -1207,6 +1267,8 @@ object DiagnosticsReport {
         appendLine("завершено=${sums.completed}")
         appendLine("ошибок=${sums.failed} (за всё время работы приложения)")
         appendLine("отменено=${sums.cancelled}")
+        appendLine("file_broker_fallback_attempts=${facts.counters[Counters.FILE_BROKER_FALLBACK_ATTEMPTS] ?: 0L} (сессия; не доказательство постановки в relay)")
+        appendLine("apk_direct_unreachable=${facts.counters[Counters.APK_DIRECT_UNREACHABLE] ?: 0L} (сессия; APK-пакет в брокер не отправлялся)")
         facts.failureCodes.forEach { failure ->
             appendLine("ошибка.${failure.code}=${failure.count} — ${TransferErrorText.explain(failure.code)}")
         }
@@ -1235,6 +1297,9 @@ object DiagnosticsReport {
         appendLine("[сессия]")
         val c = facts.counters
         appendLine("передач начато (отправка)=${c[Counters.FILE_STARTED_OUT] ?: 0L}")
+        if ((c[Counters.FILE_STARTED_OUT] ?: 0L) > 0L) {
+            appendLine("  ↳ это попытки подготовки, включая самосев APK; при ошибке строка удаляется — не число пользовательских отправок")
+        }
         appendLine("приёмов начато=${c[Counters.FILE_STARTED_IN] ?: 0L}")
         appendLine("передач завершено=${c[Counters.FILE_COMPLETED] ?: 0L}")
         appendLine("ошибок передачи=${c[Counters.FILE_FAILED] ?: 0L}")
@@ -1250,7 +1315,8 @@ object DiagnosticsReport {
         appendLine("отказов старта ядра=${c[Counters.CORE_FAILURES] ?: 0L}")
         val known = setOf(
             Counters.FILE_STARTED_OUT, Counters.FILE_STARTED_IN, Counters.FILE_COMPLETED,
-            Counters.FILE_FAILED, Counters.F4_NEGOTIATED, Counters.F4_RANGES_SENT,
+            Counters.FILE_FAILED, Counters.FILE_BROKER_FALLBACK_ATTEMPTS,
+            Counters.APK_DIRECT_UNREACHABLE, Counters.F4_NEGOTIATED, Counters.F4_RANGES_SENT,
             Counters.F4_RANGES_RECEIVED, Counters.F4_BYTES_SENT, Counters.F4_BYTES_RECEIVED,
             Counters.F4_RANGE_FAILURES, Counters.F4_UDP_FALLBACK, Counters.NETWORK_CHANGES,
             Counters.CORE_STARTS,
@@ -1259,6 +1325,7 @@ object DiagnosticsReport {
             Counters.MSG_OUT,
             Counters.MSG_ACK,
             Counters.MSG_IN_NOT_OPENED,
+            Counters.MSG_IN_LOCAL_CRYPTO_UNAVAILABLE,
             Counters.MSG_IN_NOT_OPENED_STALE,
             Counters.MSG_IN_BAD_SENDER,
             Counters.MSG_PEER_KEY_CHANGED,

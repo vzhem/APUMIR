@@ -3,6 +3,7 @@ package com.vladimir.messenger.data.file
 import android.util.Log
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
+import com.vladimir.messenger.data.update.ApkUpdate
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -26,8 +27,10 @@ import kotlinx.coroutines.sync.withLock
  * ДЛЯ ЭТОГО просителя, + моя подписанная привязка); куски - после первого
  * подтверждения, окном от подтверждённого префикса или по инвентарю
  * просителя ([onWant]): «у меня N подряд, пришли вот эти» - так несколько
- * сидов шлют разные полосы, а не одно и то же. Всё по прямому каналу
- * (LAN/QUIC, [directTransport]); гонять мегабайты через ретранслятор нельзя.
+ * сидов шлют разные полосы, а не одно и то же. Для APK разрешён только
+ * прямой LAN/UDP/QUIC ([apkDirectTransport]): десятки мегабайт не должны
+ * скапливаться в relay. Для обычных файлов группы сохраняется прежний
+ * ограниченный fallback ([directTransport]) при недоступности прямого пути.
  * Подтверждения и инвентарь приходят через FileTransferReceiver
  * ([FileTransferReceiver.GroupSeedHooks]).
  *
@@ -39,8 +42,10 @@ import kotlinx.coroutines.sync.withLock
 class GroupFileSeeder(
     private val transferDao: FileTransferDao,
     private val chunkStore: FileTransferChunkStore,
-    /** Прямой канал: (узел, текст) -> true, если ушло напрямую. */
+    /** Для файлов группы — прежняя доставка, включая ограниченный broker fallback. */
     private val directTransport: (String, String) -> Boolean,
+    /** Для APK — только прямой транспорт; никакого broker fallback с кусками APK. */
+    private val apkDirectTransport: (String, String) -> Boolean = directTransport,
     private val ownBindingProvider: () -> ByteArray?,
     /** Конверт с ключом общей копии для просителя (OutgoingFilePreparationService.wrapGroupKey). */
     private val wrapKey: suspend (transferIdHex: String, requester: String) -> ByteArray,
@@ -326,9 +331,12 @@ class GroupFileSeeder(
     ): Window {
         val id = transfer.transferId
         val transferId = hexToBytes(id)
+        // APK может быть десятки мегабайт: ни offer, ни куски не должны
+        // накапливаться в RAM/durable relay при отсутствии прямого соседа.
+        val sendPacket = if (transfer.chatId == ApkUpdate.CHAT_ID) apkDirectTransport else directTransport
         var sent = 0
         for (fragment in FileTransferPacketCodec.fragment(FileTransferPacketCodec.Type.OFFER, transferId, 0L, offer)) {
-            check(directTransport(to, FileTransferWire.encodeEncodedPacket(fragment))) { "direct send failed" }
+            check(sendPacket(to, FileTransferWire.encodeEncodedPacket(fragment))) { "direct send failed" }
             sent++
         }
         if (offerOnly) return Window(sent, acked)
@@ -340,7 +348,7 @@ class GroupFileSeeder(
             var taken = 0
             for (chunkIndex in pending) {
                 if (taken == perWindow) break
-                sent += sendChunk(to, id, transferId, chunkIndex)
+                sent += sendChunk(sendPacket, to, id, transferId, chunkIndex)
                 last = maxOf(last, chunkIndex + 1)
                 taken++
             }
@@ -348,18 +356,24 @@ class GroupFileSeeder(
         }
         val windowEnd = minOf(transfer.chunkCount, acked + perWindow.toLong())
         for (chunkIndex in acked until windowEnd) {
-            sent += sendChunk(to, id, transferId, chunkIndex)
+            sent += sendChunk(sendPacket, to, id, transferId, chunkIndex)
         }
         return Window(sent, windowEnd)
     }
 
-    private fun sendChunk(to: String, id: String, transferId: ByteArray, chunkIndex: Long): Int {
+    private fun sendChunk(
+        sendPacket: (String, String) -> Boolean,
+        to: String,
+        id: String,
+        transferId: ByteArray,
+        chunkIndex: Long,
+    ): Int {
         val ciphertext = chunkStore.readEncryptedChunk(id, chunkIndex)
             ?: throw IllegalStateException("Chunk $chunkIndex missing for $id")
         var sent = 0
         try {
             for (fragment in FileTransferPacketCodec.fragment(FileTransferPacketCodec.Type.CHUNK, transferId, chunkIndex, ciphertext)) {
-                check(directTransport(to, FileTransferWire.encodeEncodedPacket(fragment))) { "direct send failed" }
+                check(sendPacket(to, FileTransferWire.encodeEncodedPacket(fragment))) { "direct send failed" }
                 sent++
             }
         } finally {

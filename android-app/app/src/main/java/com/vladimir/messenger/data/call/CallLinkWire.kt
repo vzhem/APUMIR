@@ -28,7 +28,7 @@ object CallLinkWire {
     const val TYPE_MEDIA = 0xAC
 
     const val MAX_BATCH_FRAMES = 8
-    const val MAX_FRAME_BYTES = CallWire.MAX_AUDIO_PAYLOAD_BYTES
+    const val MAX_FRAME_BYTES = 8 * 1024
     const val MAX_CONTROL_BYTES = 4 * 1024
 
     /** seq управляющих пакетов принимающей стороны начинаются отсюда. */

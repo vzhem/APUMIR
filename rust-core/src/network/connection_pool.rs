@@ -269,6 +269,22 @@ impl ConnectionPool {
         }
     }
 
+    /// A local, non-mutating liveness sample for authenticated peer IDs.
+    /// Unlike `get`, this does not refresh last_used merely because the
+    /// external-fallback policy checked a socket; idle cleanup still works.
+    pub async fn has_any_live_of(&self, peer_ids: &[&str]) -> bool {
+        !self.live_of(peer_ids).await.is_empty()
+    }
+
+    /// Only the specified, already-open QUIC keys; observing must NOT call
+    /// get() or refresh idle timers. The caller intersects with signed PEX.
+    pub async fn live_of(&self, peer_ids: &[&str]) -> Vec<String> {
+        let entries = self.entries.lock().await;
+        peer_ids.iter().filter(|id| entries.get(id.as_bytes())
+            .map(|entry| !entry.connection.is_closed()).unwrap_or(false))
+            .map(|id| (*id).to_string()).collect()
+    }
+
     /// Список ключей всех активных соединений (для диагностики).
     pub async fn active_keys(&self) -> Vec<Vec<u8>> {
         let entries = self.entries.lock().await;

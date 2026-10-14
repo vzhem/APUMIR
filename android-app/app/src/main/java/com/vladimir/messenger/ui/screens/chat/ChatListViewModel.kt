@@ -975,11 +975,31 @@ class ChatListViewModel @Inject constructor(
                 com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
             }
             val story = com.vladimir.messenger.data.story.StoryStore.publish(me, trimmed.take(200), bg, photoB64)
-            val packets = com.vladimir.messenger.data.story.StoryStore.encodePackets(story)
-            chatRepository.directContactIds().forEach { peer ->
-                packets.forEach { packet ->
-                    runCatching { chatRepository.sendStoryPacket(peer, packet) }
-                }
+            val packets = com.vladimir.messenger.data.story.StoryOutbox.packets(
+                story.id, com.vladimir.messenger.data.story.StoryStore.encodePackets(story))
+            val peers = chatRepository.directContactIds()
+            // Фото едет десятками частей, а сборка требует все: рассылка идёт
+            // волнами (StoryOutbox), иначе потеря одной части оставляет друга и
+            // без фото, и без подписи - история не показывается вовсе.
+            com.vladimir.messenger.data.story.StoryOutbox.start(story.id, packets, peers) { peer, packet ->
+                chatRepository.sendStoryPacket(peer, packet.content, packet.transportId)
+            }
+        }
+    }
+
+    /** Досрочно снять свою историю: у друзей она тоже исчезает. */
+    fun deleteStory(storyId: String) {
+        viewModelScope.launch {
+            val story = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.vladimir.messenger.data.story.StoryStore.revokeMine(storyId)
+            } ?: return@launch
+            com.vladimir.messenger.data.story.StoryOutbox.cancel(story.id)
+            val packets = com.vladimir.messenger.data.story.StoryOutbox.packets(
+                story.id, listOf(com.vladimir.messenger.data.story.StoryStore.encodeRevoke(story)),
+            )
+            val peers = chatRepository.directContactIds()
+            com.vladimir.messenger.data.story.StoryOutbox.startRevoke(story.id, packets, peers) { peer, packet ->
+                chatRepository.sendStoryPacket(peer, packet.content, packet.transportId)
             }
         }
     }

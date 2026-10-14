@@ -15,6 +15,8 @@ import android.os.StatFs
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.local.dao.FileTransferDao
+import com.vladimir.messenger.data.file.FileExchangeKeyStore
+import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import com.vladimir.messenger.data.swarm.OnlineHelperSettings
 import com.vladimir.messenger.data.swarm.ServerMode
 import com.vladimir.messenger.data.swarm.SwarmSettings
@@ -60,6 +62,20 @@ object TransferDiagnostics {
 
     /** Сколько ждать чтение журнала процесса, прежде чем собрать отчёт без него. */
     private const val LOGCAT_BUDGET_MS = 2_500L
+    /** A failing KeyMint must not stall the first, immediately visible report snapshot. */
+    private const val KEY_MODE_BUDGET_MS = 1_500L
+
+    /** Snapshot of bounded pre-engine installs; read-only mode alone can change AFTER core init. */
+    private data class CryptoBootState(
+        val signingInstall: String = "unknown",
+        val fileExchangeInstall: String = "unknown",
+        val signingMatchesCoreRouting: Boolean? = null,
+    )
+    @Volatile private var cryptoBootState = CryptoBootState()
+
+    fun noteCryptoBootstrap(signingInstall: String, fileExchangeInstall: String, signingMatchesCoreRouting: Boolean?) {
+        cryptoBootState = CryptoBootState(signingInstall, fileExchangeInstall, signingMatchesCoreRouting)
+    }
 
     /**
      * Строка вместо раздела журнала процесса, пока он читается: в быстрой
@@ -172,19 +188,14 @@ object TransferDiagnostics {
         }
     }
 
-    /**
-     * Сообщение легло в очередь и уйдёт само, когда появится сеть. Это НЕ
-     * отправка: подтверждения доставки на такое сообщение ещё не было и быть
-     * не может. Отдельный счётчик нужен, чтобы «отправлено» не путалось с
-     * «отложено» — иначе отчёт выглядел бы бодрее, чем переписка.
-     */
+    /** Попытка оставлена в очереди; повтор требует связи И доступных ключей. Не доставка. */
     fun noteMessageQueuedOffline() {
         val total = bump(Counters.MSG_QUEUED_OFFLINE)
         if (total == 1L || total % 10L == 0L) {
             append(
                 DiagnosticsLevel.INFO,
                 "msg",
-                "исходящее отложено до сети ($total-е): уйдёт само",
+                "исходящее ожидает условий ($total-я попытка): нужны связь и доступные ключи; доставка не подтверждена",
             )
         }
     }
@@ -197,33 +208,36 @@ object TransferDiagnostics {
     }
 
     /**
-     * Входящий конверт не вскрылся — это потеря НАСТОЯЩЕГО сообщения, а не
-     * служебный шум. Поэтому предупреждение и счётчик, а [senderKeyKnown]
-     * отделяет две разные причины: «не нам» и «у собеседника устаревший наш
-     * ключ» — советы в этих случаях разные.
+     * Failed opens count attempts, not unique messages or confirmed peer-key changes. A relay
+     * may hand us someone else's ciphertext. Only a separately verified HELLO pin mismatch
+     * is evidence of a changed peer binding.
      */
-    fun noteSealedNotOpened(senderKeyKnown: Boolean, staleKeyCopy: Boolean = false) {
+    fun noteSealedNotOpened(
+        senderKeyKnown: Boolean,
+        staleKeyCopy: Boolean = false,
+        localIdentityUnavailable: Boolean = false,
+    ) {
+        if (localIdentityUnavailable) {
+            val attempts = bump(Counters.MSG_IN_NOT_OPENED)
+            bump(Counters.MSG_IN_LOCAL_CRYPTO_UNAVAILABLE)
+            if (attempts == 1L || attempts % 25L == 0L) {
+                append(DiagnosticsLevel.WARN, "msg", "конверт не открылся ($attempts-я попытка); локальные ключи при старте были недоступны, адресат пакета не установлен")
+            }
+            return
+        }
         if (staleKeyCopy) {
-            // Копия, отправленная до обмена ключами: ключ уже рабочий, новая
-            // переписка открывается. Это НЕ потеря и не повод для тревоги —
-            // считаем отдельным числом, чтобы «не вскрылось» не росло из-за
-            // хвостов, и в журнал не пишем (владелец 2026-10-07: «плашка
-            // появилась опять, хотя переписка работает»).
+            // Recently successful open: usually a delayed/foreign copy, not proof of a broken chat.
             bump(Counters.MSG_IN_NOT_OPENED_STALE)
             return
         }
-        val total = bump(Counters.MSG_IN_NOT_OPENED)
-        if (total == 1L || total % 5L == 0L) {
+        val attempts = bump(Counters.MSG_IN_NOT_OPENED)
+        if (attempts == 1L || attempts % 25L == 0L) {
             append(
                 DiagnosticsLevel.WARN,
                 "msg",
-                if (senderKeyKnown) {
-                    "входящее не вскрылось ($total-е): собеседник запечатал для нашего " +
-                        "прежнего ключа — у него устаревшая копия"
-                } else {
-                    "входящее не вскрылось ($total-е): конверт не нам — ключами с " +
-                        "отправителем не обменивались"
-                },
+                "конверт не открылся ($attempts-я попытка); " +
+                    if (senderKeyKnown) "ключ отправителя известен, но адресат и причина не подтверждены"
+                    else "ключ отправителя не известен, адресат и причина не подтверждены",
             )
         }
     }
@@ -242,8 +256,8 @@ object TransferDiagnostics {
             append(
                 DiagnosticsLevel.WARN,
                 "msg",
-                "у собеседника сменился ключ шифрования (переустановка приложения?) — " +
-                    "сообщения не вскрываются, пока не отсканируете его QR-код заново",
+                "подписанный HELLO не совпал с закреплённым ключом собеседника; " +
+                    "проверьте его личность по другому каналу, прежде чем обновлять QR",
             )
         }
     }
@@ -379,7 +393,7 @@ object TransferDiagnostics {
 
     // ── Факты с телефона ───────────────────────────────────────────────
 
-    private fun gatherFacts(
+    private suspend fun gatherFacts(
         context: Context,
         createdAtMs: Long,
         counters: Map<String, Long>,
@@ -397,6 +411,25 @@ object TransferDiagnostics {
         } else {
             ""
         }
+        // Read-only key modes: neither creates a seed nor serializes a binding into the report.
+        // Do not infer the cause of a failed open from a known sender binding alone.
+        val signingSeedMode = kotlinx.coroutines.withTimeoutOrNull(KEY_MODE_BUDGET_MS) {
+            withContext(Dispatchers.IO) {
+                runCatching { IdentitySigningKeyStore.mode(context).name.lowercase() }
+                    .getOrDefault("unavailable")
+            }
+        } ?: "timeout"
+        val fileExchangeMode = kotlinx.coroutines.withTimeoutOrNull(KEY_MODE_BUDGET_MS) {
+            withContext(Dispatchers.IO) {
+                runCatching { FileExchangeKeyStore.mode(context).name.lowercase() }
+                    .getOrDefault("unavailable")
+            }
+        } ?: "timeout"
+        val installedSigningMode = safeNative { uniffi.p2p_core.identitySigningMode() }
+        val boot = cryptoBootState
+        val running = runCatching { RustBridge.isRunning() }.getOrDefault(false)
+        val liveDirect = if (running) runCatching { RustBridge.liveSwarmPeerIds().size }.getOrNull() else null
+        val externalAllowed = if (running) runCatching { RustBridge.externalTransportAllowed() }.getOrNull() else null
         // Полное имя java.lang.Runtime: иначе песочница, где нет JDK, видит
         // «Runtime» как имя без объявления (ложное срабатывание проверки).
         val runtime = java.lang.Runtime.getRuntime()
@@ -430,6 +463,14 @@ object TransferDiagnostics {
                 OnlineHelperSettings.init(context)
                 OnlineHelperSettings.enabled.value
             }.getOrNull(),
+            signingSeedMode = signingSeedMode,
+            installedSigningMode = installedSigningMode,
+            fileExchangeMode = fileExchangeMode,
+            signingInstallBeforeCore = boot.signingInstall,
+            fileExchangeInstallBeforeCore = boot.fileExchangeInstall,
+            signingMatchesCoreRouting = boot.signingMatchesCoreRouting,
+            liveDirectSwarmPeers = liveDirect,
+            externalTransportAllowed = externalAllowed,
             updateDiagnostics = runCatching {
                 UpdateDiagnosticsStore.snapshot(context)
             }.getOrDefault(com.vladimir.messenger.data.diagnostics.UpdateDiagnosticFacts.EMPTY),
@@ -439,7 +480,7 @@ object TransferDiagnostics {
             powerSave = battery.powerSave,
             batteryExempt = battery.exempt,
             deviceIdle = battery.idle,
-            coreRunning = runCatching { RustBridge.isRunning() }.getOrDefault(false),
+            coreRunning = running,
             coreBuild = coreLine.ifBlank { "недоступно" },
             coreStage = runCatching { CoreStatus.stage.value }.getOrDefault(""),
             coreReady = runCatching { CoreStatus.ready.value }.getOrDefault(false),

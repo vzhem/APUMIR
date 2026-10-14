@@ -33,7 +33,7 @@ import org.json.JSONObject
  *
  * Протокол (служебные конверты поверх обычной 1:1 доставки, как APUREAD1):
  *   `APUBK1|store|<владелец>|<конверт>`  — «держи мою копию»;
- *   `APUBK1|ack|<хранитель>|<владелец>`  — «копия у меня»;
+ *   `APUBK1|ack|<хранитель>|<владелец>|<SHA256 конверта>` — подтверждение именно этой копии;
  *   `APUBK1|ask|<проситель>`             — «дай мою копию» (сервер недоступен);
  *   `APUBK1|give|<хранитель>|<владелец>|<конверт>` — «вот твоя копия».
  *
@@ -60,9 +60,11 @@ class AddressBookSwarmBackup @Inject constructor(
         private const val DIR_NAME = "apu_swarm_backups"
         private const val KEY_INDEX = "swarm_bk_index"
         private const val KEY_ACKS = "swarm_bk_acks"
+        private const val KEY_SNAPSHOT_ACKS = "swarm_bk_snapshot_acks"
         private const val KEY_SENDS = "swarm_bk_sends"
+        private const val KEY_SEND_HASHES = "swarm_bk_send_hashes"
         private const val ASK_TIMEOUT_MS = 20_000L
-        private const val MAX_ASK_PEERS = 40
+        private const val MAX_ASK_PEERS = 8
 
         /** Сколько версий копии собрать для слияния - дальше ждать незачем. */
         private const val ENOUGH_GIVES = 4
@@ -93,6 +95,17 @@ class AddressBookSwarmBackup @Inject constructor(
         val json = JSONObject()
         for ((k, v) in map) json.put(k, v)
         prefs().edit().putString(key, json.toString()).apply()
+    }
+
+    private fun hashMap(): MutableMap<String, String> = runCatching {
+        val json = JSONObject(prefs().getString(KEY_SEND_HASHES, "{}") ?: "{}")
+        json.keys().asSequence().associateWith { json.optString(it) }.toMutableMap()
+    }.getOrDefault(mutableMapOf())
+
+    private fun saveHashMap(map: Map<String, String>) {
+        val json = JSONObject()
+        for ((k, v) in map) json.put(k, v)
+        prefs().edit().putString(KEY_SEND_HASHES, json.toString()).apply()
     }
 
     // ── жеребьёвка хранителей ───────────────────────────────────────────────
@@ -148,29 +161,41 @@ class AddressBookSwarmBackup @Inject constructor(
      * @return человекочитаемая добавка к итогу копирования (пустая строка —
      * добавлять нечего).
      */
-    suspend fun distribute(envelope: String, force: Boolean): String = withContext(Dispatchers.IO) {
+    suspend fun distribute(envelope: String, force: Boolean, snapshotSha: String): String = withContext(Dispatchers.IO) {
         if (envelope.length > MAX_ENVELOPE_CHARS) {
             return@withContext "для телефонов роя велика (>120 КБ) — храним на сервере"
         }
         val me = me() ?: return@withContext ""
-        val elected = elect(me, candidates(me))
-        if (elected.isEmpty()) return@withContext "в рое пока нет других знакомых телефонов"
+        // A known address or MQTT presence is not a holder we can reach in the
+        // current swarm. Never enqueue a 120 KiB copy to every old contact just
+        // to justify a subsequent server upload. Include new signed neighbours
+        // even before they have entered the contact list.
+        val live = RustBridge.liveSwarmPeerIds().filter { it != me }.toSet()
+        if (live.isEmpty()) return@withContext "прямые соседи для копии пока недоступны"
+        val elected = elect(me, candidates(me) + live).filter { it in live }
+        if (elected.isEmpty()) return@withContext "прямые соседи для копии пока недоступны"
         val now = System.currentTimeMillis()
         val sends = jsonMap(KEY_SENDS)
+        val hashes = hashMap()
         var sent = 0
         for (holder in elected) {
-            val due = force || now - sends.getOrDefault(holder, 0L) > RESEND_AFTER_MS
+            val due = force || hashes[holder] != snapshotSha ||
+                now - sends.getOrDefault(holder, 0L) > RESEND_AFTER_MS
             if (!due) continue
             if (send(holder, "$PREFIX|store|$me|$envelope")) {
                 sends[holder] = now
+                hashes[holder] = snapshotSha
                 sent++
             }
         }
-        if (sent > 0) saveJsonMap(KEY_SENDS, sends)
+        if (sent > 0) {
+            saveJsonMap(KEY_SENDS, sends)
+            saveHashMap(hashes)
+        }
         when {
-            sent == elected.size -> "роздана на $sent телефонах роя"
-            sent > 0 -> "роздана на $sent из ${elected.size} телефонов роя, остальные недоступны"
-            else -> "телефоны роя для копии недоступны, повторю позже"
+            sent == elected.size -> "отправлена $sent хранителям роя; ждём подтверждения записи"
+            sent > 0 -> "отправлена $sent из ${elected.size} хранителей; ждём подтверждения"
+            else -> "копия не была отправлена хранителям; повторю позже"
         }
     }
 
@@ -182,10 +207,28 @@ class AddressBookSwarmBackup @Inject constructor(
         return acks.count { (holder, at) -> holder != me && now - at < ACK_FRESH_MS }
     }
 
-    /** Ежечасный тик из фоновой петли: обновить копии у хранителей, если пора. */
-    suspend fun hourlyTick(currentEnvelope: String?) {
-        if (currentEnvelope.isNullOrBlank()) return
-        runCatching { distribute(currentEnvelope, force = false) }
+    /** A queued send or a previous snapshot's ACK cannot justify skipping backup. */
+    fun hasConfirmedSnapshot(envelope: String): Boolean {
+        val digest = shaHex(envelope)
+        val now = System.currentTimeMillis()
+        return jsonMap(KEY_SNAPSHOT_ACKS).any { (key, at) ->
+            key.startsWith("$digest|") && at in (now - ACK_FRESH_MS)..now
+        }
+    }
+
+    suspend fun awaitConfirmedSnapshot(envelope: String, maxWaitMs: Long = 5_000L): Boolean {
+        val until = System.currentTimeMillis() + maxWaitMs
+        while (System.currentTimeMillis() < until) {
+            if (hasConfirmedSnapshot(envelope)) return true
+            delay(250)
+        }
+        return hasConfirmedSnapshot(envelope)
+    }
+
+    /** Retry as needed, and fan out a freshly restored snapshot without waiting 12h. */
+    suspend fun hourlyTick(currentEnvelope: String?, snapshotSha: String) {
+        if (currentEnvelope.isNullOrBlank() || snapshotSha.isBlank()) return
+        runCatching { distribute(currentEnvelope, force = false, snapshotSha = snapshotSha) }
             .onFailure { Log.w(TAG, "swarm distribute: ${it.message}") }
     }
 
@@ -210,7 +253,18 @@ class AddressBookSwarmBackup @Inject constructor(
     suspend fun askAndRestoreAll(validator: (String) -> Boolean): List<String> =
         withContext(Dispatchers.IO) {
             val me = me() ?: return@withContext emptyList()
-            val peers = candidates(me).take(MAX_ASK_PEERS)
+            // Old contact count is not reachability. If no directly signed
+            // neighbour is open, the core already spent its search window;
+            // do not send dozens of broker requests just to call it "swarm".
+            val live = RustBridge.liveSwarmPeerIds().filter { it != me }
+            if (live.isEmpty()) return@withContext emptyList()
+            val confirmedHolders = jsonMap(KEY_ACKS).keys
+            // Ask all connected holders first, then other *connected* peers.
+            // Off-line holders can only be reached through queued MQTT; that is
+            // not a successful swarm query and would leak a large request to a
+            // fallback transport unrelated to the actual missing datum.
+            val peers = (live.filter { it in confirmedHolders } + live)
+                .distinct().take(MAX_ASK_PEERS)
             if (peers.isEmpty()) return@withContext emptyList()
             pendingGives.clear()
             asking = true
@@ -246,7 +300,7 @@ class AddressBookSwarmBackup @Inject constructor(
     private fun blobFile(owner: String): File =
         File(dir(), owner.replace(Regex("[^A-Za-z0-9_]"), "_") + ".bk")
 
-    private fun storeBlob(owner: String, envelope: String) {
+    private fun storeBlob(owner: String, envelope: String): Boolean =
         runCatching {
             val file = blobFile(owner)
             val tmp = File(dir(), file.name + ".tmp")
@@ -261,8 +315,8 @@ class AddressBookSwarmBackup @Inject constructor(
             val index = jsonMap(KEY_INDEX)
             index[owner] = System.currentTimeMillis()
             saveJsonMap(KEY_INDEX, index)
-        }.onFailure { Log.w(TAG, "store blob: ${it.message}") }
-    }
+            true
+        }.onFailure { Log.w(TAG, "store blob: ${it.message}") }.getOrDefault(false)
 
     // ── разбор входящих конвертов (вызывается из петли сервиса) ─────────────
 
@@ -282,22 +336,30 @@ class AddressBookSwarmBackup @Inject constructor(
                 val envelope = parts.drop(3).joinToString("|")
                 if (owner.isBlank() || senderId != owner) return true
                 if (envelope.startsWith(AddressBookBackup.MAGIC) &&
-                    envelope.length <= MAX_ENVELOPE_CHARS
+                    envelope.length <= MAX_ENVELOPE_CHARS && storeBlob(owner, envelope)
                 ) {
-                    storeBlob(owner, envelope)
-                    send(senderId, "$PREFIX|ack|$me|$owner")
+                    send(senderId, "$PREFIX|ack|$me|$owner|${shaHex(envelope)}")
                 }
                 return true
             }
             "ack" -> {
-                if (parts.size != 4) return true
+                if (parts.size !in 4..5) return true // older peers omit digest
                 val holder = parts[2]
                 val owner = parts[3]
-                if (owner == me && holder != me) {
+                if (owner == me && holder != me && senderId == holder) {
+                    val now = System.currentTimeMillis()
                     val acks = jsonMap(KEY_ACKS)
-                    acks[holder] = System.currentTimeMillis()
+                    acks[holder] = now
                     saveJsonMap(KEY_ACKS, acks)
-                    Log.i(TAG, "copy ack from ${holder.takeLast(8)}")
+                    val digest = parts.getOrNull(4).orEmpty()
+                    if (digest.matches(Regex("[0-9a-f]{64}"))) {
+                        val snapshots = jsonMap(KEY_SNAPSHOT_ACKS)
+                        snapshots["$digest|$holder"] = now
+                        val fresh = snapshots.filterValues { it in (now - ACK_FRESH_MS)..now }
+                            .toList().sortedByDescending { it.second }.take(4_096).toMap()
+                        saveJsonMap(KEY_SNAPSHOT_ACKS, fresh)
+                    }
+                    Log.i(TAG, "copy ack from ${holder.takeLast(8)} snapshot=${digest.take(12)}")
                 }
                 return true
             }
@@ -317,7 +379,7 @@ class AddressBookSwarmBackup @Inject constructor(
                 // APUBK1|give|<хранитель>|<владелец>|<конверт>
                 val owner = parts.getOrNull(3).orEmpty()
                 val envelope = parts.drop(4).joinToString("|")
-                if (owner == me && asking) pendingGives.add(envelope)
+                if (owner == me && senderId == parts.getOrNull(2) && asking) pendingGives.add(envelope)
                 return true
             }
             else -> return true
