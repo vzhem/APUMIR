@@ -6,6 +6,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 python3 "$ROOT/scripts/ci/check-deferred-cancel.py"
+python3 "$ROOT/scripts/ci/check-delete-read.py"
 OUT="$ROOT/target/chat-history-check"
 mkdir -p "$OUT/compiler" "$OUT/runtime" "$OUT/classes"
 read -r KOTLIN COROUTINES JUNIT < <(python3 - "$ROOT/android-app/gradle/libs.versions.toml" <<'PY'
