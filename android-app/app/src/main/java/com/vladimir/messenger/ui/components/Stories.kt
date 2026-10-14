@@ -262,6 +262,12 @@ fun StoryViewerDialog(
     stories: List<StoryStore.Story>,
     onDismiss: () -> Unit,
     onDeleteMine: ((String) -> Unit)? = null,
+    /** Поставить/снять значок на истории (null - экран только смотрит). */
+    onReact: ((StoryStore.Story, String) -> Unit)? = null,
+    /** Написать комментарий к истории. */
+    onComment: ((StoryStore.Story, String) -> Unit)? = null,
+    /** История показана: экран просит у автора сводку откликов, если её нет. */
+    onStoryShown: ((StoryStore.Story) -> Unit)? = null,
 ) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) {
@@ -283,6 +289,11 @@ fun StoryViewerDialog(
     var userPaused by remember(authorId) { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var pendingDeleteId by remember { mutableStateOf<String?>(null) }
+    // Отклики на историю: палитра значков и лента комментариев. Оба окна
+    // останавливают ленту (см. ключи LaunchedEffect ниже).
+    var showReactionPicker by remember { mutableStateOf(false) }
+    var showComments by remember { mutableStateOf(false) }
+    val feedback = rememberStoryFeedback(current.id)
     val owner = LocalLifecycleOwner.current
     var resumed by remember(owner) { mutableStateOf(owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     DisposableEffect(owner) {
@@ -310,8 +321,13 @@ fun StoryViewerDialog(
     val setHeldNow by rememberUpdatedState<(Boolean) -> Unit>({ held = it })
     // Не отмечаем собственные истории. Это локальный статус, не счётчик просмотров автора.
     LaunchedEffect(current.id) { if (!current.mine) StoryStore.markSeen(current.id) }
-    LaunchedEffect(current.id, held, userPaused, confirmDelete, resumed) {
-        if (StoryPlayback.frozen(held, userPaused, confirmDelete, resumed)) return@LaunchedEffect
+    // Зритель, который был офлайн или открыл историю первым, просит сводку
+    // откликов у автора. Просьба ограничена по частоте правилами очереди.
+    LaunchedEffect(current.id) { onStoryShown?.invoke(current) }
+    LaunchedEffect(current.id, held, userPaused, confirmDelete, resumed, showReactionPicker, showComments) {
+        if (StoryPlayback.frozen(held || showReactionPicker || showComments, userPaused, confirmDelete, resumed)) {
+            return@LaunchedEffect
+        }
         val duration = StoryPlayback.durationMs(current.text.length)
         var last = withFrameMillis { it }
         while (progress < 1f) {
@@ -327,7 +343,9 @@ fun StoryViewerDialog(
             Box(Modifier.fillMaxSize().clip(RoundedCornerShape(20.dp))
                 .background(storyBackgrounds[current.bg.coerceIn(storyBackgrounds.indices)])) {
                 // Жесты только в области контента: верхние кнопки не перекрыты прозрачным слоем.
-                Box(Modifier.fillMaxSize().padding(top = 96.dp, bottom = 72.dp)
+                // Низ отступлен дальше, чем раньше: под снимком теперь ещё и ряд
+                // откликов (значки и комментарии), он не должен лежать на жесте.
+                Box(Modifier.fillMaxSize().padding(top = 96.dp, bottom = 112.dp)
                     .pointerInput(current.id) {
                         awaitEachGesture {
                             val down = awaitFirstDown()
@@ -363,7 +381,7 @@ fun StoryViewerDialog(
                         }
                     }, contentAlignment = Alignment.Center) {
                     Crossfade(targetState = current, label = "story-content") { story ->
-                        Box(Modifier.fillMaxSize().padding(top = 96.dp, bottom = 64.dp), contentAlignment = Alignment.Center) {
+                        Box(Modifier.fillMaxSize().padding(top = 96.dp, bottom = 104.dp), contentAlignment = Alignment.Center) {
                             StoryContentCanvas(story.text, story.photoB64, storyBackgrounds[story.bg.coerceIn(storyBackgrounds.indices)])
                         }
                     }
@@ -413,15 +431,50 @@ fun StoryViewerDialog(
                         }
                     }
                 }
-                Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    StoryNavigation(stringResource(R.string.story_previous), previous, Modifier.weight(1f))
-                    Text("${index + 1} / ${activeStories.size}", color = Color.White.copy(alpha = .7f),
-                        modifier = Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelMedium)
-                    StoryNavigation(stringResource(R.string.story_next), next, Modifier.weight(1f))
+                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+                    // Реакции и комментарии - как в привычных мессенджерах:
+                    // значки со счётчиками и вход в ленту комментариев прямо на
+                    // снимке. Лента публичная, её видит каждый зритель истории.
+                    StoryFeedbackBar(
+                        summary = feedback,
+                        onOpenPicker = { showReactionPicker = true },
+                        onToggleEmoji = { emoji -> onReact?.invoke(current, emoji) },
+                        onOpenComments = { showComments = true },
+                    )
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        StoryNavigation(stringResource(R.string.story_previous), previous, Modifier.weight(1f))
+                        Text("${index + 1} / ${activeStories.size}", color = Color.White.copy(alpha = .7f),
+                            modifier = Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelMedium)
+                        StoryNavigation(stringResource(R.string.story_next), next, Modifier.weight(1f))
+                    }
                 }
             }
         }
+    }
+    if (showReactionPicker) {
+        // Палитра та же, что в переписке: 20 доброжелательных значков, свой
+        // обведён золотом, рядом - «Убрать реакцию».
+        ReactionPickerDialog(
+            onDismiss = { showReactionPicker = false },
+            myEmoji = feedback.myEmoji,
+            onPick = { emoji ->
+                showReactionPicker = false
+                onReact?.invoke(current, emoji)
+            },
+            onRemove = {
+                showReactionPicker = false
+                // Повторный тап по своему значку снимает его (правило книги откликов).
+                feedback.myEmoji?.let { emoji -> onReact?.invoke(current, emoji) }
+            },
+        )
+    }
+    if (showComments) {
+        StoryCommentsDialog(
+            summary = feedback,
+            onSend = { body -> onComment?.invoke(current, body) },
+            onDismiss = { showComments = false },
+        )
     }
     if (confirmDelete && current.mine && onDeleteMine != null) {
         ApuPremiumDialog(

@@ -68,6 +68,9 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
     override fun onCreate() {
         super.onCreate()
         com.vladimir.messenger.data.story.StoryStore.attach(this)
+        // Отклики на истории (значки и комментарии) живут своим снимком и
+        // поднимаются вместе с лентой: до attach книга откликов пуста.
+        com.vladimir.messenger.data.story.StoryFeedbackStore.attach(this)
         // Отметка в журнале «Логов»: владелец видит, с какого момента
         // собраны события, и не путает свежий запуск со старым.
         com.vladimir.messenger.data.diagnostics.TransferDiagnostics.record(

@@ -1615,6 +1615,21 @@
     <string name="story_photo_failed">Не удалось открыть фото. Выберите другое.</string>
     <string name="story_photo_unavailable">Фото не открылось на этом телефоне</string>
     <string name="story_photo_needs_update">Фото увидят друзья на новой версии APU</string>
+    <!-- Отклики на истории: значки и комментарии. Лента публичная - её видит
+         каждый, кто открыл историю (решение владельца 2026-10-14). -->
+    <string name="story_reaction_add">Реакция на историю</string>
+    <string name="story_reactions_empty">Пока никто не отреагировал</string>
+    <string name="story_reactions_count">Реакции: %1$d</string>
+    <string name="story_comments">Комментарии к истории</string>
+    <string name="story_comments_open">Комментарии</string>
+    <string name="story_comments_count">Комментарии: %1$d</string>
+    <string name="story_comments_empty">Комментариев пока нет. Напишите первый.</string>
+    <string name="story_comment_hint">Написать комментарий…</string>
+    <string name="story_comment_send">Отправить</string>
+    <string name="story_comment_limit">До 200 знаков</string>
+    <string name="story_feedback_public">Реакции и комментарии видят все, кто открыл историю</string>
+    <string name="story_feedback_core_not_ready">Ядро ещё не готово: отклик уйдёт, когда появится связь</string>
+    <string name="story_feedback_unnamed">Без имени</string>
     <string name="swarm_mode_normal">Обычный</string>
     <string name="swarm_mode_economy">Экономный</string>
     <string name="swarm_mode_unlimited">Без ограничений</string>

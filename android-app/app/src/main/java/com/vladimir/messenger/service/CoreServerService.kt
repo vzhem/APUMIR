@@ -88,6 +88,8 @@ class CoreServerService : Service() {
     @Inject lateinit var peerRankRouter: com.vladimir.messenger.data.rank.PeerRankRouter
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
+    // Отклики на истории: значки и комментарии зрителей (см. docs/STORY_REACTIONS_AND_COMMENTS.md).
+    @Inject lateinit var storyFeedback: com.vladimir.messenger.data.story.StoryFeedbackRepository
     @Inject lateinit var groupDao: com.vladimir.messenger.data.local.dao.GroupDao
     @Inject lateinit var inboxPinDao: com.vladimir.messenger.data.local.dao.InboxPinDao
     @Inject lateinit var counters: com.vladimir.messenger.data.channel.PostCounterRepository
@@ -2012,6 +2014,14 @@ class CoreServerService : Service() {
                     RuntimeDiagnostics.measure(DiagnosticOperation.STORY_PUMP) { chatRepository.pumpStoryOutbox() }
                 } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                 catch (_: Exception) { TransferDiagnostics.recordWarning("story", "цикл досылки истории не завершён; повтор при следующем цикле") }
+                // Отклики на истории досылаются своим насосом: значок или
+                // комментарий зрителя уходит автору, автор рассылает сводку
+                // остальным зрителям. Плановый цикл - страховка; основной
+                // толчок репозиторий делает сам, сразу после действия человека.
+                try {
+                    RuntimeDiagnostics.measure(DiagnosticOperation.STORY_PUMP) { storyFeedback.pump() }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { TransferDiagnostics.recordWarning("story", "цикл досылки откликов истории не завершён; повтор при следующем цикле") }
                 // Файлы группы роем (этап 9): повторить свои просьбы, отдать
                 // из очереди, освободить куски отданного.
                 try {
