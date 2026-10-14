@@ -33,7 +33,7 @@
 //! произойдёт вместе с Android Keystore-мостом (следующий slice).
 
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}};
 
 use rusqlite::{params, Connection, Result as SqlResult, Transaction};
 use serde::{Deserialize, Serialize};
@@ -286,14 +286,17 @@ pub enum RelayStoreError {
 /// `spawn_blocking` или из выделенного sync-потока.
 pub struct RelayStore {
     conn: Mutex<Connection>,
+    interrupt: rusqlite::InterruptHandle,
+    maintenance_epoch: Arc<AtomicU64>,
 }
 
 impl RelayStore {
     /// Открыть хранилище по пути (создаёт файл и применяет миграцию).
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, RelayStoreError> {
         let conn = Connection::open(path)?;
+        let interrupt = conn.get_interrupt_handle();
         let store = Self {
-            conn: Mutex::new(conn),
+            conn: Mutex::new(conn), interrupt, maintenance_epoch: Arc::new(AtomicU64::new(0)),
         };
         store.migrate()?;
         Ok(store)
@@ -302,8 +305,9 @@ impl RelayStore {
     /// Открыть в памяти (для тестов).
     pub fn open_in_memory() -> Result<Self, RelayStoreError> {
         let conn = Connection::open_in_memory()?;
+        let interrupt = conn.get_interrupt_handle();
         let store = Self {
-            conn: Mutex::new(conn),
+            conn: Mutex::new(conn), interrupt, maintenance_epoch: Arc::new(AtomicU64::new(0)),
         };
         store.migrate()?;
         Ok(store)
@@ -311,7 +315,7 @@ impl RelayStore {
 
     fn migrate(&self) -> SqlResult<()> {
         let conn = self.conn.lock().unwrap();
-        conn.busy_timeout(std::time::Duration::from_millis(100))?;
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         let empty: i64 = conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table'", [], |r| r.get(0))?;
         if empty == 0 { conn.execute_batch("PRAGMA auto_vacuum=INCREMENTAL;")?; }
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA journal_size_limit=8388608;")?;
@@ -560,9 +564,18 @@ impl RelayStore {
     /// Engine-owned maintenance. Serialized with writers, bounded SQL work and
     /// interruptible compaction. Never opens another DB or decrypts live data.
     pub fn automatic_maintenance(&self, now_ms: i64) -> Result<(usize, usize, usize, bool), RelayStoreError> {
+        self.maintenance_for_epoch(now_ms, self.maintenance_epoch())
+    }
+
+    pub fn maintenance_epoch(&self) -> u64 { self.maintenance_epoch.load(Ordering::Acquire) }
+
+    pub fn maintenance_for_epoch(&self, now_ms: i64, epoch: u64) -> Result<(usize, usize, usize, bool), RelayStoreError> {
+        if epoch != self.maintenance_epoch() { return Ok((0,0,0,false)); }
         let conn = match self.conn.try_lock() { Ok(c) => c, Err(_) => return Ok((0,0,0,false)) };
+        conn.busy_timeout(std::time::Duration::from_millis(100))?;
         let started = std::time::Instant::now();
-        conn.progress_handler(10_000, Some(move || started.elapsed() > std::time::Duration::from_secs(5)));
+        let generation = self.maintenance_epoch.clone();
+        conn.progress_handler(10_000, Some(move || generation.load(Ordering::Acquire) != epoch || started.elapsed() > std::time::Duration::from_secs(5)));
         let result = (|| {
             let expired = conn.execute("DELETE FROM relay_records_enc WHERE msg_id IN (SELECT msg_id FROM relay_records_enc WHERE expires_at_ms<=?1 ORDER BY expires_at_ms LIMIT 5000)", params![now_ms])?
                 + conn.execute("DELETE FROM relay_messages WHERE msg_id IN (SELECT msg_id FROM relay_messages WHERE expires_at_ms<=?1 ORDER BY expires_at_ms LIMIT 5000)", params![now_ms])?;
@@ -585,6 +598,7 @@ impl RelayStore {
                 if free * size >= 64 * 1024 * 1024 && free >= pages / 2
                     && (last == 0 || now_ms.saturating_sub(last) >= 24 * 60 * 60 * 1000)
                     && available > db_bytes.saturating_mul(2).saturating_add(64 * 1024 * 1024) {
+                    if epoch != self.maintenance_epoch() { return Ok((expired, quarantine, tombstones, false)); }
                     conn.execute("UPDATE relay_maintenance SET last_compact_ms=?1 WHERE id=1", params![now_ms])?;
                     if mode != 2 {
                         conn.execute_batch("PRAGMA auto_vacuum=INCREMENTAL; VACUUM;")?;
@@ -605,7 +619,16 @@ impl RelayStore {
             Ok((expired, quarantine, tombstones, compacted))
         })();
         conn.progress_handler(0, None::<fn() -> bool>);
+        // Restore ordinary writer tolerance after holding the connection alone.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         result
+    }
+
+    /// Core stop/restart cancels blocking SQLite work before reopening the DB.
+    /// Does not acquire the connection mutex or unlink anything.
+    pub fn interrupt_for_shutdown(&self) {
+        self.maintenance_epoch.fetch_add(1, Ordering::AcqRel);
+        self.interrupt.interrupt();
     }
 
     /// Явно заменить/добавить зашифрованную запись при пользовательском повторе.
@@ -1726,6 +1749,20 @@ mod tests {
         let body: Vec<u8> = c.query_row("SELECT envelope FROM relay_records_enc WHERE msg_id='live-0'", [], |r| r.get(0)).unwrap();
         assert_eq!(body, vec![42u8; 8192]);
         assert_eq!(c.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0)).unwrap(), "ok");
+    }
+
+    #[test]
+    fn shutdown_cancels_queued_old_generation_maintenance_without_losing_data() {
+        let s = store();
+        let now = 1_000_000;
+        s.store_encrypted(&keys(), &relay("own-live", "pk_b", now), now).unwrap();
+        let old_epoch = s.maintenance_epoch();
+        s.interrupt_for_shutdown();
+        assert_eq!(s.maintenance_for_epoch(now, old_epoch).unwrap(), (0,0,0,false));
+        assert_eq!(s.count_encrypted().unwrap(), 1);
+        assert!(s.store_encrypted(&keys(), &relay("after-restart", "pk_b", now), now).unwrap());
+        assert_eq!(s.automatic_maintenance(now).unwrap(), (0,0,0,false));
+        assert_eq!(s.count_encrypted().unwrap(), 2);
     }
 
 }

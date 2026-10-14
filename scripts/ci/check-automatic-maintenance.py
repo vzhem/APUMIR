@@ -14,7 +14,7 @@ class AutomaticMaintenanceContracts(unittest.TestCase):
         core = source("rust-core/src/engine/core.rs")
         section = core[core.index("// Independent of MQTT"):core.index("let (mqtt_outbound_tx", core.index("// Independent of MQTT"))]
         self.assertIn("spawn_blocking", section)
-        self.assertIn("automatic_maintenance", section)
+        self.assertIn("maintenance_for_epoch", section)
         self.assertIn("queue.cleanup_expired()", section)
         self.assertNotIn("is_connected", section)
 
@@ -25,6 +25,7 @@ class AutomaticMaintenanceContracts(unittest.TestCase):
             self.assertIn(token, section)
         self.assertNotIn("remove_file", section)
         self.assertNotIn("decrypt_record", section)
+        self.assertIn("interrupt_for_shutdown()", source("rust-core/src/engine/core.rs"))
 
     def test_repeated_cleanup_and_markers_do_not_create_or_refresh_garbage(self):
         store = source("rust-core/src/storage/relay_store.rs")

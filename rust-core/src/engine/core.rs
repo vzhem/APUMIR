@@ -823,12 +823,13 @@ impl P2PCore {
                 // Independent of MQTT, gossip and the diagnostic screen.
                 if let Some(custody) = relay_custody2.clone() {
                     let maintenance_queue = relay_queue2.clone();
+                    let maintenance_epoch = custody.store.maintenance_epoch();
                     runtime.spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                         loop {
                             if let Some(ref queue) = maintenance_queue { queue.cleanup_expired(); }
                             let store = custody.clone();
-                            let outcome = tokio::task::spawn_blocking(move || store.store.automatic_maintenance(crate::network::relay_queue::utc_now_ms())).await;
+                            let outcome = tokio::task::spawn_blocking(move || store.store.maintenance_for_epoch(crate::network::relay_queue::utc_now_ms(), maintenance_epoch)).await;
                             match outcome {
                                 Ok(Ok((expired, quarantine, tombstones, compacted))) => tracing::info!(
                                     "MESH maintenance: expired={} quarantine={} tombstones={} compacted={}", expired, quarantine, tombstones, compacted),
@@ -4736,6 +4737,7 @@ impl P2PCore {
     }
 
     pub fn stop(&mut self) {
+        if let Some(ref custody) = self.relay_custody { custody.store.interrupt_for_shutdown(); }
         self.network.stop();
         self.mqtt_outbound_tx = None;
         // K4: гасим поток личного presence (он проснётся не позже чем через

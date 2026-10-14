@@ -9,7 +9,8 @@ import java.util.ArrayDeque
 internal object TemporaryFileSweep {
     data class Result(val examined: Int, val deleted: Int, val freedBytes: Long, val failed: Int)
     fun sweep(root: File, nowMs: Long, onlyAtomicTemps: Boolean = false,
-              ageMs: Long = 7L * 24 * 60 * 60 * 1000): Result {
+              ageMs: Long = 7L * 24 * 60 * 60 * 1000,
+              depthLimit: Int = 3, acceptName: (String) -> Boolean = { true }): Result {
         if (!root.isDirectory || Files.isSymbolicLink(root.toPath())) return Result(0, 0, 0, 0)
         val queue = ArrayDeque<Pair<File, Int>>()
         queue.add(root to 0)
@@ -24,11 +25,12 @@ internal object TemporaryFileSweep {
                         examined++
                         if (Files.isSymbolicLink(path)) continue
                         if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
-                            if (depth < 3) queue.add(path.toFile() to depth + 1)
+                            if (depth < depthLimit) queue.add(path.toFile() to depth + 1)
                             continue
                         }
                         if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) continue
                         val file = path.toFile()
+                        if (!acceptName(file.name)) continue
                         if (onlyAtomicTemps && !(file.name.startsWith(".") && file.name.endsWith(".tmp"))) continue
                         val modified = file.lastModified()
                         if (modified <= 0 || modified > nowMs || nowMs - modified < ageMs) continue

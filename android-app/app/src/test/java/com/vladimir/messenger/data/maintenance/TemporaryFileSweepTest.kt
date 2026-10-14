@@ -42,4 +42,16 @@ class TemporaryFileSweepTest {
             Files.delete(root.resolve("link").toPath())
         } finally { root.deleteRecursively(); outside.deleteRecursively() }
     }
+    @Test fun topLevelImportSweepNeverDescendsIntoReferencedVoiceHistory() {
+        val root = Files.createTempDirectory("apu-import-sweep").toFile()
+        try {
+            val now = System.currentTimeMillis()
+            val temp = root.resolve("apu_pick_old.apk").apply { writeText("temporary"); setLastModified(now - week - 1000) }
+            val original = root.resolve("personal-document.txt").apply { writeText("original"); setLastModified(now - week - 1000) }
+            val voice = root.resolve("voice").apply { mkdirs() }.resolve("apu_pick_do-not-touch.apk").apply { writeText("referenced"); setLastModified(now - week - 1000) }
+            TemporaryFileSweep.sweep(root, now, depthLimit = 0, acceptName = { it.startsWith("apu_pick_") && it.endsWith(".apk") })
+            assertFalse(temp.exists()); assertTrue(original.exists()); assertTrue(voice.exists())
+        } finally { root.deleteRecursively() }
+    }
+
 }

@@ -49,6 +49,21 @@ object AutomaticMaintenance {
                 examined += result.examined; deleted += result.deleted
                 bytes += result.freedBytes; failed += result.failed
             }
+            // Known top-level import leftovers only; never descend into voice/cache libraries.
+            val extra = listOf(
+                TemporaryFileSweep.sweep(app.cacheDir, now, depthLimit = 0, acceptName = {
+                    (it.startsWith("apu_pick_") && it.endsWith(".apk")) ||
+                        (it.startsWith("gif-mirror-") && it.endsWith(".gif"))
+                }),
+                TemporaryFileSweep.sweep(File(app.noBackupFilesDir, "giflib"), now,
+                    depthLimit = 0, acceptName = { it.endsWith(".tmp") }),
+                TemporaryFileSweep.sweep(File(app.noBackupFilesDir, "stickers/v1"), now,
+                    depthLimit = 0, acceptName = { it.endsWith(".tmp") }),
+            )
+            for (result in extra) {
+                examined += result.examined; deleted += result.deleted
+                bytes += result.freedBytes; failed += result.failed
+            }
             runCatching { DownloadTrashCleanup.clean(app) }.onFailure { failed++ }
             runCatching { DownloadTrashCleanup.cleanOldApks(app) }.onFailure { failed++ }
             prefs.edit().putLong("last_run_ms", now).putInt("examined", examined)
