@@ -25,9 +25,9 @@
 исходные логи/идентификаторы телефона в репозиторий не копируются.
 
 Проверки: 5 source-wiring contracts; 3 новых pure JVM StoryPublishTest (всего 10),
-новый UUID privacy test. Четыре Android renderer-теста: multiline/IME semantics,
+новый UUID privacy test. Пять Android renderer-тестов: multiline/IME semantics,
 одинаковые переносы при разных размерах и fontScale, подпись фото, 200 символов
-с большим числом переносов. Source guards не заменяют компиляцию/renderer.
+с большим числом переносов, fractional density. Source guards не заменяют компиляцию/renderer.
 Device-тесты компилируются в CI, но без телефона/эмулятора здесь не запускаются;
 реальная клавиша Enter, курсор/выделение на масштабированном холсте и клавиатура
 в портрете/альбоме остаются обязательной проверкой на устройстве.

@@ -35,10 +35,10 @@ class StoryEditorInstrumentedTest {
     private var compact by mutableStateOf(false)
     private var largeFont by mutableStateOf(false)
 
-    private fun fixture(photo: Boolean = false) {
+    private fun fixture(photo: Boolean = false, pixelDensity: Float? = null) {
         compose.setContent {
             val density = LocalDensity.current
-            CompositionLocalProvider(LocalDensity provides Density(density.density, if (largeFont) 2f else 1f)) {
+            CompositionLocalProvider(LocalDensity provides Density(pixelDensity ?: density.density, if (largeFont) 2f else 1f)) {
                 MaterialTheme {
                     Box(Modifier.width(300.dp).height(if (compact) 260.dp else 600.dp).testTag("host"),
                         contentAlignment = Alignment.Center) {
@@ -108,6 +108,14 @@ class StoryEditorInstrumentedTest {
         compose.runOnIdle { editing = false }
         assertSameLines(before, layout("story-preview"))
         assertEquals(101, before.lineCount)
+    }
+
+    @Test fun fractionalDensityCaptionStillFitsAndMatches() {
+        fixture(photo = true, pixelDensity = 2.625f)
+        compose.onNodeWithTag("story-editor").performTextInput(("Строка\n").repeat(28))
+        val before = layout("story-editor")
+        compose.runOnIdle { editing = false; compact = true }
+        assertSameLines(before, layout("story-preview"))
     }
 
     companion object {

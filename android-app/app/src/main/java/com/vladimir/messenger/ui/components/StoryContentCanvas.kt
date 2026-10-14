@@ -90,8 +90,12 @@ private fun BoxScope.StoryCanvasText(text: String, caption: Boolean, onTextChang
     val baseSize = if (caption) 20f else if (text.length > 120) 25f else 32f
     val lineRatio = if (caption) 1.4f else if (text.length > 120) 1.36f else 1.3125f
     // Caption occupies at most 40% of the inner artwork; plaintext can use all.
-    val availableWidth = with(density) { (if (caption) 280.dp else 304.dp).roundToPx() }
-    val availableHeight = with(density) { (if (caption) 209.dp else 584.dp).roundToPx() }
+    // Match each rounded padding operation, including fractional screen densities.
+    val inset = with(density) { 28.dp.roundToPx() }
+    val captionInset = if (caption) with(density) { 12.dp.roundToPx() } else 0
+    val availableWidth = with(density) { 360.dp.roundToPx() } - 2 * inset - 2 * captionInset
+    val innerHeight = with(density) { 640.dp.roundToPx() } - 2 * inset
+    val availableHeight = (if (caption) (innerHeight * .4f).toInt() else innerHeight) - 2 * captionInset
     fun style(size: Float) = inheritedStyle.merge(TextStyle(color = Color.White, fontSize = size.sp,
         letterSpacing = 0.sp,
         lineHeight = (size * lineRatio).sp,
