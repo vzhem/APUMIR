@@ -29,9 +29,18 @@ WorkManager не является точным будильником: Android, 
 
 Локально PASS: check-settings-style.py (15 проверок), XML и отсутствие
 повторяющихся ключей строк RU/EN, bash -n обоих изменённых CI-скриптов,
-git diff --check. Android/JVM-компиляция в текущей среде не выполнялась:
-нет JDK/SDK, а запрос workflow_dispatch получил HTTP 403 (Resource not
-accessible by integration). Успех новых JVM-тестов пока не подтверждён.
+git diff --check. В локальной среде нет JDK/SDK, а запрос workflow_dispatch
+получил HTTP 403 (Resource not accessible by integration).
+
+После отдельного разрешения владельца открыт PR #46. Core compile check
+38517833245 на коммите 13fc0859dc976ab3205e1bad91ca2d8c92a12a9e завершился
+SUCCESS за 8m27s. Блокирующие шаги включают compileReleaseKotlin, выбранные
+Android JVM-тесты (в том числе SendTimePolicyTest), чистые Kotlin-тесты,
+проверки исходников, Rust check/тесты и контракт UniFFI.
+https://github.com/vzhem/APUMIR/actions/runs/38517833245
+
+Установка на телефон и визуальная проверка не проводились. PR не слит,
+новый релиз не выпускался.
 
 Ручной чек-лист после сборки:
 - личный чат, группа, тема группы и канал с правом публикации;
