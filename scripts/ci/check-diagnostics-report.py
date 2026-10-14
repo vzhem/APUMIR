@@ -1074,6 +1074,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             self.assertNotIn(forbidden, sender)
         self.assertIn("StoryStore.persistForDelivery()", repo)
         self.assertIn("enqueueStory(story)", vm)
+        self.assertIn("viewModel.acknowledgeError(message)", source(MAIN / "ui/screens/chat/ChatListScreen.kt"))
         self.assertIn("enqueueStory(story, revoke = true)", vm)
         self.assertIn("chatRepository.pumpStoryOutbox()", service)
         self.assertIn("OperationalDiagnostics.tracker.ack(messageId)", repo)

@@ -147,6 +147,11 @@ fun ChatListScreen(
     var showConnectDialog by remember { mutableStateOf(false) }
     var connectLink by remember { mutableStateOf("") }
     val context = LocalContext.current
+    LaunchedEffect(uiState.error) {
+        val message = uiState.error ?: return@LaunchedEffect
+        android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+        viewModel.acknowledgeError(message)
+    }
 
     // Меню создания у кнопки-карандаша: чат, группа, канал.
     var fabMenuExpanded by remember { mutableStateOf(false) }

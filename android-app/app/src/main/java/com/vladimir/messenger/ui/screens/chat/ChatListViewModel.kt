@@ -966,6 +966,10 @@ class ChatListViewModel @Inject constructor(
         const val MAX_WINDOW = 3000
     }
 
+    fun acknowledgeError(expected: String) {
+        _uiState.update { if (it.error == expected) it.copy(error = null) else it }
+    }
+
     /** Своя история: сохранить и разослать контактам личных чатов. */
     fun publishStory(text: String, bg: Int, photoB64: String? = null) {
         val trimmed = text.trim()
