@@ -55,7 +55,7 @@ class DeferredDelivery @Inject constructor(
                 DeferredInboxStore.completeCancellation(context, key)
                 true
             }
-            if (applied) RustBridge.sendMessage(DeferredWire.transportId(cancel.id, sender, "cancelack"),
+            if (applied) RustBridge.retryMessage(DeferredWire.transportId(cancel.id, sender, "cancelack"),
                 chatId, sender, DeferredWire.cancelAck(cancel))
             if (!fromMirror && applied) MirrorHub.publishEnvelope(sender, chatId, messageId, text)
             return@withContext true
@@ -198,9 +198,9 @@ class DeferredDelivery @Inject constructor(
                 val legacy = if (item.isGroup) {
                     com.vladimir.messenger.data.group.GroupWire.buildMessageDelete(letter.groupId, letter.id, item.ownerId)
                 } else "APUDEL1|${item.targetId}|${letter.id}|${System.currentTimeMillis()}"
-                send(DeferredWire.transportId(letter.id, peer, "cancel-legacy"), item.targetId, peer, legacy)
+                send(DeferredWire.transportId(letter.id, peer, "cancel-legacy"), item.targetId, peer, legacy, renewRetention = true)
             }
-            send(DeferredWire.transportId(letter.id, peer, "cancel"), item.targetId, peer, wire)
+            send(DeferredWire.transportId(letter.id, peer, "cancel"), item.targetId, peer, wire, renewRetention = true)
         }
         val latest = ScheduledSendStore.get(context, item.id) ?: return true
         val done = latest.recipients.orEmpty().all { it in latest.cancelAcked }
@@ -257,14 +257,15 @@ class DeferredDelivery @Inject constructor(
         }
     }
 
-    private fun send(id: String, chatId: String, peer: String, text: String): Boolean {
+    private fun send(id: String, chatId: String, peer: String, text: String, renewRetention: Boolean = false): Boolean {
         // Like file sending, a schedule created on the mirror shadow needs the network role.
         // Do not pass plaintext into mirror chat history just to reach the active device.
         if (MirrorHub.routeOutgoing() != null) {
             MirrorHub.claimEngine()
             return false
         }
-        return RustBridge.sendMessage(id, chatId, peer, text)
+        return if (renewRetention) RustBridge.retryMessage(id, chatId, peer, text)
+            else RustBridge.sendMessage(id, chatId, peer, text)
     }
 
     /** Offline reveal. Never reads the network, and rechecks wall time after every restart. */
