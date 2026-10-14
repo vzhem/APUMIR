@@ -163,6 +163,8 @@ class ChatListViewModel @Inject constructor(
      * виден и у тех, кого в контактах нет.
      */
     private val peerRankStore: com.vladimir.messenger.data.rank.PeerRankStore,
+    /** Отклики на истории: значки и комментарии зрителей. */
+    private val storyFeedback: com.vladimir.messenger.data.story.StoryFeedbackRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatListUiState())
@@ -988,6 +990,40 @@ class ChatListViewModel @Inject constructor(
                 chatRepository.pumpStoryOutbox()
             }
         }
+    }
+
+    /**
+     * Значок на истории: поставить или снять.
+     *
+     * Действие сначала ложится локально (человек видит свой значок сразу), затем
+     * досылается: автору истории - если история чужая, зрителям - если своя.
+     * null значит «ядро не готово»: отклик не принят, показываем почему.
+     */
+    fun reactToStory(story: com.vladimir.messenger.data.story.StoryStore.Story, emoji: String) {
+        viewModelScope.launch {
+            val added = storyFeedback.react(story, emoji)
+            if (added == null) {
+                _uiState.update { it.copy(error = appContext.getString(R.string.story_feedback_core_not_ready)) }
+            }
+        }
+    }
+
+    /** Комментарий к истории: виден всем, кто её откроет. */
+    fun commentOnStory(story: com.vladimir.messenger.data.story.StoryStore.Story, body: String) {
+        viewModelScope.launch {
+            if (!storyFeedback.comment(story, body)) {
+                _uiState.update { it.copy(error = appContext.getString(R.string.story_feedback_core_not_ready)) }
+            }
+        }
+    }
+
+    /**
+     * История показана: спросить у автора сводку откликов, если у нас её нет
+     * (зритель был офлайн или открыл историю первым). Частоту ограничивает
+     * очередь, поэтому листание ленты не засыпает автора просьбами.
+     */
+    fun onStoryShown(story: com.vladimir.messenger.data.story.StoryStore.Story) {
+        viewModelScope.launch { storyFeedback.onStoryOpened(story) }
     }
 
     /** Досрочно снять свою историю: у друзей она тоже исчезает. */

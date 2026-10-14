@@ -8,6 +8,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 python3 "$ROOT/scripts/ci/check-deferred-cancel.py"
 python3 "$ROOT/scripts/ci/check-delete-read.py"
 python3 "$ROOT/scripts/ci/check-story-editor.py"
+python3 "$ROOT/scripts/ci/check-story-feedback.py"
 OUT="$ROOT/target/chat-history-check"
 mkdir -p "$OUT/compiler" "$OUT/runtime" "$OUT/classes"
 read -r KOTLIN COROUTINES JUNIT < <(python3 - "$ROOT/android-app/gradle/libs.versions.toml" <<'PY'
@@ -81,6 +82,15 @@ OP_CLEANUP="$BASE/main/java/com/vladimir/messenger/data/diagnostics/RelayCleanup
 OP_HEALTH_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/OperationalHealthTest.kt"
 STORY_QUEUE="$BASE/main/java/com/vladimir/messenger/data/story/StoryDeliveryQueue.kt"
 STORY_QUEUE_TEST="$BASE/test/java/com/vladimir/messenger/data/story/StoryDeliveryQueueTest.kt"
+# Отклики на истории (реакции и комментарии, запрос владельца 2026-10-14):
+# провод, книга слияния и очередь - чистый Kotlin, поэтому формат и правила
+# «побеждает последний по времени» ловятся здесь, до сборки APK.
+STORY_FEEDBACK_WIRE="$BASE/main/java/com/vladimir/messenger/data/story/StoryFeedbackWire.kt"
+STORY_FEEDBACK_LEDGER="$BASE/main/java/com/vladimir/messenger/data/story/StoryFeedbackLedger.kt"
+STORY_FEEDBACK_OUTBOX="$BASE/main/java/com/vladimir/messenger/data/story/StoryFeedbackOutbox.kt"
+STORY_FEEDBACK_WIRE_TEST="$BASE/test/java/com/vladimir/messenger/data/story/StoryFeedbackWireTest.kt"
+STORY_FEEDBACK_LEDGER_TEST="$BASE/test/java/com/vladimir/messenger/data/story/StoryFeedbackLedgerTest.kt"
+STORY_FEEDBACK_OUTBOX_TEST="$BASE/test/java/com/vladimir/messenger/data/story/StoryFeedbackOutboxTest.kt"
 DIAG_MQTT="$BASE/main/java/com/vladimir/messenger/data/diagnostics/MqttLinkText.kt"
 DIAG_REPORT_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReportTest.kt"
 DIAG_MQTT_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/MqttLinkTextTest.kt"
@@ -115,6 +125,8 @@ RETENTION_TEST="$BASE/test/java/com/vladimir/messenger/data/file/FileTransferRet
     "$MODEL/Message.kt" "$MODEL/MessageStatus.kt" "$MODEL/MessageChannel.kt" "$OBSERVER" "$TEST" "$PIN_POLICY" "$PIN_TEST" "$SPLASH_MATH" "$SPLASH_TEST" "$SETTINGS_LAYOUT" "$SETTINGS_TEST" "$HEART_WIRE" "$HEART_TEST" "$GROUP_PERMS" "$GROUP_PERMS_TEST" \
     "$POST_MANIFEST" "$GROUP_WIRE" "$GROUP_WIRE_TEST" "$GROUP_WIRE_UPDATE_TEST" \
     "$OP_HEALTH" "$OP_BOUNDED_READ" "$OP_CLEANUP" "$OP_HEALTH_TEST" "$STORY_QUEUE" "$STORY_QUEUE_TEST" "$RUNTIME_HEALTH" "$RUNTIME_HEALTH_TEST" "$DIAG_REPORT" "$RELAY_STORAGE" "$RELAY_STORAGE_TEST" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
+    "$STORY_FEEDBACK_WIRE" "$STORY_FEEDBACK_LEDGER" "$STORY_FEEDBACK_OUTBOX" \
+    "$STORY_FEEDBACK_WIRE_TEST" "$STORY_FEEDBACK_LEDGER_TEST" "$STORY_FEEDBACK_OUTBOX_TEST" \
     "$UPDATE_POLICY" "$UPDATE_POLICY_TEST" \
     "$CALL_WIRE" "$FILE_CODEC" "$FILE_WIRE" "$FILE_UDP" "$SEALED_WIRE" "$OUTGOING_POLICY" "$OUTGOING_POLICY_TEST" \
     "$DEFERRED_WIRE" "$DEFERRED_POLICY" "$DEFERRED_WIRE_TEST" "$DEFERRED_POLICY_TEST" \
@@ -135,6 +147,9 @@ RETENTION_TEST="$BASE/test/java/com/vladimir/messenger/data/file/FileTransferRet
     com.vladimir.messenger.data.diagnostics.RuntimeHealthTest \
     com.vladimir.messenger.data.diagnostics.OperationalHealthTest \
     com.vladimir.messenger.data.story.StoryDeliveryQueueTest \
+    com.vladimir.messenger.data.story.StoryFeedbackWireTest \
+    com.vladimir.messenger.data.story.StoryFeedbackLedgerTest \
+    com.vladimir.messenger.data.story.StoryFeedbackOutboxTest \
     com.vladimir.messenger.data.diagnostics.MqttLinkTextTest \
     com.vladimir.messenger.service.UpdateCheckerTest \
     com.vladimir.messenger.data.security.OutgoingPayloadPolicyTest \

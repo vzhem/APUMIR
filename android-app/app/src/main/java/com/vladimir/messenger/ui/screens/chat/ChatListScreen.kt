@@ -400,6 +400,10 @@ fun ChatListScreen(
                         section = section,
                         onAddStory = { storyComposer = true },
                         onDeleteStory = viewModel::deleteStory,
+                        // Отклики на истории: значки и комментарии зрителей.
+                        onReactStory = viewModel::reactToStory,
+                        onCommentStory = viewModel::commentOnStory,
+                        onStoryShown = viewModel::onStoryShown,
                         // Готовый список раздела, посчитанный в фоне. Раньше
                         // здесь шёл пересчёт прямо во время отрисовки - при
                         // сотнях чатов это подвешивало жест листания.
@@ -1031,6 +1035,12 @@ private fun SectionPage(
     section: InboxSection,
     onAddStory: () -> Unit = {},
     onDeleteStory: (String) -> Unit = {},
+    /** Значок на истории: поставить или снять. */
+    onReactStory: (com.vladimir.messenger.data.story.StoryStore.Story, String) -> Unit = { _, _ -> },
+    /** Комментарий к истории: виден всем, кто её откроет. */
+    onCommentStory: (com.vladimir.messenger.data.story.StoryStore.Story, String) -> Unit = { _, _ -> },
+    /** История показана - пора попросить у автора сводку откликов. */
+    onStoryShown: (com.vladimir.messenger.data.story.StoryStore.Story) -> Unit = {},
     items: List<InboxItem>,
     isSearchActive: Boolean,
     /**
@@ -1078,6 +1088,9 @@ private fun SectionPage(
                 .sortedBy { it.createdAtMs },
             onDismiss = { storyOpenAuthor = null },
             onDeleteMine = onDeleteStory,
+            onReact = onReactStory,
+            onComment = onCommentStory,
+            onStoryShown = onStoryShown,
         )
     }
     val openAdmin = section == InboxSection.AdminGroups ||

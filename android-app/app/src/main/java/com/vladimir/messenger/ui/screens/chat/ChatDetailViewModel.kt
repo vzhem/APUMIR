@@ -130,6 +130,8 @@ class ChatDetailViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context,
     /** Ранги собеседников: поток узлов-элиты для знака и кольца у аватарки. */
     private val peerRankStore: com.vladimir.messenger.data.rank.PeerRankStore,
+    /** Отклики на истории: значки и комментарии из просмотра истории собеседника. */
+    private val storyFeedback: com.vladimir.messenger.data.story.StoryFeedbackRepository,
 ) : ViewModel() {
 
     // chatId передаётся через навигацию (SavedStateHandle)
@@ -307,6 +309,29 @@ class ChatDetailViewModel @Inject constructor(
     /** Убрать свою реакцию, какой бы она ни была. */
     fun removeReaction(messageId: String) {
         viewModelScope.launch { reactionRepository.removeMine(chatId, messageId) }
+    }
+
+    /** Значок на истории собеседника: сначала локально, затем досылка автору. */
+    fun reactToStory(story: com.vladimir.messenger.data.story.StoryStore.Story, emoji: String) {
+        viewModelScope.launch {
+            if (storyFeedback.react(story, emoji) == null) {
+                _uiState.update { it.copy(error = appContext.getString(R.string.story_feedback_core_not_ready)) }
+            }
+        }
+    }
+
+    /** Комментарий к истории собеседника: виден всем, кто её откроет. */
+    fun commentOnStory(story: com.vladimir.messenger.data.story.StoryStore.Story, body: String) {
+        viewModelScope.launch {
+            if (!storyFeedback.comment(story, body)) {
+                _uiState.update { it.copy(error = appContext.getString(R.string.story_feedback_core_not_ready)) }
+            }
+        }
+    }
+
+    /** История показана: попросить у автора сводку откликов, если её нет. */
+    fun onStoryShown(story: com.vladimir.messenger.data.story.StoryStore.Story) {
+        viewModelScope.launch { storyFeedback.onStoryOpened(story) }
     }
 
     /**

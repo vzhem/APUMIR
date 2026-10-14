@@ -1602,6 +1602,21 @@ The file is not on this phone</string>
     <string name="story_photo_failed">Could not open the photo. Choose another.</string>
     <string name="story_photo_unavailable">The photo could not be opened on this phone</string>
     <string name="story_photo_needs_update">Friends will see the photo on the new APU version</string>
+    <!-- Story feedback: reactions and comments. The feed is public - everyone
+         who opens the story sees it (owner decision, 2026-10-14). -->
+    <string name="story_reaction_add">React to story</string>
+    <string name="story_reactions_empty">No reactions yet</string>
+    <string name="story_reactions_count">Reactions: %1$d</string>
+    <string name="story_comments">Story comments</string>
+    <string name="story_comments_open">Comments</string>
+    <string name="story_comments_count">Comments: %1$d</string>
+    <string name="story_comments_empty">No comments yet. Write the first one.</string>
+    <string name="story_comment_hint">Write a comment…</string>
+    <string name="story_comment_send">Send</string>
+    <string name="story_comment_limit">Up to 200 characters</string>
+    <string name="story_feedback_public">Reactions and comments are visible to everyone who opens the story</string>
+    <string name="story_feedback_core_not_ready">The core is not ready yet: your reply will be sent once there is a connection</string>
+    <string name="story_feedback_unnamed">Unnamed</string>
     <string name="swarm_mode_normal">Normal</string>
     <string name="swarm_mode_economy">Economy</string>
     <string name="swarm_mode_unlimited">Unlimited</string>

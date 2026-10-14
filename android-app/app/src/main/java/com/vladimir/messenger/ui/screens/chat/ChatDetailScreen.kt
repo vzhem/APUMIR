@@ -273,6 +273,11 @@ fun ChatDetailScreen(
         com.vladimir.messenger.ui.components.StoryViewerDialog(
             stories = peerStories,
             onDismiss = { showPeerStories = false },
+            // Отклики на историю собеседника: значок и комментарий уходят ему,
+            // а он рассылает сводку остальным зрителям (лента публичная).
+            onReact = viewModel::reactToStory,
+            onComment = viewModel::commentOnStory,
+            onStoryShown = viewModel::onStoryShown,
         )
     }
 

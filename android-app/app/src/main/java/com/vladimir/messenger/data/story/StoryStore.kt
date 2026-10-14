@@ -77,6 +77,12 @@ object StoryStore {
     fun receive(authorId: String, authorName: String, content: String): Boolean {
         if (!isStoryPacket(content)) return false
         if (authorId.length !in 1..256) return true
+        // Отклик на историю (значок, комментарий, сводка, просьба сводки) едет
+        // тем же префиксом, но своим конвертом: разбираем его ДО json истории и
+        // до сборки фото, иначе чужой значок сбросил бы части чьего-то снимка.
+        if (StoryFeedbackStore.isFeedback(content)) {
+            return StoryFeedbackStore.receive(authorId, content)
+        }
         if (content!!.toByteArray(Charsets.UTF_8).size > 16 * 1024) {
             OperationalDiagnostics.tracker.count(OperationalCounter.STORY_INVALID)
             photoParts.discardAuthor(authorId); return true
@@ -197,6 +203,9 @@ object StoryStore {
             persistTombstones(nowMs)
             save(StoryRevoke.remaining(_items.value, authorId, storyId))
         }
+        // Значки и комментарии снятой истории уходят вместе с ней: у призрака
+        // откликов не бывает, а книга откликов не должна жить дольше ленты.
+        StoryFeedbackStore.forget(storyId)
     }
 
     private fun loadTombstones(nowMs: Long) {
