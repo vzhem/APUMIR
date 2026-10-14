@@ -20,7 +20,7 @@ object SendTimePolicy {
         require(local.year in 1..9999)
         // A missing spring-DST hour must not silently turn into another time.
         // During the repeated autumn hour choose the earlier occurrence consistently.
-        val offset = zone.rules.getValidOffsets(local).firstOrNull() ?: return null
+        val offset = zone.rules.getValidOffsets(local).firstOrNull() ?: return@runCatching null
         local.toInstant(offset).toEpochMilli()
     }.getOrNull()
 
