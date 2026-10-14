@@ -71,8 +71,9 @@ class StoryFeedbackOutboxTest {
         assertEquals(0, later.attempts)
         assertEquals(task.generation, later.generation)
         assertEquals(1, outbox.size())
-        // Отсрочка не укорачивает прежнюю паузу.
-        outbox.defer(later, 1_000L + window, 10L)
+        // Отсрочка не укорачивает прежнюю паузу: более ранний срок не применяется
+        // (maxOf), иначе свежая сводка ушла бы раньше окна между волнами.
+        outbox.defer(later, 1_000L, 10L)
         assertEquals(1_000L + window, outbox.snapshot().single().notBeforeMs)
     }
 
