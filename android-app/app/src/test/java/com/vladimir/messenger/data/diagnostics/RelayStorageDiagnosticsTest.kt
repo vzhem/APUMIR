@@ -17,6 +17,22 @@ class RelayStorageDiagnosticsTest {
         assertTrue(report.contains("не объём ожидающих сообщений"))
     }
 
+    @Test fun reclaimedPagesAndTombstonesAreNotCalledLiveMessages() {
+        val report = RelayStorageDiagnostics(listOf(RelayStoreDiagnostic(status = "ready",
+            pageSize = 4096, pages = 280858, freePages = 229473, tombstones = 959365,
+            autoVacuumMode = 0, tombstonesOlderThan7d = 900000, oldestTombstoneMs = 1000, newestTombstoneMs = 2000))).render()
+        assertTrue(report.contains("non_freelist_page_bytes=210472960"))
+        assertTrue(report.contains("auto_vacuum_mode=0"))
+        assertTrue(report.contains("tombstone_older_than_7d=900000"))
+        assertTrue(report.contains("не разрешение удалить"))
+    }
+
+    @Test fun unknownTombstoneAgesAreNotZero() {
+        val report = RelayStorageDiagnostics(listOf(RelayStoreDiagnostic())).render()
+        assertTrue(report.contains("tombstone_older_than_7d=-1"))
+        assertTrue(report.contains("oldest_removed_epoch_ms=-1"))
+    }
+
     @Test fun aliasesAreSharedWithinOneSnapshotButNoRawIdentitySurvives() {
         val acc = RelayStorageAccumulator("private-owner", 1000)
         val table = acc.table(RelayTableKind.LEGACY)

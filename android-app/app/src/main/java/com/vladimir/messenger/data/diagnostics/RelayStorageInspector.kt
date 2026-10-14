@@ -75,7 +75,7 @@ internal object RelayStorageInspector {
                 ).use { it.moveToFirst() }
                 result = result.copy(
                     pageSize = scalar("PRAGMA page_size"), pages = scalar("PRAGMA page_count"),
-                    freePages = scalar("PRAGMA freelist_count"),
+                    freePages = scalar("PRAGMA freelist_count"), autoVacuumMode = scalar("PRAGMA auto_vacuum"),
                     unknownTables = scalar("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT IN " +
                         "('relay_messages','relay_records_enc','relay_quarantine','relay_tombstones','relay_schema_version','android_metadata','sqlite_sequence')").toInt(),
                 )
@@ -134,6 +134,14 @@ internal object RelayStorageInspector {
                 }
                 if (!cancel.isCanceled && exists("relay_tombstones")) {
                     result = result.copy(tombstones = scalar("SELECT COUNT(*) FROM relay_tombstones"))
+                    val cutoff = (nowMs - 7L * 24 * 60 * 60 * 1000).coerceAtLeast(0)
+                    fun removedAt(aggregate: String): Long? = db.rawQuery(
+                        "SELECT $aggregate(removed_at_ms) FROM relay_tombstones", null, cancel,
+                    ).use { if (it.moveToFirst() && !it.isNull(0)) it.getLong(0) else null }
+                    result = result.copy(
+                        tombstonesOlderThan7d = scalar("SELECT COUNT(*) FROM relay_tombstones WHERE removed_at_ms <= $cutoff"),
+                        oldestTombstoneMs = removedAt("MIN"), newestTombstoneMs = removedAt("MAX"),
+                    )
                 }
                 if (cancel.isCanceled) result = result.copy(status = "timeout")
                 else if (result.status == "unavailable") result = result.copy(status = "ready")

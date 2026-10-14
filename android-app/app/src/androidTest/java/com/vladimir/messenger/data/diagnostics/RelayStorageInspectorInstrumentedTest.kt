@@ -92,6 +92,25 @@ class RelayStorageInspectorInstrumentedTest {
         }
     }
 
+    @Test fun tombstoneAgeInspectionDoesNotPruneOrExposeIds() {
+        open().use { db ->
+            val week = 7L * 24 * 60 * 60 * 1000
+            db.execSQL("INSERT INTO relay_tombstones VALUES ('private-old', ?)", arrayOf(now - week - 1))
+            db.execSQL("INSERT INTO relay_tombstones VALUES ('private-new', ?)", arrayOf(now - 1))
+            val snapshot = inspect()
+            val current = snapshot.stores.first()
+            assertEquals(2L, current.tombstones)
+            assertEquals(1L, current.tombstonesOlderThan7d)
+            assertEquals(now - week - 1, current.oldestTombstoneMs)
+            assertEquals(now - 1, current.newestTombstoneMs)
+            assertEquals(0L, current.autoVacuumMode)
+            db.rawQuery("SELECT COUNT(*) FROM relay_tombstones", null).use {
+                assertTrue(it.moveToFirst()); assertEquals(2, it.getInt(0))
+            }
+            assertFalse(snapshot.render().contains("private-"))
+        }
+    }
+
     @Test fun exhaustedBudgetIsUnknownNotAnEmptyQueueAndKeepsRecords() {
         open().use { db ->
             db.execSQL("INSERT INTO relay_records_enc VALUES ('kept','peer',zeroblob(8), ?)", arrayOf(now + 1000))

@@ -16,6 +16,7 @@ data class RelayStorageDiagnostics(
         appendLine("Метки peer-N назначены заново для этого отчёта; между телефонами их не сопоставлять. self — личность из настроек.")
         appendLine("У encrypted/quarantine отправитель и тип тела скрыты; ключи и тела не читаются.")
         appendLine("Это ограниченная выборка, не полный список; повтор ID не доказывает повтор тела.")
+        appendLine("msg_id уникален внутри таблицы; одинаковый смысл с разными ID этим аудитом не определяется. Шифротекст не сравнивается.")
         appendLine("Снимок приблизительный: ядро может записывать параллельно; WAL может содержать повторные версии страниц.")
         for (store in stores) {
             val name = if (store.legacy) "legacy" else "current"
@@ -24,7 +25,12 @@ data class RelayStorageDiagnostics(
             appendLine("page_size=${store.pageSize ?: -1L} · page_count=${store.pages ?: -1L} · freelist_count=${store.freePages ?: -1L}")
             val reusable = store.pageSize?.let { size -> store.freePages?.let { size * it } }
             appendLine("reusable_page_bytes=${reusable ?: -1L} (уже внутри БД, не прибавляются к её размеру)")
+            val usedPages = if (store.pages != null && store.freePages != null && store.freePages in 0..store.pages) store.pages - store.freePages else null
+            appendLine("non_freelist_page_bytes=${usedPages?.let { count -> store.pageSize?.let { count * it } } ?: -1L} · auto_vacuum_mode=${store.autoVacuumMode ?: -1}")
+            appendLine("Свободные страницы занимают диск до уплотнения; остальные включают индексы и служебные таблицы, не только тела сообщений.")
             appendLine("tombstones=${store.tombstones ?: -1L} · unknown_tables=${store.unknownTables ?: -1}")
+            appendLine("tombstone_older_than_7d=${store.tombstonesOlderThan7d ?: -1L} · oldest_removed_epoch_ms=${store.oldestTombstoneMs ?: -1L} · newest_removed_epoch_ms=${store.newestTombstoneMs ?: -1L}")
+            appendLine("Tombstones — маркеры дедупликации, не переписка. Возраст >7д — диагностика, не разрешение удалить; mode 0=none, 1=full, 2=incremental.")
             for (table in store.tables) {
                 appendLine("table=${table.kind.code} · status=${token(table.status)} · rows=${table.totalRows ?: -1L}")
                 appendLine("sampled=${table.sampled} · limited=${table.limited} · sampled_bytes=${table.bytes} · largest_sampled_record_bytes=${table.largestBytes} · expired_sampled=${table.expired} · repeated_ids_sampled=${table.repeatedIds}")
@@ -64,6 +70,10 @@ data class RelayStoreDiagnostic(
     val tombstones: Long? = null,
     val unknownTables: Int? = null,
     val tables: List<RelayTableDiagnostic> = emptyList(),
+    val autoVacuumMode: Long? = null,
+    val tombstonesOlderThan7d: Long? = null,
+    val oldestTombstoneMs: Long? = null,
+    val newestTombstoneMs: Long? = null,
 )
 
 data class RelayTableDiagnostic(

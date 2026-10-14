@@ -84,6 +84,16 @@ def call_spans(text: str, name: str) -> list:
 
 
 class DiagnosticsContractsTest(unittest.TestCase):
+    def test_tombstone_age_and_space_breakdown_remain_read_only(self):
+        inspector = source(DIAG / "RelayStorageInspector.kt")
+        model = source(DIAG / "RelayStorageDiagnostics.kt")
+        for marker in ("PRAGMA auto_vacuum", "tombstonesOlderThan7d", "removed_at_ms", "oldestTombstoneMs", "newestTombstoneMs"):
+            self.assertIn(marker, inspector)
+        self.assertIn("non_freelist_page_bytes", model)
+        self.assertIn("не разрешение удалить", model)
+        self.assertNotIn("prune_tombstones", inspector)
+        self.assertNotIn("execSQL", inspector)
+
     def test_report_keeps_the_privacy_promise(self):
         report = source(DIAG / "DiagnosticsReport.kt")
         self.assertIn('const val SCHEMA = "apu-diag/5"', report)

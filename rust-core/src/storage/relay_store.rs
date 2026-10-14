@@ -1525,4 +1525,23 @@ mod tests {
             1
         );
     }
+    /// Storage deduplicates transport IDs, not encrypted/semantic message bodies.
+    #[test]
+    fn same_body_with_new_transport_ids_is_not_a_duplicate_record() {
+        let s = store();
+        let now = 1_000_000;
+        let original = relay("stable-id", "pk_b", now);
+        assert!(s.store_encrypted(&keys(), &original, now).unwrap());
+        for _ in 0..100 {
+            assert!(!s.store_encrypted(&keys(), &original, now).unwrap());
+        }
+        assert_eq!(s.count_encrypted().unwrap(), 1);
+        for n in 0..100 {
+            let mut repeated_body = original.clone();
+            repeated_body.msg_id = format!("new-id-{n}");
+            assert!(s.store_encrypted(&keys(), &repeated_body, now).unwrap());
+        }
+        assert_eq!(s.count_encrypted().unwrap(), 101);
+    }
+
 }
