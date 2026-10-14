@@ -1,5 +1,7 @@
 package com.vladimir.messenger.data.schedule
 
+import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
+import com.vladimir.messenger.data.diagnostics.OperationalCounter
 import android.content.Context
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -103,11 +105,21 @@ object ScheduledSendStore {
         val item = _items.value.firstOrNull { it.id == id } ?: return@synchronized null
         if (!item.started || item.wire.isEmpty() || item.recipients.orEmpty().isEmpty()) {
             save(context, _items.value.filterNot { it.id == id })
+            OperationalDiagnostics.tracker.count(OperationalCounter.SCHEDULE_CANCEL_LOCAL_BEFORE_SEND)
             return@synchronized null
         }
         val next = item.copy(cancelRequested = true, nextPeer = 0, lastError = "")
         save(context, _items.value.map { if (it.id == id) next else it })
+        if (!item.cancelRequested) OperationalDiagnostics.tracker.count(OperationalCounter.SCHEDULE_CANCEL_REQUESTED)
         next
+    }
+
+    /** Cache-only numeric view: do not parse message bodies just to export diagnostics. */
+    fun cancelDiagnostics(): String = synchronized(lock) {
+        val requests = _items.value.filter { it.cancelRequested }
+        val waiting = requests.sumOf { item -> item.recipients.orEmpty().count { it !in item.cancelAcked } }
+        "[отмена отложенных сообщений]\nsource=current_store_cache · cancel_items=${requests.size} · waiting_recipient_receipts=$waiting\n" +
+            "Кэш может ещё не быть загружен; транспортный handoff не подтверждает отмену у получателя.\n"
     }
 
     private fun save(context: Context, list: List<Item>) {

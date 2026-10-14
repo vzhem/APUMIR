@@ -1,5 +1,7 @@
 package com.vladimir.messenger.data.schedule
 
+import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
+import com.vladimir.messenger.data.diagnostics.OperationalCounter
 import android.content.Context
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.group.GroupRepository
@@ -64,7 +66,12 @@ class DeferredDelivery @Inject constructor(
             val item = ScheduledSendStore.get(context, cancelAck.id.removePrefix("deferred_"))
             if (item != null && item.cancelRequested && DeferredDeliveryPolicy.acceptsReceipt(cancelAck,
                     item.id, item.ownerId, DeferredInboxStore.owner(context), item.recipients.orEmpty(), sender, item.wire)) {
-                ScheduledSendStore.update(context, item.id) { it.copy(cancelAcked = (it.cancelAcked + sender).distinct(), lastError = "") }
+                var newlyAcked = false
+                val updated = ScheduledSendStore.update(context, item.id) {
+                    newlyAcked = sender !in it.cancelAcked
+                    it.copy(cancelAcked = (it.cancelAcked + sender).distinct(), lastError = "")
+                }
+                if (updated != null && newlyAcked) OperationalDiagnostics.tracker.count(OperationalCounter.SCHEDULE_CANCEL_ACK)
             }
             if (!fromMirror) MirrorHub.publishEnvelope(sender, chatId, messageId, text)
             return@withContext true
@@ -200,11 +207,16 @@ class DeferredDelivery @Inject constructor(
                 } else "APUDEL1|${item.targetId}|${letter.id}|${System.currentTimeMillis()}"
                 send(DeferredWire.transportId(letter.id, peer, "cancel-legacy"), item.targetId, peer, legacy, renewRetention = true)
             }
-            send(DeferredWire.transportId(letter.id, peer, "cancel"), item.targetId, peer, wire, renewRetention = true)
+            OperationalDiagnostics.tracker.count(OperationalCounter.SCHEDULE_CANCEL_ATTEMPTS)
+            val accepted = send(DeferredWire.transportId(letter.id, peer, "cancel"), item.targetId, peer, wire, renewRetention = true)
+            OperationalDiagnostics.tracker.count(if (accepted) OperationalCounter.SCHEDULE_CANCEL_TRANSPORT_ACCEPTED else OperationalCounter.SCHEDULE_CANCEL_DEFERRED)
         }
         val latest = ScheduledSendStore.get(context, item.id) ?: return true
         val done = latest.recipients.orEmpty().all { it in latest.cancelAcked }
-        if (done) ScheduledSendStore.remove(context, item.id)
+        if (done) {
+            ScheduledSendStore.remove(context, item.id)
+            OperationalDiagnostics.tracker.count(OperationalCounter.SCHEDULE_CANCEL_COMPLETED)
+        }
         return done
     }
 

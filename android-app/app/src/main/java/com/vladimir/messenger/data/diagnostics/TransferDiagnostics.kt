@@ -374,7 +374,8 @@ object TransferDiagnostics {
         val health = runCatching { RuntimeDiagnostics.snapshot(context.applicationContext) }
             .getOrDefault(RuntimeHealthSnapshot())
         val details = OperationalDiagnostics.storageTrend(storage) + OperationalDiagnostics.journalReport() + OperationalDiagnostics.wakeReport() + logcat.relayCleanup.render() +
-            com.vladimir.messenger.data.story.DurableStorySender.report(context.applicationContext)
+            com.vladimir.messenger.data.story.DurableStorySender.report(context.applicationContext) +
+            com.vladimir.messenger.data.schedule.ScheduledSendStore.cancelDiagnostics()
         snapshotOf(facts.copy(relayStorage = storage, runtimeHealth = health,
             operationalHealth = OperationalDiagnostics.tracker.snapshot(), operationalDetails = details),
             journalSnapshot.first, logcat.lines, createdAtMs)

@@ -24,6 +24,11 @@ tombstones; в выборке все 512 строк просрочены. Нел
    корзина >1ч открыта. Это не метрики всех групп/служебных/зеркальных маршрутов.
    Удаление: requests, retry opportunities, ACK matched to pending peer. Счётчик
    не меняет существующие правила авторизации/удаления и не является новым ACK-протоколом.
+   Отложенная отмена: локальное снятие до отправки / durable cancel intent /
+   transport attempts и accepts / verified newly persisted cancel ACK / all-recipient
+   completion. Повтор ACK не увеличивает метрику; handoff не считается удалением.
+   Pending cancel items/recipient receipts экспортируются только из текущего кэша,
+   без повторного чтения/разбора тел ради отчёта; unloaded cache явно оговорён.
 2. **Хранение:** полный COUNT просроченных по открытой expiry и MIN(expiry),
    отдельно от ограниченной payload-size выборки. Все SQL используют прежний
    общий CancellationSignal/2с budget; поля неизвестны при timeout. Никакого
