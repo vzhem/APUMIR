@@ -858,7 +858,7 @@ class DiagnosticsReportTest {
 
         val safe = DiagnosticsPrivacy.redact(line)
 
-        assertTrue(safe.contains("p2pm2/msg/[contact]/receipt/[id]"))
+        assertTrue(safe.contains("topic=[route]"))
         assertTrue(safe.contains("p2pm2/receipt/cleanup/[id]"))
         assertFalse(safe.contains(messageHash))
     }
@@ -1147,6 +1147,26 @@ class DiagnosticsReportTest {
         assertTrue(report.contains("[отзывчивость и работа служб]"))
         assertTrue(report.contains("ui_max_completed_lag_ms=2200"))
         assertTrue(report.contains("os_exit_history=unsupported"))
+    }
+
+    @Test fun shortIdentityTopicsAndProcessNumbersAreRedacted() {
+        val line = "10-14 14:00:37.485   653   688 W CoreServerService: sender=deadbeef peer=ab12cd34 topic=p2pm2/msg/Server3.local. payload=[hidden]"
+        val safe = DiagnosticsPrivacy.redact(line)
+        assertFalse(safe.contains("deadbeef"))
+        assertFalse(safe.contains("ab12cd34"))
+        assertFalse(safe.contains("Server3"))
+        assertFalse(safe.contains("653"))
+        assertFalse(safe.contains("688"))
+        assertEquals("W", DiagnosticsPrivacy.logcatSeverity(safe))
+    }
+
+    @Test fun operationalMetricsAndSafeKeyReasonsReachReport() {
+        val state = OperationalSnapshot(counters = mapOf(OperationalCounter.STORY_PACKET_DEFERRED to 3L))
+        val report = DiagnosticsReport.render(facts().copy(operationalHealth = state,
+            signingModeReason = KeyModeReason.MISSING_WRAP_KEY), emptyList(), emptyList())
+        assertTrue(report.contains("[операционные метрики]"))
+        assertTrue(report.contains("story_packet_deferred=3"))
+        assertTrue(report.contains("signing_mode_reason=missing_wrap_key"))
     }
 
 }

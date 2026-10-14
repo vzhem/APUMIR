@@ -1,5 +1,8 @@
 package com.vladimir.messenger.data.repository
 
+import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
+import com.vladimir.messenger.data.diagnostics.OperationalCounter
+
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.local.dao.ChatDao
@@ -153,6 +156,7 @@ class MessageDeletionRepository @Inject constructor(
                     tried = emptyList(),
                 ),
             )
+            OperationalDiagnostics.tracker.count(OperationalCounter.DELETE_REQUESTED)
             deleteLocal(chatId, messageId)
             Result.success(Unit)
         }
@@ -198,7 +202,11 @@ class MessageDeletionRepository @Inject constructor(
         if (parts.size == 3 && parts[1] == "ack") {
             val ackedId = parts[2]
             if (ackedId.isBlank()) return true
-            withContext(Dispatchers.IO) { outbox.removeByTarget(DeletionOutbox.KIND_DIRECT, ackedId) }
+            withContext(Dispatchers.IO) {
+                val matching = outbox.all().any { it.kind == DeletionOutbox.KIND_DIRECT && it.targetId == ackedId && it.peerId == senderId }
+                if (matching) OperationalDiagnostics.tracker.count(OperationalCounter.DELETE_ACK_MATCHED)
+                outbox.removeByTarget(DeletionOutbox.KIND_DIRECT, ackedId)
+            }
             return true
         }
         if (parts.size != 4) {
@@ -253,6 +261,7 @@ class MessageDeletionRepository @Inject constructor(
                     RustBridge.sendMessage(UUID.randomUUID().toString(), chat.id, entry.peerId, envelope)
                 }
             }.getOrDefault(false)
+            OperationalDiagnostics.tracker.count(OperationalCounter.DELETE_RETRY)
             outbox.markTried(entry, now)
             if (sent) Log.i(TAG, "delete re-sent id=${entry.targetId} to ${entry.peerId.takeLast(8)} (attempt ${entry.attempts + 1})")
         }

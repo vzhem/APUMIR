@@ -24,7 +24,11 @@ object CoreStatus {
         _stage.value = text
     }
 
+    fun markStarting() { _ready.value = false }
+
     fun markReady() {
+        com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.tracker.coreReady()
+        com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.phase(com.vladimir.messenger.data.diagnostics.DiagnosticPhase.CORE_READY)
         _ready.value = true
     }
 }

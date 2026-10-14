@@ -74,6 +74,11 @@ RELAY_STORAGE="$BASE/main/java/com/vladimir/messenger/data/diagnostics/RelayStor
 RELAY_STORAGE_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/RelayStorageDiagnosticsTest.kt"
 RUNTIME_HEALTH="$BASE/main/java/com/vladimir/messenger/data/diagnostics/RuntimeHealth.kt"
 RUNTIME_HEALTH_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/RuntimeHealthTest.kt"
+OP_HEALTH="$BASE/main/java/com/vladimir/messenger/data/diagnostics/OperationalHealth.kt"
+OP_CLEANUP="$BASE/main/java/com/vladimir/messenger/data/diagnostics/RelayCleanupWindow.kt"
+OP_HEALTH_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/OperationalHealthTest.kt"
+STORY_QUEUE="$BASE/main/java/com/vladimir/messenger/data/story/StoryDeliveryQueue.kt"
+STORY_QUEUE_TEST="$BASE/test/java/com/vladimir/messenger/data/story/StoryDeliveryQueueTest.kt"
 DIAG_MQTT="$BASE/main/java/com/vladimir/messenger/data/diagnostics/MqttLinkText.kt"
 DIAG_REPORT_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReportTest.kt"
 DIAG_MQTT_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/MqttLinkTextTest.kt"
@@ -105,7 +110,7 @@ RETENTION_TEST="$BASE/test/java/com/vladimir/messenger/data/file/FileTransferRet
     -no-stdlib -no-reflect -jvm-target 17 -classpath "$CP" -d "$OUT/classes" \
     "$MODEL/Message.kt" "$MODEL/MessageStatus.kt" "$MODEL/MessageChannel.kt" "$OBSERVER" "$TEST" "$PIN_POLICY" "$PIN_TEST" "$SPLASH_MATH" "$SPLASH_TEST" "$SETTINGS_LAYOUT" "$SETTINGS_TEST" "$HEART_WIRE" "$HEART_TEST" "$GROUP_PERMS" "$GROUP_PERMS_TEST" \
     "$POST_MANIFEST" "$GROUP_WIRE" "$GROUP_WIRE_TEST" "$GROUP_WIRE_UPDATE_TEST" \
-    "$RUNTIME_HEALTH" "$RUNTIME_HEALTH_TEST" "$DIAG_REPORT" "$RELAY_STORAGE" "$RELAY_STORAGE_TEST" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
+    "$OP_HEALTH" "$OP_CLEANUP" "$OP_HEALTH_TEST" "$STORY_QUEUE" "$STORY_QUEUE_TEST" "$RUNTIME_HEALTH" "$RUNTIME_HEALTH_TEST" "$DIAG_REPORT" "$RELAY_STORAGE" "$RELAY_STORAGE_TEST" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
     "$UPDATE_POLICY" "$UPDATE_POLICY_TEST" \
     "$CALL_WIRE" "$FILE_CODEC" "$FILE_WIRE" "$FILE_UDP" "$SEALED_WIRE" "$OUTGOING_POLICY" "$OUTGOING_POLICY_TEST" \
     "$DEFERRED_WIRE" "$DEFERRED_POLICY" "$DEFERRED_WIRE_TEST" "$DEFERRED_POLICY_TEST" \
@@ -123,6 +128,8 @@ RETENTION_TEST="$BASE/test/java/com/vladimir/messenger/data/file/FileTransferRet
     com.vladimir.messenger.data.diagnostics.DiagnosticsReportTest \
     com.vladimir.messenger.data.diagnostics.RelayStorageDiagnosticsTest \
     com.vladimir.messenger.data.diagnostics.RuntimeHealthTest \
+    com.vladimir.messenger.data.diagnostics.OperationalHealthTest \
+    com.vladimir.messenger.data.story.StoryDeliveryQueueTest \
     com.vladimir.messenger.data.diagnostics.MqttLinkTextTest \
     com.vladimir.messenger.service.UpdateCheckerTest \
     com.vladimir.messenger.data.security.OutgoingPayloadPolicyTest \

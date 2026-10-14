@@ -37,7 +37,7 @@ internal object RelayStorageInspector {
         try {
             val stores = listOf(false, true).map { legacy ->
                 val file = File(root, if (legacy) "apu_relay.sqlite.relay.sqlite" else "apu_relay.sqlite")
-                inspectStore(file, legacy, cancel, accumulator, capacity = { minOf(SAMPLE_ROWS_PER_TABLE, remaining) },
+                inspectStore(file, legacy, cancel, accumulator, nowMs = nowMs, capacity = { minOf(SAMPLE_ROWS_PER_TABLE, remaining) },
                     consumed = { remaining -= it })
             }
             return RelayStorageDiagnostics(stores, quota, SystemClock.elapsedRealtime() - started,
@@ -53,6 +53,7 @@ internal object RelayStorageInspector {
         legacy: Boolean,
         cancel: CancellationSignal,
         accumulator: RelayStorageAccumulator,
+        nowMs: Long,
         capacity: () -> Int,
         consumed: (Int) -> Unit,
     ): RelayStoreDiagnostic {
@@ -114,7 +115,12 @@ internal object RelayStorageInspector {
                             }
                         }
                         // Count uses SQLite's indexes, not payload contents; cancellation bounds it too.
-                        tables.add(sample.finish(scalar("SELECT COUNT(*) FROM $name"), limited))
+                        val count = scalar("SELECT COUNT(*) FROM $name")
+                        val expiredCount = scalar("SELECT COUNT(*) FROM $name WHERE expires_at_ms <= $nowMs")
+                        val earliestExpiry = db.rawQuery("SELECT MIN(expires_at_ms) FROM $name", null, cancel).use {
+                            if (it.moveToFirst() && !it.isNull(0)) it.getLong(0) else null
+                        }
+                        tables.add(sample.finish(count, limited).copy(expiredTotalRows = expiredCount, earliestExpiryMs = earliestExpiry))
                     } catch (_: OperationCanceledException) {
                         tables.add(sample.finish(null, limited = true, status = "timeout"))
                         result = result.copy(status = "timeout")

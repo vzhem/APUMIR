@@ -1012,7 +1012,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             self.assertNotIn(forbidden, inspector)
         collector = source(DIAG / "TransferDiagnostics.kt")
         self.assertGreater(collector.index("RelayStorageInspector.collect("), collector.index("onPartial?.invoke("))
-        self.assertIn("facts.copy(relayStorage = storage, runtimeHealth = health)", collector)
+        self.assertIn("facts.copy(relayStorage = storage, runtimeHealth = health,", collector)
         report = source(DIAG / "DiagnosticsReport.kt")
         self.assertIn("append(facts.relayStorage.render())", report)
         for lang in ("values", "values-en"):
@@ -1054,6 +1054,35 @@ class DiagnosticsContractsTest(unittest.TestCase):
             self.assertIn(marker, collector)
         self.assertIn("validated_by_android=", report)
         self.assertIn("не замер скорости", report)
+
+    def test_operational_metrics_and_story_retries_are_wired_and_bounded(self):
+        model = source(DIAG / "OperationalHealth.kt")
+        journal = source(DIAG / "OperationalDiagnostics.kt")
+        sender = source(MAIN / "data/story/DurableStorySender.kt")
+        repo = source(MAIN / "data/repository/ChatRepository.kt")
+        vm = source(MAIN / "ui/screens/chat/ChatListViewModel.kt")
+        service = source(MAIN / "service/CoreServerService.kt")
+        for marker in ("messages.size == 256", "peerRoutes.size >= 256", "enum class OperationalCounter", "class WakeHoldTracker"):
+            self.assertIn(marker, model)
+        for marker in ("phases.size > 64", "source.length() <= 32768", "AtomicFile", "latestWrite.getAndSet(null)"):
+            self.assertIn(marker, journal)
+        for forbidden in ("messageId", "peerId", "plaintext", "ciphertext", "fileName"):
+            self.assertNotIn(forbidden, journal)
+        for marker in ("story.createdAtMs", "queue.due(now)", "queue.contains(entry)", "queue.result(entry", "revoke:", "throw cancelled", "262144"):
+            self.assertIn(marker, sender)
+        for forbidden in ("http://", "https://", "ensureKey(", "reset("):
+            self.assertNotIn(forbidden, sender)
+        self.assertIn("StoryStore.persistForDelivery()", repo)
+        self.assertIn("enqueueStory(story)", vm)
+        self.assertIn("enqueueStory(story, revoke = true)", vm)
+        self.assertIn("chatRepository.pumpStoryOutbox()", service)
+        self.assertIn("OperationalDiagnostics.tracker.ack(messageId)", repo)
+        self.assertIn("OperationalDiagnostics.tracker.persisted(messageId)", repo)
+        inspector = source(DIAG / "RelayStorageInspector.kt")
+        self.assertIn("WHERE expires_at_ms <= $nowMs", inspector)
+        self.assertIn("MIN(expires_at_ms)", inspector)
+        for name in ("OperationalHealthTest", "StoryDeliveryQueueTest"):
+            self.assertIn(name, source(ROOT / "scripts/ci/check-chat-history.sh"))
 
     def test_ci_runs_the_pure_kotlin_diagnostics_tests(self):
         script = source(ROOT / "scripts/ci/check-chat-history.sh")

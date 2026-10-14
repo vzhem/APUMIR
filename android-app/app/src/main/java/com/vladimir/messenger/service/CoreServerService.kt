@@ -1,5 +1,8 @@
 package com.vladimir.messenger.service
 
+import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
+import com.vladimir.messenger.data.diagnostics.OperationalCounter
+import com.vladimir.messenger.data.diagnostics.DiagnosticPhase
 import com.vladimir.messenger.data.diagnostics.RuntimeDiagnostics
 import com.vladimir.messenger.data.diagnostics.DiagnosticOperation
 
@@ -515,6 +518,9 @@ class CoreServerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        OperationalDiagnostics.tracker.coreStarting()
+        CoreStatus.markStarting()
+        OperationalDiagnostics.phase(DiagnosticPhase.SERVICE_START)
         Log.i(TAG, "CoreServerService created")
         TransferDiagnostics.record("core", "служба ядра запускается")
         val powerManager = getSystemService(POWER_SERVICE) as PowerManager
@@ -525,6 +531,7 @@ class CoreServerService : Service() {
             acquire(CallIncoming.CORE_WAKE_LOCK_MS)
         }
         lastWakeLockAtElapsed = SystemClock.elapsedRealtime()
+        OperationalDiagnostics.wake.acquire(lastWakeLockAtElapsed, CallIncoming.CORE_WAKE_LOCK_MS)
 
         try {
             val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
@@ -599,6 +606,7 @@ class CoreServerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        OperationalDiagnostics.tracker.count(OperationalCounter.SERVICE_START_COMMAND)
         Log.i(TAG, "CoreServerService started (action=" + (intent?.action ?: "null") + ")")
         startForeground(NOTIFICATION_ID, buildNotification("Подключение..."))
 
@@ -651,7 +659,9 @@ class CoreServerService : Service() {
                 val wakeHeld = wakeLock?.isHeld == true
                 val wakeAge = SystemClock.elapsedRealtime() - lastWakeLockAtElapsed
                 if (CallIncoming.shouldRefreshWakeLock(wakeHeld, wakeAge)) {
-                    runCatching { wakeLock?.acquire(CallIncoming.CORE_WAKE_LOCK_MS) }
+                    runCatching { wakeLock?.acquire(CallIncoming.CORE_WAKE_LOCK_MS) }.onSuccess {
+                        if (wakeLock?.isHeld == true) OperationalDiagnostics.wake.acquire(SystemClock.elapsedRealtime(), CallIncoming.CORE_WAKE_LOCK_MS)
+                    }
                     lastWakeLockAtElapsed = SystemClock.elapsedRealtime()
                 }
                 sincePump++
@@ -1829,6 +1839,8 @@ class CoreServerService : Service() {
     }
 
     override fun onDestroy() {
+        OperationalDiagnostics.tracker.count(OperationalCounter.SERVICE_DESTROYED)
+        OperationalDiagnostics.phase(DiagnosticPhase.SERVICE_STOP)
         // Снимаем foreground-статус первым делом, чтобы система не считала
         // сервис зависшим, пока мы закрываем реле и Rust-ядро.
         try {
@@ -1853,6 +1865,7 @@ class CoreServerService : Service() {
             multicastLock?.release()
             Log.i(TAG, "MulticastLock released")
         } catch (_: Exception) {}
+        OperationalDiagnostics.wake.release(SystemClock.elapsedRealtime())
         wakeLock?.release()
         super.onDestroy()
     }
@@ -1995,6 +2008,10 @@ class CoreServerService : Service() {
                 } catch (ex: Exception) {
                     Log.w(TAG, "File pump error: ${ex.message}")
                 }
+                try {
+                    RuntimeDiagnostics.measure(DiagnosticOperation.STORY_PUMP) { chatRepository.pumpStoryOutbox() }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { TransferDiagnostics.recordWarning("story", "цикл досылки истории не завершён; повтор при следующем цикле") }
                 // Файлы группы роем (этап 9): повторить свои просьбы, отдать
                 // из очереди, освободить куски отданного.
                 try {

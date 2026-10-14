@@ -373,7 +373,11 @@ object TransferDiagnostics {
             .getOrDefault(RelayStorageDiagnostics(status = "unavailable"))
         val health = runCatching { RuntimeDiagnostics.snapshot(context.applicationContext) }
             .getOrDefault(RuntimeHealthSnapshot())
-        snapshotOf(facts.copy(relayStorage = storage, runtimeHealth = health), journalSnapshot.first, logcat.lines, createdAtMs)
+        val details = OperationalDiagnostics.storageTrend(storage) + OperationalDiagnostics.journalReport() + OperationalDiagnostics.wakeReport() + logcat.relayCleanup.render() +
+            com.vladimir.messenger.data.story.DurableStorySender.report(context.applicationContext)
+        snapshotOf(facts.copy(relayStorage = storage, runtimeHealth = health,
+            operationalHealth = OperationalDiagnostics.tracker.snapshot(), operationalDetails = details),
+            journalSnapshot.first, logcat.lines, createdAtMs)
     }
 
     private fun snapshotOf(
@@ -467,6 +471,8 @@ object TransferDiagnostics {
                 OnlineHelperSettings.enabled.value
             }.getOrNull(),
             signingSeedMode = signingSeedMode,
+            signingModeReason = com.vladimir.messenger.data.security.IdentitySigningKeyStore.lastModeReason,
+            exchangeModeReason = com.vladimir.messenger.data.file.FileExchangeKeyStore.lastModeReason,
             installedSigningMode = installedSigningMode,
             fileExchangeMode = fileExchangeMode,
             signingInstallBeforeCore = boot.signingInstall,
@@ -517,6 +523,7 @@ object TransferDiagnostics {
      * агрегаты, а сами строки перед показом проходят редактирование.
      */
     private data class LogcatScan(
+        val relayCleanup: RelayCleanupWindow = RelayCleanupWindow(),
         val lines: List<String>,
         val coreMessageSignals: Long,
         val relayQueueFull: Long,
@@ -769,6 +776,7 @@ object TransferDiagnostics {
         val all = synchronized(raw) { raw.toList() }
         val evictionScan = DiagnosticsPrivacy.parseRelayQueueOwnEvictions(all)
         LogcatScan(
+            relayCleanup = RelayCleanupWindow.parse(all),
             // Свежие строки важнее старых: logcat отдаёт их по времени вперёд.
             lines = DiagnosticsPrivacy.prioritizeLogcatErrors(
                 all.filter(::isRelevantProcessLog)

@@ -28,6 +28,7 @@ data class RelayStorageDiagnostics(
             for (table in store.tables) {
                 appendLine("table=${table.kind.code} · status=${token(table.status)} · rows=${table.totalRows ?: -1L}")
                 appendLine("sampled=${table.sampled} · limited=${table.limited} · sampled_bytes=${table.bytes} · largest_sampled_record_bytes=${table.largestBytes} · expired_sampled=${table.expired} · repeated_ids_sampled=${table.repeatedIds}")
+                appendLine("expired_total_rows=${table.expiredTotalRows ?: -1} · live_total_rows=${if (table.totalRows != null && table.expiredTotalRows != null && table.expiredTotalRows <= table.totalRows) table.totalRows - table.expiredTotalRows else -1} · earliest_expiry_epoch_ms=${table.earliestExpiryMs ?: -1}")
                 val shown = table.groups.sortedByDescending { it.bytes }.take(MAX_GROUPS)
                 for (group in shown) {
                     appendLine("  from=${peer(group.sender)} -> to=${peer(group.recipient)} · rows=${group.rows} · bytes=${group.bytes} · expired=${group.expired} · oldest_age_ms=${group.oldestAgeMs ?: -1L}")
@@ -76,6 +77,8 @@ data class RelayTableDiagnostic(
     val expired: Int = 0,
     val repeatedIds: Int = 0,
     val groups: List<RelayRouteDiagnostic> = emptyList(),
+    val expiredTotalRows: Long? = null,
+    val earliestExpiryMs: Long? = null,
 )
 
 data class RelayRouteDiagnostic(

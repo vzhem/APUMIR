@@ -79,11 +79,14 @@ class RelayStorageInspectorInstrumentedTest {
         open().use { db ->
             db.beginTransaction()
             try {
-                repeat(600) { db.execSQL("INSERT INTO relay_records_enc VALUES (?, 'peer', zeroblob(8), ?)", arrayOf("id-$it", now + 1000)) }
+                repeat(600) { db.execSQL("INSERT INTO relay_records_enc VALUES (?, 'peer', zeroblob(8), ?)", arrayOf("id-$it", if (it % 2 == 0) now - 1000 else now + 1000)) }
                 db.setTransactionSuccessful()
             } finally { db.endTransaction() }
             val encrypted = inspect().stores.first().tables.first { it.kind == RelayTableKind.ENCRYPTED }
             assertEquals(600L, encrypted.totalRows)
+            assertEquals(300L, encrypted.expiredTotalRows)
+            assertEquals(256, encrypted.expired)
+            assertEquals(now - 1000, encrypted.earliestExpiryMs)
             assertEquals(RelayStorageInspector.SAMPLE_ROWS_PER_TABLE, encrypted.sampled)
             assertTrue(encrypted.limited)
         }

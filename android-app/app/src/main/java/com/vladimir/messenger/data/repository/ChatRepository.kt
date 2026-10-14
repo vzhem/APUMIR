@@ -1,5 +1,8 @@
 package com.vladimir.messenger.data.repository
 
+import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
+import com.vladimir.messenger.data.story.DurableStorySender
+
 import com.vladimir.messenger.domain.model.MessageChannel
 
 import android.util.Log
@@ -177,6 +180,7 @@ class ChatRepository @Inject constructor(
                             recipientId = mirrorRecipient,
                         )
                         messageDao.insertMessage(mirrorEntity)
+                        OperationalDiagnostics.tracker.persisted(messageId)
                         chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
                         val offered = mirrorChannel.publishOutgoing(
                             MirrorRow(
@@ -235,6 +239,7 @@ class ChatRepository @Inject constructor(
                 replyText = reply?.let { DirectReplyWire.preview(it.text) }.orEmpty(),
             )
             messageDao.insertMessage(entity)
+            OperationalDiagnostics.tracker.persisted(messageId)
             chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
 
             // ШАГ 3: Rust owns direct QUIC and the bounded persistent MQTT/mesh offline path.
@@ -1263,6 +1268,7 @@ class ChatRepository @Inject constructor(
         // статуса, иначе повторные кадры надували бы число.
         if (changed) {
             com.vladimir.messenger.data.diagnostics.TransferDiagnostics.noteDeliveryAck()
+            OperationalDiagnostics.tracker.ack(messageId)
         }
         return changed
     }
@@ -1319,7 +1325,7 @@ class ChatRepository @Inject constructor(
 
     /**
      * Пакет истории контакту: только доставка, без записи в переписку и без
-     * офлайн-очереди. Не дошло - история у контакта не появится (она живёт сутки).
+     * строк в переписке. Повторные попытки до срока жизни ведёт DurableStorySender.
      *
      * [transportId] задаёт `StoryOutbox`: повторная волна обязана приехать тем же
      * сообщением, иначе получатель увидит дубликат части.
@@ -1338,9 +1344,26 @@ class ChatRepository @Inject constructor(
         return sendViaRust(transportId, "story", actual, content)
     }
 
+    suspend fun enqueueStory(story: com.vladimir.messenger.data.story.StoryStore.Story, revoke: Boolean = false): Boolean =
+        withContext(Dispatchers.IO) {
+            if (!com.vladimir.messenger.data.story.StoryStore.persistForDelivery()) {
+                com.vladimir.messenger.data.diagnostics.TransferDiagnostics.recordWarning("story", "локальное сохранение истории не подтверждено; отправка не начата")
+                false
+            } else DurableStorySender.enqueue(context, story, directContactIds(), revoke)
+        }
+
+    suspend fun pumpStoryOutbox() = withContext(Dispatchers.IO) {
+        if (RustBridge.isRunning()) DurableStorySender.pump(context, RustBridge.nodeId().orEmpty()) { peer, packet, id ->
+            sendStoryPacket(peer, packet, id)
+        }
+    }
+
     private suspend fun sendViaRust(messageId: String, chatId: String, peerId: String, content: String): Boolean =
         withContext(Dispatchers.IO) {
-            RustBridge.sendMessage(messageId, chatId, peerId, content)
+            OperationalDiagnostics.tracker.attempt(messageId)
+            RustBridge.sendMessage(messageId, chatId, peerId, content).also {
+                OperationalDiagnostics.tracker.transportResult(messageId, it)
+            }
         }
 
     private suspend fun sendViaRustRetry(
@@ -1349,7 +1372,10 @@ class ChatRepository @Inject constructor(
         peerId: String,
         content: String,
     ): Boolean = withContext(Dispatchers.IO) {
-        RustBridge.retryMessage(messageId, chatId, peerId, content)
+        OperationalDiagnostics.tracker.attempt(messageId)
+        RustBridge.retryMessage(messageId, chatId, peerId, content).also {
+            OperationalDiagnostics.tracker.transportResult(messageId, it)
+        }
     }
 
     /** Observe all messages for callers that explicitly need a full-table stream. */

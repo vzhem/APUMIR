@@ -81,6 +81,7 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
         }
         // Must run before Room/services/workers can observe restored stale state.
         DeviceIdentityMarker.discardIfRestored(applicationContext)
+        com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.install(this)
         com.vladimir.messenger.data.diagnostics.RuntimeDiagnostics.install(this)
         // р236: черновики сообщений (недописанный текст поля ввода).
         com.vladimir.messenger.data.draft.DraftStore.attach(applicationContext)

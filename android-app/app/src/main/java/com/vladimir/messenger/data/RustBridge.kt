@@ -592,7 +592,10 @@ object RustBridge {
         return OutgoingPayloadPolicy.prepare(recipientId, text) {
             appContext?.let { MessageSealer.seal(it, recipientId, text) }
         }.also { payload ->
-            if (payload == null) Log.w(TAG, "Private outbound payload deferred: sealing unavailable")
+            if (payload == null) {
+                com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.tracker.count(com.vladimir.messenger.data.diagnostics.OperationalCounter.SEAL_DEFERRED)
+                Log.w(TAG, "Private outbound payload deferred: sealing unavailable")
+            }
         }
     }
 

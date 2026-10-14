@@ -144,12 +144,14 @@ class FileTransferChunkStore(
 
         val used = currentStoredBytes()
         val projected = Math.addExact(used, ciphertext.size.toLong())
+        if (projected > maxStoreBytes) com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.tracker.count(com.vladimir.messenger.data.diagnostics.OperationalCounter.QUOTA_REJECTED)
         check(projected <= maxStoreBytes) { "File transfer owner quota exceeded" }
         headroom?.let { room ->
             val allowed = room(used)
             // Текст показывается отправителю дословно («Файл не отправлен: …»),
             // поэтому он по-русски и говорит, что делать.
             if (ciphertext.size.toLong() > allowed) {
+                com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.tracker.count(com.vladimir.messenger.data.diagnostics.OperationalCounter.QUOTA_REJECTED)
                 throw StorageFullException(
                     "не хватает места под пересылку (занято " +
                         com.vladimir.messenger.data.swarm.StoragePolicy.format(used) +

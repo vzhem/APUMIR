@@ -233,6 +233,8 @@ data class DiagnosticsFacts(
     val updateDiagnostics: UpdateDiagnosticFacts = UpdateDiagnosticFacts.EMPTY,
     val relayStorage: RelayStorageDiagnostics = RelayStorageDiagnostics(),
     val runtimeHealth: RuntimeHealthSnapshot = RuntimeHealthSnapshot(),
+    val operationalHealth: OperationalSnapshot = OperationalSnapshot(),
+    val operationalDetails: String = "",
     val networkValidated: Boolean? = null,
     val networkCaptivePortal: Boolean? = null,
     val privateDnsActive: Boolean? = null,
@@ -242,6 +244,8 @@ data class DiagnosticsFacts(
     val linkUpKbps: Int? = null,
     /** Только безопасные статусы: без ID, открытых/секретных ключей и имён файлов. */
     val signingSeedMode: String = "unknown",
+    val signingModeReason: KeyModeReason = KeyModeReason.NOT_PROBED,
+    val exchangeModeReason: KeyModeReason = KeyModeReason.NOT_PROBED,
     val installedSigningMode: String = "unknown",
     val fileExchangeMode: String = "unknown",
     /** Отличают timeout при старте от позднего READY в глобальном реестре. */
@@ -437,6 +441,9 @@ data class RelayQueueEvictionDiagnostics(val count: Long, val cumulative: Boolea
  * `10-06 [ipv6].154`.
  */
 object DiagnosticsPrivacy {
+    private val shortIdentityFieldRegex = Regex("(?i)(\\b(?:sender|peer|node|recipient|from|to|msg|msgId)=)[0-9a-f]{8,31}\\b")
+    private val mqttTopicRegex = Regex("\\btopic=[^\\s]+")
+    private val processThreadPrefixRegex = Regex("^(\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d+\\s+)\\d+\\s+\\d+\\s+")
     private val contactRegex = Regex("pk_[0-9a-f]{32,64}")
     private val uuidRegex = Regex("(?i)\\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\\b")
     // MQTT receipt topics carry SHA-256(messageId), a stable 64-hex correlator.
@@ -479,6 +486,9 @@ object DiagnosticsPrivacy {
 
     /** Не копировать в отчёт идентификаторы контактов/сообщений и сетевые адреса. */
     fun redact(text: String): String = text
+        .replace(processThreadPrefixRegex) { "${it.groupValues[1]}0 0 " }
+        .replace(shortIdentityFieldRegex) { "${it.groupValues[1]}[id]" }
+        .replace(mqttTopicRegex, "topic=[route]")
         .replace(contactRegex, "[contact]")
         .replace(uuidRegex, "[id]")
         .replace(messageHashRegex, "[id]")
@@ -692,6 +702,9 @@ object DiagnosticsReport {
         appendMqtt(facts)
         appendHelperRoutes(facts)
         appendMessages(facts)
+        append(facts.operationalHealth.render())
+        append(facts.operationalDetails)
+        appendLine()
         append(facts.runtimeHealth.render())
         appendLine()
         append(facts.relayStorage.render())
@@ -1094,6 +1107,7 @@ object DiagnosticsReport {
         appendLine("connected_peers=${facts.connectedPeers} (не число подтверждённых прямых соседей)")
         appendLine("signed_direct_swarm_peers=${facts.liveDirectSwarmPeers?.toString() ?: "unknown"} (живые подтверждённые APUX1)")
         appendLine("external_transport_allowed_now=${facts.externalTransportAllowed?.toString() ?: "unknown"} (политика на момент снимка, не факт обращения)")
+        appendLine("signing_mode_reason=${facts.signingModeReason.name.lowercase()} · exchange_mode_reason=${facts.exchangeModeReason.name.lowercase()}")
         appendLine("signing_seed_keystore=${safeDiagnosticToken(facts.signingSeedMode)}")
         appendLine("installed_signing_identity=${safeDiagnosticToken(facts.installedSigningMode)}")
         appendLine("signing_install_before_core=${safeDiagnosticToken(facts.signingInstallBeforeCore)}")

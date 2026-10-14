@@ -1,5 +1,7 @@
 package com.vladimir.messenger.data.security
 
+import com.vladimir.messenger.data.diagnostics.KeyModeReason
+
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -171,19 +173,29 @@ object IdentitySigningKeyStore {
         false
     }
 
+    @Volatile var lastModeReason = com.vladimir.messenger.data.diagnostics.KeyModeReason.NOT_PROBED
+        private set
+
     /** Read-only diagnostic: never creates a Keystore key, seed, or prefs. */
     @Synchronized
     fun mode(context: Context): Mode {
+        lastModeReason = KeyModeReason.READ_PREFS
         val app = context.applicationContext
         val encoded = app.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .getString(PREF_WRAPPED_SEED, null) ?: return Mode.ABSENT
+            .getString(PREF_WRAPPED_SEED, null)
+        if (encoded == null) { lastModeReason = KeyModeReason.ABSENT; return Mode.ABSENT }
         val seed = try {
-            val wrapKey = existingWrapKey() ?: return Mode.UNAVAILABLE
+            lastModeReason = KeyModeReason.LOOKUP_KEY
+            val wrapKey = existingWrapKey()
+            if (wrapKey == null) { lastModeReason = KeyModeReason.MISSING_WRAP_KEY; return Mode.UNAVAILABLE }
+            lastModeReason = KeyModeReason.UNWRAP
             unwrap(encoded, wrapKey)
         } catch (_: Exception) {
+            lastModeReason = if (lastModeReason == KeyModeReason.LOOKUP_KEY) KeyModeReason.KEYSTORE_ERROR else KeyModeReason.UNWRAP_FAILED
             return Mode.UNAVAILABLE
         }
         seed.fill(0)
+        lastModeReason = KeyModeReason.READY
         return Mode.READY
     }
 

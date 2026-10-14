@@ -81,7 +81,7 @@ cd android-app || exit 1
 # unit-тесты после компиляции Kotlin, не подмена полной сборки релизного APK.
 ./gradlew :app:testDebugUnitTest --no-daemon --console=plain \
     --tests '*RankWireTest*' --tests '*FileTransferRankPolicyTest*' --tests '*OnlineHelperPolicyTest*' \
-    --tests '*ShortLinksTest*' --tests '*DiagnosticsReportTest*' --tests '*RelayStorageDiagnosticsTest*' --tests '*RuntimeHealthTest*' \
+    --tests '*ShortLinksTest*' --tests '*DiagnosticsReportTest*' --tests '*RelayStorageDiagnosticsTest*' --tests '*RuntimeHealthTest*' --tests '*OperationalHealthTest*' --tests '*StoryDeliveryQueueTest*' --tests '*StoryOutboxTest*' --tests '*StoryStoreMergeTest*' \
     --tests '*GroupFileSeederTest*' --tests '*FileTransferWireTest*' \
     --tests '*SendTimePolicyTest*' --tests '*DeferredWireTest*' --tests '*DeferredDeliveryPolicyTest*'
 TESTS_STATUS=$?

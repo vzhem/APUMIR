@@ -43,17 +43,23 @@ object RuntimeDiagnostics {
         var scheduled: ScheduledFuture<*>? = null
         var lastWarningAt = 0L
         fun stop() {
+            val wasStarted = scheduled != null
             scheduled?.cancel(false)
             scheduled = null
             synchronized(gate) {
                 generation.incrementAndGet()
                 ui.visible(false)
+                OperationalDiagnostics.tracker.visible(false)
+                if (wasStarted) OperationalDiagnostics.phase(DiagnosticPhase.BACKGROUND)
                 main.removeCallbacksAndMessages(probeToken)
             }
         }
         fun update() {
             if (started.isEmpty()) { stop(); return }
             if (scheduled != null) return
+            OperationalDiagnostics.tracker.visible(true)
+            if (com.vladimir.messenger.service.CoreStatus.ready.value) OperationalDiagnostics.tracker.coreReady()
+            OperationalDiagnostics.phase(DiagnosticPhase.FOREGROUND)
             val epoch = generation.incrementAndGet()
             scheduled = timer.scheduleWithFixedDelay({
                 runCatching {

@@ -4,6 +4,9 @@ import android.content.Context
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.diagnostics.Counters
+import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
+import com.vladimir.messenger.data.diagnostics.OperationalCounter
+import com.vladimir.messenger.data.diagnostics.TransferRoute
 import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.repository.ChatRepository
@@ -119,7 +122,7 @@ class FileTransferRouter @Inject constructor(
      */
     private val binarySend: (String, String, Long, Int, Int, ByteArray) -> Boolean =
         { recipientId, transferIdHex, chunkIndex, chunkOffset, chunkLen, range ->
-            if (isPeerViaUdp(recipientId)) {
+            val delivered = if (isPeerViaUdp(recipientId)) {
                 // Понижение — и дальше текстовый путь.
                 sender.demoteBinary(transferIdHex)
                 false
@@ -135,6 +138,8 @@ class FileTransferRouter @Inject constructor(
                     )
                 }.getOrDefault(false)
             }
+            OperationalDiagnostics.tracker.routeResult("", TransferRoute.BINARY, delivered)
+            delivered
         }
     private lateinit var chunkStore: FileTransferChunkStore
     private val receivedStore: ReceivedFileStore
@@ -316,6 +321,7 @@ class FileTransferRouter @Inject constructor(
                     established && lan.sendPacket(recipientId, scope, "lan-" + System.nanoTime(), payload)
                 }
             }
+            OperationalDiagnostics.tracker.routeResult(recipientId, TransferRoute.LAN, lanOk)
             if (lanOk) {
                 lastDirectMode[recipientId] = "lan"
                 true
@@ -325,7 +331,9 @@ class FileTransferRouter @Inject constructor(
                 // пробиваем — ensureRequested отправит ufseek (троттлинг
                 // внутри), а пакет уедет дальше по цепочке.
                 udpChannels.ensureRequested(recipientId)
-                if (udpChannels.trySend(recipientId, payload)) {
+                val udpOk = udpChannels.trySend(recipientId, payload)
+                OperationalDiagnostics.tracker.routeResult(recipientId, TransferRoute.UDP, udpOk)
+                if (udpOk) {
                     lastDirectMode[recipientId] = "udp"
                     true
                 } else {
@@ -334,6 +342,7 @@ class FileTransferRouter @Inject constructor(
                     } catch (_: Exception) {
                         false
                     }
+                    OperationalDiagnostics.tracker.routeResult(recipientId, TransferRoute.QUIC, quicOk)
                     if (quicOk) {
                         lastDirectMode[recipientId] = "quic"
                         true
@@ -358,6 +367,7 @@ class FileTransferRouter @Inject constructor(
                                 )
                             }
                         }.getOrDefault(false)
+                        OperationalDiagnostics.tracker.routeResult(recipientId, TransferRoute.BROKER, viaBroker)
                         if (viaBroker) {
                             lastDirectMode[recipientId] = "broker"
                         }
@@ -997,6 +1007,8 @@ class FileTransferRouter @Inject constructor(
 
         if (removedRows > 0 || freedCopies > 0) {
             Log.i(TAG, "expired sweep: rows=$removedRows copies=$freedCopies")
+            OperationalDiagnostics.tracker.count(OperationalCounter.EXPIRED_FILE_ROWS, removedRows.toLong())
+            OperationalDiagnostics.tracker.count(OperationalCounter.EXPIRED_FILE_COPIES, freedCopies.toLong())
             TransferDiagnostics.count(Counters.TRANSFER_EXPIRED_ROWS, removedRows.toLong())
             TransferDiagnostics.count(Counters.TRANSFER_EXPIRED_COPIES, freedCopies.toLong())
             TransferDiagnostics.record(

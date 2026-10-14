@@ -3,6 +3,7 @@ package com.vladimir.messenger.data.file
 import android.util.Log
 import com.vladimir.messenger.data.diagnostics.Counters
 import com.vladimir.messenger.data.diagnostics.DiagnosticsReport
+import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
 import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
@@ -1374,6 +1375,7 @@ class FileTransferReceiver(
                 "Cannot persist verified file completion"
             }
             Log.i(TAG, "File transfer COMPLETE: $transferIdHex (${manifest.displayName})")
+            OperationalDiagnostics.tracker.fileComplete(true, manifest.fileSize.toLong(), nowMs() - fresh.createdAtMs)
             TransferDiagnostics.count(Counters.FILE_COMPLETED)
             TransferDiagnostics.recordSuccess(
                 "file",
