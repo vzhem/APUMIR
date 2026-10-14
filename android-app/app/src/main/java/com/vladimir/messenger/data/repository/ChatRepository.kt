@@ -688,6 +688,19 @@ class ChatRepository @Inject constructor(
         chatDao.updateLastMessage(chat.id, com.vladimir.messenger.util.ChatPreviews.human(row.content) ?: row.content, row.timestamp)
     }
 
+    /** Local sender copy for pre-delivery. Network retries remain owned by ScheduledSendWorker. */
+    suspend fun revealScheduledOutgoing(chatId: String, messageId: String, text: String, confirmed: Boolean) {
+        if (messageDao.messageExists(messageId)) return
+        val chat = chatDao.getChatById(chatId) ?: return
+        val now = System.currentTimeMillis()
+        messageDao.insertMessageIgnore(MessageEntity(
+            id = messageId, chatId = chatId, senderId = "self", content = text, timestamp = now,
+            isFromMe = true, status = if (confirmed) MessageStatus.DELIVERED.name else MessageStatus.SENT.name,
+            recipientId = chat.contactId,
+        ))
+        chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(text) ?: text, now)
+    }
+
     suspend fun saveIncomingMessage(
         chatId: String,
         senderId: String,

@@ -828,6 +828,60 @@ class GroupRepository(
      * отдельными пакетами той же темы ПЕРЕД кусками фото - слова важнее.
      * Раньше пост длиннее ~3 500 знаков через брокер не проходил вовсе.
      */
+    data class DeferredGroupPlan(val topicId: String, val senderName: String, val recipients: List<String>)
+
+    /** Snapshot current recipients; no message/manifest is published before the reveal time. */
+    suspend fun prepareDeferred(groupId: String, topicId: String, text: String): DeferredGroupPlan {
+        val me = myId() ?: error("Идентичность узла ещё не готова")
+        check(canAcceptDeferred(groupId, topicId, me, text)) { "Нет права отправлять в эту тему" }
+        val group = groupDao.getGroupById(groupId) ?: error("Группа не найдена")
+        val member = groupDao.getMember(groupId, me) ?: error("Вы не участник")
+        if (!GroupRole.isAdminOrOwner(member.role)) {
+            check(slowModeWaitMs(group, me, clock()) <= 0) { "Медленный режим" }
+        }
+        val topic = resolveTopic(group, topicId) ?: error("Тема не найдена")
+        return DeferredGroupPlan(topic.id, myDisplayName().take(160),
+            groupDao.getMembers(groupId).filter { !it.isBanned && it.nodeId != me }.map { it.nodeId }.distinct())
+    }
+
+    /** Validate both before durable pre-delivery and again at reveal (membership may change). */
+    suspend fun canAcceptDeferred(groupId: String, topicId: String, sender: String, text: String, localNodeId: String = myId().orEmpty()): Boolean {
+        if (text.isBlank() || text.length > MAX_MESSAGE_CHARS) return false
+        val group = groupDao.getGroupById(groupId) ?: return false
+        if (localNodeId.isBlank()) return false
+        val local = groupDao.getMember(groupId, localNodeId) ?: return false
+        val author = groupDao.getMember(groupId, sender) ?: return false
+        if (local.isBanned || author.isBanned) return false
+        val topic = resolveTopic(group, topicId) ?: return false
+        if (topic.groupId != groupId) return false
+        val admin = GroupRole.isAdminOrOwner(author.role)
+        val mask = GroupPermissions.effectiveMemberPermissions(author.permissions, effectiveMemberMask(group))
+        return (admin || GroupPermissions.has(mask, GroupPermissions.Member.SEND_MESSAGES)) && (!topic.isClosed || admin)
+    }
+
+    /** Plain group packets are built only at/after reveal; long text keeps the existing part format. */
+    fun deferredPackets(letter: com.vladimir.messenger.data.schedule.DeferredWire.Letter): List<String> {
+        val chunks = InlineImage.splitText(letter.text)
+        require(chunks.size - 1 <= InlineImage.MAX_TEXT_PARTS)
+        val head = InlineImage.headContent(chunks.first(), 0, chunks.size - 1, 0)
+        val bodies = listOf(head) + chunks.drop(1).mapIndexed { i, text ->
+            InlineImage.buildTextPart(letter.id, 0, i + 1, chunks.size - 1, text)
+        }
+        return bodies.mapIndexed { i, body ->
+            GroupWire.buildMessage(letter.groupId, letter.topicId, body,
+                if (i == 0) letter.id else "${letter.id}_part$i", letter.senderName)
+        }
+    }
+
+    /** Publish using normal permission checks and counters, but without a network dependency. */
+    suspend fun revealDeferred(sender: String, letter: com.vladimir.messenger.data.schedule.DeferredWire.Letter, localNodeId: String) {
+        if (!canAcceptDeferred(letter.groupId, letter.topicId, sender, letter.text, localNodeId)) return
+        deferredPackets(letter).forEach { wire ->
+            val packet = GroupWire.parse(wire) as? GroupWire.Packet.Message ?: error("Invalid scheduled group packet")
+            handleIncoming(sender, packet, packet.messageId, localNodeId)
+        }
+    }
+
     suspend fun sendMessage(
         groupId: String,
         topicId: String,
@@ -3266,8 +3320,8 @@ class GroupRepository(
 
     // ── Приём групповых событий ───────────────────────────────────────────────
 
-    suspend fun handleIncoming(senderId: String, packet: GroupWire.Packet, messageId: String) {
-        val me = myId().orEmpty()
+    suspend fun handleIncoming(senderId: String, packet: GroupWire.Packet, messageId: String, localNodeId: String? = null) {
+        val me = localNodeId ?: myId().orEmpty()
         when (packet) {
             is GroupWire.Packet.Message -> {
                 val group = groupDao.getGroupById(packet.groupId) ?: return

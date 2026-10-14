@@ -3,6 +3,7 @@ package com.vladimir.messenger
 import android.app.Application
 import android.util.Log
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.launch
 import com.vladimir.messenger.data.security.DeviceIdentityMarker
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.referral.ReferralRankStore
@@ -20,7 +21,12 @@ import android.os.Build
 import dagger.hilt.android.HiltAndroidApp
 
 @HiltAndroidApp
-class MessengerApplication : Application(), coil.ImageLoaderFactory {
+class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.work.Configuration.Provider {
+    @javax.inject.Inject lateinit var workerFactory: androidx.hilt.work.HiltWorkerFactory
+
+    override val workManagerConfiguration: androidx.work.Configuration
+        get() = androidx.work.Configuration.Builder().setWorkerFactory(workerFactory).build()
+
     /**
      * Общий ImageLoader Coil С декодером GIF: без него AsyncImage рисует
      * только первый кадр. Гифки в темах групп (v11.74.14) оживают сами.
@@ -81,6 +87,15 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory {
         com.vladimir.messenger.service.UpdateNotifier(applicationContext).ensureChannel()
         scheduleUpdateChecks()
         scheduleBoundedRelayWake()
+        // Restore work after a crash between committing a hidden letter and enqueueing its timer.
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO).launch {
+            runCatching {
+                com.vladimir.messenger.worker.ScheduledSendWorker.restore(applicationContext)
+                com.vladimir.messenger.data.schedule.DeferredInboxStore.pending(applicationContext).forEach { (key, at) ->
+                    com.vladimir.messenger.worker.DeferredRevealWorker.enqueue(applicationContext, key, at)
+                }
+            }.onFailure { Log.w("MessengerApp", "Deferred work recovery failed", it) }
+        }
         // Раунд 260: ядро стартует как можно раньше - ещё до отрисовки
         // первого экрана, чтобы к открытию чатов движок уже поднимался.
         // На фоновых пробуждениях система может запретить - там сервис

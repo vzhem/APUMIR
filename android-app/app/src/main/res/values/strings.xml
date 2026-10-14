@@ -1627,5 +1627,10 @@
     <string name="send_open_clock">Выбрать время</string>
     <string name="send_time_zone">Часовой пояс: %1$s</string>
     <string name="send_time_invalid">Укажите существующую дату и время в будущем.</string>
-    <string name="send_schedule_delivery_hint">Отправка начнётся не раньше выбранного времени. Android или отсутствие связи могут её задержать.</string>
+    <string name="send_schedule_delivery_hint">Скрытая копия передаётся заранее. После её сохранения связь в момент показа не нужна. Android может задержать показ; выключенный телефон покажет сообщение после включения.</string>
+
+    <string name="send_predelivery_hint">Отложенный текст передаётся заранее и скрыт до выбранного времени. После начала передачи отмена недоступна: получатель может быть без связи.</string>
+    <string name="send_predelivery_stored">Скрытая копия сохранена: %1$d из %2$d. Показ — в выбранное время.</string>
+    <string name="send_predelivery_waiting">Ожидает предварительной передачи</string>
+    <string name="send_predelivery_no_cancel">Передача начата; отмена недоступна</string>
 </resources>

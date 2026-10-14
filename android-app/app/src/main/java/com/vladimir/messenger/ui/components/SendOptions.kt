@@ -55,6 +55,8 @@ fun SendOptionsDialog(
         },
         text = {
             Column {
+                Text(stringResource(R.string.send_predelivery_hint), style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(6.dp))
                 ApuActionBubble(
                     label = if (quiet) stringResource(R.string.send_quiet_on) else stringResource(R.string.send_quiet_off),
                     icon = Icons.Filled.NotificationsOff,
@@ -93,14 +95,26 @@ fun ScheduledSendBanner(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = stringResource(R.string.send_scheduled_at, formatSendTime(item.sendAtMs)),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = { onCancel(item.id) }) {
-                    Text(stringResource(R.string.send_scheduled_cancel))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.send_scheduled_at, formatSendTime(item.sendAtMs)),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (item.preDeliver) {
+                        val status = if (item.started) {
+                            stringResource(R.string.send_predelivery_stored, item.confirmed.size, item.recipients.orEmpty().size)
+                        } else stringResource(R.string.send_predelivery_waiting)
+                        Text(status, style = MaterialTheme.typography.bodySmall)
+                        if (item.started) Text(stringResource(R.string.send_predelivery_no_cancel), style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (item.lastError.isNotEmpty()) Text(item.lastError, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error)
+                }
+                if (!item.started) {
+                    TextButton(onClick = { onCancel(item.id) }) {
+                        Text(stringResource(R.string.send_scheduled_cancel))
+                    }
                 }
             }
         }

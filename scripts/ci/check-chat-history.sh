@@ -82,6 +82,10 @@ FILE_UDP="$BASE/main/java/com/vladimir/messenger/data/file/FileUdpWire.kt"
 SEALED_WIRE="$BASE/main/java/com/vladimir/messenger/data/security/SealedWire.kt"
 OUTGOING_POLICY="$BASE/main/java/com/vladimir/messenger/data/security/OutgoingPayloadPolicy.kt"
 OUTGOING_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/data/security/OutgoingPayloadPolicyTest.kt"
+DEFERRED_WIRE="$BASE/main/java/com/vladimir/messenger/data/schedule/DeferredWire.kt"
+DEFERRED_POLICY="$BASE/main/java/com/vladimir/messenger/data/schedule/DeferredDeliveryPolicy.kt"
+DEFERRED_WIRE_TEST="$BASE/test/java/com/vladimir/messenger/data/schedule/DeferredWireTest.kt"
+DEFERRED_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/data/schedule/DeferredDeliveryPolicyTest.kt"
 SEND_TIME_POLICY="$BASE/main/java/com/vladimir/messenger/data/schedule/SendTimePolicy.kt"
 SEND_TIME_TEST="$BASE/test/java/com/vladimir/messenger/data/schedule/SendTimePolicyTest.kt"
 SELF_SEED_POLICY="$BASE/main/java/com/vladimir/messenger/data/update/SelfSeedRetryPolicy.kt"
@@ -98,6 +102,7 @@ RETENTION_TEST="$BASE/test/java/com/vladimir/messenger/data/file/FileTransferRet
     "$DIAG_REPORT" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
     "$UPDATE_POLICY" "$UPDATE_POLICY_TEST" \
     "$CALL_WIRE" "$FILE_CODEC" "$FILE_WIRE" "$FILE_UDP" "$SEALED_WIRE" "$OUTGOING_POLICY" "$OUTGOING_POLICY_TEST" \
+    "$DEFERRED_WIRE" "$DEFERRED_POLICY" "$DEFERRED_WIRE_TEST" "$DEFERRED_POLICY_TEST" \
     "$SELF_SEED_POLICY" "$SELF_SEED_POLICY_TEST" "$SEND_TIME_POLICY" "$SEND_TIME_TEST" \
     "$RETENTION" "$RETENTION_TEST"
 "$JAVA" -cp "$OUT/classes:$CP" org.junit.runner.JUnitCore \
@@ -114,5 +119,7 @@ RETENTION_TEST="$BASE/test/java/com/vladimir/messenger/data/file/FileTransferRet
     com.vladimir.messenger.service.UpdateCheckerTest \
     com.vladimir.messenger.data.security.OutgoingPayloadPolicyTest \
     com.vladimir.messenger.data.update.SelfSeedRetryPolicyTest \
+    com.vladimir.messenger.data.schedule.DeferredWireTest \
+    com.vladimir.messenger.data.schedule.DeferredDeliveryPolicyTest \
     com.vladimir.messenger.data.schedule.SendTimePolicyTest \
     com.vladimir.messenger.data.file.FileTransferRetentionTest

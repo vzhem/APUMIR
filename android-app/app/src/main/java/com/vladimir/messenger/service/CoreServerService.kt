@@ -72,6 +72,7 @@ class CoreServerService : Service() {
     @Inject lateinit var messageDeletion: com.vladimir.messenger.data.repository.MessageDeletionRepository
     @Inject lateinit var hearts: com.vladimir.messenger.data.heart.HeartRepository
     @Inject lateinit var postViews: com.vladimir.messenger.data.channel.PostViewRepository
+    @Inject lateinit var deferredDelivery: com.vladimir.messenger.data.schedule.DeferredDelivery
     @Inject lateinit var groupRouter: com.vladimir.messenger.data.group.GroupRouter
     @Inject lateinit var groupRepository: com.vladimir.messenger.data.group.GroupRepository
     @Inject lateinit var groupFiles: com.vladimir.messenger.data.group.GroupFileSwarm
@@ -285,12 +286,19 @@ class CoreServerService : Service() {
      * конверт - добавьте его и здесь, и в основной цепочке.
      * Возвращает true, если текст служебный и в чат ему дороги нет.
      */
+    private suspend fun markMessageDelivered(messageId: String): Boolean {
+        deferredDelivery.noteTransportAck(messageId)
+        return chatRepository.markOutgoingMessageDelivered(messageId)
+    }
+
     private suspend fun routeIncomingEnvelope(
         senderId: String,
         chatId: String,
         messageId: String,
         text: String,
+        authenticated: Boolean = false,
     ): Boolean {
+        if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, authenticated)) return true
         // р243/р244: подтверждение доставки, пришедшее прямым каналом. Второй
         // путь приёма обязан разбирать его так же, как основной: иначе строка
         // «ack|…» вырастет в личный чат. Даже некорректный ACK с зарезервированным
@@ -307,7 +315,7 @@ class CoreServerService : Service() {
             if (ackedId != null) {
                 // ACK-кадр нужен и партнёру той же личности, но не сохраняется.
                 mirror?.publishEnvelope(senderId, chatId, messageId, text)
-                runCatching { chatRepository.markOutgoingMessageDelivered(ackedId) }
+                runCatching { markMessageDelivered(ackedId) }
                     .onSuccess { changed ->
                         Log.i(TAG, "📬 direct delivery ACK (relay path): msgId=$ackedId changed=$changed")
                     }
@@ -982,7 +990,7 @@ class CoreServerService : Service() {
                             is RelayEnvelope.Parsed.Ack -> {
                                 // G1 fix: ACK, доставленный через relay, → DELIVERED у отправителя.
                                 val messageId = parsed.messageId
-                                if (chatRepository.markOutgoingMessageDelivered(messageId)) {
+                                if (markMessageDelivered(messageId)) {
                                     Log.i(TAG, "✅ CF ACK from $senderId → DELIVERED msgId=$messageId")
                                 } else {
                                     Log.d(TAG, "CF ACK ignored (msgId=$messageId not found / not mine / already delivered)")
@@ -1000,7 +1008,7 @@ class CoreServerService : Service() {
                                         // Он всё равно подтверждает исходящую строку, но
                                         // ACK самому ACK отправлять нельзя.
                                         DeliveryAckWire.messageId(existingMsg.content)?.let {
-                                            chatRepository.markOutgoingMessageDelivered(it)
+                                            markMessageDelivered(it)
                                         }
                                     } else {
                                         // р243: дубликат - это повтор от отправителя,
@@ -1049,7 +1057,7 @@ class CoreServerService : Service() {
                                         // конверта не создаётся.
                                         val knownChat = chatRepository.getChatByContactId(senderId)
                                         val isDeliveryAck = DeliveryAckWire.isPacket(cfContent)
-                                        if (routeIncomingEnvelope(senderId, knownChat?.id ?: "", messageId, cfContent)) {
+                                        if (routeIncomingEnvelope(senderId, knownChat?.id ?: "", messageId, cfContent, SealedWire.isSealed(parsed.content))) {
                                             Log.i(TAG, "CF service envelope handled msgId=$messageId")
                                             // Never generate an ACK-of-ACK. RelayEnvelope's own
                                             // custody receipt below remains a separate protocol.
@@ -1552,12 +1560,13 @@ class CoreServerService : Service() {
         messageId: String,
         text: String,
     ): Boolean {
+        if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, authenticated = true, fromMirror = true)) return true
         // р244: подтверждение доставки пришло с партнёрского устройства -
         // помечаем им же и здешнюю строку (переписка общая на обеих).
         if (DeliveryAckWire.isPacket(text)) {
             val ackedId = DeliveryAckWire.messageId(text)
             if (ackedId != null) {
-                runCatching { chatRepository.markOutgoingMessageDelivered(ackedId) }
+                runCatching { markMessageDelivered(ackedId) }
                     .onSuccess { changed ->
                         Log.i(TAG, "📬 delivery ACK via mirror: msgId=$ackedId changed=$changed")
                     }
@@ -1860,6 +1869,15 @@ class CoreServerService : Service() {
 
     private fun startEventPolling() {
         
+        serviceScope.launch {
+            while (isActive) {
+                try { deferredDelivery.pumpPending() }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (error: Exception) { Log.w(TAG, "Deferred delivery assist failed", error) }
+                delay(30_000L)
+            }
+        }
+
         // Observer for incoming messages → show notifications
         serviceScope.launch {
             Log.i(TAG, "Starting message observer for notifications")
@@ -1874,6 +1892,7 @@ class CoreServerService : Service() {
                     }
                     val recentIncoming = messages.filter {
                         !it.isFromMe &&
+                            !com.vladimir.messenger.data.schedule.DeferredInboxStore.owns(applicationContext, it.id) &&
                             it.timestamp >= cutoff &&
                             notifiedMessageIds.putIfAbsent(it.id, it.timestamp) == null &&
                             !com.vladimir.messenger.util.InlineImage.isPart(it.content) &&
@@ -2157,6 +2176,11 @@ class CoreServerService : Service() {
 
                 Log.i(TAG, "Message from $senderId in chat $chatId (sealed=$sealed)")
 
+                if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, sealed)) {
+                    runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                    return
+                }
+
                 // р243/р247: подтверждение доставки, пришедшее ПРЯМЫМ каналом.
                 // В v140 оно стало идти обычным P2P-пакетом `ack|id`; клиенты
                 // до v140 не распознавали его, поэтому свежая версия фильтрует
@@ -2189,7 +2213,7 @@ class CoreServerService : Service() {
                         mirror?.publishEnvelope(senderId, chatId, messageId, text)
                         serviceScope.launch {
                             runCatching {
-                                chatRepository.markOutgoingMessageDelivered(ackedId)
+                                markMessageDelivered(ackedId)
                             }.onSuccess { changed ->
                                 Log.i(TAG, "📬 direct delivery ACK: msgId=$ackedId changed=$changed")
                             }
@@ -2706,7 +2730,7 @@ class CoreServerService : Service() {
                 Log.i(TAG, "✅ DELIVERY_ACK received: msgId=$messageId from ${event.senderId}")
                 serviceScope.launch {
                     try {
-                        chatRepository.markOutgoingMessageDelivered(messageId)
+                        markMessageDelivered(messageId)
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to mark DELIVERED", e)
                     }
