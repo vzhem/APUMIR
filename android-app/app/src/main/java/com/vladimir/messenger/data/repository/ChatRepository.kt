@@ -1,5 +1,8 @@
 package com.vladimir.messenger.data.repository
 
+import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
+import com.vladimir.messenger.data.story.DurableStorySender
+
 import com.vladimir.messenger.domain.model.MessageChannel
 
 import android.util.Log
@@ -29,6 +32,7 @@ import javax.inject.Singleton
 
 @Singleton
 class ChatRepository @Inject constructor(
+    @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context,
     private val chatDao: ChatDao,
     private val messageDao: MessageDao,
     private val groupDao: GroupDao,
@@ -176,6 +180,7 @@ class ChatRepository @Inject constructor(
                             recipientId = mirrorRecipient,
                         )
                         messageDao.insertMessage(mirrorEntity)
+                        OperationalDiagnostics.tracker.persisted(messageId)
                         chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
                         val offered = mirrorChannel.publishOutgoing(
                             MirrorRow(
@@ -234,6 +239,7 @@ class ChatRepository @Inject constructor(
                 replyText = reply?.let { DirectReplyWire.preview(it.text) }.orEmpty(),
             )
             messageDao.insertMessage(entity)
+            OperationalDiagnostics.tracker.persisted(messageId)
             chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
 
             // ШАГ 3: Rust owns direct QUIC and the bounded persistent MQTT/mesh offline path.
@@ -643,6 +649,8 @@ class ChatRepository @Inject constructor(
 
     /** Отправленное с зеркала (эхо или доган): своя строка «отправлено». */
     suspend fun applyMirrorSent(row: MirrorRow) {
+        if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context,
+                com.vladimir.messenger.data.schedule.DeferredInboxStore.owner(context), row.id)) return
         // Служебный пакет не показываем и как своё сообщение. Если он всё же
         // попал в журнал зеркала, ACK по-прежнему обновляет исходящую строку.
         if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(row.content)) {
@@ -688,6 +696,25 @@ class ChatRepository @Inject constructor(
         chatDao.updateLastMessage(chat.id, com.vladimir.messenger.util.ChatPreviews.human(row.content) ?: row.content, row.timestamp)
     }
 
+    suspend fun scheduledRecipient(chatId: String): String? {
+        val raw = chatDao.getChatById(chatId)?.contactId ?: return null
+        val peer = if (raw.contains("node=pk_")) "pk_" + raw.substringAfter("node=pk_").substringBefore("&") else raw
+        return peer.takeIf { NodeIds.isNodeId(it) }
+    }
+
+    /** Local sender copy for pre-delivery. Network retries remain owned by ScheduledSendWorker. */
+    suspend fun revealScheduledOutgoing(chatId: String, messageId: String, text: String, confirmed: Boolean) {
+        if (messageDao.messageExists(messageId)) return
+        val chat = chatDao.getChatById(chatId) ?: return
+        val now = System.currentTimeMillis()
+        messageDao.insertMessageIgnore(MessageEntity(
+            id = messageId, chatId = chatId, senderId = "self", content = text, timestamp = now,
+            isFromMe = true, status = if (confirmed) MessageStatus.DELIVERED.name else MessageStatus.SENT.name,
+            recipientId = chat.contactId,
+        ))
+        chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(text) ?: text, now)
+    }
+
     suspend fun saveIncomingMessage(
         chatId: String,
         senderId: String,
@@ -697,6 +724,7 @@ class ChatRepository @Inject constructor(
         channel: MessageChannel = MessageChannel.UNKNOWN,
         recipientId: String = "",
     ) {
+        if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId)) return
         // История: пакет контакта сохраняем в ленту историй, в переписку не пускаем.
         if (com.vladimir.messenger.data.story.StoryStore.isStoryPacket(content)) {
             val name = chatDao.getChatsByContactId(senderId).firstOrNull()?.contactName.orEmpty()
@@ -741,7 +769,12 @@ class ChatRepository @Inject constructor(
             status = MessageStatus.DELIVERED.name,
             recipientId = recipientId,
         )
-        messageDao.insertMessageIgnore(entity)
+        // A due-time fallback may race the local hidden-inbox reveal.
+        if (messageDao.insertMessageIgnore(entity) == -1L) return
+        if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId)) {
+            messageDao.deleteByIdChatAndSender(messageId, chatId, senderId)
+            return
+        }
         chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
         // Раунд 150: бейдж непрочитанных на пузыре личного чата.
         // Раунд 156: служебные конверты роя (стикеры/миниатюры) - не
@@ -1235,6 +1268,7 @@ class ChatRepository @Inject constructor(
         // статуса, иначе повторные кадры надували бы число.
         if (changed) {
             com.vladimir.messenger.data.diagnostics.TransferDiagnostics.noteDeliveryAck()
+            OperationalDiagnostics.tracker.ack(messageId)
         }
         return changed
     }
@@ -1291,7 +1325,7 @@ class ChatRepository @Inject constructor(
 
     /**
      * Пакет истории контакту: только доставка, без записи в переписку и без
-     * офлайн-очереди. Не дошло - история у контакта не появится (она живёт сутки).
+     * строк в переписке. Повторные попытки до срока жизни ведёт DurableStorySender.
      *
      * [transportId] задаёт `StoryOutbox`: повторная волна обязана приехать тем же
      * сообщением, иначе получатель увидит дубликат части.
@@ -1310,9 +1344,26 @@ class ChatRepository @Inject constructor(
         return sendViaRust(transportId, "story", actual, content)
     }
 
+    suspend fun enqueueStory(story: com.vladimir.messenger.data.story.StoryStore.Story, revoke: Boolean = false): Boolean =
+        withContext(Dispatchers.IO) {
+            if (!com.vladimir.messenger.data.story.StoryStore.persistForDelivery()) {
+                com.vladimir.messenger.data.diagnostics.TransferDiagnostics.recordWarning("story", "локальное сохранение истории не подтверждено; отправка не начата")
+                false
+            } else DurableStorySender.enqueue(context, story, directContactIds(), revoke)
+        }
+
+    suspend fun pumpStoryOutbox() = withContext(Dispatchers.IO) {
+        if (RustBridge.isRunning()) DurableStorySender.pump(context, RustBridge.nodeId().orEmpty()) { peer, packet, id ->
+            sendStoryPacket(peer, packet, id)
+        }
+    }
+
     private suspend fun sendViaRust(messageId: String, chatId: String, peerId: String, content: String): Boolean =
         withContext(Dispatchers.IO) {
-            RustBridge.sendMessage(messageId, chatId, peerId, content)
+            OperationalDiagnostics.tracker.attempt(messageId)
+            RustBridge.sendMessage(messageId, chatId, peerId, content).also {
+                OperationalDiagnostics.tracker.transportResult(messageId, it)
+            }
         }
 
     private suspend fun sendViaRustRetry(
@@ -1321,7 +1372,10 @@ class ChatRepository @Inject constructor(
         peerId: String,
         content: String,
     ): Boolean = withContext(Dispatchers.IO) {
-        RustBridge.retryMessage(messageId, chatId, peerId, content)
+        OperationalDiagnostics.tracker.attempt(messageId)
+        RustBridge.retryMessage(messageId, chatId, peerId, content).also {
+            OperationalDiagnostics.tracker.transportResult(messageId, it)
+        }
     }
 
     /** Observe all messages for callers that explicitly need a full-table stream. */

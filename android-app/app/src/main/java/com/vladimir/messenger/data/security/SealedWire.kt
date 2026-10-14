@@ -55,6 +55,15 @@ object SealedWire {
 
     fun isSealed(text: String): Boolean = text.startsWith(PREFIX)
 
+    /** Extract only the v1 sender binding. Cryptographic verification still belongs to openFileKeyEnvelope. */
+    fun senderBinding(wire: String): ByteArray? {
+        val envelope = decode(wire)?.keyEnvelope ?: return null
+        if (envelope.size < 204 || envelope[0] != 1.toByte()) return null
+        val size = ((envelope[1].toInt() and 255) shl 8) or (envelope[2].toInt() and 255)
+        if (size !in 1..512 || envelope.size != size + 203) return null
+        return envelope.copyOfRange(3, size + 3)
+    }
+
     /** Разобрать конверт или вернуть null, если это не наш формат. */
     fun decode(text: String): Parts? {
         if (!isSealed(text) || text.length > MAX_WIRE_CHARS) return null

@@ -3,6 +3,7 @@ package com.vladimir.messenger
 import android.app.Application
 import android.util.Log
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.launch
 import com.vladimir.messenger.data.security.DeviceIdentityMarker
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.referral.ReferralRankStore
@@ -20,7 +21,12 @@ import android.os.Build
 import dagger.hilt.android.HiltAndroidApp
 
 @HiltAndroidApp
-class MessengerApplication : Application(), coil.ImageLoaderFactory {
+class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.work.Configuration.Provider {
+    @javax.inject.Inject lateinit var workerFactory: androidx.hilt.work.HiltWorkerFactory
+
+    override val workManagerConfiguration: androidx.work.Configuration
+        get() = androidx.work.Configuration.Builder().setWorkerFactory(workerFactory).build()
+
     /**
      * Общий ImageLoader Coil С декодером GIF: без него AsyncImage рисует
      * только первый кадр. Гифки в темах групп (v11.74.14) оживают сами.
@@ -75,12 +81,25 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory {
         }
         // Must run before Room/services/workers can observe restored stale state.
         DeviceIdentityMarker.discardIfRestored(applicationContext)
+        com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.install(this)
+        com.vladimir.messenger.data.diagnostics.RuntimeDiagnostics.install(this)
         // р236: черновики сообщений (недописанный текст поля ввода).
         com.vladimir.messenger.data.draft.DraftStore.attach(applicationContext)
         createNotificationChannels()
         com.vladimir.messenger.service.UpdateNotifier(applicationContext).ensureChannel()
         scheduleUpdateChecks()
         scheduleBoundedRelayWake()
+        runCatching { com.vladimir.messenger.data.maintenance.AutomaticMaintenance.schedule(this) }
+            .onFailure { Log.w("MessengerApp", "Maintenance scheduling deferred", it) }
+        // Restore work after a crash between committing a hidden letter and enqueueing its timer.
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO).launch {
+            runCatching {
+                com.vladimir.messenger.worker.ScheduledSendWorker.restore(applicationContext)
+                com.vladimir.messenger.data.schedule.DeferredInboxStore.pending(applicationContext).forEach { (key, at) ->
+                    com.vladimir.messenger.worker.DeferredRevealWorker.enqueue(applicationContext, key, at)
+                }
+            }.onFailure { Log.w("MessengerApp", "Deferred work recovery failed", it) }
+        }
         // Раунд 260: ядро стартует как можно раньше - ещё до отрисовки
         // первого экрана, чтобы к открытию чатов движок уже поднимался.
         // На фоновых пробуждениях система может запретить - там сервис
@@ -118,6 +137,11 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory {
         } catch (e: Exception) {
             Log.e("MessengerApp", "Failed to apply proxy collector entitlement", e)
         }
+    }
+
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        com.vladimir.messenger.data.diagnostics.RuntimeDiagnostics.memoryTrim(level)
     }
 
     /**

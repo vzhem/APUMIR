@@ -531,6 +531,12 @@ pub fn payload_kind(payload: &[u8]) -> RelayPayloadKind {
 /// Остальные сообщения, в том числе переписка и HELLO, живут в резерве
 /// переписки. Старые decimal и новые hash-ID фрагментов равноправны.
 pub fn message_kind(message_id: &str, chat_scope: &str, payload: &[u8]) -> RelayPayloadKind {
+    // Explicit pre-sealing control hint from Android; opaque ordinary UUIDs
+    // remain correspondence. Never infer category from ciphertext.
+    if let Some(id) = message_id.strip_prefix("eph1-") {
+        if uuid::Uuid::parse_str(id).is_ok() { return RelayPayloadKind::ServiceSignal; }
+    }
+
     // FileTransferWire uses `f` + 32 lowercase hex bytes of transfer ID + a
     // bounded packet-kind suffix (offer/chunk/ACK/want/cancel/FCAP). Its text
     // is sealed before Rust sees it, even in a normal one-to-one chat scope.
@@ -2179,4 +2185,37 @@ mod tests {
         assert!(!q.contains("m1"));
         assert!(q.contains("m2"));
     }
+    /// Evictions count operations; the same two IDs can be evicted many times.
+    #[test]
+    fn repeated_reentry_evictions_do_not_count_unique_messages() {
+        let q = RelayQueue::with_all_limits(10, 10, 1, 1);
+        for n in 0..100 {
+            assert!(q.enqueue_own(own_msg(if n % 2 == 0 { "a" } else { "b" }, "pk_b")).unwrap());
+        }
+        assert_eq!(q.stats().own, 1);
+        assert_eq!(q.stats().own_capacity_evictions, 99);
+    }
+
+    #[test]
+    fn opaque_sealed_control_without_type_hint_must_not_be_guessed_transient() {
+        assert_eq!(payload_kind(b"APUTYP1|1"), RelayPayloadKind::ServiceSignal);
+        // Ciphertext hides the prefix; guessing transient would delete chat data.
+        assert_eq!(message_kind("ordinary-uuid", "chat-1", b"APUSL1|opaque"),
+            RelayPayloadKind::Correspondence);
+    }
+
+    #[test]
+    fn sealed_ephemeral_id_is_a_short_lived_signal_not_correspondence() {
+        let id = "eph1-01234567-89ab-4cde-8123-456789abcdef";
+        let sealed = b"APUSEAL1|opaque-random-ciphertext";
+        assert_eq!(message_kind(id, "any-chat", sealed), RelayPayloadKind::ServiceSignal);
+        assert_eq!(message_kind("eph1-not-a-valid-id", "any-chat", sealed), RelayPayloadKind::Correspondence);
+        let q = RelayQueue::with_all_limits(10, 10, 10, 1);
+        assert!(q.enqueue_own(RelayMessage::new(id.into(), "pk_b".into(), "pk_origin".into(), "any-chat".into(), sealed.to_vec())).unwrap());
+        assert!(q.enqueue_own(own_msg("own-pending", "pk_b")).unwrap());
+        assert_eq!(q.stats().own_transients, 1);
+        assert_eq!(q.stats().own, 1);
+        assert_eq!(q.stats().own_capacity_evictions, 0);
+    }
+
 }

@@ -1,5 +1,7 @@
 package com.vladimir.messenger.data.story
 
+import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
+import com.vladimir.messenger.data.diagnostics.OperationalCounter
 import android.content.Context
 import android.util.AtomicFile
 import com.vladimir.messenger.data.swarm.ContentAddressedChunks
@@ -76,6 +78,7 @@ object StoryStore {
         if (!isStoryPacket(content)) return false
         if (authorId.length !in 1..256) return true
         if (content!!.toByteArray(Charsets.UTF_8).size > 16 * 1024) {
+            OperationalDiagnostics.tracker.count(OperationalCounter.STORY_INVALID)
             photoParts.discardAuthor(authorId); return true
         }
         val story = runCatching {
@@ -87,13 +90,16 @@ object StoryStore {
             if (id.length !in 1..100) return true
             val kind = o.optString("kind")
             if (ts < now - LIFETIME_MS || ts > now + 300_000) {
+                OperationalDiagnostics.tracker.count(OperationalCounter.STORY_EXPIRED)
                 photoParts.discard(authorId, id); return true
             }
             if (kind == StoryRevoke.KIND) {
+                OperationalDiagnostics.tracker.count(OperationalCounter.STORY_REVOKE_APPLIED)
                 applyRemoteRevoke(authorId, id, ts, now)
                 return true
             }
             if (kind == "photo" && o.has("content") && o.getLong("expiresAt") <= now) {
+                OperationalDiagnostics.tracker.count(OperationalCounter.STORY_EXPIRED)
                 photoParts.discard(authorId, id); return true
             }
             val photo = when (kind) {
@@ -107,11 +113,11 @@ object StoryStore {
                         expiresAtMs = o.getLong("expiresAt"),
                         chunkId = o.getString("chunk"),
                         data = o.getString("data"), now = now,
-                    ) ?: return true
+                    ) ?: run { OperationalDiagnostics.tracker.count(OperationalCounter.STORY_PHOTO_PENDING); return true }
                 } else {
                     photoParts.receiveLegacy(
                         authorId, id, o.getInt("part"), o.getInt("total"), o.getString("data"), now,
-                    ) ?: return true
+                    ) ?: run { OperationalDiagnostics.tracker.count(OperationalCounter.STORY_PHOTO_PENDING); return true }
                 }
                 // Пакет без kind — текстовая история, не «отмена фото». Сбрасывать
                 // сборку здесь нельзя: иначе подпись затирает уже принятый снимок,
@@ -120,7 +126,7 @@ object StoryStore {
             }
             Story(id, authorId, o.optString("name", authorName).ifBlank { authorName },
                 o.getString("text").take(200), o.optInt("bg", 0).coerceIn(0, BG_COUNT - 1), ts, false, photo)
-        }.getOrNull() ?: return true
+        }.getOrNull() ?: run { OperationalDiagnostics.tracker.count(OperationalCounter.STORY_PHOTO_PENDING); return true }
         add(story); return true
     }
 
@@ -128,7 +134,7 @@ object StoryStore {
         require(photoB64 == null || isValidPhotoB64(photoB64))
         val story = Story(
             java.util.UUID.randomUUID().toString(), authorId, "",
-            text.trim(), bg.coerceIn(0, BG_COUNT - 1), System.currentTimeMillis(), true, photoB64)
+            text.take(200), bg.coerceIn(0, BG_COUNT - 1), System.currentTimeMillis(), true, photoB64)
         add(story); return story
     }
 
@@ -242,11 +248,11 @@ object StoryStore {
         )
     }
 
-    private fun add(story: Story) = synchronized(lock) {
+    private fun add(story: Story): Boolean = synchronized(lock) {
         val now = System.currentTimeMillis()
         persistTombstones(now)
         val tomb = tombstones[StoryRevoke.key(story.authorId, story.id)]
-        if (tomb != null && StoryRevoke.isActive(tomb, now)) return
+        if (tomb != null && StoryRevoke.isActive(tomb, now)) return@synchronized false
         val previous = _items.value.firstOrNull { it.id == story.id }
         val merged = mergeIncoming(previous, story)
         val kept = _items.value.filter { now - it.createdAtMs in 0 until LIFETIME_MS && it.id != merged.id }
@@ -254,6 +260,7 @@ object StoryStore {
             val ids = list.filter { it.photoB64 != null }.takeLast(30).map { it.id }.toSet()
             list.filter { it.photoB64 == null || it.id in ids }
         })
+        previous == null || (previous.photoB64 == null && merged.photoB64 != null)
     }
 
     private fun save(list: List<Story>) {
@@ -264,16 +271,35 @@ object StoryStore {
         // complete snapshot if Android stops the process during a write.
         val file = offlineFile() ?: return
         val snapshot = list.toList()
-        diskWriter.execute {
-            var stream: java.io.FileOutputStream? = null
-            try {
-                stream = file.startWrite()
-                stream.write(toJson(snapshot).toByteArray(Charsets.UTF_8))
-                file.finishWrite(stream)
-                prefs()?.edit()?.remove(KEY)?.apply()
-            } catch (_: Exception) {
-                stream?.let { file.failWrite(it) }
+        diskWriter.execute { writeSnapshot(file, snapshot) }
+    }
+
+    /** Enqueue only after an AtomicFile snapshot is committed, off the main thread. */
+    fun persistForDelivery(): Boolean {
+        return try {
+            val future = synchronized(lock) {
+                val file = offlineFile() ?: return false
+                val snapshot = _items.value.toList()
+                diskWriter.submit<Boolean> { writeSnapshot(file, snapshot) }
             }
+            future.get(2000, java.util.concurrent.TimeUnit.MILLISECONDS)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            false
+        } catch (_: Exception) { false }
+    }
+
+    private fun writeSnapshot(file: AtomicFile, snapshot: List<Story>): Boolean {
+        var stream: java.io.FileOutputStream? = null
+        return try {
+            stream = file.startWrite()
+            stream.write(toJson(snapshot).toByteArray(Charsets.UTF_8))
+            file.finishWrite(stream)
+            prefs()?.edit()?.remove(KEY)?.apply()
+            true
+        } catch (_: Exception) {
+            stream?.let { file.failWrite(it) }
+            false
         }
     }
 

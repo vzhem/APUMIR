@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,8 +38,15 @@ fun SendOptionsDialog(
     onDismiss: () -> Unit,
     onPick: (SendChoice) -> Unit,
 ) {
-    var quiet by remember { mutableStateOf(false) }
-    val now = System.currentTimeMillis()
+    var quiet by rememberSaveable { mutableStateOf(false) }
+    var customTime by rememberSaveable { mutableStateOf(false) }
+    if (customTime) {
+        CustomSendTimeDialog(
+            onDismiss = { customTime = false },
+            onConfirm = { onPick(SendChoice(quiet, it)) },
+        )
+        return
+    }
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.send_options_title)) },
@@ -47,6 +55,8 @@ fun SendOptionsDialog(
         },
         text = {
             Column {
+                Text(stringResource(R.string.send_predelivery_hint), style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(6.dp))
                 ApuActionBubble(
                     label = if (quiet) stringResource(R.string.send_quiet_on) else stringResource(R.string.send_quiet_off),
                     icon = Icons.Filled.NotificationsOff,
@@ -56,13 +66,16 @@ fun SendOptionsDialog(
                     onPick(SendChoice(quiet, null))
                 }
                 ApuActionBubble(stringResource(R.string.send_in_15), Icons.Filled.Schedule) {
-                    onPick(SendChoice(quiet, now + 15 * 60_000L))
+                    onPick(SendChoice(quiet, System.currentTimeMillis() + 15 * 60_000L))
                 }
                 ApuActionBubble(stringResource(R.string.send_in_hour), Icons.Filled.Schedule) {
-                    onPick(SendChoice(quiet, now + 60 * 60_000L))
+                    onPick(SendChoice(quiet, System.currentTimeMillis() + 60 * 60_000L))
+                }
+                ApuActionBubble(stringResource(R.string.send_custom_time), Icons.Filled.Schedule) {
+                    customTime = true
                 }
                 ApuActionBubble(stringResource(R.string.send_tomorrow), Icons.Filled.Schedule) {
-                    onPick(SendChoice(quiet, tomorrowNineMs(now)))
+                    onPick(SendChoice(quiet, tomorrowNineMs(System.currentTimeMillis())))
                 }
             }
         },
@@ -82,14 +95,28 @@ fun ScheduledSendBanner(
                 modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = stringResource(R.string.send_scheduled_at, formatSendTime(item.sendAtMs)),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.weight(1f),
-                )
-                TextButton(onClick = { onCancel(item.id) }) {
-                    Text(stringResource(R.string.send_scheduled_cancel))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.send_scheduled_at, formatSendTime(item.sendAtMs)),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (item.preDeliver) {
+                        val status = if (item.cancelRequested) {
+                            stringResource(R.string.send_cancel_requested, item.cancelAcked.size, item.recipients.orEmpty().size)
+                        } else if (item.started) {
+                            stringResource(R.string.send_predelivery_stored, item.confirmed.size, item.recipients.orEmpty().size)
+                        } else stringResource(R.string.send_predelivery_waiting)
+                        Text(status, style = MaterialTheme.typography.bodySmall)
+                        if (item.started || item.cancelRequested) Text(stringResource(R.string.send_cancel_best_effort), style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (item.lastError.isNotEmpty()) Text(item.lastError, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error)
+                }
+                if (!item.cancelRequested) {
+                    TextButton(onClick = { onCancel(item.id) }) {
+                        Text(stringResource(R.string.send_scheduled_cancel))
+                    }
                 }
             }
         }

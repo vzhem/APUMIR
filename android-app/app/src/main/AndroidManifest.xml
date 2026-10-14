@@ -52,6 +52,15 @@
         android:theme="@style/Theme.P2PMessenger"
         tools:targetApi="31">
 
+        <!-- Hilt workers must use the application's factory, not WorkManager's reflection factory. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data android:name="androidx.work.WorkManagerInitializer" tools:node="remove" />
+        </provider>
+
         <!-- configChanges: поворот экрана обрабатывает само приложение. Без
              этого Android пересоздаёт активность, и человек вылетает на
              стартовую страницу, теряя открытый чат. Compose сам перестраивает

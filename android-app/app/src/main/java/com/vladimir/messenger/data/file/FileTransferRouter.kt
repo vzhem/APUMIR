@@ -4,6 +4,9 @@ import android.content.Context
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.diagnostics.Counters
+import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
+import com.vladimir.messenger.data.diagnostics.OperationalCounter
+import com.vladimir.messenger.data.diagnostics.TransferRoute
 import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.repository.ChatRepository
@@ -62,6 +65,7 @@ class FileTransferRouter @Inject constructor(
     private val routerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     /** Serializes sender pumps with explicit replacement/re-preparation of one outgoing message. */
     private val outgoingTransferMutex = Mutex()
+    private val expirySweepMutex = Mutex()
     private val sender: FileTransferSender
     private val receiver: FileTransferReceiver
     private val custodySender: FileCustodySender
@@ -119,7 +123,7 @@ class FileTransferRouter @Inject constructor(
      */
     private val binarySend: (String, String, Long, Int, Int, ByteArray) -> Boolean =
         { recipientId, transferIdHex, chunkIndex, chunkOffset, chunkLen, range ->
-            if (isPeerViaUdp(recipientId)) {
+            val delivered = if (isPeerViaUdp(recipientId)) {
                 // Понижение — и дальше текстовый путь.
                 sender.demoteBinary(transferIdHex)
                 false
@@ -135,6 +139,8 @@ class FileTransferRouter @Inject constructor(
                     )
                 }.getOrDefault(false)
             }
+            OperationalDiagnostics.tracker.routeResult("", TransferRoute.BINARY, delivered)
+            delivered
         }
     private lateinit var chunkStore: FileTransferChunkStore
     private val receivedStore: ReceivedFileStore
@@ -316,6 +322,7 @@ class FileTransferRouter @Inject constructor(
                     established && lan.sendPacket(recipientId, scope, "lan-" + System.nanoTime(), payload)
                 }
             }
+            OperationalDiagnostics.tracker.routeResult(recipientId, TransferRoute.LAN, lanOk)
             if (lanOk) {
                 lastDirectMode[recipientId] = "lan"
                 true
@@ -325,7 +332,9 @@ class FileTransferRouter @Inject constructor(
                 // пробиваем — ensureRequested отправит ufseek (троттлинг
                 // внутри), а пакет уедет дальше по цепочке.
                 udpChannels.ensureRequested(recipientId)
-                if (udpChannels.trySend(recipientId, payload)) {
+                val udpOk = udpChannels.trySend(recipientId, payload)
+                OperationalDiagnostics.tracker.routeResult(recipientId, TransferRoute.UDP, udpOk)
+                if (udpOk) {
                     lastDirectMode[recipientId] = "udp"
                     true
                 } else {
@@ -334,6 +343,7 @@ class FileTransferRouter @Inject constructor(
                     } catch (_: Exception) {
                         false
                     }
+                    OperationalDiagnostics.tracker.routeResult(recipientId, TransferRoute.QUIC, quicOk)
                     if (quicOk) {
                         lastDirectMode[recipientId] = "quic"
                         true
@@ -358,6 +368,7 @@ class FileTransferRouter @Inject constructor(
                                 )
                             }
                         }.getOrDefault(false)
+                        OperationalDiagnostics.tracker.routeResult(recipientId, TransferRoute.BROKER, viaBroker)
                         if (viaBroker) {
                             lastDirectMode[recipientId] = "broker"
                         }
@@ -746,6 +757,9 @@ class FileTransferRouter @Inject constructor(
         // вызов с главного потока (ViewModel при отправке) давал
         // «Приложение не отвечает» вплоть до убийства системы.
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val now = System.currentTimeMillis()
+            runCatching { purgeExpiredTransfers(now) }
+                .onFailure { Log.w(TAG, "File maintenance deferred") }
             outgoingTransferMutex.lock()
             try {
             if (!RustBridge.isRunning()) {
@@ -855,9 +869,6 @@ class FileTransferRouter @Inject constructor(
             val origin = custodySender.pumpOrigin()
             val forward = custodySender.pumpForwarding()
             val swept = custodySender.sweep()
-            // Потеряшки: просроченное убираем здесь же, чтобы строка, куски и
-            // принятый недокачанный файл уходили вместе.
-            purgeExpiredTransfers(now)
             if (origin.originPumped > 0 || forward.forwarded > 0 || swept > 0) {
                 Log.i(
                     TAG,
@@ -959,6 +970,16 @@ class FileTransferRouter @Inject constructor(
         nowMs: Long = System.currentTimeMillis(),
         force: Boolean = false,
     ): Pair<Int, Int> {
+        if (!expirySweepMutex.tryLock()) return 0 to 0
+        try {
+            if (!outgoingTransferMutex.tryLock()) return 0 to 0
+            try {
+                return receiver.tryMaintenance { purgeExpiredTransfersLocked(nowMs, force) } ?: (0 to 0)
+            } finally { outgoingTransferMutex.unlock() }
+        } finally { expirySweepMutex.unlock() }
+    }
+
+    private suspend fun purgeExpiredTransfersLocked(nowMs: Long, force: Boolean): Pair<Int, Int> {
         // Диск и база: не чаще раза в 10 минут, иначе уборка дороже пользы.
         if (!force && nowMs - lastExpiredSweepAt < EXPIRED_SWEEP_INTERVAL_MS) return 0 to 0
         lastExpiredSweepAt = nowMs
@@ -971,9 +992,11 @@ class FileTransferRouter @Inject constructor(
             if (row.direction == "OUTGOING") {
                 runCatching { chatRepository.markOutgoingFileExpired(row.messageId) }
             }
-            runCatching { chunkStore.deleteTransfer(row.transferId) }
-            runCatching { receivedStore.deleteTransfer(row.transferId) }
-            runCatching { FileTransferKeyVault.deleteKey(appContext, row.transferId) }
+            // Keep the expired DAO row until physical deletion succeeds, so
+            // an IO failure is retried instead of becoming an untracked orphan.
+            if (!runCatching { chunkStore.deleteTransfer(row.transferId) }.getOrDefault(false)) continue
+            if (!runCatching { receivedStore.deleteTransfer(row.transferId) }.getOrDefault(false)) continue
+            if (runCatching { FileTransferKeyVault.deleteKey(appContext, row.transferId) }.isFailure) continue
             if (row.direction == "OUTGOING") deleteOutgoingPreview(row.transferId)
             transferDao.deleteTransfer(row.transferId)
             removedRows++
@@ -982,9 +1005,13 @@ class FileTransferRouter @Inject constructor(
         // 2) Диск: осиротевшие копии и копии просроченных завершённых передач.
         var freedCopies = 0
         for (transferId in runCatching { chunkStore.transferIds() }.getOrDefault(emptyList())) {
-            val row = runCatching { transferDao.getTransfer(transferId) }.getOrNull()
+            if (freedCopies >= EXPIRED_PURGE_BATCH) break
+            // Fail closed: a DAO error is not proof of orphanhood.
+            val row = try { transferDao.getTransfer(transferId) }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { continue }
             if (row == null) {
-                if (chunkStore.deleteTransfer(transferId)) freedCopies++
+                if (chunkStore.isOldOrphan(transferId, nowMs) && chunkStore.deleteTransfer(transferId)) freedCopies++
                 continue
             }
             // Чужое хранение (CUSTODY) убирает свой проход: у него отдельные
@@ -997,6 +1024,8 @@ class FileTransferRouter @Inject constructor(
 
         if (removedRows > 0 || freedCopies > 0) {
             Log.i(TAG, "expired sweep: rows=$removedRows copies=$freedCopies")
+            OperationalDiagnostics.tracker.count(OperationalCounter.EXPIRED_FILE_ROWS, removedRows.toLong())
+            OperationalDiagnostics.tracker.count(OperationalCounter.EXPIRED_FILE_COPIES, freedCopies.toLong())
             TransferDiagnostics.count(Counters.TRANSFER_EXPIRED_ROWS, removedRows.toLong())
             TransferDiagnostics.count(Counters.TRANSFER_EXPIRED_COPIES, freedCopies.toLong())
             TransferDiagnostics.record(

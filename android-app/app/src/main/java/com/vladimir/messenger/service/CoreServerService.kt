@@ -1,5 +1,11 @@
 package com.vladimir.messenger.service
 
+import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
+import com.vladimir.messenger.data.diagnostics.OperationalCounter
+import com.vladimir.messenger.data.diagnostics.DiagnosticPhase
+import com.vladimir.messenger.data.diagnostics.RuntimeDiagnostics
+import com.vladimir.messenger.data.diagnostics.DiagnosticOperation
+
 import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -72,6 +78,7 @@ class CoreServerService : Service() {
     @Inject lateinit var messageDeletion: com.vladimir.messenger.data.repository.MessageDeletionRepository
     @Inject lateinit var hearts: com.vladimir.messenger.data.heart.HeartRepository
     @Inject lateinit var postViews: com.vladimir.messenger.data.channel.PostViewRepository
+    @Inject lateinit var deferredDelivery: com.vladimir.messenger.data.schedule.DeferredDelivery
     @Inject lateinit var groupRouter: com.vladimir.messenger.data.group.GroupRouter
     @Inject lateinit var groupRepository: com.vladimir.messenger.data.group.GroupRepository
     @Inject lateinit var groupFiles: com.vladimir.messenger.data.group.GroupFileSwarm
@@ -265,7 +272,7 @@ class CoreServerService : Service() {
                 chatId = chatId,
                 recipientNodeId = peerId,
             )
-            fileTransferRouter.pumpOutgoing()
+            RuntimeDiagnostics.measure(DiagnosticOperation.FILE_PUMP) { fileTransferRouter.pumpOutgoing() }
             Log.i(TAG, "GIF ${sha256.take(12)} served to ${peerId.takeLast(8)} (silent)")
         } catch (e: Exception) {
             if (e.message.orEmpty().contains("binding is not pinned")) {
@@ -285,12 +292,19 @@ class CoreServerService : Service() {
      * конверт - добавьте его и здесь, и в основной цепочке.
      * Возвращает true, если текст служебный и в чат ему дороги нет.
      */
+    private suspend fun markMessageDelivered(messageId: String): Boolean {
+        deferredDelivery.noteTransportAck(messageId)
+        return chatRepository.markOutgoingMessageDelivered(messageId)
+    }
+
     private suspend fun routeIncomingEnvelope(
         senderId: String,
         chatId: String,
         messageId: String,
         text: String,
+        authenticated: Boolean = false,
     ): Boolean {
+        if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, authenticated)) return true
         // р243/р244: подтверждение доставки, пришедшее прямым каналом. Второй
         // путь приёма обязан разбирать его так же, как основной: иначе строка
         // «ack|…» вырастет в личный чат. Даже некорректный ACK с зарезервированным
@@ -307,7 +321,7 @@ class CoreServerService : Service() {
             if (ackedId != null) {
                 // ACK-кадр нужен и партнёру той же личности, но не сохраняется.
                 mirror?.publishEnvelope(senderId, chatId, messageId, text)
-                runCatching { chatRepository.markOutgoingMessageDelivered(ackedId) }
+                runCatching { markMessageDelivered(ackedId) }
                     .onSuccess { changed ->
                         Log.i(TAG, "📬 direct delivery ACK (relay path): msgId=$ackedId changed=$changed")
                     }
@@ -485,7 +499,7 @@ class CoreServerService : Service() {
                 chatId = chatId,
                 recipientNodeId = peerId,
             )
-            fileTransferRouter.pumpOutgoing()
+            RuntimeDiagnostics.measure(DiagnosticOperation.FILE_PUMP) { fileTransferRouter.pumpOutgoing() }
             Log.i(TAG, "Sticker ${sha256.take(12)} served to ${peerId.takeLast(8)} (silent)")
         } catch (e: Exception) {
             if (e.message.orEmpty().contains("binding is not pinned")) {
@@ -504,6 +518,9 @@ class CoreServerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        OperationalDiagnostics.tracker.coreStarting()
+        CoreStatus.markStarting()
+        OperationalDiagnostics.phase(DiagnosticPhase.SERVICE_START)
         Log.i(TAG, "CoreServerService created")
         TransferDiagnostics.record("core", "служба ядра запускается")
         val powerManager = getSystemService(POWER_SERVICE) as PowerManager
@@ -514,6 +531,7 @@ class CoreServerService : Service() {
             acquire(CallIncoming.CORE_WAKE_LOCK_MS)
         }
         lastWakeLockAtElapsed = SystemClock.elapsedRealtime()
+        OperationalDiagnostics.wake.acquire(lastWakeLockAtElapsed, CallIncoming.CORE_WAKE_LOCK_MS)
 
         try {
             val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
@@ -588,6 +606,7 @@ class CoreServerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        OperationalDiagnostics.tracker.count(OperationalCounter.SERVICE_START_COMMAND)
         Log.i(TAG, "CoreServerService started (action=" + (intent?.action ?: "null") + ")")
         startForeground(NOTIFICATION_ID, buildNotification("Подключение..."))
 
@@ -640,7 +659,9 @@ class CoreServerService : Service() {
                 val wakeHeld = wakeLock?.isHeld == true
                 val wakeAge = SystemClock.elapsedRealtime() - lastWakeLockAtElapsed
                 if (CallIncoming.shouldRefreshWakeLock(wakeHeld, wakeAge)) {
-                    runCatching { wakeLock?.acquire(CallIncoming.CORE_WAKE_LOCK_MS) }
+                    runCatching { wakeLock?.acquire(CallIncoming.CORE_WAKE_LOCK_MS) }.onSuccess {
+                        if (wakeLock?.isHeld == true) OperationalDiagnostics.wake.acquire(SystemClock.elapsedRealtime(), CallIncoming.CORE_WAKE_LOCK_MS)
+                    }
                     lastWakeLockAtElapsed = SystemClock.elapsedRealtime()
                 }
                 sincePump++
@@ -982,7 +1003,7 @@ class CoreServerService : Service() {
                             is RelayEnvelope.Parsed.Ack -> {
                                 // G1 fix: ACK, доставленный через relay, → DELIVERED у отправителя.
                                 val messageId = parsed.messageId
-                                if (chatRepository.markOutgoingMessageDelivered(messageId)) {
+                                if (markMessageDelivered(messageId)) {
                                     Log.i(TAG, "✅ CF ACK from $senderId → DELIVERED msgId=$messageId")
                                 } else {
                                     Log.d(TAG, "CF ACK ignored (msgId=$messageId not found / not mine / already delivered)")
@@ -1000,7 +1021,7 @@ class CoreServerService : Service() {
                                         // Он всё равно подтверждает исходящую строку, но
                                         // ACK самому ACK отправлять нельзя.
                                         DeliveryAckWire.messageId(existingMsg.content)?.let {
-                                            chatRepository.markOutgoingMessageDelivered(it)
+                                            markMessageDelivered(it)
                                         }
                                     } else {
                                         // р243: дубликат - это повтор от отправителя,
@@ -1049,7 +1070,7 @@ class CoreServerService : Service() {
                                         // конверта не создаётся.
                                         val knownChat = chatRepository.getChatByContactId(senderId)
                                         val isDeliveryAck = DeliveryAckWire.isPacket(cfContent)
-                                        if (routeIncomingEnvelope(senderId, knownChat?.id ?: "", messageId, cfContent)) {
+                                        if (routeIncomingEnvelope(senderId, knownChat?.id ?: "", messageId, cfContent, SealedWire.isSealed(parsed.content) && MessageSealer.openedByExpectedSender(parsed.content, senderId))) {
                                             Log.i(TAG, "CF service envelope handled msgId=$messageId")
                                             // Never generate an ACK-of-ACK. RelayEnvelope's own
                                             // custody receipt below remains a separate protocol.
@@ -1241,6 +1262,7 @@ class CoreServerService : Service() {
                         true,
                         null,
                         quiet = com.vladimir.messenger.util.QuietMessage.isQuiet(row.content),
+                        messageId = row.id,
                     )
                 }
             }
@@ -1552,12 +1574,13 @@ class CoreServerService : Service() {
         messageId: String,
         text: String,
     ): Boolean {
+        if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, authenticated = true, fromMirror = true)) return true
         // р244: подтверждение доставки пришло с партнёрского устройства -
         // помечаем им же и здешнюю строку (переписка общая на обеих).
         if (DeliveryAckWire.isPacket(text)) {
             val ackedId = DeliveryAckWire.messageId(text)
             if (ackedId != null) {
-                runCatching { chatRepository.markOutgoingMessageDelivered(ackedId) }
+                runCatching { markMessageDelivered(ackedId) }
                     .onSuccess { changed ->
                         Log.i(TAG, "📬 delivery ACK via mirror: msgId=$ackedId changed=$changed")
                     }
@@ -1816,6 +1839,8 @@ class CoreServerService : Service() {
     }
 
     override fun onDestroy() {
+        OperationalDiagnostics.tracker.count(OperationalCounter.SERVICE_DESTROYED)
+        OperationalDiagnostics.phase(DiagnosticPhase.SERVICE_STOP)
         // Снимаем foreground-статус первым делом, чтобы система не считала
         // сервис зависшим, пока мы закрываем реле и Rust-ядро.
         try {
@@ -1840,6 +1865,7 @@ class CoreServerService : Service() {
             multicastLock?.release()
             Log.i(TAG, "MulticastLock released")
         } catch (_: Exception) {}
+        OperationalDiagnostics.wake.release(SystemClock.elapsedRealtime())
         wakeLock?.release()
         super.onDestroy()
     }
@@ -1860,6 +1886,15 @@ class CoreServerService : Service() {
 
     private fun startEventPolling() {
         
+        serviceScope.launch {
+            while (isActive) {
+                try { deferredDelivery.pumpPending() }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (error: Exception) { Log.w(TAG, "Deferred delivery assist failed", error) }
+                delay(30_000L)
+            }
+        }
+
         // Observer for incoming messages → show notifications
         serviceScope.launch {
             Log.i(TAG, "Starting message observer for notifications")
@@ -1874,6 +1909,7 @@ class CoreServerService : Service() {
                     }
                     val recentIncoming = messages.filter {
                         !it.isFromMe &&
+                            !com.vladimir.messenger.data.schedule.DeferredInboxStore.owns(applicationContext, it.id) &&
                             it.timestamp >= cutoff &&
                             notifiedMessageIds.putIfAbsent(it.id, it.timestamp) == null &&
                             !com.vladimir.messenger.util.InlineImage.isPart(it.content) &&
@@ -1915,6 +1951,7 @@ class CoreServerService : Service() {
                             notificationHelper.showMessageNotification(
                                 msg.chatId, msg.senderId, text, true, topicId,
                                 quiet = com.vladimir.messenger.util.QuietMessage.isQuiet(msg.content),
+                                messageId = msg.id,
                             )
                         } catch (e: Exception) {
                             Log.w(TAG, "Failed to show notification: ${e.message}")
@@ -1933,9 +1970,11 @@ class CoreServerService : Service() {
                 // и ACK-окно отправителя почти не двигалось. В простое шаг
                 // прежний (POLL_INTERVAL_MS), пустые опросы дёшевы.
                 val busy = try {
-                    val events = RustBridge.drainEvents()
-                    events.forEach { event -> handleEvent(event) }
-                    RustBridge.pendingEvents() > 0L || events.size >= BUSY_BATCH
+                    RuntimeDiagnostics.measure(DiagnosticOperation.CORE_EVENTS) {
+                        val events = RustBridge.drainEvents()
+                        events.forEach { event -> handleEvent(event) }
+                        RustBridge.pendingEvents() > 0L || events.size >= BUSY_BATCH
+                    }
                 } catch (ex: Exception) {
                     Log.e(TAG, "Event polling error", ex)
                     false
@@ -1965,14 +2004,18 @@ class CoreServerService : Service() {
             var chatQueueCycle = 0
             while (isActive) {
                 try {
-                    fileTransferRouter.pumpOutgoing()
+                    RuntimeDiagnostics.measure(DiagnosticOperation.FILE_PUMP) { fileTransferRouter.pumpOutgoing() }
                 } catch (ex: Exception) {
                     Log.w(TAG, "File pump error: ${ex.message}")
                 }
+                try {
+                    RuntimeDiagnostics.measure(DiagnosticOperation.STORY_PUMP) { chatRepository.pumpStoryOutbox() }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { TransferDiagnostics.recordWarning("story", "цикл досылки истории не завершён; повтор при следующем цикле") }
                 // Файлы группы роем (этап 9): повторить свои просьбы, отдать
                 // из очереди, освободить куски отданного.
                 try {
-                    groupFiles.pump()
+                    RuntimeDiagnostics.measure(DiagnosticOperation.GROUP_FILE_PUMP) { groupFiles.pump() }
                 } catch (ex: Exception) {
                     Log.w(TAG, "Group file pump error: ${ex.message}")
                 }
@@ -1980,19 +2023,19 @@ class CoreServerService : Service() {
                 // новой версии, обновить карточку «Обновления», объявить
                 // о своей раздаче.
                 try {
-                    apkSeeder.pump()
+                    RuntimeDiagnostics.measure(DiagnosticOperation.APK_PUMP) { apkSeeder.pump() }
                 } catch (ex: Exception) {
                     Log.w(TAG, "Apk seeder pump error: ${ex.message}")
                 }
                 // Раунд 137: недоставленные «удалить у всех» - личные (до ack)
                 // и групповые (эпидемией через помпу репозитория).
                 try {
-                    messageDeletion.pump()
+                    RuntimeDiagnostics.measure(DiagnosticOperation.DIRECT_DELETE_PUMP) { messageDeletion.pump() }
                 } catch (ex: Exception) {
                     Log.w(TAG, "Deletion pump error: ${ex.message}")
                 }
                 try {
-                    groupRepository.pumpDeletions()
+                    RuntimeDiagnostics.measure(DiagnosticOperation.GROUP_DELETE_PUMP) { groupRepository.pumpDeletions() }
                 } catch (ex: Exception) {
                     Log.w(TAG, "Group deletion pump error: ${ex.message}")
                 }
@@ -2002,7 +2045,7 @@ class CoreServerService : Service() {
                 chatQueueCycle++
                 if (chatQueueCycle % 3 == 0) {
                     try {
-                        chatRepository.pumpQueuedOffline()
+                        RuntimeDiagnostics.measure(DiagnosticOperation.CHAT_RETRY_PUMP) { chatRepository.pumpQueuedOffline() }
                     } catch (ex: Exception) {
                         Log.w(TAG, "Chat queue pump error: ${ex.message}")
                     }
@@ -2014,8 +2057,6 @@ class CoreServerService : Service() {
 
     private suspend fun handleEvent(event: CoreEventFfi) {
         Log.d(TAG, "Event: ${event.eventType}")
-        Log.d(TAG, "📥 Event: ${event.eventType}")
-        Log.d(TAG, "📥 Event: ${event.eventType}")
         when (event.eventType) {
             // K3: бинарный кусок файла по прямому QUIC (APUF-кадр из ядра).
             // Это не сообщение переписки: текста, чата и отправителя в
@@ -2157,6 +2198,11 @@ class CoreServerService : Service() {
 
                 Log.i(TAG, "Message from $senderId in chat $chatId (sealed=$sealed)")
 
+                if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, sealed && MessageSealer.openedByExpectedSender(rawText, senderId))) {
+                    runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                    return
+                }
+
                 // р243/р247: подтверждение доставки, пришедшее ПРЯМЫМ каналом.
                 // В v140 оно стало идти обычным P2P-пакетом `ack|id`; клиенты
                 // до v140 не распознавали его, поэтому свежая версия фильтрует
@@ -2189,7 +2235,7 @@ class CoreServerService : Service() {
                         mirror?.publishEnvelope(senderId, chatId, messageId, text)
                         serviceScope.launch {
                             runCatching {
-                                chatRepository.markOutgoingMessageDelivered(ackedId)
+                                markMessageDelivered(ackedId)
                             }.onSuccess { changed ->
                                 Log.i(TAG, "📬 direct delivery ACK: msgId=$ackedId changed=$changed")
                             }
@@ -2610,7 +2656,7 @@ class CoreServerService : Service() {
                                 Log.e(TAG, "Retry failed", e)
                             }
                             try {
-                                fileTransferRouter.pumpOutgoing()
+                                RuntimeDiagnostics.measure(DiagnosticOperation.FILE_PUMP) { fileTransferRouter.pumpOutgoing() }
                                 fileTransferRouter.resumeWaitingForRecipient()
                             } catch (e: Exception) {
                                 Log.w(TAG, "File pump after peer discovery failed: ${e.message}")
@@ -2686,7 +2732,7 @@ class CoreServerService : Service() {
                     }
                     serviceScope.launch {
                         try {
-                            fileTransferRouter.pumpOutgoing()
+                            RuntimeDiagnostics.measure(DiagnosticOperation.FILE_PUMP) { fileTransferRouter.pumpOutgoing() }
                         } catch (e: Exception) {
                             Log.w(TAG, "File pump after network connect failed: ${e.message}")
                         }
@@ -2706,7 +2752,7 @@ class CoreServerService : Service() {
                 Log.i(TAG, "✅ DELIVERY_ACK received: msgId=$messageId from ${event.senderId}")
                 serviceScope.launch {
                     try {
-                        chatRepository.markOutgoingMessageDelivered(messageId)
+                        markMessageDelivered(messageId)
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to mark DELIVERED", e)
                     }

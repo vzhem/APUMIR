@@ -15,8 +15,8 @@ import com.vladimir.messenger.R
 //     свечением, а не точки с серым текстом;
 //   * отчёт — тёмная КОНСОЛЬ с «светофором» и подсветкой разделов, как в
 //     премиальных приложениях; текст при копировании не меняется ни на символ;
-//   * кнопки — объёмные: золотая глянцевая основная и стеклянные вторичные, с
-//     мягкой тенью, верхним бликом и откликом на нажатие;
+//   * кнопки — компактные: золотая основная и спокойные вторичные,
+//     центрированные подписи и короткий отклик без тяжёлого глянца;
 //   * журнал событий — отдельным списком (10-07: «нет логов списка вообще»):
 //     время, область, уровень и суть, свежие сверху;
 //   * без бесконечных переливов: движение есть только в коротком отклике нажатия.
@@ -28,8 +28,6 @@ import com.vladimir.messenger.R
 // (scripts/ci/check-diagnostics-report.py, test_premium_palette_keeps_contrast).
 // =============================================================================
 
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -69,7 +67,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -90,6 +87,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
@@ -985,16 +983,17 @@ fun diagnosticsReportAnnotated(text: String): AnnotatedString = buildAnnotatedSt
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Кнопки: объёмные, с блеском и откликом
+// Кнопки: компактные, с центрированной подписью и мягким откликом
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Назначение кнопки: золотая основная, стеклянная вторичная, тихая третья, опасная красная. */
 enum class DiagnosticsActionStyle { PRIMARY, GLASS, QUIET, DANGER }
 
 /**
- * Общая объёмная кнопка APU. Стиль один для окна «Логи» и остальных разделов;
- * compact раскладывает иконку над подписью — так длинные действия не обрезаются
- * в узких колонках. content нужен для редких действий со сложным содержимым.
+ * Общая кнопка действий: спокойная поверхность, мягкие углы и короткий отклик.
+ * Подпись центрируется относительно ВСЕЙ кнопки, не относительно пары «иконка + текст».
+ * compact убирает декоративную иконку в узких колонках; индикатор загрузки остаётся.
+ * content сохраняет прежний RowScope API для нестандартного содержимого.
  */
 @Composable
 fun ApuDiagnosticsActionButton(
@@ -1010,145 +1009,87 @@ fun ApuDiagnosticsActionButton(
 ) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    // Одноразовый переллив на нажатие (без бесконечной анимации).
-    val shine = remember { Animatable(1f) }
-    LaunchedEffect(pressed) {
-        if (pressed && enabled) {
-            shine.snapTo(0f)
-            shine.animateTo(1f, tween(durationMillis = 620))
-        }
-    }
-    val emphatic = style == DiagnosticsActionStyle.PRIMARY || style == DiagnosticsActionStyle.DANGER
     val scale by animateFloatAsState(
-        targetValue = if (pressed && enabled) 0.965f else 1f,
-        animationSpec = tween(durationMillis = 110),
+        targetValue = if (pressed && enabled) 0.985f else 1f,
+        animationSpec = tween(durationMillis = 100),
         label = "apu-button-press",
     )
-    val baseLift = when (style) {
-        DiagnosticsActionStyle.PRIMARY -> 13.dp
-        DiagnosticsActionStyle.DANGER -> 11.dp
-        else -> 6.dp
-    }
-    val lift by animateDpAsState(
-        targetValue = if (pressed && enabled) baseLift - 5.dp else baseLift,
-        animationSpec = tween(durationMillis = 110),
-        label = "apu-button-lift",
-    )
-    val shape = RoundedCornerShape(if (emphatic) 16.dp else 14.dp)
+    val shape = RoundedCornerShape(16.dp)
     val fill = when (style) {
-        DiagnosticsActionStyle.PRIMARY -> Brush.linearGradient(
-            colors = listOf(DiagGoldLight, DiagGold, DiagGoldDeep),
-            start = Offset(0f, 0f),
-            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
-        )
-        DiagnosticsActionStyle.GLASS -> Brush.linearGradient(
-            colors = listOf(Color.White, Color(0xFFF1F3F7)),
-            start = Offset(0f, 0f),
-            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
-        )
-        DiagnosticsActionStyle.QUIET -> Brush.linearGradient(
-            colors = listOf(Color(0xFFF7F8FA), Color(0xFFECEEF2)),
-            start = Offset(0f, 0f),
-            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
-        )
-        DiagnosticsActionStyle.DANGER -> Brush.linearGradient(
-            colors = listOf(Color(0xFFFFEEF0), Color(0xFFF8D8DC), Color(0xFFEAB5BD)),
-            start = Offset(0f, 0f),
-            end = Offset(Float.POSITIVE_INFINITY, Float.POSITIVE_INFINITY),
-        )
+        DiagnosticsActionStyle.PRIMARY -> Brush.verticalGradient(listOf(DiagGoldLight, DiagGold))
+        DiagnosticsActionStyle.GLASS -> Brush.verticalGradient(listOf(Color.White, Color(0xFFF7F8FA)))
+        DiagnosticsActionStyle.QUIET -> Brush.verticalGradient(listOf(Color(0xFFF1F3F7), Color(0xFFF1F3F7)))
+        DiagnosticsActionStyle.DANGER -> Brush.verticalGradient(listOf(Color(0xFFFFEEF0), Color(0xFFF8D8DC)))
     }
     val ink = when (style) {
         DiagnosticsActionStyle.PRIMARY -> DiagOnGold
-        DiagnosticsActionStyle.GLASS -> ApuBubbleAccentColor
+        DiagnosticsActionStyle.GLASS -> Color(0xFF25354A)
         DiagnosticsActionStyle.QUIET -> ApuBubbleMutedColor
         DiagnosticsActionStyle.DANGER -> Color(0xFF721D2B)
     }
-    val glow = when (style) {
-        DiagnosticsActionStyle.PRIMARY -> DiagGold.copy(alpha = 0.55f)
-        DiagnosticsActionStyle.DANGER -> Color(0xFFA12D3A).copy(alpha = 0.40f)
-        else -> Color(0xFF0A1018).copy(alpha = 0.28f)
+    val outline = when (style) {
+        DiagnosticsActionStyle.PRIMARY -> DiagGoldDeep.copy(alpha = 0.24f)
+        DiagnosticsActionStyle.DANGER -> Color(0xFFA12D3A).copy(alpha = 0.18f)
+        else -> Color(0xFFDCE0E6)
     }
     val surface = modifier
-        .graphicsLayer { scaleX = scale; scaleY = scale }
-        .diagnosticsLift(lift, shape, glow)
+        .graphicsLayer {
+            scaleX = scale
+            scaleY = scale
+            alpha = if (enabled) 1f else 0.5f
+        }
+        .shadow(
+            elevation = if (pressed && enabled) 0.dp else 2.dp,
+            shape = shape,
+            clip = false,
+            ambientColor = Color.Black.copy(alpha = 0.08f),
+            spotColor = Color.Black.copy(alpha = 0.08f),
+        )
         .clip(shape)
         .background(fill)
-        .border(
-            width = 1.dp,
-            brush = Brush.linearGradient(
-                listOf(
-                    if (style == DiagnosticsActionStyle.PRIMARY) Color.White.copy(alpha = 0.85f)
-                    else if (style == DiagnosticsActionStyle.DANGER) Color.White.copy(alpha = 0.78f)
-                    else DiagGold.copy(alpha = 0.55f),
-                    if (style == DiagnosticsActionStyle.DANGER) Color(0xFFA12D3A).copy(alpha = 0.42f)
-                    else DiagGoldDeep.copy(alpha = 0.35f),
-                ),
-            ),
-            shape = shape,
-        )
-        .diagnosticsGloss(shape, intensity = if (emphatic) 1f else 0.7f)
-        .apuShineSweep(shine.value)
+        .border(1.dp, outline, shape)
         .clickableDiag(interaction, enabled, onClick)
 
-    CompositionLocalProvider(LocalContentColor provides ink.copy(alpha = if (enabled) 1f else 0.48f)) {
-        if (compact && content == null) {
-            Column(
-                modifier = surface
-                    .heightIn(min = 68.dp)
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(5.dp),
+    CompositionLocalProvider(LocalContentColor provides ink) {
+        if (content != null) {
+            Row(
+                modifier = surface.heightIn(min = 52.dp).padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                content = content,
+            )
+        } else {
+            // Equal start/end gutters keep the LABEL at the exact centre, including in RTL.
+            // The icon/spinner is an overlay, not a Row sibling that pushes the text sideways.
+            val showLeading = progress || (icon != null && !compact)
+            val labelGutter = if (showLeading) 28.dp else 0.dp
+            Box(
+                modifier = surface.heightIn(min = 52.dp).padding(horizontal = 12.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center,
             ) {
-                if (progress) {
-                    ApuPremiumSpinner(
-                        modifier = Modifier.size(18.dp),
-                        color = ink,
-                        strokeWidth = 2.dp,
-                    )
-                } else {
-                    icon?.let { Icon(it, contentDescription = null, tint = ink, modifier = Modifier.size(18.dp)) }
-                }
                 Text(
-                    label,
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = ink.copy(alpha = if (enabled) 1f else 0.48f),
+                    text = label,
+                    modifier = Modifier.padding(horizontal = labelGutter),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = ink,
+                    textAlign = TextAlign.Center,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-            }
-        } else {
-            Row(
-                modifier = surface
-                    .heightIn(min = 44.dp)
-                    .padding(horizontal = 14.dp, vertical = if (emphatic) 11.dp else 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = if (content == null) {
-                    Arrangement.spacedBy(8.dp)
-                } else {
-                    Arrangement.Center
-                },
-            ) {
-                if (content != null) {
-                    content()
-                } else {
-                    if (progress) {
-                        ApuPremiumSpinner(
-                            modifier = Modifier.size(17.dp),
-                            color = ink,
-                            strokeWidth = 2.dp,
-                        )
-                    } else {
-                        icon?.let { Icon(it, contentDescription = null, tint = ink, modifier = Modifier.size(18.dp)) }
-                    }
-                    Text(
-                        label,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = ink.copy(alpha = if (enabled) 1f else 0.48f),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                if (progress) {
+                    ApuPremiumSpinner(
+                        modifier = Modifier.align(Alignment.CenterStart).size(20.dp),
+                        color = ink,
+                        strokeWidth = 2.dp,
                     )
+                } else if (showLeading) {
+                    icon?.let {
+                        Icon(
+                            it, contentDescription = null, tint = ink,
+                            modifier = Modifier.align(Alignment.CenterStart).size(20.dp),
+                        )
+                    }
                 }
             }
         }

@@ -84,6 +84,16 @@ def call_spans(text: str, name: str) -> list:
 
 
 class DiagnosticsContractsTest(unittest.TestCase):
+    def test_tombstone_age_and_space_breakdown_remain_read_only(self):
+        inspector = source(DIAG / "RelayStorageInspector.kt")
+        model = source(DIAG / "RelayStorageDiagnostics.kt")
+        for marker in ("PRAGMA auto_vacuum", "tombstonesOlderThan7d", "removed_at_ms", "oldestTombstoneMs", "newestTombstoneMs"):
+            self.assertIn(marker, inspector)
+        self.assertIn("non_freelist_page_bytes", model)
+        self.assertIn("не разрешение удалить", model)
+        self.assertNotIn("prune_tombstones", inspector)
+        self.assertNotIn("execSQL", inspector)
+
     def test_report_keeps_the_privacy_promise(self):
         report = source(DIAG / "DiagnosticsReport.kt")
         self.assertIn('const val SCHEMA = "apu-diag/5"', report)
@@ -289,7 +299,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
         ui = source(DIAG_UI)
         for marker in (
             "Brush.sweepGradient(",
-            "animateDpAsState(",
+            "animationSpec = tween(durationMillis = 100)",
             "animateFloatAsState(",
             "collectIsPressedAsState()",
             "drawWithCache",
@@ -438,6 +448,13 @@ class DiagnosticsContractsTest(unittest.TestCase):
             with self.subTest(danger_button_stop=danger_stop):
                 self.assertGreaterEqual(contrast(danger_ink, rgb(danger_stop)), 4.5)
 
+        # Modern secondary actions: dark ink on calm neutral surfaces.
+        for background in ("FFFFFF", "F7F8FA"):
+            self.assertGreaterEqual(contrast(rgb("25354A"), rgb(background)), 4.5)
+        self.assertIn("ApuBubbleMutedColor: Color = HintBubbleMutedColor", checks.source("components/ApuBubble.kt"))
+        quiet_ink = checks.color(checks.source("components/HintBubble.kt"), "HintBubbleMutedColor")
+        self.assertGreaterEqual(contrast(quiet_ink, rgb("F1F3F7")), 4.5)
+
         # 2) Тёмная консоль: светлый текст и яркие краски ошибок на её подложке.
         surface = palette("DiagConsoleSurface")
         for ink in ("DiagConsoleText", "DiagConsoleTitle", "DiagConsoleWarn", "DiagConsoleBad"):
@@ -463,9 +480,32 @@ class DiagnosticsContractsTest(unittest.TestCase):
 
         # 5) Объём и блеск на месте: тень (диагностика), блик, отклик на нажатие.
         for marker in ("fun Modifier.diagnosticsGloss(", "fun Modifier.diagnosticsLift(",
-                       "shadow(elevation", "drawWithCache", "graphicsLayer { scaleX = scale"):
+                       "shadow(elevation", "drawWithCache", "scaleX = scale"):
             with self.subTest(marker=marker):
                 self.assertIn(marker, ui)
+
+    def test_action_labels_are_centred_without_icon_bias(self):
+        ui = source(DIAG_UI)
+        button = ui[ui.index("fun ApuDiagnosticsActionButton("):ui.index("private fun Modifier.clickableDiag(")]
+        for marker in (
+            "contentAlignment = Alignment.Center",
+            "textAlign = TextAlign.Center",
+            "Modifier.padding(horizontal = labelGutter)",
+            "Modifier.align(Alignment.CenterStart).size(20.dp)",
+            "progress || (icon != null && !compact)",
+            "heightIn(min = 52.dp)",
+            "RoundedCornerShape(16.dp)",
+            ".clickableDiag(interaction, enabled, onClick)",
+        ):
+            self.assertIn(marker, button)
+        self.assertNotIn("Column(", button)  # no icon stacked above an off-centre label
+        self.assertNotIn(".diagnosticsGloss(", button)
+        self.assertNotIn(".apuShineSweep(", button)
+        self.assertNotIn(".height(52.dp)", button)  # large fonts must be allowed to grow
+        screen = source(SCREEN)
+        actions = screen[screen.index("// На узком экране четыре кнопки"):screen.index("muteScope?.let { scope ->")]
+        self.assertEqual(actions.count(".height(IntrinsicSize.Min)"), 2)
+        self.assertEqual(actions.count("Modifier.weight(1f).fillMaxHeight()"), 4)
 
     def test_logs_window_keeps_the_house_style(self):
         """Окно «Логи»: яркий премиальный вид на house-подложке."""
@@ -502,7 +542,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
                 self.assertIn(marker, ui)
         # Краски берутся у house style, а не выдумываются на месте.
         self.assertIn("diagnosticsLevelColor(level)", ui)
-        self.assertIn("ApuBubbleAccentColor", ui)
+        self.assertIn("Color(0xFF25354A)", ui)
         self.assertIn("ApuSettingsDangerColor", ui)
         # Яркое — в заливках, читаемое — в тексте: оба набора обязаны жить рядом.
         self.assertIn("fun diagnosticsLevelInkColor(", ui)
@@ -682,8 +722,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "fun noteMessageOutgoing(",
             "fun noteDeliveryAck(",
             "fun noteSealedNotOpened(",
-            "IdentitySigningKeyStore.mode(context)",
-            "FileExchangeKeyStore.mode(context)",
+            "DiagnosticKeyProbe.read(context, KEY_MODE_BUDGET_MS)",
             "RustBridge.liveSwarmPeerIds()",
             "RustBridge.externalTransportAllowed()",
             "fun noteCryptoBootstrap(",
@@ -971,6 +1010,98 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn('"network::ice::tests::$test"', workflow)
         self.assertIn("for test in stun_fallback_uses_next_endpoint_after_a_temporary_refusal", workflow)
         self.assertIn("all_stun_refusals_return_a_recoverable_error_after_all_attempts; do", workflow)
+
+    def test_relay_storage_audit_is_read_only_bounded_and_after_partial(self):
+        inspector = source(DIAG / "RelayStorageInspector.kt")
+        for marker in ("OPEN_READONLY", "NO_LOCALIZED_COLLATORS", "CancellationSignal()",
+                       "SAMPLE_ROWS_PER_TABLE = 512", "MAX_TOTAL_SAMPLE_ROWS = 2048",
+                       "QUERY_BUDGET_MS = 2000L", "timer.shutdownNow()", "length($payloadColumn)"):
+            self.assertIn(marker, inspector)
+        for forbidden in (".getBlob(", ".readBytes(", ".execSQL(", "openOrCreateDatabase(",
+                          "IdentitySigningKeyStore", "FileExchangeKeyStore", "decrypt(", "VACUUM", "wal_checkpoint"):
+            self.assertNotIn(forbidden, inspector)
+        collector = source(DIAG / "TransferDiagnostics.kt")
+        self.assertGreater(collector.index("RelayStorageInspector.collect("), collector.index("onPartial?.invoke("))
+        self.assertIn("facts.copy(relayStorage = storage, runtimeHealth = health,", collector)
+        report = source(DIAG / "DiagnosticsReport.kt")
+        self.assertIn("append(facts.relayStorage.render())", report)
+        for lang in ("values", "values-en"):
+            xml = source(ROOT / f"android-app/app/src/main/res/{lang}/strings.xml")
+            self.assertIn('name="space_relay_note"', xml)
+            queue = re.search(r'<string name="space_queue">(.*?)</string>', xml).group(1)
+            self.assertNotIn("очередь сообщений", queue)
+            self.assertNotIn("message queue", queue)
+        script = source(ROOT / "scripts/ci/check-chat-history.sh")
+        self.assertIn("RelayStorageDiagnosticsTest", script)
+
+    def test_runtime_health_is_bounded_wired_and_payload_free(self):
+        model = source(DIAG / "RuntimeHealth.kt")
+        monitor = source(DIAG / "RuntimeDiagnostics.kt")
+        probe = source(DIAG / "DiagnosticKeyProbe.kt")
+        collector = source(DIAG / "TransferDiagnostics.kt")
+        app = source(MAIN / "MessengerApplication.kt")
+        report = source(DIAG / "DiagnosticsReport.kt")
+        for marker in ("active.size >= 32", "candidate.ticket !== ticket", "pending != null", "if (!active", "exitHistory.take(3)"):
+            self.assertIn(marker, model)
+        for marker in ("generation.get() != epoch", "main.removeCallbacksAndMessages(probeToken)", "isInteractive", "scheduled?.cancel(false)", "60_000L", "throw cancelled", "throw error", "operations.finish(ticket, outcome)"):
+            self.assertIn(marker, monitor)
+        for forbidden in (".description", ".traceInputStream", ".processName", ".pid", "getStackTrace", "allStackTraces"):
+            self.assertNotIn(forbidden, monitor)
+        self.assertGreater(app.index("RuntimeDiagnostics.install(this)"), app.index("DeviceIdentityMarker.discardIfRestored"))
+        self.assertIn("RuntimeDiagnostics.memoryTrim(level)", app)
+        self.assertIn("append(facts.runtimeHealth.render())", report)
+        self.assertIn("RuntimeDiagnostics.snapshot(context.applicationContext)", collector)
+        for marker in ("existing != null && !existing.isDone", "newSingleThreadExecutor", "TimeUnit.MILLISECONDS", "TimeoutException", "IdentitySigningKeyStore.mode(app)", "FileExchangeKeyStore.mode(app)"):
+            self.assertIn(marker, probe)
+        for forbidden in (".cancel(", "ensureKey(", "reset(", "recreate("):
+            self.assertNotIn(forbidden, probe)
+        self.assertIn("RuntimeHealthTest", source(ROOT / "scripts/ci/check-chat-history.sh"))
+
+    def test_network_capabilities_are_not_confused_with_delivery(self):
+        collector = source(DIAG / "TransferDiagnostics.kt")
+        report = source(DIAG / "DiagnosticsReport.kt")
+        for marker in ("NET_CAPABILITY_VALIDATED", "NET_CAPABILITY_CAPTIVE_PORTAL", "isPrivateDnsActive", "restrictBackgroundStatus", "isBackgroundRestricted"):
+            self.assertIn(marker, collector)
+        self.assertIn("validated_by_android=", report)
+        self.assertIn("не замер скорости", report)
+
+    def test_operational_metrics_and_story_retries_are_wired_and_bounded(self):
+        model = source(DIAG / "OperationalHealth.kt")
+        journal = source(DIAG / "OperationalDiagnostics.kt")
+        sender = source(MAIN / "data/story/DurableStorySender.kt")
+        repo = source(MAIN / "data/repository/ChatRepository.kt")
+        vm = source(MAIN / "ui/screens/chat/ChatListViewModel.kt")
+        service = source(MAIN / "service/CoreServerService.kt")
+        for marker in ("messages.size == 256", "peerRoutes.size >= 256", "enum class OperationalCounter", "class WakeHoldTracker"):
+            self.assertIn(marker, model)
+        for marker in ("phases.size > 64", "source.length() <= 32768", "AtomicFile", "latestWrite.getAndSet(null)"):
+            self.assertIn(marker, journal)
+        for forbidden in ("messageId", "peerId", "plaintext", "ciphertext", "fileName"):
+            self.assertNotIn(forbidden, journal)
+        for marker in ("story.createdAtMs", "queue.due(now, ownId)", "queue.contains(entry)", "queue.result(entry", "revoke:", "throw cancelled", "262144"):
+            self.assertIn(marker, sender)
+        self.assertIn("readBoundedDiagnosticText(input, 262144)", sender)
+        self.assertNotIn("if (!target.baseFile.exists())", sender)
+        self.assertIn("readBoundedDiagnosticText(input, 32768)", journal)
+        for forbidden in ("http://", "https://", "ensureKey(", "reset("):
+            self.assertNotIn(forbidden, sender)
+        self.assertIn("StoryStore.persistForDelivery()", repo)
+        self.assertIn("enqueueStory(story)", vm)
+        self.assertIn("viewModel.acknowledgeError(message)", source(MAIN / "ui/screens/chat/ChatListScreen.kt"))
+        self.assertIn("enqueueStory(story, revoke = true)", vm)
+        self.assertIn("chatRepository.pumpStoryOutbox()", service)
+        self.assertIn("OperationalDiagnostics.tracker.ack(messageId)", repo)
+        self.assertIn("OperationalDiagnostics.tracker.persisted(messageId)", repo)
+        cancel = source(MAIN / "data/schedule/DeferredDelivery.kt")
+        self.assertIn("updated != null && newlyAcked", cancel)
+        self.assertIn("OperationalCounter.SCHEDULE_CANCEL_ACK", cancel)
+        self.assertIn("OperationalCounter.SCHEDULE_CANCEL_COMPLETED", cancel)
+        self.assertIn("ScheduledSendStore.cancelDiagnostics()", source(DIAG / "TransferDiagnostics.kt"))
+        inspector = source(DIAG / "RelayStorageInspector.kt")
+        self.assertIn("WHERE expires_at_ms <= $nowMs", inspector)
+        self.assertIn("MIN(expires_at_ms)", inspector)
+        for name in ("OperationalHealthTest", "StoryDeliveryQueueTest"):
+            self.assertIn(name, source(ROOT / "scripts/ci/check-chat-history.sh"))
 
     def test_ci_runs_the_pure_kotlin_diagnostics_tests(self):
         script = source(ROOT / "scripts/ci/check-chat-history.sh")

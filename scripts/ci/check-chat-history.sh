@@ -5,6 +5,9 @@
 # compiled output stay in ignored target/. Requires Java 17+, curl and Python 3.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+python3 "$ROOT/scripts/ci/check-deferred-cancel.py"
+python3 "$ROOT/scripts/ci/check-delete-read.py"
+python3 "$ROOT/scripts/ci/check-story-editor.py"
 OUT="$ROOT/target/chat-history-check"
 mkdir -p "$OUT/compiler" "$OUT/runtime" "$OUT/classes"
 read -r KOTLIN COROUTINES JUNIT < <(python3 - "$ROOT/android-app/gradle/libs.versions.toml" <<'PY'
@@ -68,6 +71,16 @@ GROUP_WIRE_UPDATE_TEST="$BASE/test/java/com/vladimir/messenger/data/group/GroupW
 # компилируются и проверяются на runner, то есть формат отчёта ловится до
 # выпуска, а не по скриншоту с телефона владельца (2026-10-06).
 DIAG_REPORT="$BASE/main/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReport.kt"
+RELAY_STORAGE="$BASE/main/java/com/vladimir/messenger/data/diagnostics/RelayStorageDiagnostics.kt"
+RELAY_STORAGE_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/RelayStorageDiagnosticsTest.kt"
+RUNTIME_HEALTH="$BASE/main/java/com/vladimir/messenger/data/diagnostics/RuntimeHealth.kt"
+RUNTIME_HEALTH_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/RuntimeHealthTest.kt"
+OP_HEALTH="$BASE/main/java/com/vladimir/messenger/data/diagnostics/OperationalHealth.kt"
+OP_BOUNDED_READ="$BASE/main/java/com/vladimir/messenger/data/diagnostics/BoundedDiagnosticRead.kt"
+OP_CLEANUP="$BASE/main/java/com/vladimir/messenger/data/diagnostics/RelayCleanupWindow.kt"
+OP_HEALTH_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/OperationalHealthTest.kt"
+STORY_QUEUE="$BASE/main/java/com/vladimir/messenger/data/story/StoryDeliveryQueue.kt"
+STORY_QUEUE_TEST="$BASE/test/java/com/vladimir/messenger/data/story/StoryDeliveryQueueTest.kt"
 DIAG_MQTT="$BASE/main/java/com/vladimir/messenger/data/diagnostics/MqttLinkText.kt"
 DIAG_REPORT_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReportTest.kt"
 DIAG_MQTT_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/MqttLinkTextTest.kt"
@@ -82,10 +95,18 @@ FILE_UDP="$BASE/main/java/com/vladimir/messenger/data/file/FileUdpWire.kt"
 SEALED_WIRE="$BASE/main/java/com/vladimir/messenger/data/security/SealedWire.kt"
 OUTGOING_POLICY="$BASE/main/java/com/vladimir/messenger/data/security/OutgoingPayloadPolicy.kt"
 OUTGOING_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/data/security/OutgoingPayloadPolicyTest.kt"
+DEFERRED_WIRE="$BASE/main/java/com/vladimir/messenger/data/schedule/DeferredWire.kt"
+DEFERRED_POLICY="$BASE/main/java/com/vladimir/messenger/data/schedule/DeferredDeliveryPolicy.kt"
+DEFERRED_WIRE_TEST="$BASE/test/java/com/vladimir/messenger/data/schedule/DeferredWireTest.kt"
+DEFERRED_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/data/schedule/DeferredDeliveryPolicyTest.kt"
+SEND_TIME_POLICY="$BASE/main/java/com/vladimir/messenger/data/schedule/SendTimePolicy.kt"
+SEND_TIME_TEST="$BASE/test/java/com/vladimir/messenger/data/schedule/SendTimePolicyTest.kt"
 SELF_SEED_POLICY="$BASE/main/java/com/vladimir/messenger/data/update/SelfSeedRetryPolicy.kt"
 SELF_SEED_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/data/update/SelfSeedRetryPolicyTest.kt"
 # Сроки хранения «потеряшек» (владелец 2026-10-07: тяжёлое — сутки, текст и
 # малое — неделя). Файл чистый, поэтому проверяется здесь же на runner.
+STORY_PUBLISH="$BASE/main/java/com/vladimir/messenger/ui/components/StoryPublish.kt"
+STORY_PUBLISH_TEST="$BASE/test/java/com/vladimir/messenger/ui/components/StoryPublishTest.kt"
 RETENTION="$BASE/main/java/com/vladimir/messenger/data/file/FileTransferRetention.kt"
 RETENTION_TEST="$BASE/test/java/com/vladimir/messenger/data/file/FileTransferRetentionTest.kt"
 "$JAVA" -cp "$OUT/compiler/*:$OUT/runtime/kotlin-stdlib-$KOTLIN.jar" \
@@ -93,14 +114,16 @@ RETENTION_TEST="$BASE/test/java/com/vladimir/messenger/data/file/FileTransferRet
     -no-stdlib -no-reflect -jvm-target 17 -classpath "$CP" -d "$OUT/classes" \
     "$MODEL/Message.kt" "$MODEL/MessageStatus.kt" "$MODEL/MessageChannel.kt" "$OBSERVER" "$TEST" "$PIN_POLICY" "$PIN_TEST" "$SPLASH_MATH" "$SPLASH_TEST" "$SETTINGS_LAYOUT" "$SETTINGS_TEST" "$HEART_WIRE" "$HEART_TEST" "$GROUP_PERMS" "$GROUP_PERMS_TEST" \
     "$POST_MANIFEST" "$GROUP_WIRE" "$GROUP_WIRE_TEST" "$GROUP_WIRE_UPDATE_TEST" \
-    "$DIAG_REPORT" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
+    "$OP_HEALTH" "$OP_BOUNDED_READ" "$OP_CLEANUP" "$OP_HEALTH_TEST" "$STORY_QUEUE" "$STORY_QUEUE_TEST" "$RUNTIME_HEALTH" "$RUNTIME_HEALTH_TEST" "$DIAG_REPORT" "$RELAY_STORAGE" "$RELAY_STORAGE_TEST" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
     "$UPDATE_POLICY" "$UPDATE_POLICY_TEST" \
     "$CALL_WIRE" "$FILE_CODEC" "$FILE_WIRE" "$FILE_UDP" "$SEALED_WIRE" "$OUTGOING_POLICY" "$OUTGOING_POLICY_TEST" \
-    "$SELF_SEED_POLICY" "$SELF_SEED_POLICY_TEST" \
-    "$RETENTION" "$RETENTION_TEST"
+    "$DEFERRED_WIRE" "$DEFERRED_POLICY" "$DEFERRED_WIRE_TEST" "$DEFERRED_POLICY_TEST" \
+    "$SELF_SEED_POLICY" "$SELF_SEED_POLICY_TEST" "$SEND_TIME_POLICY" "$SEND_TIME_TEST" \
+    "$STORY_PUBLISH" "$STORY_PUBLISH_TEST" "$RETENTION" "$RETENTION_TEST"
 "$JAVA" -cp "$OUT/classes:$CP" org.junit.runner.JUnitCore \
     com.vladimir.messenger.ui.screens.chat.ChatHistoryObserverTest \
     com.vladimir.messenger.data.local.MessagePinPolicyTest \
+    com.vladimir.messenger.ui.components.StoryPublishTest \
     com.vladimir.messenger.ui.components.SplashOrbitGeometryTest \
     com.vladimir.messenger.ui.components.ApuSettingsLayoutTest \
     com.vladimir.messenger.data.heart.HeartWireTest \
@@ -108,8 +131,15 @@ RETENTION_TEST="$BASE/test/java/com/vladimir/messenger/data/file/FileTransferRet
     com.vladimir.messenger.data.group.GroupWireTest \
     com.vladimir.messenger.data.group.GroupWireUpdateTest \
     com.vladimir.messenger.data.diagnostics.DiagnosticsReportTest \
+    com.vladimir.messenger.data.diagnostics.RelayStorageDiagnosticsTest \
+    com.vladimir.messenger.data.diagnostics.RuntimeHealthTest \
+    com.vladimir.messenger.data.diagnostics.OperationalHealthTest \
+    com.vladimir.messenger.data.story.StoryDeliveryQueueTest \
     com.vladimir.messenger.data.diagnostics.MqttLinkTextTest \
     com.vladimir.messenger.service.UpdateCheckerTest \
     com.vladimir.messenger.data.security.OutgoingPayloadPolicyTest \
     com.vladimir.messenger.data.update.SelfSeedRetryPolicyTest \
+    com.vladimir.messenger.data.schedule.DeferredWireTest \
+    com.vladimir.messenger.data.schedule.DeferredDeliveryPolicyTest \
+    com.vladimir.messenger.data.schedule.SendTimePolicyTest \
     com.vladimir.messenger.data.file.FileTransferRetentionTest

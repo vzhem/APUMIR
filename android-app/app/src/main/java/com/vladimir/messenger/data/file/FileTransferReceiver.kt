@@ -3,6 +3,7 @@ package com.vladimir.messenger.data.file
 import android.util.Log
 import com.vladimir.messenger.data.diagnostics.Counters
 import com.vladimir.messenger.data.diagnostics.DiagnosticsReport
+import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
 import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
@@ -128,6 +129,12 @@ class FileTransferReceiver(
     }
 
     private val mutex = Mutex()
+
+    /** Housekeeping never races a receive/finalize operation or waits behind it. */
+    internal suspend fun <T> tryMaintenance(block: suspend () -> T): T? {
+        if (!mutex.tryLock()) return null
+        return try { block() } finally { mutex.unlock() }
+    }
     private val pendingItems = LinkedHashMap<String, PendingItem>()
     private val bufferedChunks = LinkedHashMap<String, MutableMap<Long, ByteArray>>()
     /** One bounded progress cursor per active transfer; never one heap entry per file chunk. */
@@ -1374,6 +1381,7 @@ class FileTransferReceiver(
                 "Cannot persist verified file completion"
             }
             Log.i(TAG, "File transfer COMPLETE: $transferIdHex (${manifest.displayName})")
+            OperationalDiagnostics.tracker.fileComplete(true, manifest.fileSize.toLong(), nowMs() - fresh.createdAtMs)
             TransferDiagnostics.count(Counters.FILE_COMPLETED)
             TransferDiagnostics.recordSuccess(
                 "file",

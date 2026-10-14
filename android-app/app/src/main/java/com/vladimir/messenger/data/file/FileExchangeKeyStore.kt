@@ -1,5 +1,7 @@
 package com.vladimir.messenger.data.file
 
+import com.vladimir.messenger.data.diagnostics.KeyModeReason
+
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -112,21 +114,36 @@ object FileExchangeKeyStore {
         false
     }
 
+    @Volatile var lastModeReason = KeyModeReason.NOT_PROBED
+        private set
+
     @Synchronized
     fun mode(context: Context): Mode {
+        lastModeReason = KeyModeReason.READ_PREFS
         val app = context.applicationContext
         val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val wrapped = prefs.getString(WRAPPED_SECRET, null)
         val binding = prefs.getString(PUBLIC_BINDING, null)
-        if (wrapped == null && binding == null) return Mode.ABSENT
+        if (wrapped == null && binding == null) { lastModeReason = KeyModeReason.ABSENT; return Mode.ABSENT }
+        if (wrapped == null || binding == null) { lastModeReason = KeyModeReason.INCOMPLETE_RECORD; return Mode.UNAVAILABLE }
         return try {
-            check(wrapped != null && binding != null)
-            val secret = loadExisting(app)
+            lastModeReason = KeyModeReason.LOOKUP_KEY
+            val key = existingWrapKey()
+            if (key == null) { lastModeReason = KeyModeReason.MISSING_WRAP_KEY; return Mode.UNAVAILABLE }
+            lastModeReason = KeyModeReason.UNWRAP
+            val secret = loadExisting(app, key)
             secret.fill(0)
+            lastModeReason = KeyModeReason.CHECK_BINDING
             val decoded = Base64.decode(binding, Base64.NO_WRAP)
             check(verifyFileExchangeBinding(decoded))
+            lastModeReason = KeyModeReason.READY
             Mode.READY
         } catch (_: Exception) {
+            lastModeReason = when (lastModeReason) {
+                KeyModeReason.LOOKUP_KEY -> KeyModeReason.KEYSTORE_ERROR
+                KeyModeReason.CHECK_BINDING -> KeyModeReason.BINDING_INVALID
+                else -> KeyModeReason.UNWRAP_FAILED
+            }
             Mode.UNAVAILABLE
         }
     }
@@ -151,11 +168,11 @@ object FileExchangeKeyStore {
         return try { operation(secret) } finally { secret.fill(0) }
     }
 
-    private fun loadExisting(context: Context): ByteArray {
+    private fun loadExisting(context: Context, knownWrapKey: SecretKey? = null): ByteArray {
         val encoded = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(WRAPPED_SECRET, null) ?: error("File exchange secret absent")
         require(encoded.length <= MAX_ENCODED_SECRET)
-        val wrapKey = existingWrapKey() ?: error("File exchange Keystore alias absent")
+        val wrapKey = knownWrapKey ?: existingWrapKey() ?: error("File exchange Keystore alias absent")
         val envelope = FileTransferKeyEnvelope.decode(Base64.decode(encoded, Base64.NO_WRAP))
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, wrapKey, GCMParameterSpec(GCM_TAG_BITS, envelope.iv))

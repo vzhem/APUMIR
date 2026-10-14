@@ -3,6 +3,8 @@ package com.vladimir.messenger.data.file
 import android.util.Log
 import com.vladimir.messenger.data.diagnostics.Counters
 import com.vladimir.messenger.data.diagnostics.DiagnosticsReport
+import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
+import com.vladimir.messenger.data.diagnostics.OperationalCounter
 import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
@@ -122,6 +124,7 @@ class FileTransferSender(
             if (contiguousChunks == transfer.chunkCount) {
                 advance(transfer, newState = "COMPLETE")
                 Log.i(TAG, "File transfer COMPLETE by receiver ACK: $transferIdHex")
+                OperationalDiagnostics.tracker.fileComplete(false, transfer.totalBytes, nowMs() - transfer.createdAtMs)
                 TransferDiagnostics.count(Counters.FILE_COMPLETED)
                 TransferDiagnostics.recordSuccess(
                     "file",
@@ -140,13 +143,16 @@ class FileTransferSender(
         val now = nowMs()
         for (transfer in transferDao.getActiveOutgoing(now)) {
             if (!shouldPumpNow(transfer.transferId, now)) continue
+            if (lastPumpAt.containsKey(transfer.transferId)) OperationalDiagnostics.tracker.count(OperationalCounter.FILE_RETRY)
             lastPumpAt[transfer.transferId] = now
             lastPumpAcked[transfer.transferId] = ackedContiguous[transfer.transferId] ?: 0L
             val result = runCatching { pumpTransfer(transfer) }
             result.getOrNull()?.let { pumped++; packets += it }
             if (result.isFailure) {
                 val error = result.exceptionOrNull()
+                if (error is java.net.SocketTimeoutException || error is java.util.concurrent.TimeoutException) OperationalDiagnostics.tracker.count(OperationalCounter.FILE_TIMEOUT)
                 if (error is RecipientOfflineException) {
+                    OperationalDiagnostics.tracker.count(OperationalCounter.FILE_WAIT_ATTEMPTS)
                     // Файл уже у хранителя: получатель заберёт у него, а мы
                     // лишь изредка пробуем напрямую - состояние остаётся
                     // «у хранителя», а не «ждём получателя».

@@ -966,23 +966,26 @@ class ChatListViewModel @Inject constructor(
         const val MAX_WINDOW = 3000
     }
 
+    fun acknowledgeError(expected: String) {
+        _uiState.update { if (it.error == expected) it.copy(error = null) else it }
+    }
+
     /** Своя история: сохранить и разослать контактам личных чатов. */
     fun publishStory(text: String, bg: Int, photoB64: String? = null) {
-        val trimmed = text.trim()
-        if (trimmed.isEmpty() && photoB64 == null) return
+        if (text.isBlank() && photoB64 == null) return
         viewModelScope.launch {
             val me = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
             }
-            val story = com.vladimir.messenger.data.story.StoryStore.publish(me, trimmed.take(200), bg, photoB64)
-            val packets = com.vladimir.messenger.data.story.StoryOutbox.packets(
-                story.id, com.vladimir.messenger.data.story.StoryStore.encodePackets(story))
-            val peers = chatRepository.directContactIds()
-            // Фото едет десятками частей, а сборка требует все: рассылка идёт
-            // волнами (StoryOutbox), иначе потеря одной части оставляет друга и
-            // без фото, и без подписи - история не показывается вовсе.
-            com.vladimir.messenger.data.story.StoryOutbox.start(story.id, packets, peers) { peer, packet ->
-                chatRepository.sendStoryPacket(peer, packet.content, packet.transportId)
+            if (me.isBlank()) {
+                _uiState.update { it.copy(error = "Ядро ещё не готово: дождитесь подключения перед публикацией истории.") }
+                return@launch
+            }
+            val story = com.vladimir.messenger.data.story.StoryStore.publish(me, text.take(200), bg, photoB64)
+            if (!chatRepository.enqueueStory(story)) {
+                _uiState.update { it.copy(error = "История сохранена у вас, но нет адресатов либо очередь доставки недоступна или заполнена. Проверьте Логи.") }
+            } else {
+                chatRepository.pumpStoryOutbox()
             }
         }
     }
@@ -994,12 +997,10 @@ class ChatListViewModel @Inject constructor(
                 com.vladimir.messenger.data.story.StoryStore.revokeMine(storyId)
             } ?: return@launch
             com.vladimir.messenger.data.story.StoryOutbox.cancel(story.id)
-            val packets = com.vladimir.messenger.data.story.StoryOutbox.packets(
-                story.id, listOf(com.vladimir.messenger.data.story.StoryStore.encodeRevoke(story)),
-            )
-            val peers = chatRepository.directContactIds()
-            com.vladimir.messenger.data.story.StoryOutbox.startRevoke(story.id, packets, peers) { peer, packet ->
-                chatRepository.sendStoryPacket(peer, packet.content, packet.transportId)
+            if (!chatRepository.enqueueStory(story, revoke = true)) {
+                _uiState.update { it.copy(error = "История удалена у вас, но не все запросы удаления удалось сохранить. Проверьте Логи.") }
+            } else {
+                chatRepository.pumpStoryOutbox()
             }
         }
     }

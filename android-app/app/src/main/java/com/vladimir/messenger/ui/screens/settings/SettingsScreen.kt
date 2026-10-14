@@ -1330,7 +1330,7 @@ private fun SettingsTabContent(
                         if (used == null) {
                             stringResource(R.string.settings_counting_space)
                         } else {
-                            stringResource(R.string.space_used_head, StoragePolicy.format(used.total), StoragePolicy.format(used.chunkBytes)) + (if (held > 0L) stringResource(R.string.space_held, StoragePolicy.format(held)) else "") + stringResource(R.string.space_received, StoragePolicy.format(used.receivedBytes)) + (if (used.groupFileBytes > 0L) stringResource(R.string.space_group_files, StoragePolicy.format(used.groupFileBytes)) else "") + stringResource(R.string.space_queue, StoragePolicy.format(used.relayBytes)) + stringResource(R.string.space_free_tail, StoragePolicy.format(free), StoragePolicy.format(StoragePolicy.FREE_RESERVE_BYTES))
+                            stringResource(R.string.space_used_head, StoragePolicy.format(used.total), StoragePolicy.format(used.chunkBytes)) + (if (held > 0L) stringResource(R.string.space_held, StoragePolicy.format(held)) else "") + stringResource(R.string.space_received, StoragePolicy.format(used.receivedBytes)) + (if (used.groupFileBytes > 0L) stringResource(R.string.space_group_files, StoragePolicy.format(used.groupFileBytes)) else "") + stringResource(R.string.space_queue, StoragePolicy.format(used.relayBytes)) + stringResource(R.string.space_free_tail, StoragePolicy.format(free), StoragePolicy.format(StoragePolicy.FREE_RESERVE_BYTES)) + stringResource(R.string.space_relay_note)
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1642,7 +1642,7 @@ private fun SettingsTabContent(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         val logsTitle = stringResource(R.string.settings_logs_title)
@@ -1652,7 +1652,7 @@ private fun SettingsTabContent(
                         ApuDiagnosticsActionButton(
                             label = stringResource(R.string.action_send),
                             icon = DiagnosticsActionIcons.Send,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
                             style = DiagnosticsActionStyle.PRIMARY,
                             compact = true,
                             onClick = {
@@ -1666,7 +1666,7 @@ private fun SettingsTabContent(
                         ApuDiagnosticsActionButton(
                             label = stringResource(R.string.action_copy),
                             icon = DiagnosticsActionIcons.Copy,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
                             compact = true,
                             onClick = {
                                 if (reportText.isNotBlank()) {
@@ -1683,13 +1683,13 @@ private fun SettingsTabContent(
                         )
                     }
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         ApuDiagnosticsActionButton(
                             label = stringResource(R.string.action_refresh),
                             icon = DiagnosticsActionIcons.Refresh,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
                             style = DiagnosticsActionStyle.QUIET,
                             compact = true,
                             onClick = {
@@ -1700,7 +1700,7 @@ private fun SettingsTabContent(
                         )
                         ApuDiagnosticsActionButton(
                             label = stringResource(R.string.action_close),
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).fillMaxHeight(),
                             style = DiagnosticsActionStyle.QUIET,
                             compact = true,
                             onClick = { showTransferLogsDialog = false },

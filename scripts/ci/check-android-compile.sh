@@ -81,8 +81,9 @@ cd android-app || exit 1
 # unit-тесты после компиляции Kotlin, не подмена полной сборки релизного APK.
 ./gradlew :app:testDebugUnitTest --no-daemon --console=plain \
     --tests '*RankWireTest*' --tests '*FileTransferRankPolicyTest*' --tests '*OnlineHelperPolicyTest*' \
-    --tests '*ShortLinksTest*' --tests '*DiagnosticsReportTest*' \
-    --tests '*GroupFileSeederTest*' --tests '*FileTransferWireTest*'
+    --tests '*ShortLinksTest*' --tests '*DiagnosticsReportTest*' --tests '*RelayStorageDiagnosticsTest*' --tests '*RuntimeHealthTest*' --tests '*OperationalHealthTest*' --tests '*StoryDeliveryQueueTest*' --tests '*StoryPublishTest*' --tests '*StoryOutboxTest*' --tests '*StoryStoreMergeTest*' \
+    --tests '*GroupFileSeederTest*' --tests '*FileTransferWireTest*' --tests '*FileTransferChunkStoreTest*' --tests '*TemporaryFileSweepTest*' --tests '*EphemeralControlTest*' \
+    --tests '*SendTimePolicyTest*' --tests '*DeferredWireTest*' --tests '*DeferredDeliveryPolicyTest*'
 TESTS_STATUS=$?
 
 # ---- почему тесты упали: словами в лог, а не «красный шаг без причины» -------
@@ -98,5 +99,10 @@ if [ -d "$RESULTS" ]; then
     grep -h -A 10 "<failure" "$RESULTS"/*.xml | head -100
 else
     echo "---- test results (testDebugUnitTest): отчётов нет ----"
+fi
+# Compile the Android renderer/device tests too. This does NOT run them:
+# geometry, RTL, large-font and touch behaviour still need a device/emulator.
+if [ "$TESTS_STATUS" -eq 0 ]; then
+    ./gradlew :app:compileDebugAndroidTestKotlin --no-daemon --console=plain || exit 1
 fi
 exit "$TESTS_STATUS"

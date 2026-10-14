@@ -121,4 +121,7 @@ class StoryOutboxTest {
             pauses,
         )
     }
+    @Test fun revokeTransportIdCannotBeDeduplicatedAsPublishPartZero() {
+        assertNotEquals(StoryOutbox.transportId("story-1", 0), StoryOutbox.transportId("revoke:story-1", 0))
+    }
 }

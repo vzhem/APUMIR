@@ -231,8 +231,21 @@ data class DiagnosticsFacts(
     val helperRoutes: HelperRouteDiagnostics = HelperRouteDiagnostics.EMPTY,
     /** Состояние последней проверки/уведомления о версии; без URL и текста релиза. */
     val updateDiagnostics: UpdateDiagnosticFacts = UpdateDiagnosticFacts.EMPTY,
+    val relayStorage: RelayStorageDiagnostics = RelayStorageDiagnostics(),
+    val runtimeHealth: RuntimeHealthSnapshot = RuntimeHealthSnapshot(),
+    val operationalHealth: OperationalSnapshot = OperationalSnapshot(),
+    val operationalDetails: String = "",
+    val networkValidated: Boolean? = null,
+    val networkCaptivePortal: Boolean? = null,
+    val privateDnsActive: Boolean? = null,
+    val dataSaverStatus: Int? = null,
+    val backgroundRestricted: Boolean? = null,
+    val linkDownKbps: Int? = null,
+    val linkUpKbps: Int? = null,
     /** Только безопасные статусы: без ID, открытых/секретных ключей и имён файлов. */
     val signingSeedMode: String = "unknown",
+    val signingModeReason: KeyModeReason = KeyModeReason.NOT_PROBED,
+    val exchangeModeReason: KeyModeReason = KeyModeReason.NOT_PROBED,
     val installedSigningMode: String = "unknown",
     val fileExchangeMode: String = "unknown",
     /** Отличают timeout при старте от позднего READY в глобальном реестре. */
@@ -428,6 +441,9 @@ data class RelayQueueEvictionDiagnostics(val count: Long, val cumulative: Boolea
  * `10-06 [ipv6].154`.
  */
 object DiagnosticsPrivacy {
+    private val shortIdentityFieldRegex = Regex("(?i)(\\b(?:sender|peer|node|recipient|from|to|msg|msgId)=)[0-9a-f]{8,31}\\b")
+    private val mqttTopicRegex = Regex("\\btopic=[^\\s]+")
+    private val processThreadPrefixRegex = Regex("^(\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d+\\s+)\\d+\\s+\\d+\\s+")
     private val contactRegex = Regex("pk_[0-9a-f]{32,64}")
     private val uuidRegex = Regex("(?i)\\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\\b")
     // MQTT receipt topics carry SHA-256(messageId), a stable 64-hex correlator.
@@ -470,8 +486,12 @@ object DiagnosticsPrivacy {
 
     /** Не копировать в отчёт идентификаторы контактов/сообщений и сетевые адреса. */
     fun redact(text: String): String = text
-        .replace(contactRegex, "[contact]")
+        .replace(processThreadPrefixRegex) { "${it.groupValues[1]}0 0 " }
+        // Whole UUID first: short-hex field masking must not leave its dashed tail.
         .replace(uuidRegex, "[id]")
+        .replace(shortIdentityFieldRegex) { "${it.groupValues[1]}[id]" }
+        .replace(mqttTopicRegex, "topic=[route]")
+        .replace(contactRegex, "[contact]")
         .replace(messageHashRegex, "[id]")
         .replace(transferHexRegex, "[transfer]")
         .replace(fromHexRegex) { match -> "${match.groupValues[1]}[contact]" }
@@ -683,6 +703,13 @@ object DiagnosticsReport {
         appendMqtt(facts)
         appendHelperRoutes(facts)
         appendMessages(facts)
+        append(facts.operationalHealth.render())
+        append(facts.operationalDetails)
+        appendLine()
+        append(facts.runtimeHealth.render())
+        appendLine()
+        append(facts.relayStorage.render())
+        appendLine()
         appendTransfers(facts)
         appendSession(facts)
         appendJournal(journal, facts)
@@ -1011,6 +1038,10 @@ object DiagnosticsReport {
         appendLine("internet=${facts.networkInternet}")
         appendLine("metered=${facts.networkMetered}")
         appendLine("vpn=${facts.networkVpn}")
+        appendLine("validated_by_android=${facts.networkValidated ?: "unknown"} · captive_portal=${facts.networkCaptivePortal ?: "unknown"}")
+        appendLine("private_dns_active=${facts.privateDnsActive ?: "unknown"} · data_saver_status=${facts.dataSaverStatus ?: -1} (1=off, 2=whitelisted, 3=enabled)")
+        appendLine("background_restricted=${facts.backgroundRestricted ?: "unknown"}")
+        appendLine("link_down_kbps=${facts.linkDownKbps ?: -1} · link_up_kbps=${facts.linkUpKbps ?: -1} (оценка Android, не замер скорости)")
         appendLine("notifications=${if (facts.notificationsAllowed) "разрешены" else "запрещены"}")
         appendLine("proxy_tunnel=${if (facts.proxyTunnel) "включён" else "выключен"}")
         appendLine("swarm=${facts.swarmMode}")
@@ -1077,6 +1108,7 @@ object DiagnosticsReport {
         appendLine("connected_peers=${facts.connectedPeers} (не число подтверждённых прямых соседей)")
         appendLine("signed_direct_swarm_peers=${facts.liveDirectSwarmPeers?.toString() ?: "unknown"} (живые подтверждённые APUX1)")
         appendLine("external_transport_allowed_now=${facts.externalTransportAllowed?.toString() ?: "unknown"} (политика на момент снимка, не факт обращения)")
+        appendLine("signing_mode_reason=${facts.signingModeReason.name.lowercase()} · exchange_mode_reason=${facts.exchangeModeReason.name.lowercase()}")
         appendLine("signing_seed_keystore=${safeDiagnosticToken(facts.signingSeedMode)}")
         appendLine("installed_signing_identity=${safeDiagnosticToken(facts.installedSigningMode)}")
         appendLine("signing_install_before_core=${safeDiagnosticToken(facts.signingInstallBeforeCore)}")

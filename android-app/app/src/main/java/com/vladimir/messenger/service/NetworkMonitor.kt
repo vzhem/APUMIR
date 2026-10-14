@@ -25,6 +25,7 @@ class NetworkMonitor(private val context: Context) {
     /** Тип сети для журнала: пишем только смену, а не каждый колбэк возможностей. */
     @Volatile
     private var lastTransport: String? = null
+    @Volatile private var lastCapabilitiesSignature: String? = null
     private val callbackScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val connectivityManager =
@@ -33,16 +34,16 @@ class NetworkMonitor(private val context: Context) {
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
 
         override fun onAvailable(network: Network) {
-            Log.i(TAG, "Network available: $network")
+            Log.i(TAG, "Network available")
             TransferDiagnostics.count(Counters.NETWORK_CHANGES)
             TransferDiagnostics.record("net", "сеть появилась")
             callbackScope.launch { RustBridge.onNetworkAvailable() }
         }
 
         override fun onLost(network: Network) {
-            Log.i(TAG, "Network lost: $network")
+            Log.i(TAG, "Network lost")
             TransferDiagnostics.count(Counters.NETWORK_CHANGES)
-            TransferDiagnostics.recordWarning("net", "сеть пропала — ждём восстановления")
+            TransferDiagnostics.recordWarning("net", "потеряна доступная сеть; активная сеть может быть другой")
             callbackScope.launch { RustBridge.onNetworkLost() }
         }
 
@@ -53,15 +54,21 @@ class NetworkMonitor(private val context: Context) {
             val hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             val isWifi = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
             val isMobile = caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
-            Log.d(TAG, "Network caps changed: internet=$hasInternet wifi=$isWifi mobile=$isMobile")
-            // В журнал «Логов» пишем только смену типа сети: возможности
-            // меняются часто, и полный поток «caps changed» его бы затопил.
+            // Only fixed capability/transport changes, never addresses or network IDs.
+            // These callbacks cover all matching networks, not just the active one.
             val transport = when {
                 caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "VPN"
                 isWifi -> "Wi-Fi"
                 isMobile -> "мобильная сеть"
                 caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
                 else -> "другая"
+            }
+            val validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            val portal = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)
+            val signature = "$transport/$hasInternet/$validated/$portal"
+            if (signature != lastCapabilitiesSignature) {
+                lastCapabilitiesSignature = signature
+                TransferDiagnostics.record("net", "возможности сети: $transport, internet=$hasInternet, validated=$validated, captive_portal=$portal")
             }
             if (transport != lastTransport) {
                 lastTransport = transport
