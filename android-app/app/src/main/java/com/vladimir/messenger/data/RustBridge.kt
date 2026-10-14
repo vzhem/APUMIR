@@ -2,12 +2,9 @@ package com.vladimir.messenger.data
 
 import android.content.Context
 import android.util.Log
-import com.vladimir.messenger.data.file.FileTransferWire
-import com.vladimir.messenger.data.file.FileUdpWire
-import com.vladimir.messenger.data.file.LanDirectChannel
 import com.vladimir.messenger.data.security.MessageSealer
+import com.vladimir.messenger.data.security.OutgoingPayloadPolicy
 import kotlinx.coroutines.launch
-import com.vladimir.messenger.data.security.SealedWire
 import uniffi.p2p_core.ChatFfi
 import uniffi.p2p_core.CoreEventFfi
 import uniffi.p2p_core.MessageFfi
@@ -557,7 +554,7 @@ object RustBridge {
             // ШИФРОВАНИЕ: наружу уходит запечатанный конверт, а не открытый
             // текст. Прямой QUIC защищён TLS, но путь через ретранслятор идёт
             // по чужому брокеру, где открытый текст читается кем угодно.
-            val payload = sealOutgoing(recipientId, text)
+            val payload = sealOutgoing(recipientId, text) ?: return false
             val sentDirectly = engine?.sendMessage(messageId, chatId, recipientId, payload) == true
             Log.i(TAG, "Rust send result: direct=$sentDirectly sealed=${payload !== text}")
             sentDirectly
@@ -576,7 +573,7 @@ object RustBridge {
     ): Boolean {
         if (rejectMainThreadCall("retryMessage(chat=$chatId)")) return false
         return try {
-            val payload = sealOutgoing(recipientId, text)
+            val payload = sealOutgoing(recipientId, text) ?: return false
             val sentDirectly = engine?.retryMessage(messageId, chatId, recipientId, payload) == true
             Log.i(TAG, "Rust explicit retry result: direct=$sentDirectly sealed=${payload !== text}")
             sentDirectly
@@ -587,37 +584,16 @@ object RustBridge {
     }
 
     /**
-     * Запечатать исходящее, если ключ собеседника известен.
-     *
-     * Уже запечатанное не трогаем. Если ключа ещё нет, возвращаем исходный
-     * текст: обмен ключами идёт пакетом HELLO и занимает секунды, а молча
-     * ронять сообщение хуже. Такое возможно только до первого обмена ключами.
+     * Fail closed for private data: Rust persists and may relay whatever text it receives.
+     * If the peer binding or our Keystore identity is unavailable, leave the phone-owned
+     * message queued instead of silently leaking it over the external relay.
      */
-    private fun sealOutgoing(recipientId: String, text: String): String {
-        if (!recipientId.startsWith("pk_")) return text
-        if (SealedWire.isSealed(text)) return text
-        // HELLO несёт сам открытый ключ и обязан идти незапечатанным: иначе
-        // первый обмен ключами заклинит - шифровать нечем, пока ключ не пришёл.
-        // Секрета в нём нет, это открытая часть подписанной привязки.
-        if (text.startsWith(FileTransferWire.HELLO_PREFIX)) return text
-        // APULAN1 - служебный сигнал «где ты в локальной сети»: адрес и порт,
-        // которыми поднимается ПРЯМОЙ канал. Его разбирает транспортный слой
-        // ДО расшифровки, поэтому запечатанный сигнал просто не опознаётся:
-        // канал не поднимается, и связь скатывается в одну сторону.
-        // Секрета в нём нет - это адрес в локальной сети.
-        if (LanDirectChannel.isLanSignalText(text)) return text
-        // APUUDP1 - служебные сигналы UDP-канала файловой передачи (мобильная,
-        // docs/SWARM_MOBILE.md): кандидаты NAT-пробивания. Как APULAN1: адрес +
-        // публичная (подписанная) привязка, секрета нет; транспортный слой
-        // разбирает их до расшифровки.
-        if (FileUdpWire.isUdpSignalText(text)) return text
-        val context = appContext ?: return text
-        val sealed = MessageSealer.seal(context, recipientId, text)
-        if (sealed == null) {
-            Log.w(TAG, "No key yet for ${recipientId.takeLast(8)}; sending unsealed")
-            return text
+    private fun sealOutgoing(recipientId: String, text: String): String? {
+        return OutgoingPayloadPolicy.prepare(recipientId, text) {
+            appContext?.let { MessageSealer.seal(it, recipientId, text) }
+        }.also { payload ->
+            if (payload == null) Log.w(TAG, "Private outbound payload deferred: sealing unavailable")
         }
-        return sealed
     }
 
     fun receiveMessage(
@@ -745,7 +721,8 @@ object RustBridge {
             if (handle != null) {
                 // Прямой путь уже под TLS 1.3, но запечатываем и его: тот же
                 // payload при смене маршрута может уйти через ретранслятор.
-                handle.sendDirectPayload(recipientId, sealOutgoing(recipientId, payload))
+                val sealed = sealOutgoing(recipientId, payload) ?: return false
+                handle.sendDirectPayload(recipientId, sealed)
             } else {
                 false
             }

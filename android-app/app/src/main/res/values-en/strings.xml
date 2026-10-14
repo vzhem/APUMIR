@@ -196,7 +196,7 @@
     <string name="chat_attach_file">Attach file</string>
     <string name="chat_attach_rank_hint">Attachments open from the “Circle of friends” rank</string>
     <string name="chat_input_placeholder">Message...</string>
-    <string name="chat_resend_key">Send my key again</string>
+    <string name="chat_resend_key">Resend my public key</string>
     <string name="chat_history_retry_hint">Try opening the history again</string>
     <string name="action_retry">Retry</string>
     <!-- Контакты -->
@@ -820,7 +820,7 @@
     <string name="sync_devices_find">Devices find each other automatically: the sender and the receiver only need the same nickname and password — no addresses to enter.</string>
     <string name="sync_auto_every6">It looks for a copy in the background about every 6 hours. The first transfer asks for confirmation before any data is replaced.</string>
     <!-- Пакет 27: подсказки чата, QR, аватара, гифок и никнейма -->
-    <string name="chat_peer_key_stale">Messages from this contact won’t open: they still have an old copy of your key (after a reinstall or profile restore). Ask them to scan your QR code again — “My QR” in your profile.</string>
+    <string name="chat_peer_key_stale">Several incoming envelopes could not be opened. The cause is unknown: they may be for someone else, your local key may be unavailable, or the keys may differ. You can resend only your public key; do not reset keys or rescan a QR code based on this alone.</string>
     <string name="chat_own_node">This is your own node — the contact isn’t here. Devices of one account sync automatically (Settings → “Sync diagnostics”).</string>
     <string name="qr_not_ready">The code will appear once your profile is ready. Open the app a little later — the keys are still being created.</string>
     <string name="avatar_crop_hint">Drag the photo with your finger and pinch to zoom. Whatever is visible in the circle becomes your avatar.</string>

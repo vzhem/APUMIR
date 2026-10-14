@@ -47,6 +47,11 @@ class DiagnosticsReportTest {
         onlineHelperParticipationEnabled: Boolean? = null,
         helperRoutes: HelperRouteDiagnostics = HelperRouteDiagnostics.EMPTY,
         updateDiagnostics: UpdateDiagnosticFacts = UpdateDiagnosticFacts.EMPTY,
+        signingSeedMode: String = "unknown",
+        installedSigningMode: String = "unknown",
+        fileExchangeMode: String = "unknown",
+        liveDirectSwarmPeers: Int? = null,
+        externalTransportAllowed: Boolean? = null,
     ) = DiagnosticsFacts(
         createdAtMs = 1_700_000_000_000L,
         sessionStartedAtMs = 1_700_000_000_000L - 168_000L,
@@ -107,6 +112,11 @@ class DiagnosticsReportTest {
         onlineHelperParticipationEnabled = onlineHelperParticipationEnabled,
         helperRoutes = helperRoutes,
         updateDiagnostics = updateDiagnostics,
+        signingSeedMode = signingSeedMode,
+        installedSigningMode = installedSigningMode,
+        fileExchangeMode = fileExchangeMode,
+        liveDirectSwarmPeers = liveDirectSwarmPeers,
+        externalTransportAllowed = externalTransportAllowed,
     )
 
     private fun titles(lines: List<DiagnosticsLine>): List<String> = lines.map { it.title }
@@ -207,6 +217,59 @@ class DiagnosticsReportTest {
         assertTrue(report.contains("не личность/уникальность помощника"))
     }
 
+    @Test
+    fun cubotReportShowsLocalCryptoAndRealSwarmWithoutDiagnosingPeerFromFailedOpens() {
+        val facts = facts(
+            counters = mapOf(
+                Counters.MSG_OUT to 2L,
+                Counters.MSG_IN_NOT_OPENED to 1271L,
+                Counters.MSG_IN_LOCAL_CRYPTO_UNAVAILABLE to 1271L,
+                Counters.FILE_STARTED_OUT to 16L,
+            ),
+            relayQueueOwn = 94L,
+            signingSeedMode = "unavailable",
+            installedSigningMode = "legacy-only",
+            fileExchangeMode = "unavailable",
+            liveDirectSwarmPeers = 0,
+            externalTransportAllowed = true,
+        )
+        val summary = DiagnosticsReport.summaryLines(facts)
+        assertEquals(DiagnosticsLevel.WARN, summary.first { it.title == "Локальные ключи" }.level)
+        assertTrue(summary.first { it.title == "Прямой рой" }.value.contains("подтверждённых соседей 0"))
+        val message = summary.first { it.title == "Сообщения" }
+        assertTrue(message.value.contains("1271 попыток"))
+        assertFalse(message.value.contains("устаревший ключ"))
+        val report = DiagnosticsReport.render(facts, emptyList(), emptyList())
+        assertTrue(report.contains("signing_seed_keystore=unavailable"))
+        assertTrue(report.contains("installed_signing_identity=legacy-only"))
+        assertTrue(report.contains("file_exchange_keystore=unavailable"))
+        assertTrue(report.contains("signed_direct_swarm_peers=0"))
+        assertTrue(report.contains("external_transport_allowed_now=true (политика на момент снимка, не факт обращения)"))
+        assertTrue(report.contains("из них при неготовой локальной identity при старте=1271"))
+        assertTrue(report.contains("передач начато (отправка)=16"))
+        assertTrue(report.contains("включая самосев APK"))
+        assertFalse(report.contains("устаревшая копия ключа"))
+    }
+
+    @Test
+    fun confirmedDirectNeighborReportsExternalPolicyWithoutClaimingActualRequests() {
+        val reportFacts = facts(
+            signingSeedMode = "ready",
+            installedSigningMode = "legacy+ed25519-sidecar-v1",
+            fileExchangeMode = "ready",
+            liveDirectSwarmPeers = 1,
+            externalTransportAllowed = false,
+        )
+        val lines = DiagnosticsReport.summaryLines(reportFacts)
+        assertEquals(DiagnosticsLevel.OK, lines.first { it.title == "Локальные ключи" }.level)
+        val direct = lines.first { it.title == "Прямой рой" }
+        assertEquals(DiagnosticsLevel.OK, direct.level)
+        assertTrue(direct.value.contains("подтверждённых соседей 1"))
+        assertTrue(direct.value.contains("внешний транспорт сейчас не разрешён"))
+        val report = DiagnosticsReport.render(reportFacts, emptyList(), emptyList())
+        assertTrue(report.contains("external_transport_allowed_now=false (политика на момент снимка, не факт обращения)"))
+    }
+
     /**
      * Главная жалоба владельца 2026-10-07: «мои сообщения до него доходят, а от
      * него ко мне не приходят». В сводке это должно быть предупреждением, а не
@@ -252,10 +315,10 @@ class DiagnosticsReportTest {
             "входящих показано=4",
             "исходящих отправлено=7",
             "подтверждений доставки=6",
-            "отложено до сети (уйдёт само)=0",
+            "отложено (ожидает связь/ключи; число попыток)=0",
             "не ушло (узел отказал или нет сети)=0",
             "последнее входящее=",
-            "не вскрылось (чужая переписка или устаревший ключ)=2",
+            "не вскрылось (попытки; адресат/причина не подтверждены)=2",
             "ядро передало сигналов=42",
             "пересылка: отброшено из-за полной очереди=9",
             "очередь ядра: своё ждёт получателя=нет (пусто)",
@@ -266,7 +329,8 @@ class DiagnosticsReportTest {
         // Журнал процесса показывал «EMITTED to EventBus», а показано было 4:
         // разница между этими числами и есть предмет разбора.
         assertTrue(report.contains("по журналу процесса"))
-        assertTrue(report.contains("устаревшая копия ключа"))
+        assertTrue(report.contains("не сбрасывайте ключи по этому счётчику"))
+        assertFalse(report.contains("устаревшая копия ключа"))
     }
 
     /** Тихий вечер без переписки не должен выглядеть поломкой. */
@@ -297,11 +361,7 @@ class DiagnosticsReportTest {
         assertTrue(message.value.contains("последнее входящее"))
     }
 
-    /**
-     * Самая понятная человеку причина «от него не приходят»: собеседник
-     * переустановил приложение, ключ сменился, а закреплён прежний. В сводке
-     * это должно звучать вместе с тем, что делать.
-     */
+    /** Only a verified signed HELLO pin mismatch is evidence of a changed peer binding. */
     @Test
     fun peerKeyChangeExplainsSilentChat() {
         val lines = DiagnosticsReport.summaryLines(
@@ -312,8 +372,8 @@ class DiagnosticsReportTest {
         )
         val message = lines.first { it.title == "Сообщения" }
         assertEquals(DiagnosticsLevel.WARN, message.level)
-        assertTrue(message.value.contains("новый ключ"))
-        assertTrue(message.value.contains("QR"))
+        assertTrue(message.value.contains("подписанный ключ"))
+        assertTrue(message.value.contains("проверьте его личность"))
         val report = DiagnosticsReport.render(
             facts = facts(
                 counters = mapOf(Counters.MSG_PEER_KEY_CHANGED to 1L),
@@ -323,7 +383,8 @@ class DiagnosticsReportTest {
             logcat = emptyList(),
         )
         assertTrue(report.contains("смена ключа у собеседника (раз)=1"))
-        assertTrue(report.contains("отсканируйте его QR-код заново"))
+        assertTrue(report.contains("проверьте личность собеседника"))
+        assertFalse(report.contains("отсканируйте его QR-код заново"))
     }
 
     /**
@@ -419,7 +480,7 @@ class DiagnosticsReportTest {
             facts(counters = mapOf(Counters.MSG_QUEUED_OFFLINE to 4L)),
         ).first { it.title == "Сообщения" }
         assertEquals(DiagnosticsLevel.INFO, message.level)
-        assertTrue(message.value.contains("отложено до сети 4"))
+        assertTrue(message.value.contains("отложено до сети/ключей 4"))
     }
 
     /** Сбой отправки обязан быть назван, а не спрятан в «всё хорошо». */
@@ -631,7 +692,7 @@ class DiagnosticsReportTest {
         )
 
         listOf(
-            "apu-diag/4",
+            "apu-diag/5",
             "[сводка]",
             "[окружение]",
             "[сеть]",

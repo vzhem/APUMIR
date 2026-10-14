@@ -117,6 +117,8 @@ class CoreServerService : Service() {
     private val PRESENCE_SWEEP_MS = 60_000L
     private val FILE_PUMP_INTERVAL_MS = 20000L
     private val INITIAL_FILE_PUMP_DELAY_MS = 5000L
+    /** Boot-time readiness only: a failed key unlock cannot be diagnosed as a peer-key change. */
+    @Volatile private var localCryptoReadyAtStartup = false
 
     // Раунд 121: свой каталог гифок роя (APUGIF1).
     private val gifCatalogSentAt = mutableMapOf<String, Long>()
@@ -721,10 +723,49 @@ class CoreServerService : Service() {
             val legacyRoutingId = existingPubKey
                 ?: prefs.getString("node_id", null)
                 .orEmpty()
-            // Раунд 261: независимые пред-шаги идут ПАРАЛЛЕЛЬНО: движок ждёт
-            // самый медленный, а не сумму всех. Битый Keystore (KeyMint может
-            // виснуть надолго) не задерживает старт: у каждого шага потолок,
-            // по таймауту - честный деград в legacy/RAM-only.
+            // The signed identity is captured ONCE when Rust starts. Give its Keystore unlock
+            // priority over relay custody and address-book restoration on a cold KeyMint;
+            // competing operations previously had the same 4s deadline and could leave the
+            // running core permanently in legacy-only mode until a restart.
+            localCryptoReadyAtStartup = false
+            val signing = if (prefs.getBoolean("identity_created", false)) {
+                kotlinx.coroutines.withTimeoutOrNull(8_000) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        IdentitySigningKeyStore.installIntoCore(applicationContext, legacyRoutingId)
+                    }
+                }
+            } else {
+                null
+            }
+            Log.i(
+                TAG,
+                "Identity signing mode: ${signing?.mode ?: "legacy-only"}, " +
+                    "keyId=${signing?.keyId?.take(12) ?: "none"}"
+            )
+            val fileExchange = if (signing != null) {
+                kotlinx.coroutines.withTimeoutOrNull(8_000) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        IdentitySigningKeyStore.existingVerifiedBinding(applicationContext)?.let { identityBinding ->
+                            FileExchangeKeyStore.initialize(applicationContext, legacyRoutingId, identityBinding)
+                        }
+                    }
+                }
+            } else null
+            Log.i(
+                TAG,
+                "File exchange identity: ${if (fileExchange != null) "ready" else "unavailable"}, " +
+                    "key=${fileExchange?.publicKeySha256Prefix ?: "none"}"
+            )
+            localCryptoReadyAtStartup = signing != null && fileExchange != null
+            if (signing == null && prefs.getBoolean("identity_created", false)) {
+                TransferDiagnostics.recordWarning("crypto", "подписывающий ключ не установлен до старта ядра; прямой подписанный рой недоступен")
+            }
+            if (signing != null && fileExchange == null) {
+                TransferDiagnostics.recordWarning("crypto", "ключ обмена недоступен при старте; личные конверты и файлы могут не открываться")
+            }
+
+            // The other bounded pre-start tasks may now run in parallel: they cannot evict
+            // the signing identity from the current core's snapshot.
             val atRestDeferred = async {
                 (kotlinx.coroutines.withTimeoutOrNull(4_000) {
                     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -739,34 +780,6 @@ class CoreServerService : Service() {
                     }
                 }.onFailure { Log.w(TAG, "AddressBook restore failed: ${it.message}") }
             }
-            val signing = if (prefs.getBoolean("identity_created", false)) {
-                kotlinx.coroutines.withTimeoutOrNull(4_000) {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        IdentitySigningKeyStore.installIntoCore(applicationContext, legacyRoutingId)
-                    }
-                }
-            } else {
-                null
-            }
-            Log.i(
-                TAG,
-                "Identity signing mode: ${signing?.mode ?: "legacy-only"}, " +
-                    "keyId=${signing?.keyId?.take(12) ?: "none"}"
-            )
-            val fileExchange = if (signing != null) {
-                kotlinx.coroutines.withTimeoutOrNull(4_000) {
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        IdentitySigningKeyStore.existingVerifiedBinding(applicationContext)?.let { identityBinding ->
-                            FileExchangeKeyStore.initialize(applicationContext, legacyRoutingId, identityBinding)
-                        }
-                    }
-                }
-            } else null
-            Log.i(
-                TAG,
-                "File exchange identity: ${if (fileExchange != null) "ready" else "unavailable"}, " +
-                    "key=${fileExchange?.publicKeySha256Prefix ?: "none"}"
-            )
 
             // M8-C slice 3: Android Keystore мост. Устанавливаем at-rest ключ
             // СТРОГО ДО старта движка. Недоступность ключа = честный RAM-only
@@ -996,6 +1009,7 @@ class CoreServerService : Service() {
                                             .noteSealedNotOpened(
                                                 senderKeyKnown = knownHere,
                                                 staleKeyCopy = leftoverHere,
+                                                localIdentityUnavailable = !localCryptoReadyAtStartup,
                                             )
                                     } else {
                                         // Ключ рабочий: гасим плашку и запоминаем
@@ -2092,18 +2106,13 @@ class CoreServerService : Service() {
                             .noteSealedNotOpened(
                                 senderKeyKnown = known,
                                 staleKeyCopy = leftover,
+                                localIdentityUnavailable = !localCryptoReadyAtStartup,
                             )
-                        if (known && !leftover) {
-                            // Ключ собеседника нам известен — значит, проблема на
-                            // его стороне: он запечатал для нашей ПРЕЖНЕЙ копии
-                            // ключа. Две вещи для человека, а не для отчёта:
-                            // 1) пометка у этого чата («не открывается, что
-                            //    делать») — её читает экран переписки;
-                            // 2) мягкий сигнал собеседнику: отдать ему свой ключ
-                            //    ещё раз (не чаще раза в минуту на узел). Если у
-                            //    него закреплена старая копия, его приложение
-                            //    скажет ему то же самое, и пересканирование QR
-                            //    починит переписку.
+                        if (known && !leftover && localCryptoReadyAtStartup) {
+                            // An unopened envelope cannot prove the recipient or a stale peer
+                            // key. Offer a neutral warning only if our own keys were available
+                            // at boot. Re-announcing our signed PUBLIC binding is safe; never
+                            // reset a key or tell the user to rescan QR based on this alone.
                             com.vladimir.messenger.data.security.KeyDesyncNotice
                                 .note(applicationContext, senderId)
                             runCatching { fileTransferRouter.requestExchangeBinding(senderId) }
