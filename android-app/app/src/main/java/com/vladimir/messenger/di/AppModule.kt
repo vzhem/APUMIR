@@ -130,11 +130,12 @@ object AppModule {
 
     @Provides @Singleton
     fun provideChatRepository(
+        @ApplicationContext context: Context,
         chatDao: ChatDao,
         messageDao: MessageDao,
         groupDao: GroupDao,
         referralAttribution: com.vladimir.messenger.data.referral.ReferralAttributionSender,
-    ): ChatRepository = ChatRepository(chatDao, messageDao, groupDao, referralAttribution)
+    ): ChatRepository = ChatRepository(context, chatDao, messageDao, groupDao, referralAttribution)
 
     @Provides @Singleton
     fun provideContactRepository(contactDao: ContactDao, chatRepository: ChatRepository): ContactRepository =
