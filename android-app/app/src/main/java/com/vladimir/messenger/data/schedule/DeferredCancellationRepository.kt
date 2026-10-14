@@ -14,6 +14,9 @@ class DeferredCancellationRepository @Inject constructor(
     private val db: AppDatabase,
     private val notifications: NotificationHelper,
 ) {
+    /** Older channel deletion can erase the whole post topic including other authors' comments. */
+    suspend fun canUseLegacyGroupDelete(groupId: String): Boolean = db.groupDao().getGroupById(groupId)?.isChannel == false
+
     suspend fun deleteVisible(sender: String, messageId: String, ownCopy: Boolean = false) {
         db.withTransaction {
             val messages = db.messageDao()

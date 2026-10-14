@@ -185,7 +185,7 @@ class DeferredDelivery @Inject constructor(
     private suspend fun pumpCancellation(item: ScheduledSendStore.Item): Boolean {
         val letter = DeferredWire.parse(item.wire) ?: error("Повреждён запрос отмены")
         val request = DeferredWire.parseCancel(DeferredWire.cancel(letter)) ?: error("Некорректный запрос отмены")
-        check(DeferredInboxStore.cancel(context, item.ownerId, request)) { "Не удалось сохранить отмену" }
+        check(DeferredInboxStore.cancel(context, item.ownerId, request, localIntent = true)) { "Не удалось сохранить отмену" }
         cancellations.deleteVisible(item.ownerId, letter.id, ownCopy = true)
         DeferredInboxStore.completeCancellation(context, DeferredInboxStore.entryKey(context, item.ownerId, letter.id))
         val wire = DeferredWire.cancel(letter)
@@ -193,7 +193,8 @@ class DeferredDelivery @Inject constructor(
             ScheduledSendStore.update(context, item.id) { it.copy(nextPeer = index + 1) }
             // A compatible fallback may already have left the native queue at/after the deadline.
             // Send the old deletion format too; do not claim that its transport ACK proves deletion.
-            if (DeferredWire.due(item.sendAtMs, System.currentTimeMillis())) {
+            if (DeferredWire.due(item.sendAtMs, System.currentTimeMillis()) &&
+                (!item.isGroup || cancellations.canUseLegacyGroupDelete(letter.groupId))) {
                 val legacy = if (item.isGroup) {
                     com.vladimir.messenger.data.group.GroupWire.buildMessageDelete(letter.groupId, letter.id, item.ownerId)
                 } else "APUDEL1|${item.targetId}|${letter.id}|${System.currentTimeMillis()}"

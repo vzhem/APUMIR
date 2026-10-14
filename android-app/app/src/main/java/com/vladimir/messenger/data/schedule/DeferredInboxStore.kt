@@ -26,7 +26,7 @@ object DeferredInboxStore {
     fun get(context: Context, key: String): DeferredInboxStorage.Entry? = storage.get(context, key)
     fun owns(context: Context, messageId: String): Boolean = storage.owns(context, messageId)
     fun complete(context: Context, key: String) = storage.complete(context, key)
-    fun cancel(context: Context, sender: String, request: DeferredWire.Receipt): Boolean = storage.cancel(context, sender, request)
+    fun cancel(context: Context, sender: String, request: DeferredWire.Receipt, localIntent: Boolean = false): Boolean = storage.cancel(context, sender, request, localIntent)
     fun cancellation(context: Context, key: String): DeferredInboxStorage.Cleanup? = storage.cancellation(context, key)
     fun completeCancellation(context: Context, key: String) = storage.completeCancellation(context, key)
     fun isCancelled(context: Context, sender: String, id: String): Boolean = storage.isCancelled(context, sender, id)
@@ -121,7 +121,7 @@ class DeferredInboxStorage(
     }
 
     /** Sender-scoped durable tombstone also handles cancellation arriving BEFORE the data. */
-    fun cancel(context: Context, sender: String, request: DeferredWire.Receipt): Boolean = synchronized(lock) {
+    fun cancel(context: Context, sender: String, request: DeferredWire.Receipt, localIntent: Boolean = false): Boolean = synchronized(lock) {
         val owner = owner(context)
         check(owner.startsWith("pk_"))
         val db = db(context)
@@ -132,13 +132,15 @@ class DeferredInboxStorage(
                 true
             } else false
         }
-        if (!exists) {
+        if (!exists && !localIntent) {
             db.rawQuery("SELECT COUNT(*) FROM inbox WHERE owner=? AND done>=2", arrayOf(owner)).use {
                 it.moveToFirst(); if (it.getInt(0) >= 16384) return@synchronized false
             }
             db.rawQuery("SELECT COUNT(*) FROM inbox WHERE owner=? AND sender=? AND done>=2", arrayOf(owner, sender)).use {
                 it.moveToFirst(); if (it.getInt(0) >= 1024) return@synchronized false
             }
+        }
+        if (!exists) {
             db.insertOrThrow("inbox", null, ContentValues().apply {
                 put("entry_key", entryKey); put("owner", owner); put("sender", sender)
                 put("message_id", request.id); put("digest", request.digest); put("show_at", 0L)
