@@ -110,6 +110,11 @@ class MuteNoticeContracts(unittest.TestCase):
                     f"нет строки {name} в {locale}",
                 )
 
+    def test_the_journal_remembers_why_the_row_exists(self):
+        """Журнал — запись дома: у плашки должна быть строка, откуда она взялась."""
+        notes = source(ROOT / "docs/AI_COLLABORATION_NOTES.md")
+        self.assertIn("Почему молчал второй телефон", notes)
+
     def test_pure_rule_is_compiled_and_run_without_android(self):
         runner = source(RUNNER)
         self.assertIn("IdentityHealth.kt", runner, "правило не компилируется на runner")
