@@ -1171,5 +1171,109 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertNotIn("if (digits.isNotEmpty()) return digits.toLongOrNull()", scan)
 
 
+    def test_mqtt_packet_limit_is_ours_and_not_the_client_default(self):
+        """2026-10-15: «emqx режет пакеты больше 10 КБ» оказалось нашим же
+
+        пределом. У rumqttc 0.25.1 `MqttOptions::new` ставит 10 240 байт и на
+        вход, и на выход, и НИ ОДНА наша опция его не переопределяла: пакет не
+        уходил в сеть вовсе, а ошибка клиента называла это «broker's maximum
+        packet size». От этого страдали наши же законные пакеты — кусок истории
+        до 16 КиБ после двух base64 даёт на проводе ~30 КБ, поэтому истории и
+        «ждали получателя» вечно.
+
+        Почему проверка живёт здесь: это единственный гейт исходников, который
+        прогоняется и на PR, и на сборке тега, а видит владелец эту поломку
+        ровно как строку в «Логах».
+        """
+        transport = source(ROOT / "rust-core/src/network/mqtt_transport.rs")
+        self.assertIn("pub(crate) const MAX_MQTT_PACKET_BYTES: usize = 64 * 1024;", transport)
+        # Предел обязан быть не меньше того, что очередь пересылки обещает
+        # принять и хранить: иначе запись лежит и не может быть отдана.
+        self.assertIn(
+            "MAX_MQTT_PACKET_BYTES >= crate::network::relay_queue::MAX_MESH_RELAY_ENVELOPE_BYTES",
+            transport,
+        )
+        # Ставится в ОБЕИХ постоянных сессиях, и проверяется до сети.
+        self.assertEqual(transport.count("set_max_packet_size(MAX_MQTT_PACKET_BYTES, MAX_MQTT_PACKET_BYTES)"), 2)
+        self.assertIn("fn publish_fits_our_limit(", transport)
+        self.assertEqual(
+            transport.count("if !publish_fits_our_limit(operation, topic, payload.len())"),
+            2,
+            "предел обязан проверяться и в одиночной отправке, и в веере по брокерам",
+        )
+        # Размер считается по всему пакету, как у rumqttc (Packet::size()).
+        self.assertIn("fn publish_packet_size(topic: &str, payload_len: usize) -> usize", transport)
+        for test in (
+            "fn mqtt_packet_limit_covers_the_relay_queue_promise()",
+            "fn largest_story_packet_fits_our_limit_but_not_the_client_default()",
+            "fn publish_packet_size_counts_header_topic_and_payload()",
+            "fn our_limit_refuses_oversize_publish_before_the_network()",
+        ):
+            with self.subTest(test=test):
+                self.assertIn(test, transport)
+        # Остальные сессии (наблюдатель вторичного брокера и разовая отправка
+        # квитанции) живут мимо постоянного соединения — предел нужен и им.
+        observer = source(ROOT / "rust-core/src/network/mqtt_secondary_observer.rs")
+        self.assertIn("crate::network::mqtt_transport::MAX_MQTT_PACKET_BYTES", observer)
+        core = source(ROOT / "rust-core/src/engine/core.rs")
+        self.assertIn("crate::network::mqtt_transport::MAX_MQTT_PACKET_BYTES", core)
+
+    def test_story_packet_counters_are_explained_where_they_are_printed(self):
+        """Владелец 2026-10-15: «истории 323/262/61» читалось как «262 не ушли».
+
+        Эти счётчики считают ПРЯМУЮ ногу (`accepted` — отдано напрямую,
+        `deferred` — не отдано напрямую), а сам пакет при этом лежит в очереди
+        ядра и уходит брокером или роем. Рядом с числами обязано быть сказано,
+        что они значат, — как это уже сделано для `delete_retry`.
+        """
+        health = source(DIAG / "OperationalHealth.kt")
+        self.assertIn("val storyAttempts = counters[OperationalCounter.STORY_PACKET_ATTEMPTS] ?: 0L", health)
+        self.assertIn("истории: попыток=$storyAttempts", health)
+        self.assertIn("отдано напрямую=", health)
+        self.assertIn("не отдано напрямую=", health)
+        self.assertIn("ПРЯМАЯ нога", health)
+        self.assertIn("остаётся в очереди ядра", health)
+
+    def test_self_seed_boot_order_is_not_reported_as_a_failure(self):
+        """Владелец 2026-10-15: предупреждение самосева легло в 16:31:44, а
+
+        готовность ядра — в 16:31:48. Помпа успевала раньше ядра, и порядок
+        загрузки показывался как отказ: тратилась часовая квота повторов и
+        писалось предупреждение в «Логи». Порядок загрузки обязан оставаться
+        тихим (и не тратить квоту), а предупреждение — остаться для настоящих
+        отказов, когда ядро уже отчиталось, что ключ есть, но не открывается.
+        """
+        seeder = source(MAIN / "data/update/ApkSeeder.kt")
+        early = seeder.index("IdentityHealth.state.value.reason == IdentityHealth.Reason.UNKNOWN")
+        quota = seeder.index("if (!SelfSeedRetryPolicy.mayAttempt(")
+        self.assertLess(early, quota, "тихий выход обязан быть ДО расхода квоты")
+        self.assertIn("if (!identityReadyForSeeding() &&", seeder)
+        self.assertIn("private fun identityReadyForSeeding(): Boolean = runCatching {", seeder)
+        # Настоящий отказ по-прежнему виден: предупреждение и запись квоты целы.
+        self.assertIn("самосев отложен: локальная подписывающая/файловая identity не готова", seeder)
+        self.assertIn("val keysReady = identityReadyForSeeding()", seeder)
+
+    def test_pending_outgoing_count_says_what_it_counts(self):
+        """«Ещё не ушло» — это и PENDING, и QUEUED_OFFLINE.
+
+        Строка «недоотправленных сообщений» на экране диагностики считала
+        только PENDING, то есть почти ноль при полной очереди ядра (владелец
+        2026-10-15: «своё ждёт получателя=1000» против нуля в этой строке).
+        Список обязан совпадать с тем, по которому работает досылка.
+        """
+        dao = source(MAIN / "data/local/dao/MessageDao.kt")
+        query = dao.split("SELECT COUNT(*) FROM messages WHERE isFromMe = 1", 1)[1].split(")", 1)[0]
+        self.assertIn("'PENDING'", query)
+        self.assertIn("'QUEUED_OFFLINE'", query)
+        # Тот же список, что у помпы досылки (`getPendingOutgoingMessages`):
+        # иначе «ещё не ушло» на экране и то, что реально досылается, разойдутся.
+        pump = dao.split(
+            "@Query(\"SELECT * FROM messages WHERE isFromMe = 1 AND status IN "
+            "('PENDING', 'QUEUED_OFFLINE') ORDER BY timestamp ASC\")",
+            1,
+        )
+        self.assertEqual(len(pump), 2, "помпа досылки обязана брать оба состояния")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

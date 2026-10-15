@@ -4637,6 +4637,13 @@ impl P2PCore {
         for (host, port) in MQTT_BROKERS {
             let mut opts = MqttOptions::new(&client_id, *host, *port);
             opts.set_keep_alive(std::time::Duration::from_secs(30));
+            // Разовый путь доставки квитанции идёт мимо постоянной сессии, но
+            // предел у него тот же: иначе крупный пакет молча не уйдёт отсюда
+            // (умолчание rumqttc - 10 240 байт, см. MAX_MQTT_PACKET_BYTES).
+            opts.set_max_packet_size(
+                crate::network::mqtt_transport::MAX_MQTT_PACKET_BYTES,
+                crate::network::mqtt_transport::MAX_MQTT_PACKET_BYTES,
+            );
             let (client, mut el) = AsyncClient::new(opts, 10);
             let topic = format!("p2pm2/msg/{}", to_node_id);
             let rt = tokio::runtime::Builder::new_current_thread()

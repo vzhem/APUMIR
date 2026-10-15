@@ -387,8 +387,21 @@ interface MessageDao {
     @Query("DELETE FROM messages WHERE content LIKE 'APUTYP1|%'")
     suspend fun deleteTypingJunk(): Int
 
-    /** р240: сколько своих сообщений ждёт отправки (для диагностики). */
-    @Query("SELECT COUNT(*) FROM messages WHERE isFromMe = 1 AND status = 'PENDING'")
+    /**
+     * р240: сколько своих сообщений ЕЩЁ НЕ УШЛО (для диагностики).
+     *
+     * Считаем и `PENDING`, и `QUEUED_OFFLINE`: второе — сообщение, уже отданное
+     * ядру, но ещё не подтверждённое получателем, то есть точно такое же «ещё не
+     * ушло». Раньше в счёт попадало только `PENDING`, и строка «недоотправленных
+     * сообщений» на экране диагностики показывала почти ноль, когда очередь
+     * ядра стояла полной (владелец 2026-10-15: «своё ждёт получателя=1000»
+     * против нуля в этой строке). Это тот же список, по которому работает
+     * досылка (`pumpPendingOutgoing`), поэтому числа обязаны совпадать.
+     */
+    @Query(
+        "SELECT COUNT(*) FROM messages WHERE isFromMe = 1 " +
+            "AND status IN ('PENDING', 'QUEUED_OFFLINE')"
+    )
     suspend fun countPendingOutgoing(): Int
 
     /** р239: в каких чатах лежит этот мусор и по скольку строк. */
