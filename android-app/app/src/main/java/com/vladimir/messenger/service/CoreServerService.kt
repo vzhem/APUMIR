@@ -2665,6 +2665,17 @@ class CoreServerService : Service() {
                             } catch (e: Exception) {
                                 Log.e(TAG, "Retry failed", e)
                             }
+                            // История догоняет собеседника тем же толчком, что и
+                            // переписка: пока он в сети, прямой канал работает, а
+                            // внешний при живом соседе закрыт. Без этого пакеты
+                            // истории ждали своей минуты и окно проходило мимо.
+                            try {
+                                chatRepository.pumpStoryOutbox(wakePeer = peerId)
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                throw cancelled
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Story pump after peer discovery failed: ${e.message}")
+                            }
                             try {
                                 RuntimeDiagnostics.measure(DiagnosticOperation.FILE_PUMP) { fileTransferRouter.pumpOutgoing() }
                                 fileTransferRouter.resumeWaitingForRecipient()

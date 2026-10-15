@@ -980,6 +980,7 @@
     <string name="st_error">Error: %1$s</string>
     <string name="st_install_failed">Couldn’t start the installation: %1$s</string>
     <string name="st_no_updates">No updates found (there are no neighbors on the network or they are on the same version)</string>
+    <string name="st_check_unreachable">Could not check: neither neighbors nor the official site responded. Check your connection and try again</string>
     <string name="st_saving">Saving…</string>
     <string name="st_failed_msg">Didn’t work: %1$s</string>
     <string name="st_asking_swarm">Asking the swarm…</string>

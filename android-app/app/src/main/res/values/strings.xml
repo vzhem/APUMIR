@@ -989,6 +989,7 @@
     <string name="st_error">Ошибка: %1$s</string>
     <string name="st_install_failed">Не удалось запустить установку: %1$s</string>
     <string name="st_no_updates">Обновлений не найдено (соседей в сети нет или они на этой же версии)</string>
+    <string name="st_check_unreachable">Проверить не удалось: ни соседи, ни официальный сайт не ответили. Проверьте интернет и попробуйте снова</string>
     <string name="st_saving">Сохраняю…</string>
     <string name="st_failed_msg">Не получилось: %1$s</string>
     <string name="st_asking_swarm">Спрашиваю рой…</string>

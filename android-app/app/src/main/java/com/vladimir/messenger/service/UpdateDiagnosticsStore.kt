@@ -23,6 +23,7 @@ object UpdateDiagnosticsStore {
     private const val KEY_SOURCE = "source"
     private const val KEY_RESULT = "result"
     private const val KEY_HTTP_STATUS = "http_status"
+    private const val KEY_MANUAL_WINDOW = "manual_window"
     private const val KEY_GITHUB_RESULT = "github_result"
     private const val KEY_GITHUB_HTTP_STATUS = "github_http_status"
     private const val KEY_RELAY_RESULT = "relay_result"
@@ -41,6 +42,13 @@ object UpdateDiagnosticsStore {
         var source: String = "none"
         var outcome: String = "checking"
         var httpStatus: Int? = null
+        /**
+         * Что сделала ручная кнопка с внешним каналом: `not_manual` -
+         * авто-проверка, `not_attempted` - ручная, но до канала не дошла,
+         * `opened` - открыла внешний канал (живой сосед или ядро не поднято),
+         * `already_allowed` - он и так был открыт.
+         */
+        var manualWindow: String = "not_manual"
         var githubOutcome: String = "not_attempted"
         var githubHttpStatus: Int? = null
         var relayOutcome: String = "not_attempted"
@@ -50,6 +58,9 @@ object UpdateDiagnosticsStore {
     internal fun begin(context: Context, currentVersion: String, trigger: String): CheckTrace {
         val startedAt = System.currentTimeMillis()
         val trace = CheckTrace(startedAt, safeVersion(currentVersion), safeTrigger(trigger))
+        // Ручная проверка, оборвавшаяся до запроса (ядро не поднято), не должна
+        // выглядеть в «Логах» как авто-проверка.
+        trace.manualWindow = if (trace.trigger == "manual") "not_attempted" else "not_manual"
         prefs(context).edit()
             .putLong(KEY_LAST_CHECK_AT, 0L)
             .putLong(KEY_CHECK_DURATION, -1L)
@@ -58,6 +69,7 @@ object UpdateDiagnosticsStore {
             .putString(KEY_TRIGGER, trace.trigger)
             .putString(KEY_SOURCE, "none")
             .putString(KEY_RESULT, "checking")
+            .putString(KEY_MANUAL_WINDOW, trace.manualWindow)
             .putString(KEY_GITHUB_RESULT, "not_attempted")
             .putString(KEY_RELAY_RESULT, "not_attempted")
             .remove(KEY_HTTP_STATUS)
@@ -120,6 +132,7 @@ object UpdateDiagnosticsStore {
             .putString(KEY_TRIGGER, trace.trigger)
             .putString(KEY_SOURCE, safeSource(trace.source))
             .putString(KEY_RESULT, safeOutcome(trace.outcome))
+            .putString(KEY_MANUAL_WINDOW, safeManualWindow(trace.manualWindow))
             .putString(KEY_GITHUB_RESULT, safeOutcome(trace.githubOutcome))
             .putString(KEY_RELAY_RESULT, safeOutcome(trace.relayOutcome))
         trace.httpStatus?.let { editor.putInt(KEY_HTTP_STATUS, it) } ?: editor.remove(KEY_HTTP_STATUS)
@@ -150,6 +163,7 @@ object UpdateDiagnosticsStore {
             trigger = preferences.getString(KEY_TRIGGER, "never").orEmpty(),
             source = preferences.getString(KEY_SOURCE, "none").orEmpty(),
             outcome = preferences.getString(KEY_RESULT, "never_checked").orEmpty(),
+            manualExternalWindow = preferences.getString(KEY_MANUAL_WINDOW, "unknown").orEmpty(),
             httpStatus = preferences.getInt(KEY_HTTP_STATUS, -1).takeIf { it in 100..599 },
             githubOutcome = preferences.getString(KEY_GITHUB_RESULT, "not_attempted").orEmpty(),
             githubHttpStatus = preferences.getInt(KEY_GITHUB_HTTP_STATUS, -1).takeIf { it in 100..599 },
@@ -200,10 +214,21 @@ object UpdateDiagnosticsStore {
         else -> "none"
     }
 
-    private fun safeOutcome(value: String): String = when (value) {
+    internal fun safeOutcome(value: String): String = when (value) {
         "checking", "response_received", "update_available", "up_to_date", "http_error", "network_error",
         "invalid_response", "asset_missing", "not_due", "unavailable", "fallback_not_due",
-        "never_checked", "not_attempted" -> value
+        "never_checked", "not_attempted", "swarm_first_no_http", "swarm_search_pending",
+        "swarm_available" -> value
+        else -> "unknown"
+    }
+
+    /**
+     * «swarm_first_no_http» и «swarm_search_pending» раньше не были в списке и
+     * превращались в «unknown»: по «Логам» нельзя было понять, что проверку
+     * остановил рой, а не сеть. Теперь причина видна как есть.
+     */
+    internal fun safeManualWindow(value: String): String = when (value) {
+        "not_manual", "not_attempted", "already_allowed", "opened" -> value
         else -> "unknown"
     }
 

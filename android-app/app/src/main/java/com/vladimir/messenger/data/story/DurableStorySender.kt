@@ -70,14 +70,33 @@ internal object DurableStorySender {
         accepted && persisted
     }
 
-    suspend fun pump(context: Context, ownId: String, send: suspend (String, String, String) -> Boolean) = pumpMutex.withLock {
+    /**
+     * Досылка. [wakePeer] — собеседник, который только что появился в сети:
+     * его записи идут вне очереди.
+     *
+     * Зачем. При живом соседе внешний канал закрыт правилом «рой прежде
+     * внешнего», и единственный путь к другу — прямой, пока тот в сети. Пакеты
+     * истории ждали своей минуты после неудачи и могли пропустить короткое
+     * появление получателя; у сообщений такой толчок есть
+     * (`retryPendingMessagesForPeer` по presence), у историй его не было.
+     */
+    suspend fun pump(
+        context: Context,
+        ownId: String,
+        wakePeer: String? = null,
+        send: suspend (String, String, String) -> Boolean,
+    ) = pumpMutex.withLock {
         val now = System.currentTimeMillis()
         val due = synchronized(lock) {
             load(context)
             if (status == "read_failed") return@withLock
             val expired = queue.purge(now)
             OperationalDiagnostics.tracker.count(OperationalCounter.STORY_EXPIRED, expired.toLong())
-            if (expired > 0) save()
+            val woken = if (wakePeer.isNullOrBlank()) 0 else queue.wake(wakePeer, ownId, now)
+            if (woken > 0) {
+                OperationalDiagnostics.tracker.count(OperationalCounter.STORY_PRESENCE_WAKE, woken.toLong())
+            }
+            if (expired > 0 || woken > 0) save()
             queue.due(now, ownId)
         }
         // At most 16 packets per service pump, fair rotation across recipients.
@@ -128,6 +147,6 @@ internal object DurableStorySender {
         val rows = queue.snapshot()
         val oldest = rows.minOfOrNull { it.createdAtMs }?.let { (System.currentTimeMillis() - it).coerceAtLeast(0) }
         "[доставка историй]\nstory_outbox=$status · pending_recipient_jobs=${rows.size} · max_jobs=256 · oldest_age_ms=${oldest ?: -1}\n" +
-            "TTL=24ч; до 16 пакетов за цикл; retry=60с; очередь переживает рестарт отправителя. Транспортный успех не подтверждает показ/сохранение у друга.\n"
+            "TTL=24ч; до 16 пакетов за цикл; retry=60с; толчок при появлении получателя; очередь переживает рестарт отправителя. Транспортный успех не подтверждает показ/сохранение у друга.\n"
     }
 }

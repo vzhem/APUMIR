@@ -24,6 +24,23 @@ internal class StoryDeliveryQueue(entries: List<StoryDeliveryEntry> = emptyList(
         rows.removeAll { now - it.createdAtMs >= TTL_MS || it.createdAtMs > now + 300_000 }
         return old - rows.size
     }
+
+    /**
+     * Собеседник только что появился в сети: снять отсрочку его записей, чтобы
+     * пакет ушёл именно в это окно. Без этого пакет ждал своей минуты и мог
+     * пропустить короткое появление получателя — а при живом соседе внешний
+     * канал закрыт правилом «рой прежде внешнего», и другого пути уже нет.
+     */
+    fun wake(peer: String, owner: String, now: Long): Int {
+        var woken = 0
+        for (index in rows.indices) {
+            val row = rows[index]
+            if (row.peer != peer || row.owner != owner || row.nextAttemptAtMs <= now) continue
+            rows[index] = row.copy(nextAttemptAtMs = 0)
+            woken++
+        }
+        return woken
+    }
     fun due(now: Long, owner: String? = null): List<StoryDeliveryEntry> =
         rows.filter { it.nextAttemptAtMs <= now && (owner == null || it.owner == owner) }.take(16)
     fun contains(entry: StoryDeliveryEntry): Boolean = entry in rows

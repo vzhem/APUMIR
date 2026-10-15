@@ -344,6 +344,17 @@ class SettingsViewModel @Inject constructor(
             val release = runCatching { updateChecker.checkForUpdate(currentVersion, manual = true) }.getOrNull()
             _officialRelease.value = release
             _updatesChecking.value = false
+            // Ручная кнопка теперь спрашивает и внешний канал даже при живом
+            // соседе. «Обновлений нет» говорим только тогда, когда ответ
+            // действительно дошёл: если ни рой, ни сайт не ответили, так и
+            // говорим - иначе человек считает версию проверенной, а её просто
+            // не спросили.
+            val outcome = runCatching {
+                com.vladimir.messenger.service.UpdateDiagnosticsStore.snapshot(context).outcome
+            }.getOrDefault("")
+            val unreachable = release == null && outcome in setOf(
+                "network_error", "http_error", "invalid_response", "unavailable", "swarm_search_pending",
+            )
             // Соседи отвечают на `upask` не мгновенно: предложения доедут
             // через пару секунд и карточка обновится сама (StateFlow).
             val neighbors = apkOffers.value.size
@@ -354,6 +365,7 @@ class SettingsViewModel @Inject constructor(
                     context.getString(R.string.st_new_version_official, release.version.removePrefix("v"))
                 neighbors > 0 ->
                     context.getString(R.string.st_neighbors_offer)
+                unreachable -> context.getString(R.string.st_check_unreachable)
                 asked > 0 -> context.getString(R.string.st_asked_neighbors, asked)
                 else -> context.getString(R.string.st_no_updates)
             }
