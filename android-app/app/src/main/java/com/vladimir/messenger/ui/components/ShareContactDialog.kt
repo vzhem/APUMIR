@@ -288,7 +288,10 @@ private fun ContactSelectionMark(checked: Boolean) {
         modifier = Modifier
             .size(25.dp)
             .clip(shape)
-            .background(if (checked) apuGoldBrush() else Color.White.copy(alpha = 0.92f))
+            .then(
+                if (checked) Modifier.background(apuGoldBrush(), shape)
+                else Modifier.background(Color.White.copy(alpha = 0.92f), shape),
+            )
             .border(
                 width = 1.2.dp,
                 color = if (checked) ApuGoldDeep else ApuBubbleAccentColor.copy(alpha = 0.38f),
