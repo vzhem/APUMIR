@@ -88,6 +88,21 @@
     <string name="action_close">Закрыть</string>
     <string name="settings_change_avatar">Изменить аватар</string>
     <string name="settings_change_name">Изменить имя</string>
+    <!-- День рождения: своя дата в профиле и пузырь-поздравление у друзей. -->
+    <string name="settings_birthday">День рождения</string>
+    <string name="settings_birthday_not_set">Не указан</string>
+    <string name="settings_birthday_visible">Дата видна друзьям</string>
+    <string name="settings_birthday_visible_hint">В день рождения друзья увидят вверху подсказку поздравить.</string>
+    <string name="settings_birthday_hidden_hint">Скрытую дату не видит никто: она не покидает этот телефон.</string>
+    <string name="birthday_dialog_title">День рождения</string>
+    <string name="birthday_pick_date">Выбрать дату</string>
+    <string name="birthday_year_hint">Год остаётся на этом телефоне и друзьям не передаётся: им нужен только день.</string>
+    <string name="birthday_clear">Убрать дату</string>
+    <string name="birthday_save">Готово</string>
+    <string name="birthday_banner_suffix">празднует день рождения!</string>
+    <string name="birthday_banner_action">Поздравить</string>
+    <string name="birthday_banner_hide">Скрыть на сегодня</string>
+    <string name="birthday_banner_more">и ещё %1$d</string>
     <string name="settings_share_profile">Поделиться профилем</string>
     <string name="settings_share_profile_hint">Отправить ссылку для добавления в контакты</string>
     <string name="settings_ranks">Ранги и возможности</string>

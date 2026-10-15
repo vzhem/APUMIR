@@ -470,6 +470,10 @@ class MainActivity : ComponentActivity() {
         com.vladimir.messenger.data.swarm.ServerMode.init(this)
         UsernameHolder.init(this)
         AvatarHolder.init(this)
+        // День рождения: своя дата с галочкой видимости и даты друзей,
+        // пришедшие роевой рассылкой (`bday`).
+        com.vladimir.messenger.data.profile.BirthdayStore.init(this)
+        com.vladimir.messenger.data.profile.PeerBirthdayStore.init(this)
         setContent {
             val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
             // Сплэш показывается при запуске приложения (нажатии на иконку).

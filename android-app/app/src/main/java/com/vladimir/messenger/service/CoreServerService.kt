@@ -700,6 +700,9 @@ class CoreServerService : Service() {
                 // затем разослать свой контактам (раунд 40).
                 runCatching { groupRepository.loadAvatars() }
                 runCatching { groupRepository.publishMyAvatar() }
+                // День рождения: своя (видимая) дата — контактам, скрытая не
+                // уходит вовсе. Даты друзей лежат в своей книге.
+                runCatching { groupRepository.publishMyBirthday() }
                 // Сколько места под пересылку отдаю - контактам, для их рейтинга.
                 runCatching { groupRepository.publishMyCapabilities() }
             }
@@ -723,6 +726,13 @@ class CoreServerService : Service() {
                 com.vladimir.messenger.ui.theme.AvatarHolder.uri
                     .drop(1)
                     .collect { runCatching { groupRepository.publishMyAvatar(force = true) } }
+            }
+            // Задал, изменил или скрыл день рождения - сразу объявить (скрытие
+            // шлёт отзыв: у друзей старая дата не должна остаться).
+            serviceScope.launch {
+                com.vladimir.messenger.data.profile.BirthdayStore.mine
+                    .drop(1)
+                    .collect { runCatching { groupRepository.publishMyBirthday(force = true) } }
             }
         }
 

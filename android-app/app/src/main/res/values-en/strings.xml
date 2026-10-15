@@ -79,6 +79,21 @@
     <string name="action_close">Close</string>
     <string name="settings_change_avatar">Change avatar</string>
     <string name="settings_change_name">Change name</string>
+    <!-- Birthday: your own date in the profile and the greeting bubble for friends. -->
+    <string name="settings_birthday">Birthday</string>
+    <string name="settings_birthday_not_set">Not set</string>
+    <string name="settings_birthday_visible">Date is visible to friends</string>
+    <string name="settings_birthday_visible_hint">On the day, friends see a prompt at the top to congratulate you.</string>
+    <string name="settings_birthday_hidden_hint">A hidden date is seen by nobody: it never leaves this phone.</string>
+    <string name="birthday_dialog_title">Birthday</string>
+    <string name="birthday_pick_date">Pick a date</string>
+    <string name="birthday_year_hint">The year stays on this phone and is never sent to friends: they only need the day.</string>
+    <string name="birthday_clear">Remove the date</string>
+    <string name="birthday_save">Done</string>
+    <string name="birthday_banner_suffix">celebrates a birthday!</string>
+    <string name="birthday_banner_action">Congratulate</string>
+    <string name="birthday_banner_hide">Hide for today</string>
+    <string name="birthday_banner_more">and %1$d more</string>
     <string name="settings_share_profile">Share profile</string>
     <string name="settings_share_profile_hint">Send a link so others can add you as a contact</string>
     <string name="settings_ranks">Ranks and perks</string>
