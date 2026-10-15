@@ -64,7 +64,9 @@ class StoryDeliveryQueueTest {
         queue.result(queue.due(1000).first { it.peer == "p1" }, false, 1, 1000)
         assertTrue(queue.due(1000).none { it.peer == "p1" })
         assertEquals(1, queue.wake("p1", "owner", 1000))
-        assertEquals("p1", queue.due(1000).single().peer)
+        // p2 в этот момент тоже ждёт первой попытки, поэтому проверяем именно p1:
+        // «разбудить» - значит вернуть его в очередь сейчас, не ожидая retry.
+        assertTrue(queue.due(1000).any { it.peer == "p1" })
         assertEquals(0, queue.wake("p1", "owner", 1000)) // Уже ждёт отправки - будить нечего.
     }
     @Test fun wakingTouchesNeitherTheOtherPeerNorTheOtherOwner() {
