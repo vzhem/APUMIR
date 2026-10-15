@@ -231,6 +231,14 @@ const SQL_PURGE_EXPIRED_ENC: &str =
     "DELETE FROM relay_records_enc WHERE expires_at_ms <= ?1";
 const SQL_COUNT_ENC: &str = "SELECT COUNT(*) FROM relay_records_enc";
 
+/// Отдельный бюджет разового VACUUM-преобразования legacy-хранилища
+/// (`auto_vacuum != INCREMENTAL`). Общий пятисекундный бюджет обрывает такое
+/// VACUUM на телефоне, где файл давно копил переиспользуемые страницы, и
+/// хранилище навсегда остаётся в обычном режиме (2026-10-15: файл 1.15 ГБ,
+/// 954 МБ переиспользуемых, ни одного уплотнения). Останавливает его не время,
+/// а смена поколения обслуживания: остановка ядра остаётся быстрой.
+const COMPACTION_BUDGET_SECS: u64 = 120;
+
 /// Переместить строку в карантин (в той же транзакции выполняется DELETE из
 /// основной таблицы). `reason` — короткий стабильный код, не пользовательские
 /// данные. `INSERT OR REPLACE`: повторный quarantine того же msg_id просто
@@ -593,20 +601,36 @@ impl RelayStore {
                 let mode: i64 = conn.query_row("PRAGMA auto_vacuum", [], |r| r.get(0))?;
                 let last: i64 = conn.query_row("SELECT last_compact_ms FROM relay_maintenance WHERE id=1", [], |r| r.get(0))?;
                 let parent = Path::new(path).parent().unwrap_or(Path::new("."));
-                let available = fs2::available_space(parent).unwrap_or(0);
-                let db_bytes = pages.saturating_mul(size).max(0) as u64;
-                if free * size >= 64 * 1024 * 1024 && free >= pages / 2
-                    && (last == 0 || now_ms.saturating_sub(last) >= 24 * 60 * 60 * 1000)
-                    && available > db_bytes.saturating_mul(2).saturating_add(64 * 1024 * 1024) {
+                let available = fs2::available_space(parent).ok();
+                let live_bytes = pages.saturating_sub(free).max(0).saturating_mul(size) as u64;
+                let reclaimable = free.max(0).saturating_mul(size) as u64;
+                // Разовая перестройка обычного файла требует места не под весь
+                // файл, а под ЖИВЫЕ записи: старый порог `db_bytes * 2 + 64 МиБ`
+                // на телефоне с уже выросшим файлом не выполнялся никогда, и
+                // файл только рос (см. `COMPACTION_BUDGET_SECS`).
+                let need = if mode == 2 { 0 } else { live_bytes.saturating_add(64 * 1024 * 1024) };
+                let enough = match available { Some(a) => a > need, None => need == 0 };
+                let worth = reclaimable >= 64 * 1024 * 1024 && free >= pages / 2;
+                let due = last == 0 || now_ms.saturating_sub(last) >= 24 * 60 * 60 * 1000;
+                if worth && due && enough {
                     if epoch != self.maintenance_epoch() { return Ok((expired, quarantine, tombstones, false)); }
-                    conn.execute("UPDATE relay_maintenance SET last_compact_ms=?1 WHERE id=1", params![now_ms])?;
                     if mode != 2 {
+                        // Смена поколения проверяется первой: остановка ядра
+                        // отменяет перестройку так же быстро, как и раньше.
+                        let rebuilding = std::time::Instant::now();
+                        let rebuilding_epoch = self.maintenance_epoch.clone();
+                        conn.progress_handler(10_000, Some(move || rebuilding_epoch.load(Ordering::Acquire) != epoch || rebuilding.elapsed() > std::time::Duration::from_secs(COMPACTION_BUDGET_SECS)));
                         conn.execute_batch("PRAGMA auto_vacuum=INCREMENTAL; VACUUM;")?;
                     } else {
                         // Incremental mode: bounded page movement, never full VACUUM.
                         conn.execute_batch("PRAGMA incremental_vacuum(16384);")?;
                     }
+                    // Отметка ставится только за то, что действительно вышло:
+                    // сорванное уплотнение не имеет права покупать сутки тишины.
+                    conn.execute("UPDATE relay_maintenance SET last_compact_ms=?1 WHERE id=1", params![now_ms])?;
                     compacted = true;
+                } else if worth && due {
+                    tracing::warn!("MESH compaction: deferred; reclaimable={} live={} available={} need={}", reclaimable, live_bytes, available.unwrap_or(0), need);
                 }
                 // Small continuous reclamation on already-incremental stores.
                 if mode == 2 && free > 0 && !compacted {

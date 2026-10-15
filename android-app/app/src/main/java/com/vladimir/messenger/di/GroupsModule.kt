@@ -51,6 +51,27 @@ object GroupsModule {
      * каждый участник получает обычный APUGRP1-конверт как личное сообщение,
      * а групповой роутер разбирает его до сохранения в чат.
      */
+    /**
+     * Идентификатор отправки группового конверта участнику.
+     *
+     * Выводится из (группа, участник, конверт), а не берётся случайным.
+     * Владелец 2026-10-15 (`своих=1000`, вытеснено 5347): досылка «удалить у
+     * всех» (раунд 137) собирает тот же конверт `msdel` заново и отправляет его
+     * тому же участнику, но с новым случайным UUID — для ядра это КАЖДЫЙ раз
+     * новое сообщение: своя очередь пересылки переполнялась, живые записи
+     * вытеснялись, а участник получал одну и ту же команду многократно.
+     * Команда `msdel` идемпотентна (см. `DeletionOutbox`), а её конверт
+     * собирается детерминированно (`GroupWire.buildMessageDelete`), поэтому
+     * один и тот же текст конверта и есть одна и та же отправка.
+     *
+     * Участник обязан входить в идентификатор: ключ очереди ядра — сам
+     * идентификатор, и общий id схлопнул бы весь веер в одну запись.
+     */
+    private fun groupFanoutId(groupId: String, recipientId: String, envelope: String): String =
+        UUID.nameUUIDFromBytes(
+            "apu-group:$groupId:$recipientId:$envelope".toByteArray(Charsets.UTF_8),
+        ).toString()
+
     @Provides
     @Singleton
     fun provideGroupDelivery(
@@ -65,7 +86,7 @@ object GroupsModule {
         // пять секунд (2026-09-08): тема, потом сообщение - по 10 с каждое.
         send = { groupId, recipientId, envelope ->
             withContext(Dispatchers.IO) {
-                RustBridge.sendMessage(UUID.randomUUID().toString(), groupId, recipientId, envelope)
+                RustBridge.sendMessage(groupFanoutId(groupId, recipientId, envelope), groupId, recipientId, envelope)
             }
         },
         // Очередь решают ярус и рейтинг: сначала свои, проверенные,

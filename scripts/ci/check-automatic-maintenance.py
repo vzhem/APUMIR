@@ -80,5 +80,31 @@ class AutomaticMaintenanceContracts(unittest.TestCase):
         self.assertIn("24L * 60 * 60 * 1000", cleanup)
         self.assertIn("ids.size < 128", cleanup)
 
+    def test_compaction_reacts_to_a_grown_file_and_never_fakes_success(self):
+        """2026-10-15: файл 1.15 ГБ, 954 МБ переиспользуемых, уплотнений ноль.
+
+        Разбор отчёта второго телефона: порог свободного места считался по
+        всему файлу (`db_bytes * 2 + 64 МиБ`), поэтому на телефоне, где файл
+        вырос вокруг переиспользуемых страниц, он не выполнялся НИКОГДА; а
+        разовый VACUUM всё равно обрывался об общий пятисекундный бюджет.
+        """
+        store = source("rust-core/src/storage/relay_store.rs")
+        start = store.index("let mut compacted = false;")
+        section = store[start:store.index("wal_checkpoint(TRUNCATE)", start)]
+        self.assertIn("live_bytes", section)
+        # Порог «вдвое больше файла плюс запас» снят: он считался по всему
+        # файлу, а не по живым записям (в комментарии он остаётся как история).
+        self.assertNotIn("let db_bytes", section)
+        self.assertNotIn("saturating_mul(2)", section)
+        # Разовое преобразование живёт на своём бюджете, и сторож смены
+        # поколения остаётся: остановка ядра отменяет работу сразу.
+        self.assertIn("COMPACTION_BUDGET_SECS", store)
+        self.assertLess(section.index("progress_handler"), section.index("VACUUM"))
+        # Суточное окно закрывается только за то, что действительно вышло.
+        self.assertLess(section.index("VACUUM"), section.index("UPDATE relay_maintenance SET last_compact_ms"))
+        # Отказ по месту обязан быть виден в логе: молчание этого гейта и
+        # стоило разбора вслепую.
+        self.assertIn("MESH compaction: deferred", section)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

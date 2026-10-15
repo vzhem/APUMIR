@@ -85,5 +85,69 @@ class DeleteReadTest(unittest.TestCase):
             self.assertIn("canDeleteForAll = uiState.canModerate || isAuthorMe", source(path))
 
 
+    def test_delete_retry_keeps_one_identity_and_counts_only_what_left(self):
+        """2026-10-15 (`delete_retry=246`, `своих=1000`): досылка удаления
+        уходила с новым случайным UUID на каждую попытку, то есть для ядра
+        каждый повтор был НОВЫМ сообщением — своя очередь пересылки
+        переполнялась, вытеснялись живые записи, а собеседник получал одну
+        команду многократно. Идентификатор команды обязан выводиться из
+        (собеседник, сообщение, момент постановки).
+
+        Отдельно про счётчик: `sendMessage`/`retryMessage` возвращают результат
+        ПРЯМОЙ ноги (`send_message_inner` -> `direct_send_ok`), поэтому `false`
+        не значит «не отправлено» — запись уже лежит в очереди ядра. Считать
+        `DELETE_RETRY` только по `true` значило бы показывать ноль у собеседника
+        без прямого канала; счётчик обязан считать попытки, а правду о досылке
+        даёт пара с `DELETE_ACK_MATCHED`."""
+        path = "data/repository/MessageDeletionRepository.kt"
+        text = source(path)
+        self.assertNotIn("UUID.randomUUID()", text)
+        pump = method(text, "pump")
+        self.assertIn("deletionMessageId(entry.peerId, entry.targetId, entry.atMs)", pump)
+        # Повтор обновляет ту же запись ядра, а не заводит вторую.
+        self.assertIn("RustBridge.retryMessage(", pump)
+        # Счётчик считает попытки и не прячется за `sent` (это результат
+        # прямой ноги: `false` бывает и у честно поставленной в очередь записи).
+        self.assertIn("OperationalDiagnostics.tracker.count(OperationalCounter.DELETE_RETRY)", pump)
+        self.assertNotIn("if (sent) OperationalDiagnostics", pump)
+        # Признак прямой ноги обязан быть виден в строке журнала.
+        self.assertIn("direct=$sent", pump)
+        first = method(text, "deleteForAllDirect")
+        self.assertIn("deletionMessageId(peer, messageId, atMs)", first)
+        # Один момент постановки идёт и в конверт, и в запись очереди: иначе
+        # идентификатор первой отправки не совпал бы с идентификатором досылки.
+        self.assertIn('val envelope = "$PREFIX|$chatId|$messageId|$atMs"', first)
+        self.assertIn("atMs = atMs,", first)
+        helper = text[text.index("private fun deletionMessageId"):]
+        self.assertIn("nameUUIDFromBytes", helper)
+        self.assertIn("private fun deletionAckId", text)
+
+    def test_group_fanout_reuses_one_identity_per_member_and_envelope(self):
+        """2026-10-15: тот же класс ошибки в ГРУППОВОМ веере.
+
+        Помпа «удалить у всех» (`GroupRepository.pumpDeletions`, раунд 137)
+        досылает один и тот же `msdel`, собирая конверт заново, но
+        идентификатор отправки брался случайным — значит для ядра каждая
+        досылка была НОВЫМ сообщением: своя очередь (1000) пухла, живые записи
+        вытеснялись (5347), а участник получал одну и ту же команду
+        многократно. Идентификатор обязан выводиться из (группа, участник,
+        конверт). УЧАСТНИК в нём обязателен: ключ очереди ядра — это сам
+        идентификатор (`entries: Mutex<HashMap<String, QueueEntry>>`), поэтому
+        общий id схлопнул бы весь веер в одну запись.
+        """
+        text = source("di/GroupsModule.kt")
+        self.assertNotIn("RustBridge.sendMessage(UUID.randomUUID()", text)
+        self.assertIn("groupFanoutId(groupId, recipientId, envelope)", text)
+        helper = text[text.index("private fun groupFanoutId"):]
+        self.assertIn("nameUUIDFromBytes", helper)
+        self.assertIn('"apu-group:$groupId:$recipientId:$envelope"', helper)
+        # Конверт группового удаления обязан оставаться детерминированным —
+        # иначе «тот же конверт» у досылки и у первой отправки разойдётся.
+        delete = source("data/group/GroupWire.kt")
+        build = method(delete, "buildMessageDelete")
+        self.assertNotIn("currentTimeMillis", build)
+        self.assertNotIn("randomUUID", build)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

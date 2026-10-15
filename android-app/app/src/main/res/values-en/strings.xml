@@ -1672,6 +1672,14 @@ The file is not on this phone</string>
     <string name="story_crop_straighten_value">Level: %1$d°</string>
     <string name="story_crop_hint">Pinch to zoom and rotate, drag to move, corners to crop.</string>
     <string name="story_crop_corner">Crop corner %1$d</string>
+    <!-- «Phone is mute»: this device key cannot be read, so private content is
+         never sent in cleartext and everything waits. -->
+    <string name="identity_mute_title_unreadable">Private messages are not leaving or arriving</string>
+    <string name="identity_mute_body_unreadable">The key of this phone cannot be read. The app never sends private content in cleartext, so messages, stories and profile mirroring are waiting. Restore the profile from a backup file to bring the keys back.</string>
+    <string name="identity_mute_title_timeout">The key did not open at startup</string>
+    <string name="identity_mute_body_timeout">Private messages and stories are waiting: this phone key did not open in time when the app started. Restart the app; if it happens again, restore the profile from a backup file.</string>
+    <string name="identity_mute_action">Restore from file</string>
+    <string name="identity_mute_hide">Hide until restart</string>
     <string name="story_photo_edit_failed">Couldn’t apply the crop. Try again.</string>
     <!-- Story feedback: reactions and comments. The feed is public - everyone
          who opens the story sees it (owner decision, 2026-10-14). -->

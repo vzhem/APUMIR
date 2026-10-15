@@ -354,6 +354,8 @@ object TransferDiagnostics {
                 relayQueueForeign = logcat.queueForeign,
                 relayQueueOwnSignals = logcat.queueOwnSignals,
                 relayQueueRecipients = logcat.queueRecipients,
+                relayQueueOwnLimit = logcat.queueOwnLimit,
+                relayQueueOwnOldestSecs = logcat.queueOwnOldestSecs,
                 relayQueueOwnEvictions = logcat.queueOwnEvictions,
                 relayQueueOwnEvictionsAreCumulative = logcat.queueOwnEvictionsAreCumulative,
                 stunFailedCycles = logcat.stunFailedCycles,
@@ -517,6 +519,8 @@ object TransferDiagnostics {
             relayQueueOwn = logcat.queueOwn,
             relayQueueForeign = logcat.queueForeign,
             relayQueueOwnSignals = logcat.queueOwnSignals,
+            relayQueueOwnLimit = logcat.queueOwnLimit,
+            relayQueueOwnOldestSecs = logcat.queueOwnOldestSecs,
         )
     }
 
@@ -545,6 +549,9 @@ object TransferDiagnostics {
          */
         val queueOwnSignals: Long?,
         val queueRecipients: Long?,
+        /** Предел своего резерва и возраст старейшей своей записи из той же строки. */
+        val queueOwnLimit: Long?,
+        val queueOwnOldestSecs: Long?,
         val queueOwnEvictions: Long,
         val queueOwnEvictionsAreCumulative: Boolean,
         val stunFailedCycles: Long,
@@ -557,7 +564,8 @@ object TransferDiagnostics {
         val isEmpty: Boolean
             get() = lines.isEmpty() && coreMessageSignals == 0L && relayQueueFull == 0L &&
                 queueOwn == null && queueForeign == null && queueOwnSignals == null &&
-                queueRecipients == null && queueOwnEvictions == 0L && !queueOwnEvictionsAreCumulative &&
+                queueRecipients == null && queueOwnLimit == null && queueOwnOldestSecs == null &&
+                queueOwnEvictions == 0L && !queueOwnEvictionsAreCumulative &&
                 stunFailedCycles == 0L &&
                 stunSuccessfulBindings == 0L && stunLastAttemptFailed == null &&
                 severities.warnings == 0L && severities.errors == 0L &&
@@ -572,6 +580,8 @@ object TransferDiagnostics {
                 queueForeign = null,
                 queueOwnSignals = null,
                 queueRecipients = null,
+                queueOwnLimit = null,
+                queueOwnOldestSecs = null,
                 queueOwnEvictions = 0L,
                 queueOwnEvictionsAreCumulative = false,
                 stunFailedCycles = 0L,
@@ -792,6 +802,10 @@ object TransferDiagnostics {
             queueForeign = queueStat(all, "чужих="),
             queueOwnSignals = queueStat(all, "сигналов="),
             queueRecipients = queueStat(all, "получателей="),
+            // Новые поля: старые сборки ядра их не печатают, тогда null — и в
+            // отчёте просто нет этих уточнений (никаких выдуманных нулей).
+            queueOwnLimit = queueStat(all, "предел-своих="),
+            queueOwnOldestSecs = queueStat(all, "старейшее-своё="),
             queueOwnEvictions = evictionScan.count,
             queueOwnEvictionsAreCumulative = evictionScan.cumulative,
             stunFailedCycles = all.count { it.contains(STUN_ALL_SERVERS_FAILED) }.toLong(),
@@ -815,7 +829,11 @@ object TransferDiagnostics {
             if (start < 0) continue
             val digits = line.substring(start + marker.length)
                 .takeWhile { it.isDigit() }
-            if (digits.isNotEmpty()) return digits.toLongOrNull()
+            // Пустой хвост маркера — это напечатанное «нет» («старейшее-своё=нет»),
+            // а не пропуск поля. Возвращаем null и НЕ идём к более старым строкам:
+            // их число относится к уже разошедшейся очереди и выдало бы «нет» за
+            // возраст (владелец 2026-10-15).
+            return digits.toLongOrNull()
         }
         return null
     }

@@ -128,7 +128,12 @@ class MessageDeletionRepository @Inject constructor(
             }
             val peer = chatDao.getChatById(chatId)?.contactId?.takeIf { it.isNotBlank() }
                 ?: return@withContext Result.failure(IllegalStateException("Собеседник не найден"))
-            val envelope = "$PREFIX|$chatId|$messageId|${System.currentTimeMillis()}"
+            // Один и тот же момент постановки идёт и в конверт, и в запись
+            // очереди: из него выводится устойчивый идентификатор команды
+            // (см. [deletionMessageId]), поэтому досылка обновляет ту же самую
+            // запись ядра, а не заводит вторую.
+            val atMs = System.currentTimeMillis()
+            val envelope = "$PREFIX|$chatId|$messageId|$atMs"
             // Раунд 137: команда уходит сразу и хранится в очереди до тех пор,
             // пока собеседник её не подтвердит (ack) - если его нет в сети,
             // помпа досылает, как только он появится. Прочтение не мешает:
@@ -137,7 +142,8 @@ class MessageDeletionRepository @Inject constructor(
             // активное; подтверждение собеседника вернётся тем же зеркалом
             // (оно придёт как служебный конверт и снимет запись из очереди).
             val viaMirror = MirrorHub.deliverAction(peerId = peer, groupId = "", chatId = chatId, text = envelope)
-            val sent = viaMirror || RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, peer, envelope)
+            val messageIdForWire = deletionMessageId(peer, messageId, atMs)
+            val sent = viaMirror || RustBridge.sendMessage(messageIdForWire, chatId, peer, envelope)
             // р229: удаление, сделанное здесь, применяем и на партнёрском
             // устройстве личности (у собеседника строка остаётся).
             if (!viaMirror) {
@@ -150,8 +156,11 @@ class MessageDeletionRepository @Inject constructor(
                     chatId = chatId,
                     peerId = peer,
                     deleterId = "",
-                    atMs = System.currentTimeMillis(),
-                    lastTryMs = if (sent) System.currentTimeMillis() else 0L,
+                    atMs = atMs,
+                    // `sent=false` значит «прямой ноги не было» (запись уже
+                    // в очереди ядра), поэтому первая помпа подстрахует её
+                    // сразу, а не через десять минут.
+                    lastTryMs = if (sent) atMs else 0L,
                     attempts = if (sent) 1 else 0,
                     tried = emptyList(),
                 ),
@@ -227,8 +236,11 @@ class MessageDeletionRepository @Inject constructor(
             }
             // Подтверждаем: отправитель перестанет досылать это удаление.
             runCatching {
+                // Тот же приём, что и у самой команды: подтверждение выводится
+                // из (отправитель, сообщение), поэтому повторный ack на
+                // повторно пришедшую команду не заводит в ядре вторую запись.
                 RustBridge.sendMessage(
-                    UUID.randomUUID().toString(), chat.id, senderId,
+                    deletionAckId(senderId, targetId), chat.id, senderId,
                     "$PREFIX|ack|$targetId",
                 )
             }
@@ -258,14 +270,52 @@ class MessageDeletionRepository @Inject constructor(
                 if (MirrorHub.deliverAction(entry.peerId, "", chat.id, envelope)) {
                     true
                 } else {
-                    RustBridge.sendMessage(UUID.randomUUID().toString(), chat.id, entry.peerId, envelope)
+                    // Тот же идентификатор, что у первой попытки: ядро
+                    // ОБНОВЛЯЕТ свою запись (`retryMessage`), а не заводит
+                    // вторую. `sendMessage` остаётся запасным путём на случай,
+                    // когда первой попытки в ядре не было вовсе.
+                    val wireId = deletionMessageId(entry.peerId, entry.targetId, entry.atMs)
+                    RustBridge.retryMessage(wireId, chat.id, entry.peerId, envelope) ||
+                        RustBridge.sendMessage(wireId, chat.id, entry.peerId, envelope)
                 }
             }.getOrDefault(false)
+            // Счётчик считает ПОПЫТКИ досылки, а не доставки. `sent` здесь -
+            // результат ПРЯМОЙ ноги (`send_message_inner` возвращает
+            // `direct_send_ok`), поэтому ложь бывает в обоих направлениях:
+            // и «не отправлено вовсе», и «отдано в очередь брокера» дают
+            // `false`. Правка того же дня, считавшая только `sent`, дала бы
+            // `delete_retry=0` у собеседника без прямого канала - то есть
+            // ровно ту же неправду, только наоборот (2026-10-15). Правду о
+            // досылке даёт пара счётчиков: попытки здесь, подтверждения -
+            // `DELETE_ACK_MATCHED`.
             OperationalDiagnostics.tracker.count(OperationalCounter.DELETE_RETRY)
+            // Отметка попытки держит интервал [RETRY_INTERVAL_MS]: иначе помпа
+            // дёргала бы одну и ту же запись без паузы.
             outbox.markTried(entry, now)
-            if (sent) Log.i(TAG, "delete re-sent id=${entry.targetId} to ${entry.peerId.takeLast(8)} (attempt ${entry.attempts + 1})")
+            // Пишем каждую попытку с признаком прямой ноги: по строке видно и
+            // работу помпы, и то, что собеседник не подтверждает.
+            Log.i(TAG, "delete retry id=${entry.targetId} to ${entry.peerId.takeLast(8)} direct=$sent (attempt ${entry.attempts + 1})")
         }
     }
+
+    /**
+     * Устойчивый идентификатор команды удаления (2026-10-15).
+     *
+     * Раньше каждая досылка уходила со случайным UUID: для ядра это
+     * НОВОЕ сообщение, поэтому своя очередь пересылки росла с каждым повтором
+     * (в отчёте второго телефона: `своих=1000`, вытеснено своих 5347), а
+     * собеседник получал одну и ту же команду многократно. Идентификатор
+     * выводится из (собеседник, сообщение, момент постановки) и потому
+     * совпадает у первой отправки и у каждой досылки - тот же приём, что у
+     * [com.vladimir.messenger.data.security.EphemeralControl.transportId] для
+     * служебных сигналов.
+     */
+    private fun deletionMessageId(peerId: String, targetId: String, atMs: Long): String =
+        UUID.nameUUIDFromBytes("apu-delete:$peerId:$targetId:$atMs".toByteArray(Charsets.UTF_8)).toString()
+
+    /** Устойчивый идентификатор подтверждения «удали у всех» (см. выше). */
+    private fun deletionAckId(peerId: String, targetId: String): String =
+        UUID.nameUUIDFromBytes("apu-delack:$peerId:$targetId".toByteArray(Charsets.UTF_8)).toString()
 
     /** Стереть сообщение и его реакции, пересчитать превью чата. */
     private suspend fun deleteLocal(chatId: String, messageId: String) {

@@ -138,6 +138,8 @@ fun ChatListScreen(
     onGroupAdminClick: (groupId: String) -> Unit = {},
     onChannelClick: (channelId: String) -> Unit = {},
     onCallClick: (contactId: String, contactName: String) -> Unit = { _, _ -> },
+    /** «Ключ этого телефона не читается»: открыть восстановление профиля из файла. */
+    onRestoreProfileClick: () -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -414,6 +416,9 @@ fun ChatListScreen(
                         onSavedClick = onSavedClick,
                         onAddContactClick = onAddContactClick,
                         onCallClick = onCallClick,
+                        // Плашка «телефон молчит» ведёт в восстановление профиля
+                        // из файла: там личность возвращается целиком.
+                        onRestoreProfileClick = onRestoreProfileClick,
                         onGroupClick = onGroupClick,
                         onGroupAdminClick = onGroupAdminClick,
                         onChannelClick = onChannelClick,
@@ -1053,6 +1058,8 @@ private fun SectionPage(
     onSavedClick: () -> Unit,
     onAddContactClick: () -> Unit,
     onCallClick: (contactId: String, contactName: String) -> Unit,
+    /** «Ключ этого телефона не читается»: открыть восстановление профиля из файла. */
+    onRestoreProfileClick: () -> Unit = {},
     onGroupClick: (groupId: String) -> Unit,
     onGroupAdminClick: (groupId: String) -> Unit,
     onChannelClick: (channelId: String) -> Unit,
@@ -1103,6 +1110,12 @@ private fun SectionPage(
     // кого дата скрыта, здесь нет вовсе — она к нам не приходит. Крестик
     // убирает пузырь до конца дня.
     val birthdayContext = LocalContext.current
+    val identityHealth by com.vladimir.messenger.data.security.IdentityHealth.state
+        .collectAsStateWithLifecycle()
+    // Плашку «телефон молчит» показываем до поиска и поверх всех разделов: она
+    // объясняет, почему не приходит вообще ничего, а не отдельный чат.
+    val muteReason = if (isSearchActive) null else
+        com.vladimir.messenger.data.security.IdentityHealth.notice(identityHealth)
     val birthdays by com.vladimir.messenger.data.profile.PeerBirthdayStore.entries
         .collectAsStateWithLifecycle()
     val birthdaysHidden by com.vladimir.messenger.data.profile.PeerBirthdayStore.dismissed
@@ -1263,6 +1276,17 @@ private fun SectionPage(
                             onAddClick = onAddStory,
                             onOpenAuthor = { storyOpenAuthor = it },
                         )
+                    }
+                    // Молчащий телефон — выше остальных плашек: пока ключ не
+                    // читается, ни сообщения, ни истории, ни зеркало профиля
+                    // не уходят, и человек должен видеть причину, а не тишину.
+                    muteReason?.let { reason ->
+                        item(key = "identity-mute:" + reason.name) {
+                            com.vladimir.messenger.ui.components.IdentityMuteRow(
+                                reason = reason,
+                                onRestore = onRestoreProfileClick,
+                            )
+                        }
                     }
                     // День рождения: пузырь сразу под полосой историй, как в
                     // Telegram. Показываем по одному человеку: нажатие на «×»
