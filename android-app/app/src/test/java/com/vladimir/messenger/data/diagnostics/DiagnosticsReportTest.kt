@@ -37,6 +37,8 @@ class DiagnosticsReportTest {
         relayQueueForeign: Long? = null,
         relayQueueOwnSignals: Long? = null,
         relayQueueRecipients: Long? = null,
+        relayQueueOwnLimit: Long? = null,
+        relayQueueOwnOldestSecs: Long? = null,
         relayQueueOwnEvictions: Long = 0L,
         relayQueueOwnEvictionsAreCumulative: Boolean = false,
         stunFailedCycles: Long = 0L,
@@ -105,6 +107,8 @@ class DiagnosticsReportTest {
         relayQueueForeign = relayQueueForeign,
         relayQueueOwnSignals = relayQueueOwnSignals,
         relayQueueRecipients = relayQueueRecipients,
+        relayQueueOwnLimit = relayQueueOwnLimit,
+        relayQueueOwnOldestSecs = relayQueueOwnOldestSecs,
         relayQueueOwnEvictions = relayQueueOwnEvictions,
         relayQueueOwnEvictionsAreCumulative = relayQueueOwnEvictionsAreCumulative,
         stunFailedCycles = stunFailedCycles,
@@ -456,6 +460,51 @@ class DiagnosticsReportTest {
             ),
         ).first { it.title == "Сообщения" }
         assertTrue(message.value.contains("своё ждёт получателя 2"))
+    }
+
+    /**
+     * Владелец 2026-10-15: «своё ждёт получателя=1000» само по себе не отвечает,
+     * стоит очередь или течёт: то же число даёт и вставшая на сутки переписка, и
+     * свежий поток. Рядом с числом — предел своего резерва и возраст старейшей
+     * своей записи; если ядро этих полей ещё не печатает, отчёт их не выдумывает.
+     */
+    @Test
+    fun ownQueueNumberIsExplainedByLimitAndOldestAge() {
+        val report = DiagnosticsReport.render(
+            facts = facts(
+                relayQueueOwn = 1000L,
+                relayQueueOwnSignals = 19L,
+                relayQueueOwnLimit = 1000L,
+                relayQueueOwnOldestSecs = 86_400L,
+            ),
+            journal = emptyList(),
+            logcat = emptyList(),
+        )
+        assertTrue(report.contains("очередь ядра: своё ждёт получателя=1000"))
+        assertTrue(report.contains("предел-своих=1000"))
+        assertTrue(report.contains("старейшее-своё=1 дн 0 ч"))
+
+        // И в сводке рядом с числом: «стоит или течёт» решается пределом и возрастом.
+        val summary = DiagnosticsReport.summaryLines(
+            facts(
+                counters = mapOf(Counters.MSG_IN to 3L, Counters.MSG_OUT to 4L),
+                lastIncomingAtMs = 1_700_000_000_000L - 60_000L,
+                relayQueueOwn = 1000L,
+                relayQueueOwnLimit = 1000L,
+                relayQueueOwnOldestSecs = 86_400L,
+            ),
+        ).first { it.title == "Сообщения" }
+        assertTrue(summary.value.contains("своё ждёт получателя 1000"))
+        assertTrue(summary.value.contains("предел-своих 1000"))
+        assertTrue(summary.value.contains("старейшее-своё 1 дн 0 ч"))
+
+        val legacy = DiagnosticsReport.render(
+            facts = facts(relayQueueOwn = 1000L),
+            journal = emptyList(),
+            logcat = emptyList(),
+        )
+        assertFalse(legacy.contains("предел-своих="))
+        assertFalse(legacy.contains("старейшее-своё="))
     }
 
     @Test

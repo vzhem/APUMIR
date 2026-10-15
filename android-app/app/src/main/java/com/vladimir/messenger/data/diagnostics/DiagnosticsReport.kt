@@ -219,6 +219,15 @@ data class DiagnosticsFacts(
     val relayQueueOwnSignals: Long? = null,
     /** Сколько получателей занято в последней сводке очереди ядра. */
     val relayQueueRecipients: Long? = null,
+    /**
+     * Предел своего резерва из той же сводки. «Своих=1000» при пределе 1000 —
+     * это «очередь стоит на пределе», а не случайное круглое число
+     * (владелец 2026-10-15: по одному числу нельзя было отличить застрявшую
+     * переписку от свежего потока).
+     */
+    val relayQueueOwnLimit: Long? = null,
+    /** Возраст старейшей своей записи, секунды: хвост суток и хвост минут — разные диагнозы. */
+    val relayQueueOwnOldestSecs: Long? = null,
     /** Вытеснения своей переписки из RAM-кэша: накопительный счётчик либо выборка старых логов. */
     val relayQueueOwnEvictions: Long = 0L,
     val relayQueueOwnEvictionsAreCumulative: Boolean = false,
@@ -936,6 +945,15 @@ object DiagnosticsReport {
             // Служебное (сигналы и пакеты передачи) — не переписка.
             val waitingSignals = facts.relayQueueOwnSignals ?: 0L
             if (waitingSignals > 0L) append(" (из них сигналов и пакетов $waitingSignals)")
+            // Владелец 2026-10-15: одно число не отвечает, СТОИТ очередь или
+            // течёт. Рядом с числом — предел своего резерва и возраст самой
+            // старой своей записи (если ядро их уже печатает).
+            if (waiting > 0L) {
+                facts.relayQueueOwnLimit?.let { append(" · предел-своих $it") }
+                facts.relayQueueOwnOldestSecs?.let {
+                    append(" · старейшее-своё ${formatDuration(it * 1000L)}")
+                }
+            }
             if (ownEvictions > 0L) {
                 val evictionsSource = if (facts.relayQueueOwnEvictionsAreCumulative) {
                     "с запуска ядра"
@@ -1217,6 +1235,12 @@ object DiagnosticsReport {
             "очередь ядра: своё ждёт получателя=" +
                 (facts.relayQueueOwn?.toString() ?: "нет (пусто)") +
                 (facts.relayQueueOwnSignals?.let { " (из них сигналов и пакетов=$it)" } ?: "") +
+                (facts.relayQueueOwnLimit?.let { " · предел-своих=$it" } ?: "") +
+                // Возраст печатаем как везде в отчёте («1 дн 0 ч»), а не сырыми
+                // секундами: «86400с» владельцу ничего не говорит.
+                (facts.relayQueueOwnOldestSecs?.let {
+                    " · старейшее-своё=${formatDuration(it * 1000L)}"
+                } ?: "") +
                 (if (facts.relayQueueOwn != null) " (последняя сводка logcat)" else ""),
         )
         appendLine(

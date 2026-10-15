@@ -1113,5 +1113,63 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn("com.vladimir.messenger.data.diagnostics.DiagnosticsReportTest", script)
 
 
+    def test_own_queue_number_is_explainable_by_limit_and_age(self):
+        """Владелец 2026-10-15: «своё ждёт получателя=1000» само по себе не
+
+        отвечает, стоит очередь или течёт: то же число даёт и застрявшая на
+        неделю переписка, и свежий поток, который просто не успевает уйти.
+        Ядро теперь печатает рядом предел своего резерва и возраст старейшей
+        своей записи, а отчёт показывает оба уточнения — и ничего не выдумывает,
+        если старая сборка ядра их ещё не печатает.
+        """
+        core = source(ROOT / "rust-core/src/engine/core.rs")
+        queue = source(ROOT / "rust-core/src/network/relay_queue.rs")
+        for marker in (
+            "предел-своих={}",
+            "старейшее-своё={}",
+            "старейшее-своё=нет",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, core)
+        for marker in (
+            "pub own_limit: usize",
+            "pub own_oldest_age_ms: Option<i64>",
+            "own_limit: self.max_own_total",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, queue)
+        stats = queue[queue.index("pub fn stats"):queue.index("impl Default for RelayQueue")]
+        # Возраст считается по СВОЕЙ переписке: служебное не в счёт.
+        self.assertIn("e.own && !e.kind.is_transient()", stats)
+        self.assertIn("own_oldest_age_ms", stats)
+
+        report = source(DIAG / "DiagnosticsReport.kt")
+        scan = source(DIAG / "TransferDiagnostics.kt")
+        for marker in (
+            "relayQueueOwnLimit",
+            "relayQueueOwnOldestSecs",
+            '"очередь ядра: своё ждёт получателя="',
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, report)
+        for marker in (
+            'queueStat(all, "предел-своих=")',
+            'queueStat(all, "старейшее-своё=")',
+            "queueOwnLimit",
+            "queueOwnOldestSecs",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, scan)
+        # Ноль вместо «нет данных» был бы выдумкой: оба уточнения необязательны.
+        self.assertIn("facts.relayQueueOwnLimit?.let", report)
+        self.assertIn("facts.relayQueueOwnOldestSecs?.let", report)
+        # «старейшее-своё=нет» — это утверждение свежей сводки, а не пропуск
+        # поля: разбор обязан вернуть «нет данных» и НЕ подхватывать число из
+        # более старой строки (иначе «нет» превратилось бы в возраст очереди,
+        # которая давно разошлась).
+        self.assertIn("return digits.toLongOrNull()", scan)
+        self.assertNotIn("if (digits.isNotEmpty()) return digits.toLongOrNull()", scan)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

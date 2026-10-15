@@ -620,6 +620,12 @@ pub struct RelayQueueStats {
     pub recipients: usize,
     /// Вытеснения своей переписки из RAM с момента запуска этого экземпляра очереди.
     pub own_capacity_evictions: usize,
+    /// Предел своего резерва (MAX_OWN_TOTAL или тестовый лимит). Нужен, чтобы
+    /// «своих=1000» читалось как «предел достигнут», а не как случайное число.
+    pub own_limit: usize,
+    /// Возраст самой старой записи своей переписки, мс (`None` — своей
+    /// переписки в очереди нет). Отделяет застрявший хвост от свежего потока.
+    pub own_oldest_age_ms: Option<i64>,
 }
 
 impl RelayQueue {
@@ -1207,6 +1213,12 @@ impl RelayQueue {
                 seen.push(&e.message.recipient);
             }
         }
+        let now_ms = utc_now_ms();
+        let own_oldest_age_ms = entries
+            .values()
+            .filter(|e| e.own && !e.kind.is_transient())
+            .map(|e| now_ms.saturating_sub(e.message.created_at_ms).max(0))
+            .max();
         RelayQueueStats {
             own,
             own_transients,
@@ -1214,6 +1226,8 @@ impl RelayQueue {
             total,
             recipients: seen.len(),
             own_capacity_evictions: self.own_capacity_evictions.load(Ordering::Relaxed),
+            own_limit: self.max_own_total,
+            own_oldest_age_ms,
         }
     }
 }
@@ -1569,6 +1583,56 @@ mod tests {
         assert_eq!(stats.foreign, 2);
         assert_eq!(stats.total, 3);
         assert_eq!(stats.recipients, 2);
+    }
+
+    #[test]
+    fn stats_expose_own_limit_and_oldest_correspondence_age() {
+        // Владелец 2026-10-15: «своих=1000» без предела и возраста не отвечает,
+        // стоит очередь или течёт. Предел должен быть виден как есть, а возраст
+        // считаться по САМОЙ СТАРОЙ своей переписке (служебное не в счёт).
+        let q = RelayQueue::with_all_limits(4, 16, 3, 3);
+        let now = utc_now_ms();
+        let old = RelayMessage::new_at_ms(
+            now - 90_000,
+            "old-own".into(),
+            "peer-a".into(),
+            "pk_origin".into(),
+            "chat-1".into(),
+            vec![0xAA; 50],
+        );
+        q.enqueue_own(old).unwrap();
+        q.enqueue_own(RelayMessage::new_at_ms(
+            now - 1_000,
+            "new-own".into(),
+            "peer-a".into(),
+            "pk_origin".into(),
+            "chat-1".into(),
+            vec![0xAA; 50],
+        ))
+        .unwrap();
+        q.enqueue_own(signal_msg("sig-1", "peer-a")).unwrap();
+
+        let stats = q.stats();
+        assert_eq!(stats.own, 2);
+        assert_eq!(stats.own_transients, 1);
+        assert_eq!(stats.own_limit, 3);
+        let age = stats.own_oldest_age_ms.expect("своя переписка есть");
+        assert!(
+            (age - 90_000).abs() < 5_000,
+            "возраст старейшего своего: {age} мс"
+        );
+    }
+
+    #[test]
+    fn stats_report_no_own_age_when_only_service_is_queued() {
+        // Одна служебная запись не должна выдавать себя за переписку: без своей
+        // переписки возраст — None, а не «0 секунд» (иначе отчёт показывал бы
+        // свежий хвост там, где переписки нет вовсе).
+        let q = RelayQueue::with_all_limits(4, 16, 3, 3);
+        q.enqueue_own(signal_msg("sig-only", "peer-a")).unwrap();
+        let stats = q.stats();
+        assert_eq!(stats.own, 0);
+        assert_eq!(stats.own_oldest_age_ms, None);
     }
 
     #[test]

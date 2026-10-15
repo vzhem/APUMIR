@@ -4286,16 +4286,36 @@ impl P2PCore {
                     // это видно и в журнале процесса, и в отчёте «Логи».
                     let stats = q.stats();
                     if stats.total > 0 || stats.own_capacity_evictions > 0 {
-                        tracing::info!(
-                            "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={} снято-по-ACK={} вытеснено-своих={}",
-                            stats.own,
-                            stats.own_transients,
-                            stats.foreign,
-                            stats.total,
-                            stats.recipients,
-                            q.delivered_removed(),
-                            stats.own_capacity_evictions
-                        );
+                        // владелец 2026-10-15: «своих=1000» само по себе не
+                        // отвечает, СТОИТ очередь или течёт. Печатаем предел
+                        // своего резерва (видно «предел достигнут») и возраст
+                        // старейшей своей переписки: свежий хвост минут против
+                        // застрявшего хвоста суток — разные диагнозы.
+                        match stats.own_oldest_age_ms {
+                            Some(age_ms) => tracing::info!(
+                                "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={} снято-по-ACK={} вытеснено-своих={} предел-своих={} старейшее-своё={}",
+                                stats.own,
+                                stats.own_transients,
+                                stats.foreign,
+                                stats.total,
+                                stats.recipients,
+                                q.delivered_removed(),
+                                stats.own_capacity_evictions,
+                                stats.own_limit,
+                                age_ms / 1000
+                            ),
+                            None => tracing::info!(
+                                "Relay-очередь: своих={} сигналов={} чужих={} всего={} получателей={} снято-по-ACK={} вытеснено-своих={} предел-своих={} старейшее-своё=нет",
+                                stats.own,
+                                stats.own_transients,
+                                stats.foreign,
+                                stats.total,
+                                stats.recipients,
+                                q.delivered_removed(),
+                                stats.own_capacity_evictions,
+                                stats.own_limit
+                            ),
+                        }
                     }
                 }
 
