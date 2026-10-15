@@ -126,6 +126,10 @@ BIRTHDAY="$BASE/main/java/com/vladimir/messenger/data/profile/Birthday.kt"
 BIRTHDAY_BOOK="$BASE/main/java/com/vladimir/messenger/data/profile/BirthdayBook.kt"
 BIRTHDAY_TEST="$BASE/test/java/com/vladimir/messenger/data/profile/BirthdayTest.kt"
 BIRTHDAY_WIRE_TEST="$BASE/test/java/com/vladimir/messenger/data/group/BirthdayWireTest.kt"
+# «Телефон молчит»: причина состояния без Android (ключ не читается, не успел,
+# первый запуск). Файл чистый, поэтому проверяется здесь же на runner.
+IDENTITY_HEALTH="$BASE/main/java/com/vladimir/messenger/data/security/IdentityHealth.kt"
+IDENTITY_HEALTH_TEST="$BASE/test/java/com/vladimir/messenger/data/security/IdentityHealthTest.kt"
 "$JAVA" -cp "$OUT/compiler/*:$OUT/runtime/kotlin-stdlib-$KOTLIN.jar" \
     org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
     -no-stdlib -no-reflect -jvm-target 17 -classpath "$CP" -d "$OUT/classes" \
@@ -139,13 +143,15 @@ BIRTHDAY_WIRE_TEST="$BASE/test/java/com/vladimir/messenger/data/group/BirthdayWi
     "$DEFERRED_WIRE" "$DEFERRED_POLICY" "$DEFERRED_WIRE_TEST" "$DEFERRED_POLICY_TEST" \
     "$SELF_SEED_POLICY" "$SELF_SEED_POLICY_TEST" "$SEND_TIME_POLICY" "$SEND_TIME_TEST" \
     "$STORY_PUBLISH" "$STORY_PUBLISH_TEST" "$RETENTION" "$RETENTION_TEST" \
-    "$BIRTHDAY" "$BIRTHDAY_BOOK" "$BIRTHDAY_TEST" "$BIRTHDAY_WIRE_TEST"
+    "$BIRTHDAY" "$BIRTHDAY_BOOK" "$BIRTHDAY_TEST" "$BIRTHDAY_WIRE_TEST" \
+    "$IDENTITY_HEALTH" "$IDENTITY_HEALTH_TEST"
 "$JAVA" -cp "$OUT/classes:$CP" org.junit.runner.JUnitCore \
     com.vladimir.messenger.ui.screens.chat.ChatHistoryObserverTest \
     com.vladimir.messenger.data.local.MessagePinPolicyTest \
     com.vladimir.messenger.ui.components.StoryPublishTest \
     com.vladimir.messenger.data.profile.BirthdayTest \
     com.vladimir.messenger.data.group.BirthdayWireTest \
+    com.vladimir.messenger.data.security.IdentityHealthTest \
     com.vladimir.messenger.ui.components.SplashOrbitGeometryTest \
     com.vladimir.messenger.ui.components.ApuSettingsLayoutTest \
     com.vladimir.messenger.data.heart.HeartWireTest \

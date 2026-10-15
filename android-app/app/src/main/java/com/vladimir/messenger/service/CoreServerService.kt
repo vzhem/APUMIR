@@ -808,8 +808,18 @@ class CoreServerService : Service() {
             )
             localCryptoReadyAtStartup = signing != null && fileExchange != null
             TransferDiagnostics.noteCryptoBootstrap(signingInstall, fileExchangeInstall, null)
+            // Для человека: плашка «этот телефон молчит» вверху списка чатов.
+            // Ядро запоминает identity на старте, позже не пересматривает, поэтому
+            // решение принимается здесь один раз - и без ключей, только причина.
+            com.vladimir.messenger.data.security.IdentityHealth
+                .noteBoot(signingInstall, fileExchangeInstall)
             if (signing == null && identityCreated) {
                 TransferDiagnostics.recordWarning("crypto", "подписывающий ключ не установлен до старта ядра; прямой подписанный рой недоступен")
+                // Причина словами для отчёта: `signing_mode_reason` заполняется
+                // только вызовом mode(), иначе там `not_probed` - а отличить
+                // сброшенный Keystore от чужого блоба нужно и человеку, и отчёту.
+                // Чтение: mode() не создаёт ни ключей, ни семени.
+                runCatching { IdentitySigningKeyStore.mode(applicationContext) }
             }
             if (signing != null && fileExchange == null) {
                 TransferDiagnostics.recordWarning("crypto", "ключ обмена недоступен при старте; личные конверты и файлы могут не открываться")
