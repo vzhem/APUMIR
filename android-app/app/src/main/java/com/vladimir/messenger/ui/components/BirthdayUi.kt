@@ -257,5 +257,9 @@ fun BirthdayBannerRow(
  * Год по умолчанию для календаря, когда дата ещё не выбрана: тридцать лет
  * назад. Так человеку обычно достаточно поправить год, а не листать от 1900.
  */
-private const val PICKER_DEFAULT_AGE = 30L
+/**
+ * Запасной возраст для календаря: [LocalDate.of] принимает Int, поэтому тут
+ * обычное число, а не Long (иначе вызов не компилируется).
+ */
+private const val PICKER_DEFAULT_AGE = 30
 private const val PICKER_DEFAULT_YEAR = 2000
