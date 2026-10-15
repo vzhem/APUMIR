@@ -458,6 +458,42 @@ class SettingsStyleTest(unittest.TestCase):
         self.assertIn("Role.RadioButton", groups)
         self.assertIn("Role.Switch", groups)
 
+        # Владелец 2026-10-15 (скрин раздела): «Нужно этот раздел сделать под
+        # современный стиль. Лучше чем раздел логи». Держим в контракте то, из
+        # чего складывается этот вид: сводка со счётчиками, переключатель вида,
+        # пустое состояние с действиями, знак вида в строке и скелетон загрузки.
+        # Иначе следующая правка тихо вернёт «Сообщества» к плоскому списку.
+        self.assertIn("ApuCommunitiesHero(", groups)
+        self.assertIn("ApuCommunitiesEmpty(", groups)
+        self.assertIn("ApuCommunitiesSkeleton(", groups)
+        self.assertIn("ApuCommunityKindBadge(", groups)
+        self.assertIn("ApuSegmentedControl(", groups)
+        self.assertIn("CommunityList.applyFilter(uiState.filtered, communityFilter)", groups)
+        self.assertIn("CommunityList.applyFilterToDirectory(uiState.directoryMatches, communityFilter)", groups)
+        self.assertIn(".imePadding()", groups)
+
+        communities = source("components/ApuCommunitiesUi.kt")
+        for declaration in (
+            "fun ApuCommunitiesHero(",
+            "fun ApuCommunitiesEmpty(",
+            "fun ApuCommunitiesSkeleton(",
+            "fun ApuCommunityKindBadge(",
+        ):
+            self.assertIn(declaration, communities)
+        # Пустое состояние обязано быть действием, а не тупиком: главная кнопка
+        # и хотя бы одна запасная (создать/обновить) стоят на премиальной
+        # поверхности, как кнопки окна «Логи».
+        for part in ("ApuPremiumButton(", "DiagnosticsActionStyle.PRIMARY", "apuPremiumLift(", "apuPremiumGloss("):
+            self.assertIn(part, communities)
+
+        # Подписи шапки и переключателя лежат в ресурсах: и русский, и
+        # английский текст. Литерал в коде экрана здесь — регресс.
+        for locale in ("values", "values-en"):
+            xml = (ROOT / f"android-app/app/src/main/res/{locale}/strings.xml").read_text()
+            for string_name in ("groups_hero_kicker", "groups_hero_title", "groups_filter_all",
+                                "groups_filter_groups", "groups_filter_channels", "groups_show_all"):
+                self.assertIn(f'name="{string_name}"', xml)
+
     def test_moderation_dialog_and_profile_anti_rating_use_house_style(self):
         mod_dialog = source("components/ApuModerationDialog.kt")
         self.assertNotRegex(mod_dialog, r"\bAlertDialog\(")

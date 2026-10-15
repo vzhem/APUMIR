@@ -86,6 +86,59 @@ class CommunityListTest {
     }
 
     @Test
+    fun kindFilterKeepsOnlyTheChosenKindAndAllKeepsEverything() {
+        val communities = listOf(
+            community("group-a"),
+            community("channel-a", isChannel = true),
+            community("group-b"),
+        )
+        assertEquals(communities, CommunityList.applyFilter(communities, CommunityFilter.ALL))
+        assertEquals(
+            listOf("group-a", "group-b"),
+            CommunityList.applyFilter(communities, CommunityFilter.GROUPS).map { it.id },
+        )
+        assertEquals(
+            listOf("channel-a"),
+            CommunityList.applyFilter(communities, CommunityFilter.CHANNELS).map { it.id },
+        )
+        assertTrue(CommunityList.applyFilter(emptyList(), CommunityFilter.CHANNELS).isEmpty())
+    }
+
+    @Test
+    fun kindFilterAppliesToTheNetworkCatalogToo() {
+        val directory = listOf(entry("net-group", isChannel = false), entry("net-channel"))
+        assertEquals(directory, CommunityList.applyFilterToDirectory(directory, CommunityFilter.ALL))
+        assertEquals(
+            listOf("net-group"),
+            CommunityList.applyFilterToDirectory(directory, CommunityFilter.GROUPS).map { it.groupId },
+        )
+        assertEquals(
+            listOf("net-channel"),
+            CommunityList.applyFilterToDirectory(directory, CommunityFilter.CHANNELS).map { it.groupId },
+        )
+    }
+
+    @Test
+    fun searchAndKindFilterComposeSoSubscribedChannelsStayVisible() {
+        val communities = listOf(
+            community("news-group", title = "Новости района"),
+            community("news-channel", title = "Новости APU", isChannel = true),
+            community("chat", title = "Общение"),
+        )
+        val found = CommunityList.filter(communities, "новости")
+        assertEquals(
+            listOf("news-channel"),
+            CommunityList.applyFilter(found, CommunityFilter.CHANNELS).map { it.id },
+        )
+        assertEquals(
+            listOf("news-group"),
+            CommunityList.applyFilter(found, CommunityFilter.GROUPS).map { it.id },
+        )
+        assertTrue(CommunityList.applyFilter(found, CommunityFilter.CHANNELS)
+            .none { !it.isChannel })
+    }
+
+    @Test
     fun directoryExcludesAllJoinedGroupsAndChannelsAndPrivateEntries() {
         val joined = listOf(community("group"), community("channel", isChannel = true))
         val directory = listOf(

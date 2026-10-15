@@ -251,6 +251,17 @@
     <string name="groups_nothing_found">Ничего не нашлось</string>
     <string name="groups_empty_hint">Создайте свою или войдите по ссылке-приглашению</string>
     <string name="groups_search_hint">Попробуйте другое название или войдите по ссылке</string>
+    <string name="groups_hero_kicker">Группы и каналы</string>
+    <string name="groups_hero_title">Мои сообщества</string>
+    <string name="groups_hero_online">В сети</string>
+    <string name="groups_filter_all">Все</string>
+    <string name="groups_filter_groups">Группы</string>
+    <string name="groups_filter_channels">Каналы</string>
+    <string name="groups_section_count">%1$s · %2$d</string>
+    <string name="groups_clear_search">Очистить поиск</string>
+    <string name="groups_show_all">Показать все</string>
+    <string name="groups_filter_empty">В этом разделе пусто</string>
+    <string name="groups_filter_empty_hint">Попробуйте другой фильтр или создайте сообщество</string>
     <string name="groups_my_groups">Мои группы</string>
     <string name="groups_my_channels">Мои каналы</string>
     <string name="groups_open_groups">Открытые группы сети</string>

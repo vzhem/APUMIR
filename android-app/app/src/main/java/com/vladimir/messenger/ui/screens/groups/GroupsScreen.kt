@@ -12,6 +12,11 @@ import com.vladimir.messenger.ui.components.ApuAction
 import com.vladimir.messenger.ui.components.ApuActionsMenu
 import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuNotificationBadge
+import com.vladimir.messenger.ui.components.ApuCommunitiesEmpty
+import com.vladimir.messenger.ui.components.ApuCommunitiesHero
+import com.vladimir.messenger.ui.components.ApuCommunitiesSkeleton
+import com.vladimir.messenger.ui.components.ApuCommunityKindBadge
+import com.vladimir.messenger.ui.components.ApuSegmentedControl
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.NotificationMuteDialog
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
@@ -72,6 +77,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -80,6 +86,10 @@ import androidx.compose.foundation.lazy.items
 import com.vladimir.messenger.data.local.entity.DirectoryEntity
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.SearchOff
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Lock
@@ -112,15 +122,19 @@ import com.vladimir.messenger.data.group.GroupInviteLinks
 import com.vladimir.messenger.data.link.ShortLinks
 import com.vladimir.messenger.data.group.GroupSummary
 import com.vladimir.messenger.ui.components.ChatWallpaper
-import com.vladimir.messenger.ui.components.HintBubble
-import com.vladimir.messenger.ui.components.HintBubbleMutedColor
-import com.vladimir.messenger.ui.components.HintBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuPremiumContentButton
 import com.vladimir.messenger.ui.components.ApuPremiumFloatingActionButton
 import com.vladimir.messenger.ui.components.ApuPremiumCheckbox
 import com.vladimir.messenger.ui.components.ApuPremiumSwitch
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 import com.vladimir.messenger.ui.components.ApuGoldInk
+
+/** Порядок переключателя «Все · Группы · Каналы»: тот же, что у разделов списка. */
+private val communityFilters = listOf(
+    CommunityFilter.ALL,
+    CommunityFilter.GROUPS,
+    CommunityFilter.CHANNELS,
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -173,6 +187,9 @@ fun GroupsScreen(
         }
     }
     var showJoin by remember { mutableStateOf(false) }
+    // Переключатель вида: «Все», «Группы», «Каналы». Живёт в памяти экрана,
+    // чтобы возвращение из сообщества показывало тот же срез, что оставили.
+    var communityFilter by rememberSaveable { mutableStateOf(CommunityFilter.ALL) }
 
     // Входим по ссылке РОВНО ОДИН раз за жизнь экрана - по той же причине,
     // что и с create: параметр остаётся в маршруте, и при возврате из поста
@@ -274,71 +291,173 @@ fun GroupsScreen(
             )
         },
     ) { padding ->
-        Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .padding(padding)
+                .fillMaxSize()
+                // Клавиатура сжимает список, а не накрывает его: во время набора
+                // поле поиска и найденные сообщества остаются видны.
+                .imePadding(),
+        ) {
             ApuSearchField(
                 value = uiState.searchQuery,
                 onValueChange = viewModel::onSearchQueryChanged,
                 placeholder = stringResource(R.string.groups_search),
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-            )
-
-            when {
-                uiState.isLoading -> Box(Modifier.fillMaxSize(), Alignment.Center) {
-                    ApuPremiumSpinner()
-                }
-
-                uiState.filtered.isEmpty() && uiState.directoryMatches.isEmpty() ->
-                    Box(Modifier.fillMaxSize(), Alignment.Center) {
-                    // Раунд 48: пустое состояние в пузыре HintBubble - голый
-                    // текст брал цвет из темы и на обоях не читался.
-                    HintBubble {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                // Крестик очистки: длинный запрос стирается одним касанием.
+                // При пустом поле слот остаётся пустым и места не занимает.
+                trailing = {
+                    if (uiState.searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { viewModel.onSearchQueryChanged("") }) {
                             Icon(
-                                Icons.Filled.Groups,
-                                contentDescription = null,
-                                modifier = Modifier.size(56.dp),
-                                tint = HintBubbleMutedColor,
+                                Icons.Filled.Close,
+                                contentDescription = stringResource(R.string.groups_clear_search),
+                                tint = ApuBubbleTextColor.copy(alpha = 0.6f),
                             )
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                if (uiState.searchQuery.isBlank()) {
-                                    stringResource(R.string.groups_none)
-                                } else {
-                                    stringResource(R.string.groups_nothing_found)
-                                },
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = HintBubbleTextColor,
-                            )
-                            Text(
-                                if (uiState.searchQuery.isBlank()) {
-                                    stringResource(R.string.groups_empty_hint)
-                                } else {
-                                    stringResource(R.string.groups_search_hint)
-                                },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = HintBubbleMutedColor,
-                            )
-                            Spacer(Modifier.height(12.dp))
-                            ApuTextAction(label = stringResource(R.string.groups_join_by_link), onClick = { showJoin = true })
                         }
                     }
+                },
+            )
+
+            if (uiState.isLoading) {
+                // Пока Room отдаёт список, экран показывает очертания будущих
+                // строк, а не пустоту с одиноким спиннером по центру.
+                ApuCommunitiesSkeleton()
+            } else {
+                // Поиск уже применён моделью; здесь — только отбор по виду
+                // сообщества. Правила отбора живут в CommunityList: их
+                // проверяют JVM-тесты `CommunityListTest`.
+                val mine = CommunityList.applyFilter(uiState.filtered, communityFilter)
+                val network = CommunityList.applyFilterToDirectory(uiState.directoryMatches, communityFilter)
+                val myGroups = mine.filterNot { it.isChannel }
+                val myChannels = mine.filter { it.isChannel }
+                val foundGroups = network.filterNot { it.isChannel }
+                val foundChannels = network.filter { it.isChannel }
+
+                // Счётчики считаются ДО отбора по виду: иначе выбранный фильтр
+                // обнулял бы подписи у соседних вариантов.
+                val groupTotal = uiState.filtered.count { !it.isChannel } +
+                    uiState.directoryMatches.count { !it.isChannel }
+                val channelTotal = uiState.filtered.count { it.isChannel } +
+                    uiState.directoryMatches.count { it.isChannel }
+                val anyTotal = groupTotal + channelTotal
+
+                val searching = uiState.searchQuery.isNotBlank()
+                // Пусто по трём РАЗНЫМ причинам: ничего нет вовсе, фильтр вида
+                // скрыл всё или поиск не нашёл. Врать одно «ничего не нашлось»
+                // на все случаи - значит оставить человека без объяснения.
+                val showingNothing = myGroups.isEmpty() && myChannels.isEmpty() &&
+                    foundGroups.isEmpty() && foundChannels.isEmpty()
+                val resetting = searching || communityFilter != CommunityFilter.ALL
+                // Заголовки разделов каталога зависят от того, ищем мы или просто
+                // смотрим, что есть в сети.
+                val browsing = uiState.searchQuery.isBlank()
+
+                // Действия пустого состояния. Объявлены отдельными val: у
+                // параметров-функций должен быть ясный тип.
+                val createLabel = if (anyTotal == 0 && uiState.canCreate) {
+                    stringResource(R.string.groups_create_desc)
+                } else {
+                    null
+                }
+                val openCreate: () -> Unit = {
+                    createAsChannel = false
+                    showCreate = true
+                }
+                val resetView: () -> Unit = {
+                    communityFilter = CommunityFilter.ALL
+                    if (uiState.searchQuery.isNotEmpty()) viewModel.onSearchQueryChanged("")
+                }
+                val refreshDirectory: () -> Unit = { viewModel.refreshDirectory() }
+
+                val scrollState = rememberLazyListState()
+                // Смена среза возвращает список к началу: найденное не остаётся
+                // за верхней кромкой экрана.
+                LaunchedEffect(communityFilter, uiState.searchQuery) {
+                    scrollState.scrollToItem(0)
                 }
 
-                else -> {
-                    // Бегунок справа: видно, где мы в длинном списке.
-                    val scrollState = rememberLazyListState()
-                    Box(modifier = Modifier.fillMaxSize()) {
+                // Бегунок справа: видно, где мы в длинном списке.
+                Box(modifier = Modifier.fillMaxSize()) {
                     LazyColumn(
                         state = scrollState,
                         contentPadding = PaddingValues(bottom = 96.dp),
                     ) {
+                        // Сводка и переключатель прокручиваются вместе со списком:
+                        // место отдаётся сообществам, а не шапке.
+                        if (anyTotal > 0) {
+                            item(key = "communities-hero") {
+                                ApuCommunitiesHero(
+                                    groups = uiState.groups.count { !it.isChannel },
+                                    channels = uiState.groups.count { it.isChannel },
+                                    online = uiState.directoryMatches.size,
+                                )
+                            }
+                            item(key = "communities-filter") {
+                                ApuSegmentedControl(
+                                    options = communityFilters,
+                                    selected = communityFilter,
+                                    onSelect = { chosen -> communityFilter = chosen },
+                                    label = { option ->
+                                        val title = when (option) {
+                                            CommunityFilter.ALL -> stringResource(R.string.groups_filter_all)
+                                            CommunityFilter.GROUPS -> stringResource(R.string.groups_filter_groups)
+                                            CommunityFilter.CHANNELS -> stringResource(R.string.groups_filter_channels)
+                                        }
+                                        val count = when (option) {
+                                            CommunityFilter.ALL -> anyTotal
+                                            CommunityFilter.GROUPS -> groupTotal
+                                            CommunityFilter.CHANNELS -> channelTotal
+                                        }
+                                        "$title · $count"
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                                )
+                            }
+                        }
+
+                        // Пустой экран - не тупик: объясняем словами и даём
+                        // действия вместо подсказки, из которой непонятно, что
+                        // нажимать.
+                        if (showingNothing) {
+                            item(key = "communities-empty") {
+                                ApuCommunitiesEmpty(
+                                    icon = if (searching) Icons.Filled.SearchOff else Icons.Filled.Groups,
+                                    title = when {
+                                        searching -> stringResource(R.string.groups_nothing_found)
+                                        anyTotal > 0 -> stringResource(R.string.groups_filter_empty)
+                                        else -> stringResource(R.string.groups_none)
+                                    },
+                                    body = when {
+                                        searching -> stringResource(R.string.groups_search_hint)
+                                        anyTotal > 0 -> stringResource(R.string.groups_filter_empty_hint)
+                                        else -> stringResource(R.string.groups_empty_hint)
+                                    },
+                                    primaryLabel = stringResource(R.string.groups_join_by_link),
+                                    primaryIcon = Icons.Filled.Link,
+                                    onPrimary = { showJoin = true },
+                                    secondaryLabel = createLabel,
+                                    onSecondary = if (createLabel == null) null else openCreate,
+                                    quietLabel = if (resetting) {
+                                        stringResource(R.string.groups_show_all)
+                                    } else {
+                                        stringResource(R.string.groups_refresh_list)
+                                    },
+                                    quietIcon = if (resetting) Icons.Filled.Close else Icons.Filled.Refresh,
+                                    onQuiet = if (resetting) resetView else refreshDirectory,
+                                )
+                            }
+                        }
+
                         // Свои группы и каналы - тоже раздельно: это разные вещи,
                         // и в поиске их надо различать с одного взгляда.
-                        val myGroups = uiState.filtered.filter { !it.isChannel }
-                        val myChannels = uiState.filtered.filter { it.isChannel }
                         if (myGroups.isNotEmpty()) {
-                            item { DirectoryHeader(stringResource(R.string.groups_my_groups)) }
-                            items(myGroups, key = { it.id }) { group ->
+                            item(key = "head-my-groups") {
+                                DirectoryHeaderCounted(stringResource(R.string.groups_my_groups), myGroups.size)
+                            }
+                            items(myGroups, key = { "mine-" + it.id }) { group ->
                                 GroupRow(
                                     group = group,
                                     onClick = { onGroupClick(group.id) },
@@ -356,8 +475,10 @@ fun GroupsScreen(
                             }
                         }
                         if (myChannels.isNotEmpty()) {
-                            item { DirectoryHeader(stringResource(R.string.groups_my_channels)) }
-                            items(myChannels, key = { it.id }) { group ->
+                            item(key = "head-my-channels") {
+                                DirectoryHeaderCounted(stringResource(R.string.groups_my_channels), myChannels.size)
+                            }
+                            items(myChannels, key = { "mine-" + it.id }) { group ->
                                 // Канал открывается лентой постов, группа - чатом.
                                 GroupRow(
                                     group = group,
@@ -377,32 +498,30 @@ fun GroupsScreen(
                         }
                         // Поиск по сетевому каталогу. Группы и каналы разнесены по
                         // своим заголовкам: в общей куче непонятно, куда вступаешь.
-                        val foundGroups = uiState.directoryMatches.filter { !it.isChannel }
-                        val foundChannels = uiState.directoryMatches.filter { it.isChannel }
-                        val browsing = uiState.searchQuery.isBlank()
                         if (foundGroups.isNotEmpty()) {
-                            item {
-                                DirectoryHeader(
-                                    if (browsing) stringResource(R.string.groups_open_groups) else stringResource(R.string.groups_online_groups)
+                            item(key = "head-net-groups") {
+                                DirectoryHeaderCounted(
+                                    if (browsing) stringResource(R.string.groups_open_groups) else stringResource(R.string.groups_online_groups),
+                                    foundGroups.size,
                                 )
                             }
-                            items(foundGroups, key = { it.groupId }) { entry ->
+                            items(foundGroups, key = { "net-" + it.groupId }) { entry ->
                                 DirectoryRow(entry = entry) { link -> viewModel.joinByLink(link) }
                             }
                         }
                         if (foundChannels.isNotEmpty()) {
-                            item {
-                                DirectoryHeader(
-                                    if (browsing) stringResource(R.string.groups_open_channels) else stringResource(R.string.groups_online_channels)
+                            item(key = "head-net-channels") {
+                                DirectoryHeaderCounted(
+                                    if (browsing) stringResource(R.string.groups_open_channels) else stringResource(R.string.groups_online_channels),
+                                    foundChannels.size,
                                 )
                             }
-                            items(foundChannels, key = { it.groupId }) { entry ->
+                            items(foundChannels, key = { "net-" + it.groupId }) { entry ->
                                 DirectoryRow(entry = entry) { link -> viewModel.joinByLink(link) }
                             }
                         }
                     }
                     ApuScrollbar(state = scrollState)
-                    }
                 }
             }
         }
@@ -700,22 +819,52 @@ private fun GroupRow(
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // Аватар со знаком вида: группа это или канал - видно с одного взгляда,
+        // и в общем списке не приходится вычитывать подпись под названием.
+        Box {
             GroupAvatar(
                 groupId = group.id,
                 title = group.title,
-                size = 44.dp,
+                size = 46.dp,
             )
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
+            ApuCommunityKindBadge(
+                isChannel = group.isChannel,
+                modifier = Modifier.align(Alignment.BottomEnd),
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     group.title,
                     fontWeight = FontWeight.SemiBold,
                     color = ApuBubbleTextColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
-                // Что это - канал или группа - должно быть видно СРАЗУ, иначе
-                // в общем списке они неразличимы.
+                // Пауза уведомлений видна прямо в списке: иначе кажется, что
+                // сообщество молчит само по себе.
+                if (group.mutedUntilMs > System.currentTimeMillis()) {
+                    Spacer(Modifier.width(6.dp))
+                    Icon(
+                        Icons.Filled.NotificationsOff,
+                        contentDescription = stringResource(R.string.menu_unmute),
+                        tint = ApuBubbleMutedColor,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
+            // Что это - канал или группа - и какой доступ: видно СРАЗУ, иначе
+            // в общем списке они неразличимы.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = if (group.isPublic) Icons.Filled.Public else Icons.Filled.Lock,
+                    contentDescription = null,
+                    tint = ApuBubbleAccentColor,
+                    modifier = Modifier.size(13.dp),
+                )
+                Spacer(Modifier.width(5.dp))
                 Text(
                     buildString {
                         append(if (group.isChannel) stringResource(R.string.contacts_channel) else stringResource(R.string.contacts_group))
@@ -724,32 +873,34 @@ private fun GroupRow(
                     style = MaterialTheme.typography.labelMedium,
                     color = ApuBubbleAccentColor,
                     maxLines = 1,
-                )
-                Text(
-                    buildString {
-                        append(stringResource(R.string.members_count_short, group.memberCount))
-                        if (group.topicsEnabled) append(" • ").append(stringResource(R.string.topics_tag))
-                        // Раунд 156: без служебных строк (гифки/стикеры).
-                        group.lastMessagePreview?.let {
-                            append(" • ").append(
-                                com.vladimir.messenger.util.ChatPreviews.human(it).orEmpty()
-                            )
-                        }
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ApuBubbleMutedColor,
-                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (group.pendingRequests > 0) {
-                ApuNotificationBadge(group.pendingRequests)
-                Spacer(Modifier.width(8.dp))
-            }
-            ApuNotificationBadge(group.unreadCount)
-            // Меню «⋮» - как в пузырях главного экрана: списки должны
-            // выглядеть и вести себя одинаково.
-            BubbleOverflowMenu(actions = menuActions)
+            Text(
+                buildString {
+                    append(stringResource(R.string.members_count_short, group.memberCount))
+                    if (group.topicsEnabled) append(" • ").append(stringResource(R.string.topics_tag))
+                    // Раунд 156: без служебных строк (гифки/стикеры).
+                    group.lastMessagePreview?.let {
+                        append(" • ").append(
+                            com.vladimir.messenger.util.ChatPreviews.human(it).orEmpty()
+                        )
+                    }
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = ApuBubbleMutedColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (group.pendingRequests > 0) {
+            ApuNotificationBadge(group.pendingRequests)
+            Spacer(Modifier.width(8.dp))
+        }
+        ApuNotificationBadge(group.unreadCount)
+        // Меню «⋮» - как в пузырях главного экрана: списки должны
+        // выглядеть и вести себя одинаково.
+        BubbleOverflowMenu(actions = menuActions)
     }
 }
 
@@ -1155,6 +1306,20 @@ private fun DirectoryHeader(title: String) {
     ApuSettingsSectionTitle(title)
 }
 
+/**
+ * Тот же заголовок, но с числом сообществ в разделе: объём виден сразу, и
+ * считать строки глазами не нужно. Ноль (раздел ещё пуст) - обычная капсула
+ * без цифры: «0» в заголовке читается как поломка.
+ */
+@Composable
+private fun DirectoryHeaderCounted(title: String, count: Int) {
+    if (count <= 0) {
+        DirectoryHeader(title)
+    } else {
+        ApuSettingsSectionTitle(stringResource(R.string.groups_section_count, title, count))
+    }
+}
+
 /** Строка найденного в сетевом каталоге: чужая публичная группа или канал. */
 @Composable
 private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
@@ -1173,11 +1338,18 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        GroupAvatar(
-            groupId = entry.groupId,
-            title = entry.title,
-            size = 40.dp,
-        )
+        // Аватар со знаком вида: тот же медальон, что у «моих» сообществ.
+        Box {
+            GroupAvatar(
+                groupId = entry.groupId,
+                title = entry.title,
+                size = 44.dp,
+            )
+            ApuCommunityKindBadge(
+                isChannel = entry.isChannel,
+                modifier = Modifier.align(Alignment.BottomEnd),
+            )
+        }
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -1193,26 +1365,43 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
                 if (entry.isChannel) stringResource(R.string.contacts_channel) else stringResource(R.string.contacts_group),
                 style = MaterialTheme.typography.labelMedium,
                 color = ApuBubbleAccentColor,
+                maxLines = 1,
             )
-            Text(
-                if (entry.needsApproval) stringResource(R.string.groups_by_request) else stringResource(R.string.groups_direct_join),
-                style = MaterialTheme.typography.bodySmall,
-                color = ApuBubbleMutedColor,
-            )
+            // Как вступают: сразу или по заявке. Значок отвечает на это
+            // раньше, чем человек прочитает подпись.
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = if (entry.needsApproval) Icons.Filled.Shield else Icons.Filled.CheckCircle,
+                    contentDescription = null,
+                    tint = ApuBubbleMutedColor,
+                    modifier = Modifier.size(12.dp),
+                )
+                Spacer(Modifier.width(5.dp))
+                Text(
+                    if (entry.needsApproval) stringResource(R.string.groups_by_request) else stringResource(R.string.groups_direct_join),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ApuBubbleMutedColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
+        // Действие строки - та же объёмная кнопка APU. Подпись без значка:
+        // «Подписаться» и «Вступить» длинные, и значок отнимал бы у названия
+        // сообщества место на узких экранах.
         ApuTextAction(
             label = if (entry.isChannel) stringResource(R.string.groups_subscribe) else stringResource(R.string.groups_join_btn),
             onClick = {
-            onJoin(
-                GroupInviteLinks.build(
-                    slug = entry.slug,
-                    groupId = entry.groupId,
-                    ownerId = entry.ownerId,
-                    isChannel = entry.isChannel,
-                    requestApproval = entry.needsApproval,
+                onJoin(
+                    GroupInviteLinks.build(
+                        slug = entry.slug,
+                        groupId = entry.groupId,
+                        ownerId = entry.ownerId,
+                        isChannel = entry.isChannel,
+                        requestApproval = entry.needsApproval,
+                    )
                 )
-            )
-        },
+            },
         )
     }
 }

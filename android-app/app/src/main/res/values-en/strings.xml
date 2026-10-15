@@ -242,6 +242,17 @@
     <string name="groups_nothing_found">Nothing found</string>
     <string name="groups_empty_hint">Create your own or join with an invitation link</string>
     <string name="groups_search_hint">Try another name or join with a link</string>
+    <string name="groups_hero_kicker">Groups and channels</string>
+    <string name="groups_hero_title">My communities</string>
+    <string name="groups_hero_online">Online</string>
+    <string name="groups_filter_all">All</string>
+    <string name="groups_filter_groups">Groups</string>
+    <string name="groups_filter_channels">Channels</string>
+    <string name="groups_section_count">%1$s · %2$d</string>
+    <string name="groups_clear_search">Clear search</string>
+    <string name="groups_show_all">Show all</string>
+    <string name="groups_filter_empty">Nothing in this section</string>
+    <string name="groups_filter_empty_hint">Try another filter or create a community</string>
     <string name="groups_my_groups">My groups</string>
     <string name="groups_my_channels">My channels</string>
     <string name="groups_open_groups">Open groups in the network</string>
