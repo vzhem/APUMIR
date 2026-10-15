@@ -86,16 +86,16 @@ class UpdateCheckerTest {
     fun `swarm first outcomes reach the log instead of turning into unknown`() {
         // Раньше эти два исхода не были в списке и в «Логах» выглядели как
         // unknown: по отчёту нельзя было понять, что проверку остановил рой.
-        assertEquals("swarm_first_no_http", UpdateDiagnosticsStore.safeOutcome("swarm_first_no_http"))
-        assertEquals("swarm_search_pending", UpdateDiagnosticsStore.safeOutcome("swarm_search_pending"))
-        assertEquals("up_to_date", UpdateDiagnosticsStore.safeOutcome("up_to_date"))
-        assertEquals("swarm_available", UpdateDiagnosticsStore.safeOutcome("swarm_available"))
-        assertEquals("unknown", UpdateDiagnosticsStore.safeOutcome("своё-слово"))
-        assertEquals("not_manual", UpdateDiagnosticsStore.safeManualWindow("not_manual"))
-        assertEquals("not_attempted", UpdateDiagnosticsStore.safeManualWindow("not_attempted"))
-        assertEquals("already_allowed", UpdateDiagnosticsStore.safeManualWindow("already_allowed"))
-        assertEquals("opened", UpdateDiagnosticsStore.safeManualWindow("opened"))
-        assertEquals("unknown", UpdateDiagnosticsStore.safeManualWindow("opened-by-hand"))
+        assertEquals("swarm_first_no_http", safeUpdateOutcome("swarm_first_no_http"))
+        assertEquals("swarm_search_pending", safeUpdateOutcome("swarm_search_pending"))
+        assertEquals("up_to_date", safeUpdateOutcome("up_to_date"))
+        assertEquals("swarm_available", safeUpdateOutcome("swarm_available"))
+        assertEquals("unknown", safeUpdateOutcome("своё-слово"))
+        assertEquals("not_manual", safeManualWindow("not_manual"))
+        assertEquals("not_attempted", safeManualWindow("not_attempted"))
+        assertEquals("already_allowed", safeManualWindow("already_allowed"))
+        assertEquals("opened", safeManualWindow("opened"))
+        assertEquals("unknown", safeManualWindow("opened-by-hand"))
     }
 
     @Test

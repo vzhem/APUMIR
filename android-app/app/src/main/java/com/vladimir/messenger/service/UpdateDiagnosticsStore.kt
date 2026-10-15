@@ -98,7 +98,7 @@ object UpdateDiagnosticsStore {
         latestVersion: String? = null,
     ) {
         val safeSource = if (source == "relay") "relay" else "github"
-        val safeResult = safeOutcome(result)
+        val safeResult = safeUpdateOutcome(result)
         // A scheduled relay check that is not due is not an endpoint attempt;
         // preserve the source/status of the GitHub request that led to fallback.
         if (!(safeSource == "relay" && safeResult == "not_due")) trace.source = safeSource
@@ -131,10 +131,10 @@ object UpdateDiagnosticsStore {
             .putString(KEY_LATEST_VERSION, trace.latestVersion)
             .putString(KEY_TRIGGER, trace.trigger)
             .putString(KEY_SOURCE, safeSource(trace.source))
-            .putString(KEY_RESULT, safeOutcome(trace.outcome))
+            .putString(KEY_RESULT, safeUpdateOutcome(trace.outcome))
             .putString(KEY_MANUAL_WINDOW, safeManualWindow(trace.manualWindow))
-            .putString(KEY_GITHUB_RESULT, safeOutcome(trace.githubOutcome))
-            .putString(KEY_RELAY_RESULT, safeOutcome(trace.relayOutcome))
+            .putString(KEY_GITHUB_RESULT, safeUpdateOutcome(trace.githubOutcome))
+            .putString(KEY_RELAY_RESULT, safeUpdateOutcome(trace.relayOutcome))
         trace.httpStatus?.let { editor.putInt(KEY_HTTP_STATUS, it) } ?: editor.remove(KEY_HTTP_STATUS)
         trace.githubHttpStatus?.let { editor.putInt(KEY_GITHUB_HTTP_STATUS, it) }
             ?: editor.remove(KEY_GITHUB_HTTP_STATUS)
@@ -212,24 +212,6 @@ object UpdateDiagnosticsStore {
     private fun safeSource(value: String): String = when (value) {
         "github", "relay" -> value
         else -> "none"
-    }
-
-    internal fun safeOutcome(value: String): String = when (value) {
-        "checking", "response_received", "update_available", "up_to_date", "http_error", "network_error",
-        "invalid_response", "asset_missing", "not_due", "unavailable", "fallback_not_due",
-        "never_checked", "not_attempted", "swarm_first_no_http", "swarm_search_pending",
-        "swarm_available" -> value
-        else -> "unknown"
-    }
-
-    /**
-     * «swarm_first_no_http» и «swarm_search_pending» раньше не были в списке и
-     * превращались в «unknown»: по «Логам» нельзя было понять, что проверку
-     * остановил рой, а не сеть. Теперь причина видна как есть.
-     */
-    internal fun safeManualWindow(value: String): String = when (value) {
-        "not_manual", "not_attempted", "already_allowed", "opened" -> value
-        else -> "unknown"
     }
 
     private fun safeNotificationOutcome(value: String): String = when (value) {

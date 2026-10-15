@@ -21,6 +21,28 @@ internal fun resolveUpdateCheckOutcome(
 }
 
 /**
+ * Причины проверки обновления, которые можно писать в «Логи» как есть: всё
+ * остальное сохраняется словом «unknown». Правило живёт здесь, а не в
+ * [UpdateDiagnosticsStore], по двум причинам: это чистая логика без Android, и
+ * её гоняет CI без Android SDK (`scripts/ci/check-chat-history.sh`) — иначе
+ * `swarm_first_no_http` и `swarm_search_pending` молча превращались в «unknown»,
+ * и по «Логам» нельзя было понять, что проверку остановил рой, а не сеть.
+ */
+internal fun safeUpdateOutcome(value: String): String = when (value) {
+    "checking", "response_received", "update_available", "up_to_date", "http_error", "network_error",
+    "invalid_response", "asset_missing", "not_due", "unavailable", "fallback_not_due",
+    "never_checked", "not_attempted", "swarm_first_no_http", "swarm_search_pending",
+    "swarm_available" -> value
+    else -> "unknown"
+}
+
+/** Окно ручной проверки: по нему видно, кто дал добро смотреть внешний канал. */
+internal fun safeManualWindow(value: String): String = when (value) {
+    "not_manual", "not_attempted", "already_allowed", "opened" -> value
+    else -> "unknown"
+}
+
+/**
  * Окно ручной проверки: кнопка «Проверить новую версию» получила разрешение
  * владельца спрашивать внешний канал даже при живом соседе (авто-проверки
  * остаются «рой прежде внешнего»). Живёт ограниченное время, чтобы дальше снова
