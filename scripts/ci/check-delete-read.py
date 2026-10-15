@@ -85,5 +85,31 @@ class DeleteReadTest(unittest.TestCase):
             self.assertIn("canDeleteForAll = uiState.canModerate || isAuthorMe", source(path))
 
 
+    def test_delete_retry_keeps_one_identity_and_counts_only_what_left(self):
+        """2026-10-15 (`delete_retry=246`, `своих=1000`): досылка удаления
+        уходила с новым случайным UUID на каждую попытку, то есть для ядра
+        каждый повтор был НОВЫМ сообщением — своя очередь пересылки
+        переполнялась, вытеснялись живые записи, а собеседник получал одну
+        команду многократно. Идентификатор команды обязан выводиться из
+        (собеседник, сообщение, момент постановки)."""
+        path = "data/repository/MessageDeletionRepository.kt"
+        text = source(path)
+        self.assertNotIn("UUID.randomUUID()", text)
+        pump = method(text, "pump")
+        self.assertIn("deletionMessageId(entry.peerId, entry.targetId, entry.atMs)", pump)
+        # Повтор обновляет ту же запись ядра, а не заводит вторую.
+        self.assertIn("RustBridge.retryMessage(", pump)
+        # Счётчик растёт только за отправленное, иначе он врёт.
+        self.assertRegex(pump, r"if \(sent\) OperationalDiagnostics\.tracker\.count\(OperationalCounter\.DELETE_RETRY\)")
+        first = method(text, "deleteForAllDirect")
+        self.assertIn("deletionMessageId(peer, messageId, atMs)", first)
+        # Один момент постановки идёт и в конверт, и в запись очереди: иначе
+        # идентификатор первой отправки не совпал бы с идентификатором досылки.
+        self.assertIn('val envelope = "$PREFIX|$chatId|$messageId|$atMs"', first)
+        self.assertIn("atMs = atMs,", first)
+        helper = text[text.index("private fun deletionMessageId"):]
+        self.assertIn("nameUUIDFromBytes", helper)
+        self.assertIn("private fun deletionAckId", text)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
