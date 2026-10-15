@@ -122,5 +122,32 @@ class DeleteReadTest(unittest.TestCase):
         self.assertIn("nameUUIDFromBytes", helper)
         self.assertIn("private fun deletionAckId", text)
 
+    def test_group_fanout_reuses_one_identity_per_member_and_envelope(self):
+        """2026-10-15: тот же класс ошибки в ГРУППОВОМ веере.
+
+        Помпа «удалить у всех» (`GroupRepository.pumpDeletions`, раунд 137)
+        досылает один и тот же `msdel`, собирая конверт заново, но
+        идентификатор отправки брался случайным — значит для ядра каждая
+        досылка была НОВЫМ сообщением: своя очередь (1000) пухла, живые записи
+        вытеснялись (5347), а участник получал одну и ту же команду
+        многократно. Идентификатор обязан выводиться из (группа, участник,
+        конверт). УЧАСТНИК в нём обязателен: ключ очереди ядра — это сам
+        идентификатор (`entries: Mutex<HashMap<String, QueueEntry>>`), поэтому
+        общий id схлопнул бы весь веер в одну запись.
+        """
+        text = source("di/GroupsModule.kt")
+        self.assertNotIn("RustBridge.sendMessage(UUID.randomUUID()", text)
+        self.assertIn("groupFanoutId(groupId, recipientId, envelope)", text)
+        helper = text[text.index("private fun groupFanoutId"):]
+        self.assertIn("nameUUIDFromBytes", helper)
+        self.assertIn('"apu-group:$groupId:$recipientId:$envelope"', helper)
+        # Конверт группового удаления обязан оставаться детерминированным —
+        # иначе «тот же конверт» у досылки и у первой отправки разойдётся.
+        delete = source("data/group/GroupWire.kt")
+        build = method(delete, "buildMessageDelete")
+        self.assertNotIn("currentTimeMillis", build)
+        self.assertNotIn("randomUUID", build)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
