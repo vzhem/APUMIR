@@ -53,6 +53,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,6 +72,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -107,13 +109,36 @@ fun StoriesStrip(
         .map { it.sortedBy { s -> s.createdAtMs } }
         .sortedWith(compareByDescending<List<StoryStore.Story>> { list -> list.any { it.id !in seen } }
             .thenByDescending { it.last().createdAtMs })
+    // «Как в Telegram»: много историй — плотная стопка; нажатие её раздвигает,
+    // и тогда любая история открывается одним касанием.
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val compact = StoryStripLayout.compact(byAuthor.size, expanded)
+    val labelsVisible = StoryStripLayout.labelsVisible(byAuthor.size, expanded)
+    val gap by animateDpAsState(
+        targetValue = StoryStripLayout.gapDp(byAuthor.size, expanded).dp,
+        animationSpec = tween(durationMillis = 220),
+        label = "story-strip-gap",
+    )
+    val peerSlot by animateDpAsState(
+        targetValue = StoryStripLayout.peerSlotDp(byAuthor.size, expanded).dp,
+        animationSpec = tween(durationMillis = 220),
+        label = "story-strip-slot",
+    )
+    val expandStack: () -> Unit = { expanded = true }
+    val toggleStack: () -> Unit = { expanded = !expanded }
+    // Вернувшись из просмотра, снова видим стопку, а не раздвинутую полосу.
+    val openAuthor: (String) -> Unit = { author ->
+        expanded = false
+        onOpenAuthor(author)
+    }
     LazyRow(
         modifier = modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(gap),
     ) {
         // Как в Telegram: свой кружок один. Плюс на нём — добавить, кружок —
-        // смотреть (если история уже есть).
+        // смотреть (если история уже есть). Золотая объёмная цифра на нём —
+        // сколько историй в полосе всего, и ею же стопка раздвигается.
         item(key = "mine") {
             val hasOwn = mine.isNotEmpty()
             StoryBubble(
@@ -122,15 +147,29 @@ fun StoriesStrip(
                 viewed = if (hasOwn) mine.map { true } else emptyList(),
                 self = true,
                 selfName = profileName,
+                totalStories = stories.size,
+                slotWidth = StoryStripLayout.SELF_SLOT_DP.dp,
+                showLabel = labelsVisible,
+                compact = compact,
+                onExpand = expandStack,
+                onCountClick = toggleStack,
                 onAddClick = onAddClick,
             ) {
-                if (StoryStrip.selfOpensViewer(hasOwn)) onOpenAuthor(mine.first().authorId)
+                if (StoryStrip.selfOpensViewer(hasOwn)) openAuthor(mine.first().authorId)
                 else onAddClick()
             }
         }
         items(byAuthor, key = { it.first().authorId }) { list ->
-            StoryBubble(list.last().authorName.ifBlank { "?" }, avatars[list.first().authorId], list.map { it.id in seen }) {
-                onOpenAuthor(list.first().authorId)
+            StoryBubble(
+                title = list.last().authorName.ifBlank { "?" },
+                avatar = avatars[list.first().authorId],
+                viewed = list.map { it.id in seen },
+                slotWidth = peerSlot,
+                showLabel = labelsVisible,
+                compact = compact,
+                onExpand = expandStack,
+            ) {
+                openAuthor(list.first().authorId)
             }
         }
     }
@@ -143,19 +182,41 @@ private fun StoryBubble(
     viewed: List<Boolean>,
     self: Boolean = false,
     selfName: String? = null,
+    /** Сколько историй сейчас в полосе — для золотой объёмной цифры. */
+    totalStories: Int = 0,
+    /** Ширина слота: уже кружка — соседи наезжают, полоса стоит стопкой. */
+    slotWidth: Dp = StoryStripLayout.PEER_SLOT_DP.dp,
+    /** Подписи видны только в раздвинутой полосе: в стопке их закрывают кружки. */
+    showLabel: Boolean = true,
+    /** Полоса сжата в стопку: нажатие сначала её раздвигает. */
+    compact: Boolean = false,
+    onExpand: () -> Unit = {},
+    onCountClick: (() -> Unit)? = null,
     onAddClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
+    val labelAlpha by animateFloatAsState(
+        targetValue = if (showLabel) 1f else 0f,
+        animationSpec = tween(durationMillis = 180),
+        label = "story-label",
+    )
+    val tap: () -> Unit = { if (StoryStrip.tapOpensViewer(compact)) onClick() else onExpand() }
     Column(
-        Modifier.width(if (self) 80.dp else 72.dp).then(if (self) Modifier else Modifier.clickable(onClick = onClick)),
+        // Ширина — слот, а не кружок: в стопке слот уже кружка, и соседи
+        // наезжают друг на друга. Кружок поэтому меряется `requiredSize`:
+        // иначе родитель сжал бы его до ширины слота.
+        Modifier.width(slotWidth),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(Modifier.size(if (self) 72.dp else 64.dp)) {
+        Box(Modifier.requiredSize(if (self) 72.dp else 64.dp)) {
             Box(
                 Modifier
-                    .size(64.dp)
+                    .requiredSize(64.dp)
                     .align(Alignment.TopStart)
-                    .then(if (self) Modifier.clickable(onClick = onClick) else Modifier),
+                    // Нажатие на кружок: в стопке кружки перекрываются, и
+                    // верхний (нарисованный позже) забирает касание — палец
+                    // всегда попадает в тот кружок, который видно.
+                    .clickable(onClick = tap),
                 contentAlignment = Alignment.Center,
             ) {
                 Canvas(Modifier.fillMaxSize()) {
@@ -198,6 +259,15 @@ private fun StoryBubble(
                     modifier = Modifier.align(Alignment.BottomEnd),
                 )
             }
+            // Золотая объёмная цифра: сколько историй в полосе всего. Ею же
+            // стопка раздвигается и сжимается обратно.
+            if (self && totalStories > 0) {
+                StoryCountBadge(
+                    total = totalStories,
+                    onClick = onCountClick,
+                    modifier = Modifier.align(Alignment.BottomStart),
+                )
+            }
         }
         Spacer(Modifier.height(6.dp))
         Text(
@@ -206,7 +276,11 @@ private fun StoryBubble(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            modifier = if (self) Modifier.clickable(onClick = onClick) else Modifier,
+            // Подпись в стопке прячется, но место под неё остаётся: полоса не
+            // прыгает вверх-вниз при раздвигании.
+            modifier = Modifier
+                .graphicsLayer { alpha = labelAlpha }
+                .then(if (self || showLabel) Modifier.clickable(onClick = tap) else Modifier),
         )
     }
 }
@@ -252,6 +326,76 @@ private fun StoryAddBadge(onClick: () -> Unit, modifier: Modifier = Modifier) {
             contentDescription = stringResource(R.string.story_new),
             tint = ApuGoldInk,
             modifier = Modifier.size(14.dp),
+        )
+    }
+}
+
+/**
+ * Золотая объёмная цифра на своём кружке: сколько историй в полосе прямо
+ * сейчас. Выпирает влево — зеркально плюсу, который выпирает вправо; нажатие
+ * раздвигает стопку и сжимает её обратно.
+ */
+@Composable
+private fun StoryCountBadge(total: Int, onClick: (() -> Unit)?, modifier: Modifier = Modifier) {
+    val label = StoryStripLayout.totalLabel(total)
+    val wide = label.length > 2
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val view = LocalView.current
+    LaunchedEffect(pressed) {
+        if (pressed) view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+    }
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.9f else 1f,
+        animationSpec = tween(durationMillis = 110),
+        label = "story-count-press",
+    )
+    val lift by animateDpAsState(
+        targetValue = if (pressed) 2.dp else 8.dp,
+        animationSpec = tween(durationMillis = 110),
+        label = "story-count-lift",
+    )
+    val shape = if (wide) RoundedCornerShape(percent = 50) else CircleShape
+    val description = stringResource(R.string.story_total_count, total)
+    val digits = if (wide) 10.sp else 13.sp
+    Box(
+        modifier
+            .height(24.dp)
+            .widthIn(min = 24.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .apuPremiumLift(lift, shape, ApuGold.copy(alpha = 0.55f))
+            .clip(shape)
+            .background(apuGoldBrush())
+            .border(1.5.dp, Color.White, shape)
+            .apuPremiumGloss(shape, intensity = 1.1f, topFraction = 0.75f)
+            .then(
+                if (onClick == null) Modifier
+                else Modifier.clickable(
+                    interactionSource = interaction,
+                    indication = null,
+                    onClick = onClick,
+                ),
+            )
+            .padding(horizontal = if (wide) 8.dp else 0.dp)
+            .semantics(mergeDescendants = true) { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        // Объём: снизу светлая грань, сверху на ней чёрная цифра — как отлитая
+        // из золота, в тон плюсу рядом.
+        Text(
+            label,
+            color = ApuGoldLight,
+            fontSize = digits,
+            fontWeight = FontWeight.Black,
+            maxLines = 1,
+            modifier = Modifier.offset(y = 1.dp),
+        )
+        Text(
+            label,
+            color = ApuGoldInk,
+            fontSize = digits,
+            fontWeight = FontWeight.Black,
+            maxLines = 1,
         )
     }
 }

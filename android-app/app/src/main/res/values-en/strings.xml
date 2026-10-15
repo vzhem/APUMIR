@@ -1606,6 +1606,7 @@ The file is not on this phone</string>
     <string name="send_scheduled_at">Scheduled for %1$s</string>
     <string name="send_scheduled_cancel">Cancel</string>
     <string name="story_mine">My story</string>
+    <string name="story_total_count">Stories in total: %1$d</string>
     <string name="story_you">You</string>
     <string name="story_new">New story</string>
     <string name="story_placeholder">What is new? Up to 200 characters</string>

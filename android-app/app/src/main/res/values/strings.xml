@@ -1619,6 +1619,7 @@
     <string name="send_scheduled_at">Отложено на %1$s</string>
     <string name="send_scheduled_cancel">Отменить</string>
     <string name="story_mine">Моя история</string>
+    <string name="story_total_count">Всего историй: %1$d</string>
     <string name="story_you">Вы</string>
     <string name="story_new">Новая история</string>
     <string name="story_placeholder">Что нового? До 200 знаков</string>
