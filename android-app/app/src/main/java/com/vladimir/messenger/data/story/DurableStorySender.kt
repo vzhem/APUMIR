@@ -85,10 +85,23 @@ internal object DurableStorySender {
         for (entry in due) {
             if (!synchronized(lock) { queue.contains(entry) }) continue
             val packets = packetCache.getOrPut(entry.storyId + if (entry.revoke) ":revoke" else ":publish") {
-                if (entry.revoke) listOf(StoryStore.PREFIX + JSONObject().put("id", entry.storyId)
-                    .put("kind", StoryRevoke.KIND).put("ts", entry.createdAtMs))
-                else StoryStore.active(now).firstOrNull { it.mine && it.id == entry.storyId && it.authorId == ownId }
-                    ?.let { StoryStore.encodePackets(it) }.orEmpty()
+                // Сборка пакетов может отказать (неканонический base64 снимка,
+                // пакет больше 16 КиБ). Раньше такое исключение вылетало из
+                // всего цикла досылки: одна испорченная запись останавливала
+                // рассылку ОСТАЛЬНЫХ историй, и в журнале не было ни слова о
+                // причине. Теперь отказ принадлежит одной записи.
+                runCatching {
+                    if (entry.revoke) listOf(StoryStore.PREFIX + JSONObject().put("id", entry.storyId)
+                        .put("kind", StoryRevoke.KIND).put("ts", entry.createdAtMs))
+                    else StoryStore.active(now).firstOrNull { it.mine && it.id == entry.storyId && it.authorId == ownId }
+                        ?.let { StoryStore.encodePackets(it) }.orEmpty()
+                }.getOrElse { error ->
+                    TransferDiagnostics.recordWarning(
+                        "story",
+                        "пакеты истории не собрались (" + (error::class.simpleName ?: "ошибка") + "); запись досылки снята",
+                    )
+                    emptyList()
+                }
             }
             if (packets.isEmpty() || entry.nextPart !in packets.indices) {
                 synchronized(lock) { queue.remove(entry); save() }

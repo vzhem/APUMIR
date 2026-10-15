@@ -18,6 +18,17 @@ object StoryStore {
     const val LIFETIME_MS = 24L * 60 * 60 * 1000
     const val BG_COUNT = 4
 
+    /**
+     * Насколько время создания истории может опережать наши часы.
+     *
+     * Телефоны сверяют время не мгновенно, поэтому небольшое «будущее» — норма.
+     * Раньше такие пакеты считались просрочкой и просто пропадали: ни в отчёте,
+     * ни в журнале нельзя было понять, что история не дошла из-за расхождения
+     * часов. Теперь у этой причины своё имя ([OperationalCounter.STORY_CLOCK_SKEW])
+     * и одна понятная строка в журнале.
+     */
+    private const val FUTURE_TOLERANCE_MS = 300_000L
+
     data class Story(val id: String, val authorId: String, val authorName: String,
         val text: String, val bg: Int, val createdAtMs: Long, val mine: Boolean,
         val photoB64: String? = null)
@@ -29,6 +40,10 @@ object StoryStore {
     private const val TOMB_KEY = "revoked"
     private val lock = Any()
     private val tombstones = HashMap<String, Long>()
+
+    /** Авторы, о расхождении часов с которыми журнал уже предупредил (в памяти). */
+    private val clockSkewNoted = LinkedHashSet<String>()
+    private const val MAX_CLOCK_SKEW_NOTES = 8
     private var appContext: Context? = null
     private var loaded = false
     private val diskWriter = Executors.newSingleThreadExecutor()
@@ -95,8 +110,13 @@ object StoryStore {
             val id = o.getString("id")
             if (id.length !in 1..100) return true
             val kind = o.optString("kind")
-            if (ts < now - LIFETIME_MS || ts > now + 300_000) {
+            if (ts < now - LIFETIME_MS) {
                 OperationalDiagnostics.tracker.count(OperationalCounter.STORY_EXPIRED)
+                photoParts.discard(authorId, id); return true
+            }
+            if (ts > now + FUTURE_TOLERANCE_MS) {
+                OperationalDiagnostics.tracker.count(OperationalCounter.STORY_CLOCK_SKEW)
+                noteClockSkew(authorId)
                 photoParts.discard(authorId, id); return true
             }
             if (kind == StoryRevoke.KIND) {
@@ -133,7 +153,36 @@ object StoryStore {
             Story(id, authorId, o.optString("name", authorName).ifBlank { authorName },
                 o.getString("text").take(200), o.optInt("bg", 0).coerceIn(0, BG_COUNT - 1), ts, false, photo)
         }.getOrNull() ?: run { OperationalDiagnostics.tracker.count(OperationalCounter.STORY_PHOTO_PENDING); return true }
-        add(story); return true
+        // Счётчик приёма раньше никто не увеличивал: в отчёте «Логи» нельзя
+        // было отличить «история доехала и показана» от «история не дошла
+        // вовсе» — а это первое, что нужно знать по жалобе «историй не видно».
+        if (add(story)) OperationalDiagnostics.tracker.count(OperationalCounter.STORY_RECEIVED)
+        return true
+    }
+
+    /**
+     * О расхождении часов говорим в журнал один раз на автора: пакетов у
+     * фотоистории десятки, и повторять одну и ту же строку незачем. Идентификатор
+     * автора остаётся только в памяти и в журнал не выводится.
+     */
+    private fun noteClockSkew(author: String) {
+        val first = synchronized(lock) {
+            if (author in clockSkewNoted) {
+                false
+            } else {
+                if (clockSkewNoted.size >= MAX_CLOCK_SKEW_NOTES) {
+                    clockSkewNoted.remove(clockSkewNoted.first())
+                }
+                clockSkewNoted.add(author)
+                true
+            }
+        }
+        if (first) {
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics.recordWarning(
+                "story",
+                "пакет истории отклонён: время создания в будущем — часы отправителя расходятся с нашими",
+            )
+        }
     }
 
     fun publish(authorId: String, text: String, bg: Int, photoB64: String? = null): Story {
