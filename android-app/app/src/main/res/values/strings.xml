@@ -1674,6 +1674,20 @@
     <string name="story_photo_failed">Не удалось открыть фото. Выберите другое.</string>
     <string name="story_photo_unavailable">Фото не открылось на этом телефоне</string>
     <string name="story_photo_needs_update">Фото увидят друзья на новой версии APU</string>
+    <!-- Редактор фото истории: обрезка как хочешь, поворот, отражение.
+         Владелец 2026-10-15: «обрезать её как хочешь, увеличить и другие
+         функции как в топовых мессенджерах». -->
+    <string name="story_edit_photo">Редактор фото</string>
+    <string name="story_edit_photo_open">Изменить фото</string>
+    <string name="story_crop_original">Исходное</string>
+    <string name="story_crop_rotate">Повернуть</string>
+    <string name="story_crop_mirror">Отразить ↔</string>
+    <string name="story_crop_flip">Отразить ↕</string>
+    <string name="story_crop_reset">Сброс</string>
+    <string name="story_crop_straighten_value">Ровно: %1$d°</string>
+    <string name="story_crop_hint">Двумя пальцами — увеличить и повернуть, одним — сдвинуть, уголками — обрезать.</string>
+    <string name="story_crop_corner">Угол кадра %1$d</string>
+    <string name="story_photo_edit_failed">Не удалось применить обрезку. Попробуйте ещё раз.</string>
     <!-- Отклики на истории: значки и комментарии. Лента публичная - её видит
          каждый, кто открыл историю (решение владельца 2026-10-14). -->
     <string name="story_reaction_add">Реакция на историю</string>

@@ -214,5 +214,79 @@ class BirthdayContractTest(unittest.TestCase):
         self.assertNotRegex(screen, re.compile(r"monthValue\s*==\s*LocalDate\.now\("))
 
 
+class BirthdayMirrorContractTest(unittest.TestCase):
+    """«Доделай зеркало» (владелец 2026-10-15): дата едет между своими устройствами.
+
+    Раньше зеркало профиля водило имя, ник, тему, аватар и обои, а день рождения
+    оставался на том телефоне, где его задали, - вторая правка не доезжала.
+    """
+
+    def mirror(self):
+        return kt("data/mirror/ProfileMirror.kt")
+
+    def test_snapshot_carries_day_month_and_visibility_without_the_year(self):
+        text = flat(self.mirror())
+        for part in ('const val FIELD_BDAY = "bday"', "val bdayDay: Int = 0", "val bdayMonth: Int = 0",
+                     "val bdayVisible: Boolean = false", "val tBday: Long = 0L",
+                     "fun bdayKey(): String", "fun birthdayDigest(): String"):
+            self.assertIn(part, text, part)
+        for key in ("bdday", "bdmon", "bdvis", "tbday"):
+            self.assertIn('.put("%s"' % key, text, key + " не уезжает в снимке профиля")
+        # Год не едет и здесь: ни ключа, ни поля.
+        self.assertNotIn("bdayyear", text)
+        self.assertNotIn("bdayYear", text)
+        # Старый партнёр этих ключей не знает: читаем с умолчаниями, иначе разбор
+        # чужого снимка падал бы или подменял дату пустой.
+        for part in ('o.optInt("bdday", 0)', 'o.optInt("bdmon", 0)',
+                     'o.optBoolean("bdvis", false)', 'o.optLong("tbday", 0L)'):
+            self.assertIn(part, text, part)
+
+    def test_shared_fingerprint_stays_without_the_birthday(self):
+        """Иначе старая сборка расходилась бы с новой вечно и гоняла снимки."""
+        digest = self.mirror().split("fun digest(): String", 1)[1].split("fun bdayKey()", 1)[0]
+        self.assertIn("listOf(name, nick, theme, avSha, wallSha)", flat(digest))
+        self.assertNotIn("bday", digest)
+
+    def test_merge_and_apply_keep_the_local_year(self):
+        text = flat(self.mirror())
+        self.assertIn("wins(incoming.tBday, incoming.bdayKey(), mine.tBday, mine.bdayKey())", text)
+        self.assertIn("applyBirthday(app, incoming.bdayDay, incoming.bdayMonth, incoming.bdayVisible)", text)
+        apply = self.mirror().split("private fun applyBirthday(", 1)[1].split("\n    /**", 1)[0]
+        flat_apply = flat(apply)
+        self.assertIn("Birthday.isValid(day, month)", flat_apply)
+        # Год берём локальный: он не ездит и остаётся выбором владельца.
+        self.assertIn("current?.year ?: Birthday.NO_YEAR", flat_apply)
+        self.assertIn("BirthdayStore.clear(context)", flat_apply)
+        # Петли нет: правка от чужого устройства не публикуется обратно.
+        self.assertIn("applyingRemote = true", flat_apply)
+        self.assertIn("applyingRemote = false", flat_apply)
+
+    def test_local_edits_reach_the_mirror_from_the_store(self):
+        """Все пути правки (диалог, галочка, «убрать») идут через один вызов."""
+        store = kt("data/profile/BirthdayStore.kt")
+        self.assertEqual(3, store.count("noteMirror(context)"), "правок три: дата, галочка, убрать")
+        flat_store = flat(store)
+        self.assertIn("ProfileMirror.noteLocalChange(context.applicationContext, ProfileMirror.FIELD_BDAY)", flat_store)
+
+    def test_hello_carries_the_birthday_fingerprint_and_heals_divergence(self):
+        sync = flat(kt("data/mirror/MirrorSync.kt"))
+        self.assertIn('.put("pb", ProfileMirror.cachedBirthdayDigest(context))', sync)
+        self.assertIn('ProfileMirror.notePartnerBirthdayDigest(obj.optString("pb", ""))', sync)
+        self.assertIn("pb != ProfileMirror.cachedBirthdayDigest(context)", sync)
+        self.assertIn("if (!profileDiffers && !birthdayDiffers) return", sync)
+        # Пустой ответный отпечаток - старая сборка, а не расхождение.
+        self.assertIn("pb.isNotBlank()", sync)
+
+    def test_mirror_checks_are_wired_into_ci(self):
+        test_path = ROOT / "android-app/app/src/test/java/com/vladimir/messenger/data/mirror/ProfileMirrorBirthdayTest.kt"
+        text = test_path.read_text(encoding="utf-8")
+        for part in ("sharedFingerprintIgnoresTheBirthday", "birthdayHasItsOwnFingerprint",
+                     "birthdayKeyCarriesDayMonthAndVisibility", "birthdayDivergenceIsNamedInDiagnostics",
+                     "olderPartnerSnapshotMeansNoChange"):
+            self.assertIn(part, text, part)
+        ci = source("scripts/ci/check-android-compile.sh")
+        self.assertIn("*ProfileMirrorBirthdayTest*", ci)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

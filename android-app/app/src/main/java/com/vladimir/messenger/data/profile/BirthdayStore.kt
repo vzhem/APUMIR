@@ -1,6 +1,7 @@
 package com.vladimir.messenger.data.profile
 
 import android.content.Context
+import com.vladimir.messenger.data.mirror.ProfileMirror
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -13,6 +14,11 @@ import kotlinx.coroutines.flow.asStateFlow
  * рассылка (`GroupRepository.publishMyBirthday`) отправляет только видимую дату,
  * а при выключении галочки посылает короткий отзыв — иначе у друзей осталась бы
  * старая дата навсегда.
+ *
+ * Каждая правка ещё и уходит в живое зеркало профиля (`ProfileMirror`), поэтому
+ * второе устройство той же личности видит ту же дату: владелец 2026-10-15,
+ * «доделай зеркало». Метку времени ставит зеркало, и оно же глушит обратную
+ * публикацию, когда дату применяет чужое устройство ([ProfileMirror.applyingRemote]).
  */
 object BirthdayStore {
     private const val PREFS = "p2p_prefs"
@@ -65,12 +71,14 @@ object BirthdayStore {
             .putBoolean(KEY_VISIBLE, visible)
             .apply()
         _mine.value = read(context)
+        noteMirror(context)
     }
 
     /** Галочка «дата видна друзьям»: саму дату не трогает. */
     fun setVisible(context: Context, visible: Boolean) {
         prefs(context).edit().putBoolean(KEY_VISIBLE, visible).apply()
         _mine.value = read(context)
+        noteMirror(context)
     }
 
     /** Убрать дату совсем: у друзей она тоже исчезнет (уйдёт отзыв). */
@@ -82,6 +90,18 @@ object BirthdayStore {
             .remove(KEY_VISIBLE)
             .apply()
         _mine.value = read(context)
+        noteMirror(context)
+    }
+
+    /**
+     * Сказать зеркалу профиля, что дата изменилась.
+     *
+     * Вызов живёт здесь, а не в экране профиля: так ни один путь правки (диалог,
+     * галочка, «убрать дату», восстановление из копии) не забудет про зеркало.
+     * Во время применения чужого кадра зеркало само игнорирует этот вызов.
+     */
+    private fun noteMirror(context: Context) {
+        ProfileMirror.noteLocalChange(context.applicationContext, ProfileMirror.FIELD_BDAY)
     }
 
     private fun prefs(context: Context) =

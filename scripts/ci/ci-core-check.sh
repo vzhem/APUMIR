@@ -204,6 +204,7 @@ if python3 scripts/ci/check-chat-startup.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-saved-input.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-peer-rank.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-story-editor.py >>"$LOG" 2>&1 && \
+   python3 scripts/ci/check-story-crop.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-birthday.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-relay-storage-forensics.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-automatic-maintenance.py >>"$LOG" 2>&1 && \

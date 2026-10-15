@@ -1530,7 +1530,10 @@ class MirrorChannel(
         .put("sk", MirrorRoomToken.stamp(token?.value))
         .put("mkv", ROOM_PROTOCOL_V)
         .put("pd", ProfileMirror.cachedDigest(context))
-        .put("pd", ProfileMirror.cachedDigest(context))
+        // р250: отпечаток дня рождения отдельной строкой. Старая сборка этого
+        // ключа не знает и просто не заметит, а новая увидит расхождение даты
+        // и сама запросит снимок профиля.
+        .put("pb", ProfileMirror.cachedBirthdayDigest(context))
 
     private fun sendEvent(kind: String, payload: JSONObject): Boolean {
         if (wsRef.get() == null) return false
@@ -1669,6 +1672,7 @@ class MirrorChannel(
         // р246: отпечаток профиля партнёра отличается от нашего - запросить
         // полный снимок и слиться (онлайн-поиск расхождений профиля).
         ProfileMirror.notePartnerDigest(obj.optString("pd", ""))
+        ProfileMirror.notePartnerBirthdayDigest(obj.optString("pb", ""))
         maybeRequestProfile()
     }
 
@@ -1677,8 +1681,12 @@ class MirrorChannel(
 
     private fun maybeRequestProfile() {
         val pd = ProfileMirror.partnerDigest
-        if (pd.isBlank()) return
-        if (pd == ProfileMirror.cachedDigest(context)) return
+        val pb = ProfileMirror.partnerBirthdayDigest
+        val profileDiffers = pd.isNotBlank() && pd != ProfileMirror.cachedDigest(context)
+        // Пустой отпечаток даты = партнёр на старой сборке: расхождения нет,
+        // иначе снимок профиля гонялся бы каждые 10 секунд без причины.
+        val birthdayDiffers = pb.isNotBlank() && pb != ProfileMirror.cachedBirthdayDigest(context)
+        if (!profileDiffers && !birthdayDiffers) return
         val now = System.currentTimeMillis()
         if (now - lastProfReqAt < 10_000L) return
         lastProfReqAt = now

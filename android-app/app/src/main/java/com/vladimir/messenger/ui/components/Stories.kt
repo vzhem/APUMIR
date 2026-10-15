@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import android.util.Base64
+import com.vladimir.messenger.data.story.StoryCrop
 import com.vladimir.messenger.data.story.StoryPhoto
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateDpAsState
@@ -659,26 +660,61 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
     // прикрепления. Без него кнопка публикации ждёт фото: иначе история молча
     // уходила текстом, и у друзей вместо снимка была только подпись.
     var photoSkipped by remember { mutableStateOf(false) }
+    // Снимок для редактора: пока он в памяти, «Изменить фото» открывает редактор
+    // снова, не перечитывая галерею. В Bundle его не кладём - это крупный объект,
+    // а состояние редактора восстанавливать из saved-instance нечем.
+    var editSource by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var editing by remember { mutableStateOf(false) }
+    // Отдельно от photoError: «не открылось фото» и «не собрался кадр» - разные
+    // подсказки, вторая не советует выбирать другое фото.
+    var editFailed by remember { mutableStateOf(false) }
     var cameraError by remember { mutableStateOf<Int?>(null) }
     var showCamera by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope()
 
+    /**
+     * Фото выбрано или снято: сначала редактор, публикация - только после «Готово».
+     *
+     * Раньше снимок уходил друзьям ровно таким, каким его отдала галерея: обрезать
+     * было нечем (владелец 2026-10-15). Декод большого файла идёт в IO - на главном
+     * потоке редактор бы подвесился.
+     */
     fun preparePhoto(uri: Uri, cleanup: (() -> Unit)? = null) {
         scope.launch {
             preparing = true
             photoError = false
             photoSkipped = false
+            editFailed = false
             cameraError = null
             try {
-                photo = withContext(Dispatchers.IO) { StoryPhoto.prepare(context, uri) }
+                val loaded = withContext(Dispatchers.IO) { StoryPhoto.loadForEdit(context, uri) }
+                editSource = loaded
+                editing = true
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (_: Exception) { photoError = true }
             finally {
                 runCatching { cleanup?.invoke() }
                 preparing = false
             }
+        }
+    }
+
+    /** «Готово» в редакторе: кадр собирается и кодируется один раз - уже обрезанным. */
+    fun applyPhotoEdit(crop: StoryCrop.State) {
+        val loaded = editSource ?: return
+        editing = false
+        scope.launch {
+            preparing = true
+            photoError = false
+            editFailed = false
+            try {
+                photo = withContext(Dispatchers.IO) { StoryPhoto.publishEdited(loaded, crop) }
+                photoSkipped = false
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (_: Exception) { editFailed = true }
+            finally { preparing = false }
         }
     }
 
@@ -774,7 +810,10 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                             enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
                     }
                     if (photo != null) ApuPremiumButton(stringResource(R.string.story_remove_photo),
-                        { photo = null; photoError = false; photoSkipped = false },
+                        { photo = null; editSource = null; editing = false; editFailed = false; photoError = false; photoSkipped = false },
+                        enabled = !preparing, compact = true, modifier = Modifier.fillMaxWidth())
+                    if (photo != null && editSource != null) ApuPremiumButton(stringResource(R.string.story_edit_photo_open),
+                        { editing = true },
                         enabled = !preparing, compact = true, modifier = Modifier.fillMaxWidth())
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -804,9 +843,12 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                     ApuPremiumButton(stringResource(R.string.story_take_photo), { requestCamera() },
                         enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
                     if (photo != null) ApuPremiumButton(stringResource(R.string.story_remove_photo),
-                        { photo = null; photoError = false; photoSkipped = false },
+                        { photo = null; editSource = null; editing = false; editFailed = false; photoError = false; photoSkipped = false },
                         enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
                 }
+                if (photo != null && editSource != null) ApuPremiumButton(stringResource(R.string.story_edit_photo_open),
+                    { editing = true },
+                    enabled = !preparing, compact = true, modifier = Modifier.fillMaxWidth())
                 Text(
                     "${text.length}/200",
                     color = Color.White.copy(alpha = .6f),
@@ -826,6 +868,8 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
             if (preparing) Text(stringResource(R.string.story_photo_preparing), color = Color.White,
                 modifier = Modifier.padding(horizontal = 16.dp))
             if (photoError) Text(stringResource(R.string.story_photo_failed), color = Color(0xFFFF8A80),
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp))
+            if (editFailed) Text(stringResource(R.string.story_photo_edit_failed), color = Color(0xFFFF8A80),
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp))
             if (photoMissing) ApuPremiumButton(stringResource(R.string.story_publish_without_photo),
                 { photoSkipped = true },
@@ -848,6 +892,16 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                 showCamera = false
                 preparePhoto(target.uri, target::delete)
             },
+        )
+    }
+    val editorSource = editSource
+    if (editing && editorSource != null) {
+        // Отмена возвращает к прежнему фото (или к его отсутствию): уже
+        // прикреплённый снимок от неудачной правки не теряется.
+        StoryPhotoEditorDialog(
+            source = editorSource,
+            onCancel = { editing = false },
+            onApply = { crop -> applyPhotoEdit(crop) },
         )
     }
 }
