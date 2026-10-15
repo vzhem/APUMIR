@@ -119,6 +119,13 @@ STORY_PUBLISH="$BASE/main/java/com/vladimir/messenger/ui/components/StoryPublish
 STORY_PUBLISH_TEST="$BASE/test/java/com/vladimir/messenger/ui/components/StoryPublishTest.kt"
 RETENTION="$BASE/main/java/com/vladimir/messenger/data/file/FileTransferRetention.kt"
 RETENTION_TEST="$BASE/test/java/com/vladimir/messenger/data/file/FileTransferRetentionTest.kt"
+# Дата рождения (владелец 2026-10-15): правила даты, книга слияния и конверт
+# «bday» в групповом проводе - чистый Kotlin. Здесь они компилируются и
+# проверяются на runner, поэтому «29 февраля» и отзыв даты ловятся до выпуска.
+BIRTHDAY="$BASE/main/java/com/vladimir/messenger/data/profile/Birthday.kt"
+BIRTHDAY_BOOK="$BASE/main/java/com/vladimir/messenger/data/profile/BirthdayBook.kt"
+BIRTHDAY_TEST="$BASE/test/java/com/vladimir/messenger/data/profile/BirthdayTest.kt"
+BIRTHDAY_WIRE_TEST="$BASE/test/java/com/vladimir/messenger/data/group/BirthdayWireTest.kt"
 "$JAVA" -cp "$OUT/compiler/*:$OUT/runtime/kotlin-stdlib-$KOTLIN.jar" \
     org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
     -no-stdlib -no-reflect -jvm-target 17 -classpath "$CP" -d "$OUT/classes" \
@@ -131,11 +138,14 @@ RETENTION_TEST="$BASE/test/java/com/vladimir/messenger/data/file/FileTransferRet
     "$CALL_WIRE" "$FILE_CODEC" "$FILE_WIRE" "$FILE_UDP" "$SEALED_WIRE" "$OUTGOING_POLICY" "$OUTGOING_POLICY_TEST" \
     "$DEFERRED_WIRE" "$DEFERRED_POLICY" "$DEFERRED_WIRE_TEST" "$DEFERRED_POLICY_TEST" \
     "$SELF_SEED_POLICY" "$SELF_SEED_POLICY_TEST" "$SEND_TIME_POLICY" "$SEND_TIME_TEST" \
-    "$STORY_PUBLISH" "$STORY_PUBLISH_TEST" "$RETENTION" "$RETENTION_TEST"
+    "$STORY_PUBLISH" "$STORY_PUBLISH_TEST" "$RETENTION" "$RETENTION_TEST" \
+    "$BIRTHDAY" "$BIRTHDAY_BOOK" "$BIRTHDAY_TEST" "$BIRTHDAY_WIRE_TEST"
 "$JAVA" -cp "$OUT/classes:$CP" org.junit.runner.JUnitCore \
     com.vladimir.messenger.ui.screens.chat.ChatHistoryObserverTest \
     com.vladimir.messenger.data.local.MessagePinPolicyTest \
     com.vladimir.messenger.ui.components.StoryPublishTest \
+    com.vladimir.messenger.data.profile.BirthdayTest \
+    com.vladimir.messenger.data.group.BirthdayWireTest \
     com.vladimir.messenger.ui.components.SplashOrbitGeometryTest \
     com.vladimir.messenger.ui.components.ApuSettingsLayoutTest \
     com.vladimir.messenger.data.heart.HeartWireTest \

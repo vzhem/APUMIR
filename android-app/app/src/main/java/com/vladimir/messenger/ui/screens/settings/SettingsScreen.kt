@@ -380,6 +380,10 @@ private fun ProfileTabContent(
     var avatarToCrop by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     // Куда камера положит снимок: URI нужен и при запуске, и при разборе.
     var pendingPhotoUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    // День рождения: дата (по желанию) и галочка «видна друзьям» рядом с ней.
+    val myBirthday by com.vladimir.messenger.data.profile.BirthdayStore.mine
+        .collectAsStateWithLifecycle()
+    var showBirthdayDialog by remember { mutableStateOf(false) }
 
     val avatarPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent()
@@ -588,6 +592,57 @@ private fun ProfileTabContent(
                 }
             }
 
+            // День рождения: сама дата и рядом галочка «видна друзьям».
+            // Скрытая дата не покидает телефон — друзьям не уходит даже сам
+            // факт, что она задана.
+            item {
+                val visibleLabel = stringResource(R.string.settings_birthday_visible)
+                SettingsCard {
+                    SettingsItem(
+                        icon = Icons.Default.Cake,
+                        title = stringResource(R.string.settings_birthday),
+                        subtitle = myBirthday?.let {
+                            com.vladimir.messenger.data.profile.Birthday.label(it.day, it.month, it.year)
+                        } ?: stringResource(R.string.settings_birthday_not_set),
+                        onClick = { showBirthdayDialog = true },
+                        trailingContent = {
+                            ApuPremiumSwitch(
+                                checked = myBirthday?.visible == true,
+                                // Пока даты нет, показывать нечего: галочка ждёт дату.
+                                enabled = myBirthday != null,
+                                // Подпись переключателю: сама строка называется
+                                // «День рождения», а галочка - про видимость.
+                                modifier = Modifier.semantics { contentDescription = visibleLabel },
+                                onCheckedChange = {
+                                    com.vladimir.messenger.data.profile.BirthdayStore
+                                        .setVisible(context, it)
+                                },
+                            )
+                        },
+                    )
+                    // Пояснение появляется вместе с датой: пока её нет, объяснять
+                    // нечего — «скрыто» и так по умолчанию.
+                    if (myBirthday != null) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                        ) {
+                            Text(
+                                stringResource(
+                                    if (myBirthday?.visible == true) {
+                                        R.string.settings_birthday_visible_hint
+                                    } else {
+                                        R.string.settings_birthday_hidden_hint
+                                    }
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = ApuBubbleMutedColor,
+                            )
+                        }
+                    }
+                }
+            }
+
             // Каждая строка - свой пузырь: голые ListItem во всю ширину выбивались
             // из ряда и плохо читались на обоях.
             item {
@@ -613,6 +668,29 @@ private fun ProfileTabContent(
             }
         }
         ApuScrollbar(state = profileScrollState)
+    }
+
+    // Выбор даты рождения. Галочка видимости остаётся в строке профиля, здесь
+    // только сама дата; сохранение не меняет уже выбранное «видно/скрыто».
+    if (showBirthdayDialog) {
+        com.vladimir.messenger.ui.components.BirthdayEditDialog(
+            initial = myBirthday,
+            onDismiss = { showBirthdayDialog = false },
+            onSave = { day, month, year ->
+                com.vladimir.messenger.data.profile.BirthdayStore.set(
+                    context,
+                    day = day,
+                    month = month,
+                    year = year,
+                    visible = myBirthday?.visible ?: true,
+                )
+                showBirthdayDialog = false
+            },
+            onClear = {
+                com.vladimir.messenger.data.profile.BirthdayStore.clear(context)
+                showBirthdayDialog = false
+            },
+        )
     }
 
     // Диалог выбора аватара: стандартный набор из 50 или картинка из галереи.

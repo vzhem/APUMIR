@@ -101,6 +101,13 @@ data class UpdateDiagnosticFacts(
     val trigger: String = "never",
     val source: String = "none",
     val outcome: String = "never_checked",
+    /**
+     * Что сделала ручная кнопка с внешним каналом:
+     * `opened` - открыла (иначе строка обновления могла не появиться вовсе),
+     * `already_allowed` - канал и так был открыт, `not_manual` - авто-проверка,
+     * `not_attempted` - ручная, но до внешнего запроса дело не дошло.
+     */
+    val manualExternalWindow: String = "unknown",
     val httpStatus: Int? = null,
     val githubOutcome: String = "not_attempted",
     val githubHttpStatus: Int? = null,
@@ -1060,6 +1067,7 @@ object DiagnosticsReport {
         appendLine("last_check_trigger=${safeDiagnosticToken(update.trigger).ifBlank { "unknown" }}")
         appendLine("last_check_source=${safeDiagnosticToken(update.source).ifBlank { "unknown" }}")
         appendLine("last_check_result=${safeDiagnosticToken(update.outcome).ifBlank { "unknown" }}")
+        appendLine("last_check_manual_external_window=${safeDiagnosticToken(update.manualExternalWindow).ifBlank { "unknown" }}")
         appendLine("last_check_http_status=${update.httpStatus?.takeIf { it in 100..599 }?.toString() ?: "unknown"}")
         appendLine("github_check_result=${safeDiagnosticToken(update.githubOutcome).ifBlank { "unknown" }}")
         appendLine("github_http_status=${update.githubHttpStatus?.takeIf { it in 100..599 }?.toString() ?: "unknown"}")

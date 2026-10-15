@@ -76,6 +76,16 @@ object GroupWire {
     /** Аватар участника: маленький JPEG в base64. */
     const val KIND_AVAT = "avat"
     /**
+     * День рождения владельца узла: `bday|узел|день|месяц|метка`.
+     *
+     * Едет только видимая дата и только своим контактам — роевой эпидемии у неё
+     * нет: чужая дата не должна уходить дальше, чем человек разрешил. Нулевые
+     * день и месяц означают отзыв («дату скрыл»): друзьям велено убрать запись,
+     * иначе старая дата осталась бы у них навсегда. Год рождения по сети не
+     * едет вообще.
+     */
+    const val KIND_BIRTHDAY = "bday"
+    /**
      * Возможности узла как сервера: `cap|nodeId|offeredBytes|atMs`.
      * Сейчас одно поле - сколько места под пересылку узел отдаёт (ползунок
      * «Место под пересылку»). Только от самого узла своим контактам, без
@@ -861,6 +871,18 @@ object GroupWire {
             val hops: Int,
         ) : Packet()
 
+        /**
+         * День рождения, объявленный владельцем. [day] и [month] нулевые — отзыв:
+         * человек скрыл дату, запись у получателя убирается. Года здесь нет:
+         * друзьям для поздравления он не нужен, а возраст — личное дело.
+         */
+        data class Birthday(
+            val ownerId: String,
+            val day: Int,
+            val month: Int,
+            val updatedAtMs: Long,
+        ) : Packet()
+
         data class GroupInfo(
             val groupId: String,
             val title: String,
@@ -1268,6 +1290,13 @@ object GroupWire {
 
     fun buildAvatar(ownerId: String, dataB64: String, updatedAtMs: Long, hops: Int): String =
         "$PREFIX|$KIND_AVAT|$ownerId|$dataB64|$updatedAtMs|$hops"
+
+    /**
+     * Объявление дня рождения: видимая дата или отзыв (`0|0`, когда человек
+     * скрыл её). Шлётся только своим контактам, поэтому поля `hops` нет.
+     */
+    fun buildBirthday(ownerId: String, day: Int, month: Int, updatedAtMs: Long): String =
+        "$PREFIX|$KIND_BIRTHDAY|$ownerId|$day|$month|$updatedAtMs"
 
     /** Возможности узла: объявленное место под пересылку. */
     fun buildCapabilities(nodeId: String, offeredBytes: Long, atMs: Long): String =
@@ -2127,6 +2156,27 @@ object GroupWire {
                         dataB64 = dataB64,
                         updatedAtMs = at,
                         hops = parts[5].toIntOrNull() ?: 0,
+                    )
+                }
+            } else {
+                null
+            }
+
+            KIND_BIRTHDAY -> if (parts.size == 6) {
+                val ownerId = parts[2]
+                val day = parts[3].toIntOrNull() ?: return null
+                val month = parts[4].toIntOrNull() ?: return null
+                val at = parts[5].toLongOrNull() ?: return null
+                val realDate = com.vladimir.messenger.data.profile.Birthday.isValid(day, month)
+                val revoke = day == 0 && month == 0
+                if (ownerId.isBlank() || at < 0L || (!realDate && !revoke)) {
+                    null
+                } else {
+                    Packet.Birthday(
+                        ownerId = ownerId,
+                        day = day,
+                        month = month,
+                        updatedAtMs = at,
                     )
                 }
             } else {

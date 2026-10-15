@@ -79,6 +79,21 @@
     <string name="action_close">Close</string>
     <string name="settings_change_avatar">Change avatar</string>
     <string name="settings_change_name">Change name</string>
+    <!-- Birthday: your own date in the profile and the greeting bubble for friends. -->
+    <string name="settings_birthday">Birthday</string>
+    <string name="settings_birthday_not_set">Not set</string>
+    <string name="settings_birthday_visible">Date is visible to friends</string>
+    <string name="settings_birthday_visible_hint">On the day, friends see a prompt at the top to congratulate you.</string>
+    <string name="settings_birthday_hidden_hint">A hidden date is seen by nobody: it never leaves this phone.</string>
+    <string name="birthday_dialog_title">Birthday</string>
+    <string name="birthday_pick_date">Pick a date</string>
+    <string name="birthday_year_hint">The year stays on this phone and is never sent to friends: they only need the day.</string>
+    <string name="birthday_clear">Remove the date</string>
+    <string name="birthday_save">Done</string>
+    <string name="birthday_banner_suffix">celebrates a birthday!</string>
+    <string name="birthday_banner_action">Congratulate</string>
+    <string name="birthday_banner_hide">Hide for today</string>
+    <string name="birthday_banner_more">and %1$d more</string>
     <string name="settings_share_profile">Share profile</string>
     <string name="settings_share_profile_hint">Send a link so others can add you as a contact</string>
     <string name="settings_ranks">Ranks and perks</string>
@@ -242,6 +257,17 @@
     <string name="groups_nothing_found">Nothing found</string>
     <string name="groups_empty_hint">Create your own or join with an invitation link</string>
     <string name="groups_search_hint">Try another name or join with a link</string>
+    <string name="groups_hero_kicker">Groups and channels</string>
+    <string name="groups_hero_title">My communities</string>
+    <string name="groups_hero_online">Online</string>
+    <string name="groups_filter_all">All</string>
+    <string name="groups_filter_groups">Groups</string>
+    <string name="groups_filter_channels">Channels</string>
+    <string name="groups_section_count">%1$s · %2$d</string>
+    <string name="groups_clear_search">Clear search</string>
+    <string name="groups_show_all">Show all</string>
+    <string name="groups_filter_empty">Nothing in this section</string>
+    <string name="groups_filter_empty_hint">Try another filter or create a community</string>
     <string name="groups_my_groups">My groups</string>
     <string name="groups_my_channels">My channels</string>
     <string name="groups_open_groups">Open groups in the network</string>
@@ -969,6 +995,7 @@
     <string name="st_error">Error: %1$s</string>
     <string name="st_install_failed">Couldn’t start the installation: %1$s</string>
     <string name="st_no_updates">No updates found (there are no neighbors on the network or they are on the same version)</string>
+    <string name="st_check_unreachable">Could not check: neither neighbors nor the official site responded. Check your connection and try again</string>
     <string name="st_saving">Saving…</string>
     <string name="st_failed_msg">Didn’t work: %1$s</string>
     <string name="st_asking_swarm">Asking the swarm…</string>
@@ -1594,6 +1621,7 @@ The file is not on this phone</string>
     <string name="send_scheduled_at">Scheduled for %1$s</string>
     <string name="send_scheduled_cancel">Cancel</string>
     <string name="story_mine">My story</string>
+    <string name="story_total_count">Stories in total: %1$d</string>
     <string name="story_you">You</string>
     <string name="story_new">New story</string>
     <string name="story_placeholder">What is new? Up to 200 characters</string>
@@ -1633,6 +1661,18 @@ The file is not on this phone</string>
     <string name="story_photo_failed">Could not open the photo. Choose another.</string>
     <string name="story_photo_unavailable">The photo could not be opened on this phone</string>
     <string name="story_photo_needs_update">Friends will see the photo on the new APU version</string>
+    <!-- Story photo editor: free crop, rotate, mirror (owner decision 2026-10-15). -->
+    <string name="story_edit_photo">Photo editor</string>
+    <string name="story_edit_photo_open">Edit photo</string>
+    <string name="story_crop_original">Original</string>
+    <string name="story_crop_rotate">Rotate</string>
+    <string name="story_crop_mirror">Mirror ↔</string>
+    <string name="story_crop_flip">Flip ↕</string>
+    <string name="story_crop_reset">Reset</string>
+    <string name="story_crop_straighten_value">Level: %1$d°</string>
+    <string name="story_crop_hint">Pinch to zoom and rotate, drag to move, corners to crop.</string>
+    <string name="story_crop_corner">Crop corner %1$d</string>
+    <string name="story_photo_edit_failed">Couldn’t apply the crop. Try again.</string>
     <!-- Story feedback: reactions and comments. The feed is public - everyone
          who opens the story sees it (owner decision, 2026-10-14). -->
     <string name="story_reaction_add">React to story</string>

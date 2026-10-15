@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import android.util.Base64
+import com.vladimir.messenger.data.story.StoryCrop
 import com.vladimir.messenger.data.story.StoryPhoto
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateDpAsState
@@ -53,6 +54,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,6 +73,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -107,13 +110,36 @@ fun StoriesStrip(
         .map { it.sortedBy { s -> s.createdAtMs } }
         .sortedWith(compareByDescending<List<StoryStore.Story>> { list -> list.any { it.id !in seen } }
             .thenByDescending { it.last().createdAtMs })
+    // «Как в Telegram»: много историй — плотная стопка; нажатие её раздвигает,
+    // и тогда любая история открывается одним касанием.
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val compact = StoryStripLayout.compact(byAuthor.size, expanded)
+    val labelsVisible = StoryStripLayout.labelsVisible(byAuthor.size, expanded)
+    val gap by animateDpAsState(
+        targetValue = StoryStripLayout.gapDp(byAuthor.size, expanded).dp,
+        animationSpec = tween(durationMillis = 220),
+        label = "story-strip-gap",
+    )
+    val peerSlot by animateDpAsState(
+        targetValue = StoryStripLayout.peerSlotDp(byAuthor.size, expanded).dp,
+        animationSpec = tween(durationMillis = 220),
+        label = "story-strip-slot",
+    )
+    val expandStack: () -> Unit = { expanded = true }
+    val toggleStack: () -> Unit = { expanded = !expanded }
+    // Вернувшись из просмотра, снова видим стопку, а не раздвинутую полосу.
+    val openAuthor: (String) -> Unit = { author ->
+        expanded = false
+        onOpenAuthor(author)
+    }
     LazyRow(
         modifier = modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalArrangement = Arrangement.spacedBy(gap),
     ) {
         // Как в Telegram: свой кружок один. Плюс на нём — добавить, кружок —
-        // смотреть (если история уже есть).
+        // смотреть (если история уже есть). Золотая объёмная цифра на нём —
+        // сколько историй в полосе всего, и ею же стопка раздвигается.
         item(key = "mine") {
             val hasOwn = mine.isNotEmpty()
             StoryBubble(
@@ -122,15 +148,29 @@ fun StoriesStrip(
                 viewed = if (hasOwn) mine.map { true } else emptyList(),
                 self = true,
                 selfName = profileName,
+                totalStories = stories.size,
+                slotWidth = StoryStripLayout.SELF_SLOT_DP.dp,
+                showLabel = labelsVisible,
+                compact = compact,
+                onExpand = expandStack,
+                onCountClick = toggleStack,
                 onAddClick = onAddClick,
             ) {
-                if (StoryStrip.selfOpensViewer(hasOwn)) onOpenAuthor(mine.first().authorId)
+                if (StoryStrip.selfOpensViewer(hasOwn)) openAuthor(mine.first().authorId)
                 else onAddClick()
             }
         }
         items(byAuthor, key = { it.first().authorId }) { list ->
-            StoryBubble(list.last().authorName.ifBlank { "?" }, avatars[list.first().authorId], list.map { it.id in seen }) {
-                onOpenAuthor(list.first().authorId)
+            StoryBubble(
+                title = list.last().authorName.ifBlank { "?" },
+                avatar = avatars[list.first().authorId],
+                viewed = list.map { it.id in seen },
+                slotWidth = peerSlot,
+                showLabel = labelsVisible,
+                compact = compact,
+                onExpand = expandStack,
+            ) {
+                openAuthor(list.first().authorId)
             }
         }
     }
@@ -143,19 +183,41 @@ private fun StoryBubble(
     viewed: List<Boolean>,
     self: Boolean = false,
     selfName: String? = null,
+    /** Сколько историй сейчас в полосе — для золотой объёмной цифры. */
+    totalStories: Int = 0,
+    /** Ширина слота: уже кружка — соседи наезжают, полоса стоит стопкой. */
+    slotWidth: Dp = StoryStripLayout.PEER_SLOT_DP.dp,
+    /** Подписи видны только в раздвинутой полосе: в стопке их закрывают кружки. */
+    showLabel: Boolean = true,
+    /** Полоса сжата в стопку: нажатие сначала её раздвигает. */
+    compact: Boolean = false,
+    onExpand: () -> Unit = {},
+    onCountClick: (() -> Unit)? = null,
     onAddClick: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
+    val labelAlpha by animateFloatAsState(
+        targetValue = if (showLabel) 1f else 0f,
+        animationSpec = tween(durationMillis = 180),
+        label = "story-label",
+    )
+    val tap: () -> Unit = { if (StoryStrip.tapOpensViewer(compact)) onClick() else onExpand() }
     Column(
-        Modifier.width(if (self) 80.dp else 72.dp).then(if (self) Modifier else Modifier.clickable(onClick = onClick)),
+        // Ширина — слот, а не кружок: в стопке слот уже кружка, и соседи
+        // наезжают друг на друга. Кружок поэтому меряется `requiredSize`:
+        // иначе родитель сжал бы его до ширины слота.
+        Modifier.width(slotWidth),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(Modifier.size(if (self) 72.dp else 64.dp)) {
+        Box(Modifier.requiredSize(if (self) 72.dp else 64.dp)) {
             Box(
                 Modifier
-                    .size(64.dp)
+                    .requiredSize(64.dp)
                     .align(Alignment.TopStart)
-                    .then(if (self) Modifier.clickable(onClick = onClick) else Modifier),
+                    // Нажатие на кружок: в стопке кружки перекрываются, и
+                    // верхний (нарисованный позже) забирает касание — палец
+                    // всегда попадает в тот кружок, который видно.
+                    .clickable(onClick = tap),
                 contentAlignment = Alignment.Center,
             ) {
                 Canvas(Modifier.fillMaxSize()) {
@@ -198,6 +260,15 @@ private fun StoryBubble(
                     modifier = Modifier.align(Alignment.BottomEnd),
                 )
             }
+            // Золотая объёмная цифра: сколько историй в полосе всего. Ею же
+            // стопка раздвигается и сжимается обратно.
+            if (self && totalStories > 0) {
+                StoryCountBadge(
+                    total = totalStories,
+                    onClick = onCountClick,
+                    modifier = Modifier.align(Alignment.BottomStart),
+                )
+            }
         }
         Spacer(Modifier.height(6.dp))
         Text(
@@ -206,7 +277,11 @@ private fun StoryBubble(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            modifier = if (self) Modifier.clickable(onClick = onClick) else Modifier,
+            // Подпись в стопке прячется, но место под неё остаётся: полоса не
+            // прыгает вверх-вниз при раздвигании.
+            modifier = Modifier
+                .graphicsLayer { alpha = labelAlpha }
+                .then(if (self || showLabel) Modifier.clickable(onClick = tap) else Modifier),
         )
     }
 }
@@ -252,6 +327,76 @@ private fun StoryAddBadge(onClick: () -> Unit, modifier: Modifier = Modifier) {
             contentDescription = stringResource(R.string.story_new),
             tint = ApuGoldInk,
             modifier = Modifier.size(14.dp),
+        )
+    }
+}
+
+/**
+ * Золотая объёмная цифра на своём кружке: сколько историй в полосе прямо
+ * сейчас. Выпирает влево — зеркально плюсу, который выпирает вправо; нажатие
+ * раздвигает стопку и сжимает её обратно.
+ */
+@Composable
+private fun StoryCountBadge(total: Int, onClick: (() -> Unit)?, modifier: Modifier = Modifier) {
+    val label = StoryStripLayout.totalLabel(total)
+    val wide = label.length > 2
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val view = LocalView.current
+    LaunchedEffect(pressed) {
+        if (pressed) view.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+    }
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.9f else 1f,
+        animationSpec = tween(durationMillis = 110),
+        label = "story-count-press",
+    )
+    val lift by animateDpAsState(
+        targetValue = if (pressed) 2.dp else 8.dp,
+        animationSpec = tween(durationMillis = 110),
+        label = "story-count-lift",
+    )
+    val shape = if (wide) RoundedCornerShape(percent = 50) else CircleShape
+    val description = stringResource(R.string.story_total_count, total)
+    val digits = if (wide) 10.sp else 13.sp
+    Box(
+        modifier
+            .height(24.dp)
+            .widthIn(min = 24.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .apuPremiumLift(lift, shape, ApuGold.copy(alpha = 0.55f))
+            .clip(shape)
+            .background(apuGoldBrush())
+            .border(1.5.dp, Color.White, shape)
+            .apuPremiumGloss(shape, intensity = 1.1f, topFraction = 0.75f)
+            .then(
+                if (onClick == null) Modifier
+                else Modifier.clickable(
+                    interactionSource = interaction,
+                    indication = null,
+                    onClick = onClick,
+                ),
+            )
+            .padding(horizontal = if (wide) 8.dp else 0.dp)
+            .semantics(mergeDescendants = true) { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        // Объём: снизу светлая грань, сверху на ней чёрная цифра — как отлитая
+        // из золота, в тон плюсу рядом.
+        Text(
+            label,
+            color = ApuGoldLight,
+            fontSize = digits,
+            fontWeight = FontWeight.Black,
+            maxLines = 1,
+            modifier = Modifier.offset(y = 1.dp),
+        )
+        Text(
+            label,
+            color = ApuGoldInk,
+            fontSize = digits,
+            fontWeight = FontWeight.Black,
+            maxLines = 1,
         )
     }
 }
@@ -515,26 +660,61 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
     // прикрепления. Без него кнопка публикации ждёт фото: иначе история молча
     // уходила текстом, и у друзей вместо снимка была только подпись.
     var photoSkipped by remember { mutableStateOf(false) }
+    // Снимок для редактора: пока он в памяти, «Изменить фото» открывает редактор
+    // снова, не перечитывая галерею. В Bundle его не кладём - это крупный объект,
+    // а состояние редактора восстанавливать из saved-instance нечем.
+    var editSource by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var editing by remember { mutableStateOf(false) }
+    // Отдельно от photoError: «не открылось фото» и «не собрался кадр» - разные
+    // подсказки, вторая не советует выбирать другое фото.
+    var editFailed by remember { mutableStateOf(false) }
     var cameraError by remember { mutableStateOf<Int?>(null) }
     var showCamera by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
     val scope = rememberCoroutineScope()
 
+    /**
+     * Фото выбрано или снято: сначала редактор, публикация - только после «Готово».
+     *
+     * Раньше снимок уходил друзьям ровно таким, каким его отдала галерея: обрезать
+     * было нечем (владелец 2026-10-15). Декод большого файла идёт в IO - на главном
+     * потоке редактор бы подвесился.
+     */
     fun preparePhoto(uri: Uri, cleanup: (() -> Unit)? = null) {
         scope.launch {
             preparing = true
             photoError = false
             photoSkipped = false
+            editFailed = false
             cameraError = null
             try {
-                photo = withContext(Dispatchers.IO) { StoryPhoto.prepare(context, uri) }
+                val loaded = withContext(Dispatchers.IO) { StoryPhoto.loadForEdit(context, uri) }
+                editSource = loaded
+                editing = true
             } catch (e: kotlinx.coroutines.CancellationException) { throw e }
             catch (_: Exception) { photoError = true }
             finally {
                 runCatching { cleanup?.invoke() }
                 preparing = false
             }
+        }
+    }
+
+    /** «Готово» в редакторе: кадр собирается и кодируется один раз - уже обрезанным. */
+    fun applyPhotoEdit(crop: StoryCrop.State) {
+        val loaded = editSource ?: return
+        editing = false
+        scope.launch {
+            preparing = true
+            photoError = false
+            editFailed = false
+            try {
+                photo = withContext(Dispatchers.IO) { StoryPhoto.publishEdited(loaded, crop) }
+                photoSkipped = false
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+            catch (_: Exception) { editFailed = true }
+            finally { preparing = false }
         }
     }
 
@@ -630,7 +810,10 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                             enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
                     }
                     if (photo != null) ApuPremiumButton(stringResource(R.string.story_remove_photo),
-                        { photo = null; photoError = false; photoSkipped = false },
+                        { photo = null; editSource = null; editing = false; editFailed = false; photoError = false; photoSkipped = false },
+                        enabled = !preparing, compact = true, modifier = Modifier.fillMaxWidth())
+                    if (photo != null && editSource != null) ApuPremiumButton(stringResource(R.string.story_edit_photo_open),
+                        { editing = true },
                         enabled = !preparing, compact = true, modifier = Modifier.fillMaxWidth())
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -660,9 +843,12 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                     ApuPremiumButton(stringResource(R.string.story_take_photo), { requestCamera() },
                         enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
                     if (photo != null) ApuPremiumButton(stringResource(R.string.story_remove_photo),
-                        { photo = null; photoError = false; photoSkipped = false },
+                        { photo = null; editSource = null; editing = false; editFailed = false; photoError = false; photoSkipped = false },
                         enabled = !preparing, compact = true, modifier = Modifier.weight(1f))
                 }
+                if (photo != null && editSource != null) ApuPremiumButton(stringResource(R.string.story_edit_photo_open),
+                    { editing = true },
+                    enabled = !preparing, compact = true, modifier = Modifier.fillMaxWidth())
                 Text(
                     "${text.length}/200",
                     color = Color.White.copy(alpha = .6f),
@@ -682,6 +868,8 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
             if (preparing) Text(stringResource(R.string.story_photo_preparing), color = Color.White,
                 modifier = Modifier.padding(horizontal = 16.dp))
             if (photoError) Text(stringResource(R.string.story_photo_failed), color = Color(0xFFFF8A80),
+                fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp))
+            if (editFailed) Text(stringResource(R.string.story_photo_edit_failed), color = Color(0xFFFF8A80),
                 fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 16.dp))
             if (photoMissing) ApuPremiumButton(stringResource(R.string.story_publish_without_photo),
                 { photoSkipped = true },
@@ -704,6 +892,16 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                 showCamera = false
                 preparePhoto(target.uri, target::delete)
             },
+        )
+    }
+    val editorSource = editSource
+    if (editing && editorSource != null) {
+        // Отмена возвращает к прежнему фото (или к его отсутствию): уже
+        // прикреплённый снимок от неудачной правки не теряется.
+        StoryPhotoEditorDialog(
+            source = editorSource,
+            onCancel = { editing = false },
+            onApply = { crop -> applyPhotoEdit(crop) },
         )
     }
 }

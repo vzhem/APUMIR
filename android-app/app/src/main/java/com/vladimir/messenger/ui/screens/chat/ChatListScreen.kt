@@ -1098,6 +1098,30 @@ private fun SectionPage(
     // рядом с личными чатами, но не засоряет списки групп, каналов и архив.
     val showSavedContact = !isSearchActive &&
         (section == InboxSection.All || section == InboxSection.Chats)
+    // День рождения у друзей: пузырь вверху ленты. Даты приходят от самих
+    // владельцев (`bday`) и только если они разрешили их показывать; того, у
+    // кого дата скрыта, здесь нет вовсе — она к нам не приходит. Крестик
+    // убирает пузырь до конца дня.
+    val birthdayContext = LocalContext.current
+    val birthdays by com.vladimir.messenger.data.profile.PeerBirthdayStore.entries
+        .collectAsStateWithLifecycle()
+    val birthdaysHidden by com.vladimir.messenger.data.profile.PeerBirthdayStore.dismissed
+        .collectAsStateWithLifecycle()
+    val birthdayAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
+        .collectAsStateWithLifecycle()
+    val showBirthdayBanner = !isSearchActive &&
+        (section == InboxSection.All || section == InboxSection.Chats)
+    val birthdayGuests = if (showBirthdayBanner && birthdays.isNotEmpty()) {
+        com.vladimir.messenger.data.profile.BirthdayBanner.guests(
+            birthdays = birthdays,
+            contacts = items.filterIsInstance<InboxItem.Personal>()
+                .map { it.chat.contactId to it.chat.contactName },
+            today = java.time.LocalDate.now(),
+            dismissed = birthdaysHidden,
+        )
+    } else {
+        emptyList()
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         when {
@@ -1239,6 +1263,33 @@ private fun SectionPage(
                             onAddClick = onAddStory,
                             onOpenAuthor = { storyOpenAuthor = it },
                         )
+                    }
+                    // День рождения: пузырь сразу под полосой историй, как в
+                    // Telegram. Показываем по одному человеку: нажатие на «×»
+                    // отдаёт место следующему имениннику того же дня.
+                    birthdayGuests.firstOrNull()?.let { guest ->
+                        item(key = "birthday:" + guest.nodeId) {
+                            com.vladimir.messenger.ui.components.BirthdayBannerRow(
+                                guest = guest,
+                                // Ключи витрины аватаров — как пришли из сети,
+                                // поэтому сравниваем без учёта регистра.
+                                avatarB64 = birthdayAvatars.entries
+                                    .firstOrNull { it.key.equals(guest.nodeId, ignoreCase = true) }
+                                    ?.value,
+                                othersCount = birthdayGuests.size - 1,
+                                onCongratulate = {
+                                    // Поздравить = написать: открываем чат с ним.
+                                    items.filterIsInstance<InboxItem.Personal>()
+                                        .firstOrNull { it.chat.contactId.equals(guest.nodeId, ignoreCase = true) }
+                                        ?.chat
+                                        ?.let { onChatClick(it.id, it.contactName, it.contactId) }
+                                },
+                                onDismiss = {
+                                    com.vladimir.messenger.data.profile.PeerBirthdayStore
+                                        .dismiss(birthdayContext, guest.nodeId)
+                                },
+                            )
+                        }
                     }
                     if (showSavedContact) {
                         item(key = "saved-contact") {

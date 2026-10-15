@@ -70,14 +70,33 @@ internal object DurableStorySender {
         accepted && persisted
     }
 
-    suspend fun pump(context: Context, ownId: String, send: suspend (String, String, String) -> Boolean) = pumpMutex.withLock {
+    /**
+     * Досылка. [wakePeer] — собеседник, который только что появился в сети:
+     * его записи идут вне очереди.
+     *
+     * Зачем. При живом соседе внешний канал закрыт правилом «рой прежде
+     * внешнего», и единственный путь к другу — прямой, пока тот в сети. Пакеты
+     * истории ждали своей минуты после неудачи и могли пропустить короткое
+     * появление получателя; у сообщений такой толчок есть
+     * (`retryPendingMessagesForPeer` по presence), у историй его не было.
+     */
+    suspend fun pump(
+        context: Context,
+        ownId: String,
+        wakePeer: String? = null,
+        send: suspend (String, String, String) -> Boolean,
+    ) = pumpMutex.withLock {
         val now = System.currentTimeMillis()
         val due = synchronized(lock) {
             load(context)
             if (status == "read_failed") return@withLock
             val expired = queue.purge(now)
             OperationalDiagnostics.tracker.count(OperationalCounter.STORY_EXPIRED, expired.toLong())
-            if (expired > 0) save()
+            val woken = if (wakePeer.isNullOrBlank()) 0 else queue.wake(wakePeer, ownId, now)
+            if (woken > 0) {
+                OperationalDiagnostics.tracker.count(OperationalCounter.STORY_PRESENCE_WAKE, woken.toLong())
+            }
+            if (expired > 0 || woken > 0) save()
             queue.due(now, ownId)
         }
         // At most 16 packets per service pump, fair rotation across recipients.
@@ -85,10 +104,23 @@ internal object DurableStorySender {
         for (entry in due) {
             if (!synchronized(lock) { queue.contains(entry) }) continue
             val packets = packetCache.getOrPut(entry.storyId + if (entry.revoke) ":revoke" else ":publish") {
-                if (entry.revoke) listOf(StoryStore.PREFIX + JSONObject().put("id", entry.storyId)
-                    .put("kind", StoryRevoke.KIND).put("ts", entry.createdAtMs))
-                else StoryStore.active(now).firstOrNull { it.mine && it.id == entry.storyId && it.authorId == ownId }
-                    ?.let { StoryStore.encodePackets(it) }.orEmpty()
+                // Сборка пакетов может отказать (неканонический base64 снимка,
+                // пакет больше 16 КиБ). Раньше такое исключение вылетало из
+                // всего цикла досылки: одна испорченная запись останавливала
+                // рассылку ОСТАЛЬНЫХ историй, и в журнале не было ни слова о
+                // причине. Теперь отказ принадлежит одной записи.
+                runCatching {
+                    if (entry.revoke) listOf(StoryStore.PREFIX + JSONObject().put("id", entry.storyId)
+                        .put("kind", StoryRevoke.KIND).put("ts", entry.createdAtMs))
+                    else StoryStore.active(now).firstOrNull { it.mine && it.id == entry.storyId && it.authorId == ownId }
+                        ?.let { StoryStore.encodePackets(it) }.orEmpty()
+                }.getOrElse { error ->
+                    TransferDiagnostics.recordWarning(
+                        "story",
+                        "пакеты истории не собрались (" + (error::class.simpleName ?: "ошибка") + "); запись досылки снята",
+                    )
+                    emptyList()
+                }
             }
             if (packets.isEmpty() || entry.nextPart !in packets.indices) {
                 synchronized(lock) { queue.remove(entry); save() }
@@ -115,6 +147,6 @@ internal object DurableStorySender {
         val rows = queue.snapshot()
         val oldest = rows.minOfOrNull { it.createdAtMs }?.let { (System.currentTimeMillis() - it).coerceAtLeast(0) }
         "[доставка историй]\nstory_outbox=$status · pending_recipient_jobs=${rows.size} · max_jobs=256 · oldest_age_ms=${oldest ?: -1}\n" +
-            "TTL=24ч; до 16 пакетов за цикл; retry=60с; очередь переживает рестарт отправителя. Транспортный успех не подтверждает показ/сохранение у друга.\n"
+            "TTL=24ч; до 16 пакетов за цикл; retry=60с; толчок при появлении получателя; очередь переживает рестарт отправителя. Транспортный успех не подтверждает показ/сохранение у друга.\n"
     }
 }

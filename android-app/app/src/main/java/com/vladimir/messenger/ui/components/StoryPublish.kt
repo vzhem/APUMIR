@@ -47,4 +47,12 @@ internal object StoryComposerLayout {
 internal object StoryStrip {
     fun showsSeparateAddButton(): Boolean = false
     fun selfOpensViewer(hasOwnStory: Boolean): Boolean = hasOwnStory
+
+    /**
+     * Что делает нажатие на кружок. В плотной стопке кружки наезжают друг на
+     * друга, и палец, попавший в край чужого кружка, открыл бы не ту историю.
+     * Поэтому первое нажатие стопку раздвигает, и только в раздвинутой полосе
+     * кружок открывает историю — как в Telegram.
+     */
+    fun tapOpensViewer(compact: Boolean): Boolean = !compact
 }

@@ -1352,8 +1352,12 @@ class ChatRepository @Inject constructor(
             } else DurableStorySender.enqueue(context, story, directContactIds(), revoke)
         }
 
-    suspend fun pumpStoryOutbox() = withContext(Dispatchers.IO) {
-        if (RustBridge.isRunning()) DurableStorySender.pump(context, RustBridge.nodeId().orEmpty()) { peer, packet, id ->
+    /**
+     * Досылка историй. [wakePeer] — собеседник, который только что появился в
+     * сети: его пакеты повторяются сразу, не дожидаясь своей минуты.
+     */
+    suspend fun pumpStoryOutbox(wakePeer: String? = null) = withContext(Dispatchers.IO) {
+        if (RustBridge.isRunning()) DurableStorySender.pump(context, RustBridge.nodeId().orEmpty(), wakePeer) { peer, packet, id ->
             sendStoryPacket(peer, packet, id)
         }
     }

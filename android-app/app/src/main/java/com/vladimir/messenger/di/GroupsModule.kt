@@ -141,6 +141,20 @@ object GroupsModule {
             com.vladimir.messenger.data.peer.PeerRatingStore
                 .recordOfferedStorage(context.applicationContext, nodeId, offeredBytes)
         },
+        // День рождения: свой объявляем контактам (`bday`), чужой кладём в
+        // книгу дат. Год рождения по сети не едет — друзьям нужен только день.
+        myBirthday = {
+            com.vladimir.messenger.data.profile.BirthdayStore.read(context.applicationContext)
+        },
+        onPeerBirthday = { nodeId, day, month, updatedAtMs ->
+            com.vladimir.messenger.data.profile.PeerBirthdayStore.apply(
+                context.applicationContext,
+                nodeId = nodeId,
+                day = day,
+                month = month,
+                updatedAtMs = updatedAtMs,
+            )
+        },
         // Наследование владения: «владелец удалился» видно по долгому молчанию
         // (GroupOwnership). Берём наблюдения этого телефона из рейтинга узлов.
         peerLastSeenMs = { nodeId ->

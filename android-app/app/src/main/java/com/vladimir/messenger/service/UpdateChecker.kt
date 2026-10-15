@@ -63,6 +63,28 @@ class UpdateChecker @Inject constructor(
         private const val KEY_RELAY_CHECK_JITTER = "relay_check_jitter"
         private const val RELAY_CHECK_MIN_MS = 12L * 60 * 60 * 1000
         private const val RELAY_CHECK_JITTER_MS = 6L * 60 * 60 * 1000
+
+        /**
+         * Окно, которое открывает РУЧНАЯ проверка (кнопка «Проверить новую
+         * версию»). Владелец разрешил кнопке спрашивать внешний канал даже
+         * тогда, когда рядом живой сосед: иначе правило «рой прежде внешнего»
+         * закрывало запрос, строка «Скачать v…» не появлялась вовсе, и раздел
+         * «Обновления» на таком телефоне выглядел неполным. Окно ограничено:
+         * человек успевает увидеть версию и запустить загрузку, после чего
+         * снова действует рой. Автоматические проверки (foreground, background,
+         * авто-опрос) окно НЕ открывают.
+         */
+        private const val MANUAL_WINDOW_MS = 30L * 60_000L
+
+        /**
+         * Сколько окно живёт после начала ручной загрузки APK. Файл ~40 МБ на
+         * слабом LTE качается дольше получаса, а DownloadManager работает в
+         * другом процессе: обрыв загрузки на половине выглядел бы как
+         * «обновление не работает».
+         */
+        private const val MANUAL_DOWNLOAD_WINDOW_MS = 90L * 60_000L
+        private const val MANUAL_WINDOW_PREFS = "update_manual_window"
+        private const val KEY_MANUAL_WINDOW_UNTIL = "until_wall_ms"
     }
 
     /**
@@ -78,6 +100,58 @@ class UpdateChecker @Inject constructor(
 
     @Volatile private var scannedInCurrentSwarmWindow = false
 
+    /**
+     * До какого момента (настенные часы) ручная кнопка разрешила внешний канал.
+     * -1 - ещё не читали из prefs, 0 - окно закрыто, обычное правило «рой прежде
+     * внешнего». Значение переживает перезапуск процесса: загрузку APK ведёт
+     * DownloadManager отдельным процессом, и появление соседа не должно сносить
+     * её из-за того, что наш процесс перезапустился.
+     */
+    @Volatile private var manualExternalUntilMs = -1L
+
+    private fun storedManualWindowUntil(): Long {
+        val cached = manualExternalUntilMs
+        if (cached >= 0L) return cached
+        val stored = runCatching {
+            context.getSharedPreferences(MANUAL_WINDOW_PREFS, Context.MODE_PRIVATE)
+                .getLong(KEY_MANUAL_WINDOW_UNTIL, 0L)
+        }.getOrDefault(0L)
+        manualExternalUntilMs = stored
+        return stored
+    }
+
+    private fun manualWindowActive(): Boolean =
+        manualExternalWindowActive(System.currentTimeMillis(), storedManualWindowUntil())
+
+    /**
+     * Продлить окно ручной кнопки. Возвращает true, если окно пришлось открыть
+     * именно сейчас (внешний канал был закрыт живым соседом) - этот случай
+     * виден в «Логах» отдельной строкой.
+     */
+    private fun extendManualWindow(windowMs: Long): Boolean {
+        val alreadyOpen = manualWindowActive()
+        val until = manualExternalWindowUntil(
+            System.currentTimeMillis(),
+            storedManualWindowUntil(),
+            windowMs,
+        )
+        manualExternalUntilMs = until
+        runCatching {
+            context.getSharedPreferences(MANUAL_WINDOW_PREFS, Context.MODE_PRIVATE)
+                .edit()
+                .putLong(KEY_MANUAL_WINDOW_UNTIL, until)
+                .apply()
+        }
+        return !alreadyOpen
+    }
+
+    /**
+     * Внешняя загрузка APK разрешена, если ядро открыло внешний канал само либо
+     * это окно, открытое ручной кнопкой: человек сам попросил обновление.
+     */
+    private fun externalReleaseAllowedNow(): Boolean =
+        externalReleaseAllowed(RustBridge.externalTransportAllowed(), manualWindowActive())
+
     /** DownloadManager lives outside this process. Even if a download was
      * enqueued on a valid fallback path, cancel it when the direct swarm
      * returns; do not mistake a one-time permission check for supervision. */
@@ -86,6 +160,10 @@ class UpdateChecker @Inject constructor(
             scannedInCurrentSwarmWindow = false
             return
         }
+        // Окно ручной кнопки: загрузку запросил человек, и не сносим её
+        // из-под него - иначе «Скачать» на телефоне с соседом обрывалось бы
+        // через 2.5 с после нажатия.
+        if (manualWindowActive()) return
         if (scannedInCurrentSwarmWindow) return
         val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager ?: return
         runCatching {
@@ -209,22 +287,41 @@ class UpdateChecker @Inject constructor(
             // peer online?". A live neighbour offering a newer APK/patch
             // makes the official HTTP lookup redundant for this check.
             if (!RustBridge.isRunning()) {
-                trace.outcome = "swarm_search_pending"
-                return@withContext null
-            }
-            if (!directSwarmHasNewer(currentVersion)) {
+                // Ядра нет - рой спросить не у кого. Авто-проверка откладывается,
+                // а ручная кнопка идёт внешним каналом: человек нажал и ждёт ответ.
+                if (!manual) {
+                    trace.outcome = "swarm_search_pending"
+                    return@withContext null
+                }
+            } else if (!directSwarmHasNewer(currentVersion)) {
                 runCatching { askSwarmForUpdate?.invoke() }
                     .onFailure { Log.w(TAG, "peer update query failed: ${it.message}") }
             }
-            val until = android.os.SystemClock.elapsedRealtime() + 20_000L
-            while (!directSwarmHasNewer(currentVersion) && !RustBridge.externalTransportAllowed() &&
-                android.os.SystemClock.elapsedRealtime() < until
-            ) {
-                delay(500L)
-            }
-            if (directSwarmHasNewer(currentVersion) || !RustBridge.externalTransportAllowed()) {
-                trace.outcome = "swarm_first_no_http"
-                return@withContext null
+            if (manual) {
+                // Кнопка: рой спрошен, но НЕ ждём его. Владелец разрешил ручной
+                // проверке внешний канал даже при живом соседе - иначе телефоны
+                // с соседом никогда не находили версию, и раздел «Обновления»
+                // выглядел неполным. Окно ограничено: 30 минут.
+                trace.manualWindow =
+                    if (extendManualWindow(MANUAL_WINDOW_MS)) "opened" else "already_allowed"
+                Log.i(
+                    TAG,
+                    "Manual check: external channel opened for ${MANUAL_WINDOW_MS / 60_000} min " +
+                        "(transition=${trace.manualWindow})",
+                )
+            } else {
+                // Авто-проверка: рой прежде внешнего. Ждём, не откроет ли ядро
+                // внешний канал, когда рядом нет живого подписанного соседа.
+                val until = android.os.SystemClock.elapsedRealtime() + 20_000L
+                while (!directSwarmHasNewer(currentVersion) && !RustBridge.externalTransportAllowed() &&
+                    android.os.SystemClock.elapsedRealtime() < until
+                ) {
+                    delay(500L)
+                }
+                if (directSwarmHasNewer(currentVersion) || !RustBridge.externalTransportAllowed()) {
+                    trace.outcome = "swarm_first_no_http"
+                    return@withContext null
+                }
             }
             val githubRelease = checkGitHub(currentVersion, trace)
             if (githubRelease != null) {
@@ -429,9 +526,15 @@ class UpdateChecker @Inject constructor(
      * @return ID загрузки
      */
     fun downloadApk(releaseInfo: ReleaseInfo): Long {
-        if (directSwarmHasNewer(currentAppVersion()) || !RustBridge.externalTransportAllowed()) {
+        if (directSwarmHasNewer(currentAppVersion()) || !externalReleaseAllowedNow()) {
             throw IllegalStateException("Обновление сначала запрашивается у прямого роя")
         }
+        // Дальше загрузка идёт долго и не в нашем процессе (DownloadManager),
+        // а дифф-патч собирается здесь же и читается по частям: продлеваем
+        // окно, чтобы появление соседа не снесло загрузку на половине
+        // (цикл 2.5 с в CoreServerService). Сюда попадают только нажатия
+        // человека - все вызовы этого метода идут из кнопок.
+        extendManualWindow(MANUAL_DOWNLOAD_WINDOW_MS)
         // Раунд 132: если мой телефон ровно той версии, от которой сделан
         // дифф-патч, - качаем РАЗНИЦУ (в разы меньше APK), собираем полный
         // файл у себя, сверяем sha256 релиза и сразу запускаем установку.
@@ -462,14 +565,14 @@ class UpdateChecker @Inject constructor(
             setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
         }
         
-        if (directSwarmHasNewer(currentAppVersion()) || !RustBridge.externalTransportAllowed()) {
+        if (directSwarmHasNewer(currentAppVersion()) || !externalReleaseAllowedNow()) {
             throw IllegalStateException("Рой ответил до начала внешней загрузки")
         }
         val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val downloadId = downloadManager.enqueue(request)
         scannedInCurrentSwarmWindow = false
         // A signed neighbour may have answered between permission and enqueue.
-        if (!RustBridge.externalTransportAllowed()) {
+        if (!externalReleaseAllowedNow()) {
             downloadManager.remove(downloadId)
             throw IllegalStateException("Рой появился во время запуска загрузки — внешняя загрузка отменена")
         }
@@ -578,7 +681,10 @@ class UpdateChecker @Inject constructor(
      */
     private fun downloadViaPatch(releaseInfo: ReleaseInfo): Boolean {
         val patchUrl = releaseInfo.patchUrl ?: return false
-        if (!RustBridge.externalTransportAllowed()) return false
+        // Окно ручной кнопки тоже считается: иначе после ручного «Скачать»
+        // дифф-патч молча не скачивался бы, а на телефоне с соседом качался бы
+        // целый APK вместо разницы.
+        if (!externalReleaseAllowedNow()) return false
         val expectedSha = releaseInfo.apkSha256 ?: return false
         val base = File(context.applicationInfo.sourceDir ?: return false)
         if (!base.isFile) return false
@@ -601,7 +707,7 @@ class UpdateChecker @Inject constructor(
                 patchFile.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024)
                     while (true) {
-                        if (!RustBridge.externalTransportAllowed()) {
+                        if (!externalReleaseAllowedNow()) {
                             throw java.io.IOException("Прямой рой вернулся; загрузка патча прервана")
                         }
                         val bytes = input.read(buffer)
@@ -659,7 +765,10 @@ class UpdateChecker @Inject constructor(
         trace: UpdateDiagnosticsStore.CheckTrace,
         source: String,
     ): String? {
-        if (!RustBridge.externalTransportAllowed()) {
+        // Тот же тормоз, что и в checkForUpdate, но на самом запросе: без него
+        // ручная кнопка «открыла бы» канал и всё равно получила отказ здесь -
+        // ровно то «обновлений нет», на которое жаловался владелец.
+        if (!externalReleaseAllowedNow()) {
             UpdateDiagnosticsStore.markSource(trace, source, "swarm_available")
             return null
         }

@@ -689,6 +689,7 @@ class DiagnosticsReportTest {
                     trigger = "manual",
                     source = "github",
                     outcome = "update_available",
+                    manualExternalWindow = "opened",
                     httpStatus = 200,
                     githubOutcome = "update_available",
                     githubHttpStatus = 200,
@@ -711,6 +712,7 @@ class DiagnosticsReportTest {
         assertTrue(report.contains("last_check_trigger=manual"))
         assertTrue(report.contains("last_check_source=github"))
         assertTrue(report.contains("last_check_result=update_available"))
+        assertTrue(report.contains("last_check_manual_external_window=opened"))
         assertTrue(report.contains("github_http_status=200"))
         assertTrue(report.contains("relay_check_result=not_attempted"))
         assertTrue(report.contains("last_check_duration_ms=842"))

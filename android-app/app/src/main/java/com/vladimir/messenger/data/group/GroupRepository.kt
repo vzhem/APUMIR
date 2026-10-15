@@ -29,6 +29,7 @@ import com.vladimir.messenger.data.swarm.PostManifest
 import com.vladimir.messenger.data.swarm.SwarmBuffer
 import com.vladimir.messenger.data.swarm.SwarmPolicy
 import com.vladimir.messenger.data.link.ShortLinks
+import com.vladimir.messenger.data.profile.Birthday
 import com.vladimir.messenger.util.ChatPreviews
 import com.vladimir.messenger.util.GroupInviteRef
 import com.vladimir.messenger.util.InlineImage
@@ -79,6 +80,17 @@ class GroupRepository(
     private val avatarDao: AvatarDao,
     /** Мой сжатый аватар (JPEG base64) или null, если аватара нет. */
     private val myAvatarB64: () -> String?,
+    /**
+     * Мой день рождения с галочкой видимости (null - дата не задана).
+     * Скрытая дата в рассылку не попадает: см. [publishMyBirthday].
+     */
+    private val myBirthday: () -> com.vladimir.messenger.data.profile.Birthday? = { null },
+    /**
+     * Пришла чужая дата рождения (или отзыв: день и месяц нулевые).
+     * По умолчанию ничего не делает — так живут JVM-тесты без Android.
+     */
+    private val onPeerBirthday: (nodeId: String, day: Int, month: Int, updatedAtMs: Long) -> Unit =
+        { _, _, _, _ -> },
     /**
      * Узнали настоящее @имя узла: контакт с заглушкой вместо имени должен
      * переименоваться, а его двойники от прежних установок - схлопнуться.
@@ -232,6 +244,7 @@ class GroupRepository(
     private var lastNicknamePublishMs: Long = 0L
     private var lastAvatarPublishMs: Long = 0L
     private var lastCapabilitiesPublishMs: Long = 0L
+    private var lastBirthdayPublishMs: Long = 0L
     /** Когда последний раз просили конкретный узел представиться. */
     private val lastWhoIsAskedMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
@@ -441,6 +454,39 @@ class GroupRepository(
     }
 
     /**
+     * Объявить контактам свой день рождения (`bday`).
+     *
+     * Едет только видимая дата и только напрямую своим контактам: эпидемии у
+     * неё нет, чтобы дата не разошлась дальше, чем человек разрешил. Если дата
+     * скрыта или её нет, по кругу ничего не уходит — а вот по смене настройки
+     * (force) уходит короткий отзыв, иначе у друзей осталась бы старая дата.
+     * Год рождения не отправляется никогда.
+     */
+    suspend fun publishMyBirthday(force: Boolean = false) {
+        val me = myId() ?: return
+        val birthday = myBirthday()
+        val visible = birthday != null && birthday.visible && Birthday.isComplete(birthday)
+        if (!force && !visible) return
+        if (!force && !dueNow(lastBirthdayPublishMs, GOSSIP_MIN_INTERVAL_MS)) return
+        val ids = contactIds()
+        if (ids.isEmpty()) return
+        val envelope = if (visible) {
+            GroupWire.buildBirthday(
+                ownerId = me,
+                day = birthday!!.day,
+                month = birthday.month,
+                updatedAtMs = clock(),
+            )
+        } else {
+            // Отзыв: человек скрыл дату (или убрал её) — у друзей она исчезает.
+            GroupWire.buildBirthday(ownerId = me, day = 0, month = 0, updatedAtMs = clock())
+        }
+        runCatching { delivery.deliver("birthdays", envelope, ids) }
+            .onFailure { Log.w(TAG, "birthday publish failed: ${it.message}") }
+        lastBirthdayPublishMs = clock()
+    }
+
+    /**
      * Объявить контактам, сколько места под пересылку я отдаю (`cap`).
      *
      * Адресно контактам, без эпидемии: это самооценка, у получателя она
@@ -513,6 +559,31 @@ class GroupRepository(
             runCatching { delivery.deliver("avatars", envelope, listOf(peerId)) }
                 .onFailure { Log.w(TAG, "whois avatar reply failed: ${it.message}") }
         }
+        // День рождения — только если владелец разрешил его показывать: иначе
+        // ответ «представься» стал бы лазейкой в обход галочки.
+        myBirthday()?.takeIf { it.visible && Birthday.isComplete(it) }?.let { birthday ->
+            val envelope = GroupWire.buildBirthday(
+                ownerId = me,
+                day = birthday.day,
+                month = birthday.month,
+                updatedAtMs = clock(),
+            )
+            runCatching { delivery.deliver("birthdays", envelope, listOf(peerId)) }
+                .onFailure { Log.w(TAG, "whois birthday reply failed: ${it.message}") }
+        }
+    }
+
+    /**
+     * Чужая дата рождения от самого владельца.
+     *
+     * Дальше не пересылаем: дата не должна расходиться по сети (в отличие от
+     * @имени и аватара, которые и есть общеизвестные признаки человека).
+     * Свежесть решает `BirthdayBook`: старая метка не затирает новую, отзыв
+     * (нулевые число и месяц) убирает запись.
+     */
+    private fun handleBirthday(packet: GroupWire.Packet.Birthday) {
+        if (packet.ownerId == myId()) return // свой из сети не храним
+        onPeerBirthday(packet.ownerId, packet.day, packet.month, packet.updatedAtMs)
     }
 
     /** Пора ли повторять фоновую рассылку. */
@@ -3998,6 +4069,7 @@ class GroupRepository(
             }
 
             is GroupWire.Packet.Avatar -> handleAvatar(packet, senderId)
+            is GroupWire.Packet.Birthday -> handleBirthday(packet)
 
             is GroupWire.Packet.Capabilities -> {
                 // Только о себе: чужое объявление от третьего лица - подделка

@@ -65,6 +65,40 @@ class UpdateCheckerTest {
     }
 
     @Test
+    fun `manual window is bounded and a second tap never shortens it`() {
+        val window = 30L * 60_000L
+        val opened = manualExternalWindowUntil(1_000L, 0L, window)
+        assertEquals(1_000L + window, opened)
+        assertTrue(manualExternalWindowActive(opened - 1, opened))
+        assertFalse(manualExternalWindowActive(opened, opened)) // На границе окно уже закрыто.
+        assertEquals(opened, manualExternalWindowUntil(2_000L, opened, 1_000L))
+        assertEquals(2_000L + window, manualExternalWindowUntil(2_000L, opened, window))
+    }
+
+    @Test
+    fun `release download is allowed by the core policy or by the manual window`() {
+        assertFalse(externalReleaseAllowed(transportAllowed = false, manualWindowActive = false))
+        assertTrue(externalReleaseAllowed(transportAllowed = true, manualWindowActive = false))
+        assertTrue(externalReleaseAllowed(transportAllowed = false, manualWindowActive = true))
+    }
+
+    @Test
+    fun `swarm first outcomes reach the log instead of turning into unknown`() {
+        // Раньше эти два исхода не были в списке и в «Логах» выглядели как
+        // unknown: по отчёту нельзя было понять, что проверку остановил рой.
+        assertEquals("swarm_first_no_http", safeUpdateOutcome("swarm_first_no_http"))
+        assertEquals("swarm_search_pending", safeUpdateOutcome("swarm_search_pending"))
+        assertEquals("up_to_date", safeUpdateOutcome("up_to_date"))
+        assertEquals("swarm_available", safeUpdateOutcome("swarm_available"))
+        assertEquals("unknown", safeUpdateOutcome("своё-слово"))
+        assertEquals("not_manual", safeManualWindow("not_manual"))
+        assertEquals("not_attempted", safeManualWindow("not_attempted"))
+        assertEquals("already_allowed", safeManualWindow("already_allowed"))
+        assertEquals("opened", safeManualWindow("opened"))
+        assertEquals("unknown", safeManualWindow("opened-by-hand"))
+    }
+
+    @Test
     fun `rejects malformed versions`() {
         assertFalse(isVersionNewer("development", "v11.16.2"))
         assertFalse(isVersionNewer("v11.16", "latest"))

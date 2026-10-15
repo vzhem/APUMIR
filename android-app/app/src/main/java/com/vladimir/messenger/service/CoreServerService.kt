@@ -700,6 +700,9 @@ class CoreServerService : Service() {
                 // затем разослать свой контактам (раунд 40).
                 runCatching { groupRepository.loadAvatars() }
                 runCatching { groupRepository.publishMyAvatar() }
+                // День рождения: своя (видимая) дата — контактам, скрытая не
+                // уходит вовсе. Даты друзей лежат в своей книге.
+                runCatching { groupRepository.publishMyBirthday() }
                 // Сколько места под пересылку отдаю - контактам, для их рейтинга.
                 runCatching { groupRepository.publishMyCapabilities() }
             }
@@ -723,6 +726,13 @@ class CoreServerService : Service() {
                 com.vladimir.messenger.ui.theme.AvatarHolder.uri
                     .drop(1)
                     .collect { runCatching { groupRepository.publishMyAvatar(force = true) } }
+            }
+            // Задал, изменил или скрыл день рождения - сразу объявить (скрытие
+            // шлёт отзыв: у друзей старая дата не должна остаться).
+            serviceScope.launch {
+                com.vladimir.messenger.data.profile.BirthdayStore.mine
+                    .drop(1)
+                    .collect { runCatching { groupRepository.publishMyBirthday(force = true) } }
             }
         }
 
@@ -2664,6 +2674,17 @@ class CoreServerService : Service() {
                                 chatRepository.retryPendingMessagesForPeer(peerId)
                             } catch (e: Exception) {
                                 Log.e(TAG, "Retry failed", e)
+                            }
+                            // История догоняет собеседника тем же толчком, что и
+                            // переписка: пока он в сети, прямой канал работает, а
+                            // внешний при живом соседе закрыт. Без этого пакеты
+                            // истории ждали своей минуты и окно проходило мимо.
+                            try {
+                                chatRepository.pumpStoryOutbox(wakePeer = peerId)
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                throw cancelled
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Story pump after peer discovery failed: ${e.message}")
                             }
                             try {
                                 RuntimeDiagnostics.measure(DiagnosticOperation.FILE_PUMP) { fileTransferRouter.pumpOutgoing() }

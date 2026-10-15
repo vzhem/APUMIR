@@ -63,4 +63,11 @@ class StoryPublishTest {
         assertTrue(StoryStrip.selfOpensViewer(hasOwnStory = true))
         assertFalse(StoryStrip.selfOpensViewer(hasOwnStory = false))
     }
+
+    @Test fun firstTapOnAStackedCircleSpreadsTheStack() {
+        // В стопке нажатие сначала раздвигает полосу: иначе палец попадал бы
+        // в край соседнего кружка и открывал чужую историю.
+        assertFalse(StoryStrip.tapOpensViewer(compact = true))
+        assertTrue(StoryStrip.tapOpensViewer(compact = false))
+    }
 }

@@ -26,6 +26,8 @@ import android.content.Context
 import android.net.Uri
 import android.util.Log
 import androidx.core.content.FileProvider
+import com.vladimir.messenger.data.profile.Birthday
+import com.vladimir.messenger.data.profile.BirthdayStore
 import com.vladimir.messenger.ui.theme.AvatarHolder
 import com.vladimir.messenger.ui.theme.ThemeMode
 import com.vladimir.messenger.ui.theme.ThemeModeHolder
@@ -50,6 +52,7 @@ object ProfileMirror {
     const val FIELD_THEME = "theme"
     const val FIELD_AV = "av"
     const val FIELD_WALL = "wall"
+    const val FIELD_BDAY = "bday"
 
     private const val PREFS = "apu_profile_mirror"
     private const val MAIN_PREFS = "p2p_prefs"
@@ -77,8 +80,23 @@ object ProfileMirror {
     var partnerDigest: String = ""
         private set
 
+    /**
+     * Отпечаток дня рождения партнёра из hello/hb.
+     *
+     * Пусто - партнёр на старой сборке, которая про день рождения не знает: это
+     * не расхождение, и полный снимок из-за него не запрашивается (иначе два
+     * устройства на разных версиях гоняли бы снимок профиля каждые 10 секунд).
+     */
+    @Volatile
+    var partnerBirthdayDigest: String = ""
+        private set
+
     fun notePartnerDigest(digest: String) {
         if (digest.isNotBlank()) partnerDigest = digest
+    }
+
+    fun notePartnerBirthdayDigest(digest: String) {
+        partnerBirthdayDigest = digest.trim()
     }
 
     // ── Снимок профиля ──────────────────────────────────────────────────────
@@ -96,20 +114,43 @@ object ProfileMirror {
         val tTheme: Long,
         val tAv: Long,
         val tWall: Long,
+        /**
+         * День рождения: число, месяц и галочка видимости. Год сюда не входит -
+         * он остаётся на телефоне владельца и не ездит никуда (решение 2026-10-15).
+         */
+        val bdayDay: Int = 0,
+        val bdayMonth: Int = 0,
+        val bdayVisible: Boolean = false,
+        val tBday: Long = 0L,
     ) {
         /** Отпечаток СОДЕРЖИМОГО (метки времени не входят): им сравниваются устройства. */
         fun digest(): String = sha256(
             listOf(name, nick, theme, avSha, wallSha).joinToString("|")
         ).take(32)
 
+        /** Ключ дня рождения для сравнения версий: число, месяц, видимость. */
+        fun bdayKey(): String = if (Birthday.isValid(bdayDay, bdayMonth)) {
+            "$bdayDay-$bdayMonth-" + (if (bdayVisible) 1 else 0)
+        } else ""
+
+        /**
+         * Отпечаток дня рождения - отдельной строкой («pb» в hello/hb).
+         *
+         * Отдельно от [digest] намеренно: старые сборки про день рождения не
+         * знают, и общий отпечаток с ним расходился бы у них с новыми вечно -
+         * каждые 10 секунд полный снимок профиля на ровном месте.
+         */
+        fun birthdayDigest(): String = sha256("bday|" + bdayKey()).take(32)
+
         /** Человеко-читаемые поля, где содержимое расходится. */
         fun contentDiff(other: State): List<String> {
-            val diff = ArrayList<String>(3)
+            val diff = ArrayList<String>(6)
             if (name != other.name) diff += "имя"
             if (nick != other.nick) diff += "никнейм"
             if (theme != other.theme) diff += "тема"
             if (avSha != other.avSha) diff += "аватар"
             if (wallSha != other.wallSha) diff += "обои"
+            if (bdayKey() != other.bdayKey()) diff += "день рождения"
             return diff
         }
 
@@ -126,6 +167,10 @@ object ProfileMirror {
             .put("ttheme", tTheme)
             .put("tav", tAv)
             .put("twall", tWall)
+            .put("bdday", bdayDay)
+            .put("bdmon", bdayMonth)
+            .put("bdvis", bdayVisible)
+            .put("tbday", tBday)
 
         companion object {
             fun fromJson(o: JSONObject): State = State(
@@ -141,6 +186,12 @@ object ProfileMirror {
                 tTheme = o.optLong("ttheme", 0L),
                 tAv = o.optLong("tav", 0L),
                 tWall = o.optLong("twall", 0L),
+                // Старый партнёр этих ключей не знает: пустая дата и нулевая
+                // метка читаются как «ничего не менял», а не как «убрал дату».
+                bdayDay = o.optInt("bdday", 0),
+                bdayMonth = o.optInt("bdmon", 0),
+                bdayVisible = o.optBoolean("bdvis", false),
+                tBday = o.optLong("tbday", 0L),
             )
         }
     }
@@ -160,6 +211,7 @@ object ProfileMirror {
         }
         val (avName, avSha) = imageState(app, FIELD_AV)
         val (wallName, wallSha) = imageState(app, FIELD_WALL)
+        val birthday = BirthdayStore.read(app)
         return State(
             name = main.getString("display_name", "") ?: "",
             nick = main.getString("my_username", "") ?: "",
@@ -173,11 +225,17 @@ object ProfileMirror {
             tTheme = upd.getLong("upd_" + FIELD_THEME, 0L),
             tAv = upd.getLong("upd_" + FIELD_AV, 0L),
             tWall = upd.getLong("upd_" + FIELD_WALL, 0L),
+            bdayDay = birthday?.day ?: 0,
+            bdayMonth = birthday?.month ?: 0,
+            bdayVisible = birthday?.visible == true,
+            tBday = upd.getLong("upd_" + FIELD_BDAY, 0L),
         )
     }
 
     @Volatile private var cachedDigest: String = ""
     @Volatile private var cachedAt: Long = 0L
+    @Volatile private var cachedBdayDigest: String = ""
+    @Volatile private var cachedBdayAt: Long = 0L
 
     /** Отпечаток для hello/hb: лёгкий кэш, чтобы не хэшировать на каждом кадре. */
     fun cachedDigest(context: Context): String {
@@ -189,9 +247,21 @@ object ProfileMirror {
         return cachedDigest
     }
 
+    /** Отпечаток дня рождения для hello/hb: тот же лёгкий кэш, что и у профиля. */
+    fun cachedBirthdayDigest(context: Context): String {
+        val now = System.currentTimeMillis()
+        if (cachedBdayDigest.isEmpty() || now - cachedBdayAt > 15_000L) {
+            cachedBdayDigest = snapshot(context, localize = false).birthdayDigest()
+            cachedBdayAt = now
+        }
+        return cachedBdayDigest
+    }
+
     private fun invalidateCache() {
         cachedDigest = ""
         cachedAt = 0L
+        cachedBdayDigest = ""
+        cachedBdayAt = 0L
     }
 
     // ── Локальные изменения ─────────────────────────────────────────────────
@@ -279,11 +349,41 @@ object ProfileMirror {
                     needBytes += FIELD_WALL
                 }
             }
+            // День рождения: число, месяц и видимость - одно поле со своей меткой.
+            if (wins(incoming.tBday, incoming.bdayKey(), mine.tBday, mine.bdayKey())) {
+                applyBirthday(app, incoming.bdayDay, incoming.bdayMonth, incoming.bdayVisible)
+                stamp(app, FIELD_BDAY, incoming.tBday)
+            }
         } finally {
             applyingRemote = false
         }
         invalidateCache()
         return needBytes
+    }
+
+    /**
+     * Применить день рождения партнёра (второе устройство той же личности).
+     *
+     * Год не трогаем: он не ездит никуда и остаётся тем, что выбрал владелец на
+     * этом телефоне. Пустая дата - это «убрал»: локальная тоже убирается, иначе
+     * у второго телефона дата жила бы своей жизнью.
+     *
+     * Запись идёт через BirthdayStore, поэтому значок дня рождения в профиле и
+     * поздравления друзьям оживают сами. Петли нет: [applyingRemote] глушит
+     * обратную публикацию - тем же способом, что и у имени с аватаром.
+     */
+    private fun applyBirthday(context: Context, day: Int, month: Int, visible: Boolean) {
+        applyingRemote = true
+        try {
+            if (Birthday.isValid(day, month)) {
+                val current = BirthdayStore.read(context)
+                BirthdayStore.set(context, day, month, current?.year ?: Birthday.NO_YEAR, visible)
+            } else {
+                BirthdayStore.clear(context)
+            }
+        } finally {
+            applyingRemote = false
+        }
     }
 
     /**

@@ -58,6 +58,25 @@ class StoryDeliveryQueueTest {
         assertFalse(queue.snapshot().any { it.storyId == "s" && !it.revoke })
         assertTrue(queue.snapshot().any { it.storyId == "s" && it.revoke })
     }
+    @Test fun appearingRecipientSkipsItsMinuteOfWaiting() {
+        val queue = StoryDeliveryQueue()
+        queue.enqueue("s", "owner", listOf("p1", "p2"), 1000, false)
+        queue.result(queue.due(1000).first { it.peer == "p1" }, false, 1, 1000)
+        assertTrue(queue.due(1000).none { it.peer == "p1" })
+        assertEquals(1, queue.wake("p1", "owner", 1000))
+        // p2 в этот момент тоже ждёт первой попытки, поэтому проверяем именно p1:
+        // «разбудить» - значит вернуть его в очередь сейчас, не ожидая retry.
+        assertTrue(queue.due(1000).any { it.peer == "p1" })
+        assertEquals(0, queue.wake("p1", "owner", 1000)) // Уже ждёт отправки - будить нечего.
+    }
+    @Test fun wakingTouchesNeitherTheOtherPeerNorTheOtherOwner() {
+        val queue = StoryDeliveryQueue()
+        queue.enqueue("s", "owner", listOf("p1"), 1000, false)
+        queue.result(queue.due(1000).single(), false, 1, 1000)
+        assertEquals(0, queue.wake("p1", "other-owner", 1000))
+        assertEquals(0, queue.wake("p2", "owner", 1000))
+        assertTrue(queue.due(1000).isEmpty())
+    }
     @Test fun previousOwnerJobsCannotStarveCurrentOwnerBeforeBatchLimit() {
         val queue = StoryDeliveryQueue()
         queue.enqueue("old", "previous-owner", (1..20).map { "old-$it" }, 1000, false)
