@@ -197,7 +197,15 @@ class SettingsStyleTest(unittest.TestCase):
                 text = source("screens/" + path)
                 self.assertNotRegex(text, r"\b(?:Card|OutlinedCard|ElevatedCard)\(")
                 self.assertNotIn("CardDefaults.cardColors", text)
-                if "mtproxy" not in path:
+                if path.endswith("settings/PeerRatingScreen.kt"):
+                    # «Узлы сети» deliberately use the diagnostics-console skin
+                    # requested for this screen, rather than the light settings
+                    # bubble. Its custom surface still uses the shared APU lift
+                    # and gloss, and is guarded separately below.
+                    self.assertIn("PeerConsoleCard(", text)
+                    self.assertIn("apuPremiumLift(", text)
+                    self.assertIn("apuPremiumGloss(", text)
+                elif "mtproxy" not in path:
                     self.assertIn("ApuSettingsCard", text)
         shared = source("components/ApuSettingsUi.kt")
         self.assertIn("ApuBubbleCard(", shared)
@@ -309,13 +317,15 @@ class SettingsStyleTest(unittest.TestCase):
         self.assertIn("ApuTextAction(", mute_dialog)
         self.assertNotRegex(mute_dialog, r"\bSurface\(")
 
-        # Карточки узлов сети используют ту же золотую шкалу и палитру, что и
-        # другие настройки, а не стандартный Material-индикатор прогресса.
+        # «Узлы сети» — особый тёмный экран в духе консоли диагностики.
+        # Проверяем его собственную поверхность/рейтинг и APU-контролы, а не
+        # навязываем светлую карточку настроек поверх выбранного дизайна.
         peer_rating = source("screens/settings/PeerRatingScreen.kt")
-        for house_part in ("ApuSettingsCard(", "ApuSettingsChip(", "ApuSettingsProgress("):
+        for house_part in ("PeerConsoleCard(", "ApuPremiumChip(", "PeerScoreBar("):
             self.assertIn(house_part, peer_rating)
+        self.assertIn("ApuPremiumDialog(", peer_rating)
+        self.assertIn("PeerConsoleMuted", peer_rating)
         self.assertNotIn("LinearProgressIndicator", peer_rating)
-        self.assertIn("ApuBubbleMutedColor", peer_rating)
 
         # Окно обновления тоже общее, без отдельной старой рамки/Material-полосы.
         update_dialog = (ROOT / "android-app/app/src/main/java/com/vladimir/messenger/ui/update/UpdateDialog.kt").read_text()

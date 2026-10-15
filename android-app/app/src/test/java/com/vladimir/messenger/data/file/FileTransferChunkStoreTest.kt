@@ -103,7 +103,7 @@ class FileTransferChunkStoreTest {
         // спрашивает остаток при каждой записи - смена настройки действует сразу.
         var allowed = 1_000L
         val seenUsed = ArrayList<Long>()
-        val store = FileTransferChunkStore(root, headroom = { used -> seenUsed += used; allowed })
+        val store = FileTransferChunkStore(root, headroom = { used, _ -> seenUsed += used; allowed })
         store.storeEncryptedChunk(transferId, 0, ByteArray(600) { 1 })
         assertEquals(listOf(0L), seenUsed)
         allowed = 100L
@@ -119,6 +119,31 @@ class FileTransferChunkStoreTest {
         allowed = 1_000L
         assertTrue(store.storeEncryptedChunk(transferId, 1, ByteArray(600) { 2 }).newlyStored)
         assertEquals(1_200L, store.currentStoredBytes())
+    }
+
+    @Test
+    fun updateChunksBypassOwnerQuotaButStillRespectDeviceHeadroom() {
+        var regularHeadroom = 10_000L
+        var deviceHeadroom = 10_000L
+        val store = FileTransferChunkStore(
+            root,
+            headroom = { _, ownerQuotaExempt ->
+                if (ownerQuotaExempt) deviceHeadroom else minOf(regularHeadroom, deviceHeadroom)
+            },
+        )
+        store.storeEncryptedChunk(transferId, 0, ByteArray(600) { 1 })
+
+        // The regular transfer has exhausted its configured quota.
+        regularHeadroom = 0L
+        expectFailure { store.storeEncryptedChunk(transferId, 1, ByteArray(600) { 2 }) }
+
+        // APK update chunks ignore that slider, but still need real disk headroom.
+        assertTrue(store.storeEncryptedChunk(transferId, 1, ByteArray(600) { 2 }, ownerQuotaExempt = true).newlyStored)
+        deviceHeadroom = 500L
+        expectFailure {
+            store.storeEncryptedChunk(transferId, 2, ByteArray(600) { 3 }, ownerQuotaExempt = true)
+        }
+        assertNull(store.readEncryptedChunk(transferId, 2))
     }
 
     @Test

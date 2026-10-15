@@ -22,6 +22,9 @@ data class GroupInviteCard(
 
 object GroupInviteCardSender {
 
+    /** Максимум личных чатов в одной рассылке приглашения. */
+    const val MAX_RECIPIENTS = 100
+
     private val LINK_PREFIXES = listOf(
         "https://", "http://", "apu://", "p2pmessenger://", "p2p://",
     )

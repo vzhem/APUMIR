@@ -25,6 +25,42 @@ object ApkUpdate {
      */
     const val CHAT_ID = "apkseed"
 
+    /**
+     * Максимальный срок файлового протокола: большие APK-обновления должны
+     * переживать долгие паузы связи вместо общего 24-часового срока вложений.
+     */
+    const val TRANSFER_TTL_MS = 30L * 24 * 60 * 60 * 1000
+
+    /** Если ходы не менялись дольше этого срока, просим ещё одного сида. */
+    const val STALLED_DOWNLOAD_REASK_MS = 2L * 60 * 1000
+
+    /** Проверяет отсутствие прогресса, не считая откат системных часов простоем. */
+    fun isDownloadStalled(lastProgressAtMs: Long, nowMs: Long): Boolean =
+        nowMs >= lastProgressAtMs && nowMs - lastProgressAtMs >= STALLED_DOWNLOAD_REASK_MS
+
+    data class SeedSelection(val nodeId: String, val resetTried: Boolean)
+
+    /**
+     * Выбирает следующий источник: сначала ещё не опрошенный и не участвующий
+     * в текущей полосе. Если круг исчерпан, запускает его заново; когда все
+     * известные сиды уже активны, допускает повторный запрос к любому из них.
+     */
+    fun nextSeed(
+        candidates: List<String>,
+        tried: Set<String>,
+        active: Set<String> = emptySet(),
+    ): SeedSelection? {
+        val ordered = candidates.distinct()
+        if (ordered.isEmpty()) return null
+        val inactive = ordered.filterNot { it in active }.ifEmpty { ordered }
+        val untried = inactive.firstOrNull { it !in tried }
+        return if (untried != null) {
+            SeedSelection(untried, resetTried = false)
+        } else {
+            inactive.firstOrNull()?.let { SeedSelection(it, resetTried = true) }
+        }
+    }
+
     /** Корень файловых папок раздачи (в `noBackupFilesDir`). */
     const val DIR_NAME = "apk_seed/v1"
 

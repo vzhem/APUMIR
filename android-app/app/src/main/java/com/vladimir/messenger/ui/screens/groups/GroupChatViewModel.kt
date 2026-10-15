@@ -10,6 +10,8 @@ import com.vladimir.messenger.data.group.GroupRole
 import com.vladimir.messenger.data.group.GroupSummary
 import com.vladimir.messenger.data.group.MemberSummary
 import com.vladimir.messenger.data.group.TopicSummary
+import com.vladimir.messenger.domain.model.Chat
+import com.vladimir.messenger.util.GroupInviteCardSender
 import com.vladimir.messenger.data.local.MessagePinPolicy
 import com.vladimir.messenger.data.notification.NotificationMuteStore
 import com.vladimir.messenger.data.local.entity.MessageEntity
@@ -21,6 +23,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 data class GroupChatUiState(
@@ -1322,6 +1325,79 @@ class GroupChatViewModel @Inject constructor(
      */
     suspend fun inviteQrLink(): String? =
         runCatching { groupRepository.inviteQrLink(groupId) }.getOrNull()
+
+    /** Обычная ссылка для отправки через системное меню Android. */
+    fun inviteShareLink(onLoaded: (Pair<String, String>?) -> Unit) {
+        viewModelScope.launch {
+            val invite = withContext(Dispatchers.IO) {
+                runCatching { groupRepository.inviteLinkFor(groupId) }.getOrNull()
+            }
+            onLoaded(invite)
+        }
+    }
+
+    /** Личные чаты — адресаты приглашения внутри APU. */
+    fun personalChatsOnce(onLoaded: (List<Chat>) -> Unit) {
+        viewModelScope.launch {
+            val chats = withContext(Dispatchers.IO) {
+                runCatching { chatRepository.getAllChats() }.getOrDefault(emptyList())
+            }
+            onLoaded(chats.sortedBy { it.contactName.lowercase() })
+        }
+    }
+
+    /** Не предлагаем повторно приглашать уже вступивших участников. */
+    fun groupMemberIdsOnce(targetGroupId: String, onLoaded: (Set<String>) -> Unit) {
+        viewModelScope.launch {
+            val ids = withContext(Dispatchers.IO) {
+                runCatching {
+                    groupRepository.searchMembers(targetGroupId, "").map { it.nodeId }
+                }.getOrDefault(emptyList())
+            }
+            onLoaded(ids.toSet())
+        }
+    }
+
+    /** Отправляет карточки APU с верным действием «Вступить»/«Подписаться». */
+    fun sendGroupInviteToChats(
+        group: GroupSummary,
+        chatIds: List<String>,
+        onDone: (sent: Int, failed: Int) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val recipients = chatIds.distinct().take(GroupInviteCardSender.MAX_RECIPIENTS)
+            val invite = withContext(Dispatchers.IO) {
+                runCatching { groupRepository.inviteLinkFor(group.id) }.getOrNull()
+            }
+            if (invite == null) {
+                onDone(0, recipients.size)
+                return@launch
+            }
+
+            val body = GroupInviteCardSender.build(
+                isChannel = group.isChannel,
+                title = invite.first,
+                about = group.about,
+                link = invite.second,
+            )
+            var sent = 0
+            var failed = 0
+            for (chatId in recipients) {
+                val chat = withContext(Dispatchers.IO) {
+                    runCatching { chatRepository.getChatById(chatId) }.getOrNull()
+                }
+                if (chat == null || chat.contactId.isBlank()) {
+                    failed++
+                    continue
+                }
+                val result = runCatching {
+                    chatRepository.sendMessage(chat.id, chat.contactId, body)
+                }.getOrNull()
+                if (result?.isSuccess == true) sent++ else failed++
+            }
+            onDone(sent, failed)
+        }
+    }
 
     fun createTopic(name: String, iconEmoji: String) {
         viewModelScope.launch {

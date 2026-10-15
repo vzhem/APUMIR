@@ -116,6 +116,7 @@ class ApkSeeder @Inject constructor(
         val version: String,
         val receivedBytes: Long,
         val totalBytes: Long,
+        val waitingForDeviceSpace: Boolean = false,
     )
 
     /** Обновление скачано: можно ставить и уже раздаём. */
@@ -177,6 +178,7 @@ class ApkSeeder @Inject constructor(
         val version: String,
         val receivedBytes: Long,
         val totalBytes: Long,
+        val waitingForDeviceSpace: Boolean = false,
     )
 
     private class PendingPatchAsk(
@@ -1143,21 +1145,23 @@ class ApkSeeder @Inject constructor(
         store.saveOffers(offers)
         publishOffers(offers)
         store.loadPending()?.let { saved ->
-            pending = PendingAsk(saved.version, saved.sha256, saved.startedAtMs).also {
-                it.attempts = saved.attempts
-                it.askedSeed = saved.askedSeed.ifBlank { null }
-                it.askedAtMs = saved.askedAtMs
-                saved.seeds.forEach { seed -> it.tried.add(seed) }
+            pending = PendingAsk(saved.version, saved.sha256, saved.startedAtMs).also { restored ->
+                restored.attempts = saved.attempts
+                restored.askedSeed = saved.askedSeed.ifBlank { null }
+                restored.askedAtMs = saved.askedAtMs
+                restored.askedSeed?.let(restored.tried::add)
             }
             _download.value = downloadRow(saved.version, saved.sha256)
         }
         // Раунд 133: патч-просьба и патч-объявления (перезапуск).
         store.loadPatchPending()?.let { saved ->
-            patchPending = PendingPatchAsk(saved.fromVersion, saved.toVersion, saved.patchSha256, saved.apkSha256, saved.startedAtMs).also {
-                it.attempts = saved.attempts
-                it.askedSeed = saved.askedSeed.ifBlank { null }
-                it.askedAtMs = saved.askedAtMs
-                saved.seeds.forEach { seed -> it.tried.add(seed) }
+            patchPending = PendingPatchAsk(
+                saved.fromVersion, saved.toVersion, saved.patchSha256, saved.apkSha256, saved.startedAtMs,
+            ).also { restored ->
+                restored.attempts = saved.attempts
+                restored.askedSeed = saved.askedSeed.ifBlank { null }
+                restored.askedAtMs = saved.askedAtMs
+                restored.askedSeed?.let(restored.tried::add)
             }
         }
         runCatching { publishPatchOffers(store.loadPatchOffers()) }
@@ -1322,7 +1326,6 @@ class ApkSeeder @Inject constructor(
     ) {
         val now = System.currentTimeMillis()
         val p = PendingPatchAsk(fromVersion, toVersion, sha256, apkSha256, now)
-        seeds.forEach { p.tried.add(it) }
         patchPending = p
         store.savePatchPending(
             ApkUpdateStore.PatchPending(fromVersion, toVersion, sha256, apkSha256, now, 0, "", 0L, seeds),
@@ -1339,7 +1342,7 @@ class ApkSeeder @Inject constructor(
         return (fromOffers + fromDisk).toSet()
     }
 
-    private suspend fun askPatchNext() {
+    private suspend fun askPatchNext(activeSeeds: Set<String> = emptySet()) {
         val p = patchPending ?: return
         val me = myId() ?: return
         val candidates = knownPatchSeedsFor(p).filter { it != me }
@@ -1348,11 +1351,9 @@ class ApkSeeder @Inject constructor(
             return
         }
         val ordered = runCatching { directory.order(candidates) }.getOrDefault(candidates)
-        val seed = ordered.firstOrNull { it !in p.tried } ?: run {
-            p.tried.clear()
-            ordered.firstOrNull { it !in p.tried } ?: return
-        }
-        askPatchFirst(seed, p)
+        val selection = ApkUpdate.nextSeed(ordered, p.tried, activeSeeds) ?: return
+        if (selection.resetTried) p.tried.clear()
+        askPatchFirst(selection.nodeId, p)
     }
 
     private suspend fun askPatchFirst(preferred: String, p: PendingPatchAsk) {
@@ -1388,9 +1389,15 @@ class ApkSeeder @Inject constructor(
         if (p == null) {
             if (_patchDownload.value != null) _patchDownload.value = null
         } else {
-            val row = transferDao.getForFile(ApkUpdate.CHAT_ID, p.sha256)
-                .firstOrNull { it.direction == "INCOMING" && it.state != "COMPLETE" && it.state != "FAILED" }
-            _patchDownload.value = row?.let { PatchDownload(p.toVersion, it.transferredBytes, it.totalBytes) }
+            val row = activeUpdateTransfer(p.sha256)
+            _patchDownload.value = row?.let {
+                PatchDownload(
+                    version = p.toVersion,
+                    receivedBytes = it.transferredBytes,
+                    totalBytes = it.totalBytes,
+                    waitingForDeviceSpace = it.errorCode == FileTransferReceiver.ERROR_NO_SPACE,
+                )
+            }
         }
         val offers = store.loadPatchOffers()
         val kept = offers.filter {
@@ -1549,7 +1556,6 @@ class ApkSeeder @Inject constructor(
     private suspend fun startPending(version: String, sha256: String, seeds: List<String>) {
         val now = System.currentTimeMillis()
         val p = PendingAsk(version, sha256, now)
-        seeds.forEach { p.tried.add(it) }
         pending = p
         store.savePending(
             ApkUpdateStore.Pending(version, sha256, now, 0, "", 0L, seeds),
@@ -1566,7 +1572,7 @@ class ApkSeeder @Inject constructor(
         return (fromOffers + fromDisk).toSet()
     }
 
-    private suspend fun askNext() {
+    private suspend fun askNext(activeSeeds: Set<String> = emptySet()) {
         val p = pending ?: return
         val me = myId() ?: return
         val candidates = knownSeedsFor(p).filter { it != me }
@@ -1575,11 +1581,9 @@ class ApkSeeder @Inject constructor(
             return
         }
         val ordered = runCatching { directory.order(candidates) }.getOrDefault(candidates)
-        val seed = ordered.firstOrNull { it !in p.tried } ?: run {
-            p.tried.clear()
-            ordered.firstOrNull { it !in p.tried } ?: return
-        }
-        askFirst(seed, p)
+        val selection = ApkUpdate.nextSeed(ordered, p.tried, activeSeeds) ?: return
+        if (selection.resetTried) p.tried.clear()
+        askFirst(selection.nodeId, p)
     }
 
     private suspend fun askFirst(preferred: String, p: PendingAsk) {
@@ -1602,29 +1606,39 @@ class ApkSeeder @Inject constructor(
 
     private suspend fun reask(now: Long) {
         val p = pending ?: return
-        if (now - p.startedAtMs > PENDING_TTL_MS || p.attempts >= MAX_ATTEMPTS) {
+        if (now - p.startedAtMs > PENDING_TTL_MS) {
             clearPending()
             return
         }
-        if (downloadRow(p.version, p.sha256) != null) return // куски приходят
-        val interval = (REASK_BASE_MS * p.attempts.coerceAtLeast(1)).coerceAtMost(REASK_MAX_MS)
+        val row = activeUpdateTransfer(p.sha256)
+        if (row != null && !ApkUpdate.isDownloadStalled(row.updatedAtMs, now)) return // progress продолжается
+        val interval = if (row != null) {
+            ApkUpdate.STALLED_DOWNLOAD_REASK_MS
+        } else {
+            (REASK_BASE_MS * p.attempts.coerceAtLeast(1)).coerceAtMost(REASK_MAX_MS)
+        }
         if (now - p.askedAtMs < interval) return
-        askNext()
+        // При простаивающей передаче выбираем сид, который ещё не участвует
+        // в полосе, чтобы не спрашивать повторно только текущий источник.
+        askNext(activeSeeds = if (row != null) p.striping else emptySet())
     }
 
     /** Патч-просьба: те же правила, что у APK-просьбы (раунд 133). */
     private suspend fun reaskPatch(now: Long) {
         val p = patchPending ?: return
-        if (now - p.startedAtMs > PENDING_TTL_MS || p.attempts >= MAX_ATTEMPTS) {
+        if (now - p.startedAtMs > PENDING_TTL_MS) {
             clearPatchPending()
             return
         }
-        val row = transferDao.getForFile(ApkUpdate.CHAT_ID, p.sha256)
-            .firstOrNull { it.direction == "INCOMING" && it.state != "COMPLETE" && it.state != "FAILED" }
-        if (row != null) return // куски приходят
-        val interval = (REASK_BASE_MS * p.attempts.coerceAtLeast(1)).coerceAtMost(REASK_MAX_MS)
+        val row = activeUpdateTransfer(p.sha256)
+        if (row != null && !ApkUpdate.isDownloadStalled(row.updatedAtMs, now)) return // progress продолжается
+        val interval = if (row != null) {
+            ApkUpdate.STALLED_DOWNLOAD_REASK_MS
+        } else {
+            (REASK_BASE_MS * p.attempts.coerceAtLeast(1)).coerceAtMost(REASK_MAX_MS)
+        }
         if (now - p.askedAtMs < interval) return
-        askPatchNext()
+        askPatchNext(activeSeeds = if (row != null) p.striping else emptySet())
     }
 
     private suspend fun clearPending() {
@@ -1641,12 +1655,23 @@ class ApkSeeder @Inject constructor(
     private fun pendingVersionFor(sha256: String): String? =
         pending?.takeIf { it.sha256 == sha256 }?.version ?: store.loadPending()?.takeIf { it.sha256 == sha256 }?.version
 
+    /** Незавершённая входящая передача APK/патча в виртуальном чате обновлений. */
+    private suspend fun activeUpdateTransfer(sha256: String) =
+        transferDao.getForFile(ApkUpdate.CHAT_ID, sha256)
+            .firstOrNull {
+                it.direction == "INCOMING" &&
+                    it.state !in setOf("COMPLETE", "FAILED", "CANCELLED", "EXPIRED")
+            }
+
     /** Строка приёма: есть живая INCOMING передачи в apkseed — её ход. */
     private suspend fun downloadRow(version: String, sha256: String): Download? {
-        val row = transferDao.getForFile(ApkUpdate.CHAT_ID, sha256)
-            .firstOrNull { it.direction == "INCOMING" && it.state != "COMPLETE" && it.state != "FAILED" }
-            ?: return null
-        return Download(version, row.transferredBytes, row.totalBytes)
+        val row = activeUpdateTransfer(sha256) ?: return null
+        return Download(
+            version = version,
+            receivedBytes = row.transferredBytes,
+            totalBytes = row.totalBytes,
+            waitingForDeviceSpace = row.errorCode == FileTransferReceiver.ERROR_NO_SPACE,
+        )
     }
 
     private suspend fun refreshDownloadState() {
@@ -1744,9 +1769,8 @@ class ApkSeeder @Inject constructor(
         private const val AUTO_ASK_FANOUT = 5
         /** Объявление соседа живёт столько, а потом тихо сгорает. */
         const val OFFER_TTL_MS = 3L * 24 * 60 * 60 * 1000
-        /** Моя просьба живёт сутки (как у файлов групп). */
-        const val PENDING_TTL_MS = 24L * 60 * 60 * 1000
-        const val MAX_ATTEMPTS = 40
+        /** Запрос и скачивание обновления живут до протокольного максимума 30 суток. */
+        const val PENDING_TTL_MS = ApkUpdate.TRANSFER_TTL_MS
         const val REASK_BASE_MS = 90_000L
         const val REASK_MAX_MS = 10L * 60 * 1000
         const val PRESENCE_REASK_MIN_MS = 45_000L
@@ -1755,7 +1779,7 @@ class ApkSeeder @Inject constructor(
         /** Список «Полученных APK» в настройках: не больше стольких. */
         const val MAX_RECEIVED_LIST = 20
         const val RECEIVED_SCAN_INTERVAL_MS = 5L * 60 * 1000
-        /** Сколько сидов одновременно шлют полосы кусков (K2, как у групп). */
-        const val STRIPE_SEEDS = 3
+        /** Используем все слоты общего приёмника FileTransferReceiver.MAX_GROUP_SEEDS. */
+        const val STRIPE_SEEDS = 4
     }
 }

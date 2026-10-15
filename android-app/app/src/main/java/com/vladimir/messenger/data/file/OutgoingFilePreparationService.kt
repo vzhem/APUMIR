@@ -8,6 +8,7 @@ import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
+import com.vladimir.messenger.data.update.ApkUpdate
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.security.MessageDigest
 import javax.inject.Inject
@@ -187,12 +188,14 @@ class OutgoingFilePreparationService private constructor(
             declaredSize = source.length().takeIf { source.isFile },
         ) { local.open(context) }
         check(inspected.sha256 == expectedSha256) { "Group file copy does not match its card" }
-        // Владелец 2026-10-07: тяжёлое (фото, видео, большие файлы) хранится и
-        // предлагается максимум сутки, текст и малое — неделю.
-        val expiresAtMs = Math.addExact(
-            nowMs,
-            FileTransferRetention.ttlMs(inspected.mediaType, inspected.sizeBytes),
-        )
+        // Обновление может скачиваться по нестабильной связи до 30 дней
+        // (протокольный максимум); прочие групповые файлы сохраняют общий TTL.
+        val retentionMs = if (groupId == ApkUpdate.CHAT_ID) {
+            ApkUpdate.TRANSFER_TTL_MS
+        } else {
+            FileTransferRetention.ttlMs(inspected.mediaType, inspected.sizeBytes)
+        }
+        val expiresAtMs = Math.addExact(nowMs, retentionMs)
         val manifest = try {
             uniffi.p2p_core.createGroupFileManifest(
                 senderNodeId,
@@ -224,7 +227,14 @@ class OutgoingFilePreparationService private constructor(
             keyAccess.create(manifest.transferIdHex)
             // Сразу в SEEDING, минуя PREPARED: иначе обычный передатчик успел
             // бы подхватить строку как личную передачу без конверта.
-            stageChunks(local, manifest, inspected.sha256, store, finalState = "SEEDING")
+            stageChunks(
+                local,
+                manifest,
+                inspected.sha256,
+                store,
+                finalState = "SEEDING",
+                ownerQuotaExempt = groupId == ApkUpdate.CHAT_ID,
+            )
             PreparedTransfer(
                 transferId = manifest.transferIdHex,
                 messageId = messageId,
@@ -312,10 +322,12 @@ class OutgoingFilePreparationService private constructor(
                 sizeBytes = inspected.sizeBytes,
             )
         }
-        val expiresAtMs = Math.addExact(
-            nowMs,
-            FileTransferRetention.ttlMs(inspected.mediaType, inspected.sizeBytes),
-        )
+        val retentionMs = if (chatId == ApkUpdate.CHAT_ID) {
+            ApkUpdate.TRANSFER_TTL_MS
+        } else {
+            FileTransferRetention.ttlMs(inspected.mediaType, inspected.sizeBytes)
+        }
+        val expiresAtMs = Math.addExact(nowMs, retentionMs)
         val manifest = createFileTransferManifest(
             senderNodeId,
             recipientNodeId,
@@ -361,7 +373,13 @@ class OutgoingFilePreparationService private constructor(
                     recipientBinding.fill(0)
                 }
             }
-            stageChunks(source, manifest, inspected.sha256, store)
+            stageChunks(
+                source,
+                manifest,
+                inspected.sha256,
+                store,
+                ownerQuotaExempt = chatId == ApkUpdate.CHAT_ID,
+            )
             // Раунд 43: для картинок кладём превью рядом - пузырь в чате
             // показывает фото, а не только имя файла и размер. Превью - вся
             // картинка целиком (уменьшенная, с теми же пропорциями), а не
@@ -421,6 +439,8 @@ class OutgoingFilePreparationService private constructor(
         store: FileTransferChunkStore,
         /** Состояние строки после последнего куска: PREPARED (личная) или SEEDING (общая копия группы, K2). */
         finalState: String = "PREPARED",
+        /** Explicit APK updates bypass the user quota, but not the device free-space reserve. */
+        ownerQuotaExempt: Boolean = false,
     ) {
         val input = source.open(context)
         val digest = MessageDigest.getInstance("SHA-256")
@@ -452,6 +472,7 @@ class OutgoingFilePreparationService private constructor(
                             manifest.transferIdHex,
                             index,
                             ciphertext,
+                            ownerQuotaExempt = ownerQuotaExempt,
                         )
                         transferDao.upsertChunk(
                             FileTransferChunkEntity(

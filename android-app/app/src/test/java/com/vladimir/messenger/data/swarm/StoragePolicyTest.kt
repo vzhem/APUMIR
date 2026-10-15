@@ -21,6 +21,25 @@ class StoragePolicyTest {
     }
 
     @Test
+    fun updateQuotaExemptionStillProtectsTheDevicesFreeSpaceReserve() {
+        val quota = 100L * StoragePolicy.MIB
+        val used = 100L * StoragePolicy.MIB
+        val free = StoragePolicy.FREE_RESERVE_BYTES + 80L * StoragePolicy.MIB
+
+        assertEquals(0L, StoragePolicy.headroomBytes(quota, used, free))
+        assertEquals(80L * StoragePolicy.MIB, StoragePolicy.headroomBytes(quota, used, free, ownerQuotaExempt = true))
+        assertEquals(
+            0L,
+            StoragePolicy.headroomBytes(
+                quotaBytes = quota,
+                usedBytes = used,
+                freeBytes = StoragePolicy.FREE_RESERVE_BYTES,
+                ownerQuotaExempt = true,
+            ),
+        )
+    }
+
+    @Test
     fun stepsAreOrderedAndSpanTheWholeRange() {
         val steps = StoragePolicy.STEPS
         assertEquals(StoragePolicy.MIN_QUOTA_BYTES, steps.first())

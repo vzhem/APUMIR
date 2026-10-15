@@ -8,6 +8,7 @@ import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
+import com.vladimir.messenger.data.update.ApkUpdate
 import java.security.MessageDigest
 import uniffi.p2p_core.encryptFileTransferChunk
 import kotlinx.coroutines.sync.Mutex
@@ -983,14 +984,19 @@ class FileTransferReceiver(
             return
         }
         val stored = try {
-            chunkStore.storeEncryptedChunk(transferIdHex, chunkIndex, ciphertext)
+            chunkStore.storeEncryptedChunk(
+                transferIdHex,
+                chunkIndex,
+                ciphertext,
+                ownerQuotaExempt = transfer.chatId == ApkUpdate.CHAT_ID,
+            )
         } catch (storeError: Exception) {
             Log.w(TAG, "Chunk $chunkIndex rejected by store for $transferIdHex: ${storeError.message}")
-            // Место под пересылку кончилось: передача не падает (отправитель
-            // повторит кусок, а владелец может подвинуть ползунок или
-            // очистить завершённые), но пузырь в чате должен сказать, чего
-            // ждём. Следующий удачный кусок снимает пометку сам (advance
-            // без errorCode).
+            // Динамический предел хранения исчерпан: передача не падает,
+            // отправитель повторит кусок. Обычный файл можно продолжить после
+            // изменения квоты/очистки; обновление отдельно защищено от квоты,
+            // поэтому этот сигнал означает нехватку физического места. Следующий
+            // удачный кусок сам снимет пометку (advance без errorCode).
             if (storeError is FileTransferChunkStore.StorageFullException &&
                 transfer.errorCode != ERROR_NO_SPACE
             ) {
@@ -2250,7 +2256,7 @@ class FileTransferReceiver(
 
     companion object {
         private const val TAG = "FileTransferReceiver"
-        /** errorCode строки передачи, пока приём стоит из-за квоты «Место под пересылку». */
+        /** Маркер строки передачи, пока приём заблокирован из-за нехватки места в хранилище. */
         const val ERROR_NO_SPACE = "NO_SPACE"
         const val MAX_PENDING_ITEMS = 64
         const val MAX_PENDING_BYTES = 32L * 1024 * 1024

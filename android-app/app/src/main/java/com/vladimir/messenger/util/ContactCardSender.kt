@@ -4,12 +4,25 @@ package com.vladimir.messenger.util
 // CONTACTCARDSENDER.KT — «поделись человеком, как ссылкой»
 // =============================================================================
 // Раунд 175. У «Поделиться контактом» появился второй путь: не наружу через
-// системное меню, а ВНУТРЬ APU - выбранному абоненту. Ему уходит обычное
+// системное меню, а ВНУТРЬ APU — выбранным абонентам. Каждому уходит обычное
 // сообщение с apu://-ссылкой контакта: тап по ней открывает «Добавить контакт»
 // с предзаполненным узлом - тот же механизм, что у ссылок из «Контактов».
 // =============================================================================
 
 import com.vladimir.messenger.data.repository.ChatRepository
+import kotlinx.coroutines.CancellationException
+
+/** Получатель карточки контакта при адресной рассылке. */
+data class ContactCardRecipient(
+    val contactId: String,
+    val displayName: String,
+)
+
+/** Сводка одной рассылки: сообщения, принятые каждым личным чатом. */
+data class ContactCardSendResult(
+    val sent: Int,
+    val failed: Int,
+)
 
 /** Распознанная карточка контакта внутри сообщения-приглашения. */
 data class ContactInviteCard(
@@ -19,6 +32,8 @@ data class ContactInviteCard(
 )
 
 object ContactCardSender {
+    /** Ограждение на рассылку — такое же, как у других адресных приглашений. */
+    const val MAX_RECIPIENTS = 100
 
     /**
      * Раунд 176: вытащить из сообщения карточку контакта. Такие же карточки
@@ -52,12 +67,50 @@ object ContactCardSender {
         sharedNodeId: String,
         sharedName: String,
         sharedUsername: String,
-    ): Boolean = try {
-        val link = ContactShareLink.build(sharedNodeId, sharedName, sharedUsername)
-        val chat = chatRepository.getOrCreateChat(toContactId, toName)
-        val text = "Контакт «$sharedName» в APU. Открой ссылку, чтобы добавить:\n$link"
-        chatRepository.sendMessage(chat.id, toContactId, text).isSuccess
-    } catch (_: Exception) {
-        false
+    ): Boolean = sendToMany(
+        chatRepository = chatRepository,
+        recipients = listOf(ContactCardRecipient(toContactId, toName)),
+        sharedNodeId = sharedNodeId,
+        sharedName = sharedName,
+        sharedUsername = sharedUsername,
+    ).sent == 1
+
+    /** Отправить одну карточку каждому выбранному контакту; результаты собраны без спама тостами. */
+    suspend fun sendToMany(
+        chatRepository: ChatRepository,
+        recipients: Collection<ContactCardRecipient>,
+        sharedNodeId: String,
+        sharedName: String,
+        sharedUsername: String,
+    ): ContactCardSendResult {
+        val targets = recipients.asSequence()
+            .filter { it.contactId.isNotBlank() }
+            .distinctBy { it.contactId }
+            .take(MAX_RECIPIENTS)
+            .toList()
+        if (targets.isEmpty()) return ContactCardSendResult(sent = 0, failed = 0)
+
+        val text = try {
+            val link = ContactShareLink.build(sharedNodeId, sharedName, sharedUsername)
+            "Контакт «$sharedName» в APU. Открой ссылку, чтобы добавить:\n$link"
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            return ContactCardSendResult(sent = 0, failed = targets.size)
+        }
+
+        var sent = 0
+        for (target in targets) {
+            val delivered = try {
+                val chat = chatRepository.getOrCreateChat(target.contactId, target.displayName)
+                chatRepository.sendMessage(chat.id, target.contactId, text).isSuccess
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                false
+            }
+            if (delivered) sent++
+        }
+        return ContactCardSendResult(sent = sent, failed = targets.size - sent)
     }
 }

@@ -75,6 +75,8 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.QrCode2
@@ -149,6 +151,8 @@ import com.vladimir.messenger.ui.components.GifCatalogDialog
 import com.vladimir.messenger.ui.components.InputPanelDialog
 import com.vladimir.messenger.ui.components.GroupFileCard
 import com.vladimir.messenger.ui.components.GroupQrInviteDialog
+import com.vladimir.messenger.ui.components.GroupInviteRecipientsDialog
+import com.vladimir.messenger.ui.components.InviteAttachDialog
 import com.vladimir.messenger.ui.components.fileIconFor
 import com.vladimir.messenger.ui.components.ImagePreview
 import com.vladimir.messenger.ui.components.TopicEmojiCatalog
@@ -157,6 +161,7 @@ import com.vladimir.messenger.ui.components.TopicIconCatalog
 import com.vladimir.messenger.ui.components.topicIconName
 import com.vladimir.messenger.ui.components.TopicIconView
 import com.vladimir.messenger.util.ImageLinkDetector
+import com.vladimir.messenger.util.AppShare
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -189,6 +194,7 @@ fun GroupChatScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val muteRevision by viewModel.notificationMuteRevision.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     // р237: черновик темы живёт в модели (uiState.draft): он же уезжает на
     // второе устройство личности и возвращается, если чат открыть заново.
     var showNewTopic by remember { mutableStateOf(false) }
@@ -196,10 +202,12 @@ fun GroupChatScreen(
     var showCreatePoll by remember { mutableStateOf(false) }
     // Раунд 260: тап по значку темы в шапке открывает её редактирование.
     var showEditTopic by remember { mutableStateOf(false) }
-    // Раунд 213: «три точки» шапки + приглашение по QR коду.
+    // «Три точки» шапки: уведомления и все способы пригласить в группу/канал.
     var showTopMenu by remember { mutableStateOf(false) }
     var showNotificationMuteDialog by remember { mutableStateOf(false) }
     var showQrInvite by remember { mutableStateOf(false) }
+    var inviteApuGroup by remember { mutableStateOf<GroupSummary?>(null) }
+    var groupLinkShareTarget by remember { mutableStateOf<GroupSummary?>(null) }
     var qrLink by remember { mutableStateOf<String?>(null) }
     var qrLoading by remember { mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(showQrInvite) {
@@ -736,7 +744,7 @@ fun GroupChatScreen(
                         onClick = { onOpenAdmin(uiState.groupId) },
                     )
                     Spacer(Modifier.width(6.dp))
-                    // Действия группы/канала и уведомлений собраны в «три точки».
+                    // Уведомления и три способа приглашения: в APU, ссылкой и по QR.
                     Box {
                         ApuHeaderButton(
                             icon = Icons.Filled.MoreVert,
@@ -756,9 +764,24 @@ fun GroupChatScreen(
                                     },
                                     onClick = { showNotificationMuteDialog = true },
                                 ),
-                                ApuAction(stringResource(R.string.channel_invite_qr), Icons.Filled.QrCode2) {
-                                    showQrInvite = true
-                                },
+                                ApuAction(
+                                    title = stringResource(R.string.contacts_send_in_apu),
+                                    icon = Icons.Filled.PersonAdd,
+                                    enabled = uiState.group != null,
+                                    onClick = { uiState.group?.let { inviteApuGroup = it } },
+                                ),
+                                ApuAction(
+                                    title = stringResource(R.string.groups_send_link),
+                                    icon = Icons.Filled.Link,
+                                    enabled = uiState.group != null,
+                                    onClick = { uiState.group?.let { groupLinkShareTarget = it } },
+                                ),
+                                ApuAction(
+                                    title = stringResource(R.string.channel_invite_qr),
+                                    icon = Icons.Filled.QrCode2,
+                                    enabled = uiState.group != null,
+                                    onClick = { showQrInvite = true },
+                                ),
                             ),
                         )
                     }
@@ -1440,6 +1463,34 @@ fun GroupChatScreen(
         )
     }
 
+    groupLinkShareTarget?.let { target ->
+        InviteAttachDialog(
+            title = if (target.isChannel) stringResource(R.string.menu_invite_channel)
+            else stringResource(R.string.menu_invite_group),
+            onDismiss = { groupLinkShareTarget = null },
+            onShare = { attachApk ->
+                groupLinkShareTarget = null
+                viewModel.inviteShareLink { invite ->
+                    if (invite == null) {
+                        val message = context.getString(
+                            if (target.isChannel) R.string.gqr_channel_no_link
+                            else R.string.gqr_group_no_link,
+                        )
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    } else {
+                        AppShare.shareGroupInvite(
+                            context = context,
+                            groupTitle = invite.first,
+                            link = invite.second,
+                            isChannel = target.isChannel,
+                            attachApk = attachApk,
+                        )
+                    }
+                }
+            },
+        )
+    }
+
     // Раунд 213: QR с короткой ссылкой-приглашением; без APU страница
     // сервиса предлагает установить приложение и вступить/подписаться.
     if (showQrInvite) {
@@ -1448,6 +1499,16 @@ fun GroupChatScreen(
             link = qrLink,
             loading = qrLoading,
             onDismiss = { showQrInvite = false },
+        )
+    }
+
+    inviteApuGroup?.let { group ->
+        GroupInviteRecipientsDialog(
+            group = group,
+            loadPersonalChats = viewModel::personalChatsOnce,
+            loadMemberIds = viewModel::groupMemberIdsOnce,
+            sendInvites = viewModel::sendGroupInviteToChats,
+            onDismiss = { inviteApuGroup = null },
         )
     }
 

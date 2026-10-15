@@ -17,7 +17,8 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * Отдельно от квоты действует запас свободного места самого телефона
  * ([StoragePolicy.FREE_RESERVE_BYTES]): даже при «100 ГБ» на ползунке в
- * последние полгигабайта не залезаем.
+ * последние полгигабайта не залезаем. Только явная раздача обновлений в
+ * `apkseed` обходит ползунок; системный запас остаётся обязательным.
  */
 object StorageSettings {
     private const val PREFS = "p2p_prefs"
@@ -55,15 +56,17 @@ object StorageSettings {
     }
 
     /**
-     * Сколько ещё можно записать: остаток квоты, но не глубже запаса
-     * свободного места на разделе с данными приложения. Отрицательного не
-     * бывает.
+     * Сколько ещё можно записать: остаток выбранной квоты и физического
+     * запаса. Для явного `apkseed` квота владельца игнорируется, но запас
+     * свободного места на разделе с данными приложения остаётся обязательным.
      */
-    fun headroom(context: Context, usedBytes: Long): Long {
-        val byQuota = quota(context) - usedBytes.coerceAtLeast(0L)
-        val byDisk = freeBytes(context) - StoragePolicy.FREE_RESERVE_BYTES
-        return minOf(byQuota, byDisk).coerceAtLeast(0L)
-    }
+    fun headroom(context: Context, usedBytes: Long, ownerQuotaExempt: Boolean = false): Long =
+        StoragePolicy.headroomBytes(
+            quotaBytes = quota(context),
+            usedBytes = usedBytes,
+            freeBytes = freeBytes(context),
+            ownerQuotaExempt = ownerQuotaExempt,
+        )
 
     /** Свободно на разделе, где лежат данные приложения; 0, если узнать не удалось. */
     fun freeBytes(context: Context): Long = try {

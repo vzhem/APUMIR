@@ -167,7 +167,8 @@
     <string name="menu_open_channel">Open channel</string>
     <string name="menu_open_group">Open group</string>
     <string name="menu_invite_channel">Invite to channel</string>
-    <string name="menu_invite_community">Invite to community</string>
+    <string name="menu_invite_group">Invite to group</string>
+    <string name="contacts_invite_to_group_or_channel">Invite to a group or channel</string>
     <string name="menu_manage">Manage</string>
     <string name="menu_delete_channel">Delete channel</string>
     <string name="menu_delete_group">Delete group</string>
@@ -214,6 +215,8 @@
     <string name="contacts_channel">Channel</string>
     <string name="contacts_group">Group</string>
     <string name="contacts_send_in_apu">Send in APU</string>
+    <string name="invite_send_apu_hint">Choose recipients from your APU chats</string>
+    <string name="group_invite_recipients_hint">Choose people to invite to “%1$s”.</string>
     <string name="contacts_other_app">Another app</string>
     <!-- Incoming message translation -->
     <string name="translate_title">Translate incoming messages</string>
@@ -554,7 +557,30 @@
     <string name="peer_relay_space">Relay capacity</string>
     <string name="peer_not_reported">not reported</string>
     <string name="peer_empty_body">No observations yet. The rating will appear by itself once the phone has been online and exchanged data with others.</string>
+    <string name="peer_empty_title">No rated nodes yet</string>
     <string name="peer_routing_body">The APU network is held up by the phones themselves. The more often a node is online, the faster it accepts files and the easier it is to connect to directly, the higher its rating — and the sooner data is sent to it. A declared space for relaying adds up to 10 points, and only for those who are online.</string>
+    <string name="peer_network_kicker">APU NETWORK · OBSERVATIONS</string>
+    <string name="peer_routing_summary">Scores help choose delivery nodes using observations from this phone.</string>
+    <string name="peer_routing_details">How the score works</string>
+    <string name="peer_routing_hide">Hide explanation</string>
+    <string name="peer_summary_nodes">Nodes</string>
+    <string name="peer_summary_direct">Direct</string>
+    <string name="peer_summary_average">Average score</string>
+    <string name="peer_availability">Availability</string>
+    <string name="peer_filter_all">All</string>
+    <string name="peer_filter_direct">Direct</string>
+    <string name="peer_filter_recommended">Score 50+</string>
+    <string name="peer_search_hint">Search node ID</string>
+    <string name="peer_no_results">No nodes found. Change the query or filter.</string>
+    <string name="peer_copy_id">Copy node ID</string>
+    <string name="peer_tier_excellent">Excellent</string>
+    <string name="peer_tier_good">Good</string>
+    <string name="peer_tier_average">Average</string>
+    <string name="peer_tier_weak">Weak</string>
+    <string name="peer_storage_value">%1$s · +%2$s pts</string>
+    <string name="peer_reset_confirm_title">Reset node observations?</string>
+    <string name="peer_reset_confirm_body">The local node history will be deleted. Scores will build up again as the network is used.</string>
+    <string name="peer_reset_confirm">Reset</string>
     <!-- Settings -->
     <string name="settings_set_username">Set @username</string>
     <string name="settings_complaints_spike">⚠️ A spike in complaints: the node’s reputation and priority are temporarily lowered.</string>
@@ -1325,7 +1351,10 @@
     <string name="poll_problem_question">The question can’t be empty</string>
     <string name="a11y_open">Unlocked</string>
     <string name="a11y_still_locked">Still locked</string>
-    <string name="share_contact_hint">The selected person will get the link to the contact “%1$s” and can add them in one tap.</string>
+    <string name="share_contact_hint">Select one or more recipients. We’ll send each of them the link to “%1$s”; they can add the contact in one tap.</string>
+    <string name="share_contact_send_count">Send · %1$d</string>
+    <string name="share_contact_clear_selection">Clear selection</string>
+    <string name="share_contact_limit_reached">You can select up to %1$d recipients.</string>
     <string name="contact_no_messages">No messages</string>
     <string name="sticker_cd">Sticker</string>
     <plurals name="poll_min_options">
@@ -1335,6 +1364,7 @@
     <string name="word_channel_acc">the channel</string>
     <string name="word_group_acc">the group</string>
     <string name="invite_title">Invite to %1$s</string>
+    <string name="invite_to_apu_title">Invite via APU</string>
     <string name="confirm_delete_title">Delete %1$s?</string>
     <string name="sent_count">Sent: %1$d</string>
     <string name="sent_failed">Sent: %1$d, failed: %2$d</string>
@@ -1389,6 +1419,7 @@
     <string name="ready_subtitle_tpl">%1$s, %2$s; already shared with nearby devices</string>
     <string name="receiving_tpl">Receiving v%1$s</string>
     <string name="receiving_progress_tpl">%1$s of %2$s; in pieces from %3$d peers</string>
+    <string name="update_transfer_space_blocked_tpl">%1$s of %2$s; free device storage (a 512 MB reserve is kept)</string>
     <string name="receiving_compact_tpl">Receiving v%1$s (compact)</string>
     <string name="receiving_patch_tpl">%1$s of %2$s — downloading only the version difference</string>
     <string name="patch_offer_tpl">Patch %1$s from %2$d peers — only the version difference</string>

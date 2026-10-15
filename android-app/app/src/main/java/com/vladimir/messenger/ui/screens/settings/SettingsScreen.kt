@@ -1942,7 +1942,20 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
             SettingsItem(
                 icon    = Icons.Default.Download,
                 title   = stringResource(R.string.receiving_tpl, d.version),
-                subtitle = stringResource(R.string.receiving_progress_tpl, StoragePolicy.format(d.receivedBytes), StoragePolicy.format(d.totalBytes), offers.size.coerceAtLeast(1)),
+                subtitle = if (d.waitingForDeviceSpace) {
+                    stringResource(
+                        R.string.update_transfer_space_blocked_tpl,
+                        StoragePolicy.format(d.receivedBytes),
+                        StoragePolicy.format(d.totalBytes),
+                    )
+                } else {
+                    stringResource(
+                        R.string.receiving_progress_tpl,
+                        StoragePolicy.format(d.receivedBytes),
+                        StoragePolicy.format(d.totalBytes),
+                        offers.size.coerceAtLeast(1),
+                    )
+                },
             )
             ApuSettingsDivider()
             SettingsItem(
@@ -1956,7 +1969,19 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
             SettingsItem(
                 icon    = Icons.Default.Download,
                 title   = stringResource(R.string.receiving_compact_tpl, pd.version),
-                subtitle = stringResource(R.string.receiving_patch_tpl, StoragePolicy.format(pd.receivedBytes), StoragePolicy.format(pd.totalBytes)),
+                subtitle = if (pd.waitingForDeviceSpace) {
+                    stringResource(
+                        R.string.update_transfer_space_blocked_tpl,
+                        StoragePolicy.format(pd.receivedBytes),
+                        StoragePolicy.format(pd.totalBytes),
+                    )
+                } else {
+                    stringResource(
+                        R.string.receiving_patch_tpl,
+                        StoragePolicy.format(pd.receivedBytes),
+                        StoragePolicy.format(pd.totalBytes),
+                    )
+                },
             )
             ApuSettingsDivider()
             SettingsItem(

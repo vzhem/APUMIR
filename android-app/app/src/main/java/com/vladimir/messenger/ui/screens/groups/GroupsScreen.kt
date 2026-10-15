@@ -24,10 +24,12 @@ import com.vladimir.messenger.ui.components.apuPremiumGloss
 import com.vladimir.messenger.ui.components.apuPremiumLift
 import com.vladimir.messenger.ui.components.apuPremiumThread
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
+import com.vladimir.messenger.ui.components.ApuPremiumDialog
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
 import com.vladimir.messenger.ui.components.ApuSettingsLayout
 import com.vladimir.messenger.ui.components.ApuSettingsSectionTitle
 import com.vladimir.messenger.ui.components.GroupAvatar
+import com.vladimir.messenger.ui.components.GroupInviteRecipientsDialog
 import com.vladimir.messenger.ui.components.InviteShareCard
 import com.vladimir.messenger.ui.components.BubbleOverflowMenu
 import com.vladimir.messenger.ui.components.BubbleMenuAction
@@ -151,8 +153,9 @@ fun GroupsScreen(
     // Выход из группы и удаление - через подтверждение: это необратимо.
     var confirmLeave by remember { mutableStateOf<GroupSummary?>(null) }
     var muteTarget by remember { mutableStateOf<GroupSummary?>(null) }
-    // Как приглашать: показать QR при встрече или отправить ссылку.
+    // Как приглашать: показать QR, отправить внешнюю ссылку или написать в APU.
     var inviteChoice by remember { mutableStateOf<GroupSummary?>(null) }
+    var inviteApu by remember { mutableStateOf<GroupSummary?>(null) }
     // Готовый QR: название группы и ссылка со входом без одобрения.
     var qrInvite by remember { mutableStateOf<Pair<String, String>?>(null) }
     val context = LocalContext.current
@@ -486,7 +489,7 @@ fun GroupsScreen(
         )
     }
 
-    // Как приглашать: показываем QR или отправляем ссылку.
+    // QR, внешняя ссылка и отправка приглашения в личные чаты APU.
     inviteChoice?.let { group ->
         val what = if (group.isChannel) stringResource(R.string.word_channel_acc) else stringResource(R.string.word_group_acc)
         // Раунд 198: получателя ссылки может не быть с APU - по умолчанию
@@ -497,10 +500,29 @@ fun GroupsScreen(
             title = { Text(stringResource(R.string.invite_title, what)) },
             text = {
                 Column {
+                    ApuPremiumContentButton(
+                        onClick = {
+                            inviteChoice = null
+                            inviteApu = group
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        style = DiagnosticsActionStyle.PRIMARY,
+                    ) {
+                        Icon(Icons.Filled.PersonAdd, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            stringResource(R.string.contacts_send_in_apu),
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                     Text(
-                        stringResource(R.string.grp_qr_hint)
+                        stringResource(R.string.invite_send_apu_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ApuBubbleMutedColor,
                     )
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(8.dp))
+                    Text(stringResource(R.string.grp_qr_hint))
+                    Spacer(Modifier.height(8.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
@@ -541,6 +563,16 @@ fun GroupsScreen(
                 },
                 )
             },
+        )
+    }
+
+    inviteApu?.let { group ->
+        GroupInviteRecipientsDialog(
+            group = group,
+            loadPersonalChats = viewModel::personalChatsOnce,
+            loadMemberIds = viewModel::groupMemberIdsOnce,
+            sendInvites = viewModel::sendGroupInviteToChats,
+            onDismiss = { inviteApu = null },
         )
     }
 
@@ -1210,7 +1242,7 @@ private fun groupMenuActions(
     )
     add(
         BubbleMenuAction(
-            title = if (group.isChannel) context.getString(R.string.menu_invite_channel) else context.getString(R.string.menu_invite_community),
+            title = if (group.isChannel) context.getString(R.string.menu_invite_channel) else context.getString(R.string.menu_invite_group),
             icon = Icons.Filled.PersonAdd,
             onClick = onInvite,
         )
