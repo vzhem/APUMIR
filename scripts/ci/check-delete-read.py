@@ -91,7 +91,14 @@ class DeleteReadTest(unittest.TestCase):
         каждый повтор был НОВЫМ сообщением — своя очередь пересылки
         переполнялась, вытеснялись живые записи, а собеседник получал одну
         команду многократно. Идентификатор команды обязан выводиться из
-        (собеседник, сообщение, момент постановки)."""
+        (собеседник, сообщение, момент постановки).
+
+        Отдельно про счётчик: `sendMessage`/`retryMessage` возвращают результат
+        ПРЯМОЙ ноги (`send_message_inner` -> `direct_send_ok`), поэтому `false`
+        не значит «не отправлено» — запись уже лежит в очереди ядра. Считать
+        `DELETE_RETRY` только по `true` значило бы показывать ноль у собеседника
+        без прямого канала; счётчик обязан считать попытки, а правду о досылке
+        даёт пара с `DELETE_ACK_MATCHED`."""
         path = "data/repository/MessageDeletionRepository.kt"
         text = source(path)
         self.assertNotIn("UUID.randomUUID()", text)
@@ -99,8 +106,12 @@ class DeleteReadTest(unittest.TestCase):
         self.assertIn("deletionMessageId(entry.peerId, entry.targetId, entry.atMs)", pump)
         # Повтор обновляет ту же запись ядра, а не заводит вторую.
         self.assertIn("RustBridge.retryMessage(", pump)
-        # Счётчик растёт только за отправленное, иначе он врёт.
-        self.assertRegex(pump, r"if \(sent\) OperationalDiagnostics\.tracker\.count\(OperationalCounter\.DELETE_RETRY\)")
+        # Счётчик считает попытки и не прячется за `sent` (это результат
+        # прямой ноги: `false` бывает и у честно поставленной в очередь записи).
+        self.assertIn("OperationalDiagnostics.tracker.count(OperationalCounter.DELETE_RETRY)", pump)
+        self.assertNotIn("if (sent) OperationalDiagnostics", pump)
+        # Признак прямой ноги обязан быть виден в строке журнала.
+        self.assertIn("direct=$sent", pump)
         first = method(text, "deleteForAllDirect")
         self.assertIn("deletionMessageId(peer, messageId, atMs)", first)
         # Один момент постановки идёт и в конверт, и в запись очереди: иначе

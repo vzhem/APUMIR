@@ -157,6 +157,9 @@ class MessageDeletionRepository @Inject constructor(
                     peerId = peer,
                     deleterId = "",
                     atMs = atMs,
+                    // `sent=false` значит «прямой ноги не было» (запись уже
+                    // в очереди ядра), поэтому первая помпа подстрахует её
+                    // сразу, а не через десять минут.
                     lastTryMs = if (sent) atMs else 0L,
                     attempts = if (sent) 1 else 0,
                     tried = emptyList(),
@@ -276,14 +279,22 @@ class MessageDeletionRepository @Inject constructor(
                         RustBridge.sendMessage(wireId, chat.id, entry.peerId, envelope)
                 }
             }.getOrDefault(false)
-            // Считаем то, что действительно ушло: раньше счётчик рос и на
-            // попытках, которые ядро даже не приняло, и по нему нельзя было
-            // понять, досылка работает или нет (2026-10-15).
-            if (sent) OperationalDiagnostics.tracker.count(OperationalCounter.DELETE_RETRY)
-            // Отметка попытки - всегда: она держит интервал [RETRY_INTERVAL_MS],
-            // иначе помпа дёргала бы одну и ту же запись без паузы.
+            // Счётчик считает ПОПЫТКИ досылки, а не доставки. `sent` здесь -
+            // результат ПРЯМОЙ ноги (`send_message_inner` возвращает
+            // `direct_send_ok`), поэтому ложь бывает в обоих направлениях:
+            // и «не отправлено вовсе», и «отдано в очередь брокера» дают
+            // `false`. Правка того же дня, считавшая только `sent`, дала бы
+            // `delete_retry=0` у собеседника без прямого канала - то есть
+            // ровно ту же неправду, только наоборот (2026-10-15). Правду о
+            // досылке даёт пара счётчиков: попытки здесь, подтверждения -
+            // `DELETE_ACK_MATCHED`.
+            OperationalDiagnostics.tracker.count(OperationalCounter.DELETE_RETRY)
+            // Отметка попытки держит интервал [RETRY_INTERVAL_MS]: иначе помпа
+            // дёргала бы одну и ту же запись без паузы.
             outbox.markTried(entry, now)
-            if (sent) Log.i(TAG, "delete re-sent id=${entry.targetId} to ${entry.peerId.takeLast(8)} (attempt ${entry.attempts + 1})")
+            // Пишем каждую попытку с признаком прямой ноги: по строке видно и
+            // работу помпы, и то, что собеседник не подтверждает.
+            Log.i(TAG, "delete retry id=${entry.targetId} to ${entry.peerId.takeLast(8)} direct=$sent (attempt ${entry.attempts + 1})")
         }
     }
 
