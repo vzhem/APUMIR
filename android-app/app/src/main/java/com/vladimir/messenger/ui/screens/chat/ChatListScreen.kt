@@ -416,6 +416,9 @@ fun ChatListScreen(
                         onSavedClick = onSavedClick,
                         onAddContactClick = onAddContactClick,
                         onCallClick = onCallClick,
+                        // Плашка «телефон молчит» ведёт в восстановление профиля
+                        // из файла: там личность возвращается целиком.
+                        onRestoreProfileClick = onRestoreProfileClick,
                         onGroupClick = onGroupClick,
                         onGroupAdminClick = onGroupAdminClick,
                         onChannelClick = onChannelClick,
@@ -1055,6 +1058,8 @@ private fun SectionPage(
     onSavedClick: () -> Unit,
     onAddContactClick: () -> Unit,
     onCallClick: (contactId: String, contactName: String) -> Unit,
+    /** «Ключ этого телефона не читается»: открыть восстановление профиля из файла. */
+    onRestoreProfileClick: () -> Unit = {},
     onGroupClick: (groupId: String) -> Unit,
     onGroupAdminClick: (groupId: String) -> Unit,
     onChannelClick: (channelId: String) -> Unit,

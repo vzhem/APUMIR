@@ -110,6 +110,29 @@ class MuteNoticeContracts(unittest.TestCase):
                     f"нет строки {name} в {locale}",
                 )
 
+    def test_the_action_is_threaded_into_the_list_page(self):
+        """Ленту рисует SectionPage: действие обязано быть и её параметром.
+
+        Иначе компилятор падает на `Unresolved reference` — так и вышло в
+        прогоне 38747905414: параметр объявили у `ChatListScreen`, а внутри
+        `SectionPage` его не было. Ни один локальный гейт этого не видел;
+        компилятор видит, и он же теперь не единственный свидетель.
+        """
+        chat_list = source(CHAT_LIST)
+        self.assertEqual(1, chat_list.count("private fun SectionPage("), "нет SectionPage")
+        signature = chat_list.split("private fun SectionPage(", 1)[1].split("\n) {", 1)[0]
+        self.assertIn("onRestoreProfileClick", signature, "у SectionPage нет действия «восстановить»")
+        self.assertIn(
+            "onRestoreProfileClick = onRestoreProfileClick",
+            chat_list,
+            "ChatListScreen не передаёт действие в SectionPage",
+        )
+        self.assertIn(
+            "onRestore = onRestoreProfileClick",
+            chat_list,
+            "плашка в ленте не получает действие",
+        )
+
     def test_the_journal_remembers_why_the_row_exists(self):
         """Журнал — запись дома: у плашки должна быть строка, откуда она взялась."""
         notes = source(ROOT / "docs/AI_COLLABORATION_NOTES.md")
