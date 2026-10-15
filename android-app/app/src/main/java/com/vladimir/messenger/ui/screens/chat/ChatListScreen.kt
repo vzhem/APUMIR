@@ -468,7 +468,7 @@ fun ChatListScreen(
     // Раунд 158: группа/канал для рассылки приглашения контактам APU.
     var inviteApu by remember { mutableStateOf<InboxGroup?>(null) }
 
-    // Как приглашать: QR при встрече или ссылка кому угодно.
+    // Как приглашать: QR, внешняя ссылка или отправка в личный чат APU.
     // Раунд 175: «Поделиться контактом» - выбор адресата внутри APU.
     shareCardFor?.let { shared ->
         ShareContactChooserDialog(
@@ -476,9 +476,8 @@ fun ChatListScreen(
             contacts = viewModel.contacts.collectAsStateWithLifecycle(initialValue = emptyList())
                 .value.filter { it.id != shared.contactId },
             onDismiss = { shareCardFor = null },
-            onPick = { to ->
-                shareCardFor = null
-                viewModel.sendContactCard(to.id, to.displayName, shared.contactId, shared.contactName)
+            onSend = { recipients ->
+                viewModel.sendContactCards(recipients, shared.contactId, shared.contactName)
             },
         )
     }
@@ -525,7 +524,7 @@ fun ChatListScreen(
     // ChatListViewModel.MAX_INVITE_RECIPIENTS), каждому приглашение
     // уходит в личный чат.
     inviteApu?.let { grp ->
-        val what = if (grp.isChannel) "канал" else "группу"
+        val what = if (grp.isChannel) stringResource(R.string.word_channel_acc) else stringResource(R.string.word_group_acc)
         var contacts by remember { mutableStateOf<List<com.vladimir.messenger.domain.model.Chat>?>(null) }
         var selected by remember { mutableStateOf(setOf<String>()) }
         var sending by remember { mutableStateOf(false) }
@@ -805,7 +804,7 @@ fun ChatListScreen(
     if (groupLinkShare != null) {
         val chosenGroup = groupLinkShare!!
         InviteAttachDialog(
-            title = if (chosenGroup.isChannel) stringResource(R.string.menu_invite_channel) else stringResource(R.string.menu_invite_community),
+            title = if (chosenGroup.isChannel) stringResource(R.string.menu_invite_channel) else stringResource(R.string.menu_invite_group),
             onDismiss = { groupLinkShare = null },
             onShare = { attach ->
                 groupLinkShare = null
@@ -1388,7 +1387,7 @@ private fun SectionPage(
                                             title = if (item.group.isChannel) {
                                                 stringResource(R.string.menu_invite_channel)
                                             } else {
-                                                stringResource(R.string.menu_invite_community)
+                                                stringResource(R.string.menu_invite_group)
                                             },
                                             icon = Icons.Default.PersonAdd,
                                             onClick = { onInviteToGroup(item.group) },

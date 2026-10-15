@@ -19,6 +19,48 @@ class ApkUpdateTest {
     // ── Версии ──────────────────────────────────────────────────────────────
 
     @Test
+    fun updateSwarmUsesEveryReceiverSeedSlot() {
+        assertEquals(
+            com.vladimir.messenger.data.file.FileTransferReceiver.MAX_GROUP_SEEDS,
+            ApkSeeder.STRIPE_SEEDS,
+        )
+    }
+
+    @Test
+    fun updateTransfersWaitLongerAndRetryAnotherSeedAfterAStall() {
+        assertEquals(30L * 24 * 60 * 60 * 1000, ApkUpdate.TRANSFER_TTL_MS)
+        assertFalse(ApkUpdate.isDownloadStalled(1_000L, 1_000L + ApkUpdate.STALLED_DOWNLOAD_REASK_MS - 1L))
+        assertTrue(ApkUpdate.isDownloadStalled(1_000L, 1_000L + ApkUpdate.STALLED_DOWNLOAD_REASK_MS))
+        // Clock rollback must not mark a transfer as stalled.
+        assertFalse(ApkUpdate.isDownloadStalled(2_000L, 1_000L))
+    }
+
+    @Test
+    fun stalledDownloadPrefersAnUntriedSeedOutsideTheCurrentStripe() {
+        assertEquals(
+            ApkUpdate.SeedSelection("seed-b", resetTried = false),
+            ApkUpdate.nextSeed(
+                candidates = listOf("seed-a", "seed-b", "seed-c"),
+                tried = setOf("seed-a"),
+                active = setOf("seed-a"),
+            ),
+        )
+    }
+
+    @Test
+    fun exhaustedSeedCycleRestartsOnAnInactiveSeed() {
+        assertEquals(
+            ApkUpdate.SeedSelection("seed-b", resetTried = true),
+            ApkUpdate.nextSeed(
+                candidates = listOf("seed-a", "seed-b"),
+                tried = setOf("seed-a", "seed-b"),
+                active = setOf("seed-a"),
+            ),
+        )
+        assertNull(ApkUpdate.nextSeed(emptyList(), emptySet()))
+    }
+
+    @Test
     fun versionCompareMatchesNumericExpectations() {
         assertTrue(ApkUpdate.isNewer("11.70.29", "11.70.28"))
         assertTrue(ApkUpdate.isNewer("11.16", "11.9"))

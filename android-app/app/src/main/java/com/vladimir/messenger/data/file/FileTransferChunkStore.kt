@@ -17,13 +17,15 @@ import java.util.UUID
  * живой [headroom] - сколько ещё можно записать при текущем заполнении.
  * В приложении [headroom] отвечает ползунок «Место под пересылку»
  * (`StorageSettings.headroom`): квота владельца телефона минус занятое, но не
- * глубже запаса свободного места на разделе. Спрашивается при каждой записи,
- * поэтому смена ползунка действует сразу.
+ * глубже запаса свободного места на разделе. Для явной передачи обновления
+ * APK можно обойти только пользовательскую квоту; запас свободного места
+ * устройства и жёсткий предел самого хранилища остаются в силе. Спрашивается
+ * при каждой записи, поэтому смена ползунка действует сразу.
  */
 class FileTransferChunkStore(
     private val root: File,
     private val maxStoreBytes: Long = DEFAULT_STORE_QUOTA_BYTES,
-    private val headroom: ((usedBytes: Long) -> Long)? = null,
+    private val headroom: ((usedBytes: Long, ownerQuotaExempt: Boolean) -> Long)? = null,
 ) {
     /** Lazily rebuilt once after process start; avoids an O(total chunks) scan for every write. */
     private var cachedStoredBytes: Long? = null
@@ -123,6 +125,7 @@ class FileTransferChunkStore(
         transferId: String,
         chunkIndex: Long,
         ciphertext: ByteArray,
+        ownerQuotaExempt: Boolean = false,
     ): StoredChunk {
         validateTransferId(transferId)
         require(chunkIndex >= 0L) { "Invalid chunk index" }
@@ -147,16 +150,20 @@ class FileTransferChunkStore(
         if (projected > maxStoreBytes) com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.tracker.count(com.vladimir.messenger.data.diagnostics.OperationalCounter.QUOTA_REJECTED)
         check(projected <= maxStoreBytes) { "File transfer owner quota exceeded" }
         headroom?.let { room ->
-            val allowed = room(used)
+            val allowed = room(used, ownerQuotaExempt)
             // Текст показывается отправителю дословно («Файл не отправлен: …»),
             // поэтому он по-русски и говорит, что делать.
             if (ciphertext.size.toLong() > allowed) {
                 com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.tracker.count(com.vladimir.messenger.data.diagnostics.OperationalCounter.QUOTA_REJECTED)
-                throw StorageFullException(
-                    "не хватает места под пересылку (занято " +
-                        com.vladimir.messenger.data.swarm.StoragePolicy.format(used) +
-                        "). Увеличьте «Место под пересылку» в настройках или очистите завершённые передачи",
-                )
+                if (ownerQuotaExempt) {
+                    throw StorageFullException("не хватает свободного места на устройстве для полной загрузки обновления")
+                } else {
+                    throw StorageFullException(
+                        "не хватает места под пересылку (занято " +
+                            com.vladimir.messenger.data.swarm.StoragePolicy.format(used) +
+                            "). Увеличьте «Место под пересылку» в настройках или очистите завершённые передачи",
+                    )
+                }
             }
         }
         atomicWrite(target, ciphertext)
@@ -361,7 +368,9 @@ class FileTransferChunkStore(
             val app = context.applicationContext
             return FileTransferChunkStore(
                 File(app.noBackupFilesDir, "file_transfers/v1"),
-                headroom = { used -> com.vladimir.messenger.data.swarm.StorageSettings.headroom(app, used) },
+                headroom = { used, ownerQuotaExempt ->
+                    com.vladimir.messenger.data.swarm.StorageSettings.headroom(app, used, ownerQuotaExempt)
+                },
             )
         }
     }

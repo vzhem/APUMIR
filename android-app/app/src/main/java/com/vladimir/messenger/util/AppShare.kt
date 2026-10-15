@@ -1,5 +1,6 @@
 package com.vladimir.messenger.util
 
+import com.vladimir.messenger.R
 import android.content.Context
 import android.content.Intent
 import androidx.core.content.FileProvider
@@ -96,8 +97,16 @@ object AppShare {
     ) {
         if (invites.isEmpty()) return
         val text = groupsInviteText(invites)
-        if (attachApk) shareTextWithApk(context, text, "Пригласить в сообщество")
-        else shareText(context, text, "Пригласить в сообщество")
+        val title = if (invites.size == 1) {
+            context.getString(
+                if (invites.single().isChannel) R.string.menu_invite_channel
+                else R.string.menu_invite_group,
+            )
+        } else {
+            context.getString(R.string.invite_to_apu_title)
+        }
+        if (attachApk) shareTextWithApk(context, text, title)
+        else shareText(context, text, title)
     }
 
     /**
@@ -113,7 +122,9 @@ object AppShare {
         attachApk: Boolean = false,
     ) {
         val text = groupInviteText(groupTitle, link, isChannel)
-        val title = if (isChannel) "Пригласить в канал" else "Пригласить в сообщество"
+        val title = context.getString(
+            if (isChannel) R.string.menu_invite_channel else R.string.menu_invite_group,
+        )
         if (attachApk) shareTextWithApk(context, text, title)
         else shareText(context, text, title)
     }

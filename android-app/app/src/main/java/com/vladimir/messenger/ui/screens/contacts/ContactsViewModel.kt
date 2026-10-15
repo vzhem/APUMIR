@@ -23,7 +23,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
-/** Группа или канал в списке «Пригласить в сообщество». */
+/** Группа или канал в списке «Пригласить в группу или канал». */
 data class InvitableGroup(
     val id: String,
     val title: String,
@@ -184,22 +184,26 @@ class ContactsViewModel @Inject constructor(
      * оно нужно только тем, у кого APU ещё не стоит.
      */
     /**
-     * Раунд 175: «Поделиться контактом» - отправить ссылку контакта
-     * выбранному абоненту APU (он добавит человека одним тапом).
+     * Отправить карточку контакта выбранным адресатам одним действием и
+     * показать общий итог, а не отдельное уведомление для каждого абонента.
      */
-    fun sendContactCard(toId: String, toName: String, shared: Contact) {
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val ok = runCatching {
-                com.vladimir.messenger.util.ContactCardSender.send(
-                    chatRepository = chatRepository,
-                    toContactId = toId,
-                    toName = toName,
-                    sharedNodeId = shared.id,
-                    sharedName = shared.displayName,
-                    sharedUsername = shared.username,
-                )
-            }.getOrDefault(false)
-            _toast.value = if (ok) appContext.getString(R.string.contact_sent_ok, toName) else appContext.getString(R.string.contact_send_failed)
+    fun sendContactCards(recipients: List<Contact>, shared: Contact) {
+        if (recipients.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = com.vladimir.messenger.util.ContactCardSender.sendToMany(
+                chatRepository = chatRepository,
+                recipients = recipients.map {
+                    com.vladimir.messenger.util.ContactCardRecipient(it.id, it.displayName)
+                },
+                sharedNodeId = shared.id,
+                sharedName = shared.displayName,
+                sharedUsername = shared.username,
+            )
+            _toast.value = if (result.failed == 0) {
+                appContext.getString(R.string.sent_count, result.sent)
+            } else {
+                appContext.getString(R.string.sent_failed, result.sent, result.failed)
+            }
         }
     }
 

@@ -272,7 +272,7 @@ fun ContactsScreen(
                                     },
                                 ),
                                 BubbleMenuAction(
-                                    title = stringResource(R.string.menu_invite_community),
+                                    title = stringResource(R.string.contacts_invite_to_group_or_channel),
                                     icon = Icons.Default.GroupAdd,
                                     onClick = { inviteFor = contact },
                                 ),
@@ -362,9 +362,8 @@ fun ContactsScreen(
             sharedName = shared.displayName,
             contacts = viewModel.contacts.collectAsState().value.filter { it.id != shared.id },
             onDismiss = { shareTarget = null },
-            onPick = { to ->
-                shareTarget = null
-                viewModel.sendContactCard(to.id, to.displayName, shared)
+            onSend = { recipients ->
+                viewModel.sendContactCards(recipients, shared)
             },
         )
     }
@@ -440,7 +439,7 @@ private fun ContactSortMenu(
 }
 
 /**
- * Диалог «Пригласить в сообщество»: свои группы и каналы, поиск по названию,
+ * Диалог «Пригласить в группу или канал»: свои группы и каналы, поиск по названию,
  * отметки на нескольких сразу. Одна ссылка годится и тем, у кого APU уже
  * стоит, и тем, кому его ещё ставить - в тексте есть ссылка на установку.
  */

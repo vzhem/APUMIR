@@ -33,6 +33,26 @@ object StoragePolicy {
      */
     const val FREE_RESERVE_BYTES = 512L * MIB
 
+    /**
+     * Remaining writable space for file-transfer chunks. Explicit APK update
+     * transfers may bypass the owner-selected forwarding quota, but never the
+     * device's protected free-space reserve.
+     */
+    fun headroomBytes(
+        quotaBytes: Long,
+        usedBytes: Long,
+        freeBytes: Long,
+        ownerQuotaExempt: Boolean = false,
+    ): Long {
+        val byQuota = if (ownerQuotaExempt) {
+            Long.MAX_VALUE
+        } else {
+            (quotaBytes.coerceAtLeast(0L) - usedBytes.coerceAtLeast(0L)).coerceAtLeast(0L)
+        }
+        val byDisk = (freeBytes.coerceAtLeast(0L) - FREE_RESERVE_BYTES).coerceAtLeast(0L)
+        return minOf(byQuota, byDisk)
+    }
+
     /** Положения ползунка (логарифмическая шкала: между соседями ×2…×2,5). */
     val STEPS: List<Long> = listOf(
         100L * MIB,

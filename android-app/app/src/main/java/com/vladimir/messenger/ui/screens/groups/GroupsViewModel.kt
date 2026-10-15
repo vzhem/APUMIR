@@ -7,6 +7,10 @@ import com.vladimir.messenger.data.group.GroupRepository
 import com.vladimir.messenger.data.group.JoinOutcome
 import com.vladimir.messenger.data.group.GroupSummary
 import com.vladimir.messenger.data.group.joinedMessage
+import com.vladimir.messenger.data.local.dao.GroupDao
+import com.vladimir.messenger.data.repository.ChatRepository
+import com.vladimir.messenger.domain.model.Chat
+import com.vladimir.messenger.util.GroupInviteCardSender
 import com.vladimir.messenger.data.group.requestSentMessage
 import com.vladimir.messenger.data.local.entity.DirectoryEntity
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +51,8 @@ data class GroupsUiState(
 @HiltViewModel
 class GroupsViewModel @Inject constructor(
     private val groupRepository: GroupRepository,
+    private val chatRepository: ChatRepository,
+    private val groupDao: GroupDao,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
@@ -119,6 +125,71 @@ class GroupsViewModel @Inject constructor(
      */
     private fun matchDirectory(query: String, communities: List<GroupSummary>): List<DirectoryEntity> =
         CommunityList.directoryMatches(latestDirectory, communities, query)
+
+    /** Личные чаты — адресаты приглашения в группу или канал внутри APU. */
+    fun personalChatsOnce(onLoaded: (List<Chat>) -> Unit) {
+        viewModelScope.launch {
+            val chats = withContext(Dispatchers.IO) {
+                runCatching { chatRepository.getAllChats() }.getOrDefault(emptyList())
+            }
+            onLoaded(chats.sortedBy { it.contactName.lowercase() })
+        }
+    }
+
+    /** ID участников нужны, чтобы не предлагать повторное приглашение. */
+    fun groupMemberIdsOnce(groupId: String, onLoaded: (Set<String>) -> Unit) {
+        viewModelScope.launch {
+            val ids = withContext(Dispatchers.IO) {
+                runCatching { groupDao.getMembers(groupId).map { it.nodeId } }
+                    .getOrDefault(emptyList())
+            }
+            onLoaded(ids.toSet())
+        }
+    }
+
+    /**
+     * Отправить карточку приглашения выбранным личным чатам. Тип сообщества
+     * передаётся в карточку: группа покажет «Вступить», канал — «Подписаться».
+     */
+    fun sendGroupInviteToChats(
+        group: GroupSummary,
+        chatIds: List<String>,
+        onDone: (sent: Int, failed: Int) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val recipientIds = chatIds.distinct().take(GroupInviteCardSender.MAX_RECIPIENTS)
+            val invite = withContext(Dispatchers.IO) {
+                runCatching { groupRepository.inviteLinkFor(group.id) }.getOrNull()
+            }
+            if (invite == null) {
+                onDone(0, recipientIds.size)
+                return@launch
+            }
+
+            val body = GroupInviteCardSender.build(
+                isChannel = group.isChannel,
+                title = invite.first,
+                about = group.about,
+                link = invite.second,
+            )
+            var sent = 0
+            var failed = 0
+            for (chatId in recipientIds) {
+                val chat = withContext(Dispatchers.IO) {
+                    runCatching { chatRepository.getChatById(chatId) }.getOrNull()
+                }
+                if (chat == null || chat.contactId.isBlank()) {
+                    failed++
+                    continue
+                }
+                val result = runCatching {
+                    chatRepository.sendMessage(chat.id, chat.contactId, body)
+                }.getOrNull()
+                if (result?.isSuccess == true) sent++ else failed++
+            }
+            onDone(sent, failed)
+        }
+    }
 
     fun createGroup(
         title: String,

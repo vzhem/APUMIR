@@ -844,31 +844,31 @@ class ChatListViewModel @Inject constructor(
     val contacts: kotlinx.coroutines.flow.Flow<List<com.vladimir.messenger.domain.model.Contact>> =
         contactRepository.observeContacts()
 
-    /**
-     * Раунд 175: отправить ссылку контакта выбранному абоненту APU -
-     * тот добавит человека одним тапом по apu://-ссылке.
-     */
-    fun sendContactCard(toId: String, toName: String, sharedNodeId: String, sharedName: String) {
+    /** Отправить карточку контакта нескольким абонентам и показать один общий итог. */
+    fun sendContactCards(
+        recipients: List<com.vladimir.messenger.domain.model.Contact>,
+        sharedNodeId: String,
+        sharedName: String,
+    ) {
+        if (recipients.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
-            val ok = runCatching {
-                com.vladimir.messenger.util.ContactCardSender.send(
-                    chatRepository = chatRepository,
-                    toContactId = toId,
-                    toName = toName,
-                    sharedNodeId = sharedNodeId,
-                    sharedName = sharedName,
-                    sharedUsername = "",
-                )
-            }.getOrDefault(false)
-            // Раунд 181: Toast только с главного потока - из фонового
-            // приложение падало сразу после отправки (в «Контактах»
-            // подтверждение идёт через StateFlow и потому не падало).
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
-                android.widget.Toast.makeText(
-                    appContext,
-                    if (ok) appContext.getString(R.string.contact_sent_ok, toName) else appContext.getString(R.string.contact_send_failed),
-                    android.widget.Toast.LENGTH_SHORT,
-                ).show()
+            val result = com.vladimir.messenger.util.ContactCardSender.sendToMany(
+                chatRepository = chatRepository,
+                recipients = recipients.map {
+                    com.vladimir.messenger.util.ContactCardRecipient(it.id, it.displayName)
+                },
+                sharedNodeId = sharedNodeId,
+                sharedName = sharedName,
+                sharedUsername = "",
+            )
+            // Toast только с главного потока; один итог вместо серии уведомлений.
+            kotlinx.coroutines.withContext(Dispatchers.Main) {
+                val message = if (result.failed == 0) {
+                    appContext.getString(R.string.sent_count, result.sent)
+                } else {
+                    appContext.getString(R.string.sent_failed, result.sent, result.failed)
+                }
+                android.widget.Toast.makeText(appContext, message, android.widget.Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -949,7 +949,7 @@ class ChatListViewModel @Inject constructor(
         private const val TAG = "ChatList"
 
         /** Раунд 158: максимум адресатов за одну рассылку приглашения. */
-        const val MAX_INVITE_RECIPIENTS = 100
+        const val MAX_INVITE_RECIPIENTS = com.vladimir.messenger.util.GroupInviteCardSender.MAX_RECIPIENTS
 
         /** Пауза в наборе, после которой пересчитывается поиск. */
         private const val SEARCH_DEBOUNCE_MS = 200L

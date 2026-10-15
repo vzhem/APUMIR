@@ -176,7 +176,8 @@
     <string name="menu_open_channel">Открыть канал</string>
     <string name="menu_open_group">Открыть группу</string>
     <string name="menu_invite_channel">Пригласить в канал</string>
-    <string name="menu_invite_community">Пригласить в сообщество</string>
+    <string name="menu_invite_group">Пригласить в группу</string>
+    <string name="contacts_invite_to_group_or_channel">Пригласить в группу или канал</string>
     <string name="menu_manage">Управление</string>
     <string name="menu_delete_channel">Удалить канал</string>
     <string name="menu_delete_group">Удалить группу</string>
@@ -223,6 +224,8 @@
     <string name="contacts_channel">Канал</string>
     <string name="contacts_group">Группа</string>
     <string name="contacts_send_in_apu">Отправить в APU</string>
+    <string name="invite_send_apu_hint">Выбрать получателей из личных чатов APU</string>
+    <string name="group_invite_recipients_hint">Выберите контакты для приглашения в «%1$s».</string>
     <string name="contacts_other_app">Другим приложением</string>
     <!-- Перевод входящих сообщений -->
     <string name="translate_title">Переводить входящие сообщения</string>
@@ -563,7 +566,30 @@
     <string name="peer_relay_space">Место под пересылку</string>
     <string name="peer_not_reported">не сообщал</string>
     <string name="peer_empty_body">Наблюдений пока нет. Оценка появится сама, когда телефон побудет в сети и обменяется данными с другими.</string>
+    <string name="peer_empty_title">Пока нет узлов с оценкой</string>
     <string name="peer_routing_body">Сеть APU держится на самих телефонах. Чем чаще узел в сети, чем быстрее он принимает файлы и чем проще к нему подключиться напрямую, тем выше его оценка — и тем раньше ему уходят данные. Объявленное место под пересылку добавляет до 10 баллов — и только тем, кто бывает в сети.</string>
+    <string name="peer_network_kicker">СЕТЬ APU · НАБЛЮДЕНИЯ</string>
+    <string name="peer_routing_summary">Оценка помогает выбрать узлы для доставки на основе наблюдений этого телефона.</string>
+    <string name="peer_routing_details">Как считается оценка</string>
+    <string name="peer_routing_hide">Скрыть пояснение</string>
+    <string name="peer_summary_nodes">Узлов</string>
+    <string name="peer_summary_direct">Прямых</string>
+    <string name="peer_summary_average">Средний балл</string>
+    <string name="peer_availability">Доступность</string>
+    <string name="peer_filter_all">Все</string>
+    <string name="peer_filter_direct">Напрямую</string>
+    <string name="peer_filter_recommended">Рейтинг 50+</string>
+    <string name="peer_search_hint">Поиск по ID узла</string>
+    <string name="peer_no_results">Узлов не найдено. Измените запрос или фильтр.</string>
+    <string name="peer_copy_id">Скопировать ID узла</string>
+    <string name="peer_tier_excellent">Отличный</string>
+    <string name="peer_tier_good">Хороший</string>
+    <string name="peer_tier_average">Средний</string>
+    <string name="peer_tier_weak">Слабый</string>
+    <string name="peer_storage_value">%1$s · +%2$s балла</string>
+    <string name="peer_reset_confirm_title">Сбросить наблюдения?</string>
+    <string name="peer_reset_confirm_body">Локальная история узлов будет удалена. Оценки начнут собираться заново по мере работы сети.</string>
+    <string name="peer_reset_confirm">Сбросить</string>
     <!-- Настройки -->
     <string name="settings_set_username">Задать @никнейм</string>
     <string name="settings_complaints_spike">⚠️ Всплеск жалоб: репутация и приоритет узла временно понижены.</string>
@@ -1334,7 +1360,10 @@
     <string name="poll_problem_question">Вопрос не может быть пустым</string>
     <string name="a11y_open">Открыто</string>
     <string name="a11y_still_locked">Ещё закрыто</string>
-    <string name="share_contact_hint">Ссылку контакта «%1$s» получит выбранный абонент - он сможет добавить его в один тап.</string>
+    <string name="share_contact_hint">Отметьте одного или нескольких абонентов. Ссылку на контакт «%1$s» отправим каждому — добавить его можно будет одним нажатием.</string>
+    <string name="share_contact_send_count">Отправить · %1$d</string>
+    <string name="share_contact_clear_selection">Сбросить</string>
+    <string name="share_contact_limit_reached">Можно выбрать не более %1$d абонентов.</string>
     <string name="contact_no_messages">Нет сообщений</string>
     <string name="sticker_cd">Стикер</string>
     <plurals name="poll_min_options">
@@ -1346,6 +1375,7 @@
     <string name="word_channel_acc">канал</string>
     <string name="word_group_acc">группу</string>
     <string name="invite_title">Пригласить в %1$s</string>
+    <string name="invite_to_apu_title">Пригласить в APU</string>
     <string name="confirm_delete_title">Удалить %1$s?</string>
     <string name="sent_count">Отправлено: %1$d</string>
     <string name="sent_failed">Отправлено: %1$d, не удалось: %2$d</string>
@@ -1402,6 +1432,7 @@
     <string name="ready_subtitle_tpl">%1$s, %2$s; уже раздаётся соседям</string>
     <string name="receiving_tpl">Принимаю v%1$s</string>
     <string name="receiving_progress_tpl">%1$s из %2$s; кусками от %3$d сосед(ей)</string>
+    <string name="update_transfer_space_blocked_tpl">%1$s из %2$s; освободите место на устройстве (сохраняется запас 512 МБ)</string>
     <string name="receiving_compact_tpl">Принимаю v%1$s (компактно)</string>
     <string name="receiving_patch_tpl">%1$s из %2$s — качаем только разницу версий</string>
     <string name="patch_offer_tpl">Патч %1$s от %2$d сосед(ей) — только разница версий</string>
