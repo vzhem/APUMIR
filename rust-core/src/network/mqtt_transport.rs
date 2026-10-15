@@ -84,7 +84,8 @@ fn publish_fits_our_limit(operation: &str, topic: &str, payload_len: usize) -> b
         return true;
     }
     tracing::warn!(
-        "MQTT: {operation} not sent: packet {size} bytes exceeds our own limit {MAX_MQTT_PACKET_BYTES} (payload={payload_len} topic_len={})",
+        "MQTT: {operation} not sent: packet {size} bytes exceeds our own limit {} (payload={payload_len} topic_len={})",
+        MAX_MQTT_PACKET_BYTES,
         topic.len()
     );
     false
@@ -834,7 +835,8 @@ impl MqttTransport {
     ) -> Result<(), String> {
         if !publish_fits_our_limit(operation, topic, payload.len()) {
             return Err(format!(
-                "packet exceeds our own MQTT limit of {MAX_MQTT_PACKET_BYTES} bytes"
+                "packet exceeds our own MQTT limit of {} bytes",
+                MAX_MQTT_PACKET_BYTES
             ));
         }
         let result = await_mqtt_request(
@@ -890,7 +892,8 @@ impl MqttTransport {
     ) -> Result<MqttFanoutOutcome, String> {
         if !publish_fits_our_limit(operation, topic, payload.len()) {
             return Err(format!(
-                "packet exceeds our own MQTT limit of {MAX_MQTT_PACKET_BYTES} bytes"
+                "packet exceeds our own MQTT limit of {} bytes",
+                MAX_MQTT_PACKET_BYTES
             ));
         }
         let primary_requested = targets.contains(MqttBrokerId::Primary);
@@ -1917,8 +1920,8 @@ mod tests {
     fn mqtt_packet_limit_covers_the_relay_queue_promise() {
         assert!(
             MAX_MQTT_PACKET_BYTES >= crate::network::relay_queue::MAX_MESH_RELAY_ENVELOPE_BYTES,
-            "предел пакета {MAX_MQTT_PACKET_BYTES} меньше того, что принимает очередь \
-             ({})",
+            "предел пакета {} меньше того, что принимает очередь ({})",
+            MAX_MQTT_PACKET_BYTES,
             crate::network::relay_queue::MAX_MESH_RELAY_ENVELOPE_BYTES
         );
     }
@@ -1946,7 +1949,8 @@ mod tests {
         );
         assert!(
             packet <= MAX_MQTT_PACKET_BYTES,
-            "самый большой наш пакет {packet} не влезает в предел {MAX_MQTT_PACKET_BYTES}"
+            "самый большой наш пакет {packet} не влезает в предел {}",
+            MAX_MQTT_PACKET_BYTES
         );
     }
 
@@ -1964,9 +1968,20 @@ mod tests {
     #[test]
     fn our_limit_refuses_oversize_publish_before_the_network() {
         let topic = "p2pm2/msg/pk_0123456789abcdef0123456789abcdef";
-        let headroom = MAX_MQTT_PACKET_BYTES - publish_packet_size(topic, 0);
-        assert!(publish_fits_our_limit("relay publish", topic, headroom));
-        assert!(!publish_fits_our_limit("relay publish", topic, headroom + 1));
+        // Мелкий пакет и пакет с килобайтным запасом проходят.
+        assert!(publish_fits_our_limit("relay publish", topic, 1024));
+        assert!(publish_fits_our_limit(
+            "relay publish",
+            topic,
+            MAX_MQTT_PACKET_BYTES - 1024
+        ));
+        // А ровно предел в ТЕЛЕ — уже нет: к телу добавляются тема и заголовок,
+        // именно на этом и разошлась бы проверка «по длине тела».
+        assert!(!publish_fits_our_limit(
+            "relay publish",
+            topic,
+            MAX_MQTT_PACKET_BYTES
+        ));
     }
 
     #[test]
