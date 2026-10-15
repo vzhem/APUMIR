@@ -131,6 +131,13 @@ impl SecondaryBrokerObserver {
         );
         options.set_keep_alive(SECONDARY_KEEP_ALIVE);
         options.set_clean_session(true);
+        // Observer никогда не публикует, но входящие кадры того же размера, что
+        // у остальных сессий: предел ставим тем же, иначе наблюдение за
+        // брокером рвалось бы на крупном пакете (см. MAX_MQTT_PACKET_BYTES).
+        options.set_max_packet_size(
+            crate::network::mqtt_transport::MAX_MQTT_PACKET_BYTES,
+            crate::network::mqtt_transport::MAX_MQTT_PACKET_BYTES,
+        );
 
         // Keep the AsyncClient alive so rumqttc's bounded request channel remains valid. r4.3
         // never calls subscribe or publish on it; only EventLoop::poll performs network I/O.

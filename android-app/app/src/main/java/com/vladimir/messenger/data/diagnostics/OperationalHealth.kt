@@ -57,6 +57,21 @@ data class OperationalSnapshot(
         appendLine("[операционные метрики]")
         appendLine("scope=current_process; bounded correlation=256; транспортный успех не равен ACK получателя.")
         counters.forEach { (key, value) -> appendLine("${key.name.lowercase()}=$value") }
+        // Владелец 2026-10-15: строка «story_packet_attempts=323 ·
+        // story_packet_deferred=262» читалась как «262 истории не ушли». Эти
+        // счётчики считают ПРЯМУЮ ногу (как delete_retry и schedule_cancel):
+        // accepted — отдано напрямую, deferred — НЕ отдано напрямую, а сам
+        // пакет уже лежит в очереди ядра и уходит брокером или роем. Поэтому
+        // рядом с числами печатаем, что они значат.
+        val storyAttempts = counters[OperationalCounter.STORY_PACKET_ATTEMPTS] ?: 0L
+        if (storyAttempts > 0L) {
+            appendLine(
+                "истории: попыток=$storyAttempts · " +
+                    "отдано напрямую=${counters[OperationalCounter.STORY_PACKET_ACCEPTED] ?: 0L} · " +
+                    "не отдано напрямую=${counters[OperationalCounter.STORY_PACKET_DEFERRED] ?: 0L} " +
+                    "(это ПРЯМАЯ нога: пакет остаётся в очереди ядра и уходит брокером/роем, а не потерян)",
+            )
+        }
         timings.forEach { (key, value) -> appendLine("latency=${key.name.lowercase()} · n=${value.count} · p50_upper_ms=${value.p50UpperMs ?: -1} · p95_upper_ms=${value.p95UpperMs ?: -1} · max_ms=${value.maxMs}") }
         appendLine("p50/p95 — верхние границы фиксированных корзин; -1 = нет данных или открытая корзина >1ч.")
         routeResults.forEach { (route, counts) -> appendLine("file_route=${route.name.lowercase()} · attempts=${counts.first} · failed=${counts.second}") }

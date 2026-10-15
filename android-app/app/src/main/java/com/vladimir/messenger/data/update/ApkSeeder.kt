@@ -20,6 +20,7 @@ import com.vladimir.messenger.data.group.GroupWire
 import com.vladimir.messenger.data.local.dao.ContactDao
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.dao.GroupDao
+import com.vladimir.messenger.data.security.IdentityHealth
 import com.vladimir.messenger.data.security.MessageSealer
 import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
@@ -966,6 +967,22 @@ class ApkSeeder @Inject constructor(
      * останавливал раздачу («Остановить раздачу»), не вмешиваемся, пока он
      * сам не пометит файл. Раздача старее моей — снимается, текущая важнее.
      */
+    /**
+     * Готова ли локальная личность прямо сейчас: подпись в режиме READY, ключ
+     * обмена в режиме READY и привязан к нашему узлу.
+     *
+     * Отдельная функция, потому что спрашивается дважды в одном месте: до
+     * расхода квоты повторов (порядок загрузки) и после него (настоящий отказ).
+     */
+    private fun identityReadyForSeeding(): Boolean = runCatching {
+        IdentitySigningKeyStore.mode(appContext) == IdentitySigningKeyStore.Mode.READY &&
+            uniffi.p2p_core.identitySigningMode() == "legacy+ed25519-sidecar-v1" &&
+            FileExchangeKeyStore.mode(appContext) == FileExchangeKeyStore.Mode.READY &&
+            FileExchangeKeyStore.publicBinding(appContext)?.let {
+                uniffi.p2p_core.fileExchangeBindingNodeId(it) == RustBridge.nodeId()
+            } == true
+    }.getOrDefault(false)
+
     suspend fun ensureSelfSeeding(): Unit = selfSeedMutex.withLock {
         if (store.loadAutoSeedOptOut()) return@withLock
         val current = ApkUpdate.normalize(currentAppVersion())
@@ -989,6 +1006,18 @@ class ApkSeeder @Inject constructor(
         }
         val now = System.currentTimeMillis()
         val retry = appContext.getSharedPreferences(SELF_SEED_RETRY_PREFS, Context.MODE_PRIVATE)
+        // Порядок загрузки — не отказ самосева. Помпа успевает раньше, чем ядро
+        // отчитается об identity (в отчёте владельца предупреждение легло в
+        // 16:31:44, а готовность — в 16:31:48), и раньше здесь тратилась часовая
+        // квота повторов и писалось предупреждение «самосев отложен». Теперь,
+        // если ядро ещё не сообщало о ключах, тихо возвращаемся: квота цела,
+        // следующая попытка — на очередном круге помпы, и она сразу удастся.
+        if (!identityReadyForSeeding() &&
+            IdentityHealth.state.value.reason == IdentityHealth.Reason.UNKNOWN
+        ) {
+            Log.i(TAG, "self-seed: ядро ещё не отчиталось об identity, попробуем на следующем круге")
+            return@withLock
+        }
         if (!SelfSeedRetryPolicy.mayAttempt(
                 current,
                 retry.getString(SELF_SEED_RETRY_VERSION, null),
@@ -999,14 +1028,7 @@ class ApkSeeder @Inject constructor(
         // A prepared copy without a signing/file-exchange identity cannot wrap its key for a
         // requester. Do not repeatedly hash/copy/encrypt the entire installed APK in this state.
         // Read-only modes must not create new identities or silently rotate a broken Keystore key.
-        val keysReady = runCatching {
-            IdentitySigningKeyStore.mode(appContext) == IdentitySigningKeyStore.Mode.READY &&
-                uniffi.p2p_core.identitySigningMode() == "legacy+ed25519-sidecar-v1" &&
-                FileExchangeKeyStore.mode(appContext) == FileExchangeKeyStore.Mode.READY &&
-                FileExchangeKeyStore.publicBinding(appContext)?.let {
-                    uniffi.p2p_core.fileExchangeBindingNodeId(it) == RustBridge.nodeId()
-                } == true
-        }.getOrDefault(false)
+        val keysReady = identityReadyForSeeding()
         // Record before preparation: even a process death mid-hash must not cause a hot loop.
         if (!retry.edit().putString(SELF_SEED_RETRY_VERSION, current)
                 .putLong(SELF_SEED_RETRY_AT, now).commit()) {

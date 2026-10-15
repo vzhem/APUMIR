@@ -32,8 +32,11 @@ class DeleteReadTest(unittest.TestCase):
         self.addCleanup(self.db.close)
         self.db.execute("CREATE TABLE messages(id TEXT PRIMARY KEY, chatId TEXT, senderId TEXT, status TEXT, isFromMe INTEGER)")
 
-    def insert(self, status, own=False):
-        self.db.execute("INSERT INTO messages VALUES ('message', 'chat', 'author', ?, ?)", (status, int(own)))
+    def insert(self, status, own=False, message_id="message"):
+        self.db.execute(
+            "INSERT INTO messages VALUES (?, 'chat', 'author', ?, ?)",
+            (message_id, status, int(own)),
+        )
 
     def test_remote_delete_removes_read_and_unread_rows(self):
         sql = dao_query("deleteByIdChatAndSender")
@@ -147,6 +150,23 @@ class DeleteReadTest(unittest.TestCase):
         build = method(delete, "buildMessageDelete")
         self.assertNotIn("currentTimeMillis", build)
         self.assertNotIn("randomUUID", build)
+
+
+    def test_pending_outgoing_count_includes_messages_already_queued_offline(self):
+        """2026-10-15: «ещё не ушло» обязано считать и QUEUED_OFFLINE.
+
+        Строка «недоотправленных сообщений» на экране диагностики брала только
+        PENDING — то есть почти ноль, когда очередь ядра стояла полной
+        («своё ждёт получателя=1000» в том же отчёте). Сообщение, отданное ядру,
+        но не подтверждённое получателем, — такое же «ещё не ушло». Список
+        обязан совпадать с помпой досылки (`getPendingOutgoingMessages`).
+        """
+        sql = dao_query("countPendingOutgoing")
+        self.insert("PENDING", own=True, message_id="pending")
+        self.insert("QUEUED_OFFLINE", own=True, message_id="queued")
+        self.insert("SENT", own=True, message_id="sent")
+        self.insert("PENDING", own=False, message_id="incoming")
+        self.assertEqual(2, self.db.execute(sql).fetchone()[0])
 
 
 if __name__ == "__main__":

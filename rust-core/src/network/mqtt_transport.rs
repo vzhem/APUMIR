@@ -31,6 +31,66 @@ pub const MQTT_BROKERS: &[(&str, u16)] = &[
     ("broker.emqx.io", 1883),
 ];
 
+/// Предел пакета MQTT, который наш клиент пускает на вход и на выход.
+///
+/// Почему это не «значение по умолчанию». У rumqttc 0.25.1
+/// `MqttOptions::new` ставит `max_incoming_packet_size` и
+/// `max_outgoing_packet_size` в 10 240 байт, и НИ ОДНА из наших опций их не
+/// переопределяла. Проверка ЧИСТО КЛИЕНТСКАЯ: пакет больше предела не уходит в
+/// сеть вовсе и возвращается ошибкой «Cannot send packet of size 'N'. It's
+/// greater than the broker's maximum packet size of: '10240'» — на брокере он
+/// не был ни разу, поэтому в отчёте владельца (2026-10-15) это и выглядело
+/// отказом emqx. На приёме тот же предел рвёт соединение
+/// (`PayloadSizeLimitExceeded`), когда собеседник присылает больше.
+///
+/// Наши же законные пакеты в этот предел не влезали: кусок истории до 16 КиБ
+/// (`StoryStore.encodePackets`) после `SealedWire` и повторного base64 в
+/// relay-конверте даёт на проводе до ~30 КБ; то же и групповой пакет с фото.
+/// Поэтому пакеты историй и «ждали получателя» вечно, а не уходили.
+///
+/// 64 КиБ выбраны так, чтобы совпасть с пределом самой очереди пересылки
+/// (`MAX_MESH_RELAY_ENVELOPE_BYTES`): что очередь пообещала принять и хранить,
+/// то транспорт обязан суметь отдать. Всё, что строим мы сами, укладывается в
+/// этот предел с двойным запасом (история ~30 КБ, кусок файла 4 КиБ -> ~7 КБ),
+/// а сверх него в сеть не уйдёт ничего: размер проверяется здесь до отправки.
+pub(crate) const MAX_MQTT_PACKET_BYTES: usize = 64 * 1024;
+
+/// Размер PUBLISH-пакета на проводе так, как его считает rumqttc
+/// (`Publish::size()` = байт заголовка + длина remaining + префикс темы + тема +
+/// тело). Именно это число сравнивается с `max_outgoing_packet_size`, поэтому
+/// проверяем до сети ровно его, а не длину тела.
+fn publish_packet_size(topic: &str, payload_len: usize) -> usize {
+    let remaining = 2usize
+        .saturating_add(topic.len())
+        .saturating_add(payload_len);
+    let mut size = 1usize.saturating_add(remaining);
+    let mut rest = remaining;
+    loop {
+        size = size.saturating_add(1);
+        if rest < 128 {
+            break;
+        }
+        rest /= 128;
+    }
+    size
+}
+
+/// Пакет больше нашего предела — отказываем ДО сети и говорим об этом своими
+/// словами: у rumqttc тот же отказ называется «broker's maximum packet size», и
+/// такое сообщение снова уводило бы разбор в сторону брокера.
+fn publish_fits_our_limit(operation: &str, topic: &str, payload_len: usize) -> bool {
+    let size = publish_packet_size(topic, payload_len);
+    if size <= MAX_MQTT_PACKET_BYTES {
+        return true;
+    }
+    tracing::warn!(
+        "MQTT: {operation} not sent: packet {size} bytes exceeds our own limit {} (payload={payload_len} topic_len={})",
+        MAX_MQTT_PACKET_BYTES,
+        topic.len()
+    );
+    false
+}
+
 // ── Диагностика MQTT-линка (видна в Настройках → «О приложении») ─────────
 // Глобальный статус последнего/текущего брокерного подключения: что выбрано
 // (tcp / wss-мост), когда был последний ConnAck, какая ошибка была последней.
@@ -660,6 +720,10 @@ impl MqttTransport {
         }
         opts.set_keep_alive(Duration::from_secs(60));
         opts.set_clean_session(true);
+        // Свой предел вместо умолчания rumqttc в 10 240 байт (см.
+        // MAX_MQTT_PACKET_BYTES): иначе наши же пакеты историй не уходят, а
+        // входящие рвут соединение.
+        opts.set_max_packet_size(MAX_MQTT_PACKET_BYTES, MAX_MQTT_PACKET_BYTES);
         // Last Will: брокер сам сотрёт retained presence, когда телефон пропадёт
         // без корректного отключения (закрыли приложение, сел аккумулятор,
         // упала сеть). Без этого каждая переустановка оставляла вечную запись
@@ -706,6 +770,7 @@ impl MqttTransport {
             }
             secondary_options.set_keep_alive(Duration::from_secs(60));
             secondary_options.set_clean_session(true);
+            secondary_options.set_max_packet_size(MAX_MQTT_PACKET_BYTES, MAX_MQTT_PACKET_BYTES);
             secondary_options.set_last_will(LastWill::new(
                 format!("p2pm2/presence/{}", node_id),
                 Vec::new(),
@@ -768,6 +833,12 @@ impl MqttTransport {
         retain: bool,
         payload: Vec<u8>,
     ) -> Result<(), String> {
+        if !publish_fits_our_limit(operation, topic, payload.len()) {
+            return Err(format!(
+                "packet exceeds our own MQTT limit of {} bytes",
+                MAX_MQTT_PACKET_BYTES
+            ));
+        }
         let result = await_mqtt_request(
             operation,
             MQTT_REQUEST_ENQUEUE_TIMEOUT,
@@ -819,6 +890,12 @@ impl MqttTransport {
         targets: MqttBrokerSet,
         allow_inactive_targets: bool,
     ) -> Result<MqttFanoutOutcome, String> {
+        if !publish_fits_our_limit(operation, topic, payload.len()) {
+            return Err(format!(
+                "packet exceeds our own MQTT limit of {} bytes",
+                MAX_MQTT_PACKET_BYTES
+            ));
+        }
         let primary_requested = targets.contains(MqttBrokerId::Primary);
         let secondary_requested = targets.contains(MqttBrokerId::Secondary);
         let secondary_available = self.secondary_ready.load(Ordering::Acquire);
@@ -1835,6 +1912,77 @@ pub struct MqttEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Наш предел обязан покрывать то, что очередь пересылки пообещала
+    /// хранить: иначе запись лежит в очереди и «ждёт получателя» вечно, потому
+    /// что транспорт физически не может её отдать.
+    #[test]
+    fn mqtt_packet_limit_covers_the_relay_queue_promise() {
+        assert!(
+            MAX_MQTT_PACKET_BYTES >= crate::network::relay_queue::MAX_MESH_RELAY_ENVELOPE_BYTES,
+            "предел пакета {} меньше того, что принимает очередь ({})",
+            MAX_MQTT_PACKET_BYTES,
+            crate::network::relay_queue::MAX_MESH_RELAY_ENVELOPE_BYTES
+        );
+    }
+
+    /// Умолчание rumqttc (10 240 байт) не наш случай, и это не мелочь: наш
+    /// САМЫЙ БОЛЬШОЙ законный пакет (кусок истории 16 КиБ) больше него после
+    /// двух base64 — именно поэтому истории «ждали получателя», а отчёт это
+    /// показывал как отказ брокера.
+    #[test]
+    fn largest_story_packet_fits_our_limit_but_not_the_client_default() {
+        // Кусок истории: JSON до 16 КиБ (StoryStore.encodePackets).
+        let story_packet = 16 * 1024usize;
+        // SealedWire: base64 шифротекста (тело + 16 байт тега GCM) плюс
+        // base64 конверта ключа (203 + подпись 200 байт с запасом) и IV.
+        let ciphertext_b64 = (story_packet + 16).div_ceil(3) * 4;
+        let sealed_wire = 10 + (700usize).div_ceil(3) * 4 + 16 + ciphertext_b64 + 2;
+        // Relay-конверт: ещё один base64 поверх всей запечатанной строки плюс
+        // служебные поля (msg_id, получатель, источник, область, ttl, hop).
+        let relay_payload = (sealed_wire + 2).div_ceil(3) * 4 + 210;
+        let packet = publish_packet_size("p2pm2/msg/pk_0123456789abcdef0123456789abcdef", relay_payload);
+
+        assert!(
+            packet > 10 * 1024,
+            "пакет обязан быть больше умолчания rumqttc, иначе проверять нечего: {packet}"
+        );
+        assert!(
+            packet <= MAX_MQTT_PACKET_BYTES,
+            "самый большой наш пакет {packet} не влезает в предел {}",
+            MAX_MQTT_PACKET_BYTES
+        );
+    }
+
+    /// Размер пакета считается по всему пакету (заголовок, тема, тело) — так же,
+    /// как его считает rumqttc, иначе проверка предела разошлась бы с клиентом.
+    #[test]
+    fn publish_packet_size_counts_header_topic_and_payload() {
+        assert_eq!(publish_packet_size("", 0), 4); // 1 + 1 + (2 + 0 + 0)
+        assert_eq!(publish_packet_size("ab", 3), 9); // 1 + 1 + (2 + 2 + 3)
+        // 128 байт remaining: длина занимает уже два байта.
+        assert_eq!(publish_packet_size("", 126), 131);
+    }
+
+    /// Предел проверяется ДО сети: и на границе, и за ней.
+    #[test]
+    fn our_limit_refuses_oversize_publish_before_the_network() {
+        let topic = "p2pm2/msg/pk_0123456789abcdef0123456789abcdef";
+        // Мелкий пакет и пакет с килобайтным запасом проходят.
+        assert!(publish_fits_our_limit("relay publish", topic, 1024));
+        assert!(publish_fits_our_limit(
+            "relay publish",
+            topic,
+            MAX_MQTT_PACKET_BYTES - 1024
+        ));
+        // А ровно предел в ТЕЛЕ — уже нет: к телу добавляются тема и заголовок,
+        // именно на этом и разошлась бы проверка «по длине тела».
+        assert!(!publish_fits_our_limit(
+            "relay publish",
+            topic,
+            MAX_MQTT_PACKET_BYTES
+        ));
+    }
 
     #[test]
     fn r4_broker_set_is_exactly_hivemq_then_emqx() {
