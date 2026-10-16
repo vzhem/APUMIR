@@ -25,7 +25,8 @@ object GroupWallpaper {
             (revision.substringBefore('-').toLongOrNull() ?: Long.MAX_VALUE) <= now + 300_000
     fun canChange(role: String, permissions: Long, memberMask: Long, banned: Boolean): Boolean =
         !banned && GroupRole.isAdminOrOwner(role) && GroupPermissions.canChangeInfo(role, permissions, memberMask)
-    fun resolve(personal: String?, shared: String?): String? = personal ?: shared?.takeIf { it.isNotEmpty() }
+    /** Empty personal value explicitly follows app settings; null follows the group. */
+    fun resolve(personal: String?, shared: String?): String? = if (personal != null) personal.takeIf { it.isNotEmpty() } else shared?.takeIf { it.isNotEmpty() }
 }
 
 /** Authorized fragments only; one bounded assembly per group, expires after five minutes. */

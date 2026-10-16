@@ -17,7 +17,7 @@ class GroupWallpaperTest {
         assertEquals("preset:mint", GroupWallpaper.resolve("preset:mint", "preset:sky"))
         assertEquals("preset:sky", GroupWallpaper.resolve(null, "preset:sky"))
         assertNull(GroupWallpaper.resolve(null, ""))
-        assertEquals("", GroupWallpaper.resolve("", "preset:sky"))
+        assertNull(GroupWallpaper.resolve("", "preset:sky"))
     }
     @Test fun roundTripPresetAndRemoval() {
         for (value in listOf("preset:mint", "")) {

@@ -1304,7 +1304,7 @@ class GroupRepository(
         return GroupSlowMode.remainingMs(group.slowModeSeconds, last, now)
     }
 
-    /** Расписание едино для всех тем и использует часовой пояс группы. */
+    /** Only authorized shared backgrounds enter this bounded fragment assembler. */
     private val wallpaperParts = GroupWallpaperParts()
     private val wallpaperRequests = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
