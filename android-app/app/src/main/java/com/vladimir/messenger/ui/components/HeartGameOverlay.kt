@@ -37,6 +37,7 @@ import com.vladimir.messenger.R
 import com.vladimir.messenger.data.heartgame.HeartGameNetwork
 import com.vladimir.messenger.data.heartgame.HeartGamePolicy
 import com.vladimir.messenger.data.heartgame.HeartGameStore
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -83,7 +84,14 @@ fun HeartGameOverlay(network: HeartGameNetwork) {
                     burst = null
                     progress.snapTo(0f)
                     ticket = HeartGameStore.policy.start(SystemClock.elapsedRealtime())
-                    if (ticket != null) progress.animateTo(1f, tween(HeartGamePolicy.FALL_MS.toInt(), easing = LinearEasing))
+                    // Real lifetime and spawn interval must not shrink when OS animations are disabled.
+                    val animation = launch {
+                        if (coroutineContext[androidx.compose.ui.MotionDurationScale]?.scaleFactor == 0f) {
+                            progress.snapTo(.25f)
+                        } else progress.animateTo(1f, tween(HeartGamePolicy.FALL_MS.toInt(), easing = LinearEasing))
+                    }
+                    delay(HeartGamePolicy.FALL_MS)
+                    animation.cancelAndJoin()
                     ticket = null
                     HeartGameStore.policy.cancel()
                     wait = HeartGamePolicy.nextInterval() - HeartGamePolicy.FALL_MS
@@ -160,7 +168,11 @@ internal fun SculptedHeart(modifier: Modifier = Modifier) {
 @Composable
 private fun HeartGameBurst(modifier: Modifier, onFinished: () -> Unit) {
     val t = remember { Animatable(0f) }
-    LaunchedEffect(Unit) { t.animateTo(1f, tween(1100)); onFinished() }
+    LaunchedEffect(Unit) {
+        if (coroutineContext[androidx.compose.ui.MotionDurationScale]?.scaleFactor == 0f) delay(1100)
+        else t.animateTo(1f, tween(1100))
+        onFinished()
+    }
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             for (i in 0 until 10) {

@@ -14,6 +14,8 @@ import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -83,6 +85,7 @@ class HeartGameNetwork @Inject constructor(
             targets.remove(id)
             // At most 16 packets / five minutes. Random sampling avoids starving large rosters.
             for ((target, chat) in targets.entries.shuffled().take(16)) {
+                currentCoroutineContext().ensureActive()
                 if (HeartGameStore.ownId() != id || !HeartGameStore.enabled(context, id)) break
                 runCatching { RustBridge.sendMessage(UUID.randomUUID().toString(), chat, target, envelope) }
             }

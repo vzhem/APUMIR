@@ -34,6 +34,16 @@ class HeartGameWireTest {
         val otherSeed = ByteArray(32) { 42 }
         assertNull(verify(HeartGameWire.sign(binding(), otherSeed, 7, now, "Игрок")))
     }
+    @Test fun claimedLegacyIdCannotReplaceAnotherSigningIdentity() {
+        val old = verify(record())!!
+        val forgedBinding = binding()
+        val secondSeed = ByteArray(32) { 42 }
+        Ed25519.keyPairFromSeed(secondSeed).publicKey.copyInto(forgedBinding, 3 + id.length)
+        val other = verify(HeartGameWire.sign(forgedBinding, secondSeed, 99, now + 1, "Игрок"))!!
+        assertEquals(old.nodeId, other.nodeId)
+        assertNotEquals(old.keyId, other.keyId)
+        assertFalse(HeartGameWire.newer(old, other))
+    }
     @Test fun limitsAgeAndMalformedPacketsAreRejected() {
         assertNull(verify(record(time = now - HeartGameWire.RETENTION_MS - 1)))
         assertNull(verify(record(time = now + HeartGameWire.FUTURE_MS + 1)))
@@ -45,7 +55,7 @@ class HeartGameWireTest {
         assertFalse(HeartGameWire.newer(old, old))
         assertFalse(HeartGameWire.newer(old, verify(record(6, now + 1))!!))
         assertTrue(HeartGameWire.newer(old, verify(record(8, now + 1))!!))
-        val other = old.copy(nodeId = "pk_" + "00".repeat(32))
+        val other = old.copy(keyId = "00".repeat(32))
         assertEquals(listOf(other, old), HeartGameWire.ranked(listOf(old, other)))
     }
 }

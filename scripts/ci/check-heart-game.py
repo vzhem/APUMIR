@@ -34,7 +34,11 @@ class HeartGameContracts(unittest.TestCase):
             self.assertIn(text, network)
         wire = (SRC / 'data/heartgame/HeartGameWire.kt').read_text()
         self.assertIn('Ed25519.verify', wire)
-        self.assertIn('thenBy { it.nodeId }', wire)
+        self.assertIn('thenBy { it.keyId }', wire)
+        ephemeral = (SRC / 'data/security/EphemeralControl.kt').read_text()
+        self.assertIn('text.startsWith("APUTYP1|APUGAME1|")', ephemeral)
+        mirror = (SRC / 'data/mirror/MirrorSync.kt').read_text()
+        self.assertIn('text.startsWith(com.vladimir.messenger.data.heartgame.HeartGameWire.PREFIX)', mirror)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

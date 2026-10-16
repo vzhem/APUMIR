@@ -477,6 +477,7 @@ object MirrorEnvelopes {
 
     fun isSafe(text: String): Boolean =
         isServiceAck(text) ||
+            text.startsWith(com.vladimir.messenger.data.heartgame.HeartGameWire.PREFIX) ||
             // Ранг собеседника (р246): второй телефон той же личности своего
             // движка не имеет, поэтому о чужом ранге он узнаёт только отсюда -
             // без этого знак VIP стоял бы лишь на активном устройстве.

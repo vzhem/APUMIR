@@ -76,14 +76,16 @@ private fun HeartGameLeaderboard(id: String?, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val revision by HeartGameStore.revision.collectAsStateWithLifecycle()
     var entries by remember(id) { mutableStateOf<List<HeartGameWire.Entry>>(emptyList()) }
+    var ownKey by remember(id) { mutableStateOf("local:$id") }
     var loading by remember(id) { mutableStateOf(true) }
     var failed by remember(id) { mutableStateOf(false) }
     val you = stringResource(R.string.heart_game_you)
     LaunchedEffect(id, revision, you) {
         if (id == null) { loading = false; return@LaunchedEffect }
         try {
-            val own = HeartGameWire.Entry(id, you, HeartGameStore.score(context, id), System.currentTimeMillis(), "")
-            entries = HeartGameWire.ranked(HeartGameStore.board(context, id).filter { it.nodeId != id } + own)
+            ownKey = HeartGameStore.ownKeyId(context) ?: "local:$id"
+            val own = HeartGameWire.Entry(id, you, HeartGameStore.score(context, id), System.currentTimeMillis(), "", ownKey)
+            entries = HeartGameWire.ranked(HeartGameStore.board(context, id).filter { it.keyId != ownKey } + own)
             failed = false
         } catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (_: Exception) { failed = true }
@@ -97,7 +99,7 @@ private fun HeartGameLeaderboard(id: String?, onDismiss: () -> Unit) {
                 Text(stringResource(R.string.heart_game_board_hint), style = MaterialTheme.typography.bodySmall)
                 if (loading) ApuPremiumSpinner()
                 if (failed) Text(stringResource(R.string.heart_game_save_error))
-                if (!loading && entries.none { it.nodeId != id }) Text(stringResource(R.string.heart_game_empty))
+                if (!loading && entries.none { it.keyId != ownKey }) Text(stringResource(R.string.heart_game_empty))
                 // Dialog provides a single bounded scroll container; cap visible top to 100.
                 entries.take(100).forEachIndexed { index, entry ->
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -105,8 +107,8 @@ private fun HeartGameLeaderboard(id: String?, onDismiss: () -> Unit) {
                             tint = listOf(Color(0xFFD9A329), Color(0xFF8B9CAD), Color(0xFFB77942))[index], modifier = Modifier.size(30.dp))
                         else Text("${index + 1}.")
                         Column(Modifier.weight(1f)) {
-                            Text(entry.name.ifBlank { entry.nodeId.take(12) + "…" }, fontWeight = FontWeight.SemiBold)
-                            if (entry.nodeId != id) Text(entry.nodeId.take(12) + "… · " +
+                            Text(entry.name.ifBlank { entry.keyId.take(12) + "…" }, fontWeight = FontWeight.SemiBold)
+                            if (entry.keyId != ownKey) Text(entry.keyId.take(12) + "… · " +
                                 DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(entry.updated)),
                                 style = MaterialTheme.typography.labelSmall)
                         }
@@ -114,9 +116,9 @@ private fun HeartGameLeaderboard(id: String?, onDismiss: () -> Unit) {
                         Text(entry.score.toString(), fontWeight = FontWeight.Bold)
                     }
                 }
-                if (entries.indexOfFirst { it.nodeId == id } >= 100) {
-                    Text(stringResource(R.string.heart_game_my_place, entries.indexOfFirst { it.nodeId == id } + 1,
-                        entries.first { it.nodeId == id }.score))
+                if (entries.indexOfFirst { it.keyId == ownKey } >= 100) {
+                    Text(stringResource(R.string.heart_game_my_place, entries.indexOfFirst { it.keyId == ownKey } + 1,
+                        entries.first { it.keyId == ownKey }.score))
                 }
             }
         })

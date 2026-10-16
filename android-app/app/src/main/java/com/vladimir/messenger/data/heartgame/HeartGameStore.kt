@@ -17,6 +17,9 @@ object HeartGameStore {
     val policy = HeartGamePolicy()
     private val lock = Mutex()
     fun ownId(): String? = RankWire.canonicalNodeId(RustBridge.nodeId())
+    suspend fun ownKeyId(context: Context): String? = withContext(Dispatchers.IO) {
+        com.vladimir.messenger.data.security.IdentitySigningKeyStore.existingVerifiedBinding(context)?.let(HeartGameWire::keyId)
+    }
     private fun prefs(context: Context, id: String) = context.applicationContext.getSharedPreferences("heart-game-v1-$id", Context.MODE_PRIVATE)
     fun enabled(context: Context, id: String) = prefs(context, id).getBoolean("enabled", false)
     fun score(context: Context, id: String) = prefs(context, id).getLong("score", 0L).coerceIn(0, HeartGamePolicy.MAX_SCORE)
@@ -49,8 +52,9 @@ object HeartGameStore {
     suspend fun merge(context: Context, id: String, incoming: List<HeartGameWire.Entry>) = withContext(Dispatchers.IO) {
         lock.withLock {
             val now = System.currentTimeMillis()
-            val map = load(context, id).filter { it.updated >= now - HeartGameWire.RETENTION_MS }.associateBy { it.nodeId }.toMutableMap()
-            incoming.filter { it.nodeId != id }.forEach { if (HeartGameWire.newer(map[it.nodeId], it)) map[it.nodeId] = it }
+            val map = load(context, id).filter { it.updated >= now - HeartGameWire.RETENTION_MS }.associateBy { it.keyId }.toMutableMap()
+            val ownKey = ownKeyId(context)
+            incoming.filter { it.keyId != ownKey }.forEach { if (HeartGameWire.newer(map[it.keyId], it)) map[it.keyId] = it }
             val next = HeartGameWire.ranked(map.values).take(500)
             if (next != boards[id] && prefs(context, id).edit().putString("board", next.joinToString("\n") { it.record }).commit()) {
                 boards[id] = next

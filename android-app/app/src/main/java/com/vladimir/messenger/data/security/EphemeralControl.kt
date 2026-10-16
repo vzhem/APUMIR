@@ -5,6 +5,8 @@ import java.util.UUID
 /** Only replaceable control, never chat/ref/rank/delete/scheduled messages. */
 object EphemeralControl {
     fun isReplaceable(text: String): Boolean {
+        // Periodic game snapshots are disposable; never grow the durable chat backlog.
+        if (text.startsWith("APUTYP1|APUGAME1|")) return true
         if (text == "APUTYP1|0" || text == "APUTYP1|1") return true
         if (text.startsWith("APUGRP1|typ|")) {
             val parts = text.split('|', limit = 6)
