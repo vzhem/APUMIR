@@ -462,6 +462,10 @@ fun ChatListScreen(
         if (storyComposer) {
             com.vladimir.messenger.ui.components.StoryComposerDialog(
                 onDismiss = { storyComposer = false },
+                onPublishVideo = { video ->
+                    viewModel.publishVideoStory(video)
+                    storyComposer = false
+                },
                 onPublish = { text, bg, photo, photoCircle ->
                     viewModel.publishStory(text, bg, photo, photoCircle)
                     storyComposer = false

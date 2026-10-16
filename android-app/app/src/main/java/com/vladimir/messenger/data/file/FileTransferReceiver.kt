@@ -575,6 +575,18 @@ class FileTransferReceiver(
             return
         }
 
+        // A reserved story file is accepted only after its authenticated story descriptor.
+        // Offers are retried by the durable sender if metadata arrives later.
+        if (com.vladimir.messenger.data.story.StoryVideoWire.reserved(manifest.displayName)) {
+            val allowed = !groupOffer && manifest.mediaType == "video/mp4" &&
+                com.vladimir.messenger.data.story.StoryStore.active(now).any {
+                    com.vladimir.messenger.data.story.StoryVideoWire.matches(it, senderId,
+                        manifest.displayName, manifest.fileSha256Hex, manifest.fileSize.toLong(), now) &&
+                        manifest.expiresAtMs <= it.createdAtMs + com.vladimir.messenger.data.story.StoryStore.LIFETIME_MS
+                }
+            if (!allowed) return
+        }
+
         val transferIdHex = manifest.transferIdHex
         val existing = transferDao.getTransfer(transferIdHex)
         // Общая копия (K2): один и тот же transferId приходит от нескольких

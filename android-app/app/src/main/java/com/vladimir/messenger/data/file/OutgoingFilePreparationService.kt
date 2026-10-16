@@ -127,8 +127,9 @@ class OutgoingFilePreparationService private constructor(
         chatId: String,
         recipientNodeId: String,
         nowMs: Long = System.currentTimeMillis(),
+        expiresAtMs: Long? = null,
     ): PreparedTransfer = prepareSource(
-        Source.Local(source, displayName, mediaType),
+        Source.Local(source, displayName, mediaType, expiresAtMs),
         messageId,
         chatId,
         recipientNodeId,
@@ -286,7 +287,7 @@ class OutgoingFilePreparationService private constructor(
                     ?: throw IllegalArgumentException("Cannot reopen selected file")
         }
 
-        class Local(val file: java.io.File, val displayName: String, val mediaType: String) : Source() {
+        class Local(val file: java.io.File, val displayName: String, val mediaType: String, val expiresAtMs: Long? = null) : Source() {
             override fun open(context: Context): java.io.InputStream {
                 require(file.isFile) { "Source file is missing" }
                 return file.inputStream()
@@ -327,7 +328,8 @@ class OutgoingFilePreparationService private constructor(
         } else {
             FileTransferRetention.ttlMs(inspected.mediaType, inspected.sizeBytes)
         }
-        val expiresAtMs = Math.addExact(nowMs, retentionMs)
+        val expiresAtMs = minOf(Math.addExact(nowMs, retentionMs), (source as? Source.Local)?.expiresAtMs ?: Long.MAX_VALUE)
+        require(expiresAtMs > nowMs) { "File already expired" }
         val manifest = createFileTransferManifest(
             senderNodeId,
             recipientNodeId,

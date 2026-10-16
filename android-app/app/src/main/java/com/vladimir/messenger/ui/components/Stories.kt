@@ -476,6 +476,7 @@ fun StoryViewerDialog(
         if (StoryPlayback.frozen(held || showReactionPicker || showComments, userPaused, confirmDelete, resumed)) {
             return@LaunchedEffect
         }
+        if (current.video != null) return@LaunchedEffect
         val duration = StoryPlayback.durationMs(current.text.length)
         var last = withFrameMillis { it }
         while (progress < 1f) {
@@ -591,11 +592,18 @@ fun StoryViewerDialog(
                             } finally { setHeldNow(false) }
                         }
                     }, contentAlignment = Alignment.Center) {
-                    Crossfade(targetState = current, label = "story-content") { story ->
+                    if (current.video != null) {
+                        androidx.compose.runtime.key(current.authorId, current.id) {
+                            StoryVideoPlayer(current,
+                                paused = StoryPlayback.frozen(held || showReactionPicker || showComments, userPaused, confirmDelete, resumed),
+                                onProgress = { progress = it }, onEnded = { nextNow() })
+                        }
+                    } else Crossfade(targetState = current, label = "story-content") { story ->
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             StoryContentCanvas(story.text, story.photoB64, storyBackgrounds[story.bg.coerceIn(storyBackgrounds.indices)], photoCircle = story.photoCircle)
                         }
                     }
+
                 }
                 Column(Modifier.fillMaxWidth()) {
                     // Реакции и комментарии - как в привычных мессенджерах:
@@ -670,7 +678,10 @@ private fun StoryNavigation(label: String, onClick: () -> Unit, modifier: Modifi
 
 /** Текст сразу редактируется на выбранном фоне — так же он выглядит у получателя. */
 @Composable
-fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int, photoB64: String?, photoCircle: Boolean) -> Unit) {
+internal fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int, photoB64: String?, photoCircle: Boolean) -> Unit,
+    onPublishVideo: (com.vladimir.messenger.data.story.StoryVideoExporter.Exported) -> Unit) {
+    var videoComposer by remember { mutableStateOf(false) }
+    if (videoComposer) StoryVideoComposer(onDismiss = { videoComposer = false }, onPublish = onPublishVideo)
     var text by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
     var photoCircle by rememberSaveable { mutableStateOf(false) }
     var bg by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
@@ -898,6 +909,9 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                     textAlign = TextAlign.End,
                 )
             }
+            ApuPremiumButton(label = "Видеоистория · до 60 с", enabled = !preparing,
+                onClick = { hideKeyboard(); videoComposer = true },
+                compact = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
             if (preparing) Text(stringResource(R.string.story_photo_preparing), color = Color.White,
                 modifier = Modifier.padding(horizontal = 16.dp))
             if (photoError) Text(stringResource(R.string.story_photo_failed), color = Color(0xFFFF8A80),

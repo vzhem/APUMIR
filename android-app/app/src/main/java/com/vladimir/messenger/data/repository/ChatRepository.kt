@@ -36,6 +36,7 @@ class ChatRepository @Inject constructor(
     private val chatDao: ChatDao,
     private val messageDao: MessageDao,
     private val groupDao: GroupDao,
+    private val storyVideos: com.vladimir.messenger.data.story.StoryVideoDelivery,
     private val referralAttribution: com.vladimir.messenger.data.referral.ReferralAttributionSender,
 ) {
     // Защита от повторного FULL SYNC в течение 30 секунд
@@ -727,8 +728,11 @@ class ChatRepository @Inject constructor(
         if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId)) return
         // История: пакет контакта сохраняем в ленту историй, в переписку не пускаем.
         if (com.vladimir.messenger.data.story.StoryStore.isStoryPacket(content)) {
+            if (content.toByteArray(Charsets.UTF_8).size > 16 * 1024) return
+            if (storyVideos.receiveReady(senderId, content)) return
             val name = chatDao.getChatsByContactId(senderId).firstOrNull()?.contactName.orEmpty()
             com.vladimir.messenger.data.story.StoryStore.receive(senderId, name, content)
+            storyVideos.readyPacket(senderId, content)?.let { sendStoryPacket(senderId, it) }
             return
         }
         // р239/р247: страховка на самом сохранении. Служебный пакет приложения
@@ -1349,7 +1353,11 @@ class ChatRepository @Inject constructor(
             if (!com.vladimir.messenger.data.story.StoryStore.persistForDelivery()) {
                 com.vladimir.messenger.data.diagnostics.TransferDiagnostics.recordWarning("story", "локальное сохранение истории не подтверждено; отправка не начата")
                 false
-            } else DurableStorySender.enqueue(context, story, directContactIds(), revoke)
+            } else {
+                val peers = directContactIds()
+                if (!revoke && !storyVideos.register(story, peers)) false
+                else DurableStorySender.enqueue(context, story, peers, revoke)
+            }
         }
 
     /**

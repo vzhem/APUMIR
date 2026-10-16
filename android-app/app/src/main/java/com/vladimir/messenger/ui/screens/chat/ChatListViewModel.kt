@@ -974,6 +974,29 @@ class ChatListViewModel @Inject constructor(
         _uiState.update { if (it.error == expected) it.copy(error = null) else it }
     }
 
+    internal fun publishVideoStory(exported: com.vladimir.messenger.data.story.StoryVideoExporter.Exported) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val me = com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
+                    check(me.isNotBlank()) { "Дождитесь подключения перед публикацией" }
+                    val id = java.util.UUID.randomUUID().toString()
+                    val cover = com.vladimir.messenger.data.story.StoryPhoto.prepare(appContext, android.net.Uri.fromFile(exported.cover))
+                    com.vladimir.messenger.data.story.StoryVideoStorage.install(appContext, me, id, exported.file, exported.media)
+                    val story = com.vladimir.messenger.data.story.StoryStore.publish(me, exported.draft.caption, 0,
+                        cover, video = exported.media, id = id)
+                    check(chatRepository.enqueueStory(story)) {
+                        "Видео сохранено у вас, но очередь доставки недоступна или нет адресатов."
+                    }
+                    chatRepository.pumpStoryOutbox()
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                _uiState.update { it.copy(error = failure.message ?: "Не удалось опубликовать видеоисторию") }
+            }
+        }.invokeOnCompletion { exported.delete() }
+    }
+
     /** Своя история: сохранить и разослать контактам личных чатов. */
     fun publishStory(text: String, bg: Int, photoB64: String? = null, photoCircle: Boolean = false) {
         if (text.isBlank() && photoB64 == null) return
