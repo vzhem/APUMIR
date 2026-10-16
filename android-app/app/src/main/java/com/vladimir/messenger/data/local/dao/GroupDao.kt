@@ -123,6 +123,9 @@ interface GroupDao {
     @Query("UPDATE groups SET quietHours = :schedule WHERE id = :groupId")
     suspend fun setQuietHours(groupId: String, schedule: String)
 
+    @Query("UPDATE groups SET memberListVisible = :visible WHERE id = :groupId")
+    suspend fun setMemberListVisible(groupId: String, visible: Boolean)
+
     /** р249: звук выключен прямо сейчас (см. ChatDao.countMuted про COUNT(*)). */
     @Query("SELECT COUNT(*) FROM groups WHERE id = :groupId AND mutedUntilMs > :nowMs")
     suspend fun countMuted(groupId: String, nowMs: Long): Int

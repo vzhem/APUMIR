@@ -26,6 +26,7 @@ data class GroupSummary(
      */
     val slowModeSeconds: Int = 0,
     val quietHours: String = "",
+    val memberListVisible: Boolean = true,
     /** Личная пауза уведомлений группы или канала. */
     val mutedUntilMs: Long = 0L,
 )

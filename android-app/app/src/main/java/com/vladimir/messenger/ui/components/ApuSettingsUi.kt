@@ -31,6 +31,16 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
@@ -368,22 +378,39 @@ fun ApuSettingsProgress(
 
 @Composable
 fun ApuProfileQuickAction(label: String, icon: ImageVector, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) .96f else 1f, spring(dampingRatio = .7f), label = "profile-action-press")
+    var activation by remember { mutableIntStateOf(0) }
+    val view = LocalView.current
+    val shape = RoundedCornerShape(22.dp)
     Column(
-        modifier = modifier.heightIn(min = 72.dp).clip(RoundedCornerShape(14.dp))
-            .background(ApuBubbleAccentColor.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
-            .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 12.dp),
+        modifier = modifier
+            .graphicsLayer { scaleX = scale; scaleY = scale }
+            .apuPremiumLift(if (pressed) 2.dp else 7.dp, shape)
+            .clip(shape)
+            .background(Brush.linearGradient(listOf(Color(0xFFFFF6D9), Color(0xFFF0D89C), Color(0xFFE3BE67))))
+            .border(1.dp, Color.White.copy(alpha = .75f), shape)
+            .apuPremiumGloss(shape, intensity = .5f, topFraction = .45f)
+            .apuSelectionSheen(activation, active = activation > 0)
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button) {
+                view.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
+                activation++
+                onClick()
+            }
+            .heightIn(min = 96.dp)
+            .padding(horizontal = 12.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically),
     ) {
-        ApuPremiumIconTile(icon = icon, size = 34.dp, corner = 11.dp, lift = 5.dp)
+        // One continuous pressable surface, no nested icon-button decoration.
+        Icon(icon, contentDescription = null, tint = ApuGoldInk, modifier = Modifier.size(32.dp))
         Text(
             label,
-            style = MaterialTheme.typography.labelLarge,
-            color = ApuBubbleAccentColor,
+            style = MaterialTheme.typography.titleSmall,
+            color = ApuGoldInk,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
     }
 }

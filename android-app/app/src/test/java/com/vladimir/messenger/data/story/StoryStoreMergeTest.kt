@@ -66,4 +66,13 @@ class StoryStoreMergeTest {
         assertEquals("PHOTO", merged.photoB64)
         assertEquals("Alice", merged.authorName)
     }
+
+    @Test
+    fun photoShapeSurvivesLateCaptionAndDefaultsToRectangle() {
+        val circular = story(photoB64 = "PHOTO").copy(photoCircle = true)
+        assertTrue(StoryStore.mergeIncoming(circular, story()).photoCircle)
+        assertTrue(StoryStore.mergeIncoming(story(), circular).photoCircle)
+        assertEquals(false, story().photoCircle)
+        assertEquals(false, StoryStore.mergeIncoming(circular, story(photoB64 = "REPLACEMENT")).photoCircle)
+    }
 }

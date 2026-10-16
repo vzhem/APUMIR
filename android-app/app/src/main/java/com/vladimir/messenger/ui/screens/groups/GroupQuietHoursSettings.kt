@@ -9,6 +9,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
+import com.vladimir.messenger.ui.i18n.AppLanguageHolder
 import com.vladimir.messenger.data.group.GroupQuietHours
 import com.vladimir.messenger.data.group.GroupQuietSchedule
 import com.vladimir.messenger.ui.components.ApuBubble
@@ -29,7 +32,10 @@ private data class QuietIntervalDraft(
 /** All intervals use the group's explicit timezone, not each viewer's phone timezone. */
 @Composable
 internal fun GroupQuietHoursSettings(raw: String, canEdit: Boolean, onSave: (String) -> Unit) {
+    val language by AppLanguageHolder.language.collectAsState()
+    val locale = remember(language) { java.util.Locale.forLanguageTag(language.code) }
     val stored = remember(raw) { GroupQuietSchedule.decode(raw) }
+    val localScheduleNotice = rememberGroupScheduleNotice(stored)
     var enabled by remember(raw) { mutableStateOf(stored != null) }
     var drafts by remember(raw) {
         mutableStateOf(stored?.intervals?.map {
@@ -40,26 +46,30 @@ internal fun GroupQuietHoursSettings(raw: String, canEdit: Boolean, onSave: (Str
     var error by remember { mutableStateOf<String?>(null) }
     var chooseZone by remember { mutableStateOf(false) }
     var zoneSearch by remember { mutableStateOf("") }
+    val zoneDisplayTime = remember(chooseZone, locale) { java.time.Instant.now() }
+    val zoneLabel = remember(zone, locale, zoneDisplayTime) { GroupTimeZones.entry(zone, locale, zoneDisplayTime).label }
     val dayNames = listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
     fun update(index: Int, draft: QuietIntervalDraft) {
         drafts = drafts.mapIndexed { i, value -> if (i == index) draft else value }
     }
     if (chooseZone) {
-        val zones = remember { java.time.ZoneId.getAvailableZoneIds().sorted() }
+        val zones = remember(locale, zoneDisplayTime) { GroupTimeZones.entries(locale, zoneDisplayTime) }
         ApuSettingsDialog(
             onDismissRequest = { chooseZone = false },
-            title = { Text("Часовой пояс группы") },
+            title = { Text(stringResource(R.string.group_timezone_title)) },
             text = {
                 Column {
-                    ApuFormTextField(value = zoneSearch, onValueChange = { zoneSearch = it }, label = "Поиск, например Moscow")
+                    ApuFormTextField(value = zoneSearch, onValueChange = { zoneSearch = it }, label = stringResource(R.string.group_timezone_search))
+                    Text(stringResource(R.string.group_timezone_offset_hint))
+                    if (zones.none { it.matches(zoneSearch) }) Text(stringResource(R.string.group_timezone_not_found))
                     LazyColumn(Modifier.heightIn(max = 320.dp)) {
-                        items(zones.filter { it.contains(zoneSearch, ignoreCase = true) }) { id ->
-                            ApuTextAction(label = id, onClick = { zone = id; chooseZone = false })
+                        items(zones.filter { it.matches(zoneSearch) }, key = { it.id }) { entry ->
+                            ApuTextAction(label = entry.label, onClick = { zone = entry.id; chooseZone = false })
                         }
                     }
                 }
             },
-            confirmButton = { ApuTextAction(label = "Закрыть", onClick = { chooseZone = false }) },
+            confirmButton = { ApuTextAction(label = stringResource(R.string.action_close), onClick = { chooseZone = false }) },
         )
     }
     ApuBubble {
@@ -68,8 +78,10 @@ internal fun GroupQuietHoursSettings(raw: String, canEdit: Boolean, onSave: (Str
             Text("Для обычных участников во всех темах. Владелец и администраторы могут писать.")
             if (!canEdit) {
                 if (stored == null) Text("Выключено")
+                if (localScheduleNotice.isNotBlank()) Text(localScheduleNotice)
+                if (stored != null) Text(if (language.code == "en") "Original schedule in the group time zone:" else "Исходное расписание по часовому поясу группы:")
                 stored?.intervals?.forEach { interval ->
-                    Text("${interval.days.sorted().joinToString { dayNames[it - 1] }}: ${GroupQuietHours.time(interval.startMinute)}–${GroupQuietHours.time(interval.endMinute)} (${interval.zoneId})")
+                    Text("${interval.days.sorted().joinToString { dayNames[it - 1] }}: ${GroupQuietHours.time(interval.startMinute)}–${GroupQuietHours.time(interval.endMinute)} (${GroupTimeZones.entry(interval.zoneId, locale, zoneDisplayTime).label})")
                 }
             } else {
                 Row {
@@ -77,7 +89,7 @@ internal fun GroupQuietHoursSettings(raw: String, canEdit: Boolean, onSave: (Str
                     ApuPremiumSwitch(checked = enabled, onCheckedChange = { enabled = it })
                 }
                 if (enabled) {
-                    ApuTextAction(label = "Часовой пояс: $zone", onClick = { chooseZone = true })
+                    ApuTextAction(label = stringResource(R.string.group_timezone_selected, zoneLabel), onClick = { chooseZone = true })
                     Text("Каждому интервалу можно задать свои дни и любое время с точностью до минуты. Ночной интервал относится к дню начала: Пн 23:00–08:00 — до утра вторника.")
                     drafts.forEachIndexed { index, draft ->
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {

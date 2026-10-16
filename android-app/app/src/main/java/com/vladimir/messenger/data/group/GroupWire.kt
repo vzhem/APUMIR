@@ -533,6 +533,9 @@ object GroupWire {
          * р250: медленный режим группы - участник ждёт [seconds] секунд между
          * своими сообщениями; 0 - режим выключен.
          */
+        data class MemberListVisibility(val groupId: String, val visible: Boolean) : Packet()
+        data class MemberListVisibilityRequest(val groupId: String) : Packet()
+
         data class QuietHoursRequest(val groupId: String) : Packet()
 
         data class QuietHours(val groupId: String, val schedule: String) : Packet()
@@ -1465,6 +1468,10 @@ object GroupWire {
     // ── р250: медленный режим ───────────────────────────────────────────────
 
     /** Медленный режим группы: [seconds] секунд между сообщениями участника (0 - выключен). */
+    fun buildMemberListVisibility(groupId: String, visible: Boolean): String =
+        "$PREFIX|member_list|$groupId|${if (visible) 1 else 0}"
+    fun buildMemberListVisibilityRequest(groupId: String): String = "$PREFIX|member_list_get|$groupId"
+
     fun buildQuietHoursRequest(groupId: String): String = "$PREFIX|quiet_hours_get|$groupId"
 
     fun buildQuietHours(groupId: String, schedule: String): String {
@@ -1918,6 +1925,10 @@ object GroupWire {
             } else {
                 null
             }
+
+            "member_list_get" -> if (parts.size == 3) Packet.MemberListVisibilityRequest(groupId) else null
+            "member_list" -> if (parts.size == 4 && parts[3] in listOf("0", "1"))
+                Packet.MemberListVisibility(groupId, parts[3] == "1") else null
 
             "quiet_hours_get" -> if (parts.size == 3) Packet.QuietHoursRequest(groupId) else null
 

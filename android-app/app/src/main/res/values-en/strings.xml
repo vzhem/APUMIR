@@ -1717,4 +1717,14 @@ The file is not on this phone</string>
     <string name="send_cancel_requested">Cancellation request queued. Confirmed: %1$d of %2$d.</string>
     <string name="send_cancel_best_effort">Cancellation sends a deletion request. An offline recipient may still see the message before the request arrives.</string>
     <string name="story_hide_keyboard">Hide keyboard</string>
+    <string name="group_timezone_title">Group time zone</string>
+    <string name="group_timezone_search">Search country or city, e.g. Moscow</string>
+    <string name="group_timezone_offset_hint">Current UTC offset; daylight saving time is applied automatically.</string>
+    <string name="group_timezone_not_found">No results</string>
+    <string name="group_timezone_selected">Time zone: %1$s</string>
+    <string name="profile_show_id">Show profile ID</string>
+    <string name="profile_hide_id">Hide profile ID</string>
+    <string name="story_photo_shape">Photo shape</string>
+    <string name="story_photo_rectangle">Regular</string>
+    <string name="story_photo_circle">Circle</string>
 </resources>

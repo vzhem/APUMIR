@@ -751,6 +751,7 @@ class GroupRepository(
             // р250: медленный режим - экран чата показывает остаток ожидания.
             slowModeSeconds = g.slowModeSeconds,
             quietHours = g.quietHours,
+            memberListVisible = g.memberListVisible,
             mutedUntilMs = g.mutedUntilMs,
         )
     }
@@ -1302,6 +1303,22 @@ class GroupRepository(
     }
 
     /** Расписание едино для всех тем и использует часовой пояс группы. */
+    suspend fun setMemberListVisible(groupId: String, visible: Boolean): Result<Unit> = runCatching {
+        val me = myId() ?: error("Идентичность узла ещё не готова")
+        val group = groupDao.getGroupById(groupId) ?: error("Группа не найдена")
+        val actor = groupDao.getMember(groupId, me) ?: error("Вы не участник")
+        check(!actor.isBanned && GroupRole.isAdminOrOwner(actor.role) &&
+            GroupPermissions.canChangeInfo(actor.role, actor.permissions, effectiveMemberMask(group))) {
+            "Нет права менять настройки группы"
+        }
+        groupDao.setMemberListVisible(groupId, visible)
+        backgroundScope.launch {
+            runCatching { delivery.deliver(groupId, GroupWire.buildMemberListVisibility(groupId, visible), allRecipients(groupId, me)) }
+                .onFailure { Log.w(TAG, "member visibility fanout failed: ${it.message}") }
+        }
+        Unit
+    }
+
     suspend fun setQuietHours(groupId: String, schedule: String): Result<Unit> = runCatching {
         require(schedule.isEmpty() || GroupQuietSchedule.decode(schedule) != null) { "Некорректное расписание" }
         val me = myId() ?: error("Идентичность узла ещё не готова")
@@ -4044,6 +4061,7 @@ class GroupRepository(
                 if (senderId == packet.ownerId && senderId != me) {
                     backgroundScope.launch {
                         runCatching { delivery.deliver(packet.groupId, GroupWire.buildQuietHoursRequest(packet.groupId), listOf(senderId)) }
+                        runCatching { delivery.deliver(packet.groupId, GroupWire.buildMemberListVisibilityRequest(packet.groupId), listOf(senderId)) }
                     }
                 }
                 Log.i(TAG, "group info applied group=${packet.groupId} title=${packet.title}")
@@ -4095,6 +4113,23 @@ class GroupRepository(
             is GroupWire.Packet.PollVote -> handlePollVote(senderId, packet)
 
             is GroupWire.Packet.PollClose -> handlePollClose(senderId, packet)
+
+            is GroupWire.Packet.MemberListVisibilityRequest -> {
+                val group = groupDao.getGroupById(packet.groupId) ?: return
+                if (group.ownerId != me) return
+                val member = groupDao.getMember(group.id, senderId) ?: return
+                if (member.isBanned) return
+                delivery.deliver(group.id, GroupWire.buildMemberListVisibility(group.id, group.memberListVisible), listOf(senderId))
+            }
+            is GroupWire.Packet.MemberListVisibility -> {
+                val group = groupDao.getGroupById(packet.groupId) ?: return
+                if (senderId != group.ownerId) {
+                    val actor = groupDao.getMember(group.id, senderId) ?: return
+                    if (actor.isBanned || !GroupRole.isAdminOrOwner(actor.role) ||
+                        !GroupPermissions.canChangeInfo(actor.role, actor.permissions, effectiveMemberMask(group))) return
+                }
+                groupDao.setMemberListVisible(group.id, packet.visible)
+            }
 
             is GroupWire.Packet.QuietHoursRequest -> {
                 val group = groupDao.getGroupById(packet.groupId) ?: return
@@ -5488,6 +5523,7 @@ class GroupRepository(
         if (slug.isNotBlank()) groupDao.registerInviteUse(slug)
         groupDao.refreshMemberCount(group.id)
         sendGroupInfo(group, nodeId)
+        delivery.deliver(group.id, GroupWire.buildMemberListVisibility(group.id, group.memberListVisible), listOf(nodeId))
         delivery.deliver(group.id, GroupWire.buildQuietHours(group.id, group.quietHours), listOf(nodeId))
         sendTopics(group.id, nodeId)
         publishRoster(group.id, newcomer = nodeId)

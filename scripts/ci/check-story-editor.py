@@ -41,9 +41,21 @@ class StoryEditorContracts(unittest.TestCase):
                      "textStyle = textStyle", "style = textStyle", "repeat(8)"):
             self.assertIn(part, source)
 
+    def test_photo_shape_reaches_viewer_and_storage(self):
+        source = (MAIN / "ui/components/Stories.kt").read_text()
+        canvas = (MAIN / "ui/components/StoryContentCanvas.kt").read_text()
+        store = (MAIN / "data/story/StoryStore.kt").read_text()
+        self.assertIn("photoCircle = story.photoCircle", source)
+        self.assertIn("photoCircle = photoCircle", source)
+        self.assertIn("aspectRatio(1f).clip(CircleShape)", canvas)
+        self.assertIn("ContentScale.Crop", canvas)
+        self.assertIn('.put("photoCircle", story.photoCircle)', store)
+        self.assertIn('.put("photoCircle", s.photoCircle)', store)
+        self.assertIn('o.optBoolean("photoCircle", false)', store)
+
     def test_manual_whitespace_survives_publish(self):
         source = (MAIN / "ui/components/Stories.kt").read_text()
-        self.assertIn("onPublish(text, bg, photo)", source)
+        self.assertIn("onPublish(text, bg, photo, photo != null && photoCircle)", source)
         vm = (MAIN / "ui/screens/chat/ChatListViewModel.kt").read_text()
         publish = vm.split("fun publishStory(")[1].split("fun deleteStory(")[0]
         self.assertNotIn(".trim()", publish)

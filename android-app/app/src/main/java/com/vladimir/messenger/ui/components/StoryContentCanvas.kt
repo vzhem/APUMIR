@@ -2,6 +2,8 @@ package com.vladimir.messenger.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -47,6 +49,7 @@ internal fun StoryContentCanvas(
     background: Brush,
     modifier: Modifier = Modifier,
     onTextChange: ((String) -> Unit)? = null,
+    photoCircle: Boolean = false,
 ) {
     val density = LocalDensity.current
     val width = with(density) { 360.dp.roundToPx() }
@@ -57,7 +60,11 @@ internal fun StoryContentCanvas(
             CompositionLocalProvider(LocalDensity provides Density(density.density, 1f)) {
                 Box(Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(background)) {
                     Box(Modifier.fillMaxSize().padding(28.dp), contentAlignment = Alignment.Center) {
-                        if (photoB64 != null) StoryPhotoView(photoB64, Modifier.fillMaxSize())
+                        if (photoB64 != null) {
+                            if (photoCircle) StoryPhotoView(photoB64,
+                                Modifier.fillMaxWidth().aspectRatio(1f).clip(CircleShape), ContentScale.Crop)
+                            else StoryPhotoView(photoB64, Modifier.fillMaxSize())
+                        }
                         if (onTextChange != null || text.isNotEmpty()) {
                             StoryCanvasText(text, photoB64 != null, onTextChange)
                         }

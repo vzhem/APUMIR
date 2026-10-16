@@ -432,6 +432,26 @@ class SettingsStyleTest(unittest.TestCase):
         self.assertIn("if (uiState.rankVip)", chat_list)
         self.assertIn("ApuVipBadge()", chat_list)
 
+    def test_profile_actions_have_one_large_pressable_surface(self):
+        action = source("components/ApuSettingsUi.kt").split("fun ApuProfileQuickAction(")[1].split("fun ApuSettingsDialog(")[0]
+        self.assertIn("heightIn(min = 96.dp)", action)
+        self.assertNotIn("ApuPremiumIconTile(", action)
+        self.assertEqual(1, action.count(".clickable("))
+        self.assertIn("performHapticFeedback", action)
+        self.assertIn("collectIsPressedAsState", action)
+        self.assertIn("onClick()", action)
+
+    def test_bottom_motion_is_selection_driven_not_infinite(self):
+        bar = source("components/ApuBottomBar.kt")
+        sheen = source("components/ApuSelectionSheen.kt")
+        self.assertIn("Role.Tab", bar)
+        self.assertIn("selected = item.selected", bar)
+        self.assertIn("performHapticFeedback", bar)
+        self.assertIn("apuSelectionSheen(item.selected", bar)
+        self.assertIn("areAnimatorsEnabled()", sheen)
+        self.assertNotIn("rememberInfiniteTransition", sheen)
+        self.assertNotIn("while (true)", sheen)
+
     def test_large_profile_initials_and_avatar_io_are_preserved(self):
         avatar = source("components/MyAvatar.kt")
         self.assertIn("size: Int = 52", avatar)
@@ -444,7 +464,7 @@ class SettingsStyleTest(unittest.TestCase):
         # (владелец 2026-10-07: «чтобы аккаунт VIP должно быть видно везде»).
         self.assertIn("VipRing(Modifier.matchParentSize())", avatar)
         self.assertIn("rememberSelfVip()", avatar)
-        self.assertIn("size = 88", source("screens/settings/SettingsScreen.kt"))
+        self.assertIn("size = 108", source("screens/settings/SettingsScreen.kt"))
         self.assertIn("size = 96", source("screens/share/ShareProfileScreen.kt"))
 
     def test_groups_screen_and_create_dialog_use_house_style(self):

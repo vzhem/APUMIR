@@ -292,6 +292,13 @@ class GroupAdminViewModel @Inject constructor(
      * меняет владелец, администратор с правом «Изменять информацию» или
      * участник, которому это право дано (см. GroupPermissions.canChangeInfo).
      */
+    fun setMemberListVisible(visible: Boolean) {
+        viewModelScope.launch {
+            groupRepository.setMemberListVisible(groupId, visible)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
     fun setQuietHours(schedule: String) {
         viewModelScope.launch {
             groupRepository.setQuietHours(groupId, schedule)

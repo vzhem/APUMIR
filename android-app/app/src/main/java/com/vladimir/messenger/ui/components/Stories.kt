@@ -593,7 +593,7 @@ fun StoryViewerDialog(
                     }, contentAlignment = Alignment.Center) {
                     Crossfade(targetState = current, label = "story-content") { story ->
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            StoryContentCanvas(story.text, story.photoB64, storyBackgrounds[story.bg.coerceIn(storyBackgrounds.indices)])
+                            StoryContentCanvas(story.text, story.photoB64, storyBackgrounds[story.bg.coerceIn(storyBackgrounds.indices)], photoCircle = story.photoCircle)
                         }
                     }
                 }
@@ -670,8 +670,9 @@ private fun StoryNavigation(label: String, onClick: () -> Unit, modifier: Modifi
 
 /** Текст сразу редактируется на выбранном фоне — так же он выглядит у получателя. */
 @Composable
-fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int, photoB64: String?) -> Unit) {
+fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int, photoB64: String?, photoCircle: Boolean) -> Unit) {
     var text by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    var photoCircle by rememberSaveable { mutableStateOf(false) }
     var bg by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     // Do not put large photo bytes into the saved-instance Bundle.
     var photo by remember { mutableStateOf<String?>(null) }
@@ -770,7 +771,7 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
     fun confirmPublish() {
         hideKeyboard()
         if (!preparing && StoryPublish.canPublish(text, photo, photoMissing)) {
-            onPublish(text, bg, photo)
+            onPublish(text, bg, photo, photo != null && photoCircle)
         }
     }
     BoxWithConstraints(
@@ -796,6 +797,16 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                 }
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, stringResource(R.string.action_close), tint = Color.White) }
             }
+            if (photo != null && !imeOpen) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.story_photo_shape), color = Color.White, modifier = Modifier.weight(1f))
+                    ApuPremiumChip(label = stringResource(R.string.story_photo_rectangle), selected = !photoCircle,
+                        enabled = !preparing, onClick = { photoCircle = false })
+                    ApuPremiumChip(label = stringResource(R.string.story_photo_circle), selected = photoCircle,
+                        enabled = !preparing, onClick = { photoCircle = true })
+                }
+            }
             // Превью занимает всё свободное место. «Опубликовать» живёт НИЖЕ
             // этого блока — клавиатура его не выталкивает за край экрана.
             Box(
@@ -815,6 +826,7 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                 StoryContentCanvas(
                     text = text,
                     photoB64 = photo,
+                    photoCircle = photoCircle,
                     background = storyBackgrounds[bg],
                     onTextChange = { text = StoryPublish.editorText(it) },
                 )

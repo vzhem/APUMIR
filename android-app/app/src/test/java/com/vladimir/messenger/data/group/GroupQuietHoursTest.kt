@@ -69,4 +69,40 @@ class GroupQuietHoursTest {
         assertNull(GroupQuietSchedule.decode(first.encode() + "~bad"))
         assertTrue(runCatching { GroupQuietSchedule(emptyList()) }.isFailure)
     }
+
+    @Test fun participantsSeeSameEndInTheirOwnLocalTimes() {
+        val schedule = GroupQuietSchedule(listOf(GroupQuietHours(setOf(1), 1380, 480, "Europe/Moscow")))
+        val now = at("2026-10-12T21:00:00Z")
+        assertEquals(at("2026-10-13T05:00:00Z"), schedule.nextChangeAtMs(now))
+        val ru = java.util.Locale.forLanguageTag("ru")
+        assertTrue(schedule.notice(now, java.time.ZoneId.of("Europe/Moscow"), ru).contains("13.10.2026 08:00"))
+        assertTrue(schedule.notice(now, java.time.ZoneId.of("Asia/Yekaterinburg"), ru).contains("13.10.2026 10:00"))
+        assertTrue(schedule.notice(now, java.time.ZoneId.of("America/Los_Angeles"), ru).contains("12.10.2026 22:00"))
+    }
+
+    @Test fun noticeWaitsForLastOverlappingOrTouchingInterval() {
+        val schedule = GroupQuietSchedule(listOf(
+            GroupQuietHours(setOf(1), 600, 720, "UTC"),
+            GroupQuietHours(setOf(1), 690, 780, "UTC"),
+            GroupQuietHours(setOf(1), 780, 840, "UTC"),
+        ))
+        assertEquals(at("2026-10-12T14:00:00Z"), schedule.nextChangeAtMs(at("2026-10-12T10:00:00Z")))
+        assertEquals(at("2026-10-12T10:00:00Z"), schedule.nextChangeAtMs(at("2026-10-12T09:00:00Z")))
+    }
+
+    @Test fun repeatedHourAndSpringJumpHaveActualTimelineBoundaries() {
+        val schedule = GroupQuietSchedule(listOf(GroupQuietHours(setOf(7), 120, 150, "Europe/Berlin")))
+        assertEquals(at("2026-10-25T00:30:00Z"), schedule.nextChangeAtMs(at("2026-10-25T00:10:00Z")))
+        assertEquals(at("2026-10-25T01:00:00Z"), schedule.nextChangeAtMs(at("2026-10-25T00:40:00Z")))
+        assertEquals(at("2026-10-25T01:30:00Z"), schedule.nextChangeAtMs(at("2026-10-25T01:10:00Z")))
+        val spring = GroupQuietSchedule(listOf(GroupQuietHours(setOf(7), 90, 150, "Europe/Berlin")))
+        assertEquals(at("2026-03-29T01:00:00Z"), spring.nextChangeAtMs(at("2026-03-29T00:40:00Z")))
+    }
+
+    @Test fun continuouslyBlockedWeekHasNoInventedEnd() {
+        val all = (1..7).toSet()
+        val schedule = GroupQuietSchedule(listOf(GroupQuietHours(all, 0, 720, "UTC"), GroupQuietHours(all, 720, 0, "UTC")))
+        assertNull(schedule.nextChangeAtMs(at("2026-10-12T12:00:00Z")))
+        assertTrue(schedule.notice(at("2026-10-12T12:00:00Z"), java.time.ZoneId.of("UTC"), java.util.Locale.forLanguageTag("ru")).contains("непрерывно"))
+    }
 }

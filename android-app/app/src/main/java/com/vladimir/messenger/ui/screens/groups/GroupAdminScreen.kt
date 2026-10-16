@@ -244,6 +244,8 @@ fun GroupAdminScreen(
                     onSetSlowMode = viewModel::setSlowMode,
                     quietHours = uiState.group?.quietHours.orEmpty(),
                     onSetQuietHours = viewModel::setQuietHours,
+                    memberListVisible = uiState.group?.memberListVisible != false,
+                    onSetMemberListVisible = viewModel::setMemberListVisible,
                     onLeave = { viewModel.leaveGroup(onLeftGroup) },
                     onDeleteGroup = { viewModel.deleteGroup(onLeftGroup) },
                 )
@@ -258,7 +260,9 @@ fun GroupAdminScreen(
                     onClaimOwnership = viewModel::claimOwnership,
                 )
 
-                AdminTab.Members -> MembersTab(
+                AdminTab.Members -> if (uiState.group?.memberListVisible == false && !uiState.isAdmin) {
+                    ApuBubble { Text("Просмотр списка участников закрыт администратором группы.") }
+                } else MembersTab(
                     isAdmin = uiState.isAdmin,
                     members = uiState.searchResults,
                     vipNodeIds = uiState.vipNodeIds,
@@ -325,6 +329,8 @@ private fun OverviewTab(
     onSetSlowMode: (Int) -> Unit,
     quietHours: String,
     onSetQuietHours: (String) -> Unit,
+    memberListVisible: Boolean,
+    onSetMemberListVisible: (Boolean) -> Unit,
     onLeave: () -> Unit,
     onDeleteGroup: () -> Unit,
 ) {
@@ -492,6 +498,19 @@ private fun OverviewTab(
                     }
                     ApuPremiumSwitch(checked = false, onCheckedChange = { onEnableTopics() })
                 }
+            }
+        }
+
+        ApuBubble {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Показывать список участников")
+                    Text("Если выключено, список видят только владелец и администраторы.",
+                        style = MaterialTheme.typography.bodySmall, color = ApuBubbleMutedColor)
+                }
+                ApuPremiumSwitch(checked = memberListVisible,
+                    enabled = canChangeInfo && canChangeVisibility,
+                    onCheckedChange = onSetMemberListVisible)
             }
         }
 

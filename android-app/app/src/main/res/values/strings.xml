@@ -1750,4 +1750,14 @@
     <string name="st_official_checking">Проверяем версию на официальном сайте…</string>
     <string name="st_official_check_download_hint">Проверить свежую версию и скачать, если она новее установленной</string>
     <string name="st_official_already_requested">Эта версия уже скачивается или скачана. Проверьте загрузки и готовые обновления.</string>
+    <string name="group_timezone_title">Часовой пояс группы</string>
+    <string name="group_timezone_search">Поиск страны или города, например Москва</string>
+    <string name="group_timezone_offset_hint">Смещение относительно UTC сейчас; летнее время учитывается автоматически.</string>
+    <string name="group_timezone_not_found">Ничего не найдено</string>
+    <string name="group_timezone_selected">Часовой пояс: %1$s</string>
+    <string name="profile_show_id">Показать идентификатор профиля</string>
+    <string name="profile_hide_id">Скрыть идентификатор профиля</string>
+    <string name="story_photo_shape">Форма фото</string>
+    <string name="story_photo_rectangle">Обычно</string>
+    <string name="story_photo_circle">Круг</string>
 </resources>

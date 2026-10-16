@@ -55,4 +55,6 @@ data class GroupEntity(
     val slowModeSeconds: Int = 0,
     @ColumnInfo(defaultValue = "''")
     val quietHours: String = "",
+    @ColumnInfo(defaultValue = "1")
+    val memberListVisible: Boolean = true,
 )

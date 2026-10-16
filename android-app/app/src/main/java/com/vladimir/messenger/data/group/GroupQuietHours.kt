@@ -51,7 +51,59 @@ data class GroupQuietSchedule(val intervals: List<GroupQuietHours>) {
         require(intervals.map { it.zoneId }.distinct().size == 1) { "Выберите общий часовой пояс группы" }
     }
     fun blocks(atMs: Long): Boolean = intervals.any { it.blocks(atMs) }
-    fun notice(): String = "По расписанию группы сейчас нельзя писать (${intervals.first().zoneId}). Владелец и администраторы могут писать."
+    /** Next real change of the union, including DST transitions and touching intervals. */
+    fun nextChangeAtMs(atMs: Long): Long? {
+        val now = Instant.ofEpochMilli(atMs)
+        val zone = ZoneId.of(intervals.first().zoneId)
+        val date = now.atZone(zone).toLocalDate()
+        val candidates = sortedSetOf<Long>()
+        // A weekly schedule repeats within eight local days; include both
+        // occurrences of ambiguous wall times during the autumn clock change.
+        for (day in 0L..8L) {
+            val localDate = date.plusDays(day)
+            for (interval in intervals) {
+                for (minute in listOf(interval.startMinute, interval.endMinute)) {
+                    val wall = localDate.atStartOfDay().plusMinutes(minute.toLong())
+                    val offsets = zone.rules.getValidOffsets(wall)
+                    if (offsets.isEmpty()) candidates.add(wall.atZone(zone).toInstant().toEpochMilli())
+                    else offsets.forEach { candidates.add(wall.toInstant(it).toEpochMilli()) }
+                }
+            }
+        }
+        val until = date.plusDays(9).atStartOfDay(zone).toInstant()
+        var transition = zone.rules.nextTransition(now)
+        while (transition != null && transition.instant.isBefore(until)) {
+            candidates.add(transition.instant.toEpochMilli())
+            transition = zone.rules.nextTransition(transition.instant.plusSeconds(1))
+        }
+        val blocked = blocks(atMs)
+        return candidates.firstOrNull { it > atMs && blocks(it) != blocked }
+    }
+
+    fun notice(
+        atMs: Long = System.currentTimeMillis(),
+        viewerZone: ZoneId = ZoneId.systemDefault(),
+        locale: java.util.Locale = java.util.Locale.getDefault(),
+    ): String {
+        val blocked = blocks(atMs)
+        val next = nextChangeAtMs(atMs)
+        val english = locale.language == "en"
+        if (next == null) return if (blocked) {
+            if (english) "Messaging is restricted continuously by the group schedule." else "По расписанию группы запрет действует непрерывно."
+        } else {
+            if (english) "Messaging is currently allowed." else "Сейчас писать можно."
+        }
+        val local = Instant.ofEpochMilli(next).atZone(viewerZone)
+        val time = java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm", locale).format(local)
+        val offset = local.offset.id.let { if (it == "Z") "+00:00" else it }
+        return if (english) {
+            if (blocked) "Messaging is restricted. You can write from $time (your local time, UTC$offset)."
+            else "Messaging is allowed. The next restriction starts at $time (your local time, UTC$offset)."
+        } else {
+            if (blocked) "Сейчас писать нельзя. Можно писать с $time (ваше местное время, UTC$offset)."
+            else "Сейчас писать можно. Следующий запрет — с $time (ваше местное время, UTC$offset)."
+        }
+    }
     fun encode(): String = intervals.joinToString("~") { it.encode() }
     companion object {
         // A previously saved single interval is also a valid schedule.

@@ -202,6 +202,7 @@ fun GroupChatScreen(
     // р250: окно создания опроса (кнопка «Опрос» у поля ввода).
     var showCreatePoll by remember { mutableStateOf(false) }
     // Раунд 260: тап по значку темы в шапке открывает её редактирование.
+    var showMembers by remember { mutableStateOf(false) }
     var showEditTopic by remember { mutableStateOf(false) }
     // «Три точки» шапки: уведомления и все способы пригласить в группу/канал.
     var showTopMenu by remember { mutableStateOf(false) }
@@ -243,8 +244,7 @@ fun GroupChatScreen(
     val canDecideRequests = uiState.me?.let {
         com.vladimir.messenger.data.group.GroupRole.isAdminOrOwner(it.role)
     } == true
-    // Раунд 267: тап по пузырю шапки группы/канала ведёт в настройки -
-    // но только админам/владельцу, у остальных тап ничего не делает.
+    // Администраторы видят состав даже при закрытом списке участников.
     val iAmGroupAdmin = canDecideRequests
     // Каталог GIF (кнопка «GIF» у скрепки).
     var showGifCatalog by remember { mutableStateOf(false) }
@@ -640,11 +640,11 @@ fun GroupChatScreen(
                     scrolledContainerColor = Color.Transparent,
                 ),
                 title = {
-                    // Права на действия не меняются: тема — только с правом
-                    // управления темами, группа/канал — для админов/владельца.
+                    // Название группы всегда открывает список; доступ проверяется в окне.
+                    // Шестерёнка по-прежнему открывает настройки.
                     val openHeader: (() -> Unit)? = when {
                         topicHeader && selectedTopic != null && uiState.canManageTopics -> ({ showEditTopic = true })
-                        !topicHeader && iAmGroupAdmin -> ({ onOpenAdmin(uiState.groupId) })
+                        !topicHeader -> ({ showMembers = true })
                         else -> null
                     }
                     ApuHeaderBubble(onClick = openHeader) {
@@ -1391,8 +1391,9 @@ fun GroupChatScreen(
                         kotlinx.coroutines.delay(1_000)
                     }
                 }
-                if (quietBlocked) {
-                    Text(quietSchedule?.notice().orEmpty(), style = MaterialTheme.typography.labelSmall,
+                val localScheduleNotice = rememberGroupScheduleNotice(quietSchedule)
+                if (quietSchedule != null && !iAmGroupAdmin && localScheduleNotice.isNotBlank()) {
+                    Text(localScheduleNotice, style = MaterialTheme.typography.labelSmall,
                         color = ApuBubbleMutedColor, modifier = Modifier.padding(6.dp))
                 }
                 val canSend = (uiState.draft.isNotBlank() || uiState.stagedFile != null) &&
@@ -1463,6 +1464,14 @@ fun GroupChatScreen(
     }
 
     // Раунд 260: тап по значку темы в шапке - смена имени и значка темы.
+    if (showMembers) {
+        GroupMembersDialog(
+            members = uiState.members,
+            canView = uiState.group != null && (uiState.group?.memberListVisible == true || iAmGroupAdmin),
+            onDismiss = { showMembers = false },
+        )
+    }
+
     if (showEditTopic && selectedTopic != null) {
         val topic = selectedTopic
         NewTopicDialog(

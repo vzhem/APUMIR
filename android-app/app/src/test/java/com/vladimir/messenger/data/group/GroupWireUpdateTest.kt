@@ -127,4 +127,17 @@ class GroupWireUpdateTest {
             // Ожидаемо.
         }
     }
+
+    @Test
+    fun memberListVisibilityRoundTrip() {
+        listOf(true, false).forEach { visible ->
+            assertEquals(GroupWire.Packet.MemberListVisibility("group", visible),
+                GroupWire.parse(GroupWire.buildMemberListVisibility("group", visible)))
+        }
+        assertEquals(GroupWire.Packet.MemberListVisibilityRequest("group"),
+            GroupWire.parse(GroupWire.buildMemberListVisibilityRequest("group")))
+        val valid = GroupWire.buildMemberListVisibility("group", true)
+        assertNull(GroupWire.parse(valid.substringBeforeLast('|') + "|2"))
+        assertNull(GroupWire.parse(valid + "|extra"))
+    }
 }

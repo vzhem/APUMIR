@@ -423,6 +423,13 @@ private fun ProfileTabContent(
         }
     }
 
+    val profileView = androidx.compose.ui.platform.LocalView.current
+    var showFingerprint by remember { mutableStateOf(false) }
+    fun profileTap(action: () -> Unit) {
+        profileView.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
+        action()
+    }
+
     // Бегунок справа: видно, где мы в длинном списке.
     val profileScrollState = rememberLazyListState()
     Box(modifier = Modifier.fillMaxSize()) {
@@ -442,16 +449,16 @@ private fun ProfileTabContent(
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Box(
-                            modifier = Modifier.size(104.dp)
-                                .clickable(role = androidx.compose.ui.semantics.Role.Button) { showAvatarPicker = true },
+                            modifier = Modifier.size(124.dp)
+                                .clickable(role = androidx.compose.ui.semantics.Role.Button) { profileTap { showAvatarPicker = true } },
                             contentAlignment = Alignment.Center,
                         ) {
                             Box(
-                                modifier = Modifier.size(100.dp)
+                                modifier = Modifier.size(120.dp)
                                     .border(2.dp, ApuBubbleAccentColor.copy(alpha = 0.38f), CircleShape)
                                     .padding(5.dp),
                             ) {
-                                MyAvatar(displayName = uiState.displayName, modifier = Modifier.fillMaxSize(), size = 88)
+                                MyAvatar(displayName = uiState.displayName, modifier = Modifier.fillMaxSize(), size = 108)
                             }
                             Box(
                                 modifier = Modifier.align(Alignment.BottomEnd).size(30.dp)
@@ -470,7 +477,7 @@ private fun ProfileTabContent(
                         Spacer(Modifier.height(10.dp))
                         Row(
                             modifier = Modifier.heightIn(min = 44.dp)
-                                .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onEditName),
+                                .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = { profileTap(onEditName) }),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
@@ -488,7 +495,7 @@ private fun ProfileTabContent(
                             style = MaterialTheme.typography.bodyMedium,
                             color = ApuBubbleAccentColor,
                             fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.clickable(onClick = onUsername).padding(vertical = 4.dp),
+                            modifier = Modifier.clickable(onClick = { profileTap(onUsername) }).heightIn(min = 48.dp).padding(vertical = 12.dp),
                         )
                         Spacer(Modifier.height(8.dp))
                         Row(
@@ -547,6 +554,11 @@ private fun ProfileTabContent(
                             }
                         }
                         Spacer(Modifier.height(14.dp))
+                        ApuTextAction(
+                            label = stringResource(if (showFingerprint) R.string.profile_hide_id else R.string.profile_show_id),
+                            onClick = { showFingerprint = !showFingerprint },
+                        )
+                        if (showFingerprint) {
                         Box(
                             modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
                                 .background(ApuBubbleAccentColor.copy(alpha = 0.04f)).padding(10.dp),
@@ -562,6 +574,8 @@ private fun ProfileTabContent(
                             }
                         }
                         Spacer(Modifier.height(14.dp))
+                        }
+                        Spacer(Modifier.height(16.dp))
                         val actions = listOf(
                             Triple(stringResource(R.string.settings_my_qr), Icons.Default.QrCode, onMyQr),
                             Triple(stringResource(R.string.groups_link), Icons.Default.ContentCopy, onCopyLink),
@@ -571,9 +585,9 @@ private fun ProfileTabContent(
                         val fontScale = LocalDensity.current.fontScale
                         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
                             val columns = ApuSettingsLayout.profileActionColumns(maxWidth.value, fontScale)
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                                 actions.chunked(columns).forEach { group ->
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                         group.forEach { (title, icon, click) ->
                                             ApuProfileQuickAction(title, icon, click, modifier = Modifier.weight(1f))
                                         }

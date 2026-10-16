@@ -975,7 +975,7 @@ class ChatListViewModel @Inject constructor(
     }
 
     /** Своя история: сохранить и разослать контактам личных чатов. */
-    fun publishStory(text: String, bg: Int, photoB64: String? = null) {
+    fun publishStory(text: String, bg: Int, photoB64: String? = null, photoCircle: Boolean = false) {
         if (text.isBlank() && photoB64 == null) return
         viewModelScope.launch {
             val me = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -985,7 +985,7 @@ class ChatListViewModel @Inject constructor(
                 _uiState.update { it.copy(error = "Ядро ещё не готово: дождитесь подключения перед публикацией истории.") }
                 return@launch
             }
-            val story = com.vladimir.messenger.data.story.StoryStore.publish(me, text.take(200), bg, photoB64)
+            val story = com.vladimir.messenger.data.story.StoryStore.publish(me, text.take(200), bg, photoB64, photoCircle)
             if (!chatRepository.enqueueStory(story)) {
                 _uiState.update { it.copy(error = "История сохранена у вас, но нет адресатов либо очередь доставки недоступна или заполнена. Проверьте Логи.") }
             } else {
