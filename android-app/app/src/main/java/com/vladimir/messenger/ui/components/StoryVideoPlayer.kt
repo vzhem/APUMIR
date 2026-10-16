@@ -41,9 +41,11 @@ internal fun StoryVideoPlayer(story: StoryStore.Story, paused: Boolean,
     onProgress: (Float) -> Unit, onEnded: () -> Unit) {
     val context = LocalContext.current
     var file by remember(story.id) { mutableStateOf<File?>(null) }
+    var unavailable by remember(story.id) { mutableStateOf<String?>(null) }
     LaunchedEffect(story.id) {
         while (file == null) {
             file = withContext(Dispatchers.IO) { StoryVideoStorage.file(context, story) }
+            unavailable = StoryVideoStorage.failure(story)
             if (file == null) delay(1000)
         }
     }
@@ -53,7 +55,7 @@ internal fun StoryVideoPlayer(story: StoryStore.Story, paused: Boolean,
     if (source == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             StoryContentCanvas(story.text, story.photoB64, Color.Black)
-            Text("Видео загружается. Можно перейти к следующей истории.", color = Color.White,
+            Text(unavailable ?: "Видео загружается. Можно перейти к следующей истории.", color = Color.White,
                 modifier = Modifier.align(Alignment.TopCenter).padding(20.dp))
         }
         return

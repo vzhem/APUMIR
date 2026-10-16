@@ -15,6 +15,9 @@ class FakeFileTransferDao : FileTransferDao {
     private val chunks = HashMap<Pair<String, Long>, FileTransferChunkEntity>()
     private val observe = MutableStateFlow(0)
 
+    override suspend fun getStoryVideoTransfers(): List<FileTransferEntity> =
+        transfers.values.filter { it.displayName.startsWith("apu-story-video-") }
+
     override fun observeForChat(chatId: String): Flow<List<FileTransferEntity>> =
         observe.map { transfers.values.filter { entity -> entity.chatId == chatId } }
 

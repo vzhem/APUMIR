@@ -11,6 +11,11 @@ import kotlinx.coroutines.withContext
 object StoryVideoStorage {
     private const val MAX_LIBRARY_BYTES = 256L * 1024 * 1024
     private val lock = Any()
+    private val failed = java.util.concurrent.ConcurrentHashMap<String, String>()
+    fun failure(story: StoryStore.Story): String? = failed[key(story.authorId, story.id)]
+    fun noteFailure(story: StoryStore.Story) {
+        if (failed.size < 100) failed[key(story.authorId, story.id)] = "Не удалось проверить или сохранить видео. Проверьте свободное место и перезапустите приложение для повтора."
+    }
     private fun directory(context: Context) = File(context.noBackupFilesDir, "story-videos-v1").apply {
         check(isDirectory || mkdirs())
     }
@@ -32,13 +37,17 @@ object StoryVideoStorage {
             try {
                 source.inputStream().use { input -> FileOutputStream(temp).use { output -> input.copyTo(output); output.fd.sync() } }
                 check(temp.renameTo(target)) { "Не удалось сохранить видеоисторию" }
+                failed.remove(key(author, id))
             } finally { temp.delete() }
         }
     }
     fun remove(context: Context, author: String, id: String) = synchronized(lock) {
+        failed.remove(key(author, id))
         File(directory(context), key(author, id) + ".mp4").delete()
     }
     fun sweep(context: Context, active: List<StoryStore.Story>) = synchronized(lock) {
+        val alive = active.map { key(it.authorId, it.id) }.toSet()
+        failed.keys.removeAll { it !in alive }
         val keep = active.filter { it.video != null }.map { key(it.authorId, it.id) + ".mp4" }.toSet()
         directory(context).listFiles().orEmpty().forEach { if (it.name !in keep && System.currentTimeMillis() - it.lastModified() > 60_000) it.delete() }
     }

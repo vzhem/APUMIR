@@ -20,28 +20,37 @@ internal object StoryVideoFiles {
         check(isDirectory || mkdirs()) { "Не удалось создать папку видеоисторий" }
     }
 
-    suspend fun import(context: Context, uri: Uri): Source = withContext(Dispatchers.IO) {
-        val destination = File.createTempFile("source-", ".video", directory(context))
+    suspend fun import(context: Context, uri: Uri): Source {
+        var staged: File? = null
         try {
-            var total = 0L
-            context.contentResolver.openInputStream(uri)?.use { input ->
-                destination.outputStream().use { output ->
-                    val buffer = ByteArray(64 * 1024)
-                    while (true) {
-                        currentCoroutineContext().ensureActive()
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        total += count
-                        require(total <= MAX_SOURCE_BYTES) { "Исходное видео больше 256 МБ" }
-                        require(destination.parentFile!!.usableSpace > count + 1024 * 1024) { "Недостаточно места для видео" }
-                        output.write(buffer, 0, count)
-                    }
+            return withContext(Dispatchers.IO) {
+                val destination = File.createTempFile("source-", ".video", directory(context)).also { staged = it }
+                try {
+                    var total = 0L
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        destination.outputStream().use { output ->
+                            val buffer = ByteArray(64 * 1024)
+                            while (true) {
+                                currentCoroutineContext().ensureActive()
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                total += count
+                                require(total <= MAX_SOURCE_BYTES) { "Исходное видео больше 256 МБ" }
+                                require(destination.parentFile!!.usableSpace > count + 1024 * 1024) { "Недостаточно места для видео" }
+                                output.write(buffer, 0, count)
+                            }
+                        }
+                    } ?: error("Не удалось открыть видео")
+                    require(total > 0) { "Видео пустое" }
+                    inspect(destination)
+                } catch (error: Throwable) {
+                    destination.delete()
+                    throw error
                 }
-            } ?: error("Не удалось открыть видео")
-            require(total > 0) { "Видео пустое" }
-            inspect(destination)
+            }
         } catch (error: Throwable) {
-            destination.delete()
+            // withContext can be cancelled while dispatching its successful result back to UI.
+            staged?.delete()
             throw error
         }
     }

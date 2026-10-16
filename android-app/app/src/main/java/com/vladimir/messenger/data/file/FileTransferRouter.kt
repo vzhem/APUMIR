@@ -606,7 +606,8 @@ class FileTransferRouter @Inject constructor(
             com.vladimir.messenger.data.story.StoryVideoWire.matches(it, row.peerNodeId, row.displayName,
                 row.fileSha256, row.totalBytes, System.currentTimeMillis())
         } ?: return
-        if (com.vladimir.messenger.data.story.StoryVideoStorage.file(appContext, story) != null) return
+        if (com.vladimir.messenger.data.story.StoryVideoStorage.file(appContext, story) != null ||
+            com.vladimir.messenger.data.story.StoryVideoStorage.failure(story) != null) return
         val file = receivedStore.receivedFile(row.transferId, row.displayName) ?: return
         try {
             com.vladimir.messenger.data.story.StoryVideoStorage.install(appContext,
@@ -616,7 +617,10 @@ class FileTransferRouter @Inject constructor(
                 com.vladimir.messenger.data.story.StoryVideoStorage.remove(appContext, story.authorId, story.id)
             }
         } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-        catch (failure: Exception) { Log.w(TAG, "Story video validation failed", failure) }
+        catch (failure: Exception) {
+            com.vladimir.messenger.data.story.StoryVideoStorage.noteFailure(story)
+            Log.w(TAG, "Story video validation failed", failure)
+        }
     }
 
     suspend fun routeIncoming(senderId: String, chatId: String, messageId: String, text: String): Boolean {
@@ -788,6 +792,7 @@ class FileTransferRouter @Inject constructor(
             runCatching { storyVideos.pump(drop = { row ->
                 if (row.direction == "INCOMING" && row.state != "COMPLETE") declineIncoming(row)
                 else dropTransfer(row.transferId)
+                FileTransferKeyVault.deleteKey(appContext, row.transferId)
             }, completed = { row ->
                 if (row.direction == "OUTGOING") releaseOutgoingChunks(row.transferId)
                 else acceptStoryVideo(row)

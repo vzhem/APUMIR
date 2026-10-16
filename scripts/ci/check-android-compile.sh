@@ -83,7 +83,7 @@ cd android-app || exit 1
     --tests '*GroupSlowModeTest*' --tests '*GroupQuietHoursTest*' --tests '*RankWireTest*' --tests '*FileTransferRankPolicyTest*' --tests '*OnlineHelperPolicyTest*' \
     --tests '*ShortLinksTest*' --tests '*DiagnosticsReportTest*' --tests '*RelayStorageDiagnosticsTest*' --tests '*RuntimeHealthTest*' --tests '*OperationalHealthTest*' --tests '*StoryDeliveryQueueTest*' --tests '*StoryVideoDraftTest*' --tests '*StoryVideoWireTest*' --tests '*StoryPublishTest*' --tests '*StoryOutboxTest*' --tests '*StoryStoreMergeTest*' --tests '*StoryCropTest*' --tests '*ProfileMirrorBirthdayTest*' \
     --tests '*StoryFeedbackWireTest*' --tests '*StoryFeedbackLedgerTest*' --tests '*StoryFeedbackOutboxTest*' \
-    --tests '*GroupFileSeederTest*' --tests '*FileTransferWireTest*' --tests '*FileTransferChunkStoreTest*' --tests '*TemporaryFileSweepTest*' --tests '*EphemeralControlTest*' \
+    --tests '*GroupFileSeederTest*' --tests '*FileTransferWireTest*' --tests '*FileTransferReceiverTest*' --tests '*FileTransferSenderTest*' --tests '*FileTransferChunkStoreTest*' --tests '*TemporaryFileSweepTest*' --tests '*EphemeralControlTest*' \
     --tests '*SendTimePolicyTest*' --tests '*DeferredWireTest*' --tests '*DeferredDeliveryPolicyTest*'
 TESTS_STATUS=$?
 
