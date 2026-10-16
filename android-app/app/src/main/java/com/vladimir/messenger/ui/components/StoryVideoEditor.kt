@@ -19,6 +19,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -46,12 +47,13 @@ internal fun StoryVideoEditor(
     source: StoryVideoFiles.Source,
     onDismiss: () -> Unit,
     onReady: (StoryVideoExporter.Exported) -> Unit,
-    initialCircle: Boolean = false,
-    onCircleChange: (Boolean) -> Unit = {},
+    draft: StoryVideoDraft,
+    onDraftChange: (StoryVideoDraft) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var draft by remember(source.file) { mutableStateOf(StoryVideoDraft.fromSource(source.durationMs).copy(circle = initialCircle)) }
+    val currentDraft by rememberUpdatedState(draft)
+    var resetDialog by remember { mutableStateOf(false) }
     var error by remember(source.file) { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
@@ -94,8 +96,7 @@ internal fun StoryVideoEditor(
                 verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Видеоистория · до 60 секунд")
                 StoryVideoShapeSelector(draft.circle, enabled = !busy, onChange = {
-                    draft = draft.copy(circle = it)
-                    onCircleChange(it)
+                    onDraftChange(draft.copy(circle = it))
                 })
                 StoryVideoSurface(player, draft.circle, Modifier.fillMaxWidth().height(300.dp))
                 ApuPremiumButton(label = androidx.compose.ui.res.stringResource(
@@ -113,31 +114,34 @@ internal fun StoryVideoEditor(
                     onValueChange = { value ->
                         val start = value.toLong().coerceAtMost(source.durationMs - StoryVideoDraft.MIN_DURATION_MS)
                         val end = (start + draft.durationMs).coerceAtMost(source.durationMs)
-                        draft = draft.trim(start, end)
+                        onDraftChange(draft.trim(start, end))
                     })
                 Text("Длительность: ${draft.durationMs / 1000.0} с")
                 val maxDuration = minOf(StoryVideoDraft.MAX_DURATION_MS, source.durationMs - draft.startMs)
                 if (maxDuration > StoryVideoDraft.MIN_DURATION_MS) {
                     ApuPremiumSlider(value = draft.durationMs.toFloat(), enabled = !busy,
                         valueRange = StoryVideoDraft.MIN_DURATION_MS.toFloat()..maxDuration.toFloat(),
-                        onValueChange = { draft = draft.trim(draft.startMs, draft.startMs + it.toLong()) })
+                        onValueChange = { onDraftChange(draft.trim(draft.startMs, draft.startMs + it.toLong())) })
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Без звука")
                     ApuPremiumSwitch(checked = draft.muted, enabled = !busy,
-                        onCheckedChange = { draft = draft.copy(muted = it) })
+                        onCheckedChange = { onDraftChange(draft.copy(muted = it)) })
                 }
                 Text("Обложка: ${(draft.coverMs - draft.startMs) / 1000.0} с от начала фрагмента")
                 ApuPremiumSlider(value = draft.coverMs.toFloat(), enabled = !busy,
                     valueRange = draft.startMs.toFloat()..(draft.endMs - 1).toFloat(),
                     onValueChange = {
-                        draft = draft.copy(coverMs = it.toLong().coerceIn(draft.startMs, draft.endMs - 1))
+                        val changed = draft.copy(coverMs = it.toLong().coerceIn(draft.startMs, draft.endMs - 1))
+                        onDraftChange(changed)
                         player.pause()
-                        player.seekTo(draft.exportedCoverMs)
+                        player.seekTo(changed.exportedCoverMs)
                     })
                 ApuFormTextField(value = draft.caption, label = "Подпись (до 200 символов)",
                     singleLine = false, enabled = !busy,
-                    onValueChange = { draft = draft.copy(caption = it.take(StoryVideoDraft.MAX_CAPTION_CHARS)) })
+                    onValueChange = { onDraftChange(draft.copy(caption = it.take(StoryVideoDraft.MAX_CAPTION_CHARS))) })
+                ApuTextAction(label = androidx.compose.ui.res.stringResource(com.vladimir.messenger.R.string.story_video_reset),
+                    enabled = !busy, onClick = { player.pause(); resetDialog = true })
                 error?.let { Text(it) }
                 if (busy) Text("Подготовка видео: ${(progress * 100).toInt()}%")
                 ApuPremiumButton(label = if (busy) "Подготавливаем…" else "Подготовить видео",
@@ -151,7 +155,7 @@ internal fun StoryVideoEditor(
                             var result: StoryVideoExporter.Exported? = null
                             try {
                                 result = StoryVideoExporter.export(context, source, snapshot) { progress = it }
-                                check(result.matches(source.file, draft)) { "Редактирование изменилось, повторите экспорт" }
+                                check(result.matches(source.file, currentDraft)) { "Редактирование изменилось, повторите экспорт" }
                                 onReady(result)
                                 result = null // Ownership transfers to caller only after successful handoff.
                             } catch (cancelled: CancellationException) {
@@ -169,4 +173,14 @@ internal fun StoryVideoEditor(
             }
         }
     }
+    if (resetDialog) StoryVideoResetDialog(onDismiss = { resetDialog = false }, onReset = { setting ->
+        val changed = draft.reset(setting)
+        onDraftChange(changed)
+        error = null
+        progress = 0f
+        player.pause()
+        if (setting == StoryVideoDraft.Reset.COVER) player.seekTo(0)
+        resetDialog = false
+    })
+
 }

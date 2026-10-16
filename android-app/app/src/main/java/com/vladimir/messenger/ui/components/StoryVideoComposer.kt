@@ -17,6 +17,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import com.vladimir.messenger.data.story.StoryVideoDraft
+import com.vladimir.messenger.data.story.StoryVideoSizeFormat
 import com.vladimir.messenger.data.story.StoryVideoExporter
 import com.vladimir.messenger.data.story.StoryVideoFiles
 import kotlinx.coroutines.CancellationException
@@ -28,6 +30,7 @@ internal fun StoryVideoComposer(onDismiss: () -> Unit, onPublish: (StoryVideoExp
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var source by remember { mutableStateOf<StoryVideoFiles.Source?>(null) }
+    var draft by remember { mutableStateOf<StoryVideoDraft?>(null) }
     var exported by remember { mutableStateOf<StoryVideoExporter.Exported?>(null) }
     var circle by remember { mutableStateOf(false) }
     var camera by remember { mutableStateOf(false) }
@@ -40,7 +43,11 @@ internal fun StoryVideoComposer(onDismiss: () -> Unit, onPublish: (StoryVideoExp
         if (uri != null) scope.launch {
             busy = true
             error = null
-            try { source = StoryVideoFiles.import(context, uri) }
+            try {
+                val imported = StoryVideoFiles.import(context, uri)
+                source = imported
+                draft = StoryVideoDraft.fromSource(imported.durationMs).copy(circle = circle)
+            }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { error = failure.message ?: "Не удалось открыть видео" }
             finally { busy = false }
@@ -52,17 +59,24 @@ internal fun StoryVideoComposer(onDismiss: () -> Unit, onPublish: (StoryVideoExp
         camera -> StoryVideoCamera(circle = circle, onDismiss = { camera = false }, onRecorded = {
             source?.file?.delete()
             source = it
+            draft = StoryVideoDraft.fromSource(it.durationMs).copy(circle = circle)
             camera = false
         })
-        input != null && ready == null -> StoryVideoEditor(input, onDismiss = {
-            input.file.delete(); source = null
-        }, onReady = { exported = it }, initialCircle = circle, onCircleChange = { circle = it })
+        input != null && ready == null -> StoryVideoEditor(input, draft = checkNotNull(draft), onDraftChange = {
+            draft = it
+            circle = it.circle
+        }, onDismiss = {
+            input.file.delete(); source = null; draft = null
+        }, onReady = { exported = it })
         else -> Dialog(onDismissRequest = onDismiss) {
             ApuSettingsCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Видеоистория · до 60 секунд")
                     if (ready != null) {
-                        Text("${ready.media.durationMs / 1000.0} с · ${ready.media.sizeBytes / (1024 * 1024)} МБ")
+                        Text(androidx.compose.ui.res.stringResource(com.vladimir.messenger.R.string.story_video_export_summary,
+                            (ready.media.durationMs / 1000.0).toString(),
+                            StoryVideoSizeFormat.megabytes(ready.media.sizeBytes,
+                                androidx.compose.ui.platform.LocalConfiguration.current.locales[0])))
                         Text(androidx.compose.ui.res.stringResource(if (ready.draft.circle)
                             com.vladimir.messenger.R.string.story_photo_circle else com.vladimir.messenger.R.string.story_photo_rectangle))
                         Text(ready.draft.caption)

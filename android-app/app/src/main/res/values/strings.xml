@@ -1762,4 +1762,13 @@
     <string name="story_photo_circle">Круг</string>
     <string name="story_video_shape">Формат видео</string>
     <string name="story_media_circle_hint">Круг показывает центральную часть кадра. Обычный формат сохраняет пропорции.</string>
+    <string name="story_video_export_summary">%1$s с · %2$s МБ</string>
+    <string name="story_video_reset">Сбросить настройки</string>
+    <string name="story_video_reset_all">Сбросить всё</string>
+    <string name="story_video_reset_hint">Выберите, что сбросить, или сбросьте всё: первые 60 секунд (либо весь короткий ролик), обложка в начале, исходный звук, пустая подпись и обычный формат. Исходное видео останется.</string>
+    <string name="story_video_reset_trim">Обрезку — к началу ролика</string>
+    <string name="story_video_reset_cover">Обложку — к началу фрагмента</string>
+    <string name="story_video_reset_audio">Звук — как в исходнике</string>
+    <string name="story_video_reset_caption">Очистить подпись</string>
+    <string name="story_video_reset_shape">Форму — обычный формат</string>
 </resources>

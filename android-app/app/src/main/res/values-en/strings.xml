@@ -1729,4 +1729,13 @@ The file is not on this phone</string>
     <string name="story_photo_circle">Circle</string>
     <string name="story_video_shape">Video format</string>
     <string name="story_media_circle_hint">Circle shows the center of the frame. Regular keeps the original proportions.</string>
+    <string name="story_video_export_summary">%1$s s · %2$s MB</string>
+    <string name="story_video_reset">Reset settings</string>
+    <string name="story_video_reset_all">Reset all</string>
+    <string name="story_video_reset_hint">Reset one setting or all: the first 60 seconds (or the entire shorter clip), cover at the start, original audio, empty caption and regular format. The source video is kept.</string>
+    <string name="story_video_reset_trim">Trim — from the start</string>
+    <string name="story_video_reset_cover">Cover — start of the selected clip</string>
+    <string name="story_video_reset_audio">Audio — original</string>
+    <string name="story_video_reset_caption">Clear caption</string>
+    <string name="story_video_reset_shape">Shape — regular</string>
 </resources>

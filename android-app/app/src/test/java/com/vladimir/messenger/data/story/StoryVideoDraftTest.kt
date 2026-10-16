@@ -66,4 +66,37 @@ class StoryVideoDraftTest {
         assertTrue(runCatching { StoryVideoGeometry.exportHeight(0, 720) }.isFailure)
     }
 
+    @Test fun partialResetsKeepUnrelatedEdits() {
+        val edited = StoryVideoDraft(120_000, 65_000, 100_000, 80_000,
+            muted = true, caption = "Keep my caption", circle = true)
+        assertEquals(edited.copy(muted = false), edited.reset(StoryVideoDraft.Reset.AUDIO))
+        assertEquals(edited.copy(caption = ""), edited.reset(StoryVideoDraft.Reset.CAPTION))
+        assertEquals(edited.copy(circle = false), edited.reset(StoryVideoDraft.Reset.SHAPE))
+        assertEquals(edited.copy(coverMs = 65_000), edited.reset(StoryVideoDraft.Reset.COVER))
+        val trimmed = edited.reset(StoryVideoDraft.Reset.TRIM)
+        assertEquals(0L, trimmed.startMs)
+        assertEquals(60_000L, trimmed.endMs)
+        assertEquals(59_999L, trimmed.coverMs)
+        assertEquals(edited.caption, trimmed.caption)
+        assertTrue(trimmed.muted && trimmed.circle)
+        assertEquals(StoryVideoDraft.fromSource(120_000), edited.reset(StoryVideoDraft.Reset.ALL))
+        assertEquals(4_363L, StoryVideoDraft.fromSource(4_363).copy(caption = "x")
+            .reset(StoryVideoDraft.Reset.ALL).durationMs)
+    }
+
+    @Test fun resetTrimKeepsCoverIfItIsStillInsideTheClip() {
+        val draft = StoryVideoDraft(120_000, 10_000, 50_000, 30_000)
+        assertEquals(30_000L, draft.reset(StoryVideoDraft.Reset.TRIM).coverMs)
+    }
+
+    @Test fun videoSizeShowsTwoDecimalPlacesAndUsesTheDisplayLocale() {
+        assertEquals("1.27", StoryVideoSizeFormat.megabytes(1_270_000, java.util.Locale.US))
+        assertEquals("1,27", StoryVideoSizeFormat.megabytes(1_270_000, java.util.Locale.forLanguageTag("ru")))
+        assertEquals("2.00", StoryVideoSizeFormat.megabytes(1_999_000, java.util.Locale.US))
+        assertEquals("0.00", StoryVideoSizeFormat.megabytes(0, java.util.Locale.US))
+        assertEquals("0.50", StoryVideoSizeFormat.megabytes(500_000, java.util.Locale.US))
+        assertEquals("1.05", StoryVideoSizeFormat.megabytes(1_048_576, java.util.Locale.US))
+        assertTrue(runCatching { StoryVideoSizeFormat.megabytes(-1) }.isFailure)
+    }
+
 }

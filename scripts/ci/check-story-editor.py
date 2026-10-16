@@ -84,6 +84,19 @@ class StoryEditorContracts(unittest.TestCase):
         self.assertIn("StoryVideoSurface(player, story.videoCircle", player)
         self.assertIn("photoCircle = story.videoCircle", player)
 
+    def test_return_from_export_keeps_the_complete_draft_in_the_parent(self):
+        composer = (MAIN / "ui/components/StoryVideoComposer.kt").read_text()
+        editor = (MAIN / "ui/components/StoryVideoEditor.kt").read_text()
+        self.assertIn("draft = checkNotNull(draft), onDraftChange", composer)
+        self.assertIn("ready.delete(); exported = null", composer)
+        self.assertNotIn("StoryVideoDraft.fromSource", editor)
+        self.assertIn("val currentDraft by rememberUpdatedState(draft)", editor)
+        self.assertIn("result.matches(source.file, currentDraft)", editor)
+        self.assertIn("StoryVideoSizeFormat.megabytes(ready.media.sizeBytes", composer)
+        self.assertNotIn("sizeBytes / (1024 * 1024)", composer)
+        self.assertIn("StoryVideoResetDialog", editor)
+        self.assertIn("draft.reset(setting)", editor)
+
     def test_manual_whitespace_survives_publish(self):
         source = (MAIN / "ui/components/Stories.kt").read_text()
         self.assertIn("onPublish(text, bg, photo, photo != null && photoCircle)", source)

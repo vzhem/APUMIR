@@ -27,6 +27,18 @@ data class StoryVideoDraft(
         return copy(startMs = startMs, endMs = endMs, coverMs = coverMs.coerceIn(startMs, endMs - 1))
     }
 
+    enum class Reset { TRIM, COVER, AUDIO, CAPTION, SHAPE, ALL }
+
+    /** Reset only the chosen setting; the source file and unrelated edits are untouched. */
+    fun reset(setting: Reset): StoryVideoDraft = when (setting) {
+        Reset.TRIM -> trim(0, minOf(sourceDurationMs, MAX_DURATION_MS))
+        Reset.COVER -> copy(coverMs = startMs)
+        Reset.AUDIO -> copy(muted = false)
+        Reset.CAPTION -> copy(caption = "")
+        Reset.SHAPE -> copy(circle = false)
+        Reset.ALL -> fromSource(sourceDurationMs)
+    }
+
     companion object {
         const val MAX_DURATION_MS = 60_000L
         const val MIN_DURATION_MS = 1_000L
@@ -77,5 +89,13 @@ object StoryVideoGeometry {
         require(width > 0 && height > 0)
         val scale = minOf(1.0, 720.0 / width, 1280.0 / height)
         return ((height * scale).toInt() / 2 * 2).coerceAtLeast(2)
+    }
+}
+
+/** Decimal megabytes, matching the MB label, rounded rather than truncated. */
+object StoryVideoSizeFormat {
+    fun megabytes(bytes: Long, locale: java.util.Locale = java.util.Locale.getDefault()): String {
+        require(bytes >= 0)
+        return String.format(locale, "%.2f", bytes / 1_000_000.0)
     }
 }
