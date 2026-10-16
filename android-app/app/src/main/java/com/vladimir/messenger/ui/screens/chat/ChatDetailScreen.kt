@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.chat
 
+import com.vladimir.messenger.ui.components.ApuAction
+import com.vladimir.messenger.ui.components.ConversationHeader
 import com.vladimir.messenger.ui.components.ApuPremiumSpinner
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
@@ -359,143 +361,39 @@ fun ChatDetailScreen(
         containerColor = Color.Transparent,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(
-                modifier = com.vladimir.messenger.ui.components.apuGlassBarModifier(),
-                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent,
-                    // Прокрутка НЕ должна красить панель: под ней обои APU.
-                    scrolledContainerColor = Color.Transparent,
+            val headerAvatars by AvatarStore.avatars.collectAsStateWithLifecycle()
+            val canCall = contactId.startsWith("pk_")
+            val notificationsMuted = uiState.mutedUntilMs > System.currentTimeMillis()
+            ConversationHeader(
+                name = contactName,
+                status = when {
+                    uiState.isPeerTyping -> stringResource(R.string.chat_typing)
+                    uiState.isContactOnline -> stringResource(R.string.chat_online)
+                    else -> stringResource(R.string.chat_offline)
+                },
+                active = uiState.isPeerTyping || uiState.isContactOnline,
+                onBack = onBackClick,
+                onProfile = { showPeerProfile = true },
+                avatar = if (contactId.isNotBlank()) ({
+                    PeerAvatar(name = contactName, avatarB64 = headerAvatars[contactId],
+                        vip = uiState.peerVip || uiState.selfVip, size = 30.dp)
+                }) else null,
+                vip = uiState.peerVip,
+                actions = listOfNotNull(
+                    ApuAction(title = stringResource(R.string.action_search), icon = Icons.Default.Search,
+                        onClick = { searchOpen = !searchOpen; if (!searchOpen) searchQuery = "" }),
+                    ApuAction(title = stringResource(R.string.menu_call), icon = Icons.Default.Call,
+                        enabled = canCall, onClick = { onCallClick(contactId, contactName) }),
+                    ApuAction(title = stringResource(R.string.menu_video_call), icon = Icons.Default.Videocam,
+                        enabled = canCall, onClick = { onVideoCallClick(contactId, contactName) }),
+                    if (contactId.isNotBlank()) ApuAction(title = stringResource(R.string.chat_rename),
+                        icon = Icons.Default.Edit, onClick = { onRenameClick(contactId, contactName) }) else null,
+                    ApuAction(title = stringResource(R.string.conversation_wallpaper), icon = Icons.Default.Wallpaper,
+                        onClick = { showWallpaper = true }),
+                    ApuAction(title = stringResource(if (notificationsMuted) R.string.chat_change_mute else R.string.menu_mute),
+                        icon = if (notificationsMuted) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
+                        onClick = { showNotificationMuteDialog = true }),
                 ),
-                title = {
-                    // Общий пузырь шапки, как в группах и каналах.
-                    ApuHeaderBubble(onClick = { showPeerProfile = true }) {
-                        Column {
-                            // Знак VIP у имени: собеседник сам сообщил ранг выше
-                            // десятого (конверт APURANK1) — это признание, а не
-                            // платная функция, поэтому знак просто рядом с именем.
-                            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                // Аватарка собеседника: у элиты — в объёмном
-                                // золотом кольце. Маленькая, чтобы шапка не
-                                // разъезжалась: строка имени остаётся главной.
-                                if (contactId.isNotBlank()) {
-                                    val headerAvatars by AvatarStore.avatars.collectAsStateWithLifecycle()
-                                    PeerAvatar(
-                                        name = contactName,
-                                        avatarB64 = headerAvatars[contactId],
-                                        vip = uiState.peerVip || uiState.selfVip,
-                                        size = 30.dp,
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-                                }
-                                Text(
-                                    contactName,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color(0xFF1E2430),
-                                    maxLines = 1,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f, fill = false),
-                                )
-                                if (uiState.peerVip) {
-                                    Spacer(Modifier.width(6.dp))
-                                    ApuVipBadge(compact = true)
-                                }
-                            }
-                            // р235: «печатает…» важнее статуса сети и гаснет само.
-                            val peerTyping = uiState.isPeerTyping
-                            Text(
-                                text = when {
-                                    peerTyping -> stringResource(R.string.chat_typing)
-                                    uiState.isContactOnline -> stringResource(R.string.chat_online)
-                                    else -> stringResource(R.string.chat_offline)
-                                },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (peerTyping || uiState.isContactOnline)
-                                    ApuBubbleAccentColor
-                                else
-                                    Color(0xFF5A6472),
-                            )
-                        }
-                    }
-                },
-                navigationIcon = {
-                    // Каждая кнопка шапки — в своём пузыре, как и заголовок.
-                    ApuHeaderIconBubble(
-                        onClick = onBackClick,
-                        contentDescription = stringResource(R.string.action_back),
-                    ) {
-                        Icon(Icons.Default.ArrowBack, null)
-                    }
-                },
-                actions = {
-                    ApuHeaderIconBubble(
-                        onClick = {
-                            searchOpen = !searchOpen
-                            if (!searchOpen) searchQuery = ""
-                        },
-                        contentDescription = stringResource(R.string.action_search),
-                    ) {
-                        Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    if (contactId.isNotBlank()) {
-                        ApuHeaderIconBubble(
-                            onClick = { onRenameClick(contactId, contactName) },
-                            contentDescription = stringResource(R.string.chat_rename),
-                        ) {
-                            Icon(
-                                Icons.Default.Edit,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    // Аудио- и видеозвонок: только у контакта с node id (pk_…).
-                    val canCall = contactId.startsWith("pk_")
-                    ApuHeaderIconBubble(
-                        onClick = { onCallClick(contactId, contactName) },
-                        contentDescription = stringResource(R.string.menu_call),
-                        enabled = canCall,
-                    ) {
-                        Icon(
-                            Icons.Default.Call,
-                            contentDescription = null,
-                            tint = if (canCall) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                Color(0xFF9AA3AF)
-                            },
-                        )
-                    }
-                    ApuHeaderIconBubble(
-                        onClick = { onVideoCallClick(contactId, contactName) },
-                        contentDescription = stringResource(R.string.menu_video_call),
-                        enabled = canCall,
-                    ) {
-                        Icon(
-                            Icons.Default.Videocam,
-                            contentDescription = null,
-                            tint = if (canCall) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                Color(0xFF9AA3AF)
-                            },
-                        )
-                    }
-                    ApuHeaderIconBubble(onClick = { showWallpaper = true },
-                        contentDescription = stringResource(R.string.conversation_wallpaper)) {
-                        Icon(Icons.Default.Wallpaper, contentDescription = null)
-                    }
-                    val notificationsMuted = uiState.mutedUntilMs > System.currentTimeMillis()
-                    ApuHeaderIconBubble(
-                        onClick = { showNotificationMuteDialog = true },
-                        contentDescription = if (notificationsMuted) stringResource(R.string.chat_change_mute) else stringResource(R.string.menu_mute),
-                    ) {
-                        Icon(
-                            if (notificationsMuted) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
-                            contentDescription = null,
-                            tint = if (notificationsMuted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                },
             )
         },
         bottomBar = {
