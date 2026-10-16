@@ -258,28 +258,33 @@ fun ChatListScreen(
                             // заголовок - это сразу бейдж ранга, тап по нему
                             // открывает, что уже доступно и как расти дальше.
                             if (uiState.rankBadge.isNotBlank()) {
-                                Row(
-                                    modifier = Modifier.clickable(onClick = onRankClick),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    // У VIP медаль особая (фиолетово-золотая лента
-                                    // и кольцо элиты) и рядом со званием стоит
-                                    // знак VIP - как награда рядом с именем в
-                                    // топовых мессенджерах.
-                                    RankMedal(size = 26.dp, vip = uiState.rankVip)
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        uiState.rankBadge,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    if (uiState.rankVip) {
-                                        // Полный знак «VIP» вместо одной звезды: у VIP
-                                        // в шапке должно быть видно сам статус.
+                                Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                                    Row(
+                                        modifier = Modifier.clickable(onClick = onRankClick),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        // У VIP медаль особая (фиолетово-золотая лента
+                                        // и кольцо элиты) и рядом со званием стоит
+                                        // знак VIP - как награда рядом с именем в
+                                        // топовых мессенджерах.
+                                        RankMedal(size = 26.dp, vip = uiState.rankVip)
                                         Spacer(Modifier.width(6.dp))
-                                        ApuVipBadge()
+                                        Text(
+                                            uiState.rankBadge,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        if (uiState.rankVip) {
+                                            // Полный знак «VIP» вместо одной звезды: у VIP
+                                            // в шапке должно быть видно сам статус.
+                                            Spacer(Modifier.width(6.dp))
+                                            ApuVipBadge()
+                                        }
                                     }
+                                    com.vladimir.messenger.ui.components.HeartGameHeaderStatus(
+                                        modifier = Modifier.padding(start = 32.dp),
+                                    )
                                 }
                             }
                         }

@@ -62,6 +62,41 @@ fun HeartGameCounter(onlyWhenEnabled: Boolean = false) {
 }
 
 @Composable
+fun HeartGameHeaderStatus(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    val revision by HeartGameStore.revision.collectAsStateWithLifecycle()
+    val ready by com.vladimir.messenger.service.CoreStatus.ready.collectAsStateWithLifecycle()
+    val id = remember(ready, revision) { if (ready) HeartGameStore.ownId() else null } ?: return
+    val enabled = remember(id, revision) { HeartGameStore.enabled(context, id) }
+    val score = remember(id, revision) { HeartGameStore.score(context, id) }
+    var place by remember(id) { mutableStateOf<Int?>(null) }
+    val you = stringResource(R.string.heart_game_you)
+    LaunchedEffect(id, revision, you, enabled) {
+        place = null
+        if (!enabled) return@LaunchedEffect
+        try {
+            val ownKey = HeartGameStore.ownKeyId(context) ?: return@LaunchedEffect
+            val own = HeartGameWire.Entry(id, you, HeartGameStore.score(context, id),
+                System.currentTimeMillis(), "", ownKey)
+            val ranked = HeartGameWire.ranked(HeartGameStore.board(context, id)
+                .filter { it.keyId != ownKey } + own)
+            place = ranked.indexOfFirst { it.keyId == ownKey }.takeIf { it >= 0 }?.plus(1)
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (_: Exception) { place = null }
+    }
+    if (!enabled) return
+    Row(modifier, verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Icon(Icons.Default.Favorite, null, tint = Color(0xFFE0245E), modifier = Modifier.size(13.dp))
+        Text(score.toString(), style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold, color = ApuBubbleTextColor)
+        Text("·", style = MaterialTheme.typography.labelSmall, color = ApuBubbleMutedColor)
+        Text(stringResource(R.string.heart_game_header_place, place?.toString() ?: "—"),
+            style = MaterialTheme.typography.labelSmall, color = ApuBubbleMutedColor, maxLines = 1)
+    }
+}
+
+@Composable
 fun HeartGameSettings() {
     val context = LocalContext.current
     val revision by HeartGameStore.revision.collectAsStateWithLifecycle()

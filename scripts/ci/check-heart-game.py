@@ -26,6 +26,16 @@ class HeartGameContracts(unittest.TestCase):
         self.assertIn('scaleX = scale', ui)
         self.assertIn('scaleY = scale', ui)
 
+    def test_main_header_shows_score_and_leaderboard_place_under_rank(self):
+        chat_list = (SRC / 'ui/screens/chat/ChatListScreen.kt').read_text()
+        self.assertIn('HeartGameHeaderStatus(', chat_list)
+        self.assertIn('modifier = Modifier.padding(start = 32.dp)', chat_list)
+        header = (SRC / 'ui/components/HeartGameSettings.kt').read_text()
+        self.assertIn('if (!enabled) return', header)
+        self.assertIn('heart_game_header_place', header)
+        self.assertIn('HeartGameStore.board(context, id)', header)
+        self.assertIn('HeartGameStore.score(context, id)', header)
+
     def test_private_account_scoped_score_and_opt_in(self):
         store = (SRC / 'data/heartgame/HeartGameStore.kt').read_text()
         self.assertIn('heart-game-v1-$id', store)
