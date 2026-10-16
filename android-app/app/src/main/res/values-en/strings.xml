@@ -1748,4 +1748,17 @@ The file is not on this phone</string>
     <string name="conversation_wallpaper_reset_shared">Remove shared background</string>
     <string name="conversation_wallpaper_follow">Use shared background / app settings</string>
     <string name="conversation_wallpaper_wait">Preparing and saving…</string>
+
+    <string name="heart_game_title">Boost your rating</string>
+    <string name="heart_game_hint">Catch a heart for +1 game point, separate from ratings and rank. A heart appears every 45–55 seconds while the app is open. Enabling shares your username and game score with the network. Turning it off preserves your points; published results may remain on other devices for up to 30 days.</string>
+    <string name="heart_game_points">caught</string>
+    <string name="heart_game_catch">Catch heart: one game point</string>
+    <string name="heart_game_save_error">Could not save or load game points. Please try again.</string>
+    <string name="heart_game_leaders">Heart leaderboard</string>
+    <string name="heart_game_you">You</string>
+    <string name="heart_game_close">Close</string>
+    <string name="heart_game_board_hint">Top 100 known network results, not just contacts. Updates may be delayed and incomplete. Signatures identify the reporter but cannot prevent modified clients from claiming scores.</string>
+    <string name="heart_game_empty">No results from other players received yet.</string>
+    <string name="heart_game_place">Place %1$d</string>
+    <string name="heart_game_my_place">Your place: %1$d · ♥ %2$d</string>
 </resources>

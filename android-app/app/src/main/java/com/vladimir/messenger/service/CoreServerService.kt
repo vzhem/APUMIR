@@ -85,6 +85,7 @@ class CoreServerService : Service() {
     @Inject lateinit var swarmPeerDirectory: com.vladimir.messenger.data.swarm.SwarmPeerDirectory
     @Inject lateinit var apkSeeder: com.vladimir.messenger.data.update.ApkSeeder
     @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
+    @Inject lateinit var heartGameNetwork: com.vladimir.messenger.data.heartgame.HeartGameNetwork
     @Inject lateinit var peerRankRouter: com.vladimir.messenger.data.rank.PeerRankRouter
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
@@ -385,7 +386,7 @@ class CoreServerService : Service() {
         if (runCatching { referralAttributionRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         // Ранг собеседника (APURANK1): знак VIP у имени. Поглощается здесь же,
         // чтобы служебная строка не стала текстом в переписке.
-        if (runCatching { peerRankRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { heartGameNetwork.routeIncoming(text) || peerRankRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { callManager.routeIncoming(senderId, chatId, messageId, text) }
             .getOrDefault(false)
         ) {
@@ -1615,7 +1616,7 @@ class CoreServerService : Service() {
         // Ранг собеседника едет в обёртке «печатает…» (см. RankWire.WRAPPER).
         // Разбираем его РАНЬШЕ индикатора набора: иначе конверт был бы прочитан
         // как «партнёр перестал печатать» и молча пропал бы вместе с рангом.
-        if (runCatching { peerRankRouter.routeIncoming(senderId, text) }.getOrDefault(false)) {
+        if (runCatching { heartGameNetwork.routeIncoming(text) || peerRankRouter.routeIncoming(senderId, text) }.getOrDefault(false)) {
             Log.i(TAG, "Mirror envelope: ранг собеседника применён")
             return true
         }
@@ -2481,7 +2482,7 @@ class CoreServerService : Service() {
                     // Разбирается ДО авто-создания контакта: иначе служебная
                     // строка создала бы чат с мусорным текстом у того, кто ещё
                     // не добавил этого человека.
-                    if (peerRankRouter.routeIncoming(senderId, text)) {
+                    if (heartGameNetwork.routeIncoming(text) || peerRankRouter.routeIncoming(senderId, text)) {
                         try {
                             RustBridge.sendDeliveryAck(messageId, senderId)
                         } catch (e: Exception) {

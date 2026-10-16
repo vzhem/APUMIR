@@ -553,6 +553,7 @@ private fun ProfileTabContent(
                                 )
                             }
                         }
+                        com.vladimir.messenger.ui.components.HeartGameCounter()
                         Spacer(Modifier.height(14.dp))
                         ApuTextAction(
                             label = stringResource(if (showFingerprint) R.string.profile_hide_id else R.string.profile_show_id),
@@ -1170,6 +1171,8 @@ private fun SettingsTabContent(
                     )
                 }
             }
+
+            item { SettingsCard { com.vladimir.messenger.ui.components.HeartGameSettings() } }
 
             item { SettingsSectionTitle(stringResource(R.string.section_network)) }
             item {
