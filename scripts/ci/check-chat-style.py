@@ -47,8 +47,14 @@ class ChatStyleTest(unittest.TestCase):
             "screens/groups/GroupAdminScreen.kt",
         ):
             with self.subTest(screen=relative):
-                self.assertIn("ApuHeaderBubble", source(relative))
-                self.assertIn("TextOverflow.Ellipsis", source(relative))
+                if relative == "screens/chat/ChatDetailScreen.kt":
+                    self.assertIn("ConversationHeader(", source(relative))
+                    header = source("components/ConversationHeader.kt")
+                    self.assertIn("ApuHeaderBubble(", header)
+                    self.assertNotIn("TextOverflow.Ellipsis", header)
+                else:
+                    self.assertIn("ApuHeaderBubble", source(relative))
+                    self.assertIn("TextOverflow.Ellipsis", source(relative))
 
     def test_no_stock_cards_remain_in_channel_or_chat_feeds(self):
         for relative in (

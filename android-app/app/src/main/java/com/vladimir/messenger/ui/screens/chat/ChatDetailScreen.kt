@@ -8,12 +8,9 @@ import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
-import com.vladimir.messenger.ui.components.ApuHeaderBubble
-import com.vladimir.messenger.ui.components.ApuHeaderIconBubble
 import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuTextAction
-import com.vladimir.messenger.ui.components.ApuVipBadge
 import com.vladimir.messenger.ui.components.PeerAvatar
 import com.vladimir.messenger.ui.theme.AvatarStore
 import com.vladimir.messenger.ui.components.ApuBubbleCard
