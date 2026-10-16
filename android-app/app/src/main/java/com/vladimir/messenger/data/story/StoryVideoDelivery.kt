@@ -68,6 +68,7 @@ class StoryVideoDelivery @Inject constructor(
         completed: suspend (FileTransferEntity) -> Unit, requestKey: suspend (String) -> Unit) = withContext(Dispatchers.IO) {
         mutex.withLock {
             StoryStore.attach(context)
+            StoryVideoFiles.sweepAbandonedDrafts(context)
             val active = StoryStore.active()
             StoryVideoStorage.sweep(context, active)
             val mine = active.filter { it.mine && it.video != null }

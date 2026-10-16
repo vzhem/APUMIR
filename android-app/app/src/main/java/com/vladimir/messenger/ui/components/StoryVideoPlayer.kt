@@ -54,7 +54,7 @@ internal fun StoryVideoPlayer(story: StoryStore.Story, paused: Boolean,
     val source = file
     if (source == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            StoryContentCanvas(story.text, story.photoB64, Color.Black)
+            StoryContentCanvas(story.text, story.photoB64, androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Black, Color.Black)))
             Text(unavailable ?: "Видео загружается. Можно перейти к следующей истории.", color = Color.White,
                 modifier = Modifier.align(Alignment.TopCenter).padding(20.dp))
         }

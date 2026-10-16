@@ -426,7 +426,8 @@ class FileTransferRouter @Inject constructor(
             isOnline = { nodeId -> isPeerOnline(nodeId) },
             // Файлы группы (этап 9) на хранение не отдаём: см. FileCustodySender.
             custodyAllowed = { transfer ->
-                runCatching { !groupFiles.get().isGroupChat(transfer.chatId) }.getOrDefault(true)
+                !com.vladimir.messenger.data.story.StoryVideoWire.reserved(transfer.displayName) &&
+                    runCatching { !groupFiles.get().isGroupChat(transfer.chatId) }.getOrDefault(true)
             },
         )
         custodySender = custodyLocal

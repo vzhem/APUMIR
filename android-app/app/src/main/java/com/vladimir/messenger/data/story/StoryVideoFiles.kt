@@ -20,6 +20,12 @@ internal object StoryVideoFiles {
         check(isDirectory || mkdirs()) { "Не удалось создать папку видеоисторий" }
     }
 
+    fun sweepAbandonedDrafts(context: Context, nowMs: Long = System.currentTimeMillis()) {
+        directory(context).listFiles().orEmpty().forEach { file ->
+            if (file.isFile && nowMs - file.lastModified() > StoryStore.LIFETIME_MS) file.delete()
+        }
+    }
+
     suspend fun import(context: Context, uri: Uri): Source {
         var staged: File? = null
         try {
