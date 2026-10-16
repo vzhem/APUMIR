@@ -1752,6 +1752,7 @@ The file is not on this phone</string>
     <string name="heart_game_title">Boost your rating</string>
     <string name="heart_game_hint">Catch a heart for +1 game point, separate from ratings and rank. A heart appears every 45–55 seconds while the app is open. Enabling shares your username and game score with the network. Turning it off preserves your points; published results may remain on other devices for up to 30 days.</string>
     <string name="heart_game_points">caught</string>
+    <string name="heart_game_my_place_short">Leaderboard place: %1$s</string>
     <string name="heart_game_catch">Catch heart: one game point</string>
     <string name="heart_game_save_error">Could not save or load game points. Please try again.</string>
     <string name="heart_game_leaders">Heart leaderboard</string>

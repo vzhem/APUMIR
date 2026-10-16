@@ -25,17 +25,39 @@ import java.text.DateFormat
 import java.util.Date
 
 @Composable
-fun HeartGameCounter() {
+fun HeartGameCounter(onlyWhenEnabled: Boolean = false) {
     val context = LocalContext.current
     val revision by HeartGameStore.revision.collectAsStateWithLifecycle()
     val ready by com.vladimir.messenger.service.CoreStatus.ready.collectAsStateWithLifecycle()
-    val id = remember(ready, revision) { HeartGameStore.ownId() } ?: return
-    val count = remember(id, revision) { HeartGameStore.score(context, id) }
-    Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Icon(Icons.Default.Favorite, null, tint = Color(0xFFFF537F), modifier = Modifier.size(20.dp))
-        Text(count.toString(), fontWeight = FontWeight.Bold, color = ApuBubbleAccentColor)
-        Text(stringResource(R.string.heart_game_points), style = MaterialTheme.typography.labelMedium)
+    val id = remember(ready, revision) { HeartGameStore.ownId() }
+    val enabled = remember(id, revision) { id?.let { HeartGameStore.enabled(context, it) } ?: false }
+    var place by remember(id) { mutableStateOf<Int?>(null) }
+    val you = stringResource(R.string.heart_game_you)
+    LaunchedEffect(id, revision, you) {
+        place = null
+        val account = id ?: return@LaunchedEffect
+        try {
+            val ownKey = HeartGameStore.ownKeyId(context) ?: return@LaunchedEffect
+            val own = HeartGameWire.Entry(account, you, HeartGameStore.score(context, account),
+                System.currentTimeMillis(), "", ownKey)
+            val ranked = HeartGameWire.ranked(HeartGameStore.board(context, account)
+                .filter { it.keyId != ownKey } + own)
+            place = ranked.indexOfFirst { it.keyId == ownKey }.takeIf { it >= 0 }?.plus(1)
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (_: Exception) { place = null }
+    }
+    val account = id ?: return
+    if (onlyWhenEnabled && !enabled) return
+    val count = remember(account, revision) { HeartGameStore.score(context, account) }
+    Column(Modifier.padding(top = 8.dp), horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(Icons.Default.Favorite, null, tint = Color(0xFFFF537F), modifier = Modifier.size(20.dp))
+            Text(count.toString(), fontWeight = FontWeight.Bold, color = ApuBubbleAccentColor)
+            Text(stringResource(R.string.heart_game_points), style = MaterialTheme.typography.labelMedium)
+        }
+        Text(stringResource(R.string.heart_game_my_place_short, place?.toString() ?: "—"),
+            style = MaterialTheme.typography.labelSmall, color = ApuBubbleMutedColor)
     }
 }
 

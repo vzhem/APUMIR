@@ -1785,6 +1785,7 @@
     <string name="heart_game_title">Подними себе рейтинг</string>
     <string name="heart_game_hint">Поймай сердце: +1 к игровым очкам, отдельно от рейтинга и ранга. Сердце появляется раз в 45–55 секунд, пока приложение открыто. Включение публикует ваш ник и игровые очки в сети. После выключения очки сохранятся, а ранее опубликованные результаты могут оставаться у других до 30 дней.</string>
     <string name="heart_game_points">поймано</string>
+    <string name="heart_game_my_place_short">Место в таблице: %1$s</string>
     <string name="heart_game_catch">Поймать сердце: плюс одно очко</string>
     <string name="heart_game_save_error">Не удалось сохранить или загрузить игровые очки. Попробуйте ещё раз.</string>
     <string name="heart_game_leaders">Лидеры по сердечкам</string>

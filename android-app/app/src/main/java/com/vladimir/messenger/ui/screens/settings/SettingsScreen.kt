@@ -553,7 +553,6 @@ private fun ProfileTabContent(
                                 )
                             }
                         }
-                        com.vladimir.messenger.ui.components.HeartGameCounter()
                         Spacer(Modifier.height(14.dp))
                         ApuTextAction(
                             label = stringResource(if (showFingerprint) R.string.profile_hide_id else R.string.profile_show_id),
@@ -679,6 +678,11 @@ private fun ProfileTabContent(
                         subtitle = stringResource(R.string.settings_ranks_hint),
                         onClick = onRankBenefits,
                     )
+                }
+            }
+            item {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    com.vladimir.messenger.ui.components.HeartGameCounter(onlyWhenEnabled = true)
                 }
             }
         }
