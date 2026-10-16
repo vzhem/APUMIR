@@ -125,6 +125,16 @@ class PeerRankContractTest(unittest.TestCase):
         self.assertIn(".observeVipNodeIds(FileTransferRankPolicy.vipMinimumReferrals)", STORE)
         self.assertIn("store.remember(packet.nodeId, packet.qualified, packet.updatedAtMs)", ROUTER)
 
+    def test_chat_list_qr_and_overflow_actions_have_contrast_on_light_wallpapers(self):
+        header = CHAT_LIST[CHAT_LIST.index("SearchOrb(onClick = { isSearchVisible = true })"):]
+        qr = header[header.index("IconButton(onClick = onScanQrClick)"):]
+        self.assertIn("ApuPremiumIconTile(", qr[:qr.index("Box {")])
+        self.assertIn("Icons.Default.QrCodeScanner", qr)
+        self.assertIn("Icons.Default.MoreVert", header)
+        self.assertGreaterEqual(header.count("ApuPremiumIconTile("), 2)
+        self.assertIn("contentDescription = stringResource(R.string.chat_scan_qr)", header)
+        self.assertIn("contentDescription = stringResource(R.string.chat_more)", header)
+
     def test_vip_starts_at_the_tenth_rank(self):
         # Порог один на всё приложение: политика рангов, а не второе число.
         self.assertIn("const val VIP_MINIMUM_QUALIFIED_REFERRALS = 10", POLICY)

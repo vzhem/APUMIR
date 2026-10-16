@@ -41,6 +41,7 @@ import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ApuPremiumDialog
+import com.vladimir.messenger.ui.components.ApuPremiumIconTile
 import com.vladimir.messenger.ui.components.apuBubbleSurface
 import com.vladimir.messenger.ui.components.apuPremiumGloss
 import com.vladimir.messenger.ui.components.apuPremiumLift
@@ -291,12 +292,22 @@ fun ChatListScreen(
                             // здесь главное действие и должен быть заметен.
                             SearchOrb(onClick = { isSearchVisible = true })
                             IconButton(onClick = onScanQrClick) {
-                                Icon(Icons.Default.QrCodeScanner, stringResource(R.string.chat_scan_qr))
+                                ApuPremiumIconTile(
+                                    icon = Icons.Default.QrCodeScanner,
+                                    contentDescription = stringResource(R.string.chat_scan_qr),
+                                    size = 38.dp,
+                                    corner = 12.dp,
+                                )
                             }
                             Box {
                                 var menuOpen by remember { mutableStateOf(false) }
                                 IconButton(onClick = { menuOpen = true }) {
-                                    Icon(Icons.Default.MoreVert, stringResource(R.string.chat_more))
+                                    ApuPremiumIconTile(
+                                        icon = Icons.Default.MoreVert,
+                                        contentDescription = stringResource(R.string.chat_more),
+                                        size = 38.dp,
+                                        corner = 12.dp,
+                                    )
                                 }
                                 ApuActionsMenu(
                                     expanded = menuOpen,
