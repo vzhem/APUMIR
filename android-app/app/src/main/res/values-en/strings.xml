@@ -1727,4 +1727,6 @@ The file is not on this phone</string>
     <string name="story_photo_shape">Photo shape</string>
     <string name="story_photo_rectangle">Regular</string>
     <string name="story_photo_circle">Circle</string>
+    <string name="story_video_shape">Video format</string>
+    <string name="story_media_circle_hint">Circle shows the center of the frame. Regular keeps the original proportions.</string>
 </resources>

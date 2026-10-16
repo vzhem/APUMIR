@@ -53,6 +53,37 @@ class StoryEditorContracts(unittest.TestCase):
         self.assertIn('.put("photoCircle", s.photoCircle)', store)
         self.assertIn('o.optBoolean("photoCircle", false)', store)
 
+    def test_video_has_two_formats_and_a_clippable_shared_surface(self):
+        selector = (MAIN / "ui/components/StoryVideoShapeSelector.kt").read_text()
+        self.assertEqual(2, selector.count("ApuPremiumChip("))
+        for name in ("story_photo_rectangle", "story_photo_circle"):
+            self.assertIn(name, selector)
+        surface = (MAIN / "ui/components/StoryVideoSurface.kt").read_text()
+        for token in ("clip(CircleShape)", "RESIZE_MODE_ZOOM", "RESIZE_MODE_FIT"):
+            self.assertIn(token, surface)
+        layout = (ROOT / "android-app/app/src/main/res/layout/story_video_texture.xml").read_text()
+        self.assertIn('app:surface_type="texture_view"', layout)
+        for name in ("StoryVideoEditor.kt", "StoryVideoPlayer.kt"):
+            self.assertIn("StoryVideoSurface(", (MAIN / "ui/components" / name).read_text())
+        camera = (MAIN / "ui/components/StoryVideoCamera.kt").read_text()
+        self.assertIn("ImplementationMode.COMPATIBLE", camera)
+        self.assertIn("StoryVideoFrame(circle", camera)
+
+    def test_video_shape_is_delivered_and_saved_not_burned_into_the_file(self):
+        store = (MAIN / "data/story/StoryStore.kt").read_text()
+        for token in ('.put("videoCircle", story.videoCircle)', '.put("videoCircle", s.videoCircle)',
+                      'o.optBoolean("videoCircle", false)'):
+            self.assertIn(token, store)
+        vm = (MAIN / "ui/screens/chat/ChatListViewModel.kt").read_text()
+        self.assertIn("videoCircle = exported.draft.circle", vm)
+        exporter = (MAIN / "data/story/StoryVideoExporter.kt").read_text()
+        self.assertIn("Presentation.createForHeight(exportHeight)", exporter)
+        self.assertNotIn("LAYOUT_SCALE_TO_FIT", exporter)
+        self.assertNotIn("draft.circle", exporter)
+        player = (MAIN / "ui/components/StoryVideoPlayer.kt").read_text()
+        self.assertIn("StoryVideoSurface(player, story.videoCircle", player)
+        self.assertIn("photoCircle = story.videoCircle", player)
+
     def test_manual_whitespace_survives_publish(self):
         source = (MAIN / "ui/components/Stories.kt").read_text()
         self.assertIn("onPublish(text, bg, photo, photo != null && photoCircle)", source)

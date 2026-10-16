@@ -50,7 +50,7 @@ internal object StoryVideoExporter {
         try {
             // Transformer requires a path which does not exist yet.
             check(output.delete())
-            transform(context.applicationContext, source.file, output, draft, onProgress)
+            transform(context.applicationContext, source.file, output, draft, StoryVideoGeometry.exportHeight(source.width, source.height), onProgress)
             val media = StoryVideoFiles.media(output)
             StoryVideoPreparation.Ready(draft, media)
             withContext(Dispatchers.IO) {
@@ -72,15 +72,14 @@ internal object StoryVideoExporter {
         }
     }
 
-    private suspend fun transform(context: Context, source: File, output: File, draft: StoryVideoDraft,
+    private suspend fun transform(context: Context, source: File, output: File, draft: StoryVideoDraft, exportHeight: Int,
                                   onProgress: (Float) -> Unit) = withContext(Dispatchers.Main.immediate) {
         coroutineScope {
             val item = MediaItem.Builder().setUri(Uri.fromFile(source)).setClippingConfiguration(
                 MediaItem.ClippingConfiguration.Builder().setStartPositionMs(draft.startMs)
                     .setEndPositionMs(draft.endMs).build()).build()
             val edited = EditedMediaItem.Builder(item).setRemoveAudio(draft.muted)
-                .setEffects(Effects(emptyList(), listOf(Presentation.createForWidthAndHeight(720, 1280,
-                    Presentation.LAYOUT_SCALE_TO_FIT)))).build()
+                .setEffects(Effects(emptyList(), listOf(Presentation.createForHeight(exportHeight)))).build()
             var transformer: Transformer? = null
             val progressJob = launch {
                 val progress = ProgressHolder()

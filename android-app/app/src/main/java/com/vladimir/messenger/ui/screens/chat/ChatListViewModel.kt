@@ -984,7 +984,7 @@ class ChatListViewModel @Inject constructor(
                     val cover = com.vladimir.messenger.data.story.StoryPhoto.prepare(appContext, android.net.Uri.fromFile(exported.cover))
                     com.vladimir.messenger.data.story.StoryVideoStorage.install(appContext, me, id, exported.file, exported.media)
                     val story = com.vladimir.messenger.data.story.StoryStore.publish(me, exported.draft.caption, 0,
-                        cover, video = exported.media, id = id)
+                        cover, video = exported.media, id = id, videoCircle = exported.draft.circle)
                     check(chatRepository.enqueueStory(story)) {
                         "Видео сохранено у вас, но очередь доставки недоступна или нет адресатов."
                     }

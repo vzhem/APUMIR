@@ -8,6 +8,7 @@ data class StoryVideoDraft(
     val coverMs: Long,
     val muted: Boolean = false,
     val caption: String = "",
+    val circle: Boolean = false,
 ) {
     init {
         require(sourceDurationMs > 0) { "Видео пустое или повреждено" }
@@ -67,5 +68,14 @@ data class StoryVideoMedia(
         require(sizeBytes in 1..StoryVideoDraft.MAX_EXPORT_BYTES) { "Video exceeds export budget" }
         require(durationMs in StoryVideoDraft.MIN_DURATION_MS..StoryVideoDraft.MAX_DURATION_MS)
         require(width in 1..1920 && height in 1..1920)
+    }
+}
+
+/** Fit the original aspect ratio into the export budget, without baking in black bars. */
+object StoryVideoGeometry {
+    fun exportHeight(width: Int, height: Int): Int {
+        require(width > 0 && height > 0)
+        val scale = minOf(1.0, 720.0 / width, 1280.0 / height)
+        return ((height * scale).toInt() / 2 * 2).coerceAtLeast(2)
     }
 }

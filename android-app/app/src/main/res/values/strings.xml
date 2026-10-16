@@ -1758,6 +1758,8 @@
     <string name="profile_show_id">Показать идентификатор профиля</string>
     <string name="profile_hide_id">Скрыть идентификатор профиля</string>
     <string name="story_photo_shape">Форма фото</string>
-    <string name="story_photo_rectangle">Обычно</string>
+    <string name="story_photo_rectangle">Обычный</string>
     <string name="story_photo_circle">Круг</string>
+    <string name="story_video_shape">Формат видео</string>
+    <string name="story_media_circle_hint">Круг показывает центральную часть кадра. Обычный формат сохраняет пропорции.</string>
 </resources>

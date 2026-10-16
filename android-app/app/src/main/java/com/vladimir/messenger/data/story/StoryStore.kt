@@ -31,7 +31,7 @@ object StoryStore {
 
     data class Story(val id: String, val authorId: String, val authorName: String,
         val text: String, val bg: Int, val createdAtMs: Long, val mine: Boolean,
-        val photoB64: String? = null, val photoCircle: Boolean = false, val video: StoryVideoMedia? = null)
+        val photoB64: String? = null, val photoCircle: Boolean = false, val video: StoryVideoMedia? = null, val videoCircle: Boolean = false)
 
     private val photoParts = StoryPhotoParts()
     private const val PREFS = "stories"
@@ -152,7 +152,7 @@ object StoryStore {
             }
             Story(id, authorId, o.optString("name", authorName).ifBlank { authorName },
                 o.optString("videoCaption", o.getString("text")).take(200), o.optInt("bg", 0).coerceIn(0, BG_COUNT - 1), ts, false, photo, o.optBoolean("photoCircle", false),
-                o.optJSONObject("video")?.let { StoryVideoWire.decode(it) })
+                o.optJSONObject("video")?.let { StoryVideoWire.decode(it) }, o.optBoolean("videoCircle", false))
         }.getOrNull() ?: run { OperationalDiagnostics.tracker.count(OperationalCounter.STORY_PHOTO_PENDING); return true }
         // Счётчик приёма раньше никто не увеличивал: в отчёте «Логи» нельзя
         // было отличить «история доехала и показана» от «история не дошла
@@ -186,11 +186,11 @@ object StoryStore {
         }
     }
 
-    fun publish(authorId: String, text: String, bg: Int, photoB64: String? = null, photoCircle: Boolean = false, video: StoryVideoMedia? = null, id: String = java.util.UUID.randomUUID().toString()): Story {
+    fun publish(authorId: String, text: String, bg: Int, photoB64: String? = null, photoCircle: Boolean = false, video: StoryVideoMedia? = null, id: String = java.util.UUID.randomUUID().toString(), videoCircle: Boolean = false): Story {
         require(photoB64 == null || isValidPhotoB64(photoB64))
         val story = Story(
             id, authorId, "",
-            text.take(200), bg.coerceIn(0, BG_COUNT - 1), System.currentTimeMillis(), true, photoB64, photoB64 != null && photoCircle && video == null, video)
+            text.take(200), bg.coerceIn(0, BG_COUNT - 1), System.currentTimeMillis(), true, photoB64, photoB64 != null && (if (video != null) videoCircle else photoCircle), video, video != null && videoCircle)
         add(story); return story
     }
 
@@ -199,7 +199,7 @@ object StoryStore {
         .put("text", if (story.video != null) "Видеоистория — обновите APU для просмотра.\n${story.text}" else story.text)
         .put("videoCaption", if (story.video != null) story.text else null)
         .put("video", story.video?.let { StoryVideoWire.encode(it) }).put("bg", story.bg).put("ts", story.createdAtMs)
-        .put("photoCircle", story.photoCircle).toString()
+        .put("photoCircle", story.photoCircle).put("videoCircle", story.videoCircle).toString()
 
     fun encodeRevoke(story: Story): String = PREFIX + JSONObject()
         .put("id", story.id).put("kind", StoryRevoke.KIND).put("ts", story.createdAtMs).toString()
@@ -307,6 +307,7 @@ object StoryStore {
             authorName = incoming.authorName.ifBlank { existing.authorName },
             photoB64 = incoming.photoB64 ?: existing.photoB64,
             video = existing.video ?: incoming.video,
+            videoCircle = if (existing.video != null) existing.videoCircle else incoming.videoCircle,
             photoCircle = if (incoming.photoB64 != null) incoming.photoCircle else existing.photoCircle,
             mine = existing.mine || incoming.mine,
             createdAtMs = existing.createdAtMs,
@@ -379,7 +380,7 @@ object StoryStore {
             .put("authorName", s.authorName).put("text", s.text)
             .put("bg", s.bg).put("ts", s.createdAtMs).put("mine", s.mine)
             .put("photo", s.photoB64).put("photoCircle", s.photoCircle)
-            .put("video", s.video?.let { StoryVideoWire.encode(it) })) }
+            .put("videoCircle", s.videoCircle).put("video", s.video?.let { StoryVideoWire.encode(it) })) }
         return arr.toString()
     }
 
@@ -399,6 +400,7 @@ object StoryStore {
                     mine = o.optBoolean("mine", false),
                     photoCircle = o.optBoolean("photoCircle", false),
                     video = o.optJSONObject("video")?.let { StoryVideoWire.decode(it) },
+                    videoCircle = o.optBoolean("videoCircle", false),
                     photoB64 = o.optString("photo").takeIf { it.isNotBlank() && it != "null" && isValidPhotoB64(it) },
                 )
             }

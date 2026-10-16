@@ -43,14 +43,16 @@ import kotlinx.coroutines.withContext
 
 /** Local capture screen; caller owns the returned private source and must delete it after editing. */
 @Composable
-internal fun StoryVideoCamera(onDismiss: () -> Unit, onRecorded: (StoryVideoFiles.Source) -> Unit) {
+internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, onRecorded: (StoryVideoFiles.Source) -> Unit) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val dismiss by rememberUpdatedState(onDismiss)
     val recorded by rememberUpdatedState(onRecorded)
     val session = remember(context, owner) { StoryVideoRecorder(context) }
-    val preview = remember(context, owner) { PreviewView(context) }
+    val preview = remember(context, owner) { PreviewView(context).apply {
+        implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+    } }
     var cameraAllowed by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
     }
@@ -103,7 +105,12 @@ internal fun StoryVideoCamera(onDismiss: () -> Unit, onRecorded: (StoryVideoFile
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("Запись видеоистории · до 60 секунд")
                 if (cameraAllowed) {
-                    AndroidView(factory = { preview }, modifier = Modifier.fillMaxWidth().height(300.dp))
+                    StoryVideoFrame(circle, Modifier.fillMaxWidth().height(300.dp)) {
+                        AndroidView(factory = { preview }, update = {
+                            applyStoryVideoShape(it, circle)
+                            it.scaleType = if (circle) PreviewView.ScaleType.FILL_CENTER else PreviewView.ScaleType.FIT_CENTER
+                        }, modifier = Modifier.fillMaxSize())
+                    }
                 } else {
                     ApuPremiumButton(label = "Разрешить камеру", onClick = {
                         cameraPermission.launch(Manifest.permission.CAMERA)

@@ -21,12 +21,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
 import com.vladimir.messenger.data.story.StoryStore
 import com.vladimir.messenger.data.story.StoryVideoStorage
 import java.io.File
@@ -54,7 +52,7 @@ internal fun StoryVideoPlayer(story: StoryStore.Story, paused: Boolean,
     val source = file
     if (source == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            StoryContentCanvas(story.text, story.photoB64, androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Black, Color.Black)))
+            StoryContentCanvas(story.text, story.photoB64, androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Black, Color.Black)), photoCircle = story.videoCircle)
             Text(unavailable ?: "Видео загружается. Можно перейти к следующей истории.", color = Color.White,
                 modifier = Modifier.align(Alignment.TopCenter).padding(20.dp))
         }
@@ -93,10 +91,7 @@ internal fun StoryVideoPlayer(story: StoryStore.Story, paused: Boolean,
         }
     }
     Box(Modifier.fillMaxSize()) {
-        AndroidView(factory = { ctx -> PlayerView(ctx).apply {
-            this.player = player
-            useController = false
-        } }, modifier = Modifier.fillMaxSize())
+        StoryVideoSurface(player, story.videoCircle, Modifier.fillMaxSize())
         Column(Modifier.align(Alignment.BottomCenter).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (state == Player.STATE_BUFFERING) Text("Буферизация…", color = Color.White)
             if (error != null) {

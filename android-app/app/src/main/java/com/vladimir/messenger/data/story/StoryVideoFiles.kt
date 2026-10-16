@@ -73,7 +73,8 @@ internal object StoryVideoFiles {
             require(duration >= StoryVideoDraft.MIN_DURATION_MS && width in 1..8192 && height in 1..8192) {
                 "Видео слишком короткое, повреждено или имеет неподдерживаемый размер"
             }
-            return Source(file, duration, width, height,
+            val rotated = number(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION) % 180 != 0L
+            return Source(file, duration, if (rotated) height else width, if (rotated) width else height,
                 retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_AUDIO) == "yes")
         } finally { retriever.release() }
     }

@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
@@ -24,7 +24,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
@@ -33,7 +32,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
 import com.vladimir.messenger.data.story.StoryVideoDraft
 import com.vladimir.messenger.data.story.StoryVideoExporter
 import com.vladimir.messenger.data.story.StoryVideoFiles
@@ -48,14 +46,17 @@ internal fun StoryVideoEditor(
     source: StoryVideoFiles.Source,
     onDismiss: () -> Unit,
     onReady: (StoryVideoExporter.Exported) -> Unit,
+    initialCircle: Boolean = false,
+    onCircleChange: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    var draft by remember(source.file) { mutableStateOf(StoryVideoDraft.fromSource(source.durationMs)) }
+    var draft by remember(source.file) { mutableStateOf(StoryVideoDraft.fromSource(source.durationMs).copy(circle = initialCircle)) }
     var error by remember(source.file) { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
     var exportJob by remember { mutableStateOf<Job?>(null) }
+    var playing by remember { mutableStateOf(false) }
     val owner = LocalLifecycleOwner.current
     val player = remember(source.file, owner) { ExoPlayer.Builder(context).build() }
     DisposableEffect(player, owner) {
@@ -64,6 +65,7 @@ internal fun StoryVideoEditor(
         }
         owner.lifecycle.addObserver(observer)
         val listener = object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
             override fun onPlayerError(playbackError: androidx.media3.common.PlaybackException) {
                 error = "Не удалось воспроизвести видео: ${playbackError.errorCodeName}"
             }
@@ -91,9 +93,19 @@ internal fun StoryVideoEditor(
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Видеоистория · до 60 секунд")
-                AndroidView(factory = { ctx -> PlayerView(ctx).apply { this.player = player } },
-                    update = { it.player = player },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp, max = 300.dp))
+                StoryVideoShapeSelector(draft.circle, enabled = !busy, onChange = {
+                    draft = draft.copy(circle = it)
+                    onCircleChange(it)
+                })
+                StoryVideoSurface(player, draft.circle, Modifier.fillMaxWidth().height(300.dp))
+                ApuPremiumButton(label = androidx.compose.ui.res.stringResource(
+                    if (playing) com.vladimir.messenger.R.string.story_pause else com.vladimir.messenger.R.string.story_resume),
+                    enabled = !busy, onClick = {
+                        if (playing) player.pause() else {
+                            if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
+                            player.play()
+                        }
+                    })
                 Text("Начало: ${draft.startMs / 1000} с · конец: ${draft.endMs / 1000} с")
                 // Move the start while preserving an interval within the maximum duration.
                 ApuPremiumSlider(value = draft.startMs.toFloat(), enabled = !busy,

@@ -29,6 +29,7 @@ internal fun StoryVideoComposer(onDismiss: () -> Unit, onPublish: (StoryVideoExp
     val scope = rememberCoroutineScope()
     var source by remember { mutableStateOf<StoryVideoFiles.Source?>(null) }
     var exported by remember { mutableStateOf<StoryVideoExporter.Exported?>(null) }
+    var circle by remember { mutableStateOf(false) }
     var camera by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -48,20 +49,22 @@ internal fun StoryVideoComposer(onDismiss: () -> Unit, onPublish: (StoryVideoExp
     val ready = exported
     val input = source
     when {
-        camera -> StoryVideoCamera(onDismiss = { camera = false }, onRecorded = {
+        camera -> StoryVideoCamera(circle = circle, onDismiss = { camera = false }, onRecorded = {
             source?.file?.delete()
             source = it
             camera = false
         })
         input != null && ready == null -> StoryVideoEditor(input, onDismiss = {
             input.file.delete(); source = null
-        }, onReady = { exported = it })
+        }, onReady = { exported = it }, initialCircle = circle, onCircleChange = { circle = it })
         else -> Dialog(onDismissRequest = onDismiss) {
             ApuSettingsCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Видеоистория · до 60 секунд")
                     if (ready != null) {
                         Text("${ready.media.durationMs / 1000.0} с · ${ready.media.sizeBytes / (1024 * 1024)} МБ")
+                        Text(androidx.compose.ui.res.stringResource(if (ready.draft.circle)
+                            com.vladimir.messenger.R.string.story_photo_circle else com.vladimir.messenger.R.string.story_photo_rectangle))
                         Text(ready.draft.caption)
                         Text("Доступна вашим контактам 24 часа. Доставка продолжится при подключении получателей.")
                         ApuPremiumButton(label = "Опубликовать видео", onClick = {
@@ -70,6 +73,7 @@ internal fun StoryVideoComposer(onDismiss: () -> Unit, onPublish: (StoryVideoExp
                         })
                         ApuTextAction(label = "Вернуться к редактору", onClick = { ready.delete(); exported = null })
                     } else {
+                        StoryVideoShapeSelector(circle, enabled = !busy, onChange = { circle = it })
                         ApuPremiumButton(label = "Выбрать видео", enabled = !busy, onClick = { gallery.launch("video/*") })
                         ApuPremiumButton(label = "Записать видео", enabled = !busy, onClick = { camera = true })
                     }

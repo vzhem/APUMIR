@@ -48,4 +48,22 @@ class StoryVideoDraftTest {
         assertTrue(runCatching { StoryVideoMedia("a".repeat(64), Long.MAX_VALUE, 60_000, 720, 1280, true) }.isFailure)
         assertTrue(runCatching { StoryVideoPreparation.Exporting(StoryVideoDraft.fromSource(60_000), Float.NaN) }.isFailure)
     }
+    @Test fun shapeIsReversibleAndPartOfTheDraftRevision() {
+        val regular = StoryVideoDraft.fromSource(60_000)
+        val circle = regular.copy(circle = true)
+        assertEquals(false, regular.circle)
+        assertTrue(regular != circle)
+        assertEquals(regular, circle.copy(circle = false))
+        assertTrue(circle.trim(1_000, 30_000).circle)
+    }
+
+    @Test fun exportPreservesOrientationWithoutLetterboxingOrUpscaling() {
+        assertEquals(1280, StoryVideoGeometry.exportHeight(1080, 1920))
+        assertEquals(404, StoryVideoGeometry.exportHeight(1920, 1080))
+        assertEquals(720, StoryVideoGeometry.exportHeight(1000, 1000))
+        assertEquals(480, StoryVideoGeometry.exportHeight(640, 480))
+        assertEquals(640, StoryVideoGeometry.exportHeight(480, 640))
+        assertTrue(runCatching { StoryVideoGeometry.exportHeight(0, 720) }.isFailure)
+    }
+
 }
