@@ -238,6 +238,22 @@ class SettingsStyleTest(unittest.TestCase):
         spec.loader.exec_module(checks)
         checks.ChatStyleTest("test_text_and_actions_contrast_on_any_wallpaper").test_text_and_actions_contrast_on_any_wallpaper()
 
+    def test_conversation_wallpaper_uses_swatches_and_per_scope_personal_overrides(self):
+        dialog = source("components/ConversationWallpaperDialog.kt")
+        for token in ("WallpaperTint.entries.forEach", "ConversationWallpaperTintSwatch(",
+                      "CircleShape", "option.colorsFor(dark)", "personalChoice", "sharedChoice",
+                      "val choice = if (forAll) sharedChoice else personalChoice",
+                      "onSetShared != null"):
+            self.assertIn(token, dialog)
+        for path in ("screens/groups/GroupChatScreen.kt", "screens/channels/ChannelScreen.kt"):
+            screen = source(path)
+            self.assertIn("ConversationWallpaperDialog(", screen)
+            self.assertIn("GroupRole.isAdminOrOwner", screen)
+            self.assertIn("onSetShared = if", screen)
+        chat = source("screens/chat/ChatDetailScreen.kt")
+        self.assertIn('scope = "direct:$chatId"', chat)
+        self.assertIn("ConversationWallpaperDialog(", chat)
+
     def test_profile_keeps_all_identity_actions_and_media_permissions(self):
         text = source("screens/settings/SettingsScreen.kt")
         for event in (
