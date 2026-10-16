@@ -74,7 +74,7 @@ fun NotificationMuteDialog(
 
                 NotificationMuteDuration.entries.forEach { duration ->
                     ApuPremiumChoiceRow(
-                        title = duration.label,
+                        title = stringResource(duration.labelRes),
                         subtitle = if (duration == NotificationMuteDuration.FOREVER) {
                             stringResource(R.string.nm_manual)
                         } else {

@@ -1130,11 +1130,11 @@ private fun SettingsTabContent(
                         val untilMs = viewModel.notificationMuteUntil(scope)
                         SettingsItem(
                             icon = icon,
-                            title = scope.title,
+                            title = stringResource(scope.titleRes),
                             subtitle = if (untilMs > notificationMuteNowMs) {
                                 notificationMuteStatus(LocalContext.current, untilMs, notificationMuteNowMs)
                             } else {
-                                scope.description
+                                stringResource(scope.descriptionRes)
                             },
                             onClick = { muteScope = scope },
                         )
@@ -1814,7 +1814,7 @@ private fun SettingsTabContent(
     muteScope?.let { scope ->
         val untilMs = viewModel.notificationMuteUntil(scope)
         NotificationMuteDialog(
-            targetName = scope.title,
+            targetName = stringResource(scope.titleRes),
             mutedUntilMs = untilMs,
             onSelectUntil = { chosenUntil ->
                 viewModel.setNotificationMuteUntil(scope, chosenUntil)
