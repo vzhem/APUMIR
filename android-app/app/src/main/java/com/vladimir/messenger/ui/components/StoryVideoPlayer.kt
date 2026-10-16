@@ -60,18 +60,26 @@ internal fun StoryVideoPlayer(story: StoryStore.Story, paused: Boolean,
         }
         return
     }
-    val player = remember(story.id, source) { ExoPlayer.Builder(context).build() }
+    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val pausedNow by rememberUpdatedState(paused)
+    val player = remember(story.id, source, owner) { ExoPlayer.Builder(context).build() }
     var state by remember(player) { mutableIntStateOf(Player.STATE_IDLE) }
     var error by remember(player) { mutableStateOf<String?>(null) }
     DisposableEffect(player) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE || event == androidx.lifecycle.Lifecycle.Event.ON_STOP) player.pause()
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) player.playWhenReady = !pausedNow
+        }
+        owner.lifecycle.addObserver(observer)
         val listener = object : Player.Listener {
+            override fun onRenderedFirstFrame() { if (!story.mine) StoryStore.markSeen(story.id) }
             override fun onPlaybackStateChanged(playbackState: Int) { state = playbackState }
             override fun onPlayerError(failure: PlaybackException) { error = "Не удалось воспроизвести видео" }
         }
         player.addListener(listener)
         player.setMediaItem(MediaItem.fromUri(Uri.fromFile(source)))
         player.prepare()
-        onDispose { player.removeListener(listener); player.release() }
+        onDispose { owner.lifecycle.removeObserver(observer); player.removeListener(listener); player.release() }
     }
     LaunchedEffect(player, paused) { player.playWhenReady = !paused }
     LaunchedEffect(player, state, paused) {

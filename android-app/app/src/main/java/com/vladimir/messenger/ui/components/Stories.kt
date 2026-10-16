@@ -468,7 +468,7 @@ fun StoryViewerDialog(
     val dismissNow by rememberUpdatedState(onDismiss)
     val setHeldNow by rememberUpdatedState<(Boolean) -> Unit>({ held = it })
     // Не отмечаем собственные истории. Это локальный статус, не счётчик просмотров автора.
-    LaunchedEffect(current.id) { if (!current.mine) StoryStore.markSeen(current.id) }
+    LaunchedEffect(current.id) { if (!current.mine && current.video == null) StoryStore.markSeen(current.id) }
     // Зритель, который был офлайн или открыл историю первым, просит сводку
     // откликов у автора. Просьба ограничена по частоте правилами очереди.
     LaunchedEffect(current.id) { onStoryShown?.invoke(current) }
