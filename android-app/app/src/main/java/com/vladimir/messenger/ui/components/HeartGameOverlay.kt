@@ -183,9 +183,14 @@ private fun HeartGameBurst(modifier: Modifier, onFinished: () -> Unit) {
             }
         }
         Text("+1", modifier = Modifier.testTag("heart-game-plus-one").graphicsLayer {
-            translationY = -26.dp.toPx() * t.value
-            scaleX = 1f + .22f * sin(t.value * PI.toFloat()); scaleY = scaleX
-            alpha = 1f - t.value
+            // Pop in from a smaller size, grow quickly, then drift gently upward as it fades.
+            val progress = t.value.coerceIn(0f, 1f)
+            val grow = 1f - (1f - progress) * (1f - progress) * (1f - progress)
+            val scale = .42f + .78f * grow
+            translationY = -32.dp.toPx() * progress
+            scaleX = scale
+            scaleY = scale
+            alpha = 1f - progress
         }, style = TextStyle(fontSize = 38.sp, fontWeight = FontWeight.Black,
             brush = Brush.verticalGradient(listOf(Color(0xFFFFF3BE), Color(0xFFFFD05A), Color(0xFFB57608))),
             shadow = Shadow(Color(0xFF794900), Offset(2f, 5f), 3f)))
