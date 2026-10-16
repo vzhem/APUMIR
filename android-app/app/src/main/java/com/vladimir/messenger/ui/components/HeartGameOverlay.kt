@@ -186,7 +186,7 @@ private fun HeartGameBurst(modifier: Modifier, onFinished: () -> Unit) {
             // Pop in from a smaller size, grow quickly, then drift gently upward as it fades.
             val progress = t.value.coerceIn(0f, 1f)
             val grow = 1f - (1f - progress) * (1f - progress) * (1f - progress)
-            val scale = .42f + .78f * grow
+            val scale = 1f + .42f * grow
             translationY = -32.dp.toPx() * progress
             scaleX = scale
             scaleY = scale

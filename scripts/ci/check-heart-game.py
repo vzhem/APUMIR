@@ -19,9 +19,9 @@ class HeartGameContracts(unittest.TestCase):
             self.assertIn(text, ui)
         self.assertNotIn('pointerInput', ui)  # No full-screen gesture interception.
 
-    def test_plus_one_pops_in_and_floats_up(self):
+    def test_plus_one_keeps_original_size_then_grows_and_floats_up(self):
         ui = (SRC / 'ui/components/HeartGameOverlay.kt').read_text()
-        self.assertIn('val scale = .42f + .78f * grow', ui)
+        self.assertIn('val scale = 1f + .42f * grow', ui)
         self.assertIn('translationY = -32.dp.toPx() * progress', ui)
         self.assertIn('scaleX = scale', ui)
         self.assertIn('scaleY = scale', ui)
