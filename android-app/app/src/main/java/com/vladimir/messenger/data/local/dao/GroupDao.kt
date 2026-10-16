@@ -24,6 +24,9 @@ data class ChannelPostStatRow(
 
 @Dao
 interface GroupDao {
+    @Query("UPDATE groups SET wallpaper = :value, wallpaperRevision = :revision WHERE id = :groupId AND wallpaperRevision < :revision")
+    suspend fun setWallpaper(groupId: String, value: String, revision: String): Int
+
 
     // ── Группы ────────────────────────────────────────────────────────────────
     // Каналы лежат в той же таблице, поэтому в выборках групп они отсекаются:

@@ -144,6 +144,17 @@ fun ChannelScreen(
     viewModel: ChannelViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    var showWallpaper by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(uiState.channel?.id) {
+        if (uiState.channel != null) viewModel.refreshConversationWallpaper()
+    }
+    if (showWallpaper) com.vladimir.messenger.ui.components.ConversationWallpaperDialog(
+        scope = "group:${uiState.channelId}", shared = uiState.channel?.wallpaper,
+        onSetShared = if (com.vladimir.messenger.data.group.GroupRole.isAdminOrOwner(uiState.channel?.myRole.orEmpty()))
+            { value -> viewModel.setConversationWallpaper(value) } else null,
+        onDismiss = { showWallpaper = false },
+    )
+
     var showNewPost by remember { mutableStateOf(false) }
     // Пост, который сейчас правят (автор или владелец канала).
     var editingPost by remember { mutableStateOf<ChannelPost?>(null) }
@@ -188,7 +199,7 @@ fun ChannelScreen(
             // Смахивание вправо работает как «Назад».
             .swipeBack(onBack = onBackClick),
     ) {
-        ChatWallpaper()
+        ChatWallpaper(scope = "group:${uiState.channelId}", shared = uiState.channel?.wallpaper)
         Scaffold(
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
@@ -269,6 +280,8 @@ fun ChannelScreen(
                             expanded = showTopMenu,
                             onDismiss = { showTopMenu = false },
                             actions = listOf(
+                                ApuAction(title = stringResource(R.string.conversation_wallpaper),
+                                    icon = Icons.Default.Settings, onClick = { showWallpaper = true }),
                                 ApuAction(
                                     title = if ((uiState.channel?.mutedUntilMs ?: 0L) > System.currentTimeMillis()) {
                                         stringResource(R.string.menu_unmute)

@@ -752,6 +752,8 @@ class GroupRepository(
             slowModeSeconds = g.slowModeSeconds,
             quietHours = g.quietHours,
             memberListVisible = g.memberListVisible,
+            wallpaper = g.wallpaper,
+            wallpaperRevision = g.wallpaperRevision,
             mutedUntilMs = g.mutedUntilMs,
         )
     }
@@ -1303,6 +1305,44 @@ class GroupRepository(
     }
 
     /** Расписание едино для всех тем и использует часовой пояс группы. */
+    private val wallpaperParts = GroupWallpaperParts()
+    private val wallpaperRequests = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    suspend fun setWallpaper(groupId: String, value: String): Result<Unit> = runCatching {
+        require(GroupWallpaper.valid(value)) { "Некорректный фон" }
+        val me = myId() ?: error("Идентичность узла ещё не готова")
+        val group = groupDao.getGroupById(groupId) ?: error("Группа не найдена")
+        val actor = groupDao.getMember(groupId, me) ?: error("Вы не участник")
+        check(GroupWallpaper.canChange(actor.role, actor.permissions, effectiveMemberMask(group), actor.isBanned)) { "Нет права менять общий фон" }
+        val timestamp = maxOf(clock(), (group.wallpaperRevision.substringBefore('-').toLongOrNull() ?: 0) + 1)
+        val revision = "$timestamp-${UUID.randomUUID().toString().replace("-", "")}"
+        check(GroupWallpaper.validRevision(revision, clock()))
+        check(groupDao.setWallpaper(groupId, value, revision) == 1) { "Фон уже изменён. Повторите выбор." }
+        var failed = false
+        for (packet in GroupWire.buildWallpaper(groupId, revision, value)) {
+            if (!delivery.deliver(groupId, packet, allRecipients(groupId, me)).isFullSuccess) failed = true
+        }
+        check(!failed) { "Фон сохранён, но не доставлен части участников. Он будет запрошен при открытии чата." }
+    }
+
+    suspend fun requestWallpaper(groupId: String) {
+        val me = myId() ?: return
+        val group = groupDao.getGroupById(groupId) ?: return
+        val member = groupDao.getMember(groupId, me) ?: return
+        if (member.isBanned) return
+        val targets = (listOf(group.ownerId) + groupDao.getMembers(groupId).filter {
+            !it.isBanned && GroupRole.isAdminOrOwner(it.role)
+        }.map { it.nodeId }).distinct().filter { it != me }.take(4)
+        delivery.deliver(groupId, GroupWire.buildWallpaperRequest(groupId), targets)
+    }
+
+    private suspend fun sendWallpaper(group: GroupEntity, recipient: String) {
+        if (group.wallpaperRevision.isBlank()) return
+        for (packet in GroupWire.buildWallpaper(group.id, group.wallpaperRevision, group.wallpaper)) {
+            delivery.deliver(group.id, packet, listOf(recipient))
+        }
+    }
+
     suspend fun setMemberListVisible(groupId: String, visible: Boolean): Result<Unit> = runCatching {
         val me = myId() ?: error("Идентичность узла ещё не готова")
         val group = groupDao.getGroupById(groupId) ?: error("Группа не найдена")
@@ -4062,6 +4102,7 @@ class GroupRepository(
                     backgroundScope.launch {
                         runCatching { delivery.deliver(packet.groupId, GroupWire.buildQuietHoursRequest(packet.groupId), listOf(senderId)) }
                         runCatching { delivery.deliver(packet.groupId, GroupWire.buildMemberListVisibilityRequest(packet.groupId), listOf(senderId)) }
+                        runCatching { requestWallpaper(packet.groupId) }
                     }
                 }
                 Log.i(TAG, "group info applied group=${packet.groupId} title=${packet.title}")
@@ -4113,6 +4154,33 @@ class GroupRepository(
             is GroupWire.Packet.PollVote -> handlePollVote(senderId, packet)
 
             is GroupWire.Packet.PollClose -> handlePollClose(senderId, packet)
+
+            is GroupWire.Packet.WallpaperRequest -> {
+                val group = groupDao.getGroupById(packet.groupId) ?: return
+                val actor = groupDao.getMember(group.id, me) ?: return
+                if (actor.isBanned || !GroupRole.isAdminOrOwner(actor.role)) return
+                val requester = groupDao.getMember(group.id, senderId) ?: return
+                if (requester.isBanned) return
+                val key = "${group.id}/$senderId"
+                val now = clock()
+                if (now - (wallpaperRequests[key] ?: 0) < 30_000) return
+                if (wallpaperRequests.size > 1024) wallpaperRequests.entries.removeAll { now - it.value > 60_000 }
+                if (wallpaperRequests.size >= 1024) wallpaperRequests.keys.firstOrNull()?.let { wallpaperRequests.remove(it) }
+                wallpaperRequests[key] = now
+                sendWallpaper(group, senderId)
+            }
+            is GroupWire.Packet.Wallpaper -> {
+                val group = groupDao.getGroupById(packet.groupId) ?: return
+                val mine = groupDao.getMember(group.id, me) ?: return
+                if (mine.isBanned || packet.revision <= group.wallpaperRevision) return
+                if (senderId != group.ownerId) {
+                    val actor = groupDao.getMember(group.id, senderId) ?: return
+                    if (!GroupWallpaper.canChange(actor.role, actor.permissions, effectiveMemberMask(group), actor.isBanned)) return
+                }
+                val value = wallpaperParts.receive(group.id, senderId, packet.revision, packet.index,
+                    packet.total, packet.data, clock()) ?: return
+                groupDao.setWallpaper(group.id, value, packet.revision)
+            }
 
             is GroupWire.Packet.MemberListVisibilityRequest -> {
                 val group = groupDao.getGroupById(packet.groupId) ?: return
@@ -5524,6 +5592,7 @@ class GroupRepository(
         groupDao.refreshMemberCount(group.id)
         sendGroupInfo(group, nodeId)
         delivery.deliver(group.id, GroupWire.buildMemberListVisibility(group.id, group.memberListVisible), listOf(nodeId))
+        sendWallpaper(group, nodeId)
         delivery.deliver(group.id, GroupWire.buildQuietHours(group.id, group.quietHours), listOf(nodeId))
         sendTopics(group.id, nodeId)
         publishRoster(group.id, newcomer = nodeId)

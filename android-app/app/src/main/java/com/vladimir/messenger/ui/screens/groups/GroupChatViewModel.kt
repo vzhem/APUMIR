@@ -145,6 +145,13 @@ class GroupChatViewModel @Inject constructor(
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
+    suspend fun setConversationWallpaper(value: String): Result<Unit> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        groupRepository.setWallpaper(groupId, value)
+    }
+    fun refreshConversationWallpaper() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { groupRepository.requestWallpaper(groupId) } }
+    }
+
     private val groupId: String = savedStateHandle.get<String>("groupId").orEmpty()
 
     /**

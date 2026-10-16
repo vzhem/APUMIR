@@ -132,6 +132,13 @@ class ChannelViewModel @Inject constructor(
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
 
+    suspend fun setConversationWallpaper(value: String): Result<Unit> = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        groupRepository.setWallpaper(channelId, value)
+    }
+    fun refreshConversationWallpaper() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) { runCatching { groupRepository.requestWallpaper(channelId) } }
+    }
+
     private val channelId: String = savedStateHandle.get<String>("channelId").orEmpty()
 
     /**

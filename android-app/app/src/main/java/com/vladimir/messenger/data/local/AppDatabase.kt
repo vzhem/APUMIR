@@ -54,7 +54,7 @@ import com.vladimir.messenger.data.local.dao.GroupPollDao
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 30
+const val APP_DATABASE_VERSION = 31
 
 @Database(
     entities = [
@@ -109,6 +109,13 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun groupPollDao(): GroupPollDao
 
     companion object {
+        val MIGRATION_30_31 = object : Migration(30, 31) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE groups ADD COLUMN wallpaper TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE groups ADD COLUMN wallpaperRevision TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         /** Additive migration: existing chats/messages/contacts are never rewritten or deleted. */
         val MIGRATION_29_30 = object : Migration(29, 30) {
             override fun migrate(db: SupportSQLiteDatabase) {

@@ -108,6 +108,10 @@ fun ChatDetailScreen(
     viewModel: ChatDetailViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    var showWallpaper by remember { mutableStateOf(false) }
+    if (showWallpaper) com.vladimir.messenger.ui.components.ConversationWallpaperDialog(
+        scope = "direct:$chatId", onDismiss = { showWallpaper = false })
+
     val scheduledAll by com.vladimir.messenger.data.schedule.ScheduledSendStore.items.collectAsStateWithLifecycle()
     val storeContext = androidx.compose.ui.platform.LocalContext.current
     remember(Unit) { com.vladimir.messenger.data.schedule.ScheduledSendStore.load(storeContext) }
@@ -347,7 +351,7 @@ fun ChatDetailScreen(
             // Смахивание вправо работает как «Назад».
             .swipeBack(onBack = onBackClick),
     ) {
-        ChatWallpaper()
+        ChatWallpaper(scope = "direct:$chatId")
         // Раунд 266: клавиатура не закрывает переписку - список сообщений
         // сжимается над клавиатурой, последние сообщения видны сразу.
         Scaffold(
@@ -475,6 +479,10 @@ fun ChatDetailScreen(
                                 Color(0xFF9AA3AF)
                             },
                         )
+                    }
+                    ApuHeaderIconBubble(onClick = { showWallpaper = true },
+                        contentDescription = stringResource(R.string.conversation_wallpaper)) {
+                        Icon(Icons.Default.Wallpaper, contentDescription = null)
                     }
                     val notificationsMuted = uiState.mutedUntilMs > System.currentTimeMillis()
                     ApuHeaderIconBubble(

@@ -57,4 +57,8 @@ data class GroupEntity(
     val quietHours: String = "",
     @ColumnInfo(defaultValue = "1")
     val memberListVisible: Boolean = true,
+    @ColumnInfo(defaultValue = "''")
+    val wallpaper: String = "",
+    @ColumnInfo(defaultValue = "''")
+    val wallpaperRevision: String = "",
 )

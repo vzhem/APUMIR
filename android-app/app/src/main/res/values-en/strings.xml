@@ -1738,4 +1738,14 @@ The file is not on this phone</string>
     <string name="story_video_reset_audio">Audio — original</string>
     <string name="story_video_reset_caption">Clear caption</string>
     <string name="story_video_reset_shape">Shape — regular</string>
+    <string name="conversation_wallpaper">Chat background</string>
+    <string name="conversation_wallpaper_apply">Apply</string>
+    <string name="conversation_wallpaper_priority">Your personal background is only visible to you and overrides the group or channel background.</string>
+    <string name="conversation_wallpaper_personal">Only for me</string>
+    <string name="conversation_wallpaper_shared">For all members</string>
+    <string name="conversation_wallpaper_preview">Message preview</string>
+    <string name="conversation_wallpaper_gallery">Choose an image</string>
+    <string name="conversation_wallpaper_reset_shared">Remove shared background</string>
+    <string name="conversation_wallpaper_follow">Use shared background / app settings</string>
+    <string name="conversation_wallpaper_wait">Preparing and saving…</string>
 </resources>

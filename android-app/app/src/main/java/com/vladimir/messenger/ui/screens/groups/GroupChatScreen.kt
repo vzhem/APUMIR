@@ -194,6 +194,17 @@ fun GroupChatScreen(
     viewModel: GroupChatViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    var showWallpaper by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(uiState.group?.id) {
+        if (uiState.group != null) viewModel.refreshConversationWallpaper()
+    }
+    if (showWallpaper) com.vladimir.messenger.ui.components.ConversationWallpaperDialog(
+        scope = "group:${uiState.groupId}", shared = uiState.group?.wallpaper,
+        onSetShared = if (com.vladimir.messenger.data.group.GroupRole.isAdminOrOwner(uiState.group?.myRole.orEmpty()))
+            { value -> viewModel.setConversationWallpaper(value) } else null,
+        onDismiss = { showWallpaper = false },
+    )
+
     val muteRevision by viewModel.notificationMuteRevision.collectAsStateWithLifecycle()
     val context = LocalContext.current
     // р237: черновик темы живёт в модели (uiState.draft): он же уезжает на
@@ -625,7 +636,7 @@ fun GroupChatScreen(
             }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        ChatWallpaper()
+        ChatWallpaper(scope = "group:${uiState.groupId}", shared = uiState.group?.wallpaper)
         // Раунд 266: клавиатура не закрывает переписку - сообщения и лента
         // сжимаются над клавиатурой, последнее видно сразу.
         Scaffold(
@@ -756,6 +767,8 @@ fun GroupChatScreen(
                             expanded = showTopMenu,
                             onDismiss = { showTopMenu = false },
                             actions = listOf(
+                                ApuAction(title = stringResource(R.string.conversation_wallpaper),
+                                    icon = Icons.Default.Settings, onClick = { showWallpaper = true }),
                                 ApuAction(
                                     title = if (notificationsMuted) stringResource(R.string.menu_unmute) else stringResource(R.string.menu_mute),
                                     icon = if (notificationsMuted) {

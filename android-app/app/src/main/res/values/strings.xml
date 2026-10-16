@@ -1771,4 +1771,14 @@
     <string name="story_video_reset_audio">Звук — как в исходнике</string>
     <string name="story_video_reset_caption">Очистить подпись</string>
     <string name="story_video_reset_shape">Форму — обычный формат</string>
+    <string name="conversation_wallpaper">Фон чата</string>
+    <string name="conversation_wallpaper_apply">Применить</string>
+    <string name="conversation_wallpaper_priority">Личный фон виден только вам и важнее общего фона группы или канала.</string>
+    <string name="conversation_wallpaper_personal">Только для меня</string>
+    <string name="conversation_wallpaper_shared">Для всех участников</string>
+    <string name="conversation_wallpaper_preview">Так будут выглядеть сообщения</string>
+    <string name="conversation_wallpaper_gallery">Выбрать изображение</string>
+    <string name="conversation_wallpaper_reset_shared">Убрать общий фон</string>
+    <string name="conversation_wallpaper_follow">Использовать общий фон / настройки приложения</string>
+    <string name="conversation_wallpaper_wait">Подготовка и сохранение…</string>
 </resources>

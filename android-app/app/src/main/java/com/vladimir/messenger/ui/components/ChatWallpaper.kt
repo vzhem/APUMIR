@@ -32,8 +32,21 @@ import com.vladimir.messenger.ui.theme.WallpaperHolder
  * «децентрализованная сеть» в тон действующей теме (день/ночь).
  */
 @Composable
-fun ChatWallpaper() {
-    val customUri by WallpaperHolder.uri.collectAsState()
+fun ChatWallpaper(scope: String? = null, shared: String? = null) {
+    val globalUri by WallpaperHolder.uri.collectAsState()
+    val changes by com.vladimir.messenger.data.wallpaper.ConversationWallpaper.changes.collectAsState()
+    val ctx = LocalContext.current
+    val personal = remember(scope, changes) { scope?.let { com.vladimir.messenger.data.wallpaper.ConversationWallpaper.personal(ctx, it) } }
+    val effective = com.vladimir.messenger.data.group.GroupWallpaper.resolve(personal, shared)
+    val customUri = if (effective == null) globalUri else null
+    var scopedBitmap by remember(effective) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    LaunchedEffect(effective) {
+        scopedBitmap = effective?.takeIf { it.startsWith("image:") }?.let {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                com.vladimir.messenger.data.wallpaper.ConversationWallpaper.decode(it)
+            }
+        }
+    }
     val context = LocalContext.current
     // Свои обои читаются с диска и разбираются в картинку. Подложка стоит на
     // КАЖДОМ экране, поэтому на главном потоке это било по всему приложению:
@@ -49,7 +62,7 @@ fun ChatWallpaper() {
 
     androidx.compose.foundation.layout.Box(modifier = Modifier.fillMaxSize()) {
         // Локальная копия ради умного приведения к non-null (см. MyAvatar).
-        val shown = customBitmap
+        val shown = scopedBitmap ?: customBitmap
         if (shown != null) {
             Image(
                 bitmap = shown.asImageBitmap(),
@@ -59,7 +72,8 @@ fun ChatWallpaper() {
             )
         } else {
             val dark = LocalAppDarkTheme.current
-            val tint by WallpaperTintHolder.tint.collectAsState()
+            val globalTint by WallpaperTintHolder.tint.collectAsState()
+            val tint = if (effective == null) globalTint else WallpaperTint.fromStored(effective.removePrefix("preset:"))
             val drawable = if (dark) R.drawable.chat_wallpaper_dark else R.drawable.chat_wallpaper_light
             // Рисунок APU окрашивается оттенком гаммы: его яркость сохраняется, поэтому
             // линии по контрасту такие же, как на дневной подложке. Дневная классика
