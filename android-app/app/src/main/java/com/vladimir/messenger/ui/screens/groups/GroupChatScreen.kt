@@ -117,6 +117,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -1380,8 +1381,22 @@ fun GroupChatScreen(
                 // остаток и не отправляет - репозиторий бы всё равно отказал,
                 // но человеку понятнее видеть счётчик, а не сообщение об ошибке.
                 val slowWaitSeconds = (uiState.slowModeWaitMs + 999L) / 1000L
+                val quietSchedule = remember(uiState.group?.quietHours) {
+                    com.vladimir.messenger.data.group.GroupQuietSchedule.decode(uiState.group?.quietHours.orEmpty())
+                }
+                val quietBlocked by produceState(false, quietSchedule, uiState.me?.role) {
+                    while (true) {
+                        value = !com.vladimir.messenger.data.group.GroupRole.isAdminOrOwner(uiState.me?.role.orEmpty()) &&
+                            quietSchedule?.blocks(System.currentTimeMillis()) == true
+                        kotlinx.coroutines.delay(1_000)
+                    }
+                }
+                if (quietBlocked) {
+                    Text(quietSchedule?.notice().orEmpty(), style = MaterialTheme.typography.labelSmall,
+                        color = ApuBubbleMutedColor, modifier = Modifier.padding(6.dp))
+                }
                 val canSend = (uiState.draft.isNotBlank() || uiState.stagedFile != null) &&
-                    !uiState.sending && !uiState.isPreparingFile && slowWaitSeconds <= 0L
+                    !uiState.sending && !uiState.isPreparingFile && slowWaitSeconds <= 0L && !quietBlocked
                 val scheduledHere = scheduledAll.filter {
                     it.isGroup && it.targetId == uiState.groupId && it.topicId == (uiState.selectedTopicId ?: "")
                 }
@@ -1805,19 +1820,13 @@ private fun JoinRequestRow(
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFE8EEF5)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    request.displayName.trim().take(1).uppercase().ifBlank { "?" },
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF5A6472),
-                )
-            }
+            val applicantAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
+                .collectAsState()
+            PeerAvatar(
+                name = request.displayName.ifBlank { request.nodeId.take(8) },
+                avatarB64 = applicantAvatars[request.nodeId],
+                size = 44.dp,
+            )
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(

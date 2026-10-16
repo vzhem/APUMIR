@@ -301,8 +301,8 @@ interface MessageDao {
      * предыдущего сообщения, а не от чужих, - иначе участник наказывался бы за
      * чужую болтовню. Тема не важна: режим один на всю группу.
      */
-    @Query("SELECT MAX(timestamp) FROM messages WHERE chatId = :chatId AND senderId = :senderId")
-    suspend fun lastOutgoingAt(chatId: String, senderId: String): Long?
+    @Query("SELECT MAX(timestamp) FROM messages WHERE chatId = :chatId AND senderId = :senderId AND isFromMe = 1 AND timestamp <= :nowMs")
+    suspend fun lastOutgoingAt(chatId: String, senderId: String, nowMs: Long): Long?
 
     /**
      * р250: приклеить к сообщению цитату ответа.

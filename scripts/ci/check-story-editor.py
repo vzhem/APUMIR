@@ -14,6 +14,19 @@ class StoryEditorContracts(unittest.TestCase):
         self.assertNotIn("singleLine = true", source)
         self.assertIn("story_hide_keyboard", source)
 
+    def test_viewer_fills_window_and_measures_content_between_controls(self):
+        source = (MAIN / "ui/components/Stories.kt").read_text()
+        viewer = source.split("fun StoryViewerDialog(")[1].split("fun StoryComposerDialog(")[0]
+        self.assertIn("window.setLayout(", viewer)
+        self.assertEqual(2, viewer.count("android.view.ViewGroup.LayoutParams.MATCH_PARENT"))
+        self.assertIn("window.setBackgroundDrawable", viewer)
+        self.assertIn("background(Color.Black).safeDrawingPadding()", viewer)
+        self.assertIn("fillMaxWidth().weight(1f).clipToBounds()", viewer)
+        self.assertNotIn("padding(top = 96.dp", viewer)
+        self.assertNotIn("align(Alignment.BottomCenter)", viewer)
+        self.assertIn("rememberSaveable(authorId)", viewer)
+        self.assertIn("rememberSaveable(current.id)", viewer)
+
     def test_enter_is_not_a_done_or_publish_action(self):
         source = (MAIN / "ui/components/StoryContentCanvas.kt").read_text()
         self.assertIn("singleLine = false", source)

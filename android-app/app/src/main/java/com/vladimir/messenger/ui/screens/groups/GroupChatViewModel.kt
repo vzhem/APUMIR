@@ -700,6 +700,14 @@ class GroupChatViewModel @Inject constructor(
         viewModelScope.launch {
             groupRepository.observeJoinRequests(groupId).collect { list ->
                 _joinRequests.value = list
+                // Заявитель ещё не участник и может отсутствовать в контактах.
+                // WHOIS адресно возвращает аватар; репозиторий ограничивает
+                // частоту запросов. Не задерживаем публикацию списка в UI.
+                list.map { it.nodeId }.distinct().forEach { nodeId ->
+                    if (com.vladimir.messenger.ui.theme.AvatarStore.avatars.value[nodeId].isNullOrBlank()) {
+                        launch { groupRepository.requestIdentity(nodeId) }
+                    }
+                }
             }
         }
     }
@@ -970,6 +978,7 @@ class GroupChatViewModel @Inject constructor(
      * увидят вопрос обычным сообщением.
      */
     fun createPoll(draft: com.vladimir.messenger.data.group.PollDraft) {
+        if (_uiState.value.sending) return
         val topicId = _uiState.value.selectedTopicId
         if (topicId == null) {
             _uiState.update { it.copy(error = appContext.getString(R.string.gc_choose_topic)) }
@@ -987,19 +996,27 @@ class GroupChatViewModel @Inject constructor(
         }
         _uiState.update { it.copy(sending = true, error = null) }
         viewModelScope.launch {
-            groupRepository.sendMessage(
-                groupId = groupId,
-                topicId = topicId,
-                text = question,
-                poll = com.vladimir.messenger.data.group.PollDraft(
-                    question = question,
-                    options = options,
-                    anonymous = draft.anonymous,
-                    multiChoice = draft.multiChoice,
-                ),
-            )
-                .onFailure { e -> _uiState.update { it.copy(sending = false, error = e.message) } }
-                .onSuccess { _uiState.update { it.copy(sending = false) } }
+            try {
+                groupRepository.sendMessage(
+                    groupId = groupId,
+                    topicId = topicId,
+                    text = question,
+                    poll = com.vladimir.messenger.data.group.PollDraft(
+                        question = question,
+                        options = options,
+                        anonymous = draft.anonymous,
+                        multiChoice = draft.multiChoice,
+                    ),
+                )
+                    .onFailure { e -> _uiState.update { it.copy(sending = false, error = e.message) } }
+                    .onSuccess { _uiState.update { it.copy(sending = false) } }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e.message ?: "Не удалось отправить сообщение") }
+            } finally {
+                _uiState.update { it.copy(sending = false) }
+            }
         }
     }
 
@@ -1046,7 +1063,7 @@ class GroupChatViewModel @Inject constructor(
                     runCatching { groupRepository.slowModeWaitMs(groupId, me) }.getOrDefault(0L)
                 }
                 _uiState.update { it.copy(slowModeWaitMs = wait) }
-                kotlinx.coroutines.delay(if (wait > 0L) 500L else 5_000L)
+                kotlinx.coroutines.delay(if (wait > 0L || _uiState.value.slowModeSeconds > 0) 500L else 1_000L)
             }
         }
     }
@@ -1379,6 +1396,8 @@ class GroupChatViewModel @Inject constructor(
                 title = invite.first,
                 about = group.about,
                 link = invite.second,
+                isPublic = group.isPublic,
+                needsApproval = !group.isPublic,
             )
             var sent = 0
             var failed = 0
@@ -1470,6 +1489,7 @@ class GroupChatViewModel @Inject constructor(
     }
 
     fun send(text: String, quiet: Boolean = false) {
+        if (_uiState.value.sending) return
         val topicId = _uiState.value.selectedTopicId ?: return
         val staged = _uiState.value.stagedFile
         if (text.isBlank() && staged == null) return
@@ -1487,22 +1507,30 @@ class GroupChatViewModel @Inject constructor(
         }
         _uiState.update { it.copy(sending = true, error = null) }
         viewModelScope.launch {
-            // Файл (этап 9): в сообщении едет визитка и подпись «📎 имя
-            // (размер)» - старые версии видят подпись, новые рисуют карточку;
-            // сам файл участники просят у меня и друг у друга.
-            val body = if (staged == null) {
-                if (quiet) com.vladimir.messenger.util.QuietMessage.wrap(text) else text
-            } else {
-                com.vladimir.messenger.util.GroupFileMarker.compose(text, staged)
-            }
-            groupRepository.sendMessage(groupId, topicId, body, reply = reply)
-                .onFailure { e -> _uiState.update { it.copy(sending = false, error = e.message) } }
-                .onSuccess {
-                    // р237: сообщение ушло - черновик пропадает на обоих устройствах.
-                    onDraftChanged("")
-                    // Ответ отправлен - цитата над полем ввода больше не нужна.
-                    _uiState.update { it.copy(sending = false, stagedFile = null, replyTo = null) }
+            try {
+                // Файл (этап 9): в сообщении едет визитка и подпись «📎 имя
+                // (размер)» - старые версии видят подпись, новые рисуют карточку;
+                // сам файл участники просят у меня и друг у друга.
+                val body = if (staged == null) {
+                    if (quiet) com.vladimir.messenger.util.QuietMessage.wrap(text) else text
+                } else {
+                    com.vladimir.messenger.util.GroupFileMarker.compose(text, staged)
                 }
+                groupRepository.sendMessage(groupId, topicId, body, reply = reply)
+                    .onFailure { e -> _uiState.update { it.copy(sending = false, error = e.message) } }
+                    .onSuccess {
+                        // р237: сообщение ушло - черновик пропадает на обоих устройствах.
+                        onDraftChanged("")
+                        // Ответ отправлен - цитата над полем ввода больше не нужна.
+                        _uiState.update { it.copy(sending = false, stagedFile = null, replyTo = null) }
+                    }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e.message ?: "Не удалось отправить сообщение") }
+            } finally {
+                _uiState.update { it.copy(sending = false) }
+            }
         }
     }
 
@@ -1512,6 +1540,7 @@ class GroupChatViewModel @Inject constructor(
      * с хранителей - в личные чаты ничего не приходит.
      */
     fun sendGifRefToGroup(sha256: String) {
+        if (_uiState.value.sending) return
         val topicId = _uiState.value.selectedTopicId
         if (topicId == null) {
             _uiState.update { it.copy(error = appContext.getString(R.string.gc_choose_topic)) }
@@ -1519,21 +1548,29 @@ class GroupChatViewModel @Inject constructor(
         }
         _uiState.update { it.copy(sending = true, error = null) }
         viewModelScope.launch {
-            groupRepository.sendMessage(groupId, topicId, com.vladimir.messenger.data.gif.GifLibrary.refContent(sha256))
-                .onFailure { e -> _uiState.update { it.copy(sending = false, error = e.message) } }
-                .onSuccess {
-                    _uiState.update { it.copy(sending = false) }
-                    ensureGifRefInternal(sha256)
-                    // Раунд 131: объявить каталог - участники должны узнать
-                    // во мне хранителя новой гифки.
-                    runCatching {
-                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
-                                appContext, chatRepository, force = false,
-                            )
+            try {
+                groupRepository.sendMessage(groupId, topicId, com.vladimir.messenger.data.gif.GifLibrary.refContent(sha256))
+                    .onFailure { e -> _uiState.update { it.copy(sending = false, error = e.message) } }
+                    .onSuccess {
+                        _uiState.update { it.copy(sending = false) }
+                        ensureGifRefInternal(sha256)
+                        // Раунд 131: объявить каталог - участники должны узнать
+                        // во мне хранителя новой гифки.
+                        runCatching {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
+                                    appContext, chatRepository, force = false,
+                                )
+                            }
                         }
                     }
-                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e.message ?: "Не удалось отправить сообщение") }
+            } finally {
+                _uiState.update { it.copy(sending = false) }
+            }
         }
     }
 

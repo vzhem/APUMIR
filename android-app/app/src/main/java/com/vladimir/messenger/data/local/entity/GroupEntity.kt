@@ -53,4 +53,6 @@ data class GroupEntity(
      */
     @ColumnInfo(defaultValue = "0")
     val slowModeSeconds: Int = 0,
+    @ColumnInfo(defaultValue = "''")
+    val quietHours: String = "",
 )

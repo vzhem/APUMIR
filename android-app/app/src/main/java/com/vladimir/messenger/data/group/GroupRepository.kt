@@ -750,6 +750,7 @@ class GroupRepository(
             },
             // р250: медленный режим - экран чата показывает остаток ожидания.
             slowModeSeconds = g.slowModeSeconds,
+            quietHours = g.quietHours,
             mutedUntilMs = g.mutedUntilMs,
         )
     }
@@ -927,6 +928,7 @@ class GroupRepository(
         val topic = resolveTopic(group, topicId) ?: return false
         if (topic.groupId != groupId) return false
         val admin = GroupRole.isAdminOrOwner(author.role)
+        if (!admin && GroupQuietSchedule.decode(group.quietHours)?.blocks(clock()) == true) return false
         val mask = GroupPermissions.effectiveMemberPermissions(author.permissions, effectiveMemberMask(group))
         return (admin || GroupPermissions.has(mask, GroupPermissions.Member.SEND_MESSAGES)) && (!topic.isClosed || admin)
     }
@@ -1009,6 +1011,10 @@ class GroupRepository(
         if (member.isBanned) return Result.failure(SecurityException("Вы ограничены в этой группе"))
 
         val isAdmin = GroupRole.isAdminOrOwner(member.role)
+        val schedule = GroupQuietSchedule.decode(group.quietHours)
+        if (!isAdmin && schedule?.blocks(clock()) == true) {
+            return Result.failure(SecurityException(schedule.notice()))
+        }
         val memberMask = GroupPermissions.effectiveMemberPermissions(member.permissions, effectiveMemberMask(group))
         if (!isAdmin && !GroupPermissions.has(memberMask, GroupPermissions.Member.SEND_MESSAGES)) {
             return Result.failure(SecurityException("Отправка сообщений в этой группе запрещена"))
@@ -1129,24 +1135,33 @@ class GroupRepository(
         // сборщика, открыв комментарии. На маленьком канале - всем, как раньше.
         val commentRoute = if (group.isChannel && !isChannelPost) commentTargets(group, me, topic.id) else null
         val fullRecipients = commentRoute ?: wave?.full ?: allRecipients(groupId, me)
-        val report = delivery.deliver(
-            groupId,
-            // Id сообщения уходит в конверт: у получателей строка ляжет под тем
-            // же id, и закреп (Pin) найдёт её на всех телефонах. Имя - чтобы
-            // получатель сразу знал, кто написал, даже без списка участников.
-            GroupWire.buildMessage(
-                groupId = groupId,
-                topicId = topic.id,
-                text = body,
-                messageId = messageId,
-                senderName = member.displayName,
-            ),
-            fullRecipients,
-        )
+        // Сообщение уже сохранено. Ожидание сетевого веера/бюджета не
+        // должно удерживать кнопку отправки после окончания медленного режима.
+        // Scope репозитория переживает уход с экрана; путь доставки не меняем.
+        backgroundScope.launch {
+            runCatching {
+                delivery.deliver(
+                    groupId,
+                    // Id сообщения уходит в конверт: у получателей строка ляжет под тем
+                    // же id, и закреп (Pin) найдёт её на всех телефонах. Имя - чтобы
+                    // получатель сразу знал, кто написал, даже без списка участников.
+                    GroupWire.buildMessage(
+                        groupId = groupId,
+                        topicId = topic.id,
+                        text = body,
+                        messageId = messageId,
+                        senderName = member.displayName,
+                    ),
+                    fullRecipients,
+                )
+            }.onSuccess { report ->
+                Log.i(TAG, "group message id=$messageId fanout=${report.delivered}/${report.attempted}")
+            }.onFailure { Log.w(TAG, "group message fanout failed id=$messageId: ${it.message}") }
+        }
         // Куски текста и фотографий разлетаются в фоне: до двух десятков
         // вееров подряд, и экран не должен ждать их (а viewModelScope не
         // должен их обрывать, когда человек уйдёт с экрана). Голова текста
-        // уже ушла первой.
+        // поставлена на отправку отдельно от частей.
         if (partRows.isNotEmpty()) {
             val senderName = member.displayName
             backgroundScope.launch {
@@ -1180,7 +1195,7 @@ class GroupRepository(
         Log.i(
             TAG,
             "group message id=$messageId group=$groupId topic=${topic.id} parts=${partRows.size} " +
-                "fanout=${report.delivered}/${report.attempted} swarmRest=${wave?.rest ?: 0} " +
+                "fanout=queued swarmRest=${wave?.rest ?: 0} " +
                 "viaHubs=${commentRoute != null} manifest=${manifest != null} via=${delivery.name}",
         )
         // ── р250: цитата ответа - своим конвертом, сразу за сообщением ──
@@ -1282,9 +1297,26 @@ class GroupRepository(
 
     private suspend fun slowModeWaitMs(group: GroupEntity, me: String, now: Long): Long {
         if (group.slowModeSeconds <= 0) return 0L
-        val last = messageDao.lastOutgoingAt(group.id, me) ?: return 0L
-        val wait = last + group.slowModeSeconds * 1000L - now
-        return if (wait > 0L) wait else 0L
+        val last = messageDao.lastOutgoingAt(group.id, me, now)
+        return GroupSlowMode.remainingMs(group.slowModeSeconds, last, now)
+    }
+
+    /** Расписание едино для всех тем и использует часовой пояс группы. */
+    suspend fun setQuietHours(groupId: String, schedule: String): Result<Unit> = runCatching {
+        require(schedule.isEmpty() || GroupQuietSchedule.decode(schedule) != null) { "Некорректное расписание" }
+        val me = myId() ?: error("Идентичность узла ещё не готова")
+        val group = groupDao.getGroupById(groupId) ?: error("Группа не найдена")
+        val member = groupDao.getMember(groupId, me) ?: error("Вы не участник")
+        check(GroupRole.isAdminOrOwner(member.role) &&
+            GroupPermissions.canChangeInfo(member.role, member.permissions, effectiveMemberMask(group))) {
+            "Менять расписание вправе администратор"
+        }
+        groupDao.setQuietHours(groupId, schedule)
+        backgroundScope.launch {
+            runCatching { delivery.deliver(groupId, GroupWire.buildQuietHours(groupId, schedule), allRecipients(groupId, me)) }
+                .onFailure { Log.w(TAG, "quiet hours fanout failed: ${it.message}") }
+        }
+        Unit
     }
 
     /**
@@ -2328,6 +2360,10 @@ class GroupRepository(
         val member = groupDao.getMember(groupId, me)
             ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
         if (member.isBanned) return Result.failure(SecurityException("Вы ограничены в этой группе"))
+        val schedule = GroupQuietSchedule.decode(group.quietHours)
+        if (!GroupRole.isAdminOrOwner(member.role) && schedule?.blocks(clock()) == true) {
+            return Result.failure(SecurityException(schedule.notice()))
+        }
         val message = messageDao.getMessageById(messageId)
             ?: return Result.failure(IllegalStateException("Сообщение не найдено"))
         if (message.chatId != groupId) {
@@ -4003,6 +4039,13 @@ class GroupRepository(
                     )
                     groupDao.bumpMemberCount(packet.groupId)
                 }
+                // Запрашиваем после применения info: отдельный пакет настройки
+                // мог обогнать карточку группы на другом транспорте.
+                if (senderId == packet.ownerId && senderId != me) {
+                    backgroundScope.launch {
+                        runCatching { delivery.deliver(packet.groupId, GroupWire.buildQuietHoursRequest(packet.groupId), listOf(senderId)) }
+                    }
+                }
                 Log.i(TAG, "group info applied group=${packet.groupId} title=${packet.title}")
             }
 
@@ -4052,6 +4095,24 @@ class GroupRepository(
             is GroupWire.Packet.PollVote -> handlePollVote(senderId, packet)
 
             is GroupWire.Packet.PollClose -> handlePollClose(senderId, packet)
+
+            is GroupWire.Packet.QuietHoursRequest -> {
+                val group = groupDao.getGroupById(packet.groupId) ?: return
+                if (group.ownerId != myId()) return
+                val member = groupDao.getMember(packet.groupId, senderId) ?: return
+                if (member.isBanned) return
+                delivery.deliver(group.id, GroupWire.buildQuietHours(group.id, group.quietHours), listOf(senderId))
+            }
+
+            is GroupWire.Packet.QuietHours -> {
+                val group = groupDao.getGroupById(packet.groupId) ?: return
+                if (senderId != group.ownerId) {
+                    val sender = groupDao.getMember(packet.groupId, senderId) ?: return
+                    if (sender.isBanned || !GroupRole.isAdminOrOwner(sender.role) ||
+                        !GroupPermissions.canChangeInfo(sender.role, sender.permissions, effectiveMemberMask(group))) return
+                }
+                groupDao.setQuietHours(packet.groupId, packet.schedule)
+            }
 
             is GroupWire.Packet.SlowMode -> handleSlowMode(senderId, packet)
 
@@ -5427,6 +5488,7 @@ class GroupRepository(
         if (slug.isNotBlank()) groupDao.registerInviteUse(slug)
         groupDao.refreshMemberCount(group.id)
         sendGroupInfo(group, nodeId)
+        delivery.deliver(group.id, GroupWire.buildQuietHours(group.id, group.quietHours), listOf(nodeId))
         sendTopics(group.id, nodeId)
         publishRoster(group.id, newcomer = nodeId)
         // Ключи подписи - новичку канала и большой группы (этап 5): в ответ он

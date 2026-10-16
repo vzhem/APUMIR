@@ -533,6 +533,10 @@ object GroupWire {
          * р250: медленный режим группы - участник ждёт [seconds] секунд между
          * своими сообщениями; 0 - режим выключен.
          */
+        data class QuietHoursRequest(val groupId: String) : Packet()
+
+        data class QuietHours(val groupId: String, val schedule: String) : Packet()
+
         data class SlowMode(val groupId: String, val seconds: Int) : Packet()
 
         /**
@@ -1461,6 +1465,13 @@ object GroupWire {
     // ── р250: медленный режим ───────────────────────────────────────────────
 
     /** Медленный режим группы: [seconds] секунд между сообщениями участника (0 - выключен). */
+    fun buildQuietHoursRequest(groupId: String): String = "$PREFIX|quiet_hours_get|$groupId"
+
+    fun buildQuietHours(groupId: String, schedule: String): String {
+        require(schedule.isEmpty() || GroupQuietSchedule.decode(schedule) != null)
+        return "$PREFIX|quiet_hours|$groupId|${encode(schedule)}"
+    }
+
     fun buildSlowMode(groupId: String, seconds: Int): String {
         require(groupId.isNotBlank()) { "bad group id" }
         val safe = seconds.coerceIn(0, SLOW_MODE_MAX_SECONDS)
@@ -1907,6 +1918,13 @@ object GroupWire {
             } else {
                 null
             }
+
+            "quiet_hours_get" -> if (parts.size == 3) Packet.QuietHoursRequest(groupId) else null
+
+            "quiet_hours" -> if (parts.size == 4) {
+                val schedule = decode(parts[3]) ?: return null
+                if (schedule.isEmpty() || GroupQuietSchedule.decode(schedule) != null) Packet.QuietHours(groupId, schedule) else null
+            } else null
 
             KIND_SLOW_MODE -> if (parts.size == 4) {
                 val seconds = parts[3].toIntOrNull()

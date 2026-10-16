@@ -112,7 +112,7 @@ class PeerRankContractTest(unittest.TestCase):
         self.assertRegex(PEER_DAO, re.compile(
             r"WHERE nodeId = :nodeId AND updatedAtMs < :updatedAtMs"))
         # Версия базы поднята вместе с миграцией; уже принятые ранги переезжают.
-        self.assertIn("APP_DATABASE_VERSION = 28", DATABASE)
+        self.assertGreaterEqual(int(re.search(r"APP_DATABASE_VERSION = (\d+)", DATABASE).group(1)), 28)
         self.assertIn("MIGRATION_27_28", DATABASE)
         self.assertIn("peer_ranks", DATABASE)
         self.assertIn("SELECT lower(`id`), `peerRankQualified`, `peerRankUpdatedAtMs`", DATABASE)

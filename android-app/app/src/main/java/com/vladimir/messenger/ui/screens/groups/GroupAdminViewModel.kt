@@ -138,6 +138,14 @@ class GroupAdminViewModel @Inject constructor(
         viewModelScope.launch {
             groupRepository.observeJoinRequests(groupId).collect { list ->
                 _uiState.update { it.copy(requests = list) }
+                // Заявитель ещё не участник и может отсутствовать в контактах.
+                // WHOIS адресно возвращает аватар; репозиторий ограничивает
+                // частоту запросов. Не задерживаем публикацию списка в UI.
+                list.map { it.nodeId }.distinct().forEach { nodeId ->
+                    if (com.vladimir.messenger.ui.theme.AvatarStore.avatars.value[nodeId].isNullOrBlank()) {
+                        launch { groupRepository.requestIdentity(nodeId) }
+                    }
+                }
             }
         }
     }
@@ -284,6 +292,14 @@ class GroupAdminViewModel @Inject constructor(
      * меняет владелец, администратор с правом «Изменять информацию» или
      * участник, которому это право дано (см. GroupPermissions.canChangeInfo).
      */
+    fun setQuietHours(schedule: String) {
+        viewModelScope.launch {
+            groupRepository.setQuietHours(groupId, schedule)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                .onSuccess { _uiState.update { it.copy(notice = "Расписание сохранено") } }
+        }
+    }
+
     fun setSlowMode(seconds: Int) {
         viewModelScope.launch {
             groupRepository.setSlowMode(groupId, seconds)

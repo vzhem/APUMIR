@@ -907,6 +907,8 @@ class ChatListViewModel @Inject constructor(
                         title = title,
                         about = group.about,
                         link = link,
+                        isPublic = group.isPublic,
+                        needsApproval = !group.isPublic,
                     )
                 } else {
                     "Приглашение в $what «$title»:\n$link"

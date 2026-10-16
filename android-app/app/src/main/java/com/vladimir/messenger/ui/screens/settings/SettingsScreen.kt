@@ -1989,6 +1989,18 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
     LaunchedEffect(Unit) { viewModel.onUpdatesAppeared() }
 
     SettingsCard {
+        SettingsItem(
+            icon = Icons.Default.CloudDownload,
+            title = when {
+                checking -> stringResource(R.string.st_official_checking)
+                official != null -> stringResource(R.string.st_official_download_version, official!!.version.removePrefix("v"))
+                else -> stringResource(R.string.st_official_download)
+            },
+            subtitle = stringResource(R.string.st_official_check_download_hint),
+            onClick = if (checking) null else viewModel::onDownloadOfficialRelease,
+        )
+        ApuSettingsDivider()
+
         // Моя раздача.
         seed?.let { s ->
             SettingsItem(
@@ -2091,12 +2103,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
             )
-            SettingsItem(
-                icon    = Icons.Default.CloudDownload,
-                title   = stringResource(R.string.st_dl_official_v, officialNow.version.removePrefix("v")),
-                subtitle = stringResource(R.string.settings_via_internet),
-                onClick = viewModel::onDownloadOfficialRelease,
-            )
+
             SettingsItem(
                 icon    = Icons.Default.Download,
                 title   = stringResource(R.string.st_dl_net_v, best.version),
@@ -2116,15 +2123,6 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
                         stringResource(R.string.offer_one_tpl, StoragePolicy.format(best.sizeBytes))
                     },
                     onClick = { viewModel.onDownloadUpdateFrom(best.nodeId) },
-                )
-            }
-            // Официальный релиз, найденный кнопкой «Проверить новую версию».
-            official?.let { rel ->
-                SettingsItem(
-                    icon    = Icons.Default.CloudDownload,
-                    title   = stringResource(R.string.st_dl_official_only, rel.version.removePrefix("v")),
-                    subtitle = stringResource(R.string.settings_from_github),
-                    onClick = viewModel::onDownloadOfficialRelease,
                 )
             }
         }

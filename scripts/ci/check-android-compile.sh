@@ -80,7 +80,7 @@ cd android-app || exit 1
 # «APK без broker-фрагментов» + стабильность ID обычных файлов. Это реальные
 # unit-тесты после компиляции Kotlin, не подмена полной сборки релизного APK.
 ./gradlew :app:testDebugUnitTest --no-daemon --console=plain \
-    --tests '*RankWireTest*' --tests '*FileTransferRankPolicyTest*' --tests '*OnlineHelperPolicyTest*' \
+    --tests '*GroupSlowModeTest*' --tests '*GroupQuietHoursTest*' --tests '*RankWireTest*' --tests '*FileTransferRankPolicyTest*' --tests '*OnlineHelperPolicyTest*' \
     --tests '*ShortLinksTest*' --tests '*DiagnosticsReportTest*' --tests '*RelayStorageDiagnosticsTest*' --tests '*RuntimeHealthTest*' --tests '*OperationalHealthTest*' --tests '*StoryDeliveryQueueTest*' --tests '*StoryPublishTest*' --tests '*StoryOutboxTest*' --tests '*StoryStoreMergeTest*' --tests '*StoryCropTest*' --tests '*ProfileMirrorBirthdayTest*' \
     --tests '*StoryFeedbackWireTest*' --tests '*StoryFeedbackLedgerTest*' --tests '*StoryFeedbackOutboxTest*' \
     --tests '*GroupFileSeederTest*' --tests '*FileTransferWireTest*' --tests '*FileTransferChunkStoreTest*' --tests '*TemporaryFileSweepTest*' --tests '*EphemeralControlTest*' \

@@ -87,7 +87,11 @@ class NotificationHelper @Inject constructor(
             ?: groupDao.getMember(chatId, senderId)?.displayName?.takeIf { it.isNotBlank() }
             ?: senderId.take(8)
         val title = group?.title ?: senderName
-        val body = if (group != null) "$senderName: $messageText" else messageText
+        // Карточку показываем понятным текстом, а не транспортной ссылкой
+        // с адресом сервиса, slug и идентификаторами. Оба вида уведомления
+        // (свёрнутый и развёрнутый) используют один и тот же preview.
+        val preview = com.vladimir.messenger.util.MessageNotificationText.format(messageText)
+        val body = if (group != null) "$senderName: $preview" else preview
         
         // Создать intent для открытия чата
         val intent = Intent(context, MainActivity::class.java).apply {

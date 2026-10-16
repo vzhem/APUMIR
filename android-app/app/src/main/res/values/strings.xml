@@ -1733,4 +1733,21 @@
     <string name="send_cancel_requested">Запрос отмены в очереди. Подтвердили: %1$d из %2$d.</string>
     <string name="send_cancel_best_effort">При отмене отправим запрос удаления. Если получатель без связи, сообщение может успеть появиться.</string>
     <string name="story_hide_keyboard">Скрыть клавиатуру</string>
+    <string name="mb_invitation_group">Приглашение в группу</string>
+    <string name="mb_invitation_channel">Приглашение в канал</string>
+    <string name="mb_open_group">Открытая группа</string>
+    <string name="mb_closed_group">Закрытая группа</string>
+    <string name="mb_open_channel">Открытый канал</string>
+    <string name="mb_closed_channel">Закрытый канал</string>
+    <string name="mb_access_unknown">Тип доступа не указан в приглашении</string>
+    <string name="mb_description_empty">Описание не указано</string>
+    <string name="mb_join_approval">Вступление после одобрения заявки</string>
+    <string name="mb_join_direct">Вступление без одобрения заявки</string>
+    <string name="mb_join_unknown">Условия вступления не указаны в приглашении</string>
+    <string name="mb_send_join_request">Отправить заявку</string>
+    <string name="st_official_download">Скачать с официального сайта</string>
+    <string name="st_official_download_version">Скачать с официального сайта — v%1$s</string>
+    <string name="st_official_checking">Проверяем версию на официальном сайте…</string>
+    <string name="st_official_check_download_hint">Проверить свежую версию и скачать, если она новее установленной</string>
+    <string name="st_official_already_requested">Эта версия уже скачивается или скачана. Проверьте загрузки и готовые обновления.</string>
 </resources>

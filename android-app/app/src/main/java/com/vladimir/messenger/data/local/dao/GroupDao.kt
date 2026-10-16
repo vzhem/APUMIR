@@ -120,6 +120,9 @@ interface GroupDao {
     @Query("UPDATE groups SET slowModeSeconds = :seconds WHERE id = :groupId")
     suspend fun setSlowMode(groupId: String, seconds: Int)
 
+    @Query("UPDATE groups SET quietHours = :schedule WHERE id = :groupId")
+    suspend fun setQuietHours(groupId: String, schedule: String)
+
     /** р249: звук выключен прямо сейчас (см. ChatDao.countMuted про COUNT(*)). */
     @Query("SELECT COUNT(*) FROM groups WHERE id = :groupId AND mutedUntilMs > :nowMs")
     suspend fun countMuted(groupId: String, nowMs: Long): Int

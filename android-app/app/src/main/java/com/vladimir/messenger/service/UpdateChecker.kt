@@ -525,8 +525,10 @@ class UpdateChecker @Inject constructor(
      * Скачать APK через DownloadManager.
      * @return ID загрузки
      */
-    fun downloadApk(releaseInfo: ReleaseInfo): Long {
-        if (directSwarmHasNewer(currentAppVersion()) || !externalReleaseAllowedNow()) {
+    fun downloadApk(releaseInfo: ReleaseInfo, preferOfficial: Boolean = false): Long {
+        // An explicit source selection must not silently switch back to peers.
+        if (preferOfficial) extendManualWindow(MANUAL_DOWNLOAD_WINDOW_MS)
+        if ((!preferOfficial && directSwarmHasNewer(currentAppVersion())) || !externalReleaseAllowedNow()) {
             throw IllegalStateException("Обновление сначала запрашивается у прямого роя")
         }
         // Дальше загрузка идёт долго и не в нашем процессе (DownloadManager),
@@ -542,7 +544,7 @@ class UpdateChecker @Inject constructor(
         // скачивание целого APK.
         val currentNormalized = com.vladimir.messenger.data.update.ApkUpdate
             .normalize(currentAppVersion())
-        if (releaseInfo.patchUrl != null &&
+        if (!preferOfficial && releaseInfo.patchUrl != null &&
             releaseInfo.patchFrom == currentNormalized &&
             releaseInfo.apkSha256 != null
         ) {
@@ -565,7 +567,7 @@ class UpdateChecker @Inject constructor(
             setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
         }
         
-        if (directSwarmHasNewer(currentAppVersion()) || !externalReleaseAllowedNow()) {
+        if ((!preferOfficial && directSwarmHasNewer(currentAppVersion())) || !externalReleaseAllowedNow()) {
             throw IllegalStateException("Рой ответил до начала внешней загрузки")
         }
         val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager

@@ -242,6 +242,8 @@ fun GroupAdminScreen(
                     onTogglePublic = viewModel::setPublic,
                     onEnableTopics = viewModel::enableTopics,
                     onSetSlowMode = viewModel::setSlowMode,
+                    quietHours = uiState.group?.quietHours.orEmpty(),
+                    onSetQuietHours = viewModel::setQuietHours,
                     onLeave = { viewModel.leaveGroup(onLeftGroup) },
                     onDeleteGroup = { viewModel.deleteGroup(onLeftGroup) },
                 )
@@ -321,6 +323,8 @@ private fun OverviewTab(
     onEnableTopics: () -> Unit,
     /** р250: включить или выключить медленный режим. */
     onSetSlowMode: (Int) -> Unit,
+    quietHours: String,
+    onSetQuietHours: (String) -> Unit,
     onLeave: () -> Unit,
     onDeleteGroup: () -> Unit,
 ) {
@@ -490,6 +494,8 @@ private fun OverviewTab(
                 }
             }
         }
+
+        GroupQuietHoursSettings(quietHours, canChangeInfo && canChangeVisibility, onSetQuietHours)
 
         // р250: медленный режим. Блок видят все - режим заметен в чате, и
         // скрывать его нет смысла; переключают только те, кто вправе менять
@@ -1049,7 +1055,21 @@ private fun RequestsTab(requests: List<JoinRequestSummary>, onDecide: (String, B
         items(requests, key = { it.nodeId }) { request ->
             ApuBubble {
                 Column {
-                    Text(request.displayName.ifBlank { request.nodeId }, fontWeight = FontWeight.Medium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val applicantAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
+                            .collectAsState()
+                        PeerAvatar(
+                            name = request.displayName.ifBlank { request.nodeId.take(8) },
+                            avatarB64 = applicantAvatars[request.nodeId],
+                            size = 44.dp,
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            request.displayName.ifBlank { request.nodeId },
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                     if (request.note.isNotBlank()) {
                         Text(
                             request.note,

@@ -66,6 +66,10 @@ GROUP_PERMS_TEST="$BASE/test/java/com/vladimir/messenger/data/group/GroupPermiss
 # телефоны обязаны молча пропускать незнакомые виды и понимать старые `msg`/`info`.
 POST_MANIFEST="$BASE/main/java/com/vladimir/messenger/data/swarm/PostManifest.kt"
 GROUP_WIRE="$BASE/main/java/com/vladimir/messenger/data/group/GroupWire.kt"
+QUIET_HOURS="$BASE/main/java/com/vladimir/messenger/data/group/GroupQuietHours.kt"
+SLOW_MODE="$BASE/main/java/com/vladimir/messenger/data/group/GroupSlowMode.kt"
+SLOW_MODE_TEST="$BASE/test/java/com/vladimir/messenger/data/group/GroupSlowModeTest.kt"
+QUIET_HOURS_TEST="$BASE/test/java/com/vladimir/messenger/data/group/GroupQuietHoursTest.kt"
 GROUP_WIRE_TEST="$BASE/test/java/com/vladimir/messenger/data/group/GroupWireTest.kt"
 GROUP_WIRE_UPDATE_TEST="$BASE/test/java/com/vladimir/messenger/data/group/GroupWireUpdateTest.kt"
 # Отчёт «Логи» и разбор строки MQTT: чистый Kotlin без Android. Здесь они
@@ -134,7 +138,7 @@ IDENTITY_HEALTH_TEST="$BASE/test/java/com/vladimir/messenger/data/security/Ident
     org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
     -no-stdlib -no-reflect -jvm-target 17 -classpath "$CP" -d "$OUT/classes" \
     "$MODEL/Message.kt" "$MODEL/MessageStatus.kt" "$MODEL/MessageChannel.kt" "$OBSERVER" "$TEST" "$PIN_POLICY" "$PIN_TEST" "$SPLASH_MATH" "$SPLASH_TEST" "$SETTINGS_LAYOUT" "$SETTINGS_TEST" "$HEART_WIRE" "$HEART_TEST" "$GROUP_PERMS" "$GROUP_PERMS_TEST" \
-    "$POST_MANIFEST" "$GROUP_WIRE" "$GROUP_WIRE_TEST" "$GROUP_WIRE_UPDATE_TEST" \
+    "$SLOW_MODE" "$SLOW_MODE_TEST" "$QUIET_HOURS" "$QUIET_HOURS_TEST" "$POST_MANIFEST" "$GROUP_WIRE" "$GROUP_WIRE_TEST" "$GROUP_WIRE_UPDATE_TEST" \
     "$OP_HEALTH" "$OP_BOUNDED_READ" "$OP_CLEANUP" "$OP_HEALTH_TEST" "$STORY_QUEUE" "$STORY_QUEUE_TEST" "$RUNTIME_HEALTH" "$RUNTIME_HEALTH_TEST" "$DIAG_REPORT" "$RELAY_STORAGE" "$RELAY_STORAGE_TEST" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
     "$STORY_FEEDBACK_WIRE" "$STORY_FEEDBACK_LEDGER" "$STORY_FEEDBACK_OUTBOX" \
     "$STORY_FEEDBACK_WIRE_TEST" "$STORY_FEEDBACK_LEDGER_TEST" "$STORY_FEEDBACK_OUTBOX_TEST" \
@@ -156,6 +160,8 @@ IDENTITY_HEALTH_TEST="$BASE/test/java/com/vladimir/messenger/data/security/Ident
     com.vladimir.messenger.ui.components.ApuSettingsLayoutTest \
     com.vladimir.messenger.data.heart.HeartWireTest \
     com.vladimir.messenger.data.group.GroupPermissionsTest \
+    com.vladimir.messenger.data.group.GroupSlowModeTest \
+    com.vladimir.messenger.data.group.GroupQuietHoursTest \
     com.vladimir.messenger.data.group.GroupWireTest \
     com.vladimir.messenger.data.group.GroupWireUpdateTest \
     com.vladimir.messenger.data.diagnostics.DiagnosticsReportTest \
