@@ -160,6 +160,7 @@ fun GroupsScreen(
     viewModel: GroupsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val requestCounts by viewModel.myRequestCounts.collectAsStateWithLifecycle()
     var showCreate by remember { mutableStateOf(false) }
     var showRankHint by remember { mutableStateOf(false) }
     // Что создаём из меню «⋮»: группу или канал. Диалог умеет и то и другое,
@@ -331,6 +332,8 @@ fun GroupsScreen(
                 val mine = CommunityList.applyFilter(uiState.filtered, communityFilter)
                 val network = CommunityList.applyFilterToDirectory(uiState.directoryMatches, communityFilter)
                 val myGroups = mine.filterNot { it.isChannel }
+                val showGroupRequests = requestCounts.first > 0 && communityFilter != CommunityFilter.CHANNELS
+                val showChannelRequests = requestCounts.second > 0 && communityFilter != CommunityFilter.GROUPS
                 val myChannels = mine.filter { it.isChannel }
                 val foundGroups = network.filterNot { it.isChannel }
                 val foundChannels = network.filter { it.isChannel }
@@ -454,16 +457,21 @@ fun GroupsScreen(
 
                         // Свои группы и каналы - тоже раздельно: это разные вещи,
                         // и в поиске их надо различать с одного взгляда.
-                        item(key = "my-requests-groups") {
-                            MyRequestsEntry(
-                                title = stringResource(R.string.groups_my_requests_groups),
-                                onClick = { onMyRequestsClick(false) },
-                            )
-                        }
                         if (myGroups.isNotEmpty()) {
                             item(key = "head-my-groups") {
                                 DirectoryHeaderCounted(stringResource(R.string.groups_my_groups), myGroups.size)
                             }
+                        }
+                        // Заявки в группы - только в разделе групп и только если они есть.
+                        if (showGroupRequests) {
+                            item(key = "my-requests-groups") {
+                                MyRequestsEntry(
+                                    title = stringResource(R.string.groups_my_requests_groups),
+                                    onClick = { onMyRequestsClick(false) },
+                                )
+                            }
+                        }
+                        if (myGroups.isNotEmpty()) {
                             items(myGroups, key = { "mine-" + it.id }) { group ->
                                 GroupRow(
                                     group = group,
@@ -481,16 +489,21 @@ fun GroupsScreen(
                                 )
                             }
                         }
-                        item(key = "my-requests-channels") {
-                            MyRequestsEntry(
-                                title = stringResource(R.string.groups_my_requests_channels),
-                                onClick = { onMyRequestsClick(true) },
-                            )
-                        }
                         if (myChannels.isNotEmpty()) {
                             item(key = "head-my-channels") {
                                 DirectoryHeaderCounted(stringResource(R.string.groups_my_channels), myChannels.size)
                             }
+                        }
+                        // Заявки в каналы - только в разделе каналов и только если они есть.
+                        if (showChannelRequests) {
+                            item(key = "my-requests-channels") {
+                                MyRequestsEntry(
+                                    title = stringResource(R.string.groups_my_requests_channels),
+                                    onClick = { onMyRequestsClick(true) },
+                                )
+                            }
+                        }
+                        if (myChannels.isNotEmpty()) {
                             items(myChannels, key = { "mine-" + it.id }) { group ->
                                 // Канал открывается лентой постов, группа - чатом.
                                 GroupRow(
