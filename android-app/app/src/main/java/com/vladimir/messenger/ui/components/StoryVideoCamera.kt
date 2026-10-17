@@ -80,6 +80,7 @@ import com.vladimir.messenger.data.story.StoryVideoRecorder
 import com.vladimir.messenger.data.story.StoryEars
 import com.vladimir.messenger.data.story.StoryEyes
 import com.vladimir.messenger.data.story.StoryHair
+import com.vladimir.messenger.data.story.StoryBeard
 import com.vladimir.messenger.data.story.StoryBrows
 import com.vladimir.messenger.data.story.StoryCheeks
 import com.vladimir.messenger.data.story.StoryLips
@@ -95,7 +96,7 @@ private val recordRed = Color(0xFFE5484D)
 
 /** Какая часть лица сейчас выбирается в панели фильтров. */
 private enum class FilterPart(val label: String) {
-    EARS("Уши"), NOSE("Нос"), EYES("Глаза"), LIPS("Губы"), BROWS("Брови"), WHISKERS("Усы"), CHEEKS("Щёки"), HAIR("Прически")
+    EARS("Уши"), NOSE("Нос"), EYES("Глаза"), LIPS("Губы"), BROWS("Брови"), WHISKERS("Усы"), CHEEKS("Щёки"), HAIR("Прически"), BEARD("Бороды")
 }
 
 /**
@@ -527,6 +528,9 @@ private fun StoryFilterPicker(
         }
         FilterPart.HAIR -> StoryHair.entries.map { value ->
             FilterOption(value.label, filter.hair == value) { onFilter(filter.copy(hair = value)) }
+        }
+        FilterPart.BEARD -> StoryBeard.entries.map { value ->
+            FilterOption(value.label, filter.beard == value) { onFilter(filter.copy(beard = value)) }
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

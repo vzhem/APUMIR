@@ -50,8 +50,18 @@ internal object StoryStickers {
         "ear_lynx" to R.drawable.ar_ear_lynx,
         "nose_lion" to R.drawable.ar_nose_lion,
         "nose_horse" to R.drawable.ar_nose_horse,
+        "beard_stubble" to R.drawable.ar_beard_stubble,
+        "beard_full" to R.drawable.ar_beard_full,
+        "beard_goatee" to R.drawable.ar_beard_goatee,
+        "beard_vandyke" to R.drawable.ar_beard_vandyke,
+        "beard_sideburns" to R.drawable.ar_beard_sideburns,
         "eye_wolf" to R.drawable.ar_eye_wolf,
         "eye_lynx" to R.drawable.ar_eye_lynx,
+        "ear_horse" to R.drawable.ar_ear_horse,
+        "ear_lop" to R.drawable.ar_ear_lop,
+        "nose_fox" to R.drawable.ar_nose_fox,
+        "nose_wolf" to R.drawable.ar_nose_wolf,
+        "eye_horse" to R.drawable.ar_eye_horse,
     )
 
     private val cache = HashMap<String, Bitmap>()

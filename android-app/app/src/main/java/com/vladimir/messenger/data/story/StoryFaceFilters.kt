@@ -14,18 +14,19 @@ enum class StoryEars(val label: String) {
     NONE("Без"), CAT("Кот"), DOG("Собака"), BUNNY("Заяц"), BEAR("Медведь"), FOX("Лиса"),
     PANDA("Панда"), TIGER("Тигр"), MOUSE("Мышь"), DEER("Олень"),
     LYNX("Рысь"),
+    HORSE("Лошадь"), LOP("Вислоухий"),
 }
 
 enum class StoryNose(val label: String) {
     NONE("Без"), CAT("Кот"), DOG("Собака"), PIG("Свинка"), BEAR("Медведь"), RABBIT("Заяц"),
     PANDA("Панда"), TIGER("Тигр"), MOUSE("Мышь"),
-    LION("Лев"), HORSE("Лошадь"),
+    LION("Лев"), HORSE("Лошадь"), FOX("Лиса"), WOLF("Волк"),
 }
 
 enum class StoryEyes(val label: String) {
     NONE("Без"), CAT("Кошачьи"), OWL("Совиные"), PANDA("Панда"), FROG("Лягушка"),
     TIGER("Тигриные"), FOX("Лисьи"), DOG("Собачьи"),
-    WOLF("Волчьи"), LYNX("Рысьи"),
+    WOLF("Волчьи"), LYNX("Рысьи"), HORSE("Лошадь"),
 }
 
 enum class StoryLips(val label: String) { NONE("Без"), RED("Красные"), PINK("Розовые") }
@@ -38,6 +39,8 @@ enum class StoryCheeks(val label: String) { NONE("Без"), BLUSH("Румяне�
 
 enum class StoryHair(val label: String) { NONE("Без"), CURLY("Кудри"), WAVY("Волны"), BOB("Каре"), BUN("Пучок"), PONYTAIL("Хвост") }
 
+enum class StoryBeard(val label: String) { NONE("Без"), STUBBLE("Щетина"), FULL("Полная"), GOATEE("Козлиная"), VANDYKE("Ван Дейк"), SIDEBURNS("Бакенбарды") }
+
 /** Набор фильтра: каждая часть выбирается отдельно, «Без» отключает часть. */
 data class StoryFaceFilter(
     val ears: StoryEars = StoryEars.NONE,
@@ -48,11 +51,12 @@ data class StoryFaceFilter(
     val whiskers: StoryWhiskers = StoryWhiskers.NONE,
     val cheeks: StoryCheeks = StoryCheeks.NONE,
     val hair: StoryHair = StoryHair.NONE,
+    val beard: StoryBeard = StoryBeard.NONE,
 ) {
     val isActive: Boolean
         get() = ears != StoryEars.NONE || nose != StoryNose.NONE || eyes != StoryEyes.NONE ||
             lips != StoryLips.NONE || brows != StoryBrows.NONE || whiskers != StoryWhiskers.NONE ||
-            cheeks != StoryCheeks.NONE || hair != StoryHair.NONE
+            cheeks != StoryCheeks.NONE || hair != StoryHair.NONE || beard != StoryBeard.NONE
 
     companion object {
         val NONE = StoryFaceFilter()
@@ -111,6 +115,8 @@ data class StoryFaceLayout(
     val rightBrow: StoryFaceAnchor,
     /** Верх картинки прически у верхнего края головы; size — ширина. */
     val hair: StoryFaceAnchor,
+    /** Бороды: верх картинки чуть выше линии рта; size — ширина. */
+    val beard: StoryFaceAnchor,
 )
 
 object StoryFaceGeometry {
@@ -187,6 +193,7 @@ object StoryFaceGeometry {
             leftBrow = StoryFaceAnchor(leftEye.x, leftEye.y - browLift, browWidth),
             rightBrow = StoryFaceAnchor(rightEye.x, rightEye.y - browLift, browWidth),
             hair = StoryFaceAnchor(cx, box.top, w * 1.5f),
+            beard = StoryFaceAnchor(mouth.x, mouth.y, w * 0.8f),
         )
     }
 

@@ -80,6 +80,7 @@ internal fun drawStoryFaces(
         canvas.rotated(roll, transform.x(layout.centerX), transform.y(layout.centerY)) {
             // Порядок снизу вверх: румянец под губами, брови над глазами, глаза сверху.
             drawHair(canvas, filter.hair, layout.hair, transform, timeMs)
+            drawBeard(canvas, filter.beard, layout.beard, transform)
             drawCheeks(canvas, filter.cheeks, layout.leftCheek, layout.rightCheek, transform)
             drawLips(canvas, filter.lips, layout.mouth, transform)
             drawWhiskers(canvas, filter.whiskers, layout.nose, transform, timeMs)
@@ -91,6 +92,29 @@ internal fun drawStoryFaces(
             drawEyes(canvas, filter.eyes, layout.rightEye, transform, timeMs)
         }
     }
+}
+
+/** Борода: картинка под носом, верх чуть выше линии рта, чтобы губы легли поверх. */
+private fun drawBeard(
+    canvas: StoryFaceCanvas,
+    style: StoryBeard,
+    anchor: StoryFaceAnchor,
+    t: StoryFaceTransform,
+) {
+    val name = when (style) {
+        StoryBeard.NONE -> return
+        StoryBeard.STUBBLE -> "beard_stubble"
+        StoryBeard.FULL -> "beard_full"
+        StoryBeard.GOATEE -> "beard_goatee"
+        StoryBeard.VANDYKE -> "beard_vandyke"
+        StoryBeard.SIDEBURNS -> "beard_sideburns"
+    }
+    val aspect = canvas.spriteAspect(name) ?: return
+    val width = t.len(anchor.size)
+    val height = width * aspect
+    // Отступ сверху 35% высоты: рот картинки попадает на линию губ.
+    val top = t.y(anchor.y) - height * 0.35f
+    canvas.sprite(name, t.x(anchor.x), top + height / 2f, width, flipX = false, rotationDegrees = 0f)
 }
 
 /** Прическа: верх картинки у верхнего края головы, пряди свисают. Лёгкое покачивание. */
@@ -209,6 +233,8 @@ private fun drawNose(
         StoryNose.MOUSE -> "nose_mouse"
         StoryNose.LION -> "nose_lion"
         StoryNose.HORSE -> "nose_horse"
+        StoryNose.FOX -> "nose_fox"
+        StoryNose.WOLF -> "nose_wolf"
     }
     val x = t.x(nose.x)
     val y = t.y(nose.y)
@@ -241,6 +267,8 @@ private fun drawEars(
         StoryEars.MOUSE -> "ear_mouse"
         StoryEars.DEER -> "ear_deer"
         StoryEars.LYNX -> "ear_lynx"
+        StoryEars.HORSE -> "ear_horse"
+        StoryEars.LOP -> "ear_lop"
     }
     val x = t.x(anchor.x)
     val y = t.y(anchor.y)
@@ -292,6 +320,7 @@ private fun drawEyes(
         StoryEyes.DOG -> "eye_dog"
         StoryEyes.WOLF -> "eye_wolf"
         StoryEyes.LYNX -> "eye_lynx"
+        StoryEyes.HORSE -> "eye_horse"
     }
     val x = t.x(anchor.x)
     val y = t.y(anchor.y)
