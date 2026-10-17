@@ -128,6 +128,8 @@ private fun drawBeard(
         StoryBeard.GOATEE -> "beard_goatee"
         StoryBeard.VANDYKE -> "beard_vandyke"
         StoryBeard.SIDEBURNS -> "beard_sideburns"
+        StoryBeard.LONG -> "beard_long"
+        StoryBeard.NEAT -> "beard_neat"
     }
     val aspect = canvas.spriteAspect(name) ?: return
     val width = t.len(anchor.size)
@@ -152,6 +154,9 @@ private fun drawHair(
         StoryHair.BOB -> "hair_bob"
         StoryHair.BUN -> "hair_bun"
         StoryHair.PONYTAIL -> "hair_ponytail"
+        StoryHair.BRAIDS -> "hair_braids"
+        StoryHair.CROP -> "hair_crop"
+        StoryHair.AFRO -> "hair_afro"
     }
     val aspect = canvas.spriteAspect(name) ?: return
     val width = t.len(anchor.size)
@@ -219,6 +224,7 @@ private fun drawWhiskers(
         StoryWhiskers.CAT -> "whiskers"
         StoryWhiskers.DOG -> "whiskers_dog"
         StoryWhiskers.RABBIT -> "whiskers_rabbit"
+        StoryWhiskers.FOX -> "whiskers_fox"
     }
     val size = t.len(nose.size)
     val x = t.x(nose.x)
@@ -324,6 +330,8 @@ private fun drawBrows(
         StoryBrows.THIN -> "brow_thin"
         StoryBrows.ARCHED -> "brow_arched"
         StoryBrows.ANGLED -> "brow_angled"
+        StoryBrows.STRAIGHT -> "brow_straight"
+        StoryBrows.SOFT -> "brow_soft"
     }
     if (canvas.spriteAspect(name) != null) {
         canvas.sprite(name, t.x(left.x), t.y(left.y), t.len(left.size), flipX = true, rotationDegrees = 0f)

@@ -32,15 +32,15 @@ enum class StoryEyes(val label: String) {
 
 enum class StoryLips(val label: String) { NONE("Без"), RED("Красные"), PINK("Розовые"), NUDE("Нюд"), BERRY("Ягодные"), CORAL("Коралловые") }
 
-enum class StoryBrows(val label: String) { NONE("Без"), BUSHY("Густые"), THIN("Тонкие"), ARCHED("Изогнутые"), ANGLED("Вразлёт") }
+enum class StoryBrows(val label: String) { NONE("Без"), BUSHY("Густые"), THIN("Тонкие"), ARCHED("Изогнутые"), ANGLED("Вразлёт"), STRAIGHT("Прямые"), SOFT("Мягкие") }
 
-enum class StoryWhiskers(val label: String) { NONE("Без"), CAT("Кошачьи"), DOG("Собачьи"), RABBIT("Заячьи") }
+enum class StoryWhiskers(val label: String) { NONE("Без"), CAT("Кошачьи"), DOG("Собачьи"), RABBIT("Заячьи"), FOX("Лисьи") }
 
 enum class StoryCheeks(val label: String) { NONE("Без"), BLUSH("Румянец"), FRECKLES("Веснушки") }
 
-enum class StoryHair(val label: String) { NONE("Без"), CURLY("Кудри"), WAVY("Волны"), BOB("Каре"), BUN("Пучок"), PONYTAIL("Хвост") }
+enum class StoryHair(val label: String) { NONE("Без"), CURLY("Кудри"), WAVY("Волны"), BOB("Каре"), BUN("Пучок"), PONYTAIL("Хвост"), BRAIDS("Косы"), CROP("Короткая"), AFRO("Афро") }
 
-enum class StoryBeard(val label: String) { NONE("Без"), STUBBLE("Щетина"), FULL("Полная"), GOATEE("Козлиная"), VANDYKE("Ван Дейк"), SIDEBURNS("Бакенбарды") }
+enum class StoryBeard(val label: String) { NONE("Без"), STUBBLE("Щетина"), FULL("Полная"), GOATEE("Козлиная"), VANDYKE("Ван Дейк"), SIDEBURNS("Бакенбарды"), LONG("Длинная"), NEAT("Аккуратная") }
 
 enum class StoryMustache(val label: String) { NONE("Без"), PENCIL("Тонкие"), HANDLEBAR("Закрученные"), WALRUS("Моржовые"), CHEVRON("Шеврон"), HORSESHOE("Подкова") }
 
