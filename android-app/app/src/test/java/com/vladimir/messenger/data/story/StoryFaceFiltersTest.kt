@@ -107,8 +107,8 @@ class StoryFaceFiltersTest {
     fun newVariantsAreSelectableAndActive() {
         assertTrue(StoryFaceFilter(brows = StoryBrows.THIN).isActive)
         assertTrue(StoryFaceFilter(cheeks = StoryCheeks.FRECKLES).isActive)
-        assertEquals(3, StoryBrows.entries.size)
-        assertEquals(3, StoryCheeks.entries.size)
+        assertEquals(7, StoryBrows.entries.size)
+        assertEquals(5, StoryCheeks.entries.size)
     }
 
     @Test

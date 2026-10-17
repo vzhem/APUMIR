@@ -39,6 +39,6 @@ class StoryFaceMotionTest {
     @Test
     fun motionRepeatsItsPeriod() {
         assertEquals(StoryFaceMotion.furSwayDegrees(123L), StoryFaceMotion.furSwayDegrees(123L + 1400L), 0.001f)
-        assertEquals(StoryFaceMotion.noseScale(500L), StoryFaceMotion.noseScale(500L + 3200L * 5), 0.001f)
+        assertEquals(StoryFaceMotion.noseScale(500L), StoryFaceMotion.noseScale(500L + 41600L), 0.001f)
     }
 }
