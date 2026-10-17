@@ -109,6 +109,8 @@ private fun drawMustache(
         StoryMustache.WALRUS -> "mustache_walrus"
         StoryMustache.CHEVRON -> "mustache_chevron"
         StoryMustache.HORSESHOE -> "mustache_horseshoe"
+        StoryMustache.FU -> "mustache_fu"
+        StoryMustache.IMPERIAL -> "mustache_imperial"
     }
     if (canvas.spriteAspect(name) == null) return
     canvas.sprite(name, t.x(anchor.x), t.y(anchor.y), t.len(anchor.size), flipX = false, rotationDegrees = 0f)
@@ -130,6 +132,7 @@ private fun drawBeard(
         StoryBeard.SIDEBURNS -> "beard_sideburns"
         StoryBeard.LONG -> "beard_long"
         StoryBeard.NEAT -> "beard_neat"
+        StoryBeard.CHINSTRAP -> "beard_chinstrap"
     }
     val aspect = canvas.spriteAspect(name) ?: return
     val width = t.len(anchor.size)
@@ -157,6 +160,7 @@ private fun drawHair(
         StoryHair.BRAIDS -> "hair_braids"
         StoryHair.CROP -> "hair_crop"
         StoryHair.AFRO -> "hair_afro"
+        StoryHair.LONG -> "hair_long"
     }
     val aspect = canvas.spriteAspect(name) ?: return
     val width = t.len(anchor.size)
@@ -173,7 +177,13 @@ private fun drawCheeks(
     t: StoryFaceTransform,
 ) {
     if (style == StoryCheeks.NONE) return
-    val name = if (style == StoryCheeks.FRECKLES) "cheek_freckles" else "cheek"
+    val name = when (style) {
+        StoryCheeks.NONE -> return
+        StoryCheeks.BLUSH -> "cheek"
+        StoryCheeks.FRECKLES -> "cheek_freckles"
+        StoryCheeks.CONTOUR -> "cheek_contour"
+        StoryCheeks.GLOW -> "cheek_glow"
+    }
     if (canvas.spriteAspect(name) != null) {
         for (cheek in listOf(left, right)) {
             canvas.sprite(name, t.x(cheek.x), t.y(cheek.y), t.len(cheek.size) * 3.2f, flipX = false, rotationDegrees = 0f)
@@ -200,6 +210,8 @@ private fun drawLips(canvas: StoryFaceCanvas, style: StoryLips, mouth: StoryFace
         StoryLips.NUDE -> "lips_nude"
         StoryLips.BERRY -> "lips_berry"
         StoryLips.CORAL -> "lips_coral"
+        StoryLips.ROSE -> "lips_rose"
+        StoryLips.MAUVE -> "lips_mauve"
     }
     val x = t.x(mouth.x)
     val y = t.y(mouth.y)
@@ -225,6 +237,8 @@ private fun drawWhiskers(
         StoryWhiskers.DOG -> "whiskers_dog"
         StoryWhiskers.RABBIT -> "whiskers_rabbit"
         StoryWhiskers.FOX -> "whiskers_fox"
+        StoryWhiskers.SEAL -> "whiskers_seal"
+        StoryWhiskers.LYNX -> "whiskers_lynx"
     }
     val size = t.len(nose.size)
     val x = t.x(nose.x)

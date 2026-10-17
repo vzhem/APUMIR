@@ -30,19 +30,19 @@ enum class StoryEyes(val label: String) {
     HUMAN_BROWN("Карие"), HUMAN_BLUE("Голубые"), HUMAN_GREEN("Зелёные"), HUMAN_HAZEL("Ореховые"), HUMAN_GREY("Серые"),
 }
 
-enum class StoryLips(val label: String) { NONE("Без"), RED("Красные"), PINK("Розовые"), NUDE("Нюд"), BERRY("Ягодные"), CORAL("Коралловые") }
+enum class StoryLips(val label: String) { NONE("Без"), RED("Красные"), PINK("Розовые"), NUDE("Нюд"), BERRY("Ягодные"), CORAL("Коралловые"), ROSE("Розовые мягкие"), MAUVE("Мауве") }
 
 enum class StoryBrows(val label: String) { NONE("Без"), BUSHY("Густые"), THIN("Тонкие"), ARCHED("Изогнутые"), ANGLED("Вразлёт"), STRAIGHT("Прямые"), SOFT("Мягкие") }
 
-enum class StoryWhiskers(val label: String) { NONE("Без"), CAT("Кошачьи"), DOG("Собачьи"), RABBIT("Заячьи"), FOX("Лисьи") }
+enum class StoryWhiskers(val label: String) { NONE("Без"), CAT("Кошачьи"), DOG("Собачьи"), RABBIT("Заячьи"), FOX("Лисьи"), SEAL("Тюлений"), LYNX("Рысьи") }
 
-enum class StoryCheeks(val label: String) { NONE("Без"), BLUSH("Румянец"), FRECKLES("Веснушки") }
+enum class StoryCheeks(val label: String) { NONE("Без"), BLUSH("Румянец"), FRECKLES("Веснушки"), CONTOUR("Контур"), GLOW("Сияние") }
 
-enum class StoryHair(val label: String) { NONE("Без"), CURLY("Кудри"), WAVY("Волны"), BOB("Каре"), BUN("Пучок"), PONYTAIL("Хвост"), BRAIDS("Косы"), CROP("Короткая"), AFRO("Афро") }
+enum class StoryHair(val label: String) { NONE("Без"), CURLY("Кудри"), WAVY("Волны"), BOB("Каре"), BUN("Пучок"), PONYTAIL("Хвост"), BRAIDS("Косы"), CROP("Короткая"), AFRO("Афро"), LONG("Длинные") }
 
-enum class StoryBeard(val label: String) { NONE("Без"), STUBBLE("Щетина"), FULL("Полная"), GOATEE("Козлиная"), VANDYKE("Ван Дейк"), SIDEBURNS("Бакенбарды"), LONG("Длинная"), NEAT("Аккуратная") }
+enum class StoryBeard(val label: String) { NONE("Без"), STUBBLE("Щетина"), FULL("Полная"), GOATEE("Козлиная"), VANDYKE("Ван Дейк"), SIDEBURNS("Бакенбарды"), LONG("Длинная"), NEAT("Аккуратная"), CHINSTRAP("Ремешок") }
 
-enum class StoryMustache(val label: String) { NONE("Без"), PENCIL("Тонкие"), HANDLEBAR("Закрученные"), WALRUS("Моржовые"), CHEVRON("Шеврон"), HORSESHOE("Подкова") }
+enum class StoryMustache(val label: String) { NONE("Без"), PENCIL("Тонкие"), HANDLEBAR("Закрученные"), WALRUS("Моржовые"), CHEVRON("Шеврон"), HORSESHOE("Подкова"), FU("Фу Манчу"), IMPERIAL("Имперские") }
 
 /** Набор фильтра: каждая часть выбирается отдельно, «Без» отключает часть. */
 data class StoryFaceFilter(

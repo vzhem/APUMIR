@@ -117,9 +117,10 @@ class StoryFaceFiltersTest {
         assertEquals(12, StoryEars.entries.size - 1)
         assertEquals(12, StoryNose.entries.size - 1)
         assertEquals(14, StoryEyes.entries.size - 1)
-        assertEquals(8, StoryHair.entries.size - 1)
-        assertEquals(7, StoryBeard.entries.size - 1)
-        assertEquals(5, StoryMustache.entries.size - 1)
+        assertEquals(9, StoryHair.entries.size - 1)
+        assertEquals(8, StoryBeard.entries.size - 1)
+        assertEquals(7, StoryMustache.entries.size - 1)
+        assertEquals(4, StoryCheeks.entries.size - 1)
     }
 
     @Test
@@ -150,8 +151,8 @@ class StoryFaceFiltersTest {
         assertTrue(StoryFaceFilter(lips = StoryLips.BERRY).isActive)
         assertTrue(StoryFaceFilter(brows = StoryBrows.ARCHED).isActive)
         assertTrue(StoryFaceFilter(whiskers = StoryWhiskers.RABBIT).isActive)
-        assertEquals(5, StoryLips.entries.size - 1)
+        assertEquals(7, StoryLips.entries.size - 1)
         assertEquals(6, StoryBrows.entries.size - 1)
-        assertEquals(4, StoryWhiskers.entries.size - 1)
+        assertEquals(6, StoryWhiskers.entries.size - 1)
     }
 }
