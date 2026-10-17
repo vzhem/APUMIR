@@ -674,6 +674,8 @@ object GroupWire {
              * У заявок старого образца slug пустой.
              */
             val slug: String = "",
+            /** Когда абонент подал заявку (его часы). 0 - заявка старого образца. */
+            val requestedAtMs: Long = 0L,
         ) : Packet()
 
         data class JoinDecision(
@@ -1334,9 +1336,10 @@ object GroupWire {
         displayName: String,
         note: String,
         slug: String = "",
+        requestedAtMs: Long = 0L,
     ): String =
         "$PREFIX|$KIND_JOIN_REQUEST|$groupId|${encode(displayName)}|${encode(note)}|" +
-            encode(slug)
+            encode(slug) + (if (requestedAtMs > 0L) "|$requestedAtMs" else "")
 
     fun buildJoinDecision(groupId: String, nodeId: String, approved: Boolean): String =
         "$PREFIX|$KIND_JOIN_DECISION|$groupId|$nodeId|" +
@@ -1776,12 +1779,13 @@ object GroupWire {
                 null
             }
 
-            KIND_JOIN_REQUEST -> if (parts.size == 5 || parts.size == 6) {
+            KIND_JOIN_REQUEST -> if (parts.size in 5..7) {
                 val name = decode(parts[3]) ?: return null
                 val note = decode(parts[4]) ?: return null
                 // Заявки старого образца приходили без slug — считаем его пустым.
-                val slug = if (parts.size == 6) decode(parts[5]).orEmpty() else ""
-                if (name.isBlank()) null else Packet.JoinRequest(groupId, name, note, slug)
+                val slug = if (parts.size >= 6) decode(parts[5]).orEmpty() else ""
+                val requestedAt = if (parts.size == 7) parts[6].toLongOrNull() ?: return null else 0L
+                if (name.isBlank()) null else Packet.JoinRequest(groupId, name, note, slug, requestedAt)
             } else {
                 null
             }
