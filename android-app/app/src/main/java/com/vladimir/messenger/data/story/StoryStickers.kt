@@ -1,0 +1,37 @@
+package com.vladimir.messenger.data.story
+
+import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import com.vladimir.messenger.R
+
+/**
+ * Картинки AR-фильтров (вырезанные PNG с прозрачным фоном). Один кэш на экран и на запись,
+ * чтобы каждое лицо в каждом кадре не декодировало файл заново.
+ */
+internal object StoryStickers {
+    private val resources: Map<String, Int> = mapOf(
+        "ear_fox" to R.drawable.ar_ear_fox,
+        "ear_cat" to R.drawable.ar_ear_cat,
+        "ear_dog" to R.drawable.ar_ear_dog,
+        "ear_bunny" to R.drawable.ar_ear_bunny,
+        "ear_bear" to R.drawable.ar_ear_bear,
+        "nose_cat" to R.drawable.ar_nose_cat,
+        "nose_dog" to R.drawable.ar_nose_dog,
+        "nose_pig" to R.drawable.ar_nose_pig,
+        "nose_bear" to R.drawable.ar_nose_bear,
+        "nose_rabbit" to R.drawable.ar_nose_rabbit,
+    )
+
+    private val cache = HashMap<String, Bitmap>()
+
+    /** Картинка по имени или null, если такой нет или файл не декодируется (тогда рисуем фигурой). */
+    @Synchronized
+    fun bitmap(context: Context, name: String): Bitmap? {
+        cache[name]?.let { return it }
+        val id = resources[name] ?: return null
+        val bitmap = BitmapFactory.decodeResource(context.resources, id) ?: return null
+        cache[name] = bitmap
+        return bitmap
+    }
+}

@@ -10,7 +10,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.unit.IntSize
 import com.vladimir.messenger.data.story.StoryFaceCanvas
+import com.vladimir.messenger.data.story.StoryStickers
 import com.vladimir.messenger.data.story.StoryFaceFilter
 import com.vladimir.messenger.data.story.StoryFaceFrame
 import com.vladimir.messenger.data.story.StoryFaceTransform
@@ -28,13 +32,34 @@ internal fun StoryFaceOverlay(
     modifier: Modifier = Modifier,
 ) {
     if (frame == null || !filter.isActive) return
+    val context = androidx.compose.ui.platform.LocalContext.current.applicationContext
     Canvas(modifier.fillMaxSize()) {
         val transform = StoryFaceTransform.fillCenter(frame.width, frame.height, size.width, size.height, mirrored)
-        drawStoryFaces(ComposeStoryFaceCanvas(this), frame, filter, transform)
+        drawStoryFaces(ComposeStoryFaceCanvas(this) { StoryStickers.bitmap(context, it) }, frame, filter, transform)
     }
 }
 
-private class ComposeStoryFaceCanvas(private val scope: DrawScope) : StoryFaceCanvas {
+private class ComposeStoryFaceCanvas(
+    private val scope: DrawScope,
+    private val bitmapOf: (String) -> android.graphics.Bitmap?,
+) : StoryFaceCanvas {
+    override fun spriteAspect(name: String): Float? {
+        val bitmap = bitmapOf(name) ?: return null
+        return bitmap.height.toFloat() / bitmap.width.coerceAtLeast(1).toFloat()
+    }
+
+    override fun sprite(name: String, cx: Float, cy: Float, width: Float, flipX: Boolean) {
+        val bitmap = bitmapOf(name) ?: return
+        val height = width * bitmap.height / bitmap.width.coerceAtLeast(1).toFloat()
+        val image = bitmap.asImageBitmap()
+        scope.withTransform({
+            translate(left = cx - width / 2f, top = cy - height / 2f)
+            if (flipX) scale(scaleX = -1f, scaleY = 1f, pivot = Offset(width / 2f, height / 2f))
+        }) {
+            drawImage(image, dstSize = IntSize(width.toInt().coerceAtLeast(1), height.toInt().coerceAtLeast(1)))
+        }
+    }
+
     override fun oval(cx: Float, cy: Float, w: Float, h: Float, argb: Long) {
         scope.drawOval(color = Color(argb), topLeft = Offset(cx - w / 2f, cy - h / 2f), size = Size(w, h))
     }

@@ -16,6 +16,39 @@ internal interface StoryFaceCanvas {
 
     /** Рисует [block] повернутым на [degrees] вокруг точки (cx, cy). */
     fun rotated(degrees: Float, cx: Float, cy: Float, block: () -> Unit)
+
+    /** Высота / ширина картинки или null, если картинки нет: тогда рисуем фигурой. */
+    fun spriteAspect(name: String): Float?
+
+    /** Картинка по центру (cx, cy) шириной [width]; при [flipX] зеркально по горизонтали. */
+    fun sprite(name: String, cx: Float, cy: Float, width: Float, flipX: Boolean)
+}
+
+/** Имя картинки уха по стилю; null — стиль рисуется фигурой. */
+private fun earSprite(style: StoryEars): String? = when (style) {
+    StoryEars.FOX -> "ear_fox"
+    StoryEars.CAT -> "ear_cat"
+    StoryEars.DOG -> "ear_dog"
+    StoryEars.BUNNY -> "ear_bunny"
+    StoryEars.BEAR -> "ear_bear"
+    StoryEars.NONE -> null
+}
+
+private fun noseSprite(style: StoryNose): String? = when (style) {
+    StoryNose.CAT -> "nose_cat"
+    StoryNose.DOG -> "nose_dog"
+    StoryNose.PIG -> "nose_pig"
+    StoryNose.BEAR -> "nose_bear"
+    StoryNose.RABBIT -> "nose_rabbit"
+    StoryNose.NONE -> null
+}
+
+/** Ширина уха в долях от размера анкора: вытянутые уши уже, круглые шире. */
+private fun earWidthFactor(style: StoryEars): Float = when (style) {
+    StoryEars.BUNNY -> 0.5f
+    StoryEars.FOX, StoryEars.CAT -> 0.85f
+    StoryEars.DOG, StoryEars.BEAR -> 0.95f
+    StoryEars.NONE -> 0f
 }
 
 /**
@@ -79,6 +112,16 @@ private fun drawEars(canvas: StoryFaceCanvas, style: StoryEars, anchor: StoryFac
     val s = t.len(anchor.size)
     // Левое и правое ухо зеркальны по горизонтали, чтобы кончики смотрели наружу.
     val side = if (left) -1f else 1f
+    val sprite = earSprite(style)
+    if (sprite != null) {
+        val aspect = canvas.spriteAspect(sprite)
+        if (aspect != null) {
+            val width = s * earWidthFactor(style)
+            // Анкор — верх уха: картинка уходит вверх и вбок от головы.
+            canvas.sprite(sprite, x, y + width * aspect / 2f, width, flipX = left)
+            return
+        }
+    }
     when (style) {
         StoryEars.CAT -> {
             canvas.triangle(x, y, s * 0.95f, s * 0.95f, side * s * 0.05f, 0xFF3B3335, up = true)
@@ -113,6 +156,14 @@ private fun drawNose(canvas: StoryFaceCanvas, style: StoryNose, anchor: StoryFac
     val x = t.x(anchor.x)
     val y = t.y(anchor.y)
     val s = t.len(anchor.size)
+    val sprite = noseSprite(style)
+    if (sprite != null) {
+        val aspect = canvas.spriteAspect(sprite)
+        if (aspect != null) {
+            canvas.sprite(sprite, x, y, s * 1.1f, flipX = false)
+            return
+        }
+    }
     when (style) {
         StoryNose.CAT -> canvas.triangle(x, y, s * 1.0f, s * 0.68f, 0f, 0xFFFF8FA3, up = false)
         StoryNose.DOG -> {
@@ -164,8 +215,30 @@ private fun drawEyes(canvas: StoryFaceCanvas, style: StoryEyes, anchor: StoryFac
 }
 
 /** Реализация на android.graphics.Canvas — для записи файла. */
-internal class AndroidStoryFaceCanvas(private val canvas: android.graphics.Canvas) : StoryFaceCanvas {
+internal class AndroidStoryFaceCanvas(
+    private val canvas: android.graphics.Canvas,
+    private val bitmapOf: (String) -> android.graphics.Bitmap?,
+) : StoryFaceCanvas {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+    override fun spriteAspect(name: String): Float? {
+        val bitmap = bitmapOf(name) ?: return null
+        return bitmap.height.toFloat() / bitmap.width.coerceAtLeast(1).toFloat()
+    }
+
+    override fun sprite(name: String, cx: Float, cy: Float, width: Float, flipX: Boolean) {
+        val bitmap = bitmapOf(name) ?: return
+        val height = width * bitmap.height / bitmap.width.coerceAtLeast(1).toFloat()
+        val dst = RectF(cx - width / 2f, cy - height / 2f, cx + width / 2f, cy + height / 2f)
+        canvas.save()
+        try {
+            if (flipX) canvas.scale(-1f, 1f, cx, cy)
+            canvas.drawBitmap(bitmap, null, dst, bitmapPaint)
+        } finally {
+            canvas.restore()
+        }
+    }
 
     override fun oval(cx: Float, cy: Float, w: Float, h: Float, argb: Long) {
         paint.color = argb.toInt()

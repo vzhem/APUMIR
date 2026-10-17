@@ -88,7 +88,7 @@ internal object StoryFaceBaker {
     ) = withContext(Dispatchers.Main.immediate) {
         coroutineScope {
             val item = MediaItem.fromUri(Uri.fromFile(source))
-            val overlay = StoryFaceOverlaySource(filter, timeline)
+            val overlay = StoryFaceOverlaySource(context.applicationContext, filter, timeline)
             val edited = EditedMediaItem.Builder(item)
                 .setEffects(Effects(emptyList(), listOf(OverlayEffect(listOf(overlay)))))
                 .build()
@@ -149,6 +149,7 @@ internal object StoryFaceBaker {
  */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 private class StoryFaceOverlaySource(
+    private val appContext: Context,
     private val filter: StoryFaceFilter,
     private val timeline: StoryFaceTimeline,
 ) : BitmapOverlay() {
@@ -179,7 +180,7 @@ private class StoryFaceOverlaySource(
     private fun renderBitmap(index: Int): Bitmap {
         val bitmap = newBitmap()
         drawStoryFaces(
-            AndroidStoryFaceCanvas(Canvas(bitmap)),
+            AndroidStoryFaceCanvas(Canvas(bitmap)) { StoryStickers.bitmap(appContext, it) },
             StoryFaceFrame(timeline.width, timeline.height, timeline.facesAt(index)),
             filter,
             StoryFaceTransform.identity(timeline.width),
