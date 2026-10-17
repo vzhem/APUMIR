@@ -199,6 +199,23 @@ fn verify_revocation(
         .map_err(|_| DeviceCertError::InvalidSignature)
 }
 
+/// Check a revocation received from the swarm against the account key pinned for the routing id.
+/// It does not need the certificate, so a revocation may arrive before the certificate it cuts.
+pub fn verify_device_revocation(
+    rev: &DeviceRevocationV1,
+    pinned_account_public_key: &[u8],
+) -> Result<(), DeviceCertError> {
+    let canonical = revocation_canonical_bytes(rev)?;
+    if rev.account_public_key != pinned_account_public_key {
+        return Err(DeviceCertError::AccountKeyMismatch);
+    }
+    if rev.signature.len() != ED25519_SIGNATURE_BYTES {
+        return Err(DeviceCertError::Malformed);
+    }
+    Ed25519KeyPair::verify(&rev.account_public_key, &canonical, &rev.signature)
+        .map_err(|_| DeviceCertError::InvalidSignature)
+}
+
 /// Full receiver-side decision for one device-signed artifact:
 /// 1. certificate is signed by the pinned account key;
 /// 2. artifact time is not before certificate issuance;

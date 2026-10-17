@@ -47,6 +47,7 @@
 //! ```
 
 pub mod cipher;
+pub mod device_binding;
 pub mod device_certificate;
 pub mod device_pairing;
 pub mod file_transfer;
