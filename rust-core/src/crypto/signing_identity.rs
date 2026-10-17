@@ -641,7 +641,7 @@ pub fn verified_referral_inviter_node_id(
     Ok(token.signed_invite.claims.inviter_node_id)
 }
 
-fn is_legacy_routing_node_id(value: &str) -> bool {
+pub(crate) fn is_legacy_routing_node_id(value: &str) -> bool {
     let Some(suffix) = value.strip_prefix("pk_") else {
         return false;
     };

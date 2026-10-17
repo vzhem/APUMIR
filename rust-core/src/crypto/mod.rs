@@ -47,6 +47,7 @@
 //! ```
 
 pub mod cipher;
+pub mod device_certificate;
 pub mod file_transfer;
 pub mod file_key_envelope;
 pub mod handshake;
