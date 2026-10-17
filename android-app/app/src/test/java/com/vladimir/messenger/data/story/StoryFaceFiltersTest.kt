@@ -144,4 +144,14 @@ class StoryFaceFiltersTest {
         assertTrue(layout.mustache.y < layout.mouth.y)
         assertTrue(StoryFaceFilter(mustache = StoryMustache.WALRUS).isActive)
     }
+
+    @Test
+    fun newLipsBrowsAndWhiskersAreActive() {
+        assertTrue(StoryFaceFilter(lips = StoryLips.BERRY).isActive)
+        assertTrue(StoryFaceFilter(brows = StoryBrows.ARCHED).isActive)
+        assertTrue(StoryFaceFilter(whiskers = StoryWhiskers.RABBIT).isActive)
+        assertEquals(5, StoryLips.entries.size - 1)
+        assertEquals(4, StoryBrows.entries.size - 1)
+        assertEquals(3, StoryWhiskers.entries.size - 1)
+    }
 }

@@ -24,7 +24,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.item
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -538,13 +540,20 @@ private fun StoryFilterPicker(
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        // Частей семь, на узком экране они не влезают в ряд: прокручиваем.
+        // Частей много, ряд прокручивается. Выбранная часть всегда в поле зрения.
+        val partsState = rememberLazyListState()
+        LaunchedEffect(part) { partsState.animateScrollToItem(FilterPart.entries.indexOf(part)) }
         LazyRow(
+            state = partsState,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(horizontal = 16.dp),
         ) {
-            items(FilterPart.entries) { item ->
-                ApuPremiumChip(label = item.label, selected = part == item, onClick = { onPart(item) })
+            // Быстрый сброс: все части в «Без» одним нажатием.
+            item {
+                ApuPremiumChip(label = "Без фильтров", selected = !filter.isActive, onClick = { onFilter(StoryFaceFilter.NONE) })
+            }
+            items(FilterPart.entries) { entry ->
+                ApuPremiumChip(label = entry.label, selected = part == entry, onClick = { onPart(entry) })
             }
         }
         LazyRow(

@@ -30,11 +30,11 @@ enum class StoryEyes(val label: String) {
     HUMAN_BROWN("Карие"), HUMAN_BLUE("Голубые"), HUMAN_GREEN("Зелёные"), HUMAN_HAZEL("Ореховые"), HUMAN_GREY("Серые"),
 }
 
-enum class StoryLips(val label: String) { NONE("Без"), RED("Красные"), PINK("Розовые") }
+enum class StoryLips(val label: String) { NONE("Без"), RED("Красные"), PINK("Розовые"), NUDE("Нюд"), BERRY("Ягодные"), CORAL("Коралловые") }
 
-enum class StoryBrows(val label: String) { NONE("Без"), BUSHY("Густые"), THIN("Тонкие") }
+enum class StoryBrows(val label: String) { NONE("Без"), BUSHY("Густые"), THIN("Тонкие"), ARCHED("Изогнутые"), ANGLED("Вразлёт") }
 
-enum class StoryWhiskers(val label: String) { NONE("Без"), CAT("Кошачьи") }
+enum class StoryWhiskers(val label: String) { NONE("Без"), CAT("Кошачьи"), DOG("Собачьи"), RABBIT("Заячьи") }
 
 enum class StoryCheeks(val label: String) { NONE("Без"), BLUSH("Румянец"), FRECKLES("Веснушки") }
 

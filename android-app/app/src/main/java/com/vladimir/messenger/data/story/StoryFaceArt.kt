@@ -192,6 +192,9 @@ private fun drawLips(canvas: StoryFaceCanvas, style: StoryLips, mouth: StoryFace
         StoryLips.NONE -> return
         StoryLips.RED -> "lips_red"
         StoryLips.PINK -> "lips_pink"
+        StoryLips.NUDE -> "lips_nude"
+        StoryLips.BERRY -> "lips_berry"
+        StoryLips.CORAL -> "lips_coral"
     }
     val x = t.x(mouth.x)
     val y = t.y(mouth.y)
@@ -211,20 +214,25 @@ private fun drawWhiskers(
     t: StoryFaceTransform,
     timeMs: Long,
 ) {
-    if (style == StoryWhiskers.NONE) return
+    val name = when (style) {
+        StoryWhiskers.NONE -> return
+        StoryWhiskers.CAT -> "whiskers"
+        StoryWhiskers.DOG -> "whiskers_dog"
+        StoryWhiskers.RABBIT -> "whiskers_rabbit"
+    }
     val size = t.len(nose.size)
     val x = t.x(nose.x)
     val y = t.y(nose.y) + size * 0.1f
     val visualWidth = size * 1.8f
     val gap = size * 0.55f
     val sway = StoryFaceMotion.whiskerSwayDegrees(timeMs)
-    val aspect = canvas.spriteAspect("whiskers")
+    val aspect = canvas.spriteAspect(name)
     if (aspect != null) {
         // Картинка — веер с основанием внизу. Поворачиваем на 90°, чтобы веер смотрел в стороны
         // от носа. Левые усы: против часовой, правые: по часовой. Колышутся в противофазе.
         val spriteWidth = visualWidth / aspect
-        canvas.sprite("whiskers", x - gap - visualWidth / 2f, y, spriteWidth, flipX = false, rotationDegrees = -90f + sway)
-        canvas.sprite("whiskers", x + gap + visualWidth / 2f, y, spriteWidth, flipX = false, rotationDegrees = 90f - sway)
+        canvas.sprite(name, x - gap - visualWidth / 2f, y, spriteWidth, flipX = false, rotationDegrees = -90f + sway)
+        canvas.sprite(name, x + gap + visualWidth / 2f, y, spriteWidth, flipX = false, rotationDegrees = 90f - sway)
     } else {
         for (side in listOf(-1f, 1f)) {
             for (k in -1..1) {
@@ -310,7 +318,13 @@ private fun drawBrows(
     t: StoryFaceTransform,
 ) {
     if (style == StoryBrows.NONE) return
-    val name = if (style == StoryBrows.THIN) "brow_thin" else "brow"
+    val name = when (style) {
+        StoryBrows.NONE -> return
+        StoryBrows.BUSHY -> "brow"
+        StoryBrows.THIN -> "brow_thin"
+        StoryBrows.ARCHED -> "brow_arched"
+        StoryBrows.ANGLED -> "brow_angled"
+    }
     if (canvas.spriteAspect(name) != null) {
         canvas.sprite(name, t.x(left.x), t.y(left.y), t.len(left.size), flipX = true, rotationDegrees = 0f)
         canvas.sprite(name, t.x(right.x), t.y(right.y), t.len(right.size), flipX = false, rotationDegrees = 0f)
