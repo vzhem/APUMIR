@@ -3935,7 +3935,10 @@ class GroupRepository(
                 val mine = groupDao.getMember(packet.groupId, me) ?: return
                 if (!GroupPermissions.canInvite(mine.role, mine.permissions, 0L)) return
                 val existing = groupDao.getJoinRequest(packet.groupId, senderId)
-                if (existing != null && existing.status == "APPROVED") return
+                // Одобрен раньше, но уже не участник (вышел или исключён): это новая заявка.
+                // Раньше такая заявка молча пропадала здесь, и владелец её не видел.
+                if (existing != null && existing.status == "APPROVED" &&
+                    groupDao.getMember(packet.groupId, senderId) != null) return
                 val group = groupDao.getGroupById(packet.groupId) ?: return
                 val banned = groupDao.getMember(packet.groupId, senderId)?.isBanned == true
                 if (banned) {
@@ -4723,7 +4726,12 @@ class GroupRepository(
             note = note.trim().take(MAX_NOTE_CHARS),
             slug = target.slug,
         )
-        delivery.deliver(groupId, envelope, listOf(ownerId))
+        val report = delivery.deliver(groupId, envelope, listOf(ownerId))
+        // Ядро не приняло пакет: писать «заявка отправлена» нельзя, заявки у владельца не будет.
+        if (report.delivered == 0) {
+            Log.w(TAG, "join request not handed to core group=$groupId")
+            return JoinOutcome.Failed("Заявка не отправлена: нет связи с владельцем группы. Попробуйте позже.")
+        }
         Log.i(TAG, "join request sent to owner group=$groupId")
         // Признаки берём из ссылки: своей базы с приглашением здесь нет, а
         // писать «заявка отправлена», когда владелец принимает сразу, - врать.
