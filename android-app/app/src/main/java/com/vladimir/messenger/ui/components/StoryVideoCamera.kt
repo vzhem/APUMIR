@@ -2,6 +2,7 @@ package com.vladimir.messenger.ui.components
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.view.PreviewView
@@ -70,6 +71,7 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.vladimir.messenger.data.story.StoryFaceBaker
 import com.vladimir.messenger.data.story.StoryFaceFilter
 import com.vladimir.messenger.data.story.StoryFaceFrame
 import com.vladimir.messenger.data.story.StoryVideoDraft
@@ -124,6 +126,8 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
     var elapsed by remember { mutableStateOf(0L) }
     var error by remember { mutableStateOf<String?>(null) }
     var faceFilter by remember { mutableStateOf(StoryFaceFilter.NONE) }
+    // Прогресс наложения фильтра после остановки записи (0..1), null — не идёт.
+    var processing by remember { mutableStateOf<Float?>(null) }
     var filterPart by remember { mutableStateOf(FilterPart.EARS) }
     val cameraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         cameraAllowed = it
@@ -176,6 +180,8 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
         paused = false
         elapsed = 0L
         error = null
+        // Фильтр фиксируем на старте: смена во время записи не должна менять уже снятое видео.
+        val filterForRecording = faceFilter
         try {
             session.start(audio, onElapsed = { elapsed = it }, onFinished = { result ->
                 recording = false
@@ -187,17 +193,31 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                 } else {
                     // Completion handler also runs if the scope was already cancelled.
                     var handedOff = false
+                    var produced: File = file
                     scope.launch {
                         try {
-                            val source = withContext(Dispatchers.IO) { StoryVideoFiles.inspect(file) }
+                            // Накладываем фильтр на записанный файл; без фильтра он возвращается как есть.
+                            val baked = StoryFaceBaker.bake(context, file, filterForRecording) { processing = it }
+                            baked.message?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
+                            produced = baked.file
+                            if (produced != file) file.delete()
+                            val source = withContext(Dispatchers.IO) { StoryVideoFiles.inspect(produced) }
                             recorded(source)
                             handedOff = true
                         } catch (cancelled: CancellationException) {
                             throw cancelled
                         } catch (failure: Exception) {
                             error = failure.message ?: "Не удалось прочитать запись"
-                        } finally { stopping = false }
-                    }.invokeOnCompletion { if (!handedOff) file.delete() }
+                        } finally {
+                            stopping = false
+                            processing = null
+                        }
+                    }.invokeOnCompletion {
+                        if (!handedOff) {
+                            file.delete()
+                            if (produced != file) produced.delete()
+                        }
+                    }
                 }
             })
         } catch (failure: Exception) {
@@ -353,7 +373,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                 }
                 Text(
                     when {
-                        stopping -> "Сохраняем…"
+                        stopping -> processing?.let { "Накладываем фильтр… ${(it * 100).toInt()}%" } ?: "Сохраняем…"
                         recording -> if (paused) "Пауза · нажмите кнопку, чтобы завершить" else "Нажмите, чтобы завершить"
                         !ready && cameraAllowed -> "Подготовка камеры…"
                         else -> "Видеоистория · до 60 секунд"

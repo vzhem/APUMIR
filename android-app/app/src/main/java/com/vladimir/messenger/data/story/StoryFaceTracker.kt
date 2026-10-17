@@ -24,15 +24,7 @@ internal class StoryFaceTracker(
     @Volatile
     var enabled: Boolean = false
 
-    private val detector: FaceDetector = FaceDetection.getClient(
-        FaceDetectorOptions.Builder()
-            .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
-            .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
-            .setContourMode(FaceDetectorOptions.CONTOUR_MODE_NONE)
-            .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
-            .setMinFaceSize(0.15f)
-            .build(),
-    )
+    private val detector: FaceDetector = newStoryFaceDetector()
 
     @ExperimentalGetImage
     override fun analyze(image: ImageProxy) {
@@ -46,7 +38,7 @@ internal class StoryFaceTracker(
         // поэтому состояние Compose можно обновлять прямо из него.
         detector.process(input)
             .addOnSuccessListener { faces ->
-                onFrame(StoryFaceFrame(input.width, input.height, faces.map { it.toStory() }))
+                onFrame(StoryFaceFrame(input.width, input.height, faces.map { it.toStoryFace() }))
             }
             .addOnCompleteListener { image.close() }
     }
@@ -55,16 +47,28 @@ internal class StoryFaceTracker(
         detector.close()
     }
 
-    private fun Face.toStory(): StoryFace {
-        val rect: Rect = boundingBox
-        fun point(type: Int): StoryFacePoint? =
-            getLandmark(type)?.position?.let { StoryFacePoint(it.x, it.y) }
-        return StoryFace(
-            box = StoryFaceBox(rect.left.toFloat(), rect.top.toFloat(), rect.right.toFloat(), rect.bottom.toFloat()),
-            leftEye = point(FaceLandmark.LEFT_EYE),
-            rightEye = point(FaceLandmark.RIGHT_EYE),
-            nose = point(FaceLandmark.NOSE_BASE),
-            rollDegrees = headEulerAngleZ,
-        )
-    }
+}
+
+/** Один детектор на все проходы: и предпросмотр, и анализ записанного файла. */
+internal fun newStoryFaceDetector(): FaceDetector = FaceDetection.getClient(
+    FaceDetectorOptions.Builder()
+        .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+        .setLandmarkMode(FaceDetectorOptions.LANDMARK_MODE_ALL)
+        .setContourMode(FaceDetectorOptions.CONTOUR_MODE_NONE)
+        .setClassificationMode(FaceDetectorOptions.CLASSIFICATION_MODE_NONE)
+        .setMinFaceSize(0.15f)
+        .build(),
+)
+
+internal fun Face.toStoryFace(): StoryFace {
+    val rect: Rect = boundingBox
+    fun point(type: Int): StoryFacePoint? =
+        getLandmark(type)?.position?.let { StoryFacePoint(it.x, it.y) }
+    return StoryFace(
+        box = StoryFaceBox(rect.left.toFloat(), rect.top.toFloat(), rect.right.toFloat(), rect.bottom.toFloat()),
+        leftEye = point(FaceLandmark.LEFT_EYE),
+        rightEye = point(FaceLandmark.RIGHT_EYE),
+        nose = point(FaceLandmark.NOSE_BASE),
+        rollDegrees = headEulerAngleZ,
+    )
 }
