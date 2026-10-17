@@ -1425,6 +1425,7 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
                         ownerId = entry.ownerId,
                         isChannel = entry.isChannel,
                         requestApproval = entry.needsApproval,
+                        title = entry.title,
                     )
                 )
             },

@@ -4879,7 +4879,7 @@ class GroupRepository(
     fun observeInvites(groupId: String): Flow<List<InviteSummary>> =
         groupDao.observeInvites(groupId).transform { list ->
             val group = groupDao.getGroupById(groupId)
-            val plain = list.map { toInviteSummary(it, group?.ownerId, group?.isChannel == true) }
+            val plain = list.map { toInviteSummary(it, group?.ownerId, group?.isChannel == true, group?.title) }
             // Список - сразу, с основными ссылками; короткие ссылки для
             // пересылки - вторым заходом: за ними нужен сервис, и без сети
             // экран не должен ждать таймаута.
@@ -4896,6 +4896,7 @@ class GroupRepository(
         i: GroupInviteEntity,
         ownerId: String? = null,
         isChannel: Boolean = false,
+        title: String? = null,
     ) = InviteSummary(
         slug = i.slug,
         groupId = i.groupId,
@@ -4905,6 +4906,7 @@ class GroupRepository(
             ownerId = ownerId,
             isChannel = isChannel,
             requestApproval = i.requestApproval,
+            title = title,
         ),
         createdAtMs = i.createdAtMs,
         expiresAtMs = i.expiresAtMs,
@@ -4941,7 +4943,7 @@ class GroupRepository(
             requestApproval = requestApproval ?: !group.isPublic,
         )
         groupDao.insertInvite(entity)
-        return Result.success(toInviteSummary(entity, group.ownerId, group.isChannel))
+        return Result.success(toInviteSummary(entity, group.ownerId, group.isChannel, group.title))
     }
 
     suspend fun revokeInvite(groupId: String, slug: String): Result<Unit> {
@@ -5025,13 +5027,14 @@ class GroupRepository(
             slug = target.slug,
             recipients = listOf(ownerId),
             isChannel = target.isChannel,
+            knownTitle = target.title.orEmpty(),
         )
         Log.i(TAG, "join request queued for owner group=$groupId")
         // Признаки берём из ссылки: своей базы с приглашением здесь нет, а
         // писать «заявка отправлена», когда владелец принимает сразу, - врать.
         return JoinOutcome.RequestSent(
             groupId = groupId,
-            title = "",
+            title = target.title.orEmpty(),
             isChannel = target.isChannel,
             needsApproval = target.needsApproval,
         )
@@ -5606,6 +5609,7 @@ class GroupRepository(
                 // Частная группа принимает по заявке: вступающий телефон должен
                 // честно написать «заявка отправлена».
                 requestApproval = !group.isPublic,
+                title = group.title,
             )
         )
     }
@@ -5668,6 +5672,7 @@ class GroupRepository(
                 ownerId = channel.ownerId,
                 isChannel = channel.isChannel,
                 postTopicId = topicId,
+                title = channel.title,
             )
         )
     }
@@ -5693,6 +5698,7 @@ class GroupRepository(
                 groupId = groupId,
                 ownerId = group.ownerId,
                 isChannel = group.isChannel,
+                title = group.title,
             )
         )
     }
@@ -5702,7 +5708,7 @@ class GroupRepository(
         val existing = groupDao.getInvites(groupId).firstOrNull {
             !it.revoked && !it.requestApproval && it.maxUses <= 0 && it.expiresAtMs == null
         }
-        if (existing != null) return toInviteSummary(existing, group.ownerId, group.isChannel)
+        if (existing != null) return toInviteSummary(existing, group.ownerId, group.isChannel, group.title)
         return createInvite(groupId, requestApproval = false).getOrNull()
     }
 
