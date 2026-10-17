@@ -652,6 +652,11 @@ pub(crate) fn is_legacy_routing_node_id(value: &str) -> bool {
 }
 
 impl InstalledSigningIdentity {
+    /// Account key pair for issuing device certificates (P3). Never exported as bytes.
+    pub(crate) fn account_key_pair(&self) -> &Ed25519KeyPair {
+        &self.key_pair
+    }
+
     /// Only the primary device holds the account key, so only it can issue device certificates.
     pub fn issue_device_certificate(
         &self,

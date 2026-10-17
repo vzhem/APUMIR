@@ -54,6 +54,22 @@ namespace p2p_core {
     bytes device_public_key_from_seed(bytes seed);
     boolean verify_device_certificate_bytes(bytes cert, bytes pinned_account_public_key);
 
+    // P3 pairing (docs/MULTI_DEVICE_IDENTITY.md): offer -> request -> answer (SAS) -> grant.
+    [Throws=CoreError]
+    bytes create_pairing_offer(i64 now_ms);
+    void close_pairing_offer();
+    [Throws=CoreError]
+    PrimaryPairingAnswer primary_handle_pairing_request(bytes request, i64 now_ms);
+    [Throws=CoreError]
+    PrimaryPairingGrant primary_confirm_pairing(bytes device_id, i64 now_ms);
+    [Throws=CoreError]
+    bytes joiner_start_pairing(bytes offer, bytes device_id, bytes device_public_key, i64 now_ms);
+    [Throws=CoreError]
+    string joiner_handle_pairing_answer(bytes answer, i64 now_ms);
+    [Throws=CoreError]
+    bytes joiner_accept_pairing_grant(bytes grant, i64 now_ms);
+    void joiner_cancel_pairing();
+
     // R1: signed direct-referral token bound to the persisted S3B identity binding.
     [Throws=CoreError]
     bytes create_referral_invite_token(bytes identity_binding, i64 created_at_ms, i64 expires_at_ms);
@@ -317,4 +333,15 @@ interface P2PCoreHandle {
     // M8-C slice 3: честный режим relay custody и размер карантина (диагностика).
     string relay_custody_mode();
     u64 relay_quarantine_count();
+};
+
+dictionary PrimaryPairingAnswer {
+    bytes answer;
+    string sas;
+    bytes device_id;
+};
+
+dictionary PrimaryPairingGrant {
+    bytes grant;
+    bytes certificate;
 };

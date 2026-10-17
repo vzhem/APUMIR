@@ -597,6 +597,110 @@ pub fn create_device_certificate(
         })
 }
 
+/// P3: result of the primary device's answer to a pairing request.
+pub struct PrimaryPairingAnswer {
+    pub answer: Vec<u8>,
+    pub sas: String,
+    pub device_id: Vec<u8>,
+}
+
+/// P3: encrypted certificate grant for the new device, plus the certificate kept locally.
+pub struct PrimaryPairingGrant {
+    pub grant: Vec<u8>,
+    pub certificate: Vec<u8>,
+}
+
+fn pairing_error(error: crypto::device_pairing::PairingError) -> CoreError {
+    CoreError::CryptoError {
+        detail: error.to_string(),
+    }
+}
+
+fn pairing_device_id(bytes: &[u8]) -> Result<[u8; 16], CoreError> {
+    bytes.try_into().map_err(|_| CoreError::CryptoError {
+        detail: "device id must be 16 bytes".to_string(),
+    })
+}
+
+fn installed_account_identity() -> Result<std::sync::Arc<crypto::signing_identity::InstalledSigningIdentity>, CoreError> {
+    crypto::signing_identity::installed_signing_identity().ok_or_else(|| CoreError::CryptoError {
+        detail: "no installed account signing identity".to_string(),
+    })
+}
+
+/// P3 primary: open a pairing offer (QR payload). Requires the installed account identity.
+pub fn create_pairing_offer(now_ms: i64) -> Result<Vec<u8>, CoreError> {
+    let identity = installed_account_identity()?;
+    crypto::device_pairing::open_pairing_offer(
+        identity.legacy_routing_node_id(),
+        identity.public_key(),
+        now_ms,
+    )
+    .map_err(pairing_error)
+}
+
+pub fn close_pairing_offer() {
+    crypto::device_pairing::close_pairing_offer();
+}
+
+/// P3 primary: verify a request from a new device and return the answer and the code to show.
+pub fn primary_handle_pairing_request(
+    request: Vec<u8>,
+    now_ms: i64,
+) -> Result<PrimaryPairingAnswer, CoreError> {
+    let answer =
+        crypto::device_pairing::primary_handle_request(&request, now_ms).map_err(pairing_error)?;
+    Ok(PrimaryPairingAnswer {
+        answer: answer.answer,
+        sas: answer.sas,
+        device_id: answer.device_id.to_vec(),
+    })
+}
+
+/// P3 primary: the user confirmed the code on this device. Issues the certificate and grant.
+pub fn primary_confirm_pairing(
+    device_id: Vec<u8>,
+    now_ms: i64,
+) -> Result<PrimaryPairingGrant, CoreError> {
+    let id = pairing_device_id(&device_id)?;
+    let identity = installed_account_identity()?;
+    let granted = crypto::device_pairing::primary_confirm(&id, identity.account_key_pair(), now_ms)
+        .map_err(pairing_error)?;
+    let certificate = granted.certificate.to_bytes().map_err(|error| CoreError::CryptoError {
+        detail: error.to_string(),
+    })?;
+    Ok(PrimaryPairingGrant {
+        grant: granted.grant,
+        certificate,
+    })
+}
+
+/// P3 new device: start from a scanned offer. Returns the request to deliver to the account.
+pub fn joiner_start_pairing(
+    offer: Vec<u8>,
+    device_id: Vec<u8>,
+    device_public_key: Vec<u8>,
+    now_ms: i64,
+) -> Result<Vec<u8>, CoreError> {
+    let id = pairing_device_id(&device_id)?;
+    crypto::device_pairing::joiner_start(&offer, &id, &device_public_key, now_ms)
+        .map_err(pairing_error)
+}
+
+/// P3 new device: verify the primary's answer. Returns the six-digit code to show.
+pub fn joiner_handle_pairing_answer(answer: Vec<u8>, now_ms: i64) -> Result<String, CoreError> {
+    crypto::device_pairing::joiner_handle_answer(&answer, now_ms).map_err(pairing_error)
+}
+
+/// P3 new device: the user confirmed the code. Returns the verified device certificate bytes.
+pub fn joiner_accept_pairing_grant(grant: Vec<u8>, now_ms: i64) -> Result<Vec<u8>, CoreError> {
+    crypto::device_pairing::joiner_accept_grant(&grant, now_ms).map_err(pairing_error)
+}
+
+pub fn joiner_cancel_pairing() {
+    crypto::device_pairing::joiner_cancel();
+}
+
 /// P2: public key of a device key seed. The seed is zeroed before returning.
 pub fn device_public_key_from_seed(mut seed: Vec<u8>) -> Result<Vec<u8>, CoreError> {
     let result = crypto::device_certificate::device_public_key_from_seed(&seed).map_err(|error| {
