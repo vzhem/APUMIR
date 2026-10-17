@@ -207,9 +207,11 @@ fn check_offer_time(expires_at_ms: i64, now_ms: i64) -> Result<(), PairingError>
 }
 
 /// Primary device: open a new offer (replaces any previous one). Returns the QR payload.
+/// The offer names the primary device id, so the new device can address its request to it.
 pub fn open_pairing_offer(
     legacy_routing_node_id: &str,
     account_public_key: &[u8],
+    primary_device_id: &[u8; DEVICE_ID_BYTES],
     now_ms: i64,
 ) -> Result<Vec<u8>, PairingError> {
     if !is_legacy_routing_node_id(legacy_routing_node_id)
@@ -225,6 +227,7 @@ pub fn open_pairing_offer(
     out.extend_from_slice(&(legacy_routing_node_id.len() as u16).to_be_bytes());
     out.extend_from_slice(legacy_routing_node_id.as_bytes());
     out.extend_from_slice(account_public_key);
+    out.extend_from_slice(primary_device_id);
     out.extend_from_slice(&secret);
     out.extend_from_slice(&expires.to_be_bytes());
     let mut guard = OFFER.lock().map_err(|_| PairingError::Malformed)?;
@@ -236,6 +239,19 @@ pub fn open_pairing_offer(
         sessions: Vec::new(),
     });
     Ok(out)
+}
+
+/// The primary device id named in an offer (for addressing the request).
+pub fn offer_primary_device_id(offer: &[u8]) -> Result<[u8; DEVICE_ID_BYTES], PairingError> {
+    let mut parsed = Parsed::new(offer, 0)?;
+    let legacy_len = parsed.take_u16()? as usize;
+    if legacy_len == 0 || legacy_len > MAX_LEGACY_ROUTING_ID_BYTES {
+        return Err(PairingError::Malformed);
+    }
+    parsed.take(legacy_len)?;
+    parsed.take(KEY_BYTES)?;
+    let id: [u8; DEVICE_ID_BYTES] = parsed.take(DEVICE_ID_BYTES)?.try_into().unwrap();
+    Ok(id)
 }
 
 /// Close the active offer and drop every pending session.
@@ -381,6 +397,7 @@ pub fn joiner_start(
         .map_err(|_| PairingError::Malformed)?
         .to_string();
     let account_pk = parsed.take(KEY_BYTES)?.to_vec();
+    let _primary_device = parsed.take(DEVICE_ID_BYTES)?;
     let secret: [u8; SECRET_BYTES] = parsed.take(SECRET_BYTES)?.try_into().unwrap();
     let expires = parsed.take_i64()?;
     parsed.finish()?;
@@ -596,7 +613,7 @@ mod tests {
         joiner_id: [u8; 16],
         now: i64,
     ) -> (String, String, Result<Vec<u8>, PairingError>) {
-        let offer = open_pairing_offer(LEGACY, &account().public_key().0, now).unwrap();
+        let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], now).unwrap();
         let request = joiner_start(&offer, &joiner_id, &joiner_device.public_key().0, now).unwrap();
         let answer = primary_handle_request(&request, now).unwrap();
         let joiner_sas = joiner_handle_answer(&answer.answer, now).unwrap();
@@ -631,10 +648,10 @@ mod tests {
     #[test]
     fn request_without_offer_secret_is_rejected() {
         let _guard = TEST_LOCK.lock().unwrap();
-        let offer = open_pairing_offer(LEGACY, &account().public_key().0, 0).unwrap();
+        let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 0).unwrap();
         let mut forged = offer.clone();
         // Replace the secret with another value: the joiner now derives a different MAC key.
-        let secret_start = 1 + 2 + LEGACY.len() + 32;
+        let secret_start = 1 + 2 + LEGACY.len() + 32 + 16;
         forged[secret_start] ^= 0xff;
         let request = joiner_start(&forged, &[1u8; 16], &device(41).public_key().0, 0).unwrap();
         assert_eq!(
@@ -648,7 +665,7 @@ mod tests {
     fn tampered_answer_is_rejected_by_joiner() {
         let _guard = TEST_LOCK.lock().unwrap();
         let joiner = device(42);
-        let offer = open_pairing_offer(LEGACY, &account().public_key().0, 0).unwrap();
+        let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 0).unwrap();
         let request = joiner_start(&offer, &[2u8; 16], &joiner.public_key().0, 0).unwrap();
         let mut answer = primary_handle_request(&request, 0).unwrap().answer;
         let last = answer.len() - 1;
@@ -665,7 +682,7 @@ mod tests {
     fn swapped_ephemeral_key_is_rejected_by_joiner() {
         let _guard = TEST_LOCK.lock().unwrap();
         let joiner = device(43);
-        let offer = open_pairing_offer(LEGACY, &account().public_key().0, 0).unwrap();
+        let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 0).unwrap();
         let request = joiner_start(&offer, &[3u8; 16], &joiner.public_key().0, 0).unwrap();
         // Attacker swaps the primary's ephemeral key in the answer. The answer MAC is keyed by the
         // offer secret, so the joiner rejects it before any code is shown.
@@ -686,7 +703,7 @@ mod tests {
     fn answer_addressed_to_another_device_is_ignored() {
         let _guard = TEST_LOCK.lock().unwrap();
         let joiner = device(48);
-        let offer = open_pairing_offer(LEGACY, &account().public_key().0, 0).unwrap();
+        let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 0).unwrap();
         let request = joiner_start(&offer, &[10u8; 16], &joiner.public_key().0, 0).unwrap();
         let mut answer = primary_handle_request(&request, 0).unwrap().answer;
         // Address the answer to another device id; the joiner must refuse it outright.
@@ -697,9 +714,17 @@ mod tests {
     }
 
     #[test]
+    fn offer_names_primary_device_for_addressing() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[7u8; 16], 0).unwrap();
+        assert_eq!(offer_primary_device_id(&offer), Ok([7u8; 16]));
+        close_pairing_offer();
+    }
+
+    #[test]
     fn expired_offer_is_rejected() {
         let _guard = TEST_LOCK.lock().unwrap();
-        let offer = open_pairing_offer(LEGACY, &account().public_key().0, 0).unwrap();
+        let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 0).unwrap();
         let later = PAIRING_OFFER_TTL_MS + 1;
         assert_eq!(
             joiner_start(&offer, &[4u8; 16], &device(44).public_key().0, later).err(),
@@ -712,7 +737,7 @@ mod tests {
     fn tampered_grant_is_rejected() {
         let _guard = TEST_LOCK.lock().unwrap();
         let joiner = device(45);
-        let offer = open_pairing_offer(LEGACY, &account().public_key().0, 0).unwrap();
+        let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 0).unwrap();
         let request = joiner_start(&offer, &[5u8; 16], &joiner.public_key().0, 0).unwrap();
         let answer = primary_handle_request(&request, 0).unwrap();
         joiner_handle_answer(&answer.answer, 0).unwrap();
@@ -728,7 +753,7 @@ mod tests {
     fn grant_for_unknown_device_is_refused() {
         let _guard = TEST_LOCK.lock().unwrap();
         let joiner = device(46);
-        let offer = open_pairing_offer(LEGACY, &account().public_key().0, 0).unwrap();
+        let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 0).unwrap();
         let request = joiner_start(&offer, &[6u8; 16], &joiner.public_key().0, 0).unwrap();
         let answer = primary_handle_request(&request, 0).unwrap();
         joiner_handle_answer(&answer.answer, 0).unwrap();

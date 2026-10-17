@@ -1909,6 +1909,9 @@ impl P2PCore {
     ) {
         use crate::network::mdns::MdnsService;
         use std::time::Duration;
+        // Device key id of this installation (P3): published so that devices of one account
+        // can be told apart on the LAN. None until the app sets it.
+        let local_device = crate::network::device_endpoints::local_device_id_hex();
 
         let mdns = match MdnsService::new() {
             Ok(m) => m,
@@ -1937,7 +1940,7 @@ impl P2PCore {
             tracing::info!("mDNS: external addr for TXT = {}", a);
         }
 
-        if let Err(e) = mdns.publish_self(&node_id, port, &display_name, 1, public_addr_str.as_deref()).await {
+        if let Err(e) = mdns.publish_self_device(&node_id, port, &display_name, 1, public_addr_str.as_deref(), local_device.as_deref()).await {
             tracing::warn!("mDNS publish failed: {}", e);
         } else {
             tracing::info!("mDNS: published self as {} port {}", display_name, port);
@@ -1954,7 +1957,7 @@ impl P2PCore {
                 // адрес сменился вместе с сетью.
                 let public_addr_str = public_addr.lock().unwrap().map(|a| a.to_string());
                 match mdns
-                    .publish_self(&node_id, port, &display_name, 1, public_addr_str.as_deref())
+                    .publish_self_device(&node_id, port, &display_name, 1, public_addr_str.as_deref(), local_device.as_deref())
                     .await
                 {
                     Ok(()) => {
@@ -1968,6 +1971,13 @@ impl P2PCore {
                 Err(e) => tracing::warn!("mDNS discover error: {}", e),
                 Ok(nodes) => {
                     for node in nodes {
+                        // Devices of this account share our node_id: remember their LAN
+                        // endpoint by device id, never as the node route.
+                        if let Some(ref dev) = node.device_id_hex {
+                            if !crate::network::device_endpoints::is_local_device(dev) {
+                                crate::network::device_endpoints::record_device_endpoint(dev, node.address);
+                            }
+                        }
                         if let Some(ref nid) = node.node_id_hex {
                             if nid == &node_id {
                                 continue;
@@ -4968,6 +4978,33 @@ impl P2PCore {
         // K1: адрес может быть неизвестен - тогда сработает только живое
         // соединение из пула (узел сам дозвонился до нас).
         self.send_via_quic(&recipient_id, addr_opt, wire_payload)
+    }
+
+    /// P3 pairing: deliver one packet to one exact device of an account. The LAN endpoint is
+    /// taken by device id when known, otherwise the account route is used. The packet is not
+    /// sealed here: pairing messages carry their own MAC and AEAD (crypto::device_pairing).
+    pub fn send_pairing_payload(
+        &self,
+        recipient_node_id: String,
+        target_device_id_hex: String,
+        payload: String,
+    ) -> bool {
+        if !self.state.is_running() {
+            return false;
+        }
+        let Some(sender_id) = self.node_id() else {
+            return false;
+        };
+        let addr = crate::network::device_endpoints::device_endpoint(&target_device_id_hex).or_else(|| {
+            self.peer_addrs
+                .lock()
+                .unwrap()
+                .get(&recipient_node_id)
+                .copied()
+        });
+        let msg_id = uuid::Uuid::new_v4().to_string();
+        let wire_payload = format!("{}|{}|direct|{}", sender_id, msg_id, payload);
+        self.send_via_quic(&target_device_id_hex, addr, wire_payload)
     }
 
     /// K3: бинарный кусок файла по прямому QUIC-каналу.

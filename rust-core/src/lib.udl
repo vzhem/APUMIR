@@ -57,6 +57,9 @@ namespace p2p_core {
     // P3 pairing (docs/MULTI_DEVICE_IDENTITY.md): offer -> request -> answer (SAS) -> grant.
     [Throws=CoreError]
     bytes create_pairing_offer(i64 now_ms);
+    [Throws=CoreError]
+    bytes pairing_offer_primary_device_id(bytes offer);
+    void set_local_device_id(bytes device_id);
     void close_pairing_offer();
     [Throws=CoreError]
     PrimaryPairingAnswer primary_handle_pairing_request(bytes request, i64 now_ms);
@@ -263,6 +266,7 @@ interface P2PCoreHandle {
 
     // Parallel QUIC file stream: direct send WITHOUT relay queue (bulk transfer).
     boolean send_direct_payload(string recipient_id, string payload);
+    boolean send_pairing_payload(string recipient_node_id, bytes target_device_id, string payload);
 
     // K3: бинарный кусок файла по прямому QUIC-каналу. Ядро собирает из
     // аргументов APUF-кадр (file_wire) и уезжает им одним стримом с

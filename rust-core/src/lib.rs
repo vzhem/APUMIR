@@ -128,6 +128,22 @@ impl P2PCoreHandle {
         self.inner.lock().unwrap().send_direct_payload(recipient_id, payload)
     }
 
+    /// P3: one pairing packet to one device of the account (by device key id).
+    pub fn send_pairing_payload(
+        &self,
+        recipient_node_id: String,
+        target_device_id: Vec<u8>,
+        payload: String,
+    ) -> bool {
+        let Ok(id) = pairing_device_id(&target_device_id) else {
+            return false;
+        };
+        self.inner
+            .lock()
+            .unwrap()
+            .send_pairing_payload(recipient_node_id, bytes_to_hex(&id), payload)
+    }
+
     /// K3: бинарный кусок файла по прямому QUIC-каналу (APUF-кадр).
     /// `true` = получатель подтвердил приём стрима; `false` = не удалось —
     /// вызывающий ждёт следующего цикла (передача не прерывается).
@@ -628,15 +644,58 @@ fn installed_account_identity() -> Result<std::sync::Arc<crypto::signing_identit
     })
 }
 
-/// P3 primary: open a pairing offer (QR payload). Requires the installed account identity.
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// P3: the device key id of this installation (16 bytes). Set once at startup; not secret.
+pub fn set_local_device_id(device_id: Vec<u8>) {
+    match pairing_device_id(&device_id) {
+        Ok(id) => network::device_endpoints::set_local_device_id_hex(Some(bytes_to_hex(&id))),
+        Err(_) => network::device_endpoints::set_local_device_id_hex(None),
+    }
+}
+
+/// P3 primary: open a pairing offer (QR payload). Requires the installed account identity and
+/// the local device id (set_local_device_id), which the offer names as the request target.
 pub fn create_pairing_offer(now_ms: i64) -> Result<Vec<u8>, CoreError> {
     let identity = installed_account_identity()?;
+    let local = network::device_endpoints::local_device_id_hex().ok_or_else(|| {
+        CoreError::CryptoError {
+            detail: "local device id is not set".to_string(),
+        }
+    })?;
+    let device_id = pairing_device_id(&hex_to_bytes(&local)?)?;
     crypto::device_pairing::open_pairing_offer(
         identity.legacy_routing_node_id(),
         identity.public_key(),
+        &device_id,
         now_ms,
     )
     .map_err(pairing_error)
+}
+
+/// P3 new device: the primary device id named in a scanned offer.
+pub fn pairing_offer_primary_device_id(offer: Vec<u8>) -> Result<Vec<u8>, CoreError> {
+    crypto::device_pairing::offer_primary_device_id(&offer)
+        .map(|id| id.to_vec())
+        .map_err(pairing_error)
+}
+
+fn hex_to_bytes(hex: &str) -> Result<Vec<u8>, CoreError> {
+    if hex.len() % 2 != 0 {
+        return Err(CoreError::CryptoError {
+            detail: "bad hex".to_string(),
+        });
+    }
+    (0..hex.len())
+        .step_by(2)
+        .map(|i| {
+            u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| CoreError::CryptoError {
+                detail: "bad hex".to_string(),
+            })
+        })
+        .collect()
 }
 
 pub fn close_pairing_offer() {
