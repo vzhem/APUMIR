@@ -110,4 +110,12 @@ class StoryFaceFiltersTest {
         assertEquals(3, StoryBrows.entries.size)
         assertEquals(3, StoryCheeks.entries.size)
     }
+
+    @Test
+    fun animalVariantCountsMatchArtAssets() {
+        // Сколько вариантов в каждом выборе (кроме «Без»). Должны совпадать с картинками в StoryStickers.
+        assertEquals(9, StoryEars.entries.size - 1)
+        assertEquals(8, StoryNose.entries.size - 1)
+        assertEquals(7, StoryEyes.entries.size - 1)
+    }
 }

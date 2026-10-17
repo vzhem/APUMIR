@@ -180,6 +180,9 @@ private fun drawNose(
         StoryNose.PIG -> "nose_pig"
         StoryNose.BEAR -> "nose_bear"
         StoryNose.RABBIT -> "nose_rabbit"
+        StoryNose.PANDA -> "nose_panda"
+        StoryNose.TIGER -> "nose_tiger"
+        StoryNose.MOUSE -> "nose_mouse"
     }
     val x = t.x(nose.x)
     val y = t.y(nose.y)
@@ -207,6 +210,10 @@ private fun drawEars(
         StoryEars.BUNNY -> "ear_bunny"
         StoryEars.BEAR -> "ear_bear"
         StoryEars.FOX -> "ear_fox"
+        StoryEars.PANDA -> "ear_panda"
+        StoryEars.TIGER -> "ear_tiger"
+        StoryEars.MOUSE -> "ear_mouse"
+        StoryEars.DEER -> "ear_deer"
     }
     val x = t.x(anchor.x)
     val y = t.y(anchor.y)
@@ -253,6 +260,9 @@ private fun drawEyes(
         StoryEyes.OWL -> "eye_owl"
         StoryEyes.PANDA -> "eye_panda"
         StoryEyes.FROG -> "eye_frog"
+        StoryEyes.TIGER -> "eye_tiger"
+        StoryEyes.FOX -> "eye_fox"
+        StoryEyes.DOG -> "eye_dog"
     }
     val x = t.x(anchor.x)
     val y = t.y(anchor.y)

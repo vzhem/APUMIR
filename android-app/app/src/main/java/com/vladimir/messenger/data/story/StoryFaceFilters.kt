@@ -10,11 +10,20 @@ import kotlin.math.sqrt
  * движение — в StoryFaceMotion.kt, распознавание — в StoryFaceTracker.kt.
  */
 
-enum class StoryEars(val label: String) { NONE("Без"), CAT("Кот"), DOG("Собака"), BUNNY("Заяц"), BEAR("Медведь"), FOX("Лиса") }
+enum class StoryEars(val label: String) {
+    NONE("Без"), CAT("Кот"), DOG("Собака"), BUNNY("Заяц"), BEAR("Медведь"), FOX("Лиса"),
+    PANDA("Панда"), TIGER("Тигр"), MOUSE("Мышь"), DEER("Олень"),
+}
 
-enum class StoryNose(val label: String) { NONE("Без"), CAT("Кот"), DOG("Собака"), PIG("Свинка"), BEAR("Медведь"), RABBIT("Заяц") }
+enum class StoryNose(val label: String) {
+    NONE("Без"), CAT("Кот"), DOG("Собака"), PIG("Свинка"), BEAR("Медведь"), RABBIT("Заяц"),
+    PANDA("Панда"), TIGER("Тигр"), MOUSE("Мышь"),
+}
 
-enum class StoryEyes(val label: String) { NONE("Без"), CAT("Кошачьи"), OWL("Совиные"), PANDA("Панда"), FROG("Лягушка") }
+enum class StoryEyes(val label: String) {
+    NONE("Без"), CAT("Кошачьи"), OWL("Совиные"), PANDA("Панда"), FROG("Лягушка"),
+    TIGER("Тигриные"), FOX("Лисьи"), DOG("Собачьи"),
+}
 
 enum class StoryLips(val label: String) { NONE("Без"), RED("Красные"), PINK("Розовые") }
 
