@@ -83,6 +83,7 @@ internal fun drawStoryFaces(
             drawBeard(canvas, filter.beard, layout.beard, transform)
             drawCheeks(canvas, filter.cheeks, layout.leftCheek, layout.rightCheek, transform)
             drawLips(canvas, filter.lips, layout.mouth, transform)
+            drawMustache(canvas, filter.mustache, layout.mustache, transform)
             drawWhiskers(canvas, filter.whiskers, layout.nose, transform, timeMs)
             drawNose(canvas, filter.nose, layout.nose, transform, timeMs)
             drawEars(canvas, filter.ears, layout.leftEar, transform, left = true, timeMs = timeMs)
@@ -92,6 +93,25 @@ internal fun drawStoryFaces(
             drawEyes(canvas, filter.eyes, layout.rightEye, transform, timeMs)
         }
     }
+}
+
+/** Человеческие усы: над губами, поверх губ. Центр картинки на линии над ртом. */
+private fun drawMustache(
+    canvas: StoryFaceCanvas,
+    style: StoryMustache,
+    anchor: StoryFaceAnchor,
+    t: StoryFaceTransform,
+) {
+    val name = when (style) {
+        StoryMustache.NONE -> return
+        StoryMustache.PENCIL -> "mustache_pencil"
+        StoryMustache.HANDLEBAR -> "mustache_handlebar"
+        StoryMustache.WALRUS -> "mustache_walrus"
+        StoryMustache.CHEVRON -> "mustache_chevron"
+        StoryMustache.HORSESHOE -> "mustache_horseshoe"
+    }
+    if (canvas.spriteAspect(name) == null) return
+    canvas.sprite(name, t.x(anchor.x), t.y(anchor.y), t.len(anchor.size), flipX = false, rotationDegrees = 0f)
 }
 
 /** Борода: картинка под носом, верх чуть выше линии рта, чтобы губы легли поверх. */
@@ -321,6 +341,11 @@ private fun drawEyes(
         StoryEyes.WOLF -> "eye_wolf"
         StoryEyes.LYNX -> "eye_lynx"
         StoryEyes.HORSE -> "eye_horse"
+        StoryEyes.HUMAN_BROWN -> "eye_human_brown"
+        StoryEyes.HUMAN_BLUE -> "eye_human_blue"
+        StoryEyes.HUMAN_GREEN -> "eye_human_green"
+        StoryEyes.HUMAN_HAZEL -> "eye_human_hazel"
+        StoryEyes.HUMAN_GREY -> "eye_human_grey"
     }
     val x = t.x(anchor.x)
     val y = t.y(anchor.y)

@@ -84,6 +84,7 @@ import com.vladimir.messenger.data.story.StoryBeard
 import com.vladimir.messenger.data.story.StoryBrows
 import com.vladimir.messenger.data.story.StoryCheeks
 import com.vladimir.messenger.data.story.StoryLips
+import com.vladimir.messenger.data.story.StoryMustache
 import com.vladimir.messenger.data.story.StoryWhiskers
 import com.vladimir.messenger.data.story.StoryNose
 import kotlinx.coroutines.CancellationException
@@ -96,7 +97,7 @@ private val recordRed = Color(0xFFE5484D)
 
 /** Какая часть лица сейчас выбирается в панели фильтров. */
 private enum class FilterPart(val label: String) {
-    EARS("Уши"), NOSE("Нос"), EYES("Глаза"), LIPS("Губы"), BROWS("Брови"), WHISKERS("Усы"), CHEEKS("Щёки"), HAIR("Прически"), BEARD("Бороды")
+    EARS("Уши"), NOSE("Нос"), EYES("Глаза"), LIPS("Губы"), BROWS("Брови"), WHISKERS("Кошачьи усы"), CHEEKS("Щёки"), HAIR("Прически"), BEARD("Бороды"), MUSTACHE("Усы людей")
 }
 
 /**
@@ -531,6 +532,9 @@ private fun StoryFilterPicker(
         }
         FilterPart.BEARD -> StoryBeard.entries.map { value ->
             FilterOption(value.label, filter.beard == value) { onFilter(filter.copy(beard = value)) }
+        }
+        FilterPart.MUSTACHE -> StoryMustache.entries.map { value ->
+            FilterOption(value.label, filter.mustache == value) { onFilter(filter.copy(mustache = value)) }
         }
     }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

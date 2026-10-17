@@ -27,6 +27,7 @@ enum class StoryEyes(val label: String) {
     NONE("Без"), CAT("Кошачьи"), OWL("Совиные"), PANDA("Панда"), FROG("Лягушка"),
     TIGER("Тигриные"), FOX("Лисьи"), DOG("Собачьи"),
     WOLF("Волчьи"), LYNX("Рысьи"), HORSE("Лошадь"),
+    HUMAN_BROWN("Карие"), HUMAN_BLUE("Голубые"), HUMAN_GREEN("Зелёные"), HUMAN_HAZEL("Ореховые"), HUMAN_GREY("Серые"),
 }
 
 enum class StoryLips(val label: String) { NONE("Без"), RED("Красные"), PINK("Розовые") }
@@ -41,6 +42,8 @@ enum class StoryHair(val label: String) { NONE("Без"), CURLY("Кудри"), W
 
 enum class StoryBeard(val label: String) { NONE("Без"), STUBBLE("Щетина"), FULL("Полная"), GOATEE("Козлиная"), VANDYKE("Ван Дейк"), SIDEBURNS("Бакенбарды") }
 
+enum class StoryMustache(val label: String) { NONE("Без"), PENCIL("Тонкие"), HANDLEBAR("Закрученные"), WALRUS("Моржовые"), CHEVRON("Шеврон"), HORSESHOE("Подкова") }
+
 /** Набор фильтра: каждая часть выбирается отдельно, «Без» отключает часть. */
 data class StoryFaceFilter(
     val ears: StoryEars = StoryEars.NONE,
@@ -52,11 +55,12 @@ data class StoryFaceFilter(
     val cheeks: StoryCheeks = StoryCheeks.NONE,
     val hair: StoryHair = StoryHair.NONE,
     val beard: StoryBeard = StoryBeard.NONE,
+    val mustache: StoryMustache = StoryMustache.NONE,
 ) {
     val isActive: Boolean
         get() = ears != StoryEars.NONE || nose != StoryNose.NONE || eyes != StoryEyes.NONE ||
             lips != StoryLips.NONE || brows != StoryBrows.NONE || whiskers != StoryWhiskers.NONE ||
-            cheeks != StoryCheeks.NONE || hair != StoryHair.NONE || beard != StoryBeard.NONE
+            cheeks != StoryCheeks.NONE || hair != StoryHair.NONE || beard != StoryBeard.NONE || mustache != StoryMustache.NONE
 
     companion object {
         val NONE = StoryFaceFilter()
@@ -117,6 +121,8 @@ data class StoryFaceLayout(
     val hair: StoryFaceAnchor,
     /** Бороды: верх картинки чуть выше линии рта; size — ширина. */
     val beard: StoryFaceAnchor,
+    /** Человеческие усы: центр над линией губ; size — ширина. */
+    val mustache: StoryFaceAnchor,
 )
 
 object StoryFaceGeometry {
@@ -194,6 +200,7 @@ object StoryFaceGeometry {
             rightBrow = StoryFaceAnchor(rightEye.x, rightEye.y - browLift, browWidth),
             hair = StoryFaceAnchor(cx, box.top, w * 1.5f),
             beard = StoryFaceAnchor(mouth.x, mouth.y, w * 0.8f),
+            mustache = StoryFaceAnchor(mouth.x, mouth.y - mouth.size * 0.2f, mouth.size * 1.6f),
         )
     }
 

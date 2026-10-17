@@ -116,9 +116,10 @@ class StoryFaceFiltersTest {
         // Сколько вариантов в каждом выборе (кроме «Без»). Должны совпадать с картинками в StoryStickers.
         assertEquals(12, StoryEars.entries.size - 1)
         assertEquals(12, StoryNose.entries.size - 1)
-        assertEquals(10, StoryEyes.entries.size - 1)
+        assertEquals(14, StoryEyes.entries.size - 1)
         assertEquals(5, StoryHair.entries.size - 1)
         assertEquals(5, StoryBeard.entries.size - 1)
+        assertEquals(5, StoryMustache.entries.size - 1)
     }
 
     @Test
@@ -135,5 +136,12 @@ class StoryFaceFiltersTest {
         assertEquals(layout.mouth.y, layout.beard.y, 0.001f)
         assertTrue(layout.beard.size > 0f)
         assertTrue(StoryFaceFilter(beard = StoryBeard.FULL).isActive)
+    }
+
+    @Test
+    fun mustacheSitsAboveTheLips() {
+        val layout = StoryFaceGeometry.layout(face())!!
+        assertTrue(layout.mustache.y < layout.mouth.y)
+        assertTrue(StoryFaceFilter(mustache = StoryMustache.WALRUS).isActive)
     }
 }
