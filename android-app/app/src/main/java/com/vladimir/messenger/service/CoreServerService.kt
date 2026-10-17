@@ -548,6 +548,21 @@ class CoreServerService : Service() {
         }
 
         
+        // Сердечки: общая рассылка раз в 6 часов, только когда телефон свободен (HeartSyncPolicy).
+        // Ядро живёт в этом сервисе постоянно, поэтому цикл здесь, а не в экране игры.
+        serviceScope.launch {
+            while (isActive) {
+                try {
+                    heartGameNetwork.broadcastIfNeeded()
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // Ядро или подпись недоступны: повторим на следующем круге.
+                }
+                delay(com.vladimir.messenger.data.heartgame.HeartSyncPolicy.CHECK_PERIOD_MS)
+            }
+        }
+
         // ================================================================
         // РЕГИСТРАЦИЯ В CLOUDFLARE WORKER REGISTRY
         // (независимо от наличия telegram_bot_token)
@@ -2637,6 +2652,15 @@ class CoreServerService : Service() {
                         if (becameOnline) {
                             // И в чаты: шапка лички и точка в списке читают таблицу chats
                             try { chatRepository.updateContactOnlineStatus(peerId, true) } catch (_: Exception) {}
+                            // Новенький в сети: точечно синхронизируем сердечки (с антиспамом в HeartSyncPolicy).
+                            serviceScope.launch {
+                                try {
+                                    heartGameNetwork.syncWithNewcomer(existing.id)
+                                } catch (e: kotlinx.coroutines.CancellationException) {
+                                    throw e
+                                } catch (_: Exception) {
+                                }
+                            }
                             Log.i(TAG, "🟢 ONLINE: $peerName")
                         }
                         if (lightTouch) return  // пульс учли, тяжёлую синхру не дёргаем
