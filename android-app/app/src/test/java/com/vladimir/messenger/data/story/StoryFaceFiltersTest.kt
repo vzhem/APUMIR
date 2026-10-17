@@ -114,8 +114,17 @@ class StoryFaceFiltersTest {
     @Test
     fun animalVariantCountsMatchArtAssets() {
         // Сколько вариантов в каждом выборе (кроме «Без»). Должны совпадать с картинками в StoryStickers.
-        assertEquals(9, StoryEars.entries.size - 1)
-        assertEquals(8, StoryNose.entries.size - 1)
-        assertEquals(7, StoryEyes.entries.size - 1)
+        assertEquals(10, StoryEars.entries.size - 1)
+        assertEquals(10, StoryNose.entries.size - 1)
+        assertEquals(9, StoryEyes.entries.size - 1)
+        assertEquals(5, StoryHair.entries.size - 1)
+    }
+
+    @Test
+    fun hairAnchorSitsOnTopOfHead() {
+        val layout = StoryFaceGeometry.layout(face())!!
+        assertEquals(box.top, layout.hair.y, 0.001f)
+        assertTrue(layout.hair.size > box.width)
+        assertTrue(StoryFaceFilter(hair = StoryHair.BOB).isActive)
     }
 }
