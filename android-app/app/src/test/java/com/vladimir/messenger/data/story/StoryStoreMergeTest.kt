@@ -66,4 +66,27 @@ class StoryStoreMergeTest {
         assertEquals("PHOTO", merged.photoB64)
         assertEquals("Alice", merged.authorName)
     }
+
+    @Test
+    fun photoShapeSurvivesLateCaptionAndDefaultsToRectangle() {
+        val circular = story(photoB64 = "PHOTO").copy(photoCircle = true)
+        assertTrue(StoryStore.mergeIncoming(circular, story()).photoCircle)
+        assertTrue(StoryStore.mergeIncoming(story(), circular).photoCircle)
+        assertEquals(false, story().photoCircle)
+        assertEquals(false, StoryStore.mergeIncoming(circular, story(photoB64 = "REPLACEMENT")).photoCircle)
+    }
+    @Test
+    fun videoShapeSurvivesLatePacketsAndDefaultsToRegular() {
+        val media = StoryVideoMedia("a".repeat(64), 1024, 60_000, 720, 1280, true)
+        val circular = story(photoB64 = "COVER").copy(video = media, videoCircle = true, photoCircle = true)
+        val merged = StoryStore.mergeIncoming(circular, story())
+        assertTrue(merged.videoCircle)
+        assertTrue(merged.photoCircle)
+        assertEquals(media, merged.video)
+        assertTrue(StoryStore.mergeIncoming(story(), circular).videoCircle)
+        assertEquals(false, story().videoCircle)
+        // Published shape is immutable; a legacy duplicate must not change it.
+        assertTrue(StoryStore.mergeIncoming(circular, circular.copy(videoCircle = false)).videoCircle)
+    }
+
 }

@@ -1,5 +1,7 @@
 package com.vladimir.messenger.util
 
+import com.vladimir.messenger.data.group.GroupInviteLinks
+
 // =============================================================================
 // GROUPINVITECARDSENDER.KT — приглашение в группу/канал КАРТОЧКОЙ
 // =============================================================================
@@ -18,6 +20,9 @@ data class GroupInviteCard(
     val link: String,
     /** Раунд 218: установочная ссылка (если в тексте была) для кнопки «Скачать APU». */
     val apkLink: String? = null,
+    /** Null у старых карточек: не выдаём неизвестный тип за открытый. */
+    val isPublic: Boolean? = null,
+    val needsApproval: Boolean? = null,
 )
 
 object GroupInviteCardSender {
@@ -30,14 +35,28 @@ object GroupInviteCardSender {
     )
 
     /** Собрать текст карточки: заголовок, описание (если есть), ссылка. */
-    fun build(isChannel: Boolean, title: String, about: String, link: String): String {
+    fun build(
+        isChannel: Boolean,
+        title: String,
+        about: String,
+        link: String,
+        isPublic: Boolean? = null,
+        needsApproval: Boolean? = null,
+    ): String {
         val header = if (isChannel) "Канал" else "Группа"
         val sb = StringBuilder("$header «${title.trim()}» в APU.")
         val trimmedAbout = about.trim()
         if (trimmedAbout.isNotEmpty()) {
-            sb.append("\n").append(trimmedAbout.take(300))
+            sb.append("\n").append(trimmedAbout)
         }
         sb.append("\n").append(link)
+        // Метаданные после ссылки: не смешиваются с многострочным описанием.
+        // Человекочитаемы и в старых версиях приложения; короткая ссылка
+        // сама не содержит признаков доступа, поэтому передаём их отдельно.
+        isPublic?.let { sb.append("\nТип доступа: ").append(if (it) "открытый" else "закрытый") }
+        needsApproval?.let {
+            sb.append("\nВступление: ").append(if (it) "по заявке" else "без одобрения")
+        }
         return sb.toString()
     }
 
@@ -78,9 +97,21 @@ object GroupInviteCardSender {
         val apkLink = lines.drop(lines.indexOf(linkLine) + 1)
             .firstOrNull { line -> LINK_PREFIXES.any { line.startsWith(it) } }
 
+        val metadata = lines.drop(lines.indexOf(linkLine) + 1)
+        val isPublic = when (metadata.firstOrNull { it.startsWith("Тип доступа: ") }) {
+            "Тип доступа: открытый" -> true
+            "Тип доступа: закрытый" -> false
+            else -> null
+        }
+        val needsApproval = when (metadata.firstOrNull { it.startsWith("Вступление: ") }) {
+            "Вступление: по заявке" -> true
+            "Вступление: без одобрения" -> false
+            else -> GroupInviteLinks.parseTarget(linkLine)?.needsApproval
+        }
+
         val about = lines.subList(1, lines.indexOf(linkLine).coerceAtLeast(1))
             .filterNot { it.startsWith("Открой ссылку") }
-            .joinToString(" ") { it }
+            .joinToString("\n") { it }
             .removePrefix("Присоединяйся к группе в APU.")
             .removePrefix("Присоединяйся к каналу в APU.")
             .trim()
@@ -88,9 +119,11 @@ object GroupInviteCardSender {
         return GroupInviteCard(
             isChannel = isChannel,
             title = title,
-            about = about.take(300),
+            about = about,
             link = linkLine,
             apkLink = apkLink,
+            isPublic = isPublic,
+            needsApproval = needsApproval,
         )
     }
 

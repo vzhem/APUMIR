@@ -533,6 +533,15 @@ object GroupWire {
          * р250: медленный режим группы - участник ждёт [seconds] секунд между
          * своими сообщениями; 0 - режим выключен.
          */
+        data class Wallpaper(val groupId: String, val revision: String, val index: Int, val total: Int, val data: String) : Packet()
+        data class WallpaperRequest(val groupId: String) : Packet()
+        data class MemberListVisibility(val groupId: String, val visible: Boolean) : Packet()
+        data class MemberListVisibilityRequest(val groupId: String) : Packet()
+
+        data class QuietHoursRequest(val groupId: String) : Packet()
+
+        data class QuietHours(val groupId: String, val schedule: String) : Packet()
+
         data class SlowMode(val groupId: String, val seconds: Int) : Packet()
 
         /**
@@ -1461,6 +1470,25 @@ object GroupWire {
     // ── р250: медленный режим ───────────────────────────────────────────────
 
     /** Медленный режим группы: [seconds] секунд между сообщениями участника (0 - выключен). */
+    fun buildWallpaper(groupId: String, revision: String, value: String): List<String> {
+        require(GroupWallpaper.valid(value))
+        require(Regex("[0-9]{13}-[0-9a-f]{32}").matches(revision))
+        val parts = value.chunked(GroupWallpaper.CHUNK).ifEmpty { listOf("") }
+        return parts.mapIndexed { index, data -> "$PREFIX|wallpaper|$groupId|$revision|$index|${parts.size}|$data" }
+    }
+    fun buildWallpaperRequest(groupId: String): String = "$PREFIX|wallpaper_get|$groupId"
+
+    fun buildMemberListVisibility(groupId: String, visible: Boolean): String =
+        "$PREFIX|member_list|$groupId|${if (visible) 1 else 0}"
+    fun buildMemberListVisibilityRequest(groupId: String): String = "$PREFIX|member_list_get|$groupId"
+
+    fun buildQuietHoursRequest(groupId: String): String = "$PREFIX|quiet_hours_get|$groupId"
+
+    fun buildQuietHours(groupId: String, schedule: String): String {
+        require(schedule.isEmpty() || GroupQuietSchedule.decode(schedule) != null)
+        return "$PREFIX|quiet_hours|$groupId|${encode(schedule)}"
+    }
+
     fun buildSlowMode(groupId: String, seconds: Int): String {
         require(groupId.isNotBlank()) { "bad group id" }
         val safe = seconds.coerceIn(0, SLOW_MODE_MAX_SECONDS)
@@ -1907,6 +1935,26 @@ object GroupWire {
             } else {
                 null
             }
+
+            "wallpaper_get" -> if (parts.size == 3) Packet.WallpaperRequest(groupId) else null
+            "wallpaper" -> if (parts.size == 7 && parts[6].length <= GroupWallpaper.CHUNK) {
+                val index = parts[4].toIntOrNull() ?: return null
+                val total = parts[5].toIntOrNull() ?: return null
+                if (total !in 1..GroupWallpaper.MAX_PARTS || index !in 0 until total ||
+                    !Regex("[0-9]{13}-[0-9a-f]{32}").matches(parts[3])) null
+                else Packet.Wallpaper(groupId, parts[3], index, total, parts[6])
+            } else null
+
+            "member_list_get" -> if (parts.size == 3) Packet.MemberListVisibilityRequest(groupId) else null
+            "member_list" -> if (parts.size == 4 && parts[3] in listOf("0", "1"))
+                Packet.MemberListVisibility(groupId, parts[3] == "1") else null
+
+            "quiet_hours_get" -> if (parts.size == 3) Packet.QuietHoursRequest(groupId) else null
+
+            "quiet_hours" -> if (parts.size == 4) {
+                val schedule = decode(parts[3]) ?: return null
+                if (schedule.isEmpty() || GroupQuietSchedule.decode(schedule) != null) Packet.QuietHours(groupId, schedule) else null
+            } else null
 
             KIND_SLOW_MODE -> if (parts.size == 4) {
                 val seconds = parts[3].toIntOrNull()

@@ -56,6 +56,9 @@ object AppModule {
                 AppDatabase.MIGRATION_25_26,
                 AppDatabase.MIGRATION_26_27,
                 AppDatabase.MIGRATION_27_28,
+                AppDatabase.MIGRATION_28_29,
+                AppDatabase.MIGRATION_29_30,
+                AppDatabase.MIGRATION_30_31,
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -135,7 +138,8 @@ object AppModule {
         messageDao: MessageDao,
         groupDao: GroupDao,
         referralAttribution: com.vladimir.messenger.data.referral.ReferralAttributionSender,
-    ): ChatRepository = ChatRepository(context, chatDao, messageDao, groupDao, referralAttribution)
+        storyVideos: com.vladimir.messenger.data.story.StoryVideoDelivery,
+    ): ChatRepository = ChatRepository(context, chatDao, messageDao, groupDao, storyVideos, referralAttribution)
 
     @Provides @Singleton
     fun provideContactRepository(contactDao: ContactDao, chatRepository: ChatRepository): ContactRepository =

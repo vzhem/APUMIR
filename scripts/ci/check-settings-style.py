@@ -238,6 +238,22 @@ class SettingsStyleTest(unittest.TestCase):
         spec.loader.exec_module(checks)
         checks.ChatStyleTest("test_text_and_actions_contrast_on_any_wallpaper").test_text_and_actions_contrast_on_any_wallpaper()
 
+    def test_conversation_wallpaper_uses_swatches_and_per_scope_personal_overrides(self):
+        dialog = source("components/ConversationWallpaperDialog.kt")
+        for token in ("WallpaperTint.entries.forEach", "ConversationWallpaperTintSwatch(",
+                      "CircleShape", "option.colorsFor(dark)", "personalChoice", "sharedChoice",
+                      "val choice = if (forAll) sharedChoice else personalChoice",
+                      "onSetShared != null"):
+            self.assertIn(token, dialog)
+        for path in ("screens/groups/GroupChatScreen.kt", "screens/channels/ChannelScreen.kt"):
+            screen = source(path)
+            self.assertIn("ConversationWallpaperDialog(", screen)
+            self.assertIn("GroupRole.isAdminOrOwner", screen)
+            self.assertIn("onSetShared = if", screen)
+        chat = source("screens/chat/ChatDetailScreen.kt")
+        self.assertIn('scope = "direct:$chatId"', chat)
+        self.assertIn("ConversationWallpaperDialog(", chat)
+
     def test_profile_keeps_all_identity_actions_and_media_permissions(self):
         text = source("screens/settings/SettingsScreen.kt")
         for event in (
@@ -432,6 +448,26 @@ class SettingsStyleTest(unittest.TestCase):
         self.assertIn("if (uiState.rankVip)", chat_list)
         self.assertIn("ApuVipBadge()", chat_list)
 
+    def test_profile_actions_have_one_large_pressable_surface(self):
+        action = source("components/ApuSettingsUi.kt").split("fun ApuProfileQuickAction(")[1].split("fun ApuSettingsDialog(")[0]
+        self.assertIn("heightIn(min = 96.dp)", action)
+        self.assertNotIn("ApuPremiumIconTile(", action)
+        self.assertEqual(1, action.count(".clickable("))
+        self.assertIn("performHapticFeedback", action)
+        self.assertIn("collectIsPressedAsState", action)
+        self.assertIn("onClick()", action)
+
+    def test_bottom_motion_is_selection_driven_not_infinite(self):
+        bar = source("components/ApuBottomBar.kt")
+        sheen = source("components/ApuSelectionSheen.kt")
+        self.assertIn("Role.Tab", bar)
+        self.assertIn("selected = item.selected", bar)
+        self.assertIn("performHapticFeedback", bar)
+        self.assertIn("apuSelectionSheen(item.selected", bar)
+        self.assertIn("areAnimatorsEnabled()", sheen)
+        self.assertNotIn("rememberInfiniteTransition", sheen)
+        self.assertNotIn("while (true)", sheen)
+
     def test_large_profile_initials_and_avatar_io_are_preserved(self):
         avatar = source("components/MyAvatar.kt")
         self.assertIn("size: Int = 52", avatar)
@@ -444,7 +480,7 @@ class SettingsStyleTest(unittest.TestCase):
         # (владелец 2026-10-07: «чтобы аккаунт VIP должно быть видно везде»).
         self.assertIn("VipRing(Modifier.matchParentSize())", avatar)
         self.assertIn("rememberSelfVip()", avatar)
-        self.assertIn("size = 88", source("screens/settings/SettingsScreen.kt"))
+        self.assertIn("size = 108", source("screens/settings/SettingsScreen.kt"))
         self.assertIn("size = 96", source("screens/share/ShareProfileScreen.kt"))
 
     def test_groups_screen_and_create_dialog_use_house_style(self):

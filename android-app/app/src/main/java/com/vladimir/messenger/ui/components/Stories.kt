@@ -58,6 +58,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -77,6 +78,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -424,14 +427,14 @@ fun StoryViewerDialog(
         return
     }
     val authorId = activeStories.first().authorId
-    var selectedId by remember(authorId) {
+    var selectedId by rememberSaveable(authorId) {
         mutableStateOf(activeStories.firstOrNull { !it.mine && it.id !in StoryStore.seen.value }?.id ?: activeStories.first().id)
     }
     val index = activeStories.indexOfFirst { it.id == selectedId }.coerceAtLeast(0)
     val current = activeStories[index]
-    var progress by remember(current.id) { mutableFloatStateOf(0f) }
+    var progress by rememberSaveable(current.id) { mutableFloatStateOf(0f) }
     var held by remember(current.id) { mutableStateOf(false) }
-    var userPaused by remember(authorId) { mutableStateOf(false) }
+    var userPaused by rememberSaveable(authorId) { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var pendingDeleteId by remember { mutableStateOf<String?>(null) }
     // Отклики на историю: палитра значков и лента комментариев. Оба окна
@@ -465,7 +468,7 @@ fun StoryViewerDialog(
     val dismissNow by rememberUpdatedState(onDismiss)
     val setHeldNow by rememberUpdatedState<(Boolean) -> Unit>({ held = it })
     // Не отмечаем собственные истории. Это локальный статус, не счётчик просмотров автора.
-    LaunchedEffect(current.id) { if (!current.mine) StoryStore.markSeen(current.id) }
+    LaunchedEffect(current.id) { if (!current.mine && current.video == null) StoryStore.markSeen(current.id) }
     // Зритель, который был офлайн или открыл историю первым, просит сводку
     // откликов у автора. Просьба ограничена по частоте правилами очереди.
     LaunchedEffect(current.id) { onStoryShown?.invoke(current) }
@@ -473,6 +476,7 @@ fun StoryViewerDialog(
         if (StoryPlayback.frozen(held || showReactionPicker || showComments, userPaused, confirmDelete, resumed)) {
             return@LaunchedEffect
         }
+        if (current.video != null) return@LaunchedEffect
         val duration = StoryPlayback.durationMs(current.text.length)
         var last = withFrameMillis { it }
         while (progress < 1f) {
@@ -484,54 +488,29 @@ fun StoryViewerDialog(
     }
     Dialog(onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        // Диалог без платформенной ширины всё ещё может получить floating-
+        // размеры темы в landscape. Явно занимаем всё окно при каждом layout
+        // configuration update; чёрный фон закрывает чаты и системные поля.
+        val dialogView = LocalView.current
+        SideEffect {
+            val window = (dialogView.parent as? DialogWindowProvider)?.window ?: return@SideEffect
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            window.setLayout(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+            window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.BLACK))
+            window.statusBarColor = android.graphics.Color.BLACK
+            window.navigationBarColor = android.graphics.Color.BLACK
+            WindowCompat.getInsetsController(window, dialogView).apply {
+                isAppearanceLightStatusBars = false
+                isAppearanceLightNavigationBars = false
+            }
+        }
         Box(Modifier.fillMaxSize().background(Color.Black).safeDrawingPadding()) {
-            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(20.dp))
+            Column(Modifier.fillMaxSize()
                 .background(storyBackgrounds[current.bg.coerceIn(storyBackgrounds.indices)])) {
-                // Жесты только в области контента: верхние кнопки не перекрыты прозрачным слоем.
-                // Низ отступлен дальше, чем раньше: под снимком теперь ещё и ряд
-                // откликов (значки и комментарии), он не должен лежать на жесте.
-                Box(Modifier.fillMaxSize().padding(top = 96.dp, bottom = 112.dp)
-                    .pointerInput(current.id) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown()
-                            setHeldNow(true)
-                            val start = down.position
-                            var end = start
-                            var dragged = false
-                            var cancelled = false
-                            var releasedAt = down.uptimeMillis
-                            try {
-                                do {
-                                    val event = awaitPointerEvent()
-                                    val change = event.changes.firstOrNull { it.id == down.id }
-                                    if (change == null || event.changes.size > 1 || change.isConsumed) {
-                                        cancelled = true
-                                        break
-                                    }
-                                    end = change.position
-                                    releasedAt = change.uptimeMillis
-                                    if ((end - start).getDistance() > viewConfiguration.touchSlop) dragged = true
-                                    if (dragged) change.consume()
-                                } while (change.pressed)
-                                val dx = end.x - start.x
-                                val dy = end.y - start.y
-                                when (StoryPlayback.gesture(dx, dy, dragged, cancelled, releasedAt - down.uptimeMillis,
-                                    viewConfiguration.longPressTimeoutMillis, start.x, size.width, density)) {
-                                    StoryPlayback.Gesture.DISMISS -> dismissNow()
-                                    StoryPlayback.Gesture.NEXT -> nextNow()
-                                    StoryPlayback.Gesture.PREVIOUS -> previousNow()
-                                    StoryPlayback.Gesture.NONE -> Unit
-                                }
-                            } finally { setHeldNow(false) }
-                        }
-                    }, contentAlignment = Alignment.Center) {
-                    Crossfade(targetState = current, label = "story-content") { story ->
-                        Box(Modifier.fillMaxSize().padding(top = 96.dp, bottom = 104.dp), contentAlignment = Alignment.Center) {
-                            StoryContentCanvas(story.text, story.photoB64, storyBackgrounds[story.bg.coerceIn(storyBackgrounds.indices)])
-                        }
-                    }
-                }
-                Column(Modifier.align(Alignment.TopCenter).fillMaxWidth()
+                Column(Modifier.fillMaxWidth()
                     .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = .4f), Color.Transparent)))
                     .padding(horizontal = 16.dp, vertical = 12.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -576,7 +555,57 @@ fun StoryViewerDialog(
                         }
                     }
                 }
-                Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+                // Жесты только в области контента: верхние кнопки не перекрыты прозрачным слоем.
+                // Верх и низ измеряются отдельно; холст вписывается в оставшееся место.
+                Box(Modifier.fillMaxWidth().weight(1f).clipToBounds()
+                    .pointerInput(current.id) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown()
+                            setHeldNow(true)
+                            val start = down.position
+                            var end = start
+                            var dragged = false
+                            var cancelled = false
+                            var releasedAt = down.uptimeMillis
+                            try {
+                                do {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                    if (change == null || event.changes.size > 1 || change.isConsumed) {
+                                        cancelled = true
+                                        break
+                                    }
+                                    end = change.position
+                                    releasedAt = change.uptimeMillis
+                                    if ((end - start).getDistance() > viewConfiguration.touchSlop) dragged = true
+                                    if (dragged) change.consume()
+                                } while (change.pressed)
+                                val dx = end.x - start.x
+                                val dy = end.y - start.y
+                                when (StoryPlayback.gesture(dx, dy, dragged, cancelled, releasedAt - down.uptimeMillis,
+                                    viewConfiguration.longPressTimeoutMillis, start.x, size.width, density)) {
+                                    StoryPlayback.Gesture.DISMISS -> dismissNow()
+                                    StoryPlayback.Gesture.NEXT -> nextNow()
+                                    StoryPlayback.Gesture.PREVIOUS -> previousNow()
+                                    StoryPlayback.Gesture.NONE -> Unit
+                                }
+                            } finally { setHeldNow(false) }
+                        }
+                    }, contentAlignment = Alignment.Center) {
+                    if (current.video != null) {
+                        androidx.compose.runtime.key(current.authorId, current.id) {
+                            StoryVideoPlayer(current,
+                                paused = StoryPlayback.frozen(held || showReactionPicker || showComments, userPaused, confirmDelete, resumed),
+                                onProgress = { progress = it }, onEnded = { nextNow() })
+                        }
+                    } else Crossfade(targetState = current, label = "story-content") { story ->
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            StoryContentCanvas(story.text, story.photoB64, storyBackgrounds[story.bg.coerceIn(storyBackgrounds.indices)], photoCircle = story.photoCircle)
+                        }
+                    }
+
+                }
+                Column(Modifier.fillMaxWidth()) {
                     // Реакции и комментарии - как в привычных мессенджерах:
                     // значки со счётчиками и вход в ленту комментариев прямо на
                     // снимке. Лента публичная, её видит каждый зритель истории.
@@ -649,8 +678,12 @@ private fun StoryNavigation(label: String, onClick: () -> Unit, modifier: Modifi
 
 /** Текст сразу редактируется на выбранном фоне — так же он выглядит у получателя. */
 @Composable
-fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int, photoB64: String?) -> Unit) {
+internal fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int, photoB64: String?, photoCircle: Boolean) -> Unit,
+    onPublishVideo: (com.vladimir.messenger.data.story.StoryVideoExporter.Exported) -> Unit) {
+    var videoComposer by remember { mutableStateOf(false) }
+    if (videoComposer) StoryVideoComposer(onDismiss = { videoComposer = false }, onPublish = onPublishVideo)
     var text by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    var photoCircle by rememberSaveable { mutableStateOf(false) }
     var bg by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) }
     // Do not put large photo bytes into the saved-instance Bundle.
     var photo by remember { mutableStateOf<String?>(null) }
@@ -749,7 +782,7 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
     fun confirmPublish() {
         hideKeyboard()
         if (!preparing && StoryPublish.canPublish(text, photo, photoMissing)) {
-            onPublish(text, bg, photo)
+            onPublish(text, bg, photo, photo != null && photoCircle)
         }
     }
     BoxWithConstraints(
@@ -775,6 +808,16 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                 }
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, stringResource(R.string.action_close), tint = Color.White) }
             }
+            if (photo != null && !imeOpen) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.story_photo_shape), color = Color.White, modifier = Modifier.weight(1f))
+                    ApuPremiumChip(label = stringResource(R.string.story_photo_rectangle), selected = !photoCircle,
+                        enabled = !preparing, onClick = { photoCircle = false })
+                    ApuPremiumChip(label = stringResource(R.string.story_photo_circle), selected = photoCircle,
+                        enabled = !preparing, onClick = { photoCircle = true })
+                }
+            }
             // Превью занимает всё свободное место. «Опубликовать» живёт НИЖЕ
             // этого блока — клавиатура его не выталкивает за край экрана.
             Box(
@@ -794,6 +837,7 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                 StoryContentCanvas(
                     text = text,
                     photoB64 = photo,
+                    photoCircle = photoCircle,
                     background = storyBackgrounds[bg],
                     onTextChange = { text = StoryPublish.editorText(it) },
                 )
@@ -865,6 +909,9 @@ fun StoryComposerDialog(onDismiss: () -> Unit, onPublish: (text: String, bg: Int
                     textAlign = TextAlign.End,
                 )
             }
+            ApuPremiumButton(label = "Видеоистория · до 60 с", enabled = !preparing,
+                onClick = { hideKeyboard(); videoComposer = true },
+                compact = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp))
             if (preparing) Text(stringResource(R.string.story_photo_preparing), color = Color.White,
                 modifier = Modifier.padding(horizontal = 16.dp))
             if (photoError) Text(stringResource(R.string.story_photo_failed), color = Color(0xFFFF8A80),

@@ -334,8 +334,9 @@ class SettingsViewModel @Inject constructor(
      */
     fun onCheckForUpdates() {
         if (_updatesChecking.value) return
+        _updatesChecking.value = true
         viewModelScope.launch {
-            _updatesChecking.value = true
+            try {
             apkSeeder.refreshReceivedApks()
             val asked = runCatching { apkSeeder.askNeighbors() }.getOrDefault(0)
             val currentVersion = runCatching {
@@ -343,7 +344,6 @@ class SettingsViewModel @Inject constructor(
             }.getOrDefault("0")
             val release = runCatching { updateChecker.checkForUpdate(currentVersion, manual = true) }.getOrNull()
             _officialRelease.value = release
-            _updatesChecking.value = false
             // Ручная кнопка теперь спрашивает и внешний канал даже при живом
             // соседе. «Обновлений нет» говорим только тогда, когда ответ
             // действительно дошёл: если ни рой, ни сайт не ответили, так и
@@ -370,6 +370,13 @@ class SettingsViewModel @Inject constructor(
                 else -> context.getString(R.string.st_no_updates)
             }
             android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                toastIf(context.getString(R.string.st_check_unreachable))
+            } finally {
+                _updatesChecking.value = false
+            }
         }
     }
 
@@ -379,32 +386,51 @@ class SettingsViewModel @Inject constructor(
      * «Обновить до vX» и раздача соседям начнутся без человека.
      */
     fun onDownloadOfficialRelease() {
-        val release = _officialRelease.value ?: return
+        if (_updatesChecking.value) return
+        // Set synchronously so rapid taps cannot start duplicate checks/downloads.
+        _updatesChecking.value = true
         viewModelScope.launch {
-            val attempt = withContext(Dispatchers.IO) {
-                runCatching { updateChecker.downloadApk(release) }
-            }
-            attempt.onSuccess { id ->
-                if (id == -1L) {
-                    // Раунд 132: дифф-патч - скачали разницу, установщик уже открыт.
-                    android.widget.Toast.makeText(
-                        context,
-                        context.getString(R.string.st_update_delta_done),
-                        android.widget.Toast.LENGTH_LONG,
-                    ).show()
-                } else {
-                    android.widget.Toast.makeText(
-                        context,
-                        context.getString(R.string.st_download_started),
-                        android.widget.Toast.LENGTH_LONG,
-                    ).show()
+            try {
+                val current = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0"
+                val release = updateChecker.checkForUpdate(current, manual = true, trigger = "official_download_button")
+                _officialRelease.value = release
+                if (release == null) {
+                    val outcome = com.vladimir.messenger.service.UpdateDiagnosticsStore.snapshot(context).outcome
+                    toastIf(context.getString(if (outcome == "up_to_date") R.string.st_no_updates else R.string.st_check_unreachable))
+                    return@launch
                 }
-            }
-            .onFailure {
-                android.widget.Toast.makeText(context, context.getString(R.string.toast_download_failed, it.message), android.widget.Toast.LENGTH_LONG).show()
+                val activeId = officialDownloadId
+                if (activeId != null && officialDownloadVersion == release.version) {
+                    val manager = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
+                    val exists = withContext(Dispatchers.IO) {
+                        manager.query(android.app.DownloadManager.Query().setFilterById(activeId))?.use { cursor ->
+                            cursor.moveToFirst() && cursor.getInt(cursor.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_STATUS)) in setOf(
+                                android.app.DownloadManager.STATUS_PENDING, android.app.DownloadManager.STATUS_RUNNING,
+                                android.app.DownloadManager.STATUS_PAUSED, android.app.DownloadManager.STATUS_SUCCESSFUL,
+                            )
+                        } == true
+                    }
+                    if (exists) {
+                        toastIf(context.getString(R.string.st_official_already_requested))
+                        return@launch
+                    }
+                }
+                val id = withContext(Dispatchers.IO) { updateChecker.downloadApk(release, preferOfficial = true) }
+                officialDownloadId = id
+                officialDownloadVersion = release.version
+                toastIf(context.getString(R.string.st_download_started))
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                toastIf(context.getString(R.string.toast_download_failed, e.message))
+            } finally {
+                _updatesChecking.value = false
             }
         }
     }
+
+    private var officialDownloadId: Long? = null
+    private var officialDownloadVersion: String? = null
 
     private fun toastIf(message: String) {
         if (message.isBlank()) return

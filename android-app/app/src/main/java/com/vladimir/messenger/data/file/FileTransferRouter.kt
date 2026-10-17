@@ -59,6 +59,7 @@ class FileTransferRouter @Inject constructor(
      */
     private val apkSeeder: javax.inject.Provider<com.vladimir.messenger.data.update.ApkSeeder>,
     /** Раунд 139: библиотека стикеров - тихое оседание стикеров из роя. */
+    private val storyVideos: com.vladimir.messenger.data.story.StoryVideoDelivery,
     private val stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary,
 ) {
     private val appContext: Context
@@ -204,6 +205,12 @@ class FileTransferRouter @Inject constructor(
         keyVault = AndroidTransferKeyVaultAccess(appContext)
         val notifier = FileTransferReceiver.FileChatNotifier(
             { chatId, senderId, messageId, displayName, mediaType, totalBytes, fileSha256 ->
+                if (com.vladimir.messenger.data.story.StoryVideoWire.reserved(displayName)) {
+                    transferDao.getForFile(chatId, fileSha256).firstOrNull {
+                        it.direction == "INCOMING" && it.peerNodeId == senderId && it.displayName == displayName && it.state == "COMPLETE"
+                    }?.let { acceptStoryVideo(it) }
+                    return@FileChatNotifier // Never create a chat card or mirror a story as an attachment.
+                }
                 // Рой APK (docs/UPDATE_SEEDING.md): файл в виртуальное
                 // сообщество «apkseed» — строка в чат не нужна; сидер сам
                 // отметит «получено» и сразу начнёт раздавать соседям.
@@ -419,7 +426,8 @@ class FileTransferRouter @Inject constructor(
             isOnline = { nodeId -> isPeerOnline(nodeId) },
             // Файлы группы (этап 9) на хранение не отдаём: см. FileCustodySender.
             custodyAllowed = { transfer ->
-                runCatching { !groupFiles.get().isGroupChat(transfer.chatId) }.getOrDefault(true)
+                !com.vladimir.messenger.data.story.StoryVideoWire.reserved(transfer.displayName) &&
+                    runCatching { !groupFiles.get().isGroupChat(transfer.chatId) }.getOrDefault(true)
             },
         )
         custodySender = custodyLocal
@@ -594,6 +602,28 @@ class FileTransferRouter @Inject constructor(
     }
 
     /** True when the text was a file packet/handshake; the caller must skip chat-text handling. */
+    private suspend fun acceptStoryVideo(row: com.vladimir.messenger.data.local.entity.FileTransferEntity) {
+        val story = com.vladimir.messenger.data.story.StoryStore.active().firstOrNull {
+            com.vladimir.messenger.data.story.StoryVideoWire.matches(it, row.peerNodeId, row.displayName,
+                row.fileSha256, row.totalBytes, System.currentTimeMillis())
+        } ?: return
+        if (com.vladimir.messenger.data.story.StoryVideoStorage.file(appContext, story) != null ||
+            com.vladimir.messenger.data.story.StoryVideoStorage.failure(story) != null) return
+        val file = receivedStore.receivedFile(row.transferId, row.displayName) ?: return
+        try {
+            com.vladimir.messenger.data.story.StoryVideoStorage.install(appContext,
+                story.authorId, story.id, file, checkNotNull(story.video))
+            // A revoke/expiry may have raced the hashing/copy. Never resurrect it.
+            if (com.vladimir.messenger.data.story.StoryStore.active().none { it.id == story.id && it.authorId == story.authorId }) {
+                com.vladimir.messenger.data.story.StoryVideoStorage.remove(appContext, story.authorId, story.id)
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (failure: Exception) {
+            com.vladimir.messenger.data.story.StoryVideoStorage.noteFailure(story)
+            Log.w(TAG, "Story video validation failed", failure)
+        }
+    }
+
     suspend fun routeIncoming(senderId: String, chatId: String, messageId: String, text: String): Boolean {
         if (LanDirectChannel.isLanSignalText(text)) {
             handleLanSignal(senderId, text)
@@ -760,6 +790,14 @@ class FileTransferRouter @Inject constructor(
             val now = System.currentTimeMillis()
             runCatching { purgeExpiredTransfers(now) }
                 .onFailure { Log.w(TAG, "File maintenance deferred") }
+            runCatching { storyVideos.pump(drop = { row ->
+                if (row.direction == "INCOMING" && row.state != "COMPLETE") declineIncoming(row)
+                else dropTransfer(row.transferId)
+                FileTransferKeyVault.deleteKey(appContext, row.transferId)
+            }, completed = { row ->
+                if (row.direction == "OUTGOING") releaseOutgoingChunks(row.transferId)
+                else acceptStoryVideo(row)
+            }, requestKey = { requestExchangeBinding(it) }) }.onFailure { Log.w(TAG, "Story video maintenance deferred", it) }
             outgoingTransferMutex.lock()
             try {
             if (!RustBridge.isRunning()) {
@@ -1186,7 +1224,7 @@ class FileTransferRouter @Inject constructor(
     private suspend fun announceOutgoingFilesToMirror(now: Long) {
         val active = runCatching { transferDao.getActiveOutgoing(now) }.getOrDefault(emptyList())
         for (row in active) {
-            if (row.messageId.isBlank()) continue
+            if (row.messageId.isBlank() || com.vladimir.messenger.data.story.StoryVideoWire.reserved(row.displayName)) continue
             if (!mirrorAnnounced.add(row.transferId)) continue
             val groupId = if (isGroupChat(row.chatId)) row.chatId else ""
             com.vladimir.messenger.data.mirror.MirrorHub.publishFileMeta(

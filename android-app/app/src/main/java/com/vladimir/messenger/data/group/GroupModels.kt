@@ -25,8 +25,12 @@ data class GroupSummary(
      * мешает. В канале относится к комментариям под постами.
      */
     val slowModeSeconds: Int = 0,
+    val quietHours: String = "",
+    val memberListVisible: Boolean = true,
     /** Личная пауза уведомлений группы или канала. */
     val mutedUntilMs: Long = 0L,
+    val wallpaper: String = "",
+    val wallpaperRevision: String = "",
 )
 
 data class TopicSummary(

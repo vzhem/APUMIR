@@ -74,6 +74,7 @@ interface MainActivityEntryPoint {
     fun updateNotifier(): UpdateNotifier
     fun linkShortener(): LinkShortener
     /** Рассылка своего ранга собеседникам (знак VIP у имени). */
+    fun heartGameNetwork(): com.vladimir.messenger.data.heartgame.HeartGameNetwork
     fun peerRankBroadcaster(): com.vladimir.messenger.data.rank.PeerRankBroadcaster
 }
 
@@ -624,6 +625,11 @@ class MainActivity : ComponentActivity() {
                         pendingOpenSupport = pendingOpenSupport,
                         onSupportLinkConsumed = { pendingOpenSupport = false },
                     )
+                }
+                if (!uiState.isLoading && uiState.hasIdentity) {
+                    val heartNetwork = remember { EntryPointAccessors.fromApplication(applicationContext,
+                        MainActivityEntryPoint::class.java).heartGameNetwork() }
+                    com.vladimir.messenger.ui.components.HeartGameOverlay(heartNetwork)
                 }
                 }
                 // Полёт реакции - самым верхним слоем приложения. Внутри

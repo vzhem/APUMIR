@@ -28,9 +28,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -93,7 +97,7 @@ fun ApuBottomBar(
         val measurer = rememberTextMeasurer()
         val labelStyle = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium)
         val density = LocalDensity.current
-        val slot = (maxWidth - ROW_PADDING * 2) / items.size - BUTTON_PADDING * 2
+        val slot = (maxWidth - ROW_PADDING * 2 - 4.dp * (items.size - 1)) / items.size - BUTTON_PADDING * 2
         val titles = items.joinToString("\u0000") { it.title }
         val labelScale = remember(titles, maxWidth, density, labelStyle) {
             val slotPx = with(density) { slot.toPx() }
@@ -106,7 +110,7 @@ fun ApuBottomBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = ROW_PADDING, vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             for (item in items) {
@@ -128,10 +132,16 @@ private fun BottomButton(item: ApuBottomItem, labelScale: Float, modifier: Modif
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.88f else 1f,
+        targetValue = if (pressed) 0.94f else 1f,
         animationSpec = spring(),
         label = "apu-bottom-press",
     )
+
+    val view = LocalView.current
+    val lift by animateFloatAsState(if (item.selected) -2f else 0f,
+        spring(dampingRatio = .75f), label = "bottom-selection-lift")
+    val tilt by animateFloatAsState(if (pressed) -5f else 0f,
+        spring(dampingRatio = .65f), label = "bottom-press-tilt")
 
     // Открытый раздел — золотая плитка с блеском: видно, где ты, и сразу
     // понятно, что это «своя» кнопка того же стиля, что в «Логах».
@@ -140,11 +150,17 @@ private fun BottomButton(item: ApuBottomItem, labelScale: Float, modifier: Modif
     val selectedIcon = ApuGoldDeep
     Column(
         modifier = modifier
+            .graphicsLayer {
+                scaleX = scale; scaleY = scale
+                translationY = lift * density
+                rotationX = tilt
+            }
+            .semantics { selected = item.selected }
             .then(
                 if (item.selected) {
                     Modifier.apuPremiumLift(6.dp, shape, ApuGold.copy(alpha = 0.45f))
                 } else {
-                    Modifier
+                    Modifier.apuPremiumLift(2.dp, shape)
                 },
             )
             .clip(shape)
@@ -155,16 +171,23 @@ private fun BottomButton(item: ApuBottomItem, labelScale: Float, modifier: Modif
                         .border(1.dp, Color.White.copy(alpha = 0.45f), shape)
                         .apuPremiumGloss(shape, intensity = 0.85f, topFraction = 0.7f)
                 } else {
-                    Modifier
+                    Modifier.background(Color.White.copy(alpha = .65f), shape)
+                        .border(1.dp, Color.White.copy(alpha = .8f), shape)
                 },
             )
+            .apuSelectionSheen(item.selected, active = item.selected)
             .clickable(
                 interactionSource = interaction,
                 indication = null,
-                onClick = item.onClick,
+                role = Role.Tab,
+                onClick = {
+                    if (!item.selected) {
+                        view.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
+                        item.onClick()
+                    }
+                },
             )
-            .padding(horizontal = BUTTON_PADDING, vertical = 4.dp)
-            .scale(scale),
+            .padding(horizontal = BUTTON_PADDING, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         BadgedBox(
@@ -174,7 +197,7 @@ private fun BottomButton(item: ApuBottomItem, labelScale: Float, modifier: Modif
         ) {
             Icon(
                 item.icon,
-                contentDescription = item.title,
+                contentDescription = null,
                 tint = if (item.selected) {
                     selectedIcon
                 } else {

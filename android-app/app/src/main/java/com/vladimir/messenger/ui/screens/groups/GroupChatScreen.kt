@@ -117,6 +117,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -193,6 +194,17 @@ fun GroupChatScreen(
     viewModel: GroupChatViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    var showWallpaper by remember { mutableStateOf(false) }
+    androidx.compose.runtime.LaunchedEffect(uiState.group?.id) {
+        if (uiState.group != null) viewModel.refreshConversationWallpaper()
+    }
+    if (showWallpaper) com.vladimir.messenger.ui.components.ConversationWallpaperDialog(
+        scope = "group:${uiState.groupId}", shared = uiState.group?.wallpaper,
+        onSetShared = if (com.vladimir.messenger.data.group.GroupRole.isAdminOrOwner(uiState.group?.myRole.orEmpty()))
+            { value -> viewModel.setConversationWallpaper(value) } else null,
+        onDismiss = { showWallpaper = false },
+    )
+
     val muteRevision by viewModel.notificationMuteRevision.collectAsStateWithLifecycle()
     val context = LocalContext.current
     // р237: черновик темы живёт в модели (uiState.draft): он же уезжает на
@@ -201,6 +213,7 @@ fun GroupChatScreen(
     // р250: окно создания опроса (кнопка «Опрос» у поля ввода).
     var showCreatePoll by remember { mutableStateOf(false) }
     // Раунд 260: тап по значку темы в шапке открывает её редактирование.
+    var showMembers by remember { mutableStateOf(false) }
     var showEditTopic by remember { mutableStateOf(false) }
     // «Три точки» шапки: уведомления и все способы пригласить в группу/канал.
     var showTopMenu by remember { mutableStateOf(false) }
@@ -242,8 +255,7 @@ fun GroupChatScreen(
     val canDecideRequests = uiState.me?.let {
         com.vladimir.messenger.data.group.GroupRole.isAdminOrOwner(it.role)
     } == true
-    // Раунд 267: тап по пузырю шапки группы/канала ведёт в настройки -
-    // но только админам/владельцу, у остальных тап ничего не делает.
+    // Администраторы видят состав даже при закрытом списке участников.
     val iAmGroupAdmin = canDecideRequests
     // Каталог GIF (кнопка «GIF» у скрепки).
     var showGifCatalog by remember { mutableStateOf(false) }
@@ -624,7 +636,7 @@ fun GroupChatScreen(
             }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        ChatWallpaper()
+        ChatWallpaper(scope = "group:${uiState.groupId}", shared = uiState.group?.wallpaper)
         // Раунд 266: клавиатура не закрывает переписку - сообщения и лента
         // сжимаются над клавиатурой, последнее видно сразу.
         Scaffold(
@@ -639,11 +651,11 @@ fun GroupChatScreen(
                     scrolledContainerColor = Color.Transparent,
                 ),
                 title = {
-                    // Права на действия не меняются: тема — только с правом
-                    // управления темами, группа/канал — для админов/владельца.
+                    // Название группы всегда открывает список; доступ проверяется в окне.
+                    // Шестерёнка по-прежнему открывает настройки.
                     val openHeader: (() -> Unit)? = when {
                         topicHeader && selectedTopic != null && uiState.canManageTopics -> ({ showEditTopic = true })
-                        !topicHeader && iAmGroupAdmin -> ({ onOpenAdmin(uiState.groupId) })
+                        !topicHeader -> ({ showMembers = true })
                         else -> null
                     }
                     ApuHeaderBubble(onClick = openHeader) {
@@ -755,6 +767,8 @@ fun GroupChatScreen(
                             expanded = showTopMenu,
                             onDismiss = { showTopMenu = false },
                             actions = listOf(
+                                ApuAction(title = stringResource(R.string.conversation_wallpaper),
+                                    icon = Icons.Default.Settings, onClick = { showWallpaper = true }),
                                 ApuAction(
                                     title = if (notificationsMuted) stringResource(R.string.menu_unmute) else stringResource(R.string.menu_mute),
                                     icon = if (notificationsMuted) {
@@ -1380,8 +1394,23 @@ fun GroupChatScreen(
                 // остаток и не отправляет - репозиторий бы всё равно отказал,
                 // но человеку понятнее видеть счётчик, а не сообщение об ошибке.
                 val slowWaitSeconds = (uiState.slowModeWaitMs + 999L) / 1000L
+                val quietSchedule = remember(uiState.group?.quietHours) {
+                    com.vladimir.messenger.data.group.GroupQuietSchedule.decode(uiState.group?.quietHours.orEmpty())
+                }
+                val quietBlocked by produceState(false, quietSchedule, uiState.me?.role) {
+                    while (true) {
+                        value = !com.vladimir.messenger.data.group.GroupRole.isAdminOrOwner(uiState.me?.role.orEmpty()) &&
+                            quietSchedule?.blocks(System.currentTimeMillis()) == true
+                        kotlinx.coroutines.delay(1_000)
+                    }
+                }
+                val localScheduleNotice = rememberGroupScheduleNotice(quietSchedule)
+                if (quietSchedule != null && !iAmGroupAdmin && localScheduleNotice.isNotBlank()) {
+                    Text(localScheduleNotice, style = MaterialTheme.typography.labelSmall,
+                        color = ApuBubbleMutedColor, modifier = Modifier.padding(6.dp))
+                }
                 val canSend = (uiState.draft.isNotBlank() || uiState.stagedFile != null) &&
-                    !uiState.sending && !uiState.isPreparingFile && slowWaitSeconds <= 0L
+                    !uiState.sending && !uiState.isPreparingFile && slowWaitSeconds <= 0L && !quietBlocked
                 val scheduledHere = scheduledAll.filter {
                     it.isGroup && it.targetId == uiState.groupId && it.topicId == (uiState.selectedTopicId ?: "")
                 }
@@ -1448,6 +1477,14 @@ fun GroupChatScreen(
     }
 
     // Раунд 260: тап по значку темы в шапке - смена имени и значка темы.
+    if (showMembers) {
+        GroupMembersDialog(
+            members = uiState.members,
+            canView = uiState.group != null && (uiState.group?.memberListVisible == true || iAmGroupAdmin),
+            onDismiss = { showMembers = false },
+        )
+    }
+
     if (showEditTopic && selectedTopic != null) {
         val topic = selectedTopic
         NewTopicDialog(
@@ -1805,19 +1842,13 @@ private fun JoinRequestRow(
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFE8EEF5)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    request.displayName.trim().take(1).uppercase().ifBlank { "?" },
-                    fontWeight = FontWeight.Bold,
-                    color = Color(0xFF5A6472),
-                )
-            }
+            val applicantAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars
+                .collectAsState()
+            PeerAvatar(
+                name = request.displayName.ifBlank { request.nodeId.take(8) },
+                avatarB64 = applicantAvatars[request.nodeId],
+                size = 44.dp,
+            )
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(

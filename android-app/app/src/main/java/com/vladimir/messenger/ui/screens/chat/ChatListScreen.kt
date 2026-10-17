@@ -41,6 +41,7 @@ import com.vladimir.messenger.ui.components.ApuBubbleSurfaceColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ApuPremiumDialog
+import com.vladimir.messenger.ui.components.ApuPremiumIconTile
 import com.vladimir.messenger.ui.components.apuBubbleSurface
 import com.vladimir.messenger.ui.components.apuPremiumGloss
 import com.vladimir.messenger.ui.components.apuPremiumLift
@@ -257,28 +258,33 @@ fun ChatListScreen(
                             // заголовок - это сразу бейдж ранга, тап по нему
                             // открывает, что уже доступно и как расти дальше.
                             if (uiState.rankBadge.isNotBlank()) {
-                                Row(
-                                    modifier = Modifier.clickable(onClick = onRankClick),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    // У VIP медаль особая (фиолетово-золотая лента
-                                    // и кольцо элиты) и рядом со званием стоит
-                                    // знак VIP - как награда рядом с именем в
-                                    // топовых мессенджерах.
-                                    RankMedal(size = 26.dp, vip = uiState.rankVip)
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        uiState.rankBadge,
-                                        fontWeight = FontWeight.Bold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    if (uiState.rankVip) {
-                                        // Полный знак «VIP» вместо одной звезды: у VIP
-                                        // в шапке должно быть видно сам статус.
+                                Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                                    Row(
+                                        modifier = Modifier.clickable(onClick = onRankClick),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        // У VIP медаль особая (фиолетово-золотая лента
+                                        // и кольцо элиты) и рядом со званием стоит
+                                        // знак VIP - как награда рядом с именем в
+                                        // топовых мессенджерах.
+                                        RankMedal(size = 26.dp, vip = uiState.rankVip)
                                         Spacer(Modifier.width(6.dp))
-                                        ApuVipBadge()
+                                        Text(
+                                            uiState.rankBadge,
+                                            fontWeight = FontWeight.Bold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        if (uiState.rankVip) {
+                                            // Полный знак «VIP» вместо одной звезды: у VIP
+                                            // в шапке должно быть видно сам статус.
+                                            Spacer(Modifier.width(6.dp))
+                                            ApuVipBadge()
+                                        }
                                     }
+                                    com.vladimir.messenger.ui.components.HeartGameHeaderStatus(
+                                        modifier = Modifier.padding(start = 32.dp),
+                                    )
                                 }
                             }
                         }
@@ -291,12 +297,22 @@ fun ChatListScreen(
                             // здесь главное действие и должен быть заметен.
                             SearchOrb(onClick = { isSearchVisible = true })
                             IconButton(onClick = onScanQrClick) {
-                                Icon(Icons.Default.QrCodeScanner, stringResource(R.string.chat_scan_qr))
+                                ApuPremiumIconTile(
+                                    icon = Icons.Default.QrCodeScanner,
+                                    contentDescription = stringResource(R.string.chat_scan_qr),
+                                    size = 38.dp,
+                                    corner = 12.dp,
+                                )
                             }
                             Box {
                                 var menuOpen by remember { mutableStateOf(false) }
                                 IconButton(onClick = { menuOpen = true }) {
-                                    Icon(Icons.Default.MoreVert, stringResource(R.string.chat_more))
+                                    ApuPremiumIconTile(
+                                        icon = Icons.Default.MoreVert,
+                                        contentDescription = stringResource(R.string.chat_more),
+                                        size = 38.dp,
+                                        corner = 12.dp,
+                                    )
                                 }
                                 ApuActionsMenu(
                                     expanded = menuOpen,
@@ -462,8 +478,12 @@ fun ChatListScreen(
         if (storyComposer) {
             com.vladimir.messenger.ui.components.StoryComposerDialog(
                 onDismiss = { storyComposer = false },
-                onPublish = { text, bg, photo ->
-                    viewModel.publishStory(text, bg, photo)
+                onPublishVideo = { video ->
+                    viewModel.publishVideoStory(video)
+                    storyComposer = false
+                },
+                onPublish = { text, bg, photo, photoCircle ->
+                    viewModel.publishStory(text, bg, photo, photoCircle)
                     storyComposer = false
                 },
             )

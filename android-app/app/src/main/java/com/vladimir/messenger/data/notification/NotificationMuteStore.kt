@@ -1,6 +1,7 @@
 package com.vladimir.messenger.data.notification
 
 import android.content.Context
+import com.vladimir.messenger.R
 import android.util.Base64
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -20,26 +21,26 @@ import javax.inject.Singleton
 /** Уровни отключения уведомлений о новых сообщениях. */
 enum class NotificationMuteScope(
     val preferenceKey: String,
-    val title: String,
-    val description: String,
+    val titleRes: Int,
+    val descriptionRes: Int,
 ) {
     /** Все личные чаты, группы, каналы и темы. */
-    APP("app", "Во всём приложении", "Все уведомления о новых сообщениях"),
-    PERSONAL_CHATS("personal_chats", "Личные чаты", "Все уведомления из личных чатов"),
-    GROUPS("groups", "Группы", "Все уведомления из групп"),
-    CHANNELS("channels", "Каналы", "Все уведомления из каналов"),
-    TOPICS("topics", "Темы и комментарии", "Темы групп и обсуждения публикаций каналов"),
+    APP("app", R.string.notification_scope_app, R.string.notification_scope_app_hint),
+    PERSONAL_CHATS("personal_chats", R.string.notification_scope_personal, R.string.notification_scope_personal_hint),
+    GROUPS("groups", R.string.notification_scope_groups, R.string.notification_scope_groups_hint),
+    CHANNELS("channels", R.string.notification_scope_channels, R.string.notification_scope_channels_hint),
+    TOPICS("topics", R.string.notification_scope_topics, R.string.notification_scope_topics_hint),
 }
 
 /** Быстрые варианты из диалога «Отключить уведомления». */
 enum class NotificationMuteDuration(
-    val label: String,
+    val labelRes: Int,
     val durationMs: Long?,
 ) {
-    ONE_HOUR("На 1 час", 60L * 60L * 1000L),
-    FOUR_HOURS("На 4 часа", 4L * 60L * 60L * 1000L),
-    ONE_DAY("На 24 часа", 24L * 60L * 60L * 1000L),
-    FOREVER("Навсегда", null);
+    ONE_HOUR(R.string.notification_mute_one_hour, 60L * 60L * 1000L),
+    FOUR_HOURS(R.string.notification_mute_four_hours, 4L * 60L * 60L * 1000L),
+    ONE_DAY(R.string.notification_mute_one_day, 24L * 60L * 60L * 1000L),
+    FOREVER(R.string.notification_mute_forever, null);
 
 
     fun deadlineFrom(nowMs: Long = System.currentTimeMillis()): Long =

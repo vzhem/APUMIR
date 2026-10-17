@@ -494,19 +494,43 @@ private fun GroupInviteCardView(
 ) {
     Column {
         Text(
+            text = stringResource(if (card.isChannel) R.string.mb_invitation_channel else R.string.mb_invitation_group),
+            style = MaterialTheme.typography.labelMedium,
+            color = textColor.copy(alpha = 0.75f),
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
             text = card.title,
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.SemiBold,
             color = textColor,
         )
-        if (card.about.isNotBlank()) {
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = card.about,
-                style = MaterialTheme.typography.bodySmall,
-                color = textColor.copy(alpha = 0.75f),
-            )
-        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = stringResource(when (card.isPublic) {
+                true -> if (card.isChannel) R.string.mb_open_channel else R.string.mb_open_group
+                false -> if (card.isChannel) R.string.mb_closed_channel else R.string.mb_closed_group
+                null -> R.string.mb_access_unknown
+            }),
+            style = MaterialTheme.typography.bodySmall,
+            color = textColor,
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = card.about.ifBlank { stringResource(R.string.mb_description_empty) },
+            style = MaterialTheme.typography.bodySmall,
+            color = textColor.copy(alpha = 0.75f),
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = stringResource(when (card.needsApproval) {
+                true -> R.string.mb_join_approval
+                false -> R.string.mb_join_direct
+                null -> R.string.mb_join_unknown
+            }),
+            style = MaterialTheme.typography.bodySmall,
+            color = textColor.copy(alpha = 0.75f),
+        )
         Spacer(Modifier.height(8.dp))
         ApuPremiumContentButton(
             onClick = onJoin,
@@ -514,7 +538,11 @@ private fun GroupInviteCardView(
         ) {
             Icon(Icons.Default.PersonAdd, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp))
-            Text(if (card.isChannel) stringResource(R.string.groups_subscribe) else stringResource(R.string.groups_join_btn))
+            Text(stringResource(when {
+                card.needsApproval == true -> R.string.mb_send_join_request
+                card.isChannel -> R.string.groups_subscribe
+                else -> R.string.groups_join_btn
+            }))
         }
         card.apkLink?.let { apk ->
             Spacer(Modifier.height(8.dp))

@@ -133,6 +133,26 @@ class MuteNoticeContracts(unittest.TestCase):
             "плашка в ленте не получает действие",
         )
 
+    def test_notification_scope_labels_and_mute_durations_are_localized(self):
+        settings = source(MAIN / "ui/screens/settings/SettingsScreen.kt")
+        dialog = source(MAIN / "ui/components/NotificationMuteDialog.kt")
+        store = source(MAIN / "data/notification/NotificationMuteStore.kt")
+        self.assertIn("stringResource(scope.titleRes)", settings)
+        self.assertIn("stringResource(scope.descriptionRes)", settings)
+        self.assertIn("stringResource(duration.labelRes)", dialog)
+        self.assertIn("R.string.notification_scope_app", store)
+        for locale, path in (("values", RES / "values/strings.xml"),
+                             ("values-en", RES / "values-en/strings.xml")):
+            text = source(path)
+            for name in ("notification_scope_app", "notification_scope_app_hint",
+                         "notification_scope_personal", "notification_scope_personal_hint",
+                         "notification_scope_groups", "notification_scope_groups_hint",
+                         "notification_scope_channels", "notification_scope_channels_hint",
+                         "notification_scope_topics", "notification_scope_topics_hint",
+                         "notification_mute_one_hour", "notification_mute_four_hours",
+                         "notification_mute_one_day", "notification_mute_forever"):
+                self.assertIn(f'name="{name}"', text, f"нет {name} в {locale}")
+
     def test_the_journal_remembers_why_the_row_exists(self):
         """Журнал — запись дома: у плашки должна быть строка, откуда она взялась."""
         notes = source(ROOT / "docs/AI_COLLABORATION_NOTES.md")

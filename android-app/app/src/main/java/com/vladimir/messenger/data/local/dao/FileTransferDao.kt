@@ -23,6 +23,9 @@ data class TransferErrorCount(
 
 @Dao
 interface FileTransferDao {
+    @Query("SELECT * FROM file_transfers WHERE displayName LIKE 'apu-story-video-%'")
+    suspend fun getStoryVideoTransfers(): List<FileTransferEntity>
+
     @Query("SELECT * FROM file_transfers WHERE chatId = :chatId ORDER BY createdAtMs ASC")
     fun observeForChat(chatId: String): Flow<List<FileTransferEntity>>
 

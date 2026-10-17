@@ -171,6 +171,8 @@ class GroupsViewModel @Inject constructor(
                 title = invite.first,
                 about = group.about,
                 link = invite.second,
+                isPublic = group.isPublic,
+                needsApproval = !group.isPublic,
             )
             var sent = 0
             var failed = 0

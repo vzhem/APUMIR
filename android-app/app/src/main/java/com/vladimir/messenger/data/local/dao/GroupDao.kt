@@ -24,6 +24,9 @@ data class ChannelPostStatRow(
 
 @Dao
 interface GroupDao {
+    @Query("UPDATE groups SET wallpaper = :value, wallpaperRevision = :revision WHERE id = :groupId AND wallpaperRevision < :revision")
+    suspend fun setWallpaper(groupId: String, value: String, revision: String): Int
+
 
     // ── Группы ────────────────────────────────────────────────────────────────
     // Каналы лежат в той же таблице, поэтому в выборках групп они отсекаются:
@@ -119,6 +122,12 @@ interface GroupDao {
      */
     @Query("UPDATE groups SET slowModeSeconds = :seconds WHERE id = :groupId")
     suspend fun setSlowMode(groupId: String, seconds: Int)
+
+    @Query("UPDATE groups SET quietHours = :schedule WHERE id = :groupId")
+    suspend fun setQuietHours(groupId: String, schedule: String)
+
+    @Query("UPDATE groups SET memberListVisible = :visible WHERE id = :groupId")
+    suspend fun setMemberListVisible(groupId: String, visible: Boolean)
 
     /** р249: звук выключен прямо сейчас (см. ChatDao.countMuted про COUNT(*)). */
     @Query("SELECT COUNT(*) FROM groups WHERE id = :groupId AND mutedUntilMs > :nowMs")
