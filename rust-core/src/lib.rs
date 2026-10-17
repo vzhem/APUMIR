@@ -574,6 +574,50 @@ pub fn identity_signing_binding_matches_installed(binding: Vec<u8>) -> bool {
     crypto::signing_identity::identity_binding_matches_installed(&binding)
 }
 
+/// P2: the primary device issues a certificate for another device key (device_id is 16 bytes).
+/// Requires the installed account signing identity; the account key never leaves Rust.
+pub fn create_device_certificate(
+    device_id: Vec<u8>,
+    device_public_key: Vec<u8>,
+    created_at_ms: i64,
+) -> Result<Vec<u8>, CoreError> {
+    let id: [u8; 16] = device_id.as_slice().try_into().map_err(|_| CoreError::CryptoError {
+        detail: "device id must be 16 bytes".to_string(),
+    })?;
+    let identity = crypto::signing_identity::installed_signing_identity().ok_or_else(|| {
+        CoreError::CryptoError {
+            detail: "no installed account signing identity".to_string(),
+        }
+    })?;
+    identity
+        .issue_device_certificate(id, &device_public_key, created_at_ms)
+        .and_then(|cert| cert.to_bytes())
+        .map_err(|error| CoreError::CryptoError {
+            detail: error.to_string(),
+        })
+}
+
+/// P2: public key of a device key seed. The seed is zeroed before returning.
+pub fn device_public_key_from_seed(mut seed: Vec<u8>) -> Result<Vec<u8>, CoreError> {
+    let result = crypto::device_certificate::device_public_key_from_seed(&seed).map_err(|error| {
+        CoreError::CryptoError {
+            detail: error.to_string(),
+        }
+    });
+    seed.fill(0);
+    result
+}
+
+/// P2/P4: receiver-side check of a device certificate against the pinned account key.
+pub fn verify_device_certificate_bytes(cert: Vec<u8>, pinned_account_public_key: Vec<u8>) -> bool {
+    crypto::device_certificate::DeviceCertificateV1::from_bytes(&cert)
+        .map(|parsed| {
+            crypto::device_certificate::verify_device_certificate(&parsed, &pinned_account_public_key)
+                .is_ok()
+        })
+        .unwrap_or(false)
+}
+
 pub fn create_referral_invite_token(
     identity_binding: Vec<u8>,
     created_at_ms: i64,

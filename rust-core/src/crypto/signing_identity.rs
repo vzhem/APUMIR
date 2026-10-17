@@ -651,6 +651,24 @@ pub(crate) fn is_legacy_routing_node_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
 }
 
+impl InstalledSigningIdentity {
+    /// Only the primary device holds the account key, so only it can issue device certificates.
+    pub fn issue_device_certificate(
+        &self,
+        device_id: [u8; 16],
+        device_public_key: &[u8],
+        created_at_ms: i64,
+    ) -> Result<crate::crypto::device_certificate::DeviceCertificateV1, crate::crypto::device_certificate::DeviceCertError> {
+        crate::crypto::device_certificate::issue_device_certificate(
+            &self.key_pair,
+            &self.legacy_routing_node_id,
+            device_id,
+            device_public_key,
+            created_at_ms,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

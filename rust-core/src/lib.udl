@@ -46,6 +46,14 @@ namespace p2p_core {
     boolean verify_identity_signing_binding(bytes binding);
     boolean identity_signing_binding_matches_installed(bytes binding);
 
+    // P2 (multi-device identity): account key issues device certificates; devices derive their
+    // public key from a device seed that is never returned. See docs/MULTI_DEVICE_IDENTITY.md.
+    [Throws=CoreError]
+    bytes create_device_certificate(bytes device_id, bytes device_public_key, i64 created_at_ms);
+    [Throws=CoreError]
+    bytes device_public_key_from_seed(bytes seed);
+    boolean verify_device_certificate_bytes(bytes cert, bytes pinned_account_public_key);
+
     // R1: signed direct-referral token bound to the persisted S3B identity binding.
     [Throws=CoreError]
     bytes create_referral_invite_token(bytes identity_binding, i64 created_at_ms, i64 expires_at_ms);

@@ -159,6 +159,12 @@ pub fn issue_device_revocation(
     Ok(rev)
 }
 
+/// Public key of a device key seed. The seed is never stored in Rust; the caller zeroes it.
+pub fn device_public_key_from_seed(seed: &[u8]) -> Result<Vec<u8>, DeviceCertError> {
+    let key = Ed25519KeyPair::from_secret_bytes(seed).map_err(|_| DeviceCertError::InvalidKey)?;
+    Ok(key.public_key().0.to_vec())
+}
+
 /// Check the certificate against the account key that the receiver pinned for the id.
 pub fn verify_device_certificate(
     cert: &DeviceCertificateV1,
@@ -367,6 +373,14 @@ mod tests {
             DeviceCertificateV1::from_bytes(&wrong_format),
             Err(DeviceCertError::UnsupportedFormat(9))
         );
+    }
+
+    #[test]
+    fn device_public_key_from_seed_matches_keypair() {
+        let seed = [40u8; 32];
+        let pk = device_public_key_from_seed(&seed).unwrap();
+        assert_eq!(pk, device_pk(40));
+        assert_eq!(device_public_key_from_seed(&[1u8; 31]), Err(DeviceCertError::InvalidKey));
     }
 
     #[test]
