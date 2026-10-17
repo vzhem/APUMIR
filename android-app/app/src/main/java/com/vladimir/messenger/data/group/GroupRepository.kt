@@ -2341,16 +2341,19 @@ class GroupRepository(
         if (targets.isEmpty()) return
         val me = myId() ?: return
         val now = clock()
-        myJoinStore?.upsert(
-            MyJoinRequestStore.Entry(
-                groupId = groupId,
-                title = knownTitle,
-                isChannel = isChannel,
-                note = note,
-                requestedAtMs = now,
-                recipients = targets,
+        // История - лишь для экрана «Мои заявки». Её сбой не должен мешать отправке заявки.
+        runCatching {
+            myJoinStore?.upsert(
+                MyJoinRequestStore.Entry(
+                    groupId = groupId,
+                    title = knownTitle,
+                    isChannel = isChannel,
+                    note = note,
+                    requestedAtMs = now,
+                    recipients = targets,
+                )
             )
-        )
+        }.onFailure { Log.w(TAG, "join history save failed: ${it.javaClass.simpleName}: ${it.message}") }
         touchMyJoin()
         // Свою копию храним на этом телефоне: видно, что заявка отправлена, и что с ней решили.
         groupDao.insertJoinRequest(
