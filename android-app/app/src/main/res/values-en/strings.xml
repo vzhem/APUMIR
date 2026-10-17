@@ -1815,4 +1815,28 @@ The file is not on this phone</string>
     <string name="my_join_resent">Request sent again</string>
     <string name="my_join_empty_title">No requests yet</string>
     <string name="my_join_empty_body">Join requests appear here: sent, received by the owner, and answered.</string>
+
+    <string name="settings_devices">Devices</string>
+    <string name="settings_devices_hint">Connect a second phone or computer to this account</string>
+    <string name="devices_title">Devices</string>
+    <string name="devices_primary_title">This phone is the primary device</string>
+    <string name="devices_primary_hint">Show the QR code on the new device to connect it to your account.</string>
+    <string name="devices_show_qr">Show QR code</string>
+    <string name="devices_qr_description">QR code for connecting a device</string>
+    <string name="devices_qr_expiry">The code is valid for 5 minutes</string>
+    <string name="devices_error">Could not create a pairing code</string>
+    <string name="devices_code_title">Check code</string>
+    <string name="devices_code_hint">Compare the digits on both phones. Confirm only if they match.</string>
+    <string name="devices_codes_match">Matches</string>
+    <string name="devices_codes_differ">Does not match</string>
+    <string name="devices_joiner_title">This phone is the new device</string>
+    <string name="devices_joiner_hint">Scan the QR code from the primary phone where the account is already open.</string>
+    <string name="devices_scan_qr">Scan QR code</string>
+    <string name="devices_not_pairing_qr">This is not a device pairing code</string>
+    <string name="devices_waiting_answer">Waiting for the primary device…</string>
+    <string name="devices_waiting_grant">Waiting for confirmation on the primary device…</string>
+    <string name="devices_done">Device connected to the account</string>
+    <string name="devices_failed">Pairing failed</string>
+    <string name="devices_close">Close</string>
+    <string name="devices_cancel">Cancel</string>
 </resources>

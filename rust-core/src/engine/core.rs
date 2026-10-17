@@ -5002,9 +5002,16 @@ impl P2PCore {
                 .get(&recipient_node_id)
                 .copied()
         });
-        let msg_id = uuid::Uuid::new_v4().to_string();
-        let wire_payload = format!("{}|{}|direct|{}", sender_id, msg_id, payload);
-        self.send_via_quic(&target_device_id_hex, addr, wire_payload)
+        if addr.is_some() {
+            let msg_id = uuid::Uuid::new_v4().to_string();
+            let wire_payload = format!("{}|{}|direct|{}", sender_id, msg_id, payload);
+            if self.send_via_quic(&target_device_id_hex, addr, wire_payload) {
+                return true;
+            }
+        }
+        // Remote devices: the broker route to the account reaches every device subscribed to
+        // it, and the pairing protocol makes the wrong device ignore the packet.
+        self.send_message_mqtt(&recipient_node_id, &payload)
     }
 
     /// K3: бинарный кусок файла по прямому QUIC-каналу.

@@ -2250,6 +2250,13 @@ class CoreServerService : Service() {
 
                 Log.i(TAG, "Message from $senderId in chat $chatId (sealed=$sealed)")
 
+                // P3 device pairing: handled before any chat logic, never shown as a message.
+                if (com.vladimir.messenger.data.pairing.DevicePairingWire.isPacket(text)) {
+                    com.vladimir.messenger.data.pairing.DevicePairingController
+                        .routeIncoming(applicationContext, senderId, text)
+                    return
+                }
+
                 if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, sealed && MessageSealer.openedByExpectedSender(rawText, senderId))) {
                     runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
                     return

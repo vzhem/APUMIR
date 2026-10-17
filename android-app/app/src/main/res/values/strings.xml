@@ -1848,4 +1848,28 @@
     <string name="my_join_resent">Заявка снова отправлена</string>
     <string name="my_join_empty_title">Заявок пока нет</string>
     <string name="my_join_empty_body">Здесь появятся заявки на вступление: отправленные, полученные владельцем и с ответом.</string>
+
+    <string name="settings_devices">Устройства</string>
+    <string name="settings_devices_hint">Подключить второй телефон или компьютер к этому аккаунту</string>
+    <string name="devices_title">Устройства</string>
+    <string name="devices_primary_title">Этот телефон — основной</string>
+    <string name="devices_primary_hint">Покажите QR-код на новом устройстве, чтобы подключить его к аккаунту.</string>
+    <string name="devices_show_qr">Показать QR-код</string>
+    <string name="devices_qr_description">QR-код для подключения устройства</string>
+    <string name="devices_qr_expiry">Код действует 5 минут</string>
+    <string name="devices_error">Не удалось создать код подключения</string>
+    <string name="devices_code_title">Код сверки</string>
+    <string name="devices_code_hint">Сверьте цифры на обоих телефонах. Подтверждайте, только если они совпадают.</string>
+    <string name="devices_codes_match">Совпадает</string>
+    <string name="devices_codes_differ">Не совпадает</string>
+    <string name="devices_joiner_title">Этот телефон — новое устройство</string>
+    <string name="devices_joiner_hint">Отсканируйте QR-код с основного телефона, в котором уже открыт аккаунт.</string>
+    <string name="devices_scan_qr">Сканировать QR-код</string>
+    <string name="devices_not_pairing_qr">Это не код подключения устройства</string>
+    <string name="devices_waiting_answer">Ждём ответ основного устройства…</string>
+    <string name="devices_waiting_grant">Ждём подтверждение на основном устройстве…</string>
+    <string name="devices_done">Устройство подключено к аккаунту</string>
+    <string name="devices_failed">Подключение не удалось</string>
+    <string name="devices_close">Закрыть</string>
+    <string name="devices_cancel">Отменить</string>
 </resources>
