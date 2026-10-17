@@ -36,6 +36,12 @@ class HeartGameContracts(unittest.TestCase):
         self.assertIn('HeartGameStore.board(context, id)', header)
         self.assertIn('HeartGameStore.score(context, id)', header)
 
+    def test_leaderboard_numbers_top_100_and_pins_own_place(self):
+        ui = (SRC / 'ui/components/HeartGameSettings.kt').read_text()
+        for text in ('take(100)', 'take(99)', '(100 to entries[ownIndex])', 'LazyColumn(', 'heart_game_you_place',
+                     'TextAlign.End', 'coerceIn(200f, 420f)'):
+            self.assertIn(text, ui)
+
     def test_private_account_scoped_score_and_opt_in(self):
         store = (SRC / 'data/heartgame/HeartGameStore.kt').read_text()
         self.assertIn('heart-game-v1-$id', store)

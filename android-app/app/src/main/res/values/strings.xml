@@ -1808,6 +1808,7 @@
     <string name="heart_game_close">Закрыть</string>
     <string name="heart_game_board_hint">Топ-100 по известным результатам сети, а не только контактам. Данные приходят с задержкой и могут быть неполными. Подпись подтверждает автора результата, но не защищает от изменённых клиентов.</string>
     <string name="heart_game_empty">Результаты других участников пока не получены.</string>
+    <string name="heart_game_you_place">Вы — %1$d место</string>
     <string name="heart_game_place">Место %1$d</string>
     <string name="heart_game_my_place">Ваше место: %1$d · ♥ %2$d</string>
 </resources>

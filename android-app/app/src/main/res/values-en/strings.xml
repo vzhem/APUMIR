@@ -1775,6 +1775,7 @@ The file is not on this phone</string>
     <string name="heart_game_close">Close</string>
     <string name="heart_game_board_hint">Top 100 known network results, not just contacts. Updates may be delayed and incomplete. Signatures identify the reporter but cannot prevent modified clients from claiming scores.</string>
     <string name="heart_game_empty">No results from other players received yet.</string>
+    <string name="heart_game_you_place">You — place %1$d</string>
     <string name="heart_game_place">Place %1$d</string>
     <string name="heart_game_my_place">Your place: %1$d · ♥ %2$d</string>
 </resources>
