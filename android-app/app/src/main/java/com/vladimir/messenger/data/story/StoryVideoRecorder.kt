@@ -3,7 +3,10 @@ package com.vladimir.messenger.data.story
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.util.Size
+import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.FallbackStrategy
@@ -18,6 +21,8 @@ import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleOwner
 import java.io.File
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.Dispatchers
@@ -25,16 +30,33 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 
 /** Main-thread camera session. Owner must close on dismissal/background, never keep recording invisibly. */
-internal class StoryVideoRecorder(private val context: Context) {
+internal class StoryVideoRecorder(
+    private val context: Context,
+    /** Лица в кадре для AR-фильтров; вызывается на главном потоке. */
+    onFaces: (StoryFaceFrame) -> Unit = {},
+) {
     private var provider: ProcessCameraProvider? = null
     private var preview: Preview? = null
     private var capture: VideoCapture<Recorder>? = null
+    private var analysis: ImageAnalysis? = null
+    private var activeCamera: Camera? = null
     private var recording: Recording? = null
     private var pendingFile: File? = null
     private var cancelled = false
     private var closed = false
 
-    suspend fun bind(owner: LifecycleOwner, view: PreviewView, front: Boolean) = withContext(Dispatchers.Main.immediate) {
+    private val tracker = StoryFaceTracker(onFaces)
+    private var analysisExecutor: ExecutorService? = null
+
+    /** true, если на этом устройстве удалось связать распознавание лица с записью. */
+    var faceTrackingAvailable: Boolean = false
+        private set
+
+    /**
+     * Связывает камеру с предпросмотром. Возвращает true, если у выбранной камеры есть фонарик.
+     * Если устройство не тянет предпросмотр, запись и анализ лица вместе, остаётся запись без фильтров.
+     */
+    suspend fun bind(owner: LifecycleOwner, view: PreviewView, front: Boolean): Boolean = withContext(Dispatchers.Main.immediate) {
         check(!closed && pendingFile == null) { "Сначала завершите запись" }
         require(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
         val camera = provider ?: suspendCancellableCoroutine { continuation ->
@@ -52,14 +74,46 @@ internal class StoryVideoRecorder(private val context: Context) {
         require(camera.hasCamera(selector)) { "Выбранная камера недоступна" }
         preview?.let { camera.unbind(it) }
         capture?.let { camera.unbind(it) }
+        analysis?.let { camera.unbind(it) }
         val newPreview = Preview.Builder().build().also { it.setSurfaceProvider(view.surfaceProvider) }
         val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HD,
             FallbackStrategy.lowerQualityOrHigherThan(Quality.HD))).build()
         val newCapture = VideoCapture.withOutput(recorder)
         newCapture.targetRotation = view.display?.rotation ?: android.view.Surface.ROTATION_0
-        camera.bindToLifecycle(owner, selector, newPreview, newCapture)
+        val newAnalysis = ImageAnalysis.Builder()
+            .setTargetResolution(Size(640, 480))
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .build()
+            .also {
+                val executor = analysisExecutor ?: Executors.newSingleThreadExecutor().also { created -> analysisExecutor = created }
+                it.setAnalyzer(executor, tracker)
+            }
+        val bound = try {
+            camera.bindToLifecycle(owner, selector, newPreview, newCapture, newAnalysis).also {
+                analysis = newAnalysis
+                faceTrackingAvailable = true
+            }
+        } catch (_: IllegalArgumentException) {
+            // Комбинация из трёх use case не поддерживается: запись важнее фильтров.
+            tracker.enabled = false
+            faceTrackingAvailable = false
+            analysis = null
+            camera.bindToLifecycle(owner, selector, newPreview, newCapture)
+        }
+        activeCamera = bound
         preview = newPreview
         capture = newCapture
+        bound.cameraInfo.hasFlashUnit()
+    }
+
+    /** Фонарик на время записи. На камере без вспышки ничего не делает. */
+    fun setTorch(on: Boolean) {
+        runCatching { activeCamera?.cameraControl?.enableTorch(on) }
+    }
+
+    /** Распознавание включается только при выбранном фильтре, иначе кадры не анализируются. */
+    fun setFaceTracking(on: Boolean) {
+        tracker.enabled = on && faceTrackingAvailable
     }
 
     /** Permissions are requested by the screen; denial of audio permits an explicit silent recording. */
@@ -110,9 +164,16 @@ internal class StoryVideoRecorder(private val context: Context) {
     fun close() {
         closed = true
         discard()
+        tracker.enabled = false
         preview?.let { provider?.unbind(it) }
         capture?.let { provider?.unbind(it) }
+        analysis?.let { provider?.unbind(it) }
         preview = null
         capture = null
+        analysis = null
+        activeCamera = null
+        analysisExecutor?.shutdown()
+        analysisExecutor = null
+        tracker.close()
     }
 }

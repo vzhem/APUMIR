@@ -226,6 +226,9 @@ dependencies {
     implementation("com.google.mlkit:translate:17.0.3")
     implementation("com.google.mlkit:language-id:17.0.6")
 
+    // Распознавание лица для AR-фильтров видеоистории (data/story/StoryFaceTracker.kt).
+    implementation("com.google.mlkit:face-detection:16.1.7")
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.junit)
