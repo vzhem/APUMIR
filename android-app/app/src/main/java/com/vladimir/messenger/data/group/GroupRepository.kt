@@ -190,6 +190,11 @@ class GroupRepository(
      */
     private val deletionOutbox: com.vladimir.messenger.data.repository.DeletionOutbox? = null,
     /**
+     * Очередь заявок на вступление: заявка хранится на телефоне и повторяется,
+     * пока владелец не ответит. null - хранилища нет (JVM-тесты): отправка одноразовая.
+     */
+    private val joinOutbox: GroupJoinOutbox? = null,
+    /**
      * р250: опросы групп, тем и каналов.
      *
      * null - хранилища нет (так живут JVM-тесты ядра): сообщения, ответы и
@@ -2315,6 +2320,52 @@ class GroupRepository(
     }
 
     /**
+     * Заявка на вступление: сначала в очередь телефона, потом первая попытка.
+     * Неудачная попытка не теряет заявку - помпа повторит её, когда адресат
+     * появится в сети (или через рой соседей).
+     */
+    private suspend fun sendJoinRequestDurable(
+        groupId: String,
+        displayName: String,
+        note: String,
+        slug: String,
+        recipients: List<String>,
+    ) {
+        val targets = recipients.filter { it.isNotBlank() }.distinct()
+        if (targets.isEmpty()) return
+        val now = clock()
+        joinOutbox?.put(GroupJoinOutbox.Entry(groupId, displayName, note, slug, targets, now, 0L, 0))
+        val envelope = GroupWire.buildJoinRequest(groupId = groupId, displayName = displayName, note = note, slug = slug)
+        runCatching { delivery.deliver(groupId, envelope, targets) }
+        joinOutbox?.markTried(groupId, clock())
+    }
+
+    /**
+     * Помпа заявок на вступление: досылает сохранённые заявки владельцам и
+     * администраторам, пока те не ответят. Заявка снимается, если абонент уже
+     * участник этой группы, или если срок хранения (7 дней) истёк.
+     */
+    suspend fun pumpJoinRequests() {
+        val outbox = joinOutbox ?: return
+        val now = clock()
+        val me = myId() ?: return
+        for (entry in outbox.due(now, JOIN_RETRY_MS, JOIN_TTL_MS)) {
+            if (groupDao.getMember(entry.groupId, me) != null) {
+                outbox.remove(entry.groupId)
+                continue
+            }
+            val envelope = GroupWire.buildJoinRequest(
+                groupId = entry.groupId,
+                displayName = entry.displayName,
+                note = entry.note,
+                slug = entry.slug,
+            )
+            runCatching { delivery.deliver(entry.groupId, envelope, entry.recipients) }
+            outbox.markTried(entry.groupId, now)
+        }
+    }
+
+    /**
      * Раунд 137: досылка сохранённых «удалить у всех» из помпы сервиса.
      * Каждый круг - не больше двух адресатам, которых ещё не пробовали;
      * получатель, применив удаление, тоже ретранслирует, так что команда
@@ -3977,6 +4028,8 @@ class GroupRepository(
 
             is GroupWire.Packet.JoinDecision -> {
                 if (packet.nodeId != me) return
+                // Владелец ответил: заявка больше не нужна, очередь её не досылает.
+                joinOutbox?.remove(packet.groupId)
                 if (packet.approved) {
                     val group = groupDao.getGroupById(packet.groupId) ?: return
                     if (groupDao.getMember(packet.groupId, me) == null) {
@@ -4521,13 +4574,13 @@ class GroupRepository(
         val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val admins = groupDao.getAdmins(groupId)
         if (admins.isEmpty()) return Result.failure(IllegalStateException("В группе нет администраторов"))
-        val envelope = GroupWire.buildJoinRequest(
+        sendJoinRequestDurable(
             groupId = groupId,
             displayName = myDisplayName(),
             note = note.trim().take(MAX_NOTE_CHARS),
             slug = groupDao.getGroupById(groupId)?.inviteSlug.orEmpty(),
+            recipients = admins.map { it.nodeId }.filter { it != me },
         )
-        delivery.deliver(groupId, envelope, admins.map { it.nodeId }.filter { it != me })
         return Result.success(Unit)
     }
 
@@ -4720,19 +4773,15 @@ class GroupRepository(
         val ownerId = target.ownerId.orEmpty()
         if (ownerId == me) return JoinOutcome.Failed("Это ваша группа")
 
-        val envelope = GroupWire.buildJoinRequest(
+        // Заявка лежит в очереди телефона: если владелец офлайн, помпа донесёт её позже.
+        sendJoinRequestDurable(
             groupId = groupId,
             displayName = myDisplayName(),
             note = note.trim().take(MAX_NOTE_CHARS),
             slug = target.slug,
+            recipients = listOf(ownerId),
         )
-        val report = delivery.deliver(groupId, envelope, listOf(ownerId))
-        // Ядро не приняло пакет: писать «заявка отправлена» нельзя, заявки у владельца не будет.
-        if (report.delivered == 0) {
-            Log.w(TAG, "join request not handed to core group=$groupId")
-            return JoinOutcome.Failed("Заявка не отправлена: нет связи с владельцем группы. Попробуйте позже.")
-        }
-        Log.i(TAG, "join request sent to owner group=$groupId")
+        Log.i(TAG, "join request queued for owner group=$groupId")
         // Признаки берём из ссылки: своей базы с приглашением здесь нет, а
         // писать «заявка отправлена», когда владелец принимает сразу, - врать.
         return JoinOutcome.RequestSent(
@@ -5970,6 +6019,10 @@ class GroupRepository(
 companion object {
         /** Раунд 137: как часто очередь пытается донести «удалить у всех». */
         const val DELETION_RETRY_MS = 10L * 60 * 1000
+
+        /** Заявки на вступление: повтор раз в 10 минут, хранение до 7 дней. */
+        const val JOIN_RETRY_MS = 10L * 60 * 1000
+        const val JOIN_TTL_MS = 7L * 24 * 60 * 60 * 1000
 
         /** Раунд 137: сколько хранить недоставленную команду (потом сгорает). */
         const val DELETION_TTL_MS = 7L * 24 * 60 * 60 * 1000

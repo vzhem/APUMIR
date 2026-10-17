@@ -4,6 +4,7 @@ import android.content.Context
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.group.GroupDelivery
+import com.vladimir.messenger.data.group.GroupJoinOutbox
 import com.vladimir.messenger.data.group.GroupRepository
 import com.vladimir.messenger.data.group.GroupRouter
 import com.vladimir.messenger.data.group.PerMemberFanoutDelivery
@@ -23,6 +24,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import java.io.File
 import java.util.UUID
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
@@ -124,6 +126,8 @@ object GroupsModule {
         // Раунд 137: очередь «удалить у всех» - команда хранится и досылается,
         // пока не дойдёт до всех (через тех, кто в сети).
         deletionOutbox: com.vladimir.messenger.data.repository.DeletionOutbox,
+        // Заявки на вступление: хранятся на телефоне и досылаются помпой.
+        joinOutbox: GroupJoinOutbox,
         @ApplicationContext context: Context,
     ): GroupRepository = GroupRepository(
         groupDao = groupDao,
@@ -184,6 +188,7 @@ object GroupsModule {
         },
         // Раунд 137: очередь «удалить у всех» - команда хранится и досылается.
         deletionOutbox = deletionOutbox,
+        joinOutbox = joinOutbox,
         // Файлы группы роем (этап 9). Через Provider: рой сам шлёт пакеты
         // через GroupDelivery и качает через FileTransferRouter, а репозиторий
         // лишь передаёт ему просьбы - кольца зависимостей так нет.
@@ -275,6 +280,12 @@ object GroupsModule {
     @Provides
     @Singleton
     fun provideGroupRouter(repository: GroupRepository): GroupRouter = GroupRouter(repository)
+
+    /** Очередь заявок на вступление: отдельная папка в данных приложения. */
+    @Provides
+    @Singleton
+    fun provideGroupJoinOutbox(@ApplicationContext context: Context): GroupJoinOutbox =
+        GroupJoinOutbox(File(context.noBackupFilesDir, "group-join-outbox"))
 }
 
 /** Раунд 180: последний сжатый аватар - чтобы не жечь ЦП на каждый whois. */

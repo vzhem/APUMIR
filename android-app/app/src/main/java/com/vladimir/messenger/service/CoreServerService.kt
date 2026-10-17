@@ -2085,6 +2085,12 @@ class CoreServerService : Service() {
                 } catch (ex: Exception) {
                     Log.w(TAG, "Group deletion pump error: ${ex.message}")
                 }
+                // Заявки на вступление: хранятся на телефоне и досылаются, пока владелец не ответит.
+                try {
+                    groupRepository.pumpJoinRequests()
+                } catch (ex: Exception) {
+                    Log.w(TAG, "Join request pump error: ${ex.message}")
+                }
                 // Раунд 179: недоставленные сообщения (гифки-ссылки и текст
                 // QUEUED_OFFLINE) - сами доехут, когда адресат появится;
                 // пустая очередь стоит один дешёвый запрос.
