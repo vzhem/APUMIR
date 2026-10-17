@@ -7,48 +7,23 @@ import android.graphics.RectF
 /**
  * Рисование AR-фильтров: одна и та же «картинка» уходит и на экран (Compose),
  * и в сохранённый файл (android.graphics.Canvas), поэтому они совпадают.
- * Цвета — ARGB в Long, как у Compose Color.
+ * Цвета — ARGB в Long, как у Compose Color. Картинки — PNG из res/drawable-nodpi,
+ * если картинки нет, рисуем простые фигуры, чтобы фильтр не пропадал.
  */
 internal interface StoryFaceCanvas {
+    /** Овал по центру (cx, cy) шириной [w] и высотой [h]. */
     fun oval(cx: Float, cy: Float, w: Float, h: Float, argb: Long)
     fun circle(cx: Float, cy: Float, r: Float, argb: Long)
     fun triangle(cx: Float, cy: Float, w: Float, h: Float, tipShift: Float, argb: Long, up: Boolean)
 
-    /** Рисует [block] повернутым на [degrees] вокруг точки (cx, cy). */
+    /** Рисует [block] в системе координат, повернутой на [degrees] вокруг (cx, cy). */
     fun rotated(degrees: Float, cx: Float, cy: Float, block: () -> Unit)
 
-    /** Высота / ширина картинки или null, если картинки нет: тогда рисуем фигурой. */
+    /** Пропорция высота/ширина картинки по имени или null, если картинки нет. */
     fun spriteAspect(name: String): Float?
 
-    /** Картинка по центру (cx, cy) шириной [width]; при [flipX] зеркально по горизонтали. */
-    fun sprite(name: String, cx: Float, cy: Float, width: Float, flipX: Boolean)
-}
-
-/** Имя картинки уха по стилю; null — стиль рисуется фигурой. */
-private fun earSprite(style: StoryEars): String? = when (style) {
-    StoryEars.FOX -> "ear_fox"
-    StoryEars.CAT -> "ear_cat"
-    StoryEars.DOG -> "ear_dog"
-    StoryEars.BUNNY -> "ear_bunny"
-    StoryEars.BEAR -> "ear_bear"
-    StoryEars.NONE -> null
-}
-
-private fun noseSprite(style: StoryNose): String? = when (style) {
-    StoryNose.CAT -> "nose_cat"
-    StoryNose.DOG -> "nose_dog"
-    StoryNose.PIG -> "nose_pig"
-    StoryNose.BEAR -> "nose_bear"
-    StoryNose.RABBIT -> "nose_rabbit"
-    StoryNose.NONE -> null
-}
-
-/** Ширина уха в долях от размера анкора: вытянутые уши уже, круглые шире. */
-private fun earWidthFactor(style: StoryEars): Float = when (style) {
-    StoryEars.BUNNY -> 0.5f
-    StoryEars.FOX, StoryEars.CAT -> 0.85f
-    StoryEars.DOG, StoryEars.BEAR -> 0.95f
-    StoryEars.NONE -> 0f
+    /** Картинка по центру (cx, cy) шириной [width], с зеркалом и поворотом вокруг своего центра. */
+    fun sprite(name: String, cx: Float, cy: Float, width: Float, flipX: Boolean, rotationDegrees: Float)
 }
 
 /**
@@ -86,135 +61,203 @@ internal class StoryFaceTransform private constructor(
     }
 }
 
-/** Рисует все лица кадра выбранным фильтром. Пустой фильтр ничего не рисует. */
-internal fun drawStoryFaces(canvas: StoryFaceCanvas, frame: StoryFaceFrame, filter: StoryFaceFilter, transform: StoryFaceTransform) {
+/**
+ * Рисует все лица кадра выбранным фильтром. Пустой фильтр ничего не рисует.
+ * [timeMs] — время для движения (шерсть, дыхание носа, блик). В превью это время экрана,
+ * при записи — время кадра, поэтому анимация одинаково идёт и там и там.
+ */
+internal fun drawStoryFaces(
+    canvas: StoryFaceCanvas,
+    frame: StoryFaceFrame,
+    filter: StoryFaceFilter,
+    transform: StoryFaceTransform,
+    timeMs: Long,
+) {
     if (!filter.isActive) return
     for (face in frame.faces) {
         val layout = StoryFaceGeometry.layout(face) ?: continue
         val roll = StoryFaceGeometry.screenRoll(layout.rollDegrees, transform.mirrored)
         canvas.rotated(roll, transform.x(layout.centerX), transform.y(layout.centerY)) {
-            drawEars(canvas, filter.ears, layout.leftEar, transform, left = true)
-            drawEars(canvas, filter.ears, layout.rightEar, transform, left = false)
-            drawNose(canvas, filter.nose, layout.nose, transform)
-            // Глаза поверх ушей и носа, чтобы зрачки не уходили под другие детали.
-            drawEyes(canvas, filter.eyes, layout.leftEye, transform)
-            drawEyes(canvas, filter.eyes, layout.rightEye, transform)
+            // Порядок снизу вверх: румянец под губами, брови над глазами, глаза сверху.
+            drawCheeks(canvas, filter.cheeks, layout.leftCheek, layout.rightCheek, transform)
+            drawLips(canvas, filter.lips, layout.mouth, transform)
+            drawWhiskers(canvas, filter.whiskers, layout.nose, transform, timeMs)
+            drawNose(canvas, filter.nose, layout.nose, transform, timeMs)
+            drawEars(canvas, filter.ears, layout.leftEar, transform, left = true, timeMs = timeMs)
+            drawEars(canvas, filter.ears, layout.rightEar, transform, left = false, timeMs = timeMs)
+            drawBrows(canvas, filter.brows, layout.leftBrow, layout.rightBrow, transform)
+            drawEyes(canvas, filter.eyes, layout.leftEye, transform, timeMs)
+            drawEyes(canvas, filter.eyes, layout.rightEye, transform, timeMs)
         }
     }
 }
 
-// ─────────────────────────── уши ───────────────────────────
+private fun drawCheeks(
+    canvas: StoryFaceCanvas,
+    style: StoryCheeks,
+    left: StoryFaceAnchor,
+    right: StoryFaceAnchor,
+    t: StoryFaceTransform,
+) {
+    if (style == StoryCheeks.NONE) return
+    // Румянец из кругов с мягким спадом: картинка с фоном давала бы ореол.
+    for (cheek in listOf(left, right)) {
+        val x = t.x(cheek.x)
+        val y = t.y(cheek.y)
+        val r = t.len(cheek.size)
+        canvas.circle(x, y, r, 0x26FF8FA3L)
+        canvas.circle(x, y, r * 0.7f, 0x33FF8FA3L)
+        canvas.circle(x, y, r * 0.4f, 0x40FF8FA3L)
+    }
+}
 
-private fun drawEars(canvas: StoryFaceCanvas, style: StoryEars, anchor: StoryFaceAnchor, t: StoryFaceTransform, left: Boolean) {
-    if (style == StoryEars.NONE) return
+private fun drawLips(canvas: StoryFaceCanvas, style: StoryLips, mouth: StoryFaceAnchor, t: StoryFaceTransform) {
+    val name = when (style) {
+        StoryLips.NONE -> return
+        StoryLips.RED -> "lips_red"
+        StoryLips.PINK -> "lips_pink"
+    }
+    val x = t.x(mouth.x)
+    val y = t.y(mouth.y)
+    val width = t.len(mouth.size) * 1.25f
+    if (canvas.spriteAspect(name) != null) {
+        canvas.sprite(name, x, y, width, flipX = false, rotationDegrees = 0f)
+    } else {
+        val color = if (style == StoryLips.RED) 0xCCD32F4FL else 0xCCF28BB0L
+        canvas.oval(x, y, width, width * 0.24f, color)
+    }
+}
+
+private fun drawWhiskers(
+    canvas: StoryFaceCanvas,
+    style: StoryWhiskers,
+    nose: StoryFaceAnchor,
+    t: StoryFaceTransform,
+    timeMs: Long,
+) {
+    if (style == StoryWhiskers.NONE) return
+    val size = t.len(nose.size)
+    val x = t.x(nose.x)
+    val y = t.y(nose.y) + size * 0.1f
+    val width = size * 1.8f
+    val gap = size * 0.55f
+    val sway = StoryFaceMotion.whiskerSwayDegrees(timeMs)
+    if (canvas.spriteAspect("whiskers") != null) {
+        // Основание усов у носа: левые зеркалим, правые нет. Колышутся в противофазе.
+        canvas.sprite("whiskers", x - gap - width / 2f, y, width, flipX = true, rotationDegrees = sway)
+        canvas.sprite("whiskers", x + gap + width / 2f, y, width, flipX = false, rotationDegrees = -sway)
+    } else {
+        for (side in listOf(-1f, 1f)) {
+            for (k in -1..1) {
+                canvas.oval(x + side * (gap + width / 2f), y + k * size * 0.08f, width, size * 0.02f, 0xE6FFFFFFL)
+            }
+        }
+    }
+}
+
+private fun drawNose(
+    canvas: StoryFaceCanvas,
+    style: StoryNose,
+    nose: StoryFaceAnchor,
+    t: StoryFaceTransform,
+    timeMs: Long,
+) {
+    val name = when (style) {
+        StoryNose.NONE -> return
+        StoryNose.CAT -> "nose_cat"
+        StoryNose.DOG -> "nose_dog"
+        StoryNose.PIG -> "nose_pig"
+        StoryNose.BEAR -> "nose_bear"
+        StoryNose.RABBIT -> "nose_rabbit"
+    }
+    val x = t.x(nose.x)
+    val y = t.y(nose.y)
+    // Нос дышит и шмыгает: масштаб меняется во времени.
+    val size = t.len(nose.size) * StoryFaceMotion.noseScale(timeMs)
+    if (canvas.spriteAspect(name) != null) {
+        canvas.sprite(name, x, y, size * 1.1f, flipX = false, rotationDegrees = 0f)
+    } else {
+        canvas.oval(x, y, size, size * 0.72f, 0xFFF48FB1L)
+    }
+}
+
+private fun drawEars(
+    canvas: StoryFaceCanvas,
+    style: StoryEars,
+    anchor: StoryFaceAnchor,
+    t: StoryFaceTransform,
+    left: Boolean,
+    timeMs: Long,
+) {
+    val name = when (style) {
+        StoryEars.NONE -> return
+        StoryEars.CAT -> "ear_cat"
+        StoryEars.DOG -> "ear_dog"
+        StoryEars.BUNNY -> "ear_bunny"
+        StoryEars.BEAR -> "ear_bear"
+        StoryEars.FOX -> "ear_fox"
+    }
     val x = t.x(anchor.x)
     val y = t.y(anchor.y)
-    val s = t.len(anchor.size)
-    // Левое и правое ухо зеркальны по горизонтали, чтобы кончики смотрели наружу.
-    val side = if (left) -1f else 1f
-    val sprite = earSprite(style)
-    if (sprite != null) {
-        val aspect = canvas.spriteAspect(sprite)
-        if (aspect != null) {
-            val width = s * earWidthFactor(style)
-            // Анкор — верх уха: картинка уходит вверх и вбок от головы.
-            canvas.sprite(sprite, x, y + width * aspect / 2f, width, flipX = left)
-            return
-        }
-    }
-    when (style) {
-        StoryEars.CAT -> {
-            canvas.triangle(x, y, s * 0.95f, s * 0.95f, side * s * 0.05f, 0xFF3B3335, up = true)
-            canvas.triangle(x, y + s * 0.12f, s * 0.55f, s * 0.6f, side * s * 0.05f, 0xFFFFB3C1, up = true)
-        }
-        StoryEars.FOX -> {
-            canvas.triangle(x, y, s * 1.0f, s * 1.2f, side * s * 0.08f, 0xFFE8833A, up = true)
-            canvas.triangle(x, y + s * 0.2f, s * 0.42f, s * 0.5f, side * s * 0.08f, 0xFFFFF4E6, up = true)
-        }
-        StoryEars.DOG -> {
-            // Висячее ухо: овал ниже и наружу от головы.
-            canvas.oval(x + side * s * 0.12f, y + s * 0.42f, s * 0.7f, s * 1.1f, 0xFF8B5A2B)
-            canvas.oval(x + side * s * 0.12f, y + s * 0.5f, s * 0.36f, s * 0.7f, 0xFFB07D4A)
-        }
-        StoryEars.BUNNY -> {
-            // Длинное заячье ухо торчит вверх над головой.
-            canvas.oval(x, y - s * 0.35f, s * 0.46f, s * 1.45f, 0xFFF5F0EA)
-            canvas.oval(x, y - s * 0.35f, s * 0.24f, s * 1.2f, 0xFFFFB3C1)
-        }
-        StoryEars.BEAR -> {
-            canvas.circle(x, y, s * 0.36f, 0xFF7A4A24)
-            canvas.circle(x, y, s * 0.18f, 0xFFC9955E)
-        }
-        StoryEars.NONE -> Unit
+    val size = t.len(anchor.size)
+    // Шерсть качается: левое и правое ухо в разной фазе.
+    val sway = StoryFaceMotion.furSwayDegrees(timeMs, phase = if (left) 0.0 else 1.3)
+    if (canvas.spriteAspect(name) != null) {
+        canvas.sprite(name, x, y, size, flipX = left, rotationDegrees = sway)
+    } else {
+        canvas.triangle(x, y, size * 0.6f, size * 0.7f, if (left) -size * 0.1f else size * 0.1f, 0xFFE0A070L, up = true)
     }
 }
 
-// ─────────────────────────── нос ───────────────────────────
-
-private fun drawNose(canvas: StoryFaceCanvas, style: StoryNose, anchor: StoryFaceAnchor, t: StoryFaceTransform) {
-    if (style == StoryNose.NONE) return
-    val x = t.x(anchor.x)
-    val y = t.y(anchor.y)
-    val s = t.len(anchor.size)
-    val sprite = noseSprite(style)
-    if (sprite != null) {
-        val aspect = canvas.spriteAspect(sprite)
-        if (aspect != null) {
-            canvas.sprite(sprite, x, y, s * 1.1f, flipX = false)
-            return
+private fun drawBrows(
+    canvas: StoryFaceCanvas,
+    style: StoryBrows,
+    left: StoryFaceAnchor,
+    right: StoryFaceAnchor,
+    t: StoryFaceTransform,
+) {
+    if (style == StoryBrows.NONE) return
+    if (canvas.spriteAspect("brow") != null) {
+        canvas.sprite("brow", t.x(left.x), t.y(left.y), t.len(left.size), flipX = true, rotationDegrees = 0f)
+        canvas.sprite("brow", t.x(right.x), t.y(right.y), t.len(right.size), flipX = false, rotationDegrees = 0f)
+    } else {
+        for (anchor in listOf(left, right)) {
+            canvas.oval(t.x(anchor.x), t.y(anchor.y), t.len(anchor.size), t.len(anchor.size) * 0.14f, 0xFF3E2A1AL)
         }
-    }
-    when (style) {
-        StoryNose.CAT -> canvas.triangle(x, y, s * 1.0f, s * 0.68f, 0f, 0xFFFF8FA3, up = false)
-        StoryNose.DOG -> {
-            canvas.oval(x, y, s * 1.0f, s * 0.72f, 0xFF1E1A1C)
-            canvas.circle(x - s * 0.18f, y - s * 0.12f, s * 0.07f, 0xB3FFFFFF)
-        }
-        StoryNose.PIG -> {
-            canvas.oval(x, y, s * 1.0f, s * 0.72f, 0xFFFFA9B8)
-            canvas.circle(x - s * 0.16f, y, s * 0.08f, 0xFF8A3A4A)
-            canvas.circle(x + s * 0.16f, y, s * 0.08f, 0xFF8A3A4A)
-        }
-        StoryNose.BEAR -> canvas.oval(x, y, s * 0.92f, s * 0.66f, 0xFF3A2416)
-        StoryNose.RABBIT -> canvas.oval(x, y, s * 0.62f, s * 0.46f, 0xFFFF9DB0)
-        StoryNose.NONE -> Unit
     }
 }
 
-// ─────────────────────────── глаза ───────────────────────────
-
-/** [anchor.size] — диаметр глаза в пикселях кадра анализа. */
-private fun drawEyes(canvas: StoryFaceCanvas, style: StoryEyes, anchor: StoryFaceAnchor, t: StoryFaceTransform) {
-    if (style == StoryEyes.NONE) return
+private fun drawEyes(
+    canvas: StoryFaceCanvas,
+    style: StoryEyes,
+    anchor: StoryFaceAnchor,
+    t: StoryFaceTransform,
+    timeMs: Long,
+) {
+    val name = when (style) {
+        StoryEyes.NONE -> return
+        StoryEyes.CAT -> "eye_cat"
+        StoryEyes.OWL -> "eye_owl"
+        StoryEyes.PANDA -> "eye_panda"
+        StoryEyes.FROG -> "eye_frog"
+    }
     val x = t.x(anchor.x)
     val y = t.y(anchor.y)
     val d = t.len(anchor.size)
-    when (style) {
-        StoryEyes.CAT -> {
-            canvas.circle(x, y, d * 0.55f, 0xFFFFFFFF)
-            canvas.circle(x, y, d * 0.42f, 0xFF9ACD4B)
-            canvas.oval(x, y, d * 0.1f, d * 0.7f, 0xFF101010)
-        }
-        StoryEyes.OWL -> {
-            canvas.circle(x, y, d * 0.62f, 0xFFFFFFFF)
-            canvas.circle(x, y, d * 0.46f, 0xFFFFC53D)
-            canvas.circle(x, y, d * 0.24f, 0xFF101010)
-        }
-        StoryEyes.PANDA -> {
-            canvas.oval(x, y, d * 1.05f, d * 0.9f, 0xFF141414)
-            canvas.circle(x, y, d * 0.32f, 0xFFFFFFFF)
-            canvas.circle(x, y, d * 0.16f, 0xFF101010)
-        }
-        StoryEyes.FROG -> {
-            canvas.circle(x, y, d * 0.62f, 0xFF5DBB63)
-            canvas.circle(x, y, d * 0.3f, 0xFFFFFFFF)
-            canvas.circle(x, y, d * 0.16f, 0xFF101010)
-        }
-        StoryEyes.NONE -> Unit
+    if (canvas.spriteAspect(name) != null) {
+        canvas.sprite(name, x, y, d * 1.15f, flipX = false, rotationDegrees = 0f)
+    } else {
+        canvas.oval(x, y, d, d * 0.8f, 0xFF2B2B2BL)
     }
+    // Блик: белый круг в верхнем-левом углу и маленькая точка, блик чуть «плывёт».
+    val glint = StoryFaceMotion.glintOffset(timeMs)
+    val gx = x - d * 0.18f
+    val gy = y - d * (0.2f - glint)
+    canvas.circle(gx, gy, d * 0.1f, 0xE6FFFFFFL)
+    canvas.circle(gx - d * 0.04f, gy - d * 0.06f, d * 0.04f, 0xFFFFFFFFL)
 }
 
-/** Реализация на android.graphics.Canvas — для записи файла. */
+/** Реализация на android.graphics.Canvas — для записи файла. [bitmapOf] даёт картинку по имени. */
 internal class AndroidStoryFaceCanvas(
     private val canvas: android.graphics.Canvas,
     private val bitmapOf: (String) -> android.graphics.Bitmap?,
@@ -227,12 +270,13 @@ internal class AndroidStoryFaceCanvas(
         return bitmap.height.toFloat() / bitmap.width.coerceAtLeast(1).toFloat()
     }
 
-    override fun sprite(name: String, cx: Float, cy: Float, width: Float, flipX: Boolean) {
+    override fun sprite(name: String, cx: Float, cy: Float, width: Float, flipX: Boolean, rotationDegrees: Float) {
         val bitmap = bitmapOf(name) ?: return
         val height = width * bitmap.height / bitmap.width.coerceAtLeast(1).toFloat()
         val dst = RectF(cx - width / 2f, cy - height / 2f, cx + width / 2f, cy + height / 2f)
         canvas.save()
         try {
+            if (rotationDegrees != 0f) canvas.rotate(rotationDegrees, cx, cy)
             if (flipX) canvas.scale(-1f, 1f, cx, cy)
             canvas.drawBitmap(bitmap, null, dst, bitmapPaint)
         } finally {

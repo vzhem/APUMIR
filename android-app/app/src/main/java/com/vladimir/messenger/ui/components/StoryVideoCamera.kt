@@ -79,6 +79,10 @@ import com.vladimir.messenger.data.story.StoryVideoFiles
 import com.vladimir.messenger.data.story.StoryVideoRecorder
 import com.vladimir.messenger.data.story.StoryEars
 import com.vladimir.messenger.data.story.StoryEyes
+import com.vladimir.messenger.data.story.StoryBrows
+import com.vladimir.messenger.data.story.StoryCheeks
+import com.vladimir.messenger.data.story.StoryLips
+import com.vladimir.messenger.data.story.StoryWhiskers
 import com.vladimir.messenger.data.story.StoryNose
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -89,7 +93,9 @@ import java.io.File
 private val recordRed = Color(0xFFE5484D)
 
 /** Какая часть лица сейчас выбирается в панели фильтров. */
-private enum class FilterPart(val label: String) { EARS("Уши"), NOSE("Нос"), EYES("Глаза") }
+private enum class FilterPart(val label: String) {
+    EARS("Уши"), NOSE("Нос"), EYES("Глаза"), LIPS("Губы"), BROWS("Брови"), WHISKERS("Усы"), CHEEKS("Щёки")
+}
 
 /**
  * Экран записи видеоистории: полноэкранное превью, кнопки поверх, большой затвор
@@ -506,11 +512,26 @@ private fun StoryFilterPicker(
         FilterPart.EYES -> StoryEyes.entries.map { value ->
             FilterOption(value.label, filter.eyes == value) { onFilter(filter.copy(eyes = value)) }
         }
+        FilterPart.LIPS -> StoryLips.entries.map { value ->
+            FilterOption(value.label, filter.lips == value) { onFilter(filter.copy(lips = value)) }
+        }
+        FilterPart.BROWS -> StoryBrows.entries.map { value ->
+            FilterOption(value.label, filter.brows == value) { onFilter(filter.copy(brows = value)) }
+        }
+        FilterPart.WHISKERS -> StoryWhiskers.entries.map { value ->
+            FilterOption(value.label, filter.whiskers == value) { onFilter(filter.copy(whiskers = value)) }
+        }
+        FilterPart.CHEEKS -> StoryCheeks.entries.map { value ->
+            FilterOption(value.label, filter.cheeks == value) { onFilter(filter.copy(cheeks = value)) }
+        }
     }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.Center) {
-            FilterPart.entries.forEachIndexed { index, item ->
-                if (index > 0) Spacer(Modifier.width(8.dp))
+        // Частей семь, на узком экране они не влезают в ряд: прокручиваем.
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp),
+        ) {
+            items(FilterPart.entries) { item ->
                 ApuPremiumChip(label = item.label, selected = part == item, onClick = { onPart(item) })
             }
         }

@@ -70,5 +70,9 @@ internal fun Face.toStoryFace(): StoryFace {
         rightEye = point(FaceLandmark.RIGHT_EYE),
         nose = point(FaceLandmark.NOSE_BASE),
         rollDegrees = headEulerAngleZ,
+        mouthLeft = point(FaceLandmark.MOUTH_LEFT),
+        mouthRight = point(FaceLandmark.MOUTH_RIGHT),
+        leftCheek = point(FaceLandmark.LEFT_CHEEK),
+        rightCheek = point(FaceLandmark.RIGHT_CHEEK),
     )
 }

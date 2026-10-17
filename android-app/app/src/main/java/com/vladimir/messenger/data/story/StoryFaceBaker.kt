@@ -184,6 +184,8 @@ private class StoryFaceOverlaySource(
             StoryFaceFrame(timeline.width, timeline.height, timeline.facesAt(index)),
             filter,
             StoryFaceTransform.identity(timeline.width),
+            // Время кадра в записи: та же шкала, что и у анимации в превью.
+            timeMs = index * StoryFaceTimeline.SAMPLE_STEP_MS,
         )
         return bitmap
     }

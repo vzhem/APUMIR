@@ -74,4 +74,32 @@ class StoryFaceFiltersTest {
         assertEquals(20f, StoryFaceGeometry.screenRoll(20f, mirrored = false), 0.001f)
         assertEquals(-20f, StoryFaceGeometry.screenRoll(20f, mirrored = true), 0.001f)
     }
+
+    @Test
+    fun mouthCheeksAndBrowsFallBackOrFollowLandmarks() {
+        val fallback = StoryFaceGeometry.layout(face())!!
+        assertTrue(fallback.mouth.y > box.centerY)
+        assertTrue(fallback.leftCheek.x < box.centerX && fallback.rightCheek.x > box.centerX)
+        assertTrue(fallback.leftBrow.y < fallback.leftEye.y)
+
+        val mouthLeft = StoryFacePoint(370f, 400f)
+        val mouthRight = StoryFacePoint(430f, 400f)
+        val real = StoryFaceGeometry.layout(
+            face(leftEye = StoryFacePoint(350f, 300f), rightEye = StoryFacePoint(450f, 300f)).copy(
+                mouthLeft = mouthLeft,
+                mouthRight = mouthRight,
+            ),
+        )!!
+        assertEquals(400f, real.mouth.x, 0.001f)
+        assertEquals(400f, real.mouth.y, 0.001f)
+        assertEquals(60f, real.mouth.size, 0.001f)
+    }
+
+    @Test
+    fun filterWithNewPartsIsActive() {
+        assertTrue(StoryFaceFilter(lips = StoryLips.RED).isActive)
+        assertTrue(StoryFaceFilter(brows = StoryBrows.BUSHY).isActive)
+        assertTrue(StoryFaceFilter(whiskers = StoryWhiskers.CAT).isActive)
+        assertTrue(StoryFaceFilter(cheeks = StoryCheeks.BLUSH).isActive)
+    }
 }
