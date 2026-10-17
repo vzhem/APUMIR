@@ -29,6 +29,9 @@ internal object StoryStickers {
         "lips_pink" to R.drawable.ar_lips_pink,
         "brow" to R.drawable.ar_brow,
         "whiskers" to R.drawable.ar_whiskers,
+        "brow_thin" to R.drawable.ar_brow_thin,
+        "cheek" to R.drawable.ar_cheek,
+        "cheek_freckles" to R.drawable.ar_cheek_freckles,
     )
 
     private val cache = HashMap<String, Bitmap>()

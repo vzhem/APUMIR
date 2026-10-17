@@ -100,7 +100,15 @@ private fun drawCheeks(
     t: StoryFaceTransform,
 ) {
     if (style == StoryCheeks.NONE) return
-    // Румянец из кругов с мягким спадом: картинка с фоном давала бы ореол.
+    val name = if (style == StoryCheeks.FRECKLES) "cheek_freckles" else "cheek"
+    if (canvas.spriteAspect(name) != null) {
+        for (cheek in listOf(left, right)) {
+            canvas.sprite(name, t.x(cheek.x), t.y(cheek.y), t.len(cheek.size) * 3.2f, flipX = false, rotationDegrees = 0f)
+        }
+        return
+    }
+    if (style != StoryCheeks.BLUSH) return
+    // Запасной вариант без картинки: мягкие круги с спадом.
     for (cheek in listOf(left, right)) {
         val x = t.x(cheek.x)
         val y = t.y(cheek.y)
@@ -139,17 +147,20 @@ private fun drawWhiskers(
     val size = t.len(nose.size)
     val x = t.x(nose.x)
     val y = t.y(nose.y) + size * 0.1f
-    val width = size * 1.8f
+    val visualWidth = size * 1.8f
     val gap = size * 0.55f
     val sway = StoryFaceMotion.whiskerSwayDegrees(timeMs)
-    if (canvas.spriteAspect("whiskers") != null) {
-        // Основание усов у носа: левые зеркалим, правые нет. Колышутся в противофазе.
-        canvas.sprite("whiskers", x - gap - width / 2f, y, width, flipX = true, rotationDegrees = sway)
-        canvas.sprite("whiskers", x + gap + width / 2f, y, width, flipX = false, rotationDegrees = -sway)
+    val aspect = canvas.spriteAspect("whiskers")
+    if (aspect != null) {
+        // Картинка — веер с основанием внизу. Поворачиваем на 90°, чтобы веер смотрел в стороны
+        // от носа. Левые усы: против часовой, правые: по часовой. Колышутся в противофазе.
+        val spriteWidth = visualWidth / aspect
+        canvas.sprite("whiskers", x - gap - visualWidth / 2f, y, spriteWidth, flipX = false, rotationDegrees = -90f + sway)
+        canvas.sprite("whiskers", x + gap + visualWidth / 2f, y, spriteWidth, flipX = false, rotationDegrees = 90f - sway)
     } else {
         for (side in listOf(-1f, 1f)) {
             for (k in -1..1) {
-                canvas.oval(x + side * (gap + width / 2f), y + k * size * 0.08f, width, size * 0.02f, 0xE6FFFFFFL)
+                canvas.oval(x + side * (gap + visualWidth / 2f), y + k * size * 0.08f, visualWidth, size * 0.02f, 0xE6FFFFFFL)
             }
         }
     }
@@ -217,12 +228,14 @@ private fun drawBrows(
     t: StoryFaceTransform,
 ) {
     if (style == StoryBrows.NONE) return
-    if (canvas.spriteAspect("brow") != null) {
-        canvas.sprite("brow", t.x(left.x), t.y(left.y), t.len(left.size), flipX = true, rotationDegrees = 0f)
-        canvas.sprite("brow", t.x(right.x), t.y(right.y), t.len(right.size), flipX = false, rotationDegrees = 0f)
+    val name = if (style == StoryBrows.THIN) "brow_thin" else "brow"
+    if (canvas.spriteAspect(name) != null) {
+        canvas.sprite(name, t.x(left.x), t.y(left.y), t.len(left.size), flipX = true, rotationDegrees = 0f)
+        canvas.sprite(name, t.x(right.x), t.y(right.y), t.len(right.size), flipX = false, rotationDegrees = 0f)
     } else {
+        val thickness = if (style == StoryBrows.THIN) 0.06f else 0.14f
         for (anchor in listOf(left, right)) {
-            canvas.oval(t.x(anchor.x), t.y(anchor.y), t.len(anchor.size), t.len(anchor.size) * 0.14f, 0xFF3E2A1AL)
+            canvas.oval(t.x(anchor.x), t.y(anchor.y), t.len(anchor.size), t.len(anchor.size) * thickness, 0xFF3E2A1AL)
         }
     }
 }

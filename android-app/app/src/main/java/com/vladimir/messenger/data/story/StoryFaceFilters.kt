@@ -18,11 +18,11 @@ enum class StoryEyes(val label: String) { NONE("Без"), CAT("Кошачьи"),
 
 enum class StoryLips(val label: String) { NONE("Без"), RED("Красные"), PINK("Розовые") }
 
-enum class StoryBrows(val label: String) { NONE("Без"), BUSHY("Густые") }
+enum class StoryBrows(val label: String) { NONE("Без"), BUSHY("Густые"), THIN("Тонкие") }
 
 enum class StoryWhiskers(val label: String) { NONE("Без"), CAT("Кошачьи") }
 
-enum class StoryCheeks(val label: String) { NONE("Без"), BLUSH("Румянец") }
+enum class StoryCheeks(val label: String) { NONE("Без"), BLUSH("Румянец"), FRECKLES("Веснушки") }
 
 /** Набор фильтра: каждая часть выбирается отдельно, «Без» отключает часть. */
 data class StoryFaceFilter(

@@ -102,4 +102,12 @@ class StoryFaceFiltersTest {
         assertTrue(StoryFaceFilter(whiskers = StoryWhiskers.CAT).isActive)
         assertTrue(StoryFaceFilter(cheeks = StoryCheeks.BLUSH).isActive)
     }
+
+    @Test
+    fun newVariantsAreSelectableAndActive() {
+        assertTrue(StoryFaceFilter(brows = StoryBrows.THIN).isActive)
+        assertTrue(StoryFaceFilter(cheeks = StoryCheeks.FRECKLES).isActive)
+        assertEquals(3, StoryBrows.entries.size)
+        assertEquals(3, StoryCheeks.entries.size)
+    }
 }
