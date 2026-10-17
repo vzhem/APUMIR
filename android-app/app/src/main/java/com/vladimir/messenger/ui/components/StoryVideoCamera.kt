@@ -126,7 +126,10 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
     var cameraAllowed by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
     }
-    var audio by remember { mutableStateOf(false) }
+    // Звук включён по умолчанию: без дорожки в записи в истории не будет слышно звука.
+    var audio by remember {
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
+    }
     var front by remember { mutableStateOf(false) }
     var ready by remember { mutableStateOf(false) }
     var hasTorch by remember { mutableStateOf(false) }
@@ -147,6 +150,10 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
     val audioPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         audio = it
         if (!it) error = "Микрофон недоступен. Можно записать видео без звука."
+    }
+    // Просим микрофон сразу при открытии экрана, если его ещё нет; отказ оставит запись без звука.
+    LaunchedEffect(Unit) {
+        if (!audio) audioPermission.launch(Manifest.permission.RECORD_AUDIO)
     }
     DisposableEffect(session, owner) {
         val observer = LifecycleEventObserver { _, event ->
