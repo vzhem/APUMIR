@@ -13,12 +13,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -39,6 +37,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.widget.Toast
 import com.vladimir.messenger.R
 import com.vladimir.messenger.data.pairing.DevicePairingController
+import com.vladimir.messenger.ui.components.ApuPremiumButton
+import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 import com.vladimir.messenger.data.pairing.DevicePairingController.JoinerPhase
 import com.vladimir.messenger.util.QrCodeGenerator
 import kotlinx.coroutines.Dispatchers
@@ -97,7 +97,8 @@ fun DevicesScreen(
             style = MaterialTheme.typography.bodyMedium,
         )
         Spacer(Modifier.height(8.dp))
-        Button(
+        DevicesButton(
+            label = stringResource(R.string.devices_show_qr),
             onClick = {
                 scope.launch {
                     val text = withContext(Dispatchers.IO) {
@@ -111,7 +112,7 @@ fun DevicesScreen(
                 }
             },
             modifier = Modifier.fillMaxWidth(),
-        ) { Text(stringResource(R.string.devices_show_qr)) }
+        )
 
         if (offerOpen && qrBitmap != null && primary == null) {
             Spacer(Modifier.height(12.dp))
@@ -139,14 +140,14 @@ fun DevicesScreen(
             Text(stringResource(R.string.devices_code_hint), style = MaterialTheme.typography.bodyMedium)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = {
+                DevicesButton(label = stringResource(R.string.devices_codes_match), onClick = {
                     scope.launch(Dispatchers.IO) { DevicePairingController.confirmPrimary() }
                     qrText = null
-                }) { Text(stringResource(R.string.devices_codes_match)) }
-                OutlinedButton(onClick = {
+                })
+                DevicesButton(label = stringResource(R.string.devices_codes_differ), onClick = {
                     DevicePairingController.rejectPrimary()
                     qrText = null
-                }) { Text(stringResource(R.string.devices_codes_differ)) }
+                }, primary = false)
             }
         }
 
@@ -156,9 +157,7 @@ fun DevicesScreen(
         Text(stringResource(R.string.devices_joiner_title), style = MaterialTheme.typography.titleMedium)
         Text(stringResource(R.string.devices_joiner_hint), style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(8.dp))
-        Button(onClick = onScanClick, modifier = Modifier.fillMaxWidth()) {
-            Text(stringResource(R.string.devices_scan_qr))
-        }
+        DevicesButton(label = stringResource(R.string.devices_scan_qr), onClick = onScanClick, modifier = Modifier.fillMaxWidth())
 
         joiner?.let { state ->
             Spacer(Modifier.height(12.dp))
@@ -174,9 +173,9 @@ fun DevicesScreen(
                     )
                     Text(stringResource(R.string.devices_code_hint), style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(8.dp))
-                    Button(onClick = {
+                    DevicesButton(label = stringResource(R.string.devices_codes_match), onClick = {
                         scope.launch(Dispatchers.IO) { DevicePairingController.confirmJoinerCode() }
-                    }) { Text(stringResource(R.string.devices_codes_match)) }
+                    })
                 }
                 JoinerPhase.WAITING_GRANT -> Text(stringResource(R.string.devices_waiting_grant))
                 JoinerPhase.DONE -> Text(stringResource(R.string.devices_done))
@@ -188,15 +187,31 @@ fun DevicesScreen(
             }
             if (state.phase == JoinerPhase.DONE || state.phase == JoinerPhase.FAILED) {
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = {
+                DevicesButton(label = stringResource(R.string.devices_close), onClick = {
                     DevicePairingController.dismissJoiner()
-                }) { Text(stringResource(R.string.devices_close)) }
+                }, primary = false)
             } else {
                 Spacer(Modifier.height(8.dp))
-                OutlinedButton(onClick = {
+                DevicesButton(label = stringResource(R.string.devices_cancel), onClick = {
                     scope.launch(Dispatchers.IO) { DevicePairingController.cancel() }
-                }) { Text(stringResource(R.string.devices_cancel)) }
+                }, primary = false)
             }
         }
     }
+}
+
+/** Фирменная кнопка экрана: основное действие или спокойная (GLASS). */
+@Composable
+private fun DevicesButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    primary: Boolean = true,
+) {
+    ApuPremiumButton(
+        label = label,
+        onClick = onClick,
+        modifier = modifier,
+        style = if (primary) DiagnosticsActionStyle.PRIMARY else DiagnosticsActionStyle.GLASS,
+    )
 }
