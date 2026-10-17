@@ -116,7 +116,7 @@ class StoryFaceFiltersTest {
         // Сколько вариантов в каждом выборе (кроме «Без»). Должны совпадать с картинками в StoryStickers.
         assertEquals(12, StoryEars.entries.size - 1)
         assertEquals(12, StoryNose.entries.size - 1)
-        assertEquals(14, StoryEyes.entries.size - 1)
+        assertEquals(15, StoryEyes.entries.size - 1)
         assertEquals(9, StoryHair.entries.size - 1)
         assertEquals(8, StoryBeard.entries.size - 1)
         assertEquals(7, StoryMustache.entries.size - 1)
