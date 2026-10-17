@@ -41,6 +41,8 @@ object GroupWire {
     const val KIND_JOIN_DECISION = "reqd"
     /** Карточка группы владельца абоненту, подавшему заявку: название, число участников, дата. */
     const val KIND_JOIN_INFO = "jinfo"
+    /** Абонент спрашивает владельца или админа напрямую: «решена ли моя заявка». */
+    const val KIND_JOIN_STATUS = "jsq"
     const val KIND_PIN = "pin"
     const val KIND_ROSTER = "roster"
     const val KIND_GROUP_DELETED = "grpdel"
@@ -685,6 +687,9 @@ object GroupWire {
             val nodeId: String,
             val approved: Boolean,
         ) : Packet()
+
+        /** Запрос статуса заявки: [requesterId] спрашивает, решена ли его заявка. */
+        data class JoinStatusQuery(val groupId: String, val requesterId: String) : Packet()
 
         /** Карточка группы для абонента, который подал заявку. */
         data class JoinInfo(
@@ -1354,6 +1359,9 @@ object GroupWire {
         "$PREFIX|$KIND_JOIN_REQUEST|$groupId|${encode(displayName)}|${encode(note)}|" +
             encode(slug) + (if (requestedAtMs > 0L) "|$requestedAtMs" else "")
 
+    fun buildJoinStatusQuery(groupId: String, requesterId: String): String =
+        "$PREFIX|$KIND_JOIN_STATUS|$groupId|$requesterId"
+
     fun buildJoinInfo(
         groupId: String,
         requesterId: String,
@@ -1999,6 +2007,12 @@ object GroupWire {
             KIND_TOPICS -> if (parts.size == 4) {
                 val entries = parseTopics(parts[3]) ?: return null
                 Packet.Topics(groupId, entries)
+            } else {
+                null
+            }
+
+            KIND_JOIN_STATUS -> if (parts.size == 4 && parts[3].isNotBlank()) {
+                Packet.JoinStatusQuery(groupId, parts[3])
             } else {
                 null
             }

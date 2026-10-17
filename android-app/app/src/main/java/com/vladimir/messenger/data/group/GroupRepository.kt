@@ -2409,7 +2409,11 @@ class GroupRepository(
         }
         if (!fresh) return
         groupDao.getMember(packet.groupId, me) ?: return
-        groupDao.getJoinRequest(packet.groupId, packet.nodeId)?.takeIf { it.status == "PENDING" }?.let {
+        // Свою копию заявки меняем только по решению от владельца или админа (ретрансляции
+        // случайных участников не меняют статус), но передаём дальше, как и раньше.
+        val senderMember = groupDao.getMember(packet.groupId, senderId)
+        val trustedSender = senderMember != null && GroupPermissions.canInvite(senderMember.role, senderMember.permissions, 0L)
+        if (trustedSender) groupDao.getJoinRequest(packet.groupId, packet.nodeId)?.takeIf { it.status == "PENDING" }?.let {
             groupDao.updateJoinRequestStatus(
                 packet.groupId, packet.nodeId, if (packet.approved) "APPROVED" else "REJECTED", clock(), senderId,
             )
@@ -2489,10 +2493,31 @@ class GroupRepository(
      * администраторам, пока те не ответят. Заявка снимается, если абонент уже
      * участник этой группы, или если срок хранения (7 дней) истёк.
      */
+    /** Адресаты моей заявки: владелец и админы, которым я её отправлял. */
+    private fun isAddresseeOfMyRequest(groupId: String, nodeId: String): Boolean {
+        val stored = myJoinStore?.get(groupId)?.recipients.orEmpty()
+        val queued = joinOutbox?.all()?.firstOrNull { it.groupId == groupId }?.recipients.orEmpty()
+        return nodeId in stored || nodeId in queued
+    }
+
+    /** Спросить адресатов напрямую, решена ли моя заявка. Ответ придёт прямым решением. */
+    private suspend fun requestJoinStatus(groupId: String) {
+        val me = myId() ?: return
+        val stored = myJoinStore?.get(groupId)?.recipients.orEmpty()
+        val queued = joinOutbox?.all()?.firstOrNull { it.groupId == groupId }?.recipients.orEmpty()
+        val targets = (stored + queued).filter { it.isNotBlank() && it != me }.distinct()
+        if (targets.isEmpty()) return
+        runCatching { delivery.deliver(groupId, GroupWire.buildJoinStatusQuery(groupId, me), targets) }
+    }
+
     suspend fun pumpJoinRequests() {
         val outbox = joinOutbox ?: return
         val now = clock()
         val me = myId() ?: return
+        // Офлайн-заявки: при выходе в сеть спрашиваем адресатов, решены ли они.
+        myJoinStore?.all()
+            ?.filter { it.status == MyJoinRequestStore.PENDING && it.requestedAtMs + JOIN_TTL_MS > now }
+            ?.forEach { requestJoinStatus(it.groupId) }
         for (entry in outbox.due(now, JOIN_RETRY_MS, JOIN_TTL_MS)) {
             if (groupDao.getMember(entry.groupId, me) != null) {
                 outbox.remove(entry.groupId)
@@ -4187,6 +4212,22 @@ class GroupRepository(
                 }
             }
 
+            is GroupWire.Packet.JoinStatusQuery -> {
+                // Отвечаем только самому абоненту и только если сами решали заявку.
+                if (packet.requesterId != senderId) return
+                val mine = groupDao.getMember(packet.groupId, me) ?: return
+                if (!GroupPermissions.canInvite(mine.role, mine.permissions, 0L)) return
+                val decided = groupDao.getJoinRequest(packet.groupId, senderId)
+                    ?.takeIf { it.status == "APPROVED" || it.status == "REJECTED" } ?: return
+                runCatching {
+                    delivery.deliver(
+                        packet.groupId,
+                        GroupWire.buildJoinDecision(packet.groupId, senderId, decided.status == "APPROVED"),
+                        listOf(senderId),
+                    )
+                }
+            }
+
             is GroupWire.Packet.JoinInfo -> {
                 if (packet.requesterId != me) return
                 val store = myJoinStore ?: return
@@ -4210,6 +4251,12 @@ class GroupRepository(
                 if (packet.nodeId != me) {
                     // Чужая заявка: решение разносим по рою, свою копию заявки обновляем.
                     handleForeignDecision(packet, senderId)
+                    return
+                }
+                // Решение принимаем только от владельца или админа, которому мы сами писали.
+                // Ретрансляцию от случайного участника не верим: спрашиваем адресатов напрямую.
+                if (!isAddresseeOfMyRequest(packet.groupId, senderId)) {
+                    requestJoinStatus(packet.groupId)
                     return
                 }
                 // Владелец ответил: заявка больше не нужна, очередь её не досылает.

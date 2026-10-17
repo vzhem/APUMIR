@@ -70,4 +70,11 @@ class MyJoinRequestHistoryTest {
         folder.newFile("my-requests.txt").writeText("не та шапка\nxxx|yyy")
         assertTrue(MyJoinRequestStore(folder.root).all().isEmpty())
     }
+
+    @Test
+    fun statusQueryRoundTripsThroughWire() {
+        val parsed = GroupWire.parse(GroupWire.buildJoinStatusQuery("g1", "me")) as GroupWire.Packet.JoinStatusQuery
+        assertEquals("g1", parsed.groupId)
+        assertEquals("me", parsed.requesterId)
+    }
 }
