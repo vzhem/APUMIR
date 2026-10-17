@@ -548,6 +548,21 @@ class CoreServerService : Service() {
         }
 
         
+        // Сердечки: общая рассылка раз в 6 часов, только когда телефон свободен (HeartSyncPolicy).
+        // Ядро живёт в этом сервисе постоянно, поэтому цикл здесь, а не в экране игры.
+        serviceScope.launch {
+            while (isActive) {
+                try {
+                    heartGameNetwork.broadcastIfNeeded()
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    // Ядро или подпись недоступны: повторим на следующем круге.
+                }
+                delay(com.vladimir.messenger.data.heartgame.HeartSyncPolicy.CHECK_PERIOD_MS)
+            }
+        }
+
         // ================================================================
         // РЕГИСТРАЦИЯ В CLOUDFLARE WORKER REGISTRY
         // (независимо от наличия telegram_bot_token)
@@ -2070,6 +2085,12 @@ class CoreServerService : Service() {
                 } catch (ex: Exception) {
                     Log.w(TAG, "Group deletion pump error: ${ex.message}")
                 }
+                // Заявки на вступление: хранятся на телефоне и досылаются, пока владелец не ответит.
+                try {
+                    groupRepository.pumpJoinRequests()
+                } catch (ex: Exception) {
+                    Log.w(TAG, "Join request pump error: ${ex.message}")
+                }
                 // Раунд 179: недоставленные сообщения (гифки-ссылки и текст
                 // QUEUED_OFFLINE) - сами доехут, когда адресат появится;
                 // пустая очередь стоит один дешёвый запрос.
@@ -2228,6 +2249,13 @@ class CoreServerService : Service() {
                 }
 
                 Log.i(TAG, "Message from $senderId in chat $chatId (sealed=$sealed)")
+
+                // P3 device pairing: handled before any chat logic, never shown as a message.
+                if (com.vladimir.messenger.data.pairing.DevicePairingWire.isPacket(text)) {
+                    com.vladimir.messenger.data.pairing.DevicePairingController
+                        .routeIncoming(applicationContext, senderId, text)
+                    return
+                }
 
                 if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, sealed && MessageSealer.openedByExpectedSender(rawText, senderId))) {
                     runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
@@ -2637,6 +2665,15 @@ class CoreServerService : Service() {
                         if (becameOnline) {
                             // И в чаты: шапка лички и точка в списке читают таблицу chats
                             try { chatRepository.updateContactOnlineStatus(peerId, true) } catch (_: Exception) {}
+                            // Новенький в сети: точечно синхронизируем сердечки (с антиспамом в HeartSyncPolicy).
+                            serviceScope.launch {
+                                try {
+                                    heartGameNetwork.syncWithNewcomer(existing.id)
+                                } catch (e: kotlinx.coroutines.CancellationException) {
+                                    throw e
+                                } catch (_: Exception) {
+                                }
+                            }
                             Log.i(TAG, "🟢 ONLINE: $peerName")
                         }
                         if (lightTouch) return  // пульс учли, тяжёлую синхру не дёргаем

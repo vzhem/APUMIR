@@ -1,6 +1,8 @@
 package com.vladimir.messenger.data.group
 
 import java.net.URI
+import java.net.URLDecoder
+import java.net.URLEncoder
 import java.security.SecureRandom
 import java.util.regex.Pattern
 
@@ -75,6 +77,7 @@ object GroupInviteLinks {
          * попадает на нужный пост, а не в начало ленты.
          */
         postTopicId: String? = null,
+        title: String? = null,
     ): String {
         val sb = StringBuilder(APP_LINK_PREFIX).append(slug)
         if (!groupId.isNullOrBlank()) sb.append("&g=").append(groupId)
@@ -85,6 +88,7 @@ object GroupInviteLinks {
         // Владелец им не доверяет и проверяет всё по своей базе.
         if (isChannel) sb.append("&c=1")
         if (requestApproval) sb.append("&a=1")
+        appendTitle(sb, title)
         return sb.toString()
     }
 
@@ -107,6 +111,7 @@ object GroupInviteLinks {
         isChannel: Boolean = false,
         postTopicId: String? = null,
         requestApproval: Boolean = false,
+        title: String? = null,
     ): String {
         val sb = StringBuilder(WEB_LINK_PREFIX).append(slug)
         if (!groupId.isNullOrBlank()) sb.append("&g=").append(groupId)
@@ -114,6 +119,7 @@ object GroupInviteLinks {
         if (!postTopicId.isNullOrBlank()) sb.append("&p=").append(postTopicId)
         if (isChannel) sb.append("&c=1")
         if (requestApproval) sb.append("&a=1")
+        appendTitle(sb, title)
         return sb.toString()
     }
 
@@ -132,6 +138,7 @@ object GroupInviteLinks {
             isChannel = target.isChannel,
             requestApproval = target.needsApproval,
             postTopicId = target.postTopicId,
+            title = target.title,
         )
     }
 
@@ -148,6 +155,7 @@ object GroupInviteLinks {
             ownerId = target.ownerId,
             isChannel = target.isChannel,
             postTopicId = target.postTopicId,
+            title = target.title,
             requestApproval = target.needsApproval,
         )
     }
@@ -174,6 +182,8 @@ object GroupInviteLinks {
         val needsApproval: Boolean = false,
         /** Ссылка ведёт к конкретному посту канала, а не просто в канал. */
         val postTopicId: String? = null,
+        /** Название группы или канала, если ссылку выпустил владелец. В старых ссылках его нет. */
+        val title: String? = null,
     ) {
         /** Хватает ли данных, чтобы попросить группу по сети. */
         val isRoutable: Boolean
@@ -231,6 +241,7 @@ object GroupInviteLinks {
                 isChannel = queryParam(query, "c") == "1",
                 needsApproval = queryParam(query, "a") == "1",
                 postTopicId = queryParam(query, "p"),
+                title = decodeTitle(queryParam(query, "t")),
             )
         }
 
@@ -258,6 +269,7 @@ object GroupInviteLinks {
                 isChannel = queryParam(uri.rawQuery, "c") == "1",
                 needsApproval = queryParam(uri.rawQuery, "a") == "1",
                 postTopicId = queryParam(uri.rawQuery, "p"),
+                title = decodeTitle(queryParam(uri.rawQuery, "t")),
             )
         } catch (_: Exception) {
             null
@@ -293,6 +305,35 @@ object GroupInviteLinks {
             ?.get(1)?.trim()
             .orEmpty()
         return value.ifBlank { null }
+    }
+
+    /** Длина названия в ссылке: символов, не больше. Длинное название режется, а не отбрасывается. */
+    const val MAX_TITLE_CHARS = 40
+
+    /** Название для ссылки: обрезано, в процентах, пробелы как %20 (регулярка не пропускает `+`). */
+    fun encodeTitle(title: String?): String? {
+        val clean = title?.trim().orEmpty()
+        if (clean.isEmpty()) return null
+        return URLEncoder.encode(clipTitle(clean), "UTF-8").replace("+", "%20")
+    }
+
+    private fun appendTitle(sb: StringBuilder, title: String?) {
+        encodeTitle(title)?.let { sb.append("&t=").append(it) }
+    }
+
+    /** Название из ссылки. Битая кодировка означает «без названия», а не ошибку разбора. */
+    private fun decodeTitle(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        return try {
+            clipTitle(URLDecoder.decode(raw, "UTF-8").trim()).ifBlank { null }
+        } catch (_: IllegalArgumentException) {
+            null
+        }
+    }
+
+    private fun clipTitle(text: String): String {
+        if (text.codePointCount(0, text.length) <= MAX_TITLE_CHARS) return text
+        return text.substring(0, text.offsetByCodePoints(0, MAX_TITLE_CHARS))
     }
 
     private fun parseQuerySlug(query: String?): String? {

@@ -66,14 +66,7 @@ fun HeartGameOverlay(network: HeartGameNetwork) {
     LaunchedEffect(id, enabled, owner) {
         owner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             if (!enabled) return@repeatOnLifecycle
-            launch {
-                while (isActive) {
-                    try { network.broadcastIfNeeded() }
-                    catch (e: kotlinx.coroutines.CancellationException) { throw e }
-                    catch (_: Exception) { /* Core/signing unavailable: retry later, never block gameplay. */ }
-                    delay(60_000)
-                }
-            }
+            // Рассылку ведёт CoreServerService раз в 6 часов (см. HeartSyncPolicy); здесь только игра.
             try {
                 var wait = HeartGamePolicy.nextInterval()
                 while (isActive) {

@@ -42,6 +42,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import com.vladimir.messenger.ui.components.ApuPremiumIconTile
+import com.vladimir.messenger.ui.components.ApuSettingsCard
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Settings
@@ -142,6 +145,8 @@ fun GroupsScreen(
     onBackClick: () -> Unit,
     /** Управление группой: тот же экран, что и из меню на главной. */
     onGroupAdminClick: (groupId: String) -> Unit = {},
+    /** «Мои заявки»: true - заявки в каналы, false - в группы. */
+    onMyRequestsClick: (channels: Boolean) -> Unit = {},
     /** Ссылка-приглашение из QR или из внешнего открытия: сразу пробуем войти. */
     joinLink: String? = null,
     /** Из меню кнопки-карандаша: "group" или "channel" - сразу открыть создание. */
@@ -155,6 +160,7 @@ fun GroupsScreen(
     viewModel: GroupsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val requestCounts by viewModel.myRequestCounts.collectAsStateWithLifecycle()
     var showCreate by remember { mutableStateOf(false) }
     var showRankHint by remember { mutableStateOf(false) }
     // Что создаём из меню «⋮»: группу или канал. Диалог умеет и то и другое,
@@ -326,6 +332,8 @@ fun GroupsScreen(
                 val mine = CommunityList.applyFilter(uiState.filtered, communityFilter)
                 val network = CommunityList.applyFilterToDirectory(uiState.directoryMatches, communityFilter)
                 val myGroups = mine.filterNot { it.isChannel }
+                val showGroupRequests = requestCounts.first > 0 && communityFilter != CommunityFilter.CHANNELS
+                val showChannelRequests = requestCounts.second > 0 && communityFilter != CommunityFilter.GROUPS
                 val myChannels = mine.filter { it.isChannel }
                 val foundGroups = network.filterNot { it.isChannel }
                 val foundChannels = network.filter { it.isChannel }
@@ -453,6 +461,17 @@ fun GroupsScreen(
                             item(key = "head-my-groups") {
                                 DirectoryHeaderCounted(stringResource(R.string.groups_my_groups), myGroups.size)
                             }
+                        }
+                        // Заявки в группы - только в разделе групп и только если они есть.
+                        if (showGroupRequests) {
+                            item(key = "my-requests-groups") {
+                                MyRequestsEntry(
+                                    title = stringResource(R.string.groups_my_requests_groups),
+                                    onClick = { onMyRequestsClick(false) },
+                                )
+                            }
+                        }
+                        if (myGroups.isNotEmpty()) {
                             items(myGroups, key = { "mine-" + it.id }) { group ->
                                 GroupRow(
                                     group = group,
@@ -474,6 +493,17 @@ fun GroupsScreen(
                             item(key = "head-my-channels") {
                                 DirectoryHeaderCounted(stringResource(R.string.groups_my_channels), myChannels.size)
                             }
+                        }
+                        // Заявки в каналы - только в разделе каналов и только если они есть.
+                        if (showChannelRequests) {
+                            item(key = "my-requests-channels") {
+                                MyRequestsEntry(
+                                    title = stringResource(R.string.groups_my_requests_channels),
+                                    onClick = { onMyRequestsClick(true) },
+                                )
+                            }
+                        }
+                        if (myChannels.isNotEmpty()) {
                             items(myChannels, key = { "mine-" + it.id }) { group ->
                                 // Канал открывается лентой постов, группа - чатом.
                                 GroupRow(
@@ -1395,6 +1425,7 @@ private fun DirectoryRow(entry: DirectoryEntity, onJoin: (String) -> Unit) {
                         ownerId = entry.ownerId,
                         isChannel = entry.isChannel,
                         requestApproval = entry.needsApproval,
+                        title = entry.title,
                     )
                 )
             },
@@ -1469,4 +1500,32 @@ private fun groupMenuActions(
             onClick = onLeaveOrDelete,
         )
     )
+}
+
+/** Строка входа в «Мои заявки»: карточка с иконкой и стрелкой, как у других разделов списка. */
+@Composable
+private fun MyRequestsEntry(title: String, onClick: () -> Unit) {
+    ApuSettingsCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .clickable(onClick = onClick),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ApuPremiumIconTile(icon = Icons.Filled.PersonAdd, size = 40.dp)
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = ApuBubbleTextColor,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = null,
+                tint = ApuBubbleMutedColor,
+            )
+        }
+    }
 }

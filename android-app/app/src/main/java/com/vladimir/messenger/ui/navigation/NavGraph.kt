@@ -56,7 +56,11 @@ import com.vladimir.messenger.ui.screens.feedback.FeedbackScreen
 import com.vladimir.messenger.ui.screens.mtproxy.MtProxyListScreen
 import com.vladimir.messenger.ui.screens.share.ShareProfileScreen
 import com.vladimir.messenger.ui.screens.qr.QrScannerScreen
+import com.vladimir.messenger.ui.screens.devices.DevicesScreen
+import com.vladimir.messenger.data.pairing.DevicePairingController
+import com.vladimir.messenger.data.pairing.DevicePairingWire
 import com.vladimir.messenger.ui.screens.groups.GroupsScreen
+import com.vladimir.messenger.ui.screens.groups.MyJoinRequestsScreen
 import com.vladimir.messenger.ui.screens.groups.GroupChatScreen
 import com.vladimir.messenger.ui.screens.groups.GroupAdminScreen
 import com.vladimir.messenger.ui.screens.channels.ChannelScreen
@@ -157,6 +161,8 @@ sealed class Screen(val route: String) {
 
     // QR-сканер для добавления контакта
     data object QrScanner : Screen("qr_scanner")
+    data object Devices : Screen("devices")
+    data object DevicePairScan : Screen("device_pair_scan")
 
     // Раздел «Группы»
     data object Groups : Screen("groups?joinLink={joinLink}&create={create}") {
@@ -199,6 +205,12 @@ sealed class Screen(val route: String) {
     data object GroupAdmin : Screen("group_admin/{groupId}") {
         fun createRoute(groupId: String): String =
             "group_admin/" + java.net.URLEncoder.encode(groupId, "UTF-8")
+    }
+
+    /** «Мои заявки»: отдельно для групп и отдельно для каналов. */
+    data object MyJoinRequests : Screen("my_join_requests/{kind}") {
+        fun createRoute(channels: Boolean): String =
+            "my_join_requests/" + if (channels) "channels" else "groups"
     }
 
     // Экран звонка: peerId заполнен = исходящий, пустой = нас позвали на входящий.
@@ -590,6 +602,29 @@ fun MessengerNavGraph(
         // ------------------------------------------------------------------
         // РќРђРЎРўР РћР™РљР
         // ------------------------------------------------------------------
+        composable(route = Screen.Devices.route) {
+            DevicesScreen(
+                onBackClick = { navController.popBackStack() },
+                onScanClick = { navController.navigate(Screen.DevicePairScan.route) },
+            )
+        }
+
+        composable(route = Screen.DevicePairScan.route) {
+            val scanContext = androidx.compose.ui.platform.LocalContext.current
+            val scanScope = androidx.compose.runtime.rememberCoroutineScope()
+            QrScannerScreen(
+                onBackClick = { navController.popBackStack() },
+                onQrScanned = { qr ->
+                    if (DevicePairingWire.parseQr(qr) != null) {
+                        scanScope.launch(kotlinx.coroutines.Dispatchers.IO) { DevicePairingController.startJoin(qr) }
+                        navController.popBackStack()
+                    } else {
+                        android.widget.Toast.makeText(scanContext, scanContext.getString(com.vladimir.messenger.R.string.devices_not_pairing_qr), android.widget.Toast.LENGTH_LONG).show()
+                    }
+                },
+            )
+        }
+
         composable(route = Screen.Settings.route) {
             SettingsScreen(
                 bottomBar = {
@@ -602,6 +637,7 @@ fun MessengerNavGraph(
                 onRankBenefitsClick = { navController.navigate(Screen.RankBenefits.route) },
                 onPeerRatingClick = { navController.navigate(Screen.PeerRating.route) },
                 onIdentityBackupClick = { navController.navigate(Screen.IdentityBackup.route) },
+                onDevicesClick = { navController.navigate(Screen.Devices.route) },
                 onProfileBackupClick = { navController.navigate(Screen.ProfileBackup.route) },
                 onSupportClick = { navController.navigate(Screen.Support.route) },
                 onFeedbackClick = { navController.navigate(Screen.Feedback.route) },
@@ -784,8 +820,28 @@ fun MessengerNavGraph(
                 onGroupAdminClick = { groupId ->
                     navController.navigate(Screen.GroupAdmin.createRoute(groupId))
                 },
+                onMyRequestsClick = { channels ->
+                    navController.navigate(Screen.MyJoinRequests.createRoute(channels))
+                },
                 joinLink = entry.arguments?.getString("joinLink"),
                 create = entry.arguments?.getString("create"),
+            )
+        }
+
+        composable(
+            route = Screen.MyJoinRequests.route,
+            arguments = listOf(
+                navArgument("kind") { type = NavType.StringType },
+            ),
+        ) { entry ->
+            MyJoinRequestsScreen(
+                channels = entry.arguments?.getString("kind") == "channels",
+                onBackClick = { navController.popBackStack() },
+                onOpenCommunity = { groupId, isChannel ->
+                    navController.navigate(
+                        if (isChannel) Screen.Channel.createRoute(groupId) else Screen.GroupChat.createRoute(groupId),
+                    )
+                },
             )
         }
 

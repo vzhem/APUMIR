@@ -51,6 +51,8 @@ const TXT_KEY_NODE_ID: &str = "node_id";
 /// Ключ TXT-записи для версии протокола.
 const TXT_KEY_PROTOCOL_VERSION: &str = "proto_ver";
 const TXT_KEY_PUBLIC_ADDR: &str = "public_addr";
+/// Device key id (P3 multi-device): tells devices of one account apart on the LAN.
+const TXT_KEY_DEVICE_ID: &str = "device_id";
 
 // ═══════════════════════════════════════════════════════════════════
 // ОШИБКИ
@@ -95,6 +97,8 @@ pub struct DiscoveredNode {
     /// Версия протокола если удалось прочитать
     pub protocol_version: Option<u8>,
     pub public_addr: Option<String>,
+    /// Device key id (hex) when the node advertises one; absent for legacy nodes.
+    pub device_id_hex: Option<String>,
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -137,6 +141,21 @@ impl MdnsService {
         protocol_version: u8,
         public_addr: Option<&str>,
     ) -> MdnsResult<()> {
+        self.publish_self_device(node_id_hex, port, instance_name, protocol_version, public_addr, None)
+            .await
+    }
+
+    /// Same as [`publish_self`], plus the device key id so that two devices of one account
+    /// (same `node_id`) can be told apart when resolving a device-level address.
+    pub async fn publish_self_device(
+        &self,
+        node_id_hex: &str,
+        port: u16,
+        instance_name: &str,
+        protocol_version: u8,
+        public_addr: Option<&str>,
+        device_id_hex: Option<&str>,
+    ) -> MdnsResult<()> {
         // Определяем локальный IP
         let local_ip = get_local_ip()?;
 
@@ -149,6 +168,9 @@ impl MdnsService {
         );
         if let Some(addr) = public_addr {
             properties.insert(TXT_KEY_PUBLIC_ADDR.to_string(), addr.to_string());
+        }
+        if let Some(device) = device_id_hex {
+            properties.insert(TXT_KEY_DEVICE_ID.to_string(), device.to_string());
         }
 
         // Создаём ServiceInfo
@@ -243,6 +265,9 @@ impl MdnsService {
                         .get(TXT_KEY_PROTOCOL_VERSION)
                         .and_then(|v| v.val_str().parse::<u8>().ok());
                     let public_addr = properties.get(TXT_KEY_PUBLIC_ADDR).map(|v| v.val_str().to_string());
+                    let device_id_hex = properties
+                        .get(TXT_KEY_DEVICE_ID)
+                        .map(|v| v.val_str().to_string());
 
                     // Извлекаем короткое имя
                     let short_name = full_name
@@ -258,6 +283,7 @@ impl MdnsService {
                         node_id_hex,
                         protocol_version,
                         public_addr,
+                        device_id_hex,
                     };
 
                     discovered.lock().await.insert(full_name, node);
@@ -299,6 +325,23 @@ impl MdnsService {
 // ═══════════════════════════════════════════════════════════════════
 
 /// Получить локальный IP-адрес (не loopback).
+/// Find the LAN endpoint of one specific device. Several devices of one account share a
+/// `node_id`, so the device key id is the only way to choose the right one. Matching is exact
+/// and case-insensitive on the hex form.
+pub fn find_device_endpoint<'a>(
+    nodes: &'a [DiscoveredNode],
+    device_id_hex: &str,
+) -> Option<&'a DiscoveredNode> {
+    if device_id_hex.is_empty() {
+        return None;
+    }
+    nodes.iter().find(|node| {
+        node.device_id_hex
+            .as_deref()
+            .is_some_and(|value| value.eq_ignore_ascii_case(device_id_hex))
+    })
+}
+
 fn get_local_ip() -> MdnsResult<IpAddr> {
     let addrs = if_addrs::get_if_addrs().map_err(|e| MdnsError::Daemon(e.to_string()))?;
 
@@ -403,6 +446,26 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn node(name: &str, device: Option<&str>) -> DiscoveredNode {
+        DiscoveredNode {
+            full_name: name.to_string(),
+            name: name.to_string(),
+            address: "192.168.1.10:7777".parse().unwrap(),
+            node_id_hex: Some("pk_same".to_string()),
+            protocol_version: Some(1),
+            public_addr: None,
+            device_id_hex: device.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn device_endpoint_is_chosen_by_device_id_not_node_id() {
+        let nodes = vec![node("phone", Some("aa11")), node("pc", Some("BB22")), node("old", None)];
+        assert_eq!(find_device_endpoint(&nodes, "bb22").map(|n| n.name.as_str()), Some("pc"));
+        assert_eq!(find_device_endpoint(&nodes, "cc33").map(|n| n.name.as_str()), None);
+        assert!(find_device_endpoint(&nodes, "").is_none());
     }
 
     #[tokio::test]

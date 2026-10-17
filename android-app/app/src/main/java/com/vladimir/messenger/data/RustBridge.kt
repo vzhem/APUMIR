@@ -236,6 +236,8 @@ object RustBridge {
             }
 
             Log.i(TAG, "Rust version: ${getVersion()}")
+            // The device key id is published in mDNS when the engine starts (P3 pairing).
+            com.vladimir.messenger.data.pairing.DevicePairingController.prepareLocal()
 
             val e = if (!relayDbPath.isNullOrBlank()) {
                 // M8-C: durable-режим. Пустые строки ключей = «сгенерировать новые».
@@ -717,6 +719,20 @@ object RustBridge {
      * Параллельный QUIC-поток для файлов: отправка напрямую БЕЗ relay queue.
      * true = QUIC-доставка удалась; false = получатель недоступен напрямую.
      */
+    /**
+     * P3 pairing: one packet to one device of the account. Not sealed here: the pairing protocol
+     * carries its own MAC and AEAD. The core picks the LAN endpoint by device id, or the broker.
+     */
+    fun sendPairingPayload(recipientNodeId: String, targetDeviceId: ByteArray, payload: String): Boolean {
+        if (rejectMainThreadCall("sendPairingPayload")) return false
+        return try {
+            engine?.sendPairingPayload(recipientNodeId, targetDeviceId, payload) ?: false
+        } catch (e: Exception) {
+            Log.w(TAG, "sendPairingPayload failed: ${e.message}")
+            false
+        }
+    }
+
     fun sendDirectPayload(recipientId: String, payload: String): Boolean {
         if (rejectMainThreadCall("sendDirectPayload")) return false
         return try {

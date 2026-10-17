@@ -39,6 +39,10 @@ object GroupWire {
     const val KIND_TOPIC_UPDATED = "topicup"
     const val KIND_JOIN_REQUEST = "req"
     const val KIND_JOIN_DECISION = "reqd"
+    /** Карточка группы владельца абоненту, подавшему заявку: название, число участников, дата. */
+    const val KIND_JOIN_INFO = "jinfo"
+    /** Абонент спрашивает владельца или админа напрямую: «решена ли моя заявка». */
+    const val KIND_JOIN_STATUS = "jsq"
     const val KIND_PIN = "pin"
     const val KIND_ROSTER = "roster"
     const val KIND_GROUP_DELETED = "grpdel"
@@ -674,12 +678,28 @@ object GroupWire {
              * У заявок старого образца slug пустой.
              */
             val slug: String = "",
+            /** Когда абонент подал заявку (его часы). 0 - заявка старого образца. */
+            val requestedAtMs: Long = 0L,
         ) : Packet()
 
         data class JoinDecision(
             val groupId: String,
             val nodeId: String,
             val approved: Boolean,
+        ) : Packet()
+
+        /** Запрос статуса заявки: [requesterId] спрашивает, решена ли его заявка. */
+        data class JoinStatusQuery(val groupId: String, val requesterId: String) : Packet()
+
+        /** Карточка группы для абонента, который подал заявку. */
+        data class JoinInfo(
+            val groupId: String,
+            val requesterId: String,
+            val title: String,
+            val memberCount: Int,
+            val isChannel: Boolean,
+            val ownerName: String,
+            val createdAtMs: Long,
         ) : Packet()
 
         data class Pin(
@@ -1334,9 +1354,25 @@ object GroupWire {
         displayName: String,
         note: String,
         slug: String = "",
+        requestedAtMs: Long = 0L,
     ): String =
         "$PREFIX|$KIND_JOIN_REQUEST|$groupId|${encode(displayName)}|${encode(note)}|" +
-            encode(slug)
+            encode(slug) + (if (requestedAtMs > 0L) "|$requestedAtMs" else "")
+
+    fun buildJoinStatusQuery(groupId: String, requesterId: String): String =
+        "$PREFIX|$KIND_JOIN_STATUS|$groupId|$requesterId"
+
+    fun buildJoinInfo(
+        groupId: String,
+        requesterId: String,
+        title: String,
+        memberCount: Int,
+        isChannel: Boolean,
+        ownerName: String,
+        createdAtMs: Long,
+    ): String =
+        "$PREFIX|$KIND_JOIN_INFO|$groupId|$requesterId|${encode(title)}|$memberCount|" +
+            (if (isChannel) "1" else "0") + "|${encode(ownerName)}|$createdAtMs"
 
     fun buildJoinDecision(groupId: String, nodeId: String, approved: Boolean): String =
         "$PREFIX|$KIND_JOIN_DECISION|$groupId|$nodeId|" +
@@ -1776,12 +1812,13 @@ object GroupWire {
                 null
             }
 
-            KIND_JOIN_REQUEST -> if (parts.size == 5 || parts.size == 6) {
+            KIND_JOIN_REQUEST -> if (parts.size in 5..7) {
                 val name = decode(parts[3]) ?: return null
                 val note = decode(parts[4]) ?: return null
                 // Заявки старого образца приходили без slug — считаем его пустым.
-                val slug = if (parts.size == 6) decode(parts[5]).orEmpty() else ""
-                if (name.isBlank()) null else Packet.JoinRequest(groupId, name, note, slug)
+                val slug = if (parts.size >= 6) decode(parts[5]).orEmpty() else ""
+                val requestedAt = if (parts.size == 7) parts[6].toLongOrNull() ?: return null else 0L
+                if (name.isBlank()) null else Packet.JoinRequest(groupId, name, note, slug, requestedAt)
             } else {
                 null
             }
@@ -1970,6 +2007,25 @@ object GroupWire {
             KIND_TOPICS -> if (parts.size == 4) {
                 val entries = parseTopics(parts[3]) ?: return null
                 Packet.Topics(groupId, entries)
+            } else {
+                null
+            }
+
+            KIND_JOIN_STATUS -> if (parts.size == 4 && parts[3].isNotBlank()) {
+                Packet.JoinStatusQuery(groupId, parts[3])
+            } else {
+                null
+            }
+
+            KIND_JOIN_INFO -> if (parts.size == 9) {
+                val requesterId = parts[3]
+                val title = decode(parts[4]) ?: return null
+                val count = parts[5].toIntOrNull() ?: return null
+                val channel = when (parts[6]) { "1" -> true; "0" -> false; else -> return null }
+                val ownerName = decode(parts[7]) ?: return null
+                val created = parts[8].toLongOrNull() ?: return null
+                if (requesterId.isBlank() || count < 0) null
+                else Packet.JoinInfo(groupId, requesterId, title, count, channel, ownerName, created)
             } else {
                 null
             }
