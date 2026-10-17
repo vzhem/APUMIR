@@ -44,6 +44,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import com.vladimir.messenger.ui.components.ApuPremiumIconTile
+import com.vladimir.messenger.ui.components.ApuSettingsCard
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Settings
