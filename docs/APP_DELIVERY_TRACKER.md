@@ -31,6 +31,9 @@
    `gh workflow run build-release.yml --ref arena/27f670ff-apumir`
    Workflow при `workflow_dispatch` собирает APK, запускает unit-тесты и кладёт APK в артефакт.
    Публикация при этом запрещена самим workflow.
+   ВНИМАНИЕ (2026-10-17): из песочницы этот запуск даёт HTTP 403 «Resource not accessible by integration».
+   Тег для обхода не создавать (тег публикует релиз). Нужен запуск владельцем: GitHub → Actions →
+   «Build Release APK» → Run workflow → ветка `arena/27f670ff-apumir`. Попросить владельца так сделать.
 2. Дождаться результата: `gh run list --workflow=build-release.yml --limit 3`, затем `gh run view <id> --log-failed`.
 3. Если сборка упала, исправить ошибку в ветке и повторить п. 1. Не выпускать релиз с красной сборкой.
 4. Если сборка зелёная, проверить на телефоне по чек-листу ниже и записать результат в таблицу выше.
