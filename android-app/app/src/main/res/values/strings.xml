@@ -1811,4 +1811,41 @@
     <string name="heart_game_you_place">Вы — %1$d место</string>
     <string name="heart_game_place">Место %1$d</string>
     <string name="heart_game_my_place">Ваше место: %1$d · ♥ %2$d</string>
+
+    <!-- Мои заявки на вступление -->
+    <string name="groups_my_requests_groups">Мои заявки в группы</string>
+    <string name="groups_my_requests_channels">Мои заявки в каналы</string>
+    <string name="my_join_title_groups">Заявки в группы</string>
+    <string name="my_join_title_channels">Заявки в каналы</string>
+    <string name="my_join_filter_all">Все</string>
+    <string name="my_join_filter_pending">Ждут ответа</string>
+    <string name="my_join_filter_approved">Одобрены</string>
+    <string name="my_join_filter_rejected">Отклонены</string>
+    <string name="my_join_status_approved">Одобрено</string>
+    <string name="my_join_status_rejected">Отклонено</string>
+    <string name="my_join_status_sending">Владелец не в сети</string>
+    <string name="my_join_status_received">Владелец получил</string>
+    <string name="my_join_status_expired">Не доставлено</string>
+    <string name="my_join_kind_group">Группа</string>
+    <string name="my_join_kind_channel">Канал</string>
+    <string name="my_join_step_sent">Отправлена</string>
+    <string name="my_join_step_received">Получена</string>
+    <string name="my_join_step_decided">Ответ</string>
+    <string name="my_join_step_waiting">ждём</string>
+    <string name="my_join_created">Создана %1$s</string>
+    <string name="my_join_owner">Владелец: %1$s</string>
+    <string name="my_join_note">Ваше сообщение: %1$s</string>
+    <string name="my_join_untitled">Название придёт, когда владелец получит заявку</string>
+    <string name="my_join_retry_until">Телефон будет досылать заявку до %1$s</string>
+    <string name="my_join_expired_hint">Срок досылки истёк. Отправьте ссылку на вступление заново.</string>
+    <string name="my_join_resend">Отправить снова</string>
+    <string name="my_join_cancel">Отменить заявку</string>
+    <string name="my_join_cancel_title">Отменить заявку?</string>
+    <string name="my_join_cancel_body">Заявка перестанет досылаться и исчезнет у владельца, если он ещё не ответил.</string>
+    <string name="my_join_keep">Оставить</string>
+    <string name="my_join_remove">Убрать</string>
+    <string name="my_join_open">Открыть</string>
+    <string name="my_join_resent">Заявка снова отправлена</string>
+    <string name="my_join_empty_title">Заявок пока нет</string>
+    <string name="my_join_empty_body">Здесь появятся заявки на вступление: отправленные, полученные владельцем и с ответом.</string>
 </resources>

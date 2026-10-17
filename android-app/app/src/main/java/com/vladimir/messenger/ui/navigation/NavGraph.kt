@@ -57,6 +57,7 @@ import com.vladimir.messenger.ui.screens.mtproxy.MtProxyListScreen
 import com.vladimir.messenger.ui.screens.share.ShareProfileScreen
 import com.vladimir.messenger.ui.screens.qr.QrScannerScreen
 import com.vladimir.messenger.ui.screens.groups.GroupsScreen
+import com.vladimir.messenger.ui.screens.groups.MyJoinRequestsScreen
 import com.vladimir.messenger.ui.screens.groups.GroupChatScreen
 import com.vladimir.messenger.ui.screens.groups.GroupAdminScreen
 import com.vladimir.messenger.ui.screens.channels.ChannelScreen
@@ -199,6 +200,12 @@ sealed class Screen(val route: String) {
     data object GroupAdmin : Screen("group_admin/{groupId}") {
         fun createRoute(groupId: String): String =
             "group_admin/" + java.net.URLEncoder.encode(groupId, "UTF-8")
+    }
+
+    /** «Мои заявки»: отдельно для групп и отдельно для каналов. */
+    data object MyJoinRequests : Screen("my_join_requests/{kind}") {
+        fun createRoute(channels: Boolean): String =
+            "my_join_requests/" + if (channels) "channels" else "groups"
     }
 
     // Экран звонка: peerId заполнен = исходящий, пустой = нас позвали на входящий.
@@ -784,8 +791,28 @@ fun MessengerNavGraph(
                 onGroupAdminClick = { groupId ->
                     navController.navigate(Screen.GroupAdmin.createRoute(groupId))
                 },
+                onMyRequestsClick = { channels ->
+                    navController.navigate(Screen.MyJoinRequests.createRoute(channels))
+                },
                 joinLink = entry.arguments?.getString("joinLink"),
                 create = entry.arguments?.getString("create"),
+            )
+        }
+
+        composable(
+            route = Screen.MyJoinRequests.route,
+            arguments = listOf(
+                navArgument("kind") { type = NavType.StringType },
+            ),
+        ) { entry ->
+            MyJoinRequestsScreen(
+                channels = entry.arguments?.getString("kind") == "channels",
+                onBackClick = { navController.popBackStack() },
+                onOpenCommunity = { groupId, isChannel ->
+                    navController.navigate(
+                        if (isChannel) Screen.Channel.createRoute(groupId) else Screen.GroupChat.createRoute(groupId),
+                    )
+                },
             )
         }
 

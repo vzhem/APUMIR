@@ -5,6 +5,7 @@ import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.group.GroupDelivery
 import com.vladimir.messenger.data.group.GroupJoinOutbox
+import com.vladimir.messenger.data.group.MyJoinRequestStore
 import com.vladimir.messenger.data.group.GroupRepository
 import com.vladimir.messenger.data.group.GroupRouter
 import com.vladimir.messenger.data.group.PerMemberFanoutDelivery
@@ -128,6 +129,7 @@ object GroupsModule {
         deletionOutbox: com.vladimir.messenger.data.repository.DeletionOutbox,
         // Заявки на вступление: хранятся на телефоне и досылаются помпой.
         joinOutbox: GroupJoinOutbox,
+        myJoinStore: MyJoinRequestStore,
         @ApplicationContext context: Context,
     ): GroupRepository = GroupRepository(
         groupDao = groupDao,
@@ -189,6 +191,7 @@ object GroupsModule {
         // Раунд 137: очередь «удалить у всех» - команда хранится и досылается.
         deletionOutbox = deletionOutbox,
         joinOutbox = joinOutbox,
+        myJoinStore = myJoinStore,
         // Файлы группы роем (этап 9). Через Provider: рой сам шлёт пакеты
         // через GroupDelivery и качает через FileTransferRouter, а репозиторий
         // лишь передаёт ему просьбы - кольца зависимостей так нет.
@@ -286,6 +289,11 @@ object GroupsModule {
     @Singleton
     fun provideGroupJoinOutbox(@ApplicationContext context: Context): GroupJoinOutbox =
         GroupJoinOutbox(File(context.noBackupFilesDir, "group-join-outbox"))
+
+    @Provides
+    @Singleton
+    fun provideMyJoinRequestStore(@ApplicationContext context: Context): MyJoinRequestStore =
+        MyJoinRequestStore(File(context.noBackupFilesDir, "group-join-history"))
 }
 
 /** Раунд 180: последний сжатый аватар - чтобы не жечь ЦП на каждый whois. */

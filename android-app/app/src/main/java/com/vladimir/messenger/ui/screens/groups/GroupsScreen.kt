@@ -42,6 +42,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import com.vladimir.messenger.ui.components.ApuPremiumIconTile
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Settings
@@ -142,6 +144,8 @@ fun GroupsScreen(
     onBackClick: () -> Unit,
     /** Управление группой: тот же экран, что и из меню на главной. */
     onGroupAdminClick: (groupId: String) -> Unit = {},
+    /** «Мои заявки»: true - заявки в каналы, false - в группы. */
+    onMyRequestsClick: (channels: Boolean) -> Unit = {},
     /** Ссылка-приглашение из QR или из внешнего открытия: сразу пробуем войти. */
     joinLink: String? = null,
     /** Из меню кнопки-карандаша: "group" или "channel" - сразу открыть создание. */
@@ -449,6 +453,12 @@ fun GroupsScreen(
 
                         // Свои группы и каналы - тоже раздельно: это разные вещи,
                         // и в поиске их надо различать с одного взгляда.
+                        item(key = "my-requests-groups") {
+                            MyRequestsEntry(
+                                title = stringResource(R.string.groups_my_requests_groups),
+                                onClick = { onMyRequestsClick(false) },
+                            )
+                        }
                         if (myGroups.isNotEmpty()) {
                             item(key = "head-my-groups") {
                                 DirectoryHeaderCounted(stringResource(R.string.groups_my_groups), myGroups.size)
@@ -469,6 +479,12 @@ fun GroupsScreen(
                                     ),
                                 )
                             }
+                        }
+                        item(key = "my-requests-channels") {
+                            MyRequestsEntry(
+                                title = stringResource(R.string.groups_my_requests_channels),
+                                onClick = { onMyRequestsClick(true) },
+                            )
                         }
                         if (myChannels.isNotEmpty()) {
                             item(key = "head-my-channels") {
@@ -1469,4 +1485,32 @@ private fun groupMenuActions(
             onClick = onLeaveOrDelete,
         )
     )
+}
+
+/** Строка входа в «Мои заявки»: карточка с иконкой и стрелкой, как у других разделов списка. */
+@Composable
+private fun MyRequestsEntry(title: String, onClick: () -> Unit) {
+    ApuSettingsCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .clickable(onClick = onClick),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ApuPremiumIconTile(icon = Icons.Filled.PersonAdd, size = 40.dp)
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = ApuBubbleTextColor,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = null,
+                tint = ApuBubbleMutedColor,
+            )
+        }
+    }
 }
