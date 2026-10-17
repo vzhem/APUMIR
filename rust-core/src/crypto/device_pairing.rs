@@ -291,6 +291,7 @@ pub fn primary_handle_request(request: &[u8], now_ms: i64) -> Result<PrimaryAnsw
     let answer_tag = answer_mac(&offer.secret, &transcript)?;
 
     let mut answer = vec![PAIRING_FORMAT_V1, MSG_ANSWER];
+    answer.extend_from_slice(&device_id);
     answer.extend_from_slice(&nonce_p);
     answer.extend_from_slice(&eph_p_pub);
     answer.extend_from_slice(&answer_tag);
@@ -359,6 +360,7 @@ pub fn primary_confirm(
         )
         .map_err(|_| PairingError::Crypto("seal".into()))?;
     let mut grant = vec![PAIRING_FORMAT_V1, MSG_GRANT];
+    grant.extend_from_slice(&session.device_id);
     grant.extend_from_slice(&ciphertext);
     Ok(PrimaryGrant { grant, certificate })
 }
@@ -423,6 +425,7 @@ pub fn joiner_start(
 /// New device: verify the primary's answer and return the code to show.
 pub fn joiner_handle_answer(answer: &[u8], now_ms: i64) -> Result<String, PairingError> {
     let mut parsed = Parsed::new(answer, MSG_ANSWER)?;
+    let target: [u8; DEVICE_ID_BYTES] = parsed.take(DEVICE_ID_BYTES)?.try_into().unwrap();
     let nonce_p = parsed.take(NONCE_BYTES)?.to_vec();
     let eph_p = parsed.take(KEY_BYTES)?.to_vec();
     let tag = parsed.take(32)?.to_vec();
@@ -430,6 +433,9 @@ pub fn joiner_handle_answer(answer: &[u8], now_ms: i64) -> Result<String, Pairin
 
     let mut guard = JOINER.lock().map_err(|_| PairingError::Malformed)?;
     let state = guard.as_mut().ok_or(PairingError::UnknownSession)?;
+    if target != state.device_id {
+        return Err(PairingError::AuthFailed);
+    }
     check_offer_time(state.expires_at_ms, now_ms)?;
     let eph_n_pub = state.eph_n.public_key().0.to_vec();
     let transcript = Transcript::new(
@@ -463,9 +469,13 @@ pub fn joiner_handle_answer(answer: &[u8], now_ms: i64) -> Result<String, Pairin
 /// New device: the user confirmed the code. Open the grant and return the device certificate bytes.
 pub fn joiner_accept_grant(grant: &[u8], now_ms: i64) -> Result<Vec<u8>, PairingError> {
     let mut parsed = Parsed::new(grant, MSG_GRANT)?;
+    let target: [u8; DEVICE_ID_BYTES] = parsed.take(DEVICE_ID_BYTES)?.try_into().unwrap();
     let ciphertext = parsed.rest().to_vec();
     let mut guard = JOINER.lock().map_err(|_| PairingError::Malformed)?;
     let state = guard.as_ref().ok_or(PairingError::UnknownSession)?;
+    if target != state.device_id {
+        return Err(PairingError::AuthFailed);
+    }
     check_offer_time(state.expires_at_ms, now_ms)?;
     let root = state.root.ok_or(PairingError::UnknownSession)?;
     let enc_key = derive_enc_key(&root, &state.transcript)?;
@@ -662,11 +672,26 @@ mod tests {
         let answer = primary_handle_request(&request, 0).unwrap();
         let mut attacker_answer = answer.answer.clone();
         let attacker_eph = X25519KeyPair::generate().public_key().0;
-        attacker_answer[2 + 32..2 + 32 + 32].copy_from_slice(&attacker_eph);
+        // Layout: format | type | device_id(16) | nonce_p(32) | eph_p(32) | tag(32).
+        attacker_answer[2 + 16 + 32..2 + 16 + 32 + 32].copy_from_slice(&attacker_eph);
         assert_eq!(
             joiner_handle_answer(&attacker_answer, 0),
             Err(PairingError::AuthFailed)
         );
+        joiner_cancel();
+        close_pairing_offer();
+    }
+
+    #[test]
+    fn answer_addressed_to_another_device_is_ignored() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let joiner = device(48);
+        let offer = open_pairing_offer(LEGACY, &account().public_key().0, 0).unwrap();
+        let request = joiner_start(&offer, &[10u8; 16], &joiner.public_key().0, 0).unwrap();
+        let mut answer = primary_handle_request(&request, 0).unwrap().answer;
+        // Address the answer to another device id; the joiner must refuse it outright.
+        answer[2..18].copy_from_slice(&[11u8; 16]);
+        assert_eq!(joiner_handle_answer(&answer, 0), Err(PairingError::AuthFailed));
         joiner_cancel();
         close_pairing_offer();
     }
