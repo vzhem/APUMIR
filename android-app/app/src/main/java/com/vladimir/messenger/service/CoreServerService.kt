@@ -308,6 +308,15 @@ class CoreServerService : Service() {
         authenticated: Boolean = false,
     ): Boolean {
         if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, authenticated)) return true
+        // P3: пакеты подключения устройств разбираем и на запасном пути приёма.
+        // У устройств одного аккаунта общий nodeId, поэтому «отправитель = я»
+        // здесь не признак мусора: кто именно из устройств прислал пакет,
+        // ядро определяет по device_id и MAC внутри пакета.
+        if (com.vladimir.messenger.data.pairing.DevicePairingWire.isPacket(text)) {
+            com.vladimir.messenger.data.pairing.DevicePairingController
+                .routeIncoming(applicationContext, senderId, text)
+            return true
+        }
         // р243/р244: подтверждение доставки, пришедшее прямым каналом. Второй
         // путь приёма обязан разбирать его так же, как основной: иначе строка
         // «ack|…» вырастет в личный чат. Даже некорректный ACK с зарезервированным
@@ -2940,6 +2949,16 @@ class CoreServerService : Service() {
         // K3: шаг опроса, пока события приходят пучком (идёт файл): кусок
         // не ждёт следующего полного цикла, ACK-окно отправителя движется.
         private const val BUSY_POLL_INTERVAL_MS = 100L
+        private const val BUSY_BATCH = 8
+        /** Под каким именем нас уже записал справочник. */
+        private const val REGISTRY_NAME_KEY = "registry_registered_name"
+        /** Когда записал. */
+        private const val REGISTRY_AT_KEY = "registry_registered_at"
+        /** Повторяем запись не чаще раза в неделю. */
+        private const val REGISTRY_REFRESH_MS = 7L * 24 * 60 * 60 * 1000
+    }
+}
+0L
         private const val BUSY_BATCH = 8
         /** Под каким именем нас уже записал справочник. */
         private const val REGISTRY_NAME_KEY = "registry_registered_name"

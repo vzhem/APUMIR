@@ -105,7 +105,7 @@ object DevicePairingController {
         val now = System.currentTimeMillis()
         try {
             when (packet.kind) {
-                DevicePairingWire.KIND_REQUEST -> onRequest(senderId, packet.bytes, now)
+                DevicePairingWire.KIND_REQUEST -> onRequest(context, senderId, packet.bytes, now)
                 DevicePairingWire.KIND_ANSWER -> onAnswer(packet.bytes, now)
                 DevicePairingWire.KIND_GRANT -> onGrant(context, packet.bytes, now)
                 DevicePairingWire.KIND_SYNC -> onSync(context, packet.bytes)
