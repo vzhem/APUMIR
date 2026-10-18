@@ -2958,13 +2958,3 @@ class CoreServerService : Service() {
         private const val REGISTRY_REFRESH_MS = 7L * 24 * 60 * 60 * 1000
     }
 }
-0L
-        private const val BUSY_BATCH = 8
-        /** Под каким именем нас уже записал справочник. */
-        private const val REGISTRY_NAME_KEY = "registry_registered_name"
-        /** Когда записал. */
-        private const val REGISTRY_AT_KEY = "registry_registered_at"
-        /** Повторяем запись не чаще раза в неделю. */
-        private const val REGISTRY_REFRESH_MS = 7L * 24 * 60 * 60 * 1000
-    }
-}
