@@ -379,6 +379,9 @@ interface GroupDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertJoinRequest(request: GroupJoinRequestEntity)
 
+    @Query("DELETE FROM group_join_requests WHERE groupId = :groupId AND nodeId = :nodeId")
+    suspend fun deleteJoinRequest(groupId: String, nodeId: String)
+
     @Query(
         "UPDATE group_join_requests SET status = :status, decidedAtMs = :decidedAtMs, " +
             "decidedBy = :decidedBy WHERE groupId = :groupId AND nodeId = :nodeId"

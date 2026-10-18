@@ -305,4 +305,54 @@ class GroupInviteLinksTest {
     fun `foreign https host is not an invite`() {
         assertNull(GroupInviteLinks.parseTarget("https://example.com/i?slug=Abcdefghijkmnopq&g=grp-1&o=pk_owner"))
     }
+
+
+    /** Название владельца едет в ссылке и приходит к вступающему без посредников. */
+    @Test
+    fun titleSurvivesLinkRoundTrip() {
+        val title = "Группа «Альфа» & друзья"
+        val link = GroupInviteLinks.build(
+            slug = "Abcdefghijkmnopq",
+            groupId = "grp-1",
+            ownerId = "pk_owner",
+            title = title,
+        )
+        assertFalse("пробелы в ссылке не допускаются", link.contains(' '))
+        assertEquals(title, GroupInviteLinks.parseTarget(link)?.title)
+    }
+
+    /** Длинное название режется до 40 символов, ссылка остаётся рабочей. */
+    @Test
+    fun longTitleIsClippedButLinkStillParses() {
+        val link = GroupInviteLinks.build(
+            slug = "Abcdefghijkmnopq",
+            groupId = "grp-1",
+            ownerId = "pk_owner",
+            title = "я".repeat(60),
+        )
+        val target = GroupInviteLinks.parseTarget(link)
+        assertNotNull(target)
+        assertEquals(40, target!!.title!!.length)
+        assertEquals("grp-1", target.groupId)
+    }
+
+    /** Старая ссылка без названия разбирается как раньше: названия нет. */
+    @Test
+    fun legacyLinkHasNoTitle() {
+        val target = GroupInviteLinks.parseTarget("p2pmessenger://group?slug=Abcdefghijkmnopq&g=grp-1&o=pk_owner")
+        assertNotNull(target)
+        assertNull(target!!.title)
+    }
+
+    /** Веб-ссылка для пересылки тоже несёт название. */
+    @Test
+    fun webLinkCarriesTitle() {
+        val link = GroupInviteLinks.buildWebLink(
+            slug = "Abcdefghijkmnopq",
+            groupId = "grp-1",
+            ownerId = "pk_owner",
+            title = "Канал",
+        )
+        assertEquals("Канал", GroupInviteLinks.parseTarget(link)?.title)
+    }
 }

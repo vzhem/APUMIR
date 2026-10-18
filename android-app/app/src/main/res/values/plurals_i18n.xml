@@ -18,4 +18,23 @@
         <item quantity="many">%d сообщений</item>
         <item quantity="other">%d сообщения</item>
     </plurals>
+
+    <plurals name="my_join_requests_count">
+        <item quantity="one">%d заявка</item>
+        <item quantity="few">%d заявки</item>
+        <item quantity="many">%d заявок</item>
+        <item quantity="other">%d заявки</item>
+    </plurals>
+    <plurals name="my_join_members">
+        <item quantity="one">%d участник</item>
+        <item quantity="few">%d участника</item>
+        <item quantity="many">%d участников</item>
+        <item quantity="other">%d участника</item>
+    </plurals>
+    <plurals name="my_join_subscribers">
+        <item quantity="one">%d подписчик</item>
+        <item quantity="few">%d подписчика</item>
+        <item quantity="many">%d подписчиков</item>
+        <item quantity="other">%d подписчика</item>
+    </plurals>
 </resources>

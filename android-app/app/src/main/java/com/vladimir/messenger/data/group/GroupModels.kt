@@ -67,6 +67,28 @@ data class JoinRequestSummary(
     val requestedAtMs: Long,
 )
 
+/** Строка «Моих заявок»: всё, что известно абоненту о заявке и группе. */
+data class MyJoinRequestSummary(
+    val groupId: String,
+    val title: String,
+    val isChannel: Boolean,
+    val memberCount: Int,
+    val ownerName: String,
+    val groupCreatedAtMs: Long,
+    val note: String,
+    val requestedAtMs: Long,
+    /** PENDING | APPROVED | REJECTED - см. MyJoinRequestStore. */
+    val status: String,
+    val decidedAtMs: Long,
+    val ownerReceivedAtMs: Long,
+    /** Заявка ещё в очереди телефона и досылается. */
+    val queued: Boolean,
+    val queueAttempts: Int,
+    val lastTryMs: Long,
+    /** Когда очередь перестанет досылать заявку (0 - не в очереди). */
+    val expiresAtMs: Long,
+)
+
 data class InviteSummary(
     val slug: String,
     val groupId: String,

@@ -36,6 +36,12 @@ class HeartGameContracts(unittest.TestCase):
         self.assertIn('HeartGameStore.board(context, id)', header)
         self.assertIn('HeartGameStore.score(context, id)', header)
 
+    def test_leaderboard_numbers_top_100_and_pins_own_place(self):
+        ui = (SRC / 'ui/components/HeartGameSettings.kt').read_text()
+        for text in ('take(100)', 'take(99)', '(100 to entries[ownIndex])', 'LazyColumn(', 'heart_game_you_place',
+                     'TextAlign.End', 'coerceIn(200f, 420f)'):
+            self.assertIn(text, ui)
+
     def test_private_account_scoped_score_and_opt_in(self):
         store = (SRC / 'data/heartgame/HeartGameStore.kt').read_text()
         self.assertIn('heart-game-v1-$id', store)
@@ -47,8 +53,29 @@ class HeartGameContracts(unittest.TestCase):
 
     def test_bounded_signed_network_not_fake_global_table(self):
         network = (SRC / 'data/heartgame/HeartGameNetwork.kt').read_text()
-        for text in ('verifyIdentitySigningBinding', 'MAX_PACKET', 'MAX_RECORDS', 'take(16)', '300_000', 'received > 60'):
+        for text in ('verifyIdentitySigningBinding', 'MAX_PACKET', 'MAX_RECORDS', 'MAX_TARGETS_PER_ROUND',
+                     'HeartSyncPolicy.isDue', 'HeartSyncPrefs.markGlobal', 'received > 60', 'canSendNow()'):
             self.assertIn(text, network)
+        # Синхронизация не зависит от включённой игры и не держит отсчёт в памяти.
+        self.assertNotIn('HeartGameStore.enabled', network)
+        self.assertNotIn('lastSend', network)
+
+    def test_sync_runs_when_game_disabled_and_rarely(self):
+        policy = (SRC / 'data/heartgame/HeartSyncPolicy.kt').read_text()
+        self.assertIn('const val SYNC_INTERVAL_MS = 6L * 60 * 60 * 1000', policy)
+        self.assertIn('fun isPhoneFree(', policy)
+        self.assertIn('fun newcomerAllowed(', policy)
+        prefs = (SRC / 'data/heartgame/HeartSyncPrefs.kt').read_text()
+        self.assertIn('last_global_ms', prefs)
+        self.assertIn('getSharedPreferences(PREFS', prefs)
+        core = (SRC / 'service/CoreServerService.kt').read_text()
+        self.assertIn('heartGameNetwork.broadcastIfNeeded()', core)
+        self.assertIn('heartGameNetwork.syncWithNewcomer(existing.id)', core)
+
+    def test_overlay_no_longer_broadcasts_every_minute(self):
+        ui = (SRC / 'ui/components/HeartGameOverlay.kt').read_text()
+        self.assertNotIn('broadcastIfNeeded', ui)
+        self.assertNotIn('delay(60_000)', ui)
         wire = (SRC / 'data/heartgame/HeartGameWire.kt').read_text()
         self.assertIn('Ed25519.verify', wire)
         self.assertIn('thenBy { it.keyId }', wire)

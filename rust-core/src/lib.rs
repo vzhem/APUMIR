@@ -128,6 +128,22 @@ impl P2PCoreHandle {
         self.inner.lock().unwrap().send_direct_payload(recipient_id, payload)
     }
 
+    /// P3: one pairing packet to one device of the account (by device key id).
+    pub fn send_pairing_payload(
+        &self,
+        recipient_node_id: String,
+        target_device_id: Vec<u8>,
+        payload: String,
+    ) -> bool {
+        let Ok(id) = pairing_device_id(&target_device_id) else {
+            return false;
+        };
+        self.inner
+            .lock()
+            .unwrap()
+            .send_pairing_payload(recipient_node_id, bytes_to_hex(&id), payload)
+    }
+
     /// K3: бинарный кусок файла по прямому QUIC-каналу (APUF-кадр).
     /// `true` = получатель подтвердил приём стрима; `false` = не удалось —
     /// вызывающий ждёт следующего цикла (передача не прерывается).
@@ -572,6 +588,197 @@ pub fn verify_identity_signing_binding(binding: Vec<u8>) -> bool {
 
 pub fn identity_signing_binding_matches_installed(binding: Vec<u8>) -> bool {
     crypto::signing_identity::identity_binding_matches_installed(&binding)
+}
+
+/// P2: the primary device issues a certificate for another device key (device_id is 16 bytes).
+/// Requires the installed account signing identity; the account key never leaves Rust.
+pub fn create_device_certificate(
+    device_id: Vec<u8>,
+    device_public_key: Vec<u8>,
+    created_at_ms: i64,
+) -> Result<Vec<u8>, CoreError> {
+    let id: [u8; 16] = device_id.as_slice().try_into().map_err(|_| CoreError::CryptoError {
+        detail: "device id must be 16 bytes".to_string(),
+    })?;
+    let identity = crypto::signing_identity::installed_signing_identity().ok_or_else(|| {
+        CoreError::CryptoError {
+            detail: "no installed account signing identity".to_string(),
+        }
+    })?;
+    identity
+        .issue_device_certificate(id, &device_public_key, created_at_ms)
+        .and_then(|cert| cert.to_bytes())
+        .map_err(|error| CoreError::CryptoError {
+            detail: error.to_string(),
+        })
+}
+
+/// P3: result of the primary device's answer to a pairing request.
+pub struct PrimaryPairingAnswer {
+    pub answer: Vec<u8>,
+    pub sas: String,
+    pub device_id: Vec<u8>,
+}
+
+/// P3: encrypted certificate grant for the new device, plus the certificate kept locally.
+pub struct PrimaryPairingGrant {
+    pub grant: Vec<u8>,
+    pub certificate: Vec<u8>,
+}
+
+fn pairing_error(error: crypto::device_pairing::PairingError) -> CoreError {
+    CoreError::CryptoError {
+        detail: error.to_string(),
+    }
+}
+
+fn pairing_device_id(bytes: &[u8]) -> Result<[u8; 16], CoreError> {
+    bytes.try_into().map_err(|_| CoreError::CryptoError {
+        detail: "device id must be 16 bytes".to_string(),
+    })
+}
+
+fn installed_account_identity() -> Result<std::sync::Arc<crypto::signing_identity::InstalledSigningIdentity>, CoreError> {
+    crypto::signing_identity::installed_signing_identity().ok_or_else(|| CoreError::CryptoError {
+        detail: "no installed account signing identity".to_string(),
+    })
+}
+
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// P3: the device key id of this installation (16 bytes). Set once at startup; not secret.
+pub fn set_local_device_id(device_id: Vec<u8>) {
+    match pairing_device_id(&device_id) {
+        Ok(id) => network::device_endpoints::set_local_device_id_hex(Some(bytes_to_hex(&id))),
+        Err(_) => network::device_endpoints::set_local_device_id_hex(None),
+    }
+}
+
+/// P3 primary: open a pairing offer (QR payload). Requires the installed account identity and
+/// the local device id (set_local_device_id), which the offer names as the request target.
+pub fn create_pairing_offer(now_ms: i64) -> Result<Vec<u8>, CoreError> {
+    let identity = installed_account_identity()?;
+    let local = network::device_endpoints::local_device_id_hex().ok_or_else(|| {
+        CoreError::CryptoError {
+            detail: "local device id is not set".to_string(),
+        }
+    })?;
+    let device_id = pairing_device_id(&hex_to_bytes(&local)?)?;
+    crypto::device_pairing::open_pairing_offer(
+        identity.legacy_routing_node_id(),
+        identity.public_key(),
+        &device_id,
+        now_ms,
+    )
+    .map_err(pairing_error)
+}
+
+/// P3 new device: the primary device id named in a scanned offer.
+pub fn pairing_offer_primary_device_id(offer: Vec<u8>) -> Result<Vec<u8>, CoreError> {
+    crypto::device_pairing::offer_primary_device_id(&offer)
+        .map(|id| id.to_vec())
+        .map_err(pairing_error)
+}
+
+fn hex_to_bytes(hex: &str) -> Result<Vec<u8>, CoreError> {
+    if hex.len() % 2 != 0 {
+        return Err(CoreError::CryptoError {
+            detail: "bad hex".to_string(),
+        });
+    }
+    (0..hex.len())
+        .step_by(2)
+        .map(|i| {
+            u8::from_str_radix(&hex[i..i + 2], 16).map_err(|_| CoreError::CryptoError {
+                detail: "bad hex".to_string(),
+            })
+        })
+        .collect()
+}
+
+pub fn close_pairing_offer() {
+    crypto::device_pairing::close_pairing_offer();
+}
+
+/// P3 primary: verify a request from a new device and return the answer and the code to show.
+pub fn primary_handle_pairing_request(
+    request: Vec<u8>,
+    now_ms: i64,
+) -> Result<PrimaryPairingAnswer, CoreError> {
+    let answer =
+        crypto::device_pairing::primary_handle_request(&request, now_ms).map_err(pairing_error)?;
+    Ok(PrimaryPairingAnswer {
+        answer: answer.answer,
+        sas: answer.sas,
+        device_id: answer.device_id.to_vec(),
+    })
+}
+
+/// P3 primary: the user confirmed the code on this device. Issues the certificate and grant.
+pub fn primary_confirm_pairing(
+    device_id: Vec<u8>,
+    now_ms: i64,
+) -> Result<PrimaryPairingGrant, CoreError> {
+    let id = pairing_device_id(&device_id)?;
+    let identity = installed_account_identity()?;
+    let granted = crypto::device_pairing::primary_confirm(&id, identity.account_key_pair(), now_ms)
+        .map_err(pairing_error)?;
+    let certificate = granted.certificate.to_bytes().map_err(|error| CoreError::CryptoError {
+        detail: error.to_string(),
+    })?;
+    Ok(PrimaryPairingGrant {
+        grant: granted.grant,
+        certificate,
+    })
+}
+
+/// P3 new device: start from a scanned offer. Returns the request to deliver to the account.
+pub fn joiner_start_pairing(
+    offer: Vec<u8>,
+    device_id: Vec<u8>,
+    device_public_key: Vec<u8>,
+    now_ms: i64,
+) -> Result<Vec<u8>, CoreError> {
+    let id = pairing_device_id(&device_id)?;
+    crypto::device_pairing::joiner_start(&offer, &id, &device_public_key, now_ms)
+        .map_err(pairing_error)
+}
+
+/// P3 new device: verify the primary's answer. Returns the six-digit code to show.
+pub fn joiner_handle_pairing_answer(answer: Vec<u8>, now_ms: i64) -> Result<String, CoreError> {
+    crypto::device_pairing::joiner_handle_answer(&answer, now_ms).map_err(pairing_error)
+}
+
+/// P3 new device: the user confirmed the code. Returns the verified device certificate bytes.
+pub fn joiner_accept_pairing_grant(grant: Vec<u8>, now_ms: i64) -> Result<Vec<u8>, CoreError> {
+    crypto::device_pairing::joiner_accept_grant(&grant, now_ms).map_err(pairing_error)
+}
+
+pub fn joiner_cancel_pairing() {
+    crypto::device_pairing::joiner_cancel();
+}
+
+/// P2: public key of a device key seed. The seed is zeroed before returning.
+pub fn device_public_key_from_seed(mut seed: Vec<u8>) -> Result<Vec<u8>, CoreError> {
+    let result = crypto::device_certificate::device_public_key_from_seed(&seed).map_err(|error| {
+        CoreError::CryptoError {
+            detail: error.to_string(),
+        }
+    });
+    seed.fill(0);
+    result
+}
+
+/// P2/P4: receiver-side check of a device certificate against the pinned account key.
+pub fn verify_device_certificate_bytes(cert: Vec<u8>, pinned_account_public_key: Vec<u8>) -> bool {
+    crypto::device_certificate::DeviceCertificateV1::from_bytes(&cert)
+        .map(|parsed| {
+            crypto::device_certificate::verify_device_certificate(&parsed, &pinned_account_public_key)
+                .is_ok()
+        })
+        .unwrap_or(false)
 }
 
 pub fn create_referral_invite_token(

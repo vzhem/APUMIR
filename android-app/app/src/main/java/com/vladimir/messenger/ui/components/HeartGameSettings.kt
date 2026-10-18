@@ -2,6 +2,8 @@ package com.vladimir.messenger.ui.components
 
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Favorite
@@ -12,9 +14,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.R
@@ -148,6 +152,12 @@ private fun HeartGameLeaderboard(id: String?, onDismiss: () -> Unit) {
         catch (_: Exception) { failed = true }
         finally { loading = false }
     }
+    val ownIndex = entries.indexOfFirst { it.keyId == ownKey }
+    val ownPlace = ownIndex + 1
+    val rows: List<Pair<Int, HeartGameWire.Entry>> =
+        if (ownIndex < 100) entries.take(100).mapIndexed { i, e -> (i + 1) to e }
+        else entries.take(99).mapIndexed { i, e -> (i + 1) to e } + (100 to entries[ownIndex])
+    val listHeight = (LocalConfiguration.current.screenHeightDp * 0.45f).coerceIn(200f, 420f).dp
     ApuSettingsDialog(onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.heart_game_leaders)) },
         confirmButton = { ApuTextAction(stringResource(R.string.heart_game_close), onClick = onDismiss) },
@@ -157,25 +167,34 @@ private fun HeartGameLeaderboard(id: String?, onDismiss: () -> Unit) {
                 if (loading) ApuPremiumSpinner()
                 if (failed) Text(stringResource(R.string.heart_game_save_error))
                 if (!loading && entries.none { it.keyId != ownKey }) Text(stringResource(R.string.heart_game_empty))
-                // Dialog provides a single bounded scroll container; cap visible top to 100.
-                entries.take(100).forEachIndexed { index, entry ->
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (index < 3) Icon(Icons.Default.EmojiEvents, stringResource(R.string.heart_game_place, index + 1),
-                            tint = listOf(Color(0xFFD9A329), Color(0xFF8B9CAD), Color(0xFFB77942))[index], modifier = Modifier.size(30.dp))
-                        else Text("${index + 1}.")
-                        Column(Modifier.weight(1f)) {
-                            Text(entry.name.ifBlank { entry.keyId.take(12) + "…" }, fontWeight = FontWeight.SemiBold)
-                            if (entry.keyId != ownKey) Text(entry.keyId.take(12) + "… · " +
-                                DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(entry.updated)),
-                                style = MaterialTheme.typography.labelSmall)
+                // Таблица на 100 мест. Если вы ниже 100-го, вы занимаете 100-ю строку
+                // с настоящим местом в подписи. Лента прокручивается внутри окна.
+                if (rows.isNotEmpty()) {
+                    LazyColumn(Modifier.fillMaxWidth().height(listHeight), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        items(rows, key = { it.first }) { (place, entry) ->
+                            val isMe = entry.keyId == ownKey
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text("$place", modifier = Modifier.width(36.dp), fontWeight = FontWeight.Bold,
+                                    textAlign = TextAlign.End)
+                                if (place <= 3) Icon(Icons.Default.EmojiEvents, stringResource(R.string.heart_game_place, place),
+                                    tint = listOf(Color(0xFFD9A329), Color(0xFF8B9CAD), Color(0xFFB77942))[place - 1],
+                                    modifier = Modifier.size(22.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(entry.name.ifBlank { entry.keyId.take(12) + "…" }, fontWeight = FontWeight.SemiBold)
+                                    if (isMe) {
+                                        Text(stringResource(R.string.heart_game_you_place, ownPlace),
+                                            style = MaterialTheme.typography.labelSmall, color = ApuBubbleAccentColor)
+                                    } else {
+                                        Text(entry.keyId.take(12) + "… · " +
+                                            DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(entry.updated)),
+                                            style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                Icon(Icons.Default.Favorite, null, tint = Color(0xFFFF537F), modifier = Modifier.size(16.dp))
+                                Text(entry.score.toString(), fontWeight = FontWeight.Bold)
+                            }
                         }
-                        Icon(Icons.Default.Favorite, null, tint = Color(0xFFFF537F), modifier = Modifier.size(16.dp))
-                        Text(entry.score.toString(), fontWeight = FontWeight.Bold)
                     }
-                }
-                if (entries.indexOfFirst { it.keyId == ownKey } >= 100) {
-                    Text(stringResource(R.string.heart_game_my_place, entries.indexOfFirst { it.keyId == ownKey } + 1,
-                        entries.first { it.keyId == ownKey }.score))
                 }
             }
         })

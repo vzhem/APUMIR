@@ -37,6 +37,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.Flow
@@ -44,6 +45,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.transform
 import java.time.Instant
 import java.time.ZoneOffset
@@ -189,6 +191,13 @@ class GroupRepository(
      * кто в сети).
      */
     private val deletionOutbox: com.vladimir.messenger.data.repository.DeletionOutbox? = null,
+    /**
+     * Очередь заявок на вступление: заявка хранится на телефоне и повторяется,
+     * пока владелец не ответит. null - хранилища нет (JVM-тесты): отправка одноразовая.
+     */
+    private val joinOutbox: GroupJoinOutbox? = null,
+    /** История «Моих заявок» на этом телефоне: что подано, когда, и чем закончилось. */
+    private val myJoinStore: MyJoinRequestStore? = null,
     /**
      * р250: опросы групп, тем и каналов.
      *
@@ -2315,6 +2324,221 @@ class GroupRepository(
     }
 
     /**
+     * Заявка на вступление: сначала в очередь телефона, потом первая попытка.
+     * Неудачная попытка не теряет заявку - помпа повторит её, когда адресат
+     * появится в сети (или через рой соседей).
+     */
+    private suspend fun sendJoinRequestDurable(
+        groupId: String,
+        displayName: String,
+        note: String,
+        slug: String,
+        recipients: List<String>,
+        isChannel: Boolean = false,
+        knownTitle: String = "",
+    ) {
+        val targets = recipients.filter { it.isNotBlank() }.distinct()
+        if (targets.isEmpty()) return
+        val me = myId() ?: return
+        val now = clock()
+        // История - лишь для экрана «Мои заявки». Её сбой не должен мешать отправке заявки.
+        runCatching {
+            myJoinStore?.upsert(
+                MyJoinRequestStore.Entry(
+                    groupId = groupId,
+                    title = knownTitle,
+                    isChannel = isChannel,
+                    note = note,
+                    requestedAtMs = now,
+                    recipients = targets,
+                )
+            )
+        }.onFailure { Log.w(TAG, "join history save failed: ${it.javaClass.simpleName}: ${it.message}") }
+        touchMyJoin()
+        // Свою копию храним на этом телефоне: видно, что заявка отправлена, и что с ней решили.
+        groupDao.insertJoinRequest(
+            GroupJoinRequestEntity(
+                groupId = groupId,
+                nodeId = me,
+                displayName = displayName,
+                note = note,
+                requestedAtMs = now,
+                status = "SENT",
+            )
+        )
+        joinOutbox?.put(GroupJoinOutbox.Entry(groupId, displayName, note, slug, targets, now, 0L, 0))
+        val envelope = GroupWire.buildJoinRequest(
+            groupId = groupId, displayName = displayName, note = note, slug = slug, requestedAtMs = now,
+        )
+        runCatching { delivery.deliver(groupId, envelope, targets) }
+        joinOutbox?.markTried(groupId, clock())
+    }
+
+    /** Ключи решений, которые этот телефон уже обработал или разослал (защита от кругов по рою). */
+    private val seenJoinDecisions = LinkedHashSet<String>()
+
+    /** Меняется при каждой правке истории заявок: экран «Мои заявки» перечитывает её. */
+    private val myJoinVersion = MutableStateFlow(0L)
+
+    private fun touchMyJoin() {
+        myJoinVersion.value = myJoinVersion.value + 1
+    }
+
+    /** Повтор заявки старше решения: её не возрождаем. Без времени (старый образец) - не отбрасываем. */
+    private fun isStaleJoinRequest(requestedAtMs: Long, decidedAtMs: Long?): Boolean =
+        requestedAtMs > 0L && decidedAtMs != null && requestedAtMs <= decidedAtMs
+
+    /** Решение владельца, которое этот телефон отправляет: помечаем ключ, чтобы не получить его эхо. */
+    private suspend fun broadcastJoinDecision(groupId: String, nodeId: String, approved: Boolean) {
+        val me = myId() ?: return
+        synchronized(seenJoinDecisions) { seenJoinDecisions.add("$groupId|$nodeId|$approved") }
+        relayJoinDecision(groupId, nodeId, approved, exclude = setOf(me))
+    }
+
+    /**
+     * Чужое решение по заявке: если я участник группы, обновляю свою копию заявки
+     * и передаю решение дальше - адресату и нескольким участникам. Каждый телефон
+     * ретранслирует одно решение один раз.
+     */
+    private suspend fun handleForeignDecision(packet: GroupWire.Packet.JoinDecision, senderId: String) {
+        val me = myId() ?: return
+        val key = "${packet.groupId}|${packet.nodeId}|${packet.approved}"
+        val fresh = synchronized(seenJoinDecisions) {
+            val added = seenJoinDecisions.add(key)
+            while (seenJoinDecisions.size > MAX_SEEN_JOIN_DECISIONS) {
+                seenJoinDecisions.remove(seenJoinDecisions.first())
+            }
+            added
+        }
+        if (!fresh) return
+        groupDao.getMember(packet.groupId, me) ?: return
+        // Свою копию заявки меняем только по решению от владельца или админа (ретрансляции
+        // случайных участников не меняют статус), но передаём дальше, как и раньше.
+        val senderMember = groupDao.getMember(packet.groupId, senderId)
+        val trustedSender = senderMember != null && GroupPermissions.canInvite(senderMember.role, senderMember.permissions, 0L)
+        if (trustedSender) groupDao.getJoinRequest(packet.groupId, packet.nodeId)?.takeIf { it.status == "PENDING" }?.let {
+            groupDao.updateJoinRequestStatus(
+                packet.groupId, packet.nodeId, if (packet.approved) "APPROVED" else "REJECTED", clock(), senderId,
+            )
+        }
+        relayJoinDecision(packet.groupId, packet.nodeId, packet.approved, exclude = setOf(me, senderId))
+    }
+
+    /** Решение уходит адресату и не больше чем трём участникам группы. */
+    private suspend fun relayJoinDecision(groupId: String, nodeId: String, approved: Boolean, exclude: Set<String>) {
+        val members = groupDao.getMembers(groupId)
+            .filter { !it.isBanned && it.nodeId !in exclude && it.nodeId != nodeId }
+            .map { it.nodeId }
+            .take(MAX_JOIN_DECISION_RELAY)
+        val targets = (listOf(nodeId) + members).filter { it.isNotBlank() && it !in exclude }.distinct()
+        if (targets.isEmpty()) return
+        runCatching { delivery.deliver(groupId, GroupWire.buildJoinDecision(groupId, nodeId, approved), targets) }
+    }
+
+    /** Снять свою заявку: очередь перестаёт её досылать, история и запись в базе удаляются. */
+    suspend fun cancelMyJoinRequest(groupId: String) {
+        val me = myId() ?: return
+        joinOutbox?.remove(groupId)
+        myJoinStore?.remove(groupId)
+        groupDao.deleteJoinRequest(groupId, me)
+        touchMyJoin()
+    }
+
+    /** Отправить заявку снова прямо сейчас (не дожидаясь помпы). false - заявки в очереди нет. */
+    suspend fun resendMyJoinRequest(groupId: String): Boolean {
+        val outbox = joinOutbox ?: return false
+        val entry = outbox.all().firstOrNull { it.groupId == groupId } ?: return false
+        val now = clock()
+        val envelope = GroupWire.buildJoinRequest(
+            groupId = entry.groupId,
+            displayName = entry.displayName,
+            note = entry.note,
+            slug = entry.slug,
+            requestedAtMs = entry.atMs,
+        )
+        runCatching { delivery.deliver(entry.groupId, envelope, entry.recipients) }
+        outbox.markTried(entry.groupId, now)
+        touchMyJoin()
+        return true
+    }
+
+    /** Мои заявки, новые сверху. Перечитываются при каждом изменении истории. */
+    fun observeMyJoinRequests(): Flow<List<MyJoinRequestSummary>> =
+        myJoinVersion.map { withContext(Dispatchers.IO) { loadMyJoinRequests() } }
+
+    private fun loadMyJoinRequests(): List<MyJoinRequestSummary> {
+        val store = myJoinStore ?: return emptyList()
+        val queued = joinOutbox?.all().orEmpty().associateBy { it.groupId }
+        return store.all().sortedByDescending { it.requestedAtMs }.map { e ->
+            val entry = queued[e.groupId]
+            MyJoinRequestSummary(
+                groupId = e.groupId,
+                title = e.title,
+                isChannel = e.isChannel,
+                memberCount = e.memberCount,
+                ownerName = e.ownerName,
+                groupCreatedAtMs = e.groupCreatedAtMs,
+                note = e.note,
+                requestedAtMs = e.requestedAtMs,
+                status = e.status,
+                decidedAtMs = e.decidedAtMs,
+                ownerReceivedAtMs = e.ownerReceivedAtMs,
+                queued = entry != null,
+                queueAttempts = entry?.attempts ?: 0,
+                lastTryMs = entry?.lastTryMs ?: 0L,
+                expiresAtMs = if (entry != null) entry.atMs + JOIN_TTL_MS else 0L,
+            )
+        }
+    }
+
+    /**
+     * Помпа заявок на вступление: досылает сохранённые заявки владельцам и
+     * администраторам, пока те не ответят. Заявка снимается, если абонент уже
+     * участник этой группы, или если срок хранения (7 дней) истёк.
+     */
+    /** Адресаты моей заявки: владелец и админы, которым я её отправлял. */
+    private fun isAddresseeOfMyRequest(groupId: String, nodeId: String): Boolean {
+        val stored = myJoinStore?.get(groupId)?.recipients.orEmpty()
+        val queued = joinOutbox?.all()?.firstOrNull { it.groupId == groupId }?.recipients.orEmpty()
+        return nodeId in stored || nodeId in queued
+    }
+
+    /** Спросить адресатов напрямую, решена ли моя заявка. Ответ придёт прямым решением. */
+    private suspend fun requestJoinStatus(groupId: String) {
+        val me = myId() ?: return
+        val stored = myJoinStore?.get(groupId)?.recipients.orEmpty()
+        val queued = joinOutbox?.all()?.firstOrNull { it.groupId == groupId }?.recipients.orEmpty()
+        val targets = (stored + queued).filter { it.isNotBlank() && it != me }.distinct()
+        if (targets.isEmpty()) return
+        runCatching { delivery.deliver(groupId, GroupWire.buildJoinStatusQuery(groupId, me), targets) }
+    }
+
+    suspend fun pumpJoinRequests() {
+        val outbox = joinOutbox ?: return
+        val now = clock()
+        val me = myId() ?: return
+        // Офлайн-заявки: при выходе в сеть спрашиваем адресатов, решены ли они.
+        myJoinStore?.all()
+            ?.filter { it.status == MyJoinRequestStore.PENDING && it.requestedAtMs + JOIN_TTL_MS > now }
+            ?.forEach { requestJoinStatus(it.groupId) }
+        for (entry in outbox.due(now, JOIN_RETRY_MS, JOIN_TTL_MS)) {
+            if (groupDao.getMember(entry.groupId, me) != null) {
+                outbox.remove(entry.groupId)
+                continue
+            }
+            val envelope = GroupWire.buildJoinRequest(
+                groupId = entry.groupId,
+                displayName = entry.displayName,
+                note = entry.note,
+                slug = entry.slug,
+                requestedAtMs = entry.atMs,
+            )
+            runCatching { delivery.deliver(entry.groupId, envelope, entry.recipients) }
+            outbox.markTried(entry.groupId, now)
+        }
+    }
+
+    /**
      * Раунд 137: досылка сохранённых «удалить у всех» из помпы сервиса.
      * Каждый круг - не больше двух адресатам, которых ещё не пробовали;
      * получатель, применив удаление, тоже ретранслирует, так что команда
@@ -3935,7 +4159,14 @@ class GroupRepository(
                 val mine = groupDao.getMember(packet.groupId, me) ?: return
                 if (!GroupPermissions.canInvite(mine.role, mine.permissions, 0L)) return
                 val existing = groupDao.getJoinRequest(packet.groupId, senderId)
-                if (existing != null && existing.status == "APPROVED") return
+                // Одобрен раньше, но уже не участник (вышел или исключён): это новая заявка.
+                // Раньше такая заявка молча пропадала здесь, и владелец её не видел.
+                if (existing != null && existing.status == "APPROVED" &&
+                    groupDao.getMember(packet.groupId, senderId) != null) return
+                // Повтор заявки, поданной ДО решения (телефон абонента досылает старую
+                // заявку из очереди): после отказа или выхода её не возрождаем.
+                if (existing != null && existing.status != "PENDING" &&
+                    isStaleJoinRequest(packet.requestedAtMs, existing.decidedAtMs)) return
                 val group = groupDao.getGroupById(packet.groupId) ?: return
                 val banned = groupDao.getMember(packet.groupId, senderId)?.isBanned == true
                 if (banned) {
@@ -3965,17 +4196,87 @@ class GroupRepository(
                             nodeId = senderId,
                             displayName = packet.displayName,
                             note = packet.note,
-                            requestedAtMs = clock(),
+                            requestedAtMs = if (packet.requestedAtMs > 0L) packet.requestedAtMs else clock(),
                         )
                     )
                     Log.i(TAG, "join request queued group=${packet.groupId} node=$senderId")
+                    // Карточка группы абоненту: он видит название и число участников, а владелец -
+                    // что заявка дошла. Одна отправка, без повторов: заявка всё равно повторяется у абонента.
+                    runCatching {
+                        delivery.deliver(
+                            packet.groupId,
+                            GroupWire.buildJoinInfo(
+                                packet.groupId, senderId, group.title, group.memberCount,
+                                group.isChannel, group.ownerName, group.createdAtMs,
+                            ),
+                            listOf(senderId),
+                        )
+                    }
                 }
             }
 
+            is GroupWire.Packet.JoinStatusQuery -> {
+                // Отвечаем только самому абоненту и только если сами решали заявку.
+                if (packet.requesterId != senderId) return
+                val mine = groupDao.getMember(packet.groupId, me) ?: return
+                if (!GroupPermissions.canInvite(mine.role, mine.permissions, 0L)) return
+                val decided = groupDao.getJoinRequest(packet.groupId, senderId)
+                    ?.takeIf { it.status == "APPROVED" || it.status == "REJECTED" } ?: return
+                runCatching {
+                    delivery.deliver(
+                        packet.groupId,
+                        GroupWire.buildJoinDecision(packet.groupId, senderId, decided.status == "APPROVED"),
+                        listOf(senderId),
+                    )
+                }
+            }
+
+            is GroupWire.Packet.JoinInfo -> {
+                if (packet.requesterId != me) return
+                val store = myJoinStore ?: return
+                val known = store.get(packet.groupId) ?: return
+                // Карточку принимаем только от тех, кому мы сами отправили заявку.
+                if (senderId !in known.recipients) return
+                store.update(packet.groupId) {
+                    it.copy(
+                        title = packet.title,
+                        isChannel = packet.isChannel,
+                        memberCount = packet.memberCount,
+                        ownerName = packet.ownerName,
+                        groupCreatedAtMs = packet.createdAtMs,
+                        ownerReceivedAtMs = if (it.ownerReceivedAtMs > 0L) it.ownerReceivedAtMs else clock(),
+                    )
+                }
+                touchMyJoin()
+            }
+
             is GroupWire.Packet.JoinDecision -> {
-                if (packet.nodeId != me) return
+                if (packet.nodeId != me) {
+                    // Чужая заявка: решение разносим по рою, свою копию заявки обновляем.
+                    handleForeignDecision(packet, senderId)
+                    return
+                }
+                // Решение принимаем только от владельца или админа, которому мы сами писали.
+                // Ретрансляцию от случайного участника не верим: спрашиваем адресатов напрямую.
+                if (!isAddresseeOfMyRequest(packet.groupId, senderId)) {
+                    requestJoinStatus(packet.groupId)
+                    return
+                }
+                // Владелец ответил: заявка больше не нужна, очередь её не досылает.
+                joinOutbox?.remove(packet.groupId)
+                val store = myJoinStore
+                if (store != null && store.get(packet.groupId)?.let { senderId in it.recipients } == true) {
+                    store.update(packet.groupId) { entry ->
+                        entry.copy(
+                            status = if (packet.approved) MyJoinRequestStore.APPROVED else MyJoinRequestStore.REJECTED,
+                            decidedAtMs = clock(),
+                        )
+                    }
+                    touchMyJoin()
+                }
                 if (packet.approved) {
                     val group = groupDao.getGroupById(packet.groupId) ?: return
+                    groupDao.updateJoinRequestStatus(packet.groupId, me, "APPROVED", clock(), senderId)
                     if (groupDao.getMember(packet.groupId, me) == null) {
                         groupDao.insertMember(
                             GroupMemberEntity(
@@ -4518,13 +4819,15 @@ class GroupRepository(
         val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
         val admins = groupDao.getAdmins(groupId)
         if (admins.isEmpty()) return Result.failure(IllegalStateException("В группе нет администраторов"))
-        val envelope = GroupWire.buildJoinRequest(
+        sendJoinRequestDurable(
             groupId = groupId,
             displayName = myDisplayName(),
             note = note.trim().take(MAX_NOTE_CHARS),
             slug = groupDao.getGroupById(groupId)?.inviteSlug.orEmpty(),
+            recipients = admins.map { it.nodeId }.filter { it != me },
+            isChannel = groupDao.getGroupById(groupId)?.isChannel == true,
+            knownTitle = groupDao.getGroupById(groupId)?.title.orEmpty(),
         )
-        delivery.deliver(groupId, envelope, admins.map { it.nodeId }.filter { it != me })
         return Result.success(Unit)
     }
 
@@ -4550,6 +4853,7 @@ class GroupRepository(
             val group = groupDao.getGroupById(groupId)
                 ?: return Result.failure(IllegalStateException("Группа не найдена"))
             admitMember(group, nodeId, request.displayName, slug = "")
+            broadcastJoinDecision(groupId, nodeId, true)
             // р250: новичок не знает медленного режима - конверт об изменении
             // он пропустил (его здесь не было). Говорим сразу, иначе режим
             // для него начался бы только со следующей правки настройки.
@@ -4565,11 +4869,7 @@ class GroupRepository(
                 }
             }
         } else {
-            delivery.deliver(
-                groupId,
-                GroupWire.buildJoinDecision(groupId, nodeId, false),
-                listOf(nodeId),
-            )
+            broadcastJoinDecision(groupId, nodeId, false)
         }
         return Result.success(Unit)
     }
@@ -4579,7 +4879,7 @@ class GroupRepository(
     fun observeInvites(groupId: String): Flow<List<InviteSummary>> =
         groupDao.observeInvites(groupId).transform { list ->
             val group = groupDao.getGroupById(groupId)
-            val plain = list.map { toInviteSummary(it, group?.ownerId, group?.isChannel == true) }
+            val plain = list.map { toInviteSummary(it, group?.ownerId, group?.isChannel == true, group?.title) }
             // Список - сразу, с основными ссылками; короткие ссылки для
             // пересылки - вторым заходом: за ними нужен сервис, и без сети
             // экран не должен ждать таймаута.
@@ -4596,6 +4896,7 @@ class GroupRepository(
         i: GroupInviteEntity,
         ownerId: String? = null,
         isChannel: Boolean = false,
+        title: String? = null,
     ) = InviteSummary(
         slug = i.slug,
         groupId = i.groupId,
@@ -4605,6 +4906,7 @@ class GroupRepository(
             ownerId = ownerId,
             isChannel = isChannel,
             requestApproval = i.requestApproval,
+            title = title,
         ),
         createdAtMs = i.createdAtMs,
         expiresAtMs = i.expiresAtMs,
@@ -4641,7 +4943,7 @@ class GroupRepository(
             requestApproval = requestApproval ?: !group.isPublic,
         )
         groupDao.insertInvite(entity)
-        return Result.success(toInviteSummary(entity, group.ownerId, group.isChannel))
+        return Result.success(toInviteSummary(entity, group.ownerId, group.isChannel, group.title))
     }
 
     suspend fun revokeInvite(groupId: String, slug: String): Result<Unit> {
@@ -4717,19 +5019,22 @@ class GroupRepository(
         val ownerId = target.ownerId.orEmpty()
         if (ownerId == me) return JoinOutcome.Failed("Это ваша группа")
 
-        val envelope = GroupWire.buildJoinRequest(
+        // Заявка лежит в очереди телефона: если владелец офлайн, помпа донесёт её позже.
+        sendJoinRequestDurable(
             groupId = groupId,
             displayName = myDisplayName(),
             note = note.trim().take(MAX_NOTE_CHARS),
             slug = target.slug,
+            recipients = listOf(ownerId),
+            isChannel = target.isChannel,
+            knownTitle = target.title.orEmpty(),
         )
-        delivery.deliver(groupId, envelope, listOf(ownerId))
-        Log.i(TAG, "join request sent to owner group=$groupId")
+        Log.i(TAG, "join request queued for owner group=$groupId")
         // Признаки берём из ссылки: своей базы с приглашением здесь нет, а
         // писать «заявка отправлена», когда владелец принимает сразу, - врать.
         return JoinOutcome.RequestSent(
             groupId = groupId,
-            title = "",
+            title = target.title.orEmpty(),
             isChannel = target.isChannel,
             needsApproval = target.needsApproval,
         )
@@ -5304,6 +5609,7 @@ class GroupRepository(
                 // Частная группа принимает по заявке: вступающий телефон должен
                 // честно написать «заявка отправлена».
                 requestApproval = !group.isPublic,
+                title = group.title,
             )
         )
     }
@@ -5366,6 +5672,7 @@ class GroupRepository(
                 ownerId = channel.ownerId,
                 isChannel = channel.isChannel,
                 postTopicId = topicId,
+                title = channel.title,
             )
         )
     }
@@ -5391,6 +5698,7 @@ class GroupRepository(
                 groupId = groupId,
                 ownerId = group.ownerId,
                 isChannel = group.isChannel,
+                title = group.title,
             )
         )
     }
@@ -5400,7 +5708,7 @@ class GroupRepository(
         val existing = groupDao.getInvites(groupId).firstOrNull {
             !it.revoked && !it.requestApproval && it.maxUses <= 0 && it.expiresAtMs == null
         }
-        if (existing != null) return toInviteSummary(existing, group.ownerId, group.isChannel)
+        if (existing != null) return toInviteSummary(existing, group.ownerId, group.isChannel, group.title)
         return createInvite(groupId, requestApproval = false).getOrNull()
     }
 
@@ -5962,6 +6270,14 @@ class GroupRepository(
 companion object {
         /** Раунд 137: как часто очередь пытается донести «удалить у всех». */
         const val DELETION_RETRY_MS = 10L * 60 * 1000
+
+        /** Заявки на вступление: повтор раз в 10 минут, хранение до 7 дней. */
+        const val JOIN_RETRY_MS = 10L * 60 * 1000
+        const val JOIN_TTL_MS = 7L * 24 * 60 * 60 * 1000
+
+        /** Сколько участников получают ретрансляцию решения по заявке с одного телефона. */
+        const val MAX_JOIN_DECISION_RELAY = 3
+        const val MAX_SEEN_JOIN_DECISIONS = 512
 
         /** Раунд 137: сколько хранить недоставленную команду (потом сгорает). */
         const val DELETION_TTL_MS = 7L * 24 * 60 * 60 * 1000

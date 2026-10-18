@@ -18,6 +18,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -55,6 +58,11 @@ class GroupsViewModel @Inject constructor(
     private val groupDao: GroupDao,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
+
+    /** Сколько заявок подано: первое число - в группы, второе - в каналы. Нужно, чтобы показывать раздел только при наличии заявок. */
+    val myRequestCounts: StateFlow<Pair<Int, Int>> = groupRepository.observeMyJoinRequests()
+        .map { list -> list.count { !it.isChannel } to list.count { it.isChannel } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0 to 0)
 
     private val _uiState = MutableStateFlow(GroupsUiState())
     val uiState: StateFlow<GroupsUiState> = _uiState.asStateFlow()

@@ -641,7 +641,7 @@ pub fn verified_referral_inviter_node_id(
     Ok(token.signed_invite.claims.inviter_node_id)
 }
 
-fn is_legacy_routing_node_id(value: &str) -> bool {
+pub(crate) fn is_legacy_routing_node_id(value: &str) -> bool {
     let Some(suffix) = value.strip_prefix("pk_") else {
         return false;
     };
@@ -649,6 +649,29 @@ fn is_legacy_routing_node_id(value: &str) -> bool {
         && suffix
             .bytes()
             .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+impl InstalledSigningIdentity {
+    /// Account key pair for issuing device certificates (P3). Never exported as bytes.
+    pub(crate) fn account_key_pair(&self) -> &Ed25519KeyPair {
+        &self.key_pair
+    }
+
+    /// Only the primary device holds the account key, so only it can issue device certificates.
+    pub fn issue_device_certificate(
+        &self,
+        device_id: [u8; 16],
+        device_public_key: &[u8],
+        created_at_ms: i64,
+    ) -> Result<crate::crypto::device_certificate::DeviceCertificateV1, crate::crypto::device_certificate::DeviceCertError> {
+        crate::crypto::device_certificate::issue_device_certificate(
+            &self.key_pair,
+            &self.legacy_routing_node_id,
+            device_id,
+            device_public_key,
+            created_at_ms,
+        )
+    }
 }
 
 #[cfg(test)]

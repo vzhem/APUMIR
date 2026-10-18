@@ -141,6 +141,7 @@ fun SettingsScreen(
     onPeerRatingClick: () -> Unit = {},
     /** Никнейм и пароль, которыми личность возвращается после переустановки. */
     onIdentityBackupClick: () -> Unit = {},
+    onDevicesClick: () -> Unit = {},
     /** Раунд 219: «Поддержать разработчика» (черновик). */
     onSupportClick: () -> Unit = {},
     /** «Написать разработчику»: открывает экран обратной связи. */
@@ -227,6 +228,7 @@ fun SettingsScreen(
                     onMtProxyClick = onMtProxyClick,
                     onPeerRatingClick = onPeerRatingClick,
                     onIdentityBackupClick = onIdentityBackupClick,
+                    onDevicesClick = onDevicesClick,
                     onProfileBackupClick = onProfileBackupClick,
                     onProfileClick = onProfileClick,
                     onSupportClick = onSupportClick,
@@ -768,6 +770,7 @@ private fun SettingsTabContent(
     onMtProxyClick: () -> Unit,
     onPeerRatingClick: () -> Unit = {},
     onIdentityBackupClick: () -> Unit = {},
+    onDevicesClick: () -> Unit = {},
     onProfileBackupClick: () -> Unit = {},
     onProfileClick: () -> Unit = {},
     /** Раунд 219: «Поддержать разработчика» (черновик). */
@@ -1154,6 +1157,13 @@ private fun SettingsTabContent(
                         // строка честно говорит, защищён человек или нет.
                         subtitle = stringResource(R.string.settings_identity_protection_hint),
                         onClick  = onIdentityBackupClick,
+                    )
+                    ApuSettingsDivider()
+                    SettingsItem(
+                        icon     = Icons.Default.Phone,
+                        title    = stringResource(R.string.settings_devices),
+                        subtitle = stringResource(R.string.settings_devices_hint),
+                        onClick  = onDevicesClick,
                     )
                     ApuSettingsDivider()
                     SettingsItem(

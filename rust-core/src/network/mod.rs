@@ -16,6 +16,7 @@
 //! - **adaptive_polling**  — экспоненциальный backoff (следующий этап)
 
 pub mod adaptive_polling;
+pub mod device_endpoints;
 pub mod address_lookup;
 pub mod connection_manager;
 pub mod custody_relay;

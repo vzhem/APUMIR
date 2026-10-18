@@ -517,7 +517,9 @@ class ChatDetailViewModel @Inject constructor(
                 return@launch
             }
             val outcome = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { groupRepository.joinByLink(expanded) }.getOrNull()
+                runCatching { groupRepository.joinByLink(expanded) }
+                    .onFailure { android.util.Log.w("ChatDetail", "invite join failed: ${it.javaClass.simpleName}: ${it.message}", it) }
+                    .getOrNull()
             }
             _inviteStatus.value = when (outcome) {
                 is com.vladimir.messenger.data.group.JoinOutcome.Joined ->
