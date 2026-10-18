@@ -117,10 +117,16 @@ object DevicePairingController {
         return true
     }
 
-    private fun onRequest(senderId: String, request: ByteArray, now: Long) {
+    private fun onRequest(context: Context, senderId: String, request: ByteArray, now: Long) {
         if (!offerOpen.value) return
         val answer = primaryHandlePairingRequest(request, now)
         val joinerDevice = answer.deviceId
+        // Эхо собственного запроса (брокер вернул наш же пакет, а у нас открыт
+        // свой QR): подключать телефон к самому себе нельзя.
+        if (joinerDevice.contentEquals(DeviceKeyStore.deviceId(context))) {
+            Log.d(TAG, "pairing request from own device ignored")
+            return
+        }
         val sent = RustBridge.sendPairingPayload(
             senderId,
             joinerDevice,
