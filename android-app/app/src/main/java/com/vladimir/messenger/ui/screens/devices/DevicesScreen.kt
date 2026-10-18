@@ -46,9 +46,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Multi-device pairing (P3). Two roles on one phone screen:
- * - primary: show a QR, compare the code with the new device, confirm;
- * - new device: scan the primary's QR, compare the code, confirm.
+ * Multi-device pairing (P3). Every phone can do both actions on one screen:
+ * - show a QR, compare the code with the other device, confirm;
+ * - scan the other phone's QR, compare the code, confirm.
+ * There is no fixed primary/new role here: the pressed button picks the direction.
  * The codes are the only trust step: the user checks them on both devices.
  */
 @Composable
@@ -61,7 +62,10 @@ fun DevicesScreen(
     val primary by DevicePairingController.primary.collectAsStateWithLifecycle()
     val joiner by DevicePairingController.joiner.collectAsStateWithLifecycle()
     val offerOpen by DevicePairingController.isOfferOpen.collectAsStateWithLifecycle()
+    val primaryDone by DevicePairingController.primaryDone.collectAsStateWithLifecycle()
     var qrText by remember { mutableStateOf<String?>(null) }
+    // Роли на этом экране нет: любой телефон и показывает, и сканирует QR.
+    // Кто сейчас «показывающий», а кто «сканирующий», определяет только нажатая кнопка.
     val qrBitmap = remember(qrText) { qrText?.let { QrCodeGenerator.generateQrCode(it, 800) } }
 
     DisposableEffect(Unit) {
@@ -91,9 +95,14 @@ fun DevicesScreen(
         }
 
         Spacer(Modifier.height(8.dp))
-        Text(stringResource(R.string.devices_primary_title), style = MaterialTheme.typography.titleMedium)
         Text(
-            stringResource(R.string.devices_primary_hint),
+            stringResource(R.string.devices_actions_hint),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(stringResource(R.string.devices_show_title), style = MaterialTheme.typography.titleMedium)
+        Text(
+            stringResource(R.string.devices_show_hint),
             style = MaterialTheme.typography.bodyMedium,
         )
         Spacer(Modifier.height(8.dp))
@@ -154,10 +163,15 @@ fun DevicesScreen(
         Spacer(Modifier.height(16.dp))
         HorizontalDivider()
         Spacer(Modifier.height(16.dp))
-        Text(stringResource(R.string.devices_joiner_title), style = MaterialTheme.typography.titleMedium)
-        Text(stringResource(R.string.devices_joiner_hint), style = MaterialTheme.typography.bodyMedium)
+        Text(stringResource(R.string.devices_scan_title), style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.devices_scan_hint), style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(8.dp))
         DevicesButton(label = stringResource(R.string.devices_scan_qr), onClick = onScanClick, modifier = Modifier.fillMaxWidth())
+
+        if (primaryDone) {
+            Spacer(Modifier.height(12.dp))
+            Text(stringResource(R.string.devices_done))
+        }
 
         joiner?.let { state ->
             Spacer(Modifier.height(12.dp))

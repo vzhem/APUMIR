@@ -10,6 +10,7 @@ use std::sync::Mutex;
 
 static LOCAL_DEVICE_ID: Mutex<Option<String>> = Mutex::new(None);
 static DEVICE_ENDPOINTS: Mutex<Option<HashMap<String, SocketAddr>>> = Mutex::new(None);
+static CONTACT_HINTS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 /// Lower-case hex of the 16-byte device id.
 pub fn set_local_device_id_hex(device_id_hex: Option<String>) {
@@ -35,6 +36,22 @@ pub fn device_endpoint(device_id_hex: &str) -> Option<SocketAddr> {
         .lock()
         .ok()
         .and_then(|guard| guard.as_ref().and_then(|map| map.get(&device_id_hex.to_ascii_lowercase()).copied()))
+}
+
+/// This device's own contact hints (socket addresses as text), printed into pairing QR
+/// offers so a scanning device can dial us directly. The engine refreshes them as the
+/// network changes; an empty list just means "no hint known yet".
+pub fn set_local_contact_hints(hints: Vec<String>) {
+    if let Ok(mut guard) = CONTACT_HINTS.lock() {
+        *guard = hints;
+    }
+}
+
+pub fn local_contact_hints() -> Vec<String> {
+    CONTACT_HINTS
+        .lock()
+        .map(|guard| guard.clone())
+        .unwrap_or_default()
 }
 
 /// Is this hex the id of the current device? An empty local id never matches.
@@ -63,5 +80,14 @@ mod tests {
         assert_eq!(device_endpoint("cc33"), None);
         set_local_device_id_hex(None);
         assert!(!is_local_device("aa11"));
+    }
+
+    #[test]
+    fn contact_hints_round_trip() {
+        let _guard = LOCK.lock().unwrap();
+        set_local_contact_hints(vec!["192.168.1.20:7777".to_string()]);
+        assert_eq!(local_contact_hints(), vec!["192.168.1.20:7777".to_string()]);
+        set_local_contact_hints(Vec::new());
+        assert!(local_contact_hints().is_empty());
     }
 }

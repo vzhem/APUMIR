@@ -626,6 +626,13 @@ pub struct PrimaryPairingGrant {
     pub certificate: Vec<u8>,
 }
 
+/// P3: the joiner's first step. `sas` is set when the scanned offer carried the whole
+/// handshake (format v2): the code is known at scan time, before any packet is delivered.
+pub struct JoinerPairingStart {
+    pub request: Vec<u8>,
+    pub sas: Option<String>,
+}
+
 fn pairing_error(error: crypto::device_pairing::PairingError) -> CoreError {
     CoreError::CryptoError {
         detail: error.to_string(),
@@ -671,6 +678,7 @@ pub fn create_pairing_offer(now_ms: i64) -> Result<Vec<u8>, CoreError> {
         identity.public_key(),
         &device_id,
         now_ms,
+        &network::device_endpoints::local_contact_hints(),
     )
     .map_err(pairing_error)
 }
@@ -680,6 +688,25 @@ pub fn pairing_offer_primary_device_id(offer: Vec<u8>) -> Result<Vec<u8>, CoreEr
     crypto::device_pairing::offer_primary_device_id(&offer)
         .map(|id| id.to_vec())
         .map_err(pairing_error)
+}
+
+/// P3: contact hints from a scanned offer (socket addresses as text). Empty for v1 offers.
+/// The scanning device dials these directly instead of waiting for LAN discovery.
+pub fn pairing_offer_contact_hints(offer: Vec<u8>) -> Result<Vec<String>, CoreError> {
+    crypto::device_pairing::offer_contact_hints(&offer).map_err(pairing_error)
+}
+
+/// P3: remember a direct LAN/public endpoint for one device of the account (from QR hints),
+/// so pairing packets to that device go straight to it.
+pub fn record_pairing_endpoint(device_id: Vec<u8>, address: String) -> bool {
+    let Ok(id) = pairing_device_id(&device_id) else {
+        return false;
+    };
+    let Ok(addr) = address.trim().parse::<std::net::SocketAddr>() else {
+        return false;
+    };
+    network::device_endpoints::record_device_endpoint(&bytes_to_hex(&id), addr);
+    true
 }
 
 fn hex_to_bytes(hex: &str) -> Result<Vec<u8>, CoreError> {
@@ -740,10 +767,14 @@ pub fn joiner_start_pairing(
     device_id: Vec<u8>,
     device_public_key: Vec<u8>,
     now_ms: i64,
-) -> Result<Vec<u8>, CoreError> {
+) -> Result<JoinerPairingStart, CoreError> {
     let id = pairing_device_id(&device_id)?;
-    crypto::device_pairing::joiner_start(&offer, &id, &device_public_key, now_ms)
-        .map_err(pairing_error)
+    let started = crypto::device_pairing::joiner_start(&offer, &id, &device_public_key, now_ms)
+        .map_err(pairing_error)?;
+    Ok(JoinerPairingStart {
+        request: started.request,
+        sas: started.sas,
+    })
 }
 
 /// P3 new device: verify the primary's answer. Returns the six-digit code to show.
@@ -758,6 +789,20 @@ pub fn joiner_accept_pairing_grant(grant: Vec<u8>, now_ms: i64) -> Result<Vec<u8
 
 pub fn joiner_cancel_pairing() {
     crypto::device_pairing::joiner_cancel();
+}
+
+/// P3: after the grant, seal the sync bootstrap text (mirror room token) for the paired
+/// device. Empty on failure (no completed pairing for that device).
+pub fn primary_seal_pairing_sync(device_id: Vec<u8>, text: String) -> Vec<u8> {
+    let Ok(id) = pairing_device_id(&device_id) else {
+        return Vec::new();
+    };
+    crypto::device_pairing::primary_seal_sync(&id, &text).unwrap_or_default()
+}
+
+/// P3: open a sync bootstrap packet from the granting device. Empty on failure.
+pub fn joiner_open_pairing_sync(packet: Vec<u8>) -> String {
+    crypto::device_pairing::joiner_open_sync(&packet).unwrap_or_default()
 }
 
 /// P2: public key of a device key seed. The seed is zeroed before returning.

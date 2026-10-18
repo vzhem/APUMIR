@@ -66,12 +66,17 @@ namespace p2p_core {
     [Throws=CoreError]
     PrimaryPairingGrant primary_confirm_pairing(bytes device_id, i64 now_ms);
     [Throws=CoreError]
-    bytes joiner_start_pairing(bytes offer, bytes device_id, bytes device_public_key, i64 now_ms);
+    JoinerPairingStart joiner_start_pairing(bytes offer, bytes device_id, bytes device_public_key, i64 now_ms);
+    [Throws=CoreError]
+    sequence<string> pairing_offer_contact_hints(bytes offer);
+    boolean record_pairing_endpoint(bytes device_id, string address);
     [Throws=CoreError]
     string joiner_handle_pairing_answer(bytes answer, i64 now_ms);
     [Throws=CoreError]
     bytes joiner_accept_pairing_grant(bytes grant, i64 now_ms);
     void joiner_cancel_pairing();
+    bytes primary_seal_pairing_sync(bytes device_id, string text);
+    string joiner_open_pairing_sync(bytes packet);
 
     // R1: signed direct-referral token bound to the persisted S3B identity binding.
     [Throws=CoreError]
@@ -348,4 +353,9 @@ dictionary PrimaryPairingAnswer {
 dictionary PrimaryPairingGrant {
     bytes grant;
     bytes certificate;
+};
+
+dictionary JoinerPairingStart {
+    bytes request;
+    string? sas;
 };

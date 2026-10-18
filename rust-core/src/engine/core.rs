@@ -1967,6 +1967,26 @@ impl P2PCore {
                 }
                 last_publish = std::time::Instant::now();
             }
+            // QR-подсказки: свои адреса (LAN + публичный) для офферов пэйринга,
+            // чтобы сканирующий телефон шёл сразу к нам, а не ждал обнаружения.
+            {
+                let mut hints: Vec<String> = if_addrs::get_if_addrs()
+                    .map(|ifaces| {
+                        ifaces
+                            .iter()
+                            .map(|iface| iface.ip())
+                            .filter(|ip| ip.is_ipv4() && !ip.is_loopback())
+                            .map(|ip| format!("{}:{}", ip, port))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if let Some(public) = public_addr.lock().unwrap().map(|a| a.to_string()) {
+                    if !hints.contains(&public) {
+                        hints.push(public);
+                    }
+                }
+                crate::network::device_endpoints::set_local_contact_hints(hints);
+            }
             match mdns.discover(Duration::from_secs(5)).await {
                 Err(e) => tracing::warn!("mDNS discover error: {}", e),
                 Ok(nodes) => {
