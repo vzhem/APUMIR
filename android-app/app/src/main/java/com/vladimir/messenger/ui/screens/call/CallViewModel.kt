@@ -49,4 +49,5 @@ class CallViewModel @Inject constructor(
     fun toggleCamera() = callManager.toggleCamera()
     fun micDenied() = callManager.onMicPermissionDenied()
     fun sendVideoFrame(packed: ByteArray) = callManager.sendVideoFrame(packed)
+    fun setScreenSharing(on: Boolean) = callManager.setScreenSharing(on)
 }

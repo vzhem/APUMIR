@@ -25,6 +25,8 @@ import androidx.compose.material.icons.filled.CallEnd
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.ScreenShare
+import androidx.compose.material.icons.filled.StopScreenShare
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material.icons.filled.VolumeUp
@@ -162,13 +164,38 @@ fun CallScreen(
         onDispose { view.keepScreenOn = false }
     }
 
+    // Демонстрация экрана: системное разрешение -> захват -> кадры тем же
+    // видео-путём, что камера.
+    val screenCapturer = remember {
+        ScreenShareCapturer(context.applicationContext) { viewModel.sendVideoFrame(it) }
+    }
+    val shareLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val data = result.data
+        if (result.resultCode == android.app.Activity.RESULT_OK && data != null) {
+            if (screenCapturer.start(result.resultCode, data)) viewModel.setScreenSharing(true)
+        }
+    }
+    fun stopScreenShare() {
+        screenCapturer.stop()
+        if (viewModel.uiState.value.screenSharing) viewModel.setScreenSharing(false)
+    }
+    DisposableEffect(state.screenSharing) {
+        if (!state.screenSharing) screenCapturer.stop()
+        onDispose { }
+    }
+    DisposableEffect(Unit) {
+        onDispose { screenCapturer.stop() }
+    }
+
     var frontCamera by remember { mutableStateOf(true) }
     val mediaLive = state.phase == CallStateMachine.Phase.CONNECTING ||
         state.phase == CallStateMachine.Phase.ACTIVE
     val inCall = state.phase != CallStateMachine.Phase.ENDED &&
         state.phase != CallStateMachine.Phase.IDLE
-    val showLocalCamera = state.video && state.cameraOn && cameraGranted && inCall
-    val showCameraOffPip = state.video && inCall && !showLocalCamera
+    val showLocalCamera = state.video && state.cameraOn && cameraGranted && inCall && !state.screenSharing
+    val showCameraOffPip = state.video && inCall && !showLocalCamera && !state.screenSharing
 
     Box(modifier = Modifier.fillMaxSize()) {
         ChatWallpaper()
@@ -291,12 +318,25 @@ fun CallScreen(
                             viewModel.toggleCamera()
                         }
                     },
+                    onScreenShare = {
+                        if (state.screenSharing) {
+                            stopScreenShare()
+                        } else {
+                            com.vladimir.messenger.service.CallService.startForScreenShare(context)
+                            val projectionManager = context.getSystemService(
+                                android.media.projection.MediaProjectionManager::class.java,
+                            )
+                            if (projectionManager != null) {
+                                shareLauncher.launch(projectionManager.createScreenCaptureIntent())
+                            }
+                        }
+                    },
                 )
 
                 Spacer(modifier = Modifier.height(72.dp))
             }
         }
-        if (showLocalCamera || showCameraOffPip) {
+        if (showLocalCamera || showCameraOffPip || state.screenSharing) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -459,6 +499,28 @@ private fun CameraCallButton(
             if (state.cameraOn) Icons.Default.Videocam else Icons.Default.VideocamOff,
             if (state.cameraOn) stringResource(R.string.call_camera_off) else stringResource(R.string.call_camera_on),
             tint = if (state.cameraOn) ApuBubbleMutedColor else Color.White,
+        )
+    }
+}
+
+@Composable
+private fun ScreenShareCallButton(
+    state: com.vladimir.messenger.data.call.CallManager.CallUiState,
+    onScreenShare: () -> Unit,
+) {
+    RoundCallButton(
+        background = if (state.screenSharing) MaterialTheme.colorScheme.primary
+        else Color(0xFFF5F7FA).copy(alpha = 0.95f),
+        description = if (state.screenSharing) stringResource(R.string.call_stop_share)
+        else stringResource(R.string.call_share_screen),
+        onClick = onScreenShare,
+    ) {
+        Icon(
+            if (state.screenSharing) Icons.Default.StopScreenShare else Icons.Default.ScreenShare,
+            if (state.screenSharing) stringResource(R.string.call_stop_share)
+            else stringResource(R.string.call_share_screen),
+            tint = if (state.screenSharing) MaterialTheme.colorScheme.onPrimary
+            else ApuBubbleMutedColor,
         )
     }
 }

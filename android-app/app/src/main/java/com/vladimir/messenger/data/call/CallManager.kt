@@ -75,6 +75,10 @@ class CallManager @Inject constructor(
         val video: Boolean = false,
         /** Свою камеру показываем собеседнику. */
         val cameraOn: Boolean = false,
+        /** Я показываю свой экран вместо камеры. */
+        val screenSharing: Boolean = false,
+        /** Собеседник показывает свой экран. */
+        val remoteScreen: Boolean = false,
     )
 
     private val _uiState = kotlinx.coroutines.flow.MutableStateFlow(CallUiState())
@@ -204,7 +208,7 @@ class CallManager @Inject constructor(
             is CallWire.Packet.Probe -> Unit
             is CallWire.Packet.MediaFlag -> synchronized(this) {
                 if (matchesCall(packet.callId)) {
-                    applyVideoFlag(packet.video)
+                    applyVideoFlag(packet.video, packet.screen)
                 } else if (!recentlyEnded.containsKey(packet.callId)) {
                     earlyVideo[packet.callId] = packet.video
                     trimEarly(earlyVideo)
@@ -510,7 +514,7 @@ class CallManager @Inject constructor(
                     is CallWire.Packet.Accept -> onAcceptPacket(sm.peerId, signal)
                     is CallWire.Packet.Reject -> feedMachine { it.onReject(signal.reason, nowMs()) }
                     is CallWire.Packet.Bye -> feedMachine { it.onBye(signal.reason, nowMs()) }
-                    is CallWire.Packet.MediaFlag -> applyVideoFlag(signal.video)
+                    is CallWire.Packet.MediaFlag -> applyVideoFlag(signal.video, signal.screen)
                     else -> Unit
                 }
             }
@@ -824,9 +828,43 @@ class CallManager @Inject constructor(
         return on
     }
 
+    /**
+     * Демонстрация экрана вкл/выкл (кнопка на экране звонка после системного
+     * разрешения захвата). Кадры экрана едут тем же видео-путём, что камера;
+     * собеседнику уходит флаг «s», чтобы он видел подпись «показывает экран».
+     * Демонстрация включает видеорежим, даже если звонок начинался голосовым.
+     */
+    fun setScreenSharing(on: Boolean) {
+        val sm = machine ?: return
+        if (sm.phase != CallStateMachine.Phase.CONNECTING &&
+            sm.phase != CallStateMachine.Phase.ACTIVE
+        ) return
+        if (on) videoWanted = true
+        val current = _uiState.value
+        _uiState.value = current.copy(
+            video = if (on) true else current.video,
+            screenSharing = on,
+            speaker = if (on && !current.video) true else current.speaker,
+        )
+        if (on && !current.video) {
+            sendSignal(
+                sm.peerId,
+                CallWire.mediaFlagMessageId(sm.callId),
+                CallWire.buildMediaFlag(sm.callId, video = true),
+            )
+        }
+        sendSignal(
+            sm.peerId,
+            CallWire.screenFlagMessageId(sm.callId, nowMs()),
+            CallWire.buildScreenFlag(sm.callId, on),
+        )
+    }
+
     /** JPEG-кадр локальной камеры (уже pack: rotation + jpeg). */
     fun sendVideoFrame(packed: ByteArray) {
-        if (!videoWanted || !_uiState.value.cameraOn || packed.isEmpty()) return
+        if (!videoWanted || (!_uiState.value.cameraOn && !_uiState.value.screenSharing) ||
+            packed.isEmpty()
+        ) return
         val crypto = sendVideoCrypto ?: return
         val sm = machine ?: return
         if (sm.phase != CallStateMachine.Phase.CONNECTING &&
@@ -1642,11 +1680,12 @@ class CallManager @Inject constructor(
         if (sm.phase == CallStateMachine.Phase.ENDED) scheduleIdleReset()
     }
 
-    private fun applyVideoFlag(video: Boolean) {
+    private fun applyVideoFlag(video: Boolean, screen: Boolean = false) {
         videoWanted = video
         val current = _uiState.value
         _uiState.value = current.copy(
             video = video,
+            remoteScreen = video && screen,
             cameraOn = if (video) current.cameraOn || !current.video else false,
             speaker = if (video && !current.video) true else current.speaker,
         )

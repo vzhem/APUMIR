@@ -171,6 +171,10 @@
     <string name="menu_video_call">Video call</string>
     <string name="call_flip_camera">Switch camera</string>
     <string name="call_camera_off">Turn camera off</string>
+        <string name="call_share_screen">Share screen</string>
+    <string name="call_stop_share">Stop sharing</string>
+    <string name="call_you_sharing">You are sharing your screen</string>
+    <string name="call_peer_sharing">Your partner is sharing their screen</string>
     <string name="call_camera_on">Turn camera on</string>
     <string name="menu_share_contact">Share contact</string>
     <string name="menu_unarchive">Restore from archive</string>
