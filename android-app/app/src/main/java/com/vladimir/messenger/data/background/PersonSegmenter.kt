@@ -41,11 +41,11 @@ object PersonSegmenter {
             Tasks.await(
                 segmenter.process(InputImage.fromBitmap(source, 0)),
                 5, TimeUnit.SECONDS,
-            ).mask
+            ).getMask()
         } catch (e: Exception) {
             available = false
             return source.copy(Bitmap.Config.ARGB_8888, false)
-        }
+        } ?: return source.copy(Bitmap.Config.ARGB_8888, false)
         return applyMask(source, background, mask)
     }
 
