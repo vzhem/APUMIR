@@ -39,6 +39,7 @@ import com.vladimir.messenger.ui.components.ApuDiagnosticsHero
 import com.vladimir.messenger.ui.components.ApuDiagnosticsPrivacyStrip
 import com.vladimir.messenger.ui.components.ApuDiagnosticsReportCard
 import com.vladimir.messenger.ui.components.ApuDiagnosticsStatusCard
+import com.vladimir.messenger.ui.components.ApuDiagnosticsWarningsCard
 import com.vladimir.messenger.ui.components.DiagnosticsActionIcons
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 import com.vladimir.messenger.ui.components.ApuSettingsItem
@@ -1672,6 +1673,9 @@ private fun SettingsTabContent(
     }
 
     if (showTransferLogsDialog) {
+        // «Нажал на предупреждения — сразу показал, какие»: карточка со списком
+        // разворачивается прямо под сводкой по нажатию на плашки в шапке.
+        var showDiagnosticsWarnings by remember { mutableStateOf(false) }
         val logsSnapshot = transferLogsSnapshot
         val reportText = logsSnapshot?.report.orEmpty()
         // Владелец 2026-10-07: «как то всё по пенсионерски и по деревенски…
@@ -1700,6 +1704,7 @@ private fun SettingsTabContent(
                         journalSize = logsSnapshot?.journalSize ?: 0,
                         warnCount = logsSnapshot?.warnCount ?: 0,
                         badCount = logsSnapshot?.badCount ?: 0,
+                        onWarningsClick = { showDiagnosticsWarnings = !showDiagnosticsWarnings },
                     )
                     // Ход работ и ошибка говорятся словами — окно никогда не
                     // молчит пустым экраном.
@@ -1727,6 +1732,14 @@ private fun SettingsTabContent(
                         }
                     } else {
                         ApuDiagnosticsStatusCard(lines = logsSnapshot?.statusLines.orEmpty())
+                    }
+                    // Сразу какие предупреждения: только внимание/поломки из
+                    // сводки и журнала, без чтения всего отчёта.
+                    if (showDiagnosticsWarnings && !transferLogsLoading) {
+                        ApuDiagnosticsWarningsCard(
+                            lines = logsSnapshot?.statusLines.orEmpty(),
+                            events = logsSnapshot?.events.orEmpty(),
+                        )
                     }
                     // Список событий — то, что человек называет «логи»: он виден
                     // сразу, как только пришла быстрая часть отчёта.
