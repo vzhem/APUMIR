@@ -50,4 +50,8 @@ class CallViewModel @Inject constructor(
     fun micDenied() = callManager.onMicPermissionDenied()
     fun sendVideoFrame(packed: ByteArray) = callManager.sendVideoFrame(packed)
     fun setScreenSharing(on: Boolean) = callManager.setScreenSharing(on)
+    fun setCaptions(on: Boolean) = callManager.setCaptions(on)
+
+    /** Строки живого текста звонка. */
+    val captionLines = callManager.captionLines
 }

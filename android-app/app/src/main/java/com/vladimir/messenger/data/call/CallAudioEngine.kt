@@ -42,6 +42,12 @@ class CallAudioEngine(context: Context) {
     private val appContext = context.applicationContext
     private val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
+    /** PCM-кадр нашего микрофона ДО шифрования — для живого текста звонка. */
+    @Volatile var onLocalPcm: ((ByteArray) -> Unit)? = null
+
+    /** PCM-кадр собеседника, который реально звучит в динамике, — для живого текста звонка. */
+    @Volatile var onRemotePcm: ((ByteArray) -> Unit)? = null
+
     /** Зашифрованный кадр нашего микрофона (codec = чем закодирован до шифрования), уходит в транспорт. */
     @Volatile var onOutgoingCipher: ((seq: Long, ptsMs: Long, codec: Int, cipher: ByteArray) -> Unit)? = null
 
@@ -229,6 +235,7 @@ class CallAudioEngine(context: Context) {
                 val ptsMs = seq * FRAME_MS
                 val crypto = sendCrypto ?: break
                 val plain = if (muted) ByteArray(FRAME_BYTES) else buf.copyOf()
+                onLocalPcm?.invoke(plain.copyOf())
                 val codec = outgoingCodec
                 val cipher = try {
                     val payload = if (codec == CallWire.CODEC_ADPCM_16K) adpcmEncoder.encodeFrame(plain) else plain
@@ -260,7 +267,10 @@ class CallAudioEngine(context: Context) {
                     if (w <= 0) break
                     written += w
                 }
-                if (frame != null) framesIn++
+                if (frame != null) {
+                    framesIn++
+                    onRemotePcm?.invoke(frame)
+                }
             }
         }.apply {
             name = "call-playback"
@@ -342,6 +352,8 @@ class CallAudioEngine(context: Context) {
         if (!running) return
         running = false
         onOutgoingCipher = null
+        onLocalPcm = null
+        onRemotePcm = null
         runCatching { captureThread?.join(300) }
         runCatching { record?.stop() }
         runCatching { record?.release() }

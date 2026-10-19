@@ -174,6 +174,11 @@
         <string name="call_share_screen">Share screen</string>
     <string name="call_stop_share">Stop sharing</string>
     <string name="call_you_sharing">You are sharing your screen</string>
+        <string name="call_captions">Call captions</string>
+    <string name="call_captions_preparing">Preparing call captions… the model may download the first time.</string>
+    <string name="call_captions_failed">Could not enable call captions. Check the internet (first time) and try again.</string>
+    <string name="call_captions_you">You</string>
+    <string name="call_captions_peer">Partner</string>
     <string name="call_peer_sharing">Your partner is sharing their screen</string>
     <string name="call_camera_on">Turn camera on</string>
     <string name="menu_share_contact">Share contact</string>

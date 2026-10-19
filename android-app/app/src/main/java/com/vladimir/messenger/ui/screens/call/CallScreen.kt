@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.ScreenShare
 import androidx.compose.material.icons.filled.StopScreenShare
+import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material.icons.filled.VolumeUp
@@ -77,6 +78,7 @@ fun CallScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val remoteVideo by viewModel.remoteVideo.collectAsStateWithLifecycle()
+    val captionLines by viewModel.captionLines.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     // Микрофон: запрос со входом на экран; «Принять» без разрешения — сначала запрос.
@@ -263,6 +265,46 @@ fun CallScreen(
                     )
                 }
 
+                if (state.captionsPreparing) {
+                    Text(
+                        stringResource(R.string.call_captions_preparing),
+                        color = if (state.video) Color.White.copy(alpha = 0.9f) else ApuBubbleMutedColor,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (state.captionsFailed) {
+                    Text(
+                        stringResource(R.string.call_captions_failed),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (state.captionsOn && captionLines.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .padding(top = 10.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.Black.copy(alpha = 0.45f))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        captionLines.takeLast(5).forEach { line ->
+                            val label = stringResource(
+                                if (line.speaker == com.vladimir.messenger.data.voice.CallCaptioner.Speaker.ME) {
+                                    R.string.call_captions_you
+                                } else {
+                                    R.string.call_captions_peer
+                                },
+                            )
+                            Text(
+                                "$label: ${line.text}",
+                                color = Color.White.copy(alpha = if (line.done) 0.95f else 0.6f),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                }
+
                 if (!state.video) {
                     Spacer(modifier = Modifier.height(48.dp))
 
@@ -318,6 +360,7 @@ fun CallScreen(
                             viewModel.toggleCamera()
                         }
                     },
+                    onCaptions = { viewModel.setCaptions(!state.captionsOn && !state.captionsPreparing) },
                     onScreenShare = {
                         if (state.screenSharing) {
                             stopScreenShare()
@@ -389,6 +432,7 @@ private fun CallButtons(
     onSpeaker: () -> Unit,
     onCamera: () -> Unit,
     onScreenShare: () -> Unit,
+    onCaptions: () -> Unit,
 ) {
     val gap = if (state.video) 16.dp else 32.dp
     Row(
@@ -522,6 +566,26 @@ private fun ScreenShareCallButton(
             else stringResource(R.string.call_share_screen),
             tint = if (state.screenSharing) MaterialTheme.colorScheme.onPrimary
             else ApuBubbleMutedColor,
+        )
+    }
+}
+
+@Composable
+private fun CaptionsCallButton(
+    state: com.vladimir.messenger.data.call.CallManager.CallUiState,
+    onCaptions: () -> Unit,
+) {
+    val active = state.captionsOn || state.captionsPreparing
+    RoundCallButton(
+        background = if (active) MaterialTheme.colorScheme.primary
+        else Color(0xFFF5F7FA).copy(alpha = 0.95f),
+        description = stringResource(R.string.call_captions),
+        onClick = onCaptions,
+    ) {
+        Icon(
+            Icons.Default.Subtitles,
+            stringResource(R.string.call_captions),
+            tint = if (active) MaterialTheme.colorScheme.onPrimary else ApuBubbleMutedColor,
         )
     }
 }

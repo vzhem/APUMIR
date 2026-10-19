@@ -79,6 +79,12 @@ class CallManager @Inject constructor(
         val screenSharing: Boolean = false,
         /** Собеседник показывает свой экран. */
         val remoteScreen: Boolean = false,
+        /** Живой текст звонка включён по требованию (кнопка «Текст звонка»). */
+        val captionsOn: Boolean = false,
+        /** Модель живого текста ещё готовится (первый раз — скачивается). */
+        val captionsPreparing: Boolean = false,
+        /** Живой текст не удалось включить (модель не загрузилась). */
+        val captionsFailed: Boolean = false,
     )
 
     private val _uiState = kotlinx.coroutines.flow.MutableStateFlow(CallUiState())
@@ -86,6 +92,13 @@ class CallManager @Inject constructor(
 
     private val _remoteVideo = kotlinx.coroutines.flow.MutableStateFlow<ByteArray?>(null)
     val remoteVideo: kotlinx.coroutines.flow.StateFlow<ByteArray?> = _remoteVideo
+
+    /** Строки живого текста звонка: «Вы» и «Собеседник», текущая фраза обновляется. */
+    private val _captionLines =
+        kotlinx.coroutines.flow.MutableStateFlow<List<com.vladimir.messenger.data.voice.CallCaptioner.Line>>(emptyList())
+    val captionLines: kotlinx.coroutines.flow.StateFlow<List<com.vladimir.messenger.data.voice.CallCaptioner.Line>> =
+        _captionLines
+    @Volatile private var captioner: com.vladimir.messenger.data.voice.CallCaptioner? = null
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val random = SecureRandom()
@@ -860,6 +873,65 @@ class CallManager @Inject constructor(
         )
     }
 
+    /**
+     * Живой текст звонка по требованию: обе стороны разговора распознаются
+     * прямо на телефоне (см. [com.vladimir.messenger.data.voice.CallCaptioner]).
+     * Модель при первом включении может скачиваться — UI показывает подготовку.
+     */
+    fun setCaptions(on: Boolean) {
+        if (!on) {
+            stopCaptions()
+            _uiState.value = _uiState.value.copy(
+                captionsOn = false, captionsPreparing = false, captionsFailed = false,
+            )
+            return
+        }
+        val sm = machine ?: return
+        if (sm.phase != CallStateMachine.Phase.CONNECTING &&
+            sm.phase != CallStateMachine.Phase.ACTIVE
+        ) return
+        if (_uiState.value.captionsOn || _uiState.value.captionsPreparing) return
+        _uiState.value = _uiState.value.copy(captionsPreparing = true, captionsFailed = false)
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val model = com.vladimir.messenger.data.voice.VoiceTranscriber.loadModel(appContext)
+            if (model == null || machine !== sm) {
+                if (machine === sm) {
+                    _uiState.value = _uiState.value.copy(
+                        captionsPreparing = false, captionsFailed = true,
+                    )
+                }
+                return@launch
+            }
+            val created = com.vladimir.messenger.data.voice.CallCaptioner(model)
+            captioner = created
+            _captionLines.value = emptyList()
+            audioEngine?.let { attachCaptionTaps(it) }
+            _uiState.value = _uiState.value.copy(
+                captionsOn = true, captionsPreparing = false, captionsFailed = false,
+            )
+        }
+    }
+
+    private fun attachCaptionTaps(engine: CallAudioEngine) {
+        val active = captioner ?: return
+        engine.onLocalPcm = { pcm ->
+            active.feed(com.vladimir.messenger.data.voice.CallCaptioner.Speaker.ME, pcm)
+        }
+        engine.onRemotePcm = { pcm ->
+            active.feed(com.vladimir.messenger.data.voice.CallCaptioner.Speaker.PEER, pcm)
+        }
+        scope.launch {
+            active.lines.collect { lines -> _captionLines.value = lines }
+        }
+    }
+
+    private fun stopCaptions() {
+        captioner?.let { runCatching { it.stop() } }
+        captioner = null
+        audioEngine?.onLocalPcm = null
+        audioEngine?.onRemotePcm = null
+    }
+
     /** JPEG-кадр локальной камеры (уже pack: rotation + jpeg). */
     fun sendVideoFrame(packed: ByteArray) {
         if (!videoWanted || (!_uiState.value.cameraOn && !_uiState.value.screenSharing) ||
@@ -1078,6 +1150,7 @@ class CallManager @Inject constructor(
             return
         }
         audioEngine = engine
+        attachCaptionTaps(engine)
         sendVideoCrypto = CallMediaCrypto(sk)
         recvVideoCrypto = CallMediaCrypto(rk)
         lastVideoSeq = -1L
@@ -1314,6 +1387,7 @@ class CallManager @Inject constructor(
     private var audioViaLan = false
 
     private fun stopMedia(keepLink: Boolean = false) {
+        stopCaptions()
         runCatching { audioEngine?.stop() }
         audioEngine = null
         sendVideoCrypto = null

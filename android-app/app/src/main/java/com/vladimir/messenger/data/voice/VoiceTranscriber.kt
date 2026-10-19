@@ -118,6 +118,17 @@ object VoiceTranscriber {
         Outcome.Success(text)
     }
 
+    /**
+     * Загруженная модель языка (скачает, если ещё нет) или null при неудаче.
+     * Общий вход для перевода голосовых и живого текста звонка.
+     */
+    suspend fun loadModel(context: Context, onStage: (Stage) -> Unit = {}): Model? = try {
+        ensureModel(context, language(), onStage)
+    } catch (e: Exception) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        null
+    }
+
     private suspend fun ensureModel(context: Context, lang: String, onStage: (Stage) -> Unit): Model {
         model?.takeIf { modelLang == lang }?.let { return it }
         return modelMutex.withLock {
