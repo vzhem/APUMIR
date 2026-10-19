@@ -111,10 +111,9 @@ fun HeartGameSettings() {
     var busy by remember { mutableStateOf(false) }
     var showBoard by remember { mutableStateOf(false) }
     var refreshing by remember { mutableStateOf(false) }
-    var refreshNote by remember { mutableStateOf<String?>(null) }
-    val noteDone = stringResource(R.string.heart_game_refresh_done, 0, 0, 0) // placeholder, rebuilt below
-    val noteNone = stringResource(R.string.heart_game_refresh_none_online)
-    val noteNotReady = stringResource(R.string.heart_game_refresh_not_ready)
+    var refreshResult by remember {
+        mutableStateOf<com.vladimir.messenger.data.heartgame.HeartGameNetwork.RefreshResult?>(null)
+    }
     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.heart_game_title), Modifier.weight(1f), fontWeight = FontWeight.Bold)
