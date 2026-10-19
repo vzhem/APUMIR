@@ -40,7 +40,25 @@ class HeartGameNetwork @Inject constructor(
     private var window = 0L
     private var received = 0
 
-    suspend fun routeIncoming(text: String): Boolean {
+    /** Итог ручного обновления кнопкой «Обновить» в настройках игры. */
+    data class RefreshResult(
+        /** Сеть готова и запись подписана. */
+        val ready: Boolean,
+        /** Сколько собеседников сейчас видны онлайн. */
+        val online: Int,
+        /** Скольким отправлена своя запись счёта. */
+        val sentScore: Int,
+        /** Скольким отправлен запрос их счёта. */
+        val sentRequests: Int,
+    )
+
+    suspend fun routeIncoming(text: String): Boolean = routeIncoming("", text)
+
+    suspend fun routeIncoming(senderId: String, text: String): Boolean {
+        if (text.startsWith(HeartGameWire.REQUEST_PREFIX)) {
+            handleScoreRequest(senderId, text)
+            return true
+        }
         if (!text.startsWith(HeartGameWire.PREFIX)) return false
         if (text.length > HeartGameWire.MAX_PACKET) return true
         withContext(Dispatchers.IO) {
@@ -92,6 +110,74 @@ class HeartGameNetwork @Inject constructor(
                 deliver(id, envelope, listOf(node to chat))
             }
         }
+
+    /**
+     * Ручное обновление кнопкой «Обновить»: всем, кто СЕЙЧАС виден онлайн, уходит своя
+     * подписанная запись счёта и запрос их счёта. Периодическая политика (6 часов,
+     * «телефон свободен») здесь не применяется — человек нажал кнопку сам.
+     * «Виден онлайн» = личный чат с включённым присутствием собеседника.
+     */
+    suspend fun refreshWithOnlinePeers(nowMs: Long = System.currentTimeMillis()): RefreshResult =
+        withContext(Dispatchers.IO) {
+            sendLock.withLock {
+                if (!com.vladimir.messenger.service.CoreStatus.ready.value)
+                    return@withLock RefreshResult(false, 0, 0, 0)
+                val id = HeartGameStore.ownId() ?: return@withLock RefreshResult(false, 0, 0, 0)
+                val targets = onlineTargets(id)
+                val envelope = buildEnvelope(id, nowMs)
+                    ?: return@withLock RefreshResult(false, targets.size, 0, 0)
+                var sentScore = 0
+                var sentRequests = 0
+                val request = HeartGameWire.buildRequest(id, nowMs)
+                for ((node, chat) in targets) {
+                    currentCoroutineContext().ensureActive()
+                    if (HeartGameStore.ownId() != id) break
+                    if (runCatching {
+                            RustBridge.sendMessage(UUID.randomUUID().toString(), chat, node, envelope)
+                        }.getOrDefault(false)) sentScore++
+                    if (runCatching {
+                            RustBridge.sendMessage(UUID.randomUUID().toString(), chat, node, request)
+                        }.getOrDefault(false)) sentRequests++
+                    HeartSyncPrefs.markPeer(context, node, nowMs)
+                }
+                if (targets.isNotEmpty()) HeartSyncPrefs.markGlobal(context, nowMs)
+                RefreshResult(true, targets.size, sentScore, sentRequests)
+            }
+        }
+
+    /** Ответ на ручной запрос счёта: своя подписанная запись — только запросившему
+     *  и не чаще раза в минуту на узел. Отправитель сверяется с узлом из запроса. */
+    private suspend fun handleScoreRequest(senderId: String, text: String) {
+        withContext(Dispatchers.IO) {
+            sendLock.withLock {
+                val nowMs = System.currentTimeMillis()
+                val claimed = HeartGameWire.parseRequest(text, nowMs) ?: return@withLock
+                val senderNode = RankWire.canonicalNodeId(senderId) ?: return@withLock
+                if (claimed != senderNode) return@withLock
+                val last = HeartSyncPrefs.lastRequestResponse(context, senderId)
+                if (last > 0 && nowMs - last < REQUEST_RESPONSE_MIN_GAP_MS) return@withLock
+                if (!com.vladimir.messenger.service.CoreStatus.ready.value) return@withLock
+                val id = HeartGameStore.ownId() ?: return@withLock
+                if (senderNode == id) return@withLock
+                val chat = chats.getChatByContactId(senderId)?.id ?: return@withLock
+                val envelope = buildEnvelope(id, nowMs) ?: return@withLock
+                HeartSyncPrefs.markRequestResponse(context, senderId, nowMs)
+                deliver(id, envelope, listOf(senderNode to chat))
+            }
+        }
+    }
+
+    /** Личные чаты, где собеседник сейчас виден онлайн: узел -> адрес переписки. */
+    private suspend fun onlineTargets(id: String): Map<String, String> {
+        val targets = linkedMapOf<String, String>()
+        for (contact in contacts.allIds()) {
+            val node = RankWire.canonicalNodeId(contact) ?: continue
+            val chat = chats.getChatByContactId(contact) ?: continue
+            if (chat.isContactOnline) targets[node] = chat.id
+        }
+        targets.remove(id)
+        return targets
+    }
 
     /** Ядро поднято, есть подпись, и телефон не занят другой работой. */
     private fun canSendNow(): Boolean {
@@ -149,5 +235,7 @@ class HeartGameNetwork @Inject constructor(
         const val TAG = "HeartSync"
         /** Потолок адресатов за один раунд; при большом списке выборка случайная и со временем покрывает всех. */
         const val MAX_TARGETS_PER_ROUND = 32
+        /** Не отвечать одному узлу на ручные запросы счёта чаще раза в минуту. */
+        const val REQUEST_RESPONSE_MIN_GAP_MS = 60_000L
     }
 }

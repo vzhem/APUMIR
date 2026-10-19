@@ -58,4 +58,19 @@ class HeartGameWireTest {
         val other = old.copy(keyId = "00".repeat(32))
         assertEquals(listOf(other, old), HeartGameWire.ranked(listOf(old, other)))
     }
+
+    @Test fun scoreRequestRoundTrip() {
+        val packet = HeartGameWire.buildRequest("nodeA", now)
+        assertEquals("nodeA", HeartGameWire.parseRequest(packet, now))
+        assertEquals("nodeA", HeartGameWire.parseRequest(packet, now + 9 * 60 * 1000))
+    }
+
+    @Test fun scoreRequestRejectsStaleForgedAndMalformed() {
+        assertNull(HeartGameWire.parseRequest(HeartGameWire.buildRequest("nodeA", now - 11 * 60 * 1000), now))
+        assertNull(HeartGameWire.parseRequest(HeartGameWire.buildRequest("nodeA", now + 6 * 60 * 1000), now))
+        assertNull(HeartGameWire.parseRequest("APUTYP1|APUGAMEREQ1||$now", now))
+        assertNull(HeartGameWire.parseRequest("APUTYP1|APUGAMEREQ1|nodeA", now))
+        assertNull(HeartGameWire.parseRequest("APUTYP1|APUGAMEREQ1|nodeA|abc", now))
+        assertNull(HeartGameWire.parseRequest("APUTYP1|APUGAME1|nodeA|$now", now))
+    }
 }

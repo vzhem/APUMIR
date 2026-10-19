@@ -395,7 +395,7 @@ class CoreServerService : Service() {
         if (runCatching { referralAttributionRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         // Ранг собеседника (APURANK1): знак VIP у имени. Поглощается здесь же,
         // чтобы служебная строка не стала текстом в переписке.
-        if (runCatching { heartGameNetwork.routeIncoming(text) || peerRankRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { callManager.routeIncoming(senderId, chatId, messageId, text) }
             .getOrDefault(false)
         ) {
@@ -1640,7 +1640,7 @@ class CoreServerService : Service() {
         // Ранг собеседника едет в обёртке «печатает…» (см. RankWire.WRAPPER).
         // Разбираем его РАНЬШЕ индикатора набора: иначе конверт был бы прочитан
         // как «партнёр перестал печатать» и молча пропал бы вместе с рангом.
-        if (runCatching { heartGameNetwork.routeIncoming(text) || peerRankRouter.routeIncoming(senderId, text) }.getOrDefault(false)) {
+        if (runCatching { heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text) }.getOrDefault(false)) {
             Log.i(TAG, "Mirror envelope: ранг собеседника применён")
             return true
         }
@@ -2519,7 +2519,7 @@ class CoreServerService : Service() {
                     // Разбирается ДО авто-создания контакта: иначе служебная
                     // строка создала бы чат с мусорным текстом у того, кто ещё
                     // не добавил этого человека.
-                    if (heartGameNetwork.routeIncoming(text) || peerRankRouter.routeIncoming(senderId, text)) {
+                    if (heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text)) {
                         try {
                             RustBridge.sendDeliveryAck(messageId, senderId)
                         } catch (e: Exception) {

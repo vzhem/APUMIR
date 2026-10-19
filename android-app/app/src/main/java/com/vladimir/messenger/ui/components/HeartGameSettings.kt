@@ -110,6 +110,11 @@ fun HeartGameSettings() {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var showBoard by remember { mutableStateOf(false) }
+    var refreshing by remember { mutableStateOf(false) }
+    var refreshNote by remember { mutableStateOf<String?>(null) }
+    val noteDone = stringResource(R.string.heart_game_refresh_done, 0, 0, 0) // placeholder, rebuilt below
+    val noteNone = stringResource(R.string.heart_game_refresh_none_online)
+    val noteNotReady = stringResource(R.string.heart_game_refresh_not_ready)
     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.heart_game_title), Modifier.weight(1f), fontWeight = FontWeight.Bold)
@@ -127,6 +132,35 @@ fun HeartGameSettings() {
         }
         Text(stringResource(R.string.heart_game_hint), style = MaterialTheme.typography.bodySmall)
         HeartGameCounter()
+        ApuTextAction(
+            label = stringResource(if (refreshing) R.string.heart_game_refresh_working else R.string.heart_game_refresh),
+            enabled = !refreshing && id != null,
+            onClick = {
+                refreshing = true
+                scope.launch {
+                    try {
+                        val network = dagger.hilt.android.EntryPointAccessors.fromApplication(
+                            context.applicationContext,
+                            com.vladimir.messenger.MainActivityEntryPoint::class.java,
+                        ).heartGameNetwork()
+                        refreshResult = network.refreshWithOnlinePeers()
+                    } catch (_: Exception) {
+                        refreshResult = com.vladimir.messenger.data.heartgame.HeartGameNetwork
+                            .RefreshResult(false, 0, 0, 0)
+                    } finally { refreshing = false }
+                }
+            })
+        Text(stringResource(R.string.heart_game_refresh_hint), style = MaterialTheme.typography.bodySmall)
+        refreshResult?.let { result ->
+            Text(
+                when {
+                    !result.ready -> stringResource(R.string.heart_game_refresh_not_ready)
+                    result.online == 0 -> stringResource(R.string.heart_game_refresh_none_online)
+                    else -> stringResource(R.string.heart_game_refresh_done,
+                        result.online, result.sentScore, result.sentRequests)
+                },
+                style = MaterialTheme.typography.labelSmall)
+        }
         ApuTextAction(label = stringResource(R.string.heart_game_leaders), onClick = { showBoard = true })
     }
     if (showBoard) HeartGameLeaderboard(id) { showBoard = false }

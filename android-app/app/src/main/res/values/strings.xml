@@ -1804,6 +1804,12 @@
     <string name="heart_game_catch">Поймать сердце: плюс одно очко</string>
     <string name="heart_game_save_error">Не удалось сохранить или загрузить игровые очки. Попробуйте ещё раз.</string>
     <string name="heart_game_leaders">Лидеры по сердечкам</string>
+    <string name="heart_game_refresh">Обновить</string>
+    <string name="heart_game_refresh_working">Обновляю…</string>
+    <string name="heart_game_refresh_hint">Отправить свой счёт всем, кто сейчас онлайн, и попросить их счета. Ответы придут обычными сообщениями сети и обновят таблицу лидеров.</string>
+    <string name="heart_game_refresh_done">Онлайн: %1$d. Свой счёт отправлен: %2$d, запросы отправлены: %3$d.</string>
+    <string name="heart_game_refresh_none_online">Сейчас никого не видно онлайн. Счёт уйдёт обычной рассылкой, когда собеседники появятся.</string>
+    <string name="heart_game_refresh_not_ready">Сеть ещё не готова. Подождите несколько секунд и нажмите «Обновить» ещё раз.</string>
     <string name="heart_game_you">Вы</string>
     <string name="heart_game_close">Закрыть</string>
     <string name="heart_game_board_hint">Топ-100 по известным результатам сети, а не только контактам. Данные приходят с задержкой и могут быть неполными. Подпись подтверждает автора результата, но не защищает от изменённых клиентов.</string>

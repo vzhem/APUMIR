@@ -8,6 +8,25 @@ import java.security.MessageDigest
 /** Forwardable signed self-reports, NOT proof that an unmodified client earned the points. */
 object HeartGameWire {
     const val PREFIX = "APUTYP1|APUGAME1|"
+
+    /** Запрос «пришли свой счёт»: APUGAMEREQ1|<узел-запросивший>|<метка_времени_ms>. Запрос не подписан:
+     *  в ответ уходит только ПОДПИСАННАЯ запись счёта, а узел сверяется с фактическим отправителем. */
+    const val REQUEST_PREFIX = "APUTYP1|APUGAMEREQ1|"
+
+    fun buildRequest(nodeId: String, atMs: Long): String = "$REQUEST_PREFIX$nodeId|$atMs"
+
+    /** Узел, попросивший прислать счёт, или null. Метка времени не старше 10 минут
+     *  и не из будущего дальше 5 минут — защита от переигрывания старых пакетов. */
+    fun parseRequest(text: String, nowMs: Long): String? {
+        if (!text.startsWith(REQUEST_PREFIX) || text.length > 256) return null
+        val parts = text.removePrefix(REQUEST_PREFIX).split('|')
+        if (parts.size != 2) return null
+        val node = parts[0]
+        val at = parts[1].toLongOrNull() ?: return null
+        if (node.isBlank() || node.length > 128 || node.any { it.isISOControl() }) return null
+        if (at <= 0 || at < nowMs - 10 * 60 * 1000 || at > nowMs + FUTURE_MS) return null
+        return node
+    }
     const val MAX_PACKET = 8192
     const val MAX_RECORDS = 5
     const val RETENTION_MS = 30L * 24 * 60 * 60 * 1000

@@ -1771,6 +1771,12 @@ The file is not on this phone</string>
     <string name="heart_game_catch">Catch heart: one game point</string>
     <string name="heart_game_save_error">Could not save or load game points. Please try again.</string>
     <string name="heart_game_leaders">Heart leaderboard</string>
+    <string name="heart_game_refresh">Refresh</string>
+    <string name="heart_game_refresh_working">Refreshing…</string>
+    <string name="heart_game_refresh_hint">Send your score to everyone currently online and ask for theirs. Replies arrive as regular network messages and update the leaderboard.</string>
+    <string name="heart_game_refresh_done">Online: %1$d. Your score sent: %2$d, requests sent: %3$d.</string>
+    <string name="heart_game_refresh_none_online">Nobody appears to be online right now. Your score will go out with the regular sync when peers show up.</string>
+    <string name="heart_game_refresh_not_ready">The network is not ready yet. Wait a few seconds and tap Refresh again.</string>
     <string name="heart_game_you">You</string>
     <string name="heart_game_close">Close</string>
     <string name="heart_game_board_hint">Top 100 known network results, not just contacts. Updates may be delayed and incomplete. Signatures identify the reporter but cannot prevent modified clients from claiming scores.</string>
