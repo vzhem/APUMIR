@@ -388,6 +388,7 @@ private fun CallButtons(
     onMute: () -> Unit,
     onSpeaker: () -> Unit,
     onCamera: () -> Unit,
+    onScreenShare: () -> Unit,
 ) {
     val gap = if (state.video) 16.dp else 32.dp
     Row(

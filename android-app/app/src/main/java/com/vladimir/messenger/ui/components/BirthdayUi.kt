@@ -69,7 +69,8 @@ fun BirthdayEditDialog(
     var day by rememberSaveable { mutableIntStateOf(initial?.day ?: 0) }
     var month by rememberSaveable { mutableIntStateOf(initial?.month ?: 0) }
     var year by rememberSaveable { mutableIntStateOf(initial?.year ?: Birthday.NO_YEAR) }
-    val chosen = Birthday.isValid(day, month)
+    val inFuture = Birthday.isFuture(day, month, year, LocalDate.now())
+    val chosen = Birthday.isValid(day, month) && !inFuture
 
     if (picker) {
         // Календарь — системный, как в «отложенной отправке»: свой календарь
@@ -102,6 +103,9 @@ fun BirthdayEditDialog(
                 selected.monthValue - 1,
                 selected.dayOfMonth,
             )
+            // Будущую дату рождения календарь выбрать не даёт вовсе.
+            dialog.datePicker.maxDate = today.atTime(23, 59, 59)
+                .atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
             dialog.setOnDismissListener { picker = false }
             dialog.show()
             onDispose { dialog.setOnDismissListener(null); dialog.dismiss() }
