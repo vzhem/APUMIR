@@ -18,13 +18,30 @@ import java.util.concurrent.TimeUnit
  */
 object PersonSegmenter {
 
-    private val segmenter by lazy {
+    private val streamSegmenter by lazy {
         Segmentation.getClient(
             SelfieSegmenterOptions.Builder()
                 .setDetectorMode(SelfieSegmenterOptions.STREAM_MODE)
                 .build(),
         )
     }
+
+    private val singleImageSegmenter by lazy {
+        Segmentation.getClient(
+            SelfieSegmenterOptions.Builder()
+                .setDetectorMode(SelfieSegmenterOptions.SINGLE_IMAGE_MODE)
+                .build(),
+        )
+    }
+
+    /**
+     * Последняя причина, почему фон не лёг (класс ошибки или статистика маски).
+     * Показывается пользователю, чтобы сбой не был «тихим»: без этого на телефоне
+     * невозможно отличить «модель не скачалась» от «маска пустая».
+     */
+    @Volatile
+    var lastFailure: String? = null
+        private set
 
     /**
      * Кадр с заменённым фоном или null, если сегментация сейчас недоступна.
@@ -34,17 +51,47 @@ object PersonSegmenter {
      * может ещё скачиваться, и следующий кадр обязан попробовать снова —
      * иначе фон молча не работал бы весь сеанс из-за одной ранней ошибки.
      */
-    fun compositeOrNull(source: Bitmap, background: Bitmap?): Bitmap? {
+    fun compositeOrNull(source: Bitmap, background: Bitmap?, singleImage: Boolean = false): Bitmap? {
         val mask = try {
+            val segmenter = if (singleImage) singleImageSegmenter else streamSegmenter
             val result = Tasks.await(
                 segmenter.process(InputImage.fromBitmap(source, 0)),
                 8, TimeUnit.SECONDS,
             )
             extractMask(result)
         } catch (e: Exception) {
+            lastFailure = "сегментация: ${e.javaClass.simpleName}: ${e.message?.take(110) ?: "без текста"}"
             return null
-        } ?: return null
-        return applyMask(source, background, mask)
+        } ?: run {
+            lastFailure = "сегментация: маска не получена"
+            return null
+        }
+        // Маску читаем последовательно, как в официальной документации ML Kit,
+        // и сразу считаем долю «человека»: полностью пустая или полностью полная
+        // маска означает, что фон лёг неправильно, — это ошибка, а не успех.
+        val maskWidth = mask.width
+        val maskHeight = mask.height
+        if (maskWidth <= 0 || maskHeight <= 0) {
+            lastFailure = "сегментация: пустой размер маски"
+            return null
+        }
+        val confidences = FloatArray(maskWidth * maskHeight)
+        val buffer = mask.buffer
+        buffer.rewind()
+        var foreground = 0
+        for (i in confidences.indices) {
+            if (!buffer.hasRemaining()) break
+            val value = buffer.getFloat()
+            confidences[i] = value
+            if (value > 0.5f) foreground++
+        }
+        val foregroundFraction = foreground.toFloat() / confidences.size
+        if (foregroundFraction < 0.001f || foregroundFraction > 0.995f) {
+            lastFailure = "сегментация: человек не найден (маска ${(foregroundFraction * 100).toInt()}%, ${maskWidth}x$maskHeight)"
+            return null
+        }
+        lastFailure = null
+        return applyMask(source, background, confidences, maskWidth, maskHeight)
     }
 
     /** Как [compositeOrNull], но при неудаче возвращает копию исходного кадра. */
@@ -52,13 +99,11 @@ object PersonSegmenter {
         compositeOrNull(source, background) ?: source.copy(Bitmap.Config.ARGB_8888, false)
 
     /**
-     * Маска из результата сегментации. В разных версиях ML Kit доступ к ней
-     * назван по-разному (свойство, метод или поле), поэтому ищем по типу
-     * возвращаемого значения, а не по имени: соберётся и заработает в обеих.
+     * Маска из результата сегментации. Selfie-сегментация возвращает саму маску,
+     * а не обёртку: без первой проверки маска никогда не находилась и фон молча
+     * не применялся. Остальное — запасной поиск по типу на случай другой версии.
      */
     private fun extractMask(result: Any): SegmentationMask? {
-        // Selfie-сегментация возвращает саму маску, а не обёртку с полем маски:
-        // без этой проверки маска никогда не находилась и фон молча не применялся.
         if (result is SegmentationMask) return result
         val type = SegmentationMask::class.java
         result.javaClass.methods
@@ -80,7 +125,13 @@ object PersonSegmenter {
         return up
     }
 
-    private fun applyMask(source: Bitmap, background: Bitmap?, mask: SegmentationMask): Bitmap {
+    private fun applyMask(
+        source: Bitmap,
+        background: Bitmap?,
+        confidences: FloatArray,
+        maskWidth: Int,
+        maskHeight: Int,
+    ): Bitmap {
         val width = source.width
         val height = source.height
         val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -93,17 +144,13 @@ object PersonSegmenter {
         }
         val bg = IntArray(width * height)
         bgBitmap.getPixels(bg, 0, width, 0, 0, width, height)
-        val buffer = mask.buffer
-        buffer.rewind()
-        val maskWidth = mask.width
-        val maskHeight = mask.height
         val pixels = IntArray(width * height)
-        // Маска может быть меньше кадра: тянем ближайшим соседом.
+        // Маска может отличаться от кадра по размеру: тянем ближайшим соседом.
         for (y in 0 until height) {
             val maskY = (y * maskHeight / height).coerceAtMost(maskHeight - 1)
             for (x in 0 until width) {
                 val maskX = (x * maskWidth / width).coerceAtMost(maskWidth - 1)
-                val confidence = buffer.getFloat((maskY * maskWidth + maskX) * 4)
+                val confidence = confidences[maskY * maskWidth + maskX]
                 val index = y * width + x
                 val a = (confidence.coerceIn(0f, 1f) * 255).toInt()
                 val f = fg[index]

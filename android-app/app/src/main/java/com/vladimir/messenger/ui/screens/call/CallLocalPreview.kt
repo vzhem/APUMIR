@@ -213,6 +213,7 @@ private fun CallBackgroundPreview(
     val jpegSink = rememberUpdatedState(onJpeg)
     var frame by remember { mutableStateOf<Bitmap?>(null) }
     var backgroundPending by remember { mutableStateOf(true) }
+    var backgroundStatus by remember { mutableStateOf<String?>(null) }
     var renderedBackground by remember { mutableStateOf<Bitmap?>(null) }
     var renderedKey by remember { mutableStateOf("") }
 
@@ -243,6 +244,9 @@ private fun CallBackgroundPreview(
                     val segmented = com.vladimir.messenger.data.background.PersonSegmenter
                         .compositeOrNull(source, renderedBackground)
                     backgroundPending = segmented == null
+                    backgroundStatus = if (segmented == null) {
+                        com.vladimir.messenger.data.background.PersonSegmenter.lastFailure
+                    } else null
                     val composited = segmented
                         ?: source.copy(Bitmap.Config.ARGB_8888, false)
                     frame = composited
@@ -302,7 +306,8 @@ private fun CallBackgroundPreview(
             )
             if (backgroundPending) {
                 Text(
-                    text = "Фон подготавливается…",
+                    text = backgroundStatus?.let { "Фон не применился: $it" }
+                        ?: "Фон подготавливается…",
                     color = Color.White,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)

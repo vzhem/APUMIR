@@ -3,6 +3,7 @@ package com.vladimir.messenger.data.story
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
+import android.graphics.Matrix
 import android.graphics.Rect
 import android.graphics.YuvImage
 import android.media.MediaCodec
@@ -49,7 +50,12 @@ internal object StoryBackgroundBaker {
             throw cancelled
         } catch (failure: Exception) {
             output.delete()
-            StoryBackgroundBakeResult(source, "Не удалось поставить фон, видео сохранено без него")
+            val reason = PersonSegmenter.lastFailure
+            StoryBackgroundBakeResult(
+                source,
+                if (reason != null) "Не удалось поставить фон ($reason), видео сохранено без него"
+                else "Не удалось поставить фон, видео сохранено без него",
+            )
         }
     }
 
@@ -198,14 +204,25 @@ internal object StoryBackgroundBaker {
                                 if (frame != null) {
                                     val scaled = if (frame.width == width && frame.height == height) frame
                                     else Bitmap.createScaledBitmap(frame, width, height, true)
-                                    val composited = compositeWithRetry(
-                                        scaled,
+                                    // Кадр в файле может лежать боком (поворот — в метаданных):
+                                    // человека сегментация ищет в обычном, «стоячем» кадре,
+                                    // поэтому поворачиваем туда и обратно.
+                                    val upright = if (rotation == 90 || rotation == 270) {
+                                        rotated(scaled, rotation)
+                                    } else scaled
+                                    val compositedUpright = compositeWithRetry(
+                                        upright,
                                         if (background == VideoBackground.BLUR) null else backgroundBitmap,
                                     ) ?: throw IllegalStateException("segmentation unavailable")
+                                    val composited = if (upright !== scaled) {
+                                        rotated(compositedUpright, -rotation)
+                                    } else compositedUpright
                                     compositedFrames++
                                     feedEncoder(encoder, composited, ptsUs)
                                     lastVideoPtsUs = ptsUs
-                                    if (composited !== scaled) composited.recycle()
+                                    if (composited !== compositedUpright) composited.recycle()
+                                    if (compositedUpright !== upright) compositedUpright.recycle()
+                                    if (upright !== scaled) upright.recycle()
                                     if (scaled !== frame) scaled.recycle()
                                     frame.recycle()
                                 }
@@ -253,10 +270,19 @@ internal object StoryBackgroundBaker {
      */
     private fun compositeWithRetry(frame: Bitmap, background: Bitmap?): Bitmap? {
         repeat(4) { attempt ->
-            PersonSegmenter.compositeOrNull(frame, background)?.let { return it }
+            PersonSegmenter.compositeOrNull(frame, background, singleImage = true)?.let { return it }
             if (attempt < 3) Thread.sleep(1_500)
         }
         return null
+    }
+
+    /** Повернуть кадр на кратные 90 градусы (поворот из метаданных видео). */
+    private fun rotated(bitmap: Bitmap, degrees: Int): Bitmap {
+        if (degrees % 360 == 0) return bitmap
+        return Bitmap.createBitmap(
+            bitmap, 0, 0, bitmap.width, bitmap.height,
+            Matrix().apply { postRotate(degrees.toFloat()) }, true,
+        )
     }
 
     /** Закодировать один готовый кадр с его меткой времени. */
