@@ -458,17 +458,36 @@ private fun CallButtons(
             }
 
             CallStateMachine.Phase.ACTIVE, CallStateMachine.Phase.CONNECTING -> {
-                MuteCallButton(state, onMute)
-                if (state.video) CameraCallButton(state, onCamera)
-                RoundCallButton(
-                    background = MaterialTheme.colorScheme.error,
-                    description = stringResource(R.string.call_end),
-                    onClick = onRed,
-                    big = true,
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Icon(Icons.Default.CallEnd, stringResource(R.string.call_end), tint = Color.White)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(gap),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        MuteCallButton(state, onMute)
+                        if (state.video && !state.screenSharing) CameraCallButton(state, onCamera)
+                        RoundCallButton(
+                            background = MaterialTheme.colorScheme.error,
+                            description = stringResource(R.string.call_end),
+                            onClick = onRed,
+                            big = true,
+                        ) {
+                            Icon(Icons.Default.CallEnd, stringResource(R.string.call_end), tint = Color.White)
+                        }
+                        SpeakerCallButton(state, onSpeaker)
+                    }
+                    // Второй ряд: показ экрана и живой текст — рядом с трубкой
+                    // им не хватило места, а прятать под меню их нельзя.
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(gap),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ScreenShareCallButton(state, onScreenShare)
+                        CaptionsCallButton(state, onCaptions)
+                    }
                 }
-                SpeakerCallButton(state, onSpeaker)
             }
 
             else -> {
