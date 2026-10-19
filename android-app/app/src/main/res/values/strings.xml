@@ -1640,6 +1640,16 @@
     <string name="voice_stop">Отправить</string>
     <string name="voice_cancel">Отмена</string>
     <string name="voice_recording">Запись</string>
+        <string name="voice_to_text">В текст</string>
+    <string name="voice_show_text">Показать текст</string>
+    <string name="voice_hide_text">Скрыть текст</string>
+    <string name="voice_transcribing">Распознаю…</string>
+    <string name="voice_model_downloading">Скачиваю модель распознавания (один раз)…</string>
+    <string name="voice_transcribe_hint">Первый раз модель скачивается один раз, дальше всё распознаётся на телефоне без сети.</string>
+    <string name="voice_model_error">Не удалось скачать модель распознавания. Проверьте интернет и попробуйте ещё раз.</string>
+    <string name="voice_transcribe_error">Не удалось распознать это голосовое сообщение.</string>
+    <string name="voice_empty">Речь в сообщении не нашлась.</string>
+    <string name="voice_too_long">Сообщение слишком длинное для перевода в текст (до 12 минут).</string>
     <string name="voice_play">Слушать</string>
     <string name="voice_pause">Пауза</string>
     <string name="send_more">Ещё</string>

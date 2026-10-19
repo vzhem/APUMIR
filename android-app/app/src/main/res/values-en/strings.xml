@@ -1627,6 +1627,16 @@ The file is not on this phone</string>
     <string name="voice_stop">Send</string>
     <string name="voice_cancel">Cancel</string>
     <string name="voice_recording">Recording</string>
+        <string name="voice_to_text">To text</string>
+    <string name="voice_show_text">Show text</string>
+    <string name="voice_hide_text">Hide text</string>
+    <string name="voice_transcribing">Transcribing…</string>
+    <string name="voice_model_downloading">Downloading the recognition model (one time)…</string>
+    <string name="voice_transcribe_hint">The model downloads once; after that everything is recognized on the phone, offline.</string>
+    <string name="voice_model_error">Could not download the recognition model. Check the internet and try again.</string>
+    <string name="voice_transcribe_error">Could not transcribe this voice message.</string>
+    <string name="voice_empty">No speech found in this message.</string>
+    <string name="voice_too_long">This message is too long to transcribe (up to 12 minutes).</string>
     <string name="voice_play">Play</string>
     <string name="voice_pause">Pause</string>
     <string name="send_more">More</string>

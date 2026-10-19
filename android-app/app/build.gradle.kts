@@ -229,6 +229,10 @@ dependencies {
     // Распознавание лица для AR-фильтров видеоистории (data/story/StoryFaceTracker.kt).
     implementation("com.google.mlkit:face-detection:16.1.7")
 
+    // Офлайн-распознавание речи голосовых сообщений в текст (data/voice/VoiceTranscriber.kt).
+    // Модель языка маленькая и скачивается один раз при первом переводе, в APK её нет.
+    implementation("com.alphacephei:vosk-android:0.3.47")
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.junit)
