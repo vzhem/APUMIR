@@ -1833,6 +1833,13 @@ The file is not on this phone</string>
     <string name="devices_codes_match">Matches</string>
     <string name="devices_codes_differ">Does not match</string>
     <string name="devices_scan_qr">Scan QR code</string>
+    <string name="devices_joiner_device">Device %1$s is joining</string>
+    <string name="devices_this_device">This device: %1$s</string>
+    <string name="devices_resend_request">Send the request again</string>
+    <string name="devices_resend_grant">Send the confirmation again</string>
+    <string name="devices_manual_title">No camera handy? Paste the code as text</string>
+    <string name="devices_manual_hint">On the other phone the code is shown under the QR. Paste it here in full - pairing then follows the same path as after scanning.</string>
+    <string name="devices_manual_button">Connect with code</string>
     <string name="devices_not_pairing_qr">This is not a device pairing code</string>
     <string name="devices_waiting_answer">Waiting for the other device…</string>
     <string name="devices_waiting_grant">Waiting for confirmation on the other device…</string>

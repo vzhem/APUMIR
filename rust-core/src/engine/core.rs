@@ -5022,16 +5022,25 @@ impl P2PCore {
                 .get(&recipient_node_id)
                 .copied()
         });
+        // Шлём ОБОИМИ путями сразу: прямой QUIC может «успешно» уйти в закрытый
+        // NAT-адрес из подсказок, и раньше на этом всё заканчивалось - брокерная
+        // (роевая) доставка даже не пробовалась, а второй телефон молча ждал.
+        // Дубли безвредны: запрос заменяет свою же сессию, ответ проверяется по
+        // MAC, грант после успеха игнорируется состоянием получателя.
+        let mut delivered = false;
         if addr.is_some() {
             let msg_id = uuid::Uuid::new_v4().to_string();
             let wire_payload = format!("{}|{}|direct|{}", sender_id, msg_id, payload);
             if self.send_via_quic(&target_device_id_hex, addr, wire_payload) {
-                return true;
+                delivered = true;
             }
         }
         // Remote devices: the broker route to the account reaches every device subscribed to
         // it, and the pairing protocol makes the wrong device ignore the packet.
-        self.send_message_mqtt(&recipient_node_id, &payload)
+        if self.send_message_mqtt(&recipient_node_id, &payload) {
+            delivered = true;
+        }
+        delivered
     }
 
     /// K3: бинарный кусок файла по прямому QUIC-каналу.

@@ -7,6 +7,11 @@ import com.vladimir.messenger.data.security.DeviceKeyStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers as CoroutineDispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import uniffi.p2p_core.closePairingOffer
 import uniffi.p2p_core.createPairingOffer
 import uniffi.p2p_core.joinerAcceptPairingGrant
@@ -34,6 +39,8 @@ object DevicePairingController {
     data class PrimaryRequest(
         val joinerDeviceId: ByteArray,
         val sas: String,
+        /** Short human-checkable id of the device asking to join, e.g. "A1B2-C3D4". */
+        val deviceShort: String = shortDeviceId(joinerDeviceId),
     )
 
     enum class JoinerPhase { WAITING_ANSWER, CONFIRM_CODE, WAITING_GRANT, DONE, FAILED }
@@ -42,6 +49,8 @@ object DevicePairingController {
         val phase: JoinerPhase,
         val sas: String? = null,
         val message: String? = null,
+        /** Short id of THIS device, so the user can check it is the one being connected. */
+        val deviceShort: String = "",
     )
 
     private val primaryMutable = MutableStateFlow<PrimaryRequest?>(null)
@@ -57,8 +66,16 @@ object DevicePairingController {
     private val primaryDoneMutable = MutableStateFlow(false)
     val primaryDone: StateFlow<Boolean> = primaryDoneMutable.asStateFlow()
 
+    private val retryScope = CoroutineScope(SupervisorJob() + CoroutineDispatchers.IO)
+
     /** Joiner: the user has compared the code and pressed confirm. */
     private var joinerConfirmed = false
+    @Volatile private var answerReceived = false
+    private var pendingRequestTarget: Pair<String, ByteArray>? = null
+    private var pendingRequestPacket: String? = null
+    /** Granting side: last grant+sync packets, so they can be re-sent on demand. */
+    private var lastGrantTarget: Pair<String, ByteArray>? = null
+    private var lastGrantPackets: List<String> = emptyList()
     private var pendingGrant: ByteArray? = null
     private var pendingSync: ByteArray? = null
     private var joinerAccountNode: String? = null
@@ -143,7 +160,8 @@ object DevicePairingController {
         if (current.phase != JoinerPhase.WAITING_ANSWER && current.phase != JoinerPhase.CONFIRM_CODE) return
         val sas = joinerHandlePairingAnswer(answer, now)
         if (pendingGrant != null && joinerConfirmed) return
-        joinerMutable.value = JoinerState(JoinerPhase.CONFIRM_CODE, sas = sas)
+        answerReceived = true
+        joinerMutable.value = JoinerState(JoinerPhase.CONFIRM_CODE, sas = sas, deviceShort = current.deviceShort)
     }
 
     private fun onGrant(context: Context, grant: ByteArray, now: Long) {
@@ -193,21 +211,27 @@ object DevicePairingController {
             System.currentTimeMillis(),
         )
         joinerConfirmed = false
+        answerReceived = false
         pendingGrant = null
         pendingSync = null
         joinerAccountNode = accountNode
         // A v2 offer already contained the whole handshake: the comparison code is known
         // right now, without waiting for the other phone's answer.
+        val myShort = shortDeviceId(DeviceKeyStore.deviceId(context))
         joinerMutable.value = if (started.sas != null) {
-            JoinerState(JoinerPhase.CONFIRM_CODE, sas = started.sas)
+            JoinerState(JoinerPhase.CONFIRM_CODE, sas = started.sas, deviceShort = myShort)
         } else {
-            JoinerState(JoinerPhase.WAITING_ANSWER)
+            JoinerState(JoinerPhase.WAITING_ANSWER, deviceShort = myShort)
         }
+        val requestPacket = DevicePairingWire.encode(DevicePairingWire.KIND_REQUEST, started.request)
+        pendingRequestTarget = accountNode to primaryDevice
+        pendingRequestPacket = requestPacket
         val sent = RustBridge.sendPairingPayload(
             accountNode,
             primaryDevice,
-            DevicePairingWire.encode(DevicePairingWire.KIND_REQUEST, started.request),
+            requestPacket,
         )
+        scheduleRequestRetries()
         if (!sent) {
             joinerMutable.value = JoinerState(JoinerPhase.FAILED, message = "request not delivered")
         }
@@ -233,13 +257,21 @@ object DevicePairingController {
         val request = primaryMutable.value ?: return
         val accountNode = RustBridge.nodeId() ?: return
         val granted = primaryConfirmPairing(request.joinerDeviceId, System.currentTimeMillis())
-        val sent = RustBridge.sendPairingPayload(
-            accountNode,
-            request.joinerDeviceId,
-            DevicePairingWire.encode(DevicePairingWire.KIND_GRANT, granted.grant),
-        )
+        val grantPacket = DevicePairingWire.encode(DevicePairingWire.KIND_GRANT, granted.grant)
+        val sent = RustBridge.sendPairingPayload(accountNode, request.joinerDeviceId, grantPacket)
         if (!sent) Log.w(TAG, "pairing grant was not delivered")
-        sendSyncBootstrap(accountNode, request.joinerDeviceId)
+        val syncPacket = sendSyncBootstrap(accountNode, request.joinerDeviceId)
+        // The new device may miss the grant (same delivery risks as the request):
+        // keep both packets and repeat them on a schedule and on demand.
+        lastGrantTarget = accountNode to request.joinerDeviceId
+        lastGrantPackets = listOfNotNull(grantPacket, syncPacket)
+        retryScope.launch {
+            for (waitMs in listOf(6_000L, 20_000L)) {
+                delay(waitMs)
+                if (!primaryDoneMutable.value) return@launch
+                resendGrant()
+            }
+        }
         primaryMutable.value = null
         primaryDoneMutable.value = true
         closeOffer()
@@ -252,21 +284,19 @@ object DevicePairingController {
      * partner's newest message), profile, contacts, drafts, pins, read marks and files.
      * No user action and no password are involved.
      */
-    private fun sendSyncBootstrap(accountNode: String, joinerDeviceId: ByteArray) {
-        val context = appContext ?: return
+    private fun sendSyncBootstrap(accountNode: String, joinerDeviceId: ByteArray): String? {
+        val context = appContext ?: return null
         val token = com.vladimir.messenger.data.mirror.MirrorRoomToken.load(context)
             ?: com.vladimir.messenger.data.mirror.MirrorRoomToken.create(context)
-            ?: return
+            ?: return null
         // Our own mirror channel may predate this token: make it adopt the same one.
         com.vladimir.messenger.data.mirror.MirrorHub.refreshRoomToken()
         val sealed = primarySealPairingSync(joinerDeviceId, "${token.value}:${token.createdAtMs}")
-        if (sealed.isEmpty()) return
-        val sent = RustBridge.sendPairingPayload(
-            accountNode,
-            joinerDeviceId,
-            DevicePairingWire.encode(DevicePairingWire.KIND_SYNC, sealed),
-        )
+        if (sealed.isEmpty()) return null
+        val packet = DevicePairingWire.encode(DevicePairingWire.KIND_SYNC, sealed)
+        val sent = RustBridge.sendPairingPayload(accountNode, joinerDeviceId, packet)
         if (!sent) Log.w(TAG, "pairing sync bootstrap was not delivered")
+        return packet
     }
 
     /** Paired device: the granting side sent its mirror room token. Adopt it and reconnect. */
@@ -310,6 +340,48 @@ object DevicePairingController {
         primaryMutable.value = null
         primaryDoneMutable.value = false
     }
+
+    /**
+     * The request may die on the way (closed NAT address, broker hiccup). Re-send the
+     * very same request packet a few times until the other phone's answer comes back;
+     * duplicates are harmless because the granting side replaces its own session.
+     */
+    private fun scheduleRequestRetries() {
+        retryScope.launch {
+            for (waitMs in listOf(4_000L, 8_000L, 20_000L, 40_000L)) {
+                delay(waitMs)
+                if (answerReceived) return@launch
+                val target = pendingRequestTarget ?: return@launch
+                val packet = pendingRequestPacket ?: return@launch
+                if (joinerMutable.value == null) return@launch
+                Log.i(TAG, "re-sending pairing request (no answer yet)")
+                RustBridge.sendPairingPayload(target.first, target.second, packet)
+            }
+        }
+    }
+
+    /** Scanner side, manual: send the request once more right now. */
+    fun resendRequest() {
+        val target = pendingRequestTarget ?: return
+        val packet = pendingRequestPacket ?: return
+        retryScope.launch { RustBridge.sendPairingPayload(target.first, target.second, packet) }
+    }
+
+    /** Granting side, manual: re-send the certificate and the sync bootstrap. */
+    fun resendGrant() {
+        val target = lastGrantTarget ?: return
+        if (lastGrantPackets.isEmpty()) return
+        retryScope.launch {
+            lastGrantPackets.forEach { packet ->
+                RustBridge.sendPairingPayload(target.first, target.second, packet)
+            }
+        }
+    }
+
+    /** "A1B2-C3D4" from the first bytes of a device id, for human comparison. */
+    fun shortDeviceId(deviceId: ByteArray): String =
+        DevicePairingWire.hex(deviceId).take(8).uppercase()
+            .let { if (it.length == 8) it.substring(0, 4) + "-" + it.substring(4) else it }
 
     /** Joiner: the screen was closed after success. */
     fun dismissJoiner() {

@@ -603,9 +603,22 @@ fun MessengerNavGraph(
         // РќРђРЎРўР РћР™РљР
         // ------------------------------------------------------------------
         composable(route = Screen.Devices.route) {
+            val manualContext = androidx.compose.ui.platform.LocalContext.current
+            val manualScope = androidx.compose.runtime.rememberCoroutineScope()
             DevicesScreen(
                 onBackClick = { navController.popBackStack() },
                 onScanClick = { navController.navigate(Screen.DevicePairScan.route) },
+                onManualCode = { code ->
+                    // Ручной ввод: тот же код, что в QR, только текстом - путь
+                    // подключения дальше ровно тот же, что после сканирования.
+                    if (DevicePairingWire.parseQr(code) != null) {
+                        manualScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            DevicePairingController.startJoin(code)
+                        }
+                    } else {
+                        android.widget.Toast.makeText(manualContext, manualContext.getString(com.vladimir.messenger.R.string.devices_not_pairing_qr), android.widget.Toast.LENGTH_LONG).show()
+                    }
+                },
             )
         }
 
