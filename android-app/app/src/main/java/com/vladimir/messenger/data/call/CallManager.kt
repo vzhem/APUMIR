@@ -314,7 +314,7 @@ class CallManager @Inject constructor(
                 callId = offer.callId,
                 outgoing = false,
                 video = videoWanted,
-                speaker = videoWanted,
+                // Громкая связь сама не включается: человек включит кнопкой, когда надо.
                 cameraOn = videoWanted,
             )
             startTicker()
@@ -744,7 +744,7 @@ class CallManager @Inject constructor(
                 callId = callId,
                 outgoing = true,
                 video = video,
-                speaker = video,
+                // Громкая связь при видеозвонке не активируется сразу (просьба владельца).
                 cameraOn = video,
             )
             startTicker()
@@ -857,7 +857,6 @@ class CallManager @Inject constructor(
         _uiState.value = current.copy(
             video = if (on) true else current.video,
             screenSharing = on,
-            speaker = if (on && !current.video) true else current.speaker,
         )
         if (on && !current.video) {
             sendSignal(
@@ -1761,7 +1760,6 @@ class CallManager @Inject constructor(
             video = video,
             remoteScreen = video && screen,
             cameraOn = if (video) current.cameraOn || !current.video else false,
-            speaker = if (video && !current.video) true else current.speaker,
         )
         if (video) {
             ringPlayer.setSpeaker(_uiState.value.speaker)
