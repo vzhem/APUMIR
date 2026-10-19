@@ -18,7 +18,9 @@ import java.util.UUID
  * В приложении [headroom] отвечает ползунок «Место под пересылку»
  * (`StorageSettings.headroom`): квота владельца телефона минус занятое, но не
  * глубже запаса свободного места на разделе. Для явной передачи обновления
- * APK можно обойти только пользовательскую квоту; запас свободного места
+ * APK (пометка [EXEMPT_MARKER_FILE] у передачи) не считается в статистику
+ * пересылки и обходит и пользовательскую квоту, и жёсткий предел хранилища;
+ * запас свободного места
  * устройства и жёсткий предел самого хранилища остаются в силе. Спрашивается
  * при каждой записи, поэтому смена ползунка действует сразу.
  */
@@ -145,10 +147,15 @@ class FileTransferChunkStore(
             return StoredChunk(chunkIndex, target.length(), incomingHash, newlyStored = false)
         }
 
+        if (ownerQuotaExempt) markExempt(transferId)
         val used = currentStoredBytes()
         val projected = Math.addExact(used, ciphertext.size.toLong())
-        if (projected > maxStoreBytes) com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.tracker.count(com.vladimir.messenger.data.diagnostics.OperationalCounter.QUOTA_REJECTED)
-        check(projected <= maxStoreBytes) { "File transfer owner quota exceeded" }
+        // Льготная передача (APK) вне лимитов пересылки: жёсткий предел хранилища
+        // её тоже не касается, в силе только физический запас места (headroom ниже).
+        if (!ownerQuotaExempt) {
+            if (projected > maxStoreBytes) com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.tracker.count(com.vladimir.messenger.data.diagnostics.OperationalCounter.QUOTA_REJECTED)
+            check(projected <= maxStoreBytes) { "File transfer owner quota exceeded" }
+        }
         headroom?.let { room ->
             val allowed = room(used, ownerQuotaExempt)
             // Текст показывается отправителю дословно («Файл не отправлен: …»),
@@ -167,7 +174,8 @@ class FileTransferChunkStore(
             }
         }
         atomicWrite(target, ciphertext)
-        cachedStoredBytes = projected
+        // Льготные куски в «занято пересылкой» не попадают: счётчик не двигаем.
+        if (!ownerQuotaExempt) cachedStoredBytes = projected
         return StoredChunk(chunkIndex, target.length(), incomingHash, newlyStored = true)
     }
 
@@ -251,12 +259,22 @@ class FileTransferChunkStore(
         base.walkTopDown().forEach { file ->
             check(!Files.isSymbolicLink(file.toPath())) { "Symbolic entry in file transfer store" }
             if (file.isFile && CHUNK_FILE.matches(file.name)) {
+                // Статистика пересылки: льготные передачи (APK) не считаем.
+                val transferDir = file.parentFile?.parentFile
+                if (transferDir != null && File(transferDir, EXEMPT_MARKER_FILE).isFile) return@forEach
                 total = Math.addExact(total, file.length())
                 check(total <= MAX_STORE_QUOTA_BYTES) { "Unbounded file transfer store" }
             }
         }
         cachedStoredBytes = total
         return total
+    }
+
+    /** Пометить передачу льготной (APK): её куски не считаются и не лимитируются. */
+    private fun markExempt(transferId: String) {
+        val dir = transferDirectory(transferId, create = true)
+        val marker = checkedChild(dir, EXEMPT_MARKER_FILE)
+        if (!marker.exists()) atomicWrite(marker, byteArrayOf(1))
     }
 
     private fun chunksDirectory(transferId: String, create: Boolean): File {
@@ -360,6 +378,9 @@ class FileTransferChunkStore(
         private const val MANIFEST_FILE = "manifest.v1"
         private const val KEY_ENVELOPE_FILE = "key-envelope.v1"
         private const val ORIGIN_BINDING_FILE = "origin-binding.v1"
+
+        /** Пометка льготной передачи (APK): не считается в статистику и лимиты пересылки. */
+        const val EXEMPT_MARKER_FILE = "quota-exempt.v1"
         const val MAX_ORIGIN_BINDING_BYTES = 512
         private val TRANSFER_ID = Regex("^[0-9a-f]{32}$")
         private val CHUNK_FILE = Regex("^(?:[0-9]{8}|[0-9]{20})\\.chunk$")

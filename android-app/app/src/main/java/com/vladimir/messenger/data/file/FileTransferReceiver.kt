@@ -1000,7 +1000,9 @@ class FileTransferReceiver(
                 transferIdHex,
                 chunkIndex,
                 ciphertext,
-                ownerQuotaExempt = transfer.chatId == ApkUpdate.CHAT_ID,
+                // APK вне лимитов и статистики пересылки (и обновление, и просто файл).
+                ownerQuotaExempt = transfer.chatId == ApkUpdate.CHAT_ID ||
+                    ApkFiles.isApk(transfer.displayName, transfer.mediaType),
             )
         } catch (storeError: Exception) {
             Log.w(TAG, "Chunk $chunkIndex rejected by store for $transferIdHex: ${storeError.message}")
@@ -1882,18 +1884,22 @@ class FileTransferReceiver(
             sendCustodyAck(senderId, transferIdHex, contiguousReceived(transferIdHex), FileCustodyPdu.ACK_OK)
             return
         }
-        if (transferDao.countActiveCustody() >= FileCustodySender.MAX_CUSTODY_TRANSFERS) {
-            answer(FileCustodyPdu.ACK_FULL, "too many files held"); return
-        }
-        if (transferDao.countActiveCustodyFrom(senderId) >= FileCustodySender.MAX_CUSTODY_PER_ORIGIN) {
-            answer(FileCustodyPdu.ACK_FULL, "too many files held for this sender"); return
-        }
-        val needed = Math.addExact(
-            manifest.fileSize.toLong(),
-            Math.multiplyExact(manifest.chunkCount.toLong(), FileTransferChunkStore.AEAD_TAG_BYTES.toLong()),
-        )
-        if (needed > custody.headroomBytes()) {
-            answer(FileCustodyPdu.ACK_FULL, "no space ($needed B needed)"); return
+        // APK вне лимитов пересылки: счётчики хранения и квота посредника его не касаются.
+        val apkCustody = ApkFiles.isApk(manifest.displayName, manifest.mediaType)
+        if (!apkCustody) {
+            if (transferDao.countActiveCustody() >= FileCustodySender.MAX_CUSTODY_TRANSFERS) {
+                answer(FileCustodyPdu.ACK_FULL, "too many files held"); return
+            }
+            if (transferDao.countActiveCustodyFrom(senderId) >= FileCustodySender.MAX_CUSTODY_PER_ORIGIN) {
+                answer(FileCustodyPdu.ACK_FULL, "too many files held for this sender"); return
+            }
+            val needed = Math.addExact(
+                manifest.fileSize.toLong(),
+                Math.multiplyExact(manifest.chunkCount.toLong(), FileTransferChunkStore.AEAD_TAG_BYTES.toLong()),
+            )
+            if (needed > custody.headroomBytes()) {
+                answer(FileCustodyPdu.ACK_FULL, "no space ($needed B needed)"); return
+            }
         }
         val entity = FileTransferEntity(
             transferId = transferIdHex,

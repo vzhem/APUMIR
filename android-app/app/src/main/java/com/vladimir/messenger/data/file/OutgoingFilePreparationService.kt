@@ -234,7 +234,8 @@ class OutgoingFilePreparationService private constructor(
                 inspected.sha256,
                 store,
                 finalState = "SEEDING",
-                ownerQuotaExempt = groupId == ApkUpdate.CHAT_ID,
+                ownerQuotaExempt = groupId == ApkUpdate.CHAT_ID ||
+                    ApkFiles.isApk(manifest.displayName, manifest.mediaType),
             )
             PreparedTransfer(
                 transferId = manifest.transferIdHex,
@@ -380,7 +381,8 @@ class OutgoingFilePreparationService private constructor(
                 manifest,
                 inspected.sha256,
                 store,
-                ownerQuotaExempt = chatId == ApkUpdate.CHAT_ID,
+                ownerQuotaExempt = chatId == ApkUpdate.CHAT_ID ||
+                    ApkFiles.isApk(manifest.displayName, manifest.mediaType),
             )
             // Раунд 43: для картинок кладём превью рядом - пузырь в чате
             // показывает фото, а не только имя файла и размер. Превью - вся
