@@ -137,6 +137,14 @@ fun BirthdayEditDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = ApuBubbleMutedColor,
                 )
+                if (inFuture) {
+                    Spacer(Modifier.size(6.dp))
+                    Text(
+                        stringResource(R.string.birthday_future_error),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 if (initial != null) {
                     Spacer(Modifier.size(6.dp))
                     ApuTextAction(

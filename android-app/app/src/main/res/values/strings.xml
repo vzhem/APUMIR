@@ -96,6 +96,7 @@
     <string name="settings_birthday_hidden_hint">Скрытую дату не видит никто: она не покидает этот телефон.</string>
     <string name="birthday_dialog_title">День рождения</string>
     <string name="birthday_pick_date">Выбрать дату</string>
+    <string name="birthday_future_error">Дата рождения не может быть в будущем. Выберите дату не позже сегодняшней.</string>
     <string name="birthday_year_hint">Год остаётся на этом телефоне и друзьям не передаётся: им нужен только день.</string>
     <string name="birthday_clear">Убрать дату</string>
     <string name="birthday_save">Готово</string>

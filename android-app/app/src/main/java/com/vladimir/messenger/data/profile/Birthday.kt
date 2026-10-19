@@ -54,6 +54,21 @@ data class Birthday(
             year == NO_YEAR || year in MIN_YEAR..nowYear
 
         /**
+         * Полная дата рождения в будущем: человек ещё не родился.
+         * Без года дата будущей быть не может — она повторяется каждый год.
+         * 29 февраля в невисокосный год считаем по дню, как в календаре: 28-м.
+         */
+        fun isFuture(day: Int, month: Int, year: Int, today: LocalDate): Boolean {
+            if (year == NO_YEAR || !isValid(day, month)) return false
+            val clampedDay = minOf(day, daysInMonth(month, isLeap(year)))
+            return LocalDate.of(year, month, clampedDay).isAfter(today)
+        }
+
+        /** Дата рождения целиком допустима: существует, год в пределах и не в будущем. */
+        fun isValidBirthDate(day: Int, month: Int, year: Int, today: LocalDate): Boolean =
+            isValid(day, month) && isValidYear(year, today.year) && !isFuture(day, month, year, today)
+
+        /**
          * День, в который поздравляют в этом году.
          *
          * 29 февраля поздравляют 28-го в невисокосный год: иначе человек, родившийся

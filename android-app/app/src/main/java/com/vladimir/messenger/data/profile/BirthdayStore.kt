@@ -49,7 +49,8 @@ object BirthdayStore {
             day = day,
             month = month,
             year = prefs.getInt(KEY_YEAR, Birthday.NO_YEAR).takeIf {
-                Birthday.isValidYear(it, java.time.LocalDate.now().year)
+                // Будущую дату рождения не показываем и дальше не тащим: год отбрасываем.
+                Birthday.isValidBirthDate(day, month, it, java.time.LocalDate.now())
             } ?: Birthday.NO_YEAR,
             visible = prefs.getBoolean(KEY_VISIBLE, false),
         )

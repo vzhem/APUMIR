@@ -87,6 +87,7 @@
     <string name="settings_birthday_hidden_hint">A hidden date is seen by nobody: it never leaves this phone.</string>
     <string name="birthday_dialog_title">Birthday</string>
     <string name="birthday_pick_date">Pick a date</string>
+    <string name="birthday_future_error">Date of birth cannot be in the future. Pick a date no later than today.</string>
     <string name="birthday_year_hint">The year stays on this phone and is never sent to friends: they only need the day.</string>
     <string name="birthday_clear">Remove the date</string>
     <string name="birthday_save">Done</string>
