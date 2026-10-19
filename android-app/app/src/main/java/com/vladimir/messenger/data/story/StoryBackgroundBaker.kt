@@ -43,7 +43,7 @@ internal object StoryBackgroundBaker {
         if (!background.isActive) return StoryBackgroundBakeResult(source, null)
         val output = File.createTempFile("bgstory-", ".mp4", StoryVideoFiles.directory(context))
         return try {
-            withContext(Dispatchers.IO) { transcode(source, output, background, onProgress) }
+            withContext(Dispatchers.IO) { transcode(context, source, output, background, onProgress) }
             StoryBackgroundBakeResult(output, null)
         } catch (cancelled: CancellationException) {
             output.delete()
@@ -59,7 +59,7 @@ internal object StoryBackgroundBaker {
         }
     }
 
-    private fun transcode(source: File, output: File, background: VideoBackground, onProgress: (Float) -> Unit) {
+    private fun transcode(context: android.content.Context, source: File, output: File, background: VideoBackground, onProgress: (Float) -> Unit) {
         val retriever = MediaMetadataRetriever()
         val videoExtractor = MediaExtractor()
         val audioExtractor = MediaExtractor()
@@ -115,7 +115,7 @@ internal object StoryBackgroundBaker {
             muxer.setOrientationHint(rotation)
 
             val backgroundBitmap = if (background == VideoBackground.BLUR) null
-            else background.render(width, height)
+            else background.render(context, width, height)
 
             val codecInfo = MediaCodec.BufferInfo()
             val audioInfo = MediaCodec.BufferInfo()

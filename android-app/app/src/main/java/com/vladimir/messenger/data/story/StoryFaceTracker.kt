@@ -2,6 +2,7 @@ package com.vladimir.messenger.data.story
 
 import android.graphics.Bitmap
 import android.graphics.Matrix
+import android.content.Context
 import android.graphics.Rect
 import com.vladimir.messenger.data.background.PersonSegmenter
 import com.vladimir.messenger.data.background.VideoBackground
@@ -23,6 +24,7 @@ import com.google.mlkit.vision.face.FaceLandmark
  * детектор не запускается и батарею не тратит.
  */
 internal class StoryFaceTracker(
+    private val context: Context,
     private val onFrame: (StoryFaceFrame) -> Unit,
 ) : ImageAnalysis.Analyzer {
     @Volatile
@@ -82,7 +84,7 @@ internal class StoryFaceTracker(
         if (cachedBackgroundKey != key) {
             cachedBackgroundKey = key
             cachedBackground = if (active == VideoBackground.BLUR) null
-            else active.render(upright.width, upright.height)
+            else active.render(context, upright.width, upright.height)
         }
         val segmented = PersonSegmenter.compositeOrNull(upright, cachedBackground)
         if (segmented != null) {

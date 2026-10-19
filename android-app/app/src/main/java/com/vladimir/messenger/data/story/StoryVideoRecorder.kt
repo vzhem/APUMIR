@@ -45,7 +45,7 @@ internal class StoryVideoRecorder(
     private var cancelled = false
     private var closed = false
 
-    private val tracker = StoryFaceTracker(onFaces)
+    private val tracker = StoryFaceTracker(context.applicationContext, onFaces)
     private var analysisExecutor: ExecutorService? = null
 
     /** true, если на этом устройстве удалось связать распознавание лица с записью. */

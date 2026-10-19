@@ -247,7 +247,7 @@ private fun CallBackgroundPreview(
                         renderedKey = key
                         renderedBackground = if (background ==
                             com.vladimir.messenger.data.background.VideoBackground.BLUR
-                        ) null else background.render(source.width, source.height)
+                        ) null else background.render(context, source.width, source.height)
                     }
                     val segmented = com.vladimir.messenger.data.background.PersonSegmenter
                         .compositeOrNull(source, renderedBackground)
