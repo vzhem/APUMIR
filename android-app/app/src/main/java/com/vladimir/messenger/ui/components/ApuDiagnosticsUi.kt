@@ -378,6 +378,13 @@ fun ApuDiagnosticsHero(
                     onClick = onWarningsClick,
                 )
             }
+            if (onWarningsClick != null) {
+                Text(
+                    stringResource(R.string.diag_warnings_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.66f),
+                )
+            }
         }
     }
 }

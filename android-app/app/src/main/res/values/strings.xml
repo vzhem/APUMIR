@@ -1187,6 +1187,7 @@
     <string name="diag_events_label">событий</string>
     <string name="diag_warn_label">предупр.</string>
     <string name="diag_warnings_title">Предупреждения и ошибки</string>
+    <string name="diag_warnings_hint">Нажмите «предупр.» или «ошибок» — сразу покажем, какие именно.</string>
     <string name="diag_warnings_empty">Предупреждений и ошибок нет: всё в порядке.</string>
     <string name="diag_warnings_checks">Проверки со вниманием</string>
     <string name="diag_warnings_journal">События со вниманием</string>

@@ -62,24 +62,24 @@ object DownloadTrashCleanup {
     }
 
     /**
-     * Раунд 265: телефон не должен превращаться в кладбище APK. Владелец
-     * нашёл в «Скачанных» десяток APU-v*.apk по 40 МБ после каждого
-     * обновления. Правило при каждом старте:
-     *  - версия файла равна установленной — удаляем (уже установлена, мусор);
-     *  - иначе держим только самую свежую, все старше — удаляем.
-     * Рой-раздачу это НЕ ломает: соседям отдаётся собственный установленный
-     * APK (applicationInfo.sourceDir), а не скачанный файл.
+     * Телефон не должен превращаться в кладбище APK. Правило при каждом
+     * старте (без суточного ожидания — владелец тестирует релизы пачками):
+     *  - версия файла не новее установленной — удаляем: своё отработала;
+     *  - новее установленной — держим только самый свежий файл (вдруг впереди
+     *    установка), остальные дубли и старые — удаляем;
+     *  - файлы младше десяти минут не трогаем: загрузка может ещё идти.
+     * Чужие по владельцу загрузки система удалить не даст — попытка просто
+     * молча не сработает, свои (скачанные самим приложением) уберутся.
+     * Рой-раздачу это НЕ ломает: соседям отдаётся установленный APK
+     * (applicationInfo.sourceDir), а не скачанный файл.
      */
     fun cleanOldApks(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
         val cr = context.contentResolver
         runCatching {
             val uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            val selection = "${MediaStore.Downloads.DISPLAY_NAME} LIKE ? AND ${MediaStore.MediaColumns.OWNER_PACKAGE_NAME}=? AND ${MediaStore.Downloads.DATE_MODIFIED}<?"
-            val args = arrayOf("APU-v%.apk", context.packageName, ((System.currentTimeMillis() - 24L * 60 * 60 * 1000) / 1000).toString())
-            val ids = mutableListOf<Long>()
-            val names = mutableListOf<String>()
-            val dates = mutableListOf<Long>()
+            data class Row(val id: Long, val name: String, val modifiedSec: Long)
+            val rows = mutableListOf<Row>()
             cr.query(
                 uri,
                 arrayOf(
@@ -87,44 +87,58 @@ object DownloadTrashCleanup {
                     MediaStore.Downloads.DISPLAY_NAME,
                     MediaStore.Downloads.DATE_MODIFIED,
                 ),
-                selection,
-                args,
+                "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?",
+                arrayOf("APU-v%.apk"),
                 "${MediaStore.Downloads.DATE_MODIFIED} DESC",
             )?.use { c ->
-                while (ids.size < 128 && c.moveToNext()) {
-                    ids.add(c.getLong(0))
-                    names.add(c.getString(1) ?: "")
-                    dates.add(if (c.isNull(2)) 0L else c.getLong(2))
+                while (rows.size < 128 && c.moveToNext()) {
+                    rows.add(
+                        Row(
+                            c.getLong(0),
+                            c.getString(1) ?: "",
+                            if (c.isNull(2)) 0L else c.getLong(2),
+                        ),
+                    )
                 }
             }
-            if (ids.isEmpty()) return
+            if (rows.isEmpty()) return
             val installed = com.vladimir.messenger.BuildConfig.VERSION_NAME.removePrefix("v")
-            val order = ids.indices.sortedByDescending { dates[it] }
-            var keptNewest = false
+            val versionRegex = Regex("""APU-v([0-9]+(?:\.[0-9]+)*)(?: \(\d+\))?\.apk""")
+            fun versionOf(name: String): String? = versionRegex.matchEntire(name)?.groupValues?.get(1)
+            fun compareVersions(a: String, b: String): Int {
+                val pa = a.split('.').map { it.toIntOrNull() ?: 0 }
+                val pb = b.split('.').map { it.toIntOrNull() ?: 0 }
+                for (i in 0 until maxOf(pa.size, pb.size)) {
+                    val diff = (pa.getOrElse(i) { 0 }) - (pb.getOrElse(i) { 0 })
+                    if (diff != 0) return diff
+                }
+                return 0
+            }
+            val nowSec = System.currentTimeMillis() / 1000
+            // Самый свежий файл новее установленной версии — единственный,
+            // кому разрешено остаться (возможная предстоящая установка).
+            val keepId = rows
+                .filter { row ->
+                    val v = versionOf(row.name)
+                    v != null && compareVersions(v, installed) > 0
+                }
+                .maxByOrNull { it.modifiedSec }
+                ?.id
             var deleted = 0
-            for (i in order) {
-                val ver = names[i].removePrefix("APU-v").removeSuffix(".apk")
-                val delete = when {
-                    // Уже установленная версия: файл своё отработал.
-                    ver == installed -> true
-                    // Самая свежая из оставшихся - держим (вдруг впереди установка).
-                    !keptNewest -> {
-                        keptNewest = true
-                        false
-                    }
-                    else -> true
-                }
-                if (delete) {
-                    val rowUri = ContentUris.withAppendedId(uri, ids[i])
-                    val n = runCatching { cr.delete(rowUri, null, null) }.getOrDefault(0)
-                    if (n > 0) deleted++
-                }
+            for (row in rows) {
+                if (row.id == keepId) continue
+                // Свежая загрузка могла ещё идти: младше десяти минут не трогаем.
+                if (nowSec - row.modifiedSec < 10 * 60) continue
+                val rowUri = ContentUris.withAppendedId(uri, row.id)
+                val n = runCatching { cr.delete(rowUri, null, null) }.getOrDefault(0)
+                if (n > 0) deleted++
             }
             if (deleted > 0) {
-                Log.i(TAG, "old APK cleanup: removed $deleted file(s)")
+                Log.i(TAG, "old APK cleanup: removed $deleted file(s), kept ${if (keepId != null) 1 else 0}")
             }
         }.onFailure { e ->
             Log.w(TAG, "old apk cleanup failed: ${e.message}")
         }
     }
+
 }

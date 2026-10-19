@@ -1706,6 +1706,14 @@ private fun SettingsTabContent(
                         badCount = logsSnapshot?.badCount ?: 0,
                         onWarningsClick = { showDiagnosticsWarnings = !showDiagnosticsWarnings },
                     )
+                    // Сразу какие предупреждения — прямо под шапкой, чтобы не
+                    // нужно было прокручивать окно ради списка.
+                    if (showDiagnosticsWarnings && !transferLogsLoading) {
+                        ApuDiagnosticsWarningsCard(
+                            lines = logsSnapshot?.statusLines.orEmpty(),
+                            events = logsSnapshot?.events.orEmpty(),
+                        )
+                    }
                     // Ход работ и ошибка говорятся словами — окно никогда не
                     // молчит пустым экраном.
                     val stageLine = when {
@@ -1732,14 +1740,6 @@ private fun SettingsTabContent(
                         }
                     } else {
                         ApuDiagnosticsStatusCard(lines = logsSnapshot?.statusLines.orEmpty())
-                    }
-                    // Сразу какие предупреждения: только внимание/поломки из
-                    // сводки и журнала, без чтения всего отчёта.
-                    if (showDiagnosticsWarnings && !transferLogsLoading) {
-                        ApuDiagnosticsWarningsCard(
-                            lines = logsSnapshot?.statusLines.orEmpty(),
-                            events = logsSnapshot?.events.orEmpty(),
-                        )
                     }
                     // Список событий — то, что человек называет «логи»: он виден
                     // сразу, как только пришла быстрая часть отчёта.
