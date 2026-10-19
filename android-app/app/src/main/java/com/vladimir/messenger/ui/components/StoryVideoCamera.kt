@@ -230,8 +230,13 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                             }
                             baked.message?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
                             produced = baked.file
-                            if (afterBackground != file) afterBackground.delete()
-                            if (produced != file && produced != afterBackground) file.delete()
+                            // Удаляем только промежуточные файлы и никогда — итог:
+                            // когда фильтр лица не выбран, итог и есть файл после фона,
+                            // и его удаление раньше ломало сохранение («файл не существует»).
+                            listOf(file, afterBackground)
+                                .distinct()
+                                .filter { it != produced }
+                                .forEach { it.delete() }
                             val source = withContext(Dispatchers.IO) { StoryVideoFiles.inspect(produced) }
                             recorded(source)
                             handedOff = true
