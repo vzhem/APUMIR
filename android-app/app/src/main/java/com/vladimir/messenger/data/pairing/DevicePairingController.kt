@@ -40,7 +40,7 @@ object DevicePairingController {
         val joinerDeviceId: ByteArray,
         val sas: String,
         /** Short human-checkable id of the device asking to join, e.g. "A1B2-C3D4". */
-        val deviceShort: String = shortDeviceId(joinerDeviceId),
+        val deviceShort: String,
     )
 
     enum class JoinerPhase { WAITING_ANSWER, CONFIRM_CODE, WAITING_GRANT, DONE, FAILED }
@@ -150,7 +150,7 @@ object DevicePairingController {
             DevicePairingWire.encode(DevicePairingWire.KIND_ANSWER, answer.answer),
         )
         if (!sent) Log.w(TAG, "pairing answer was not delivered")
-        primaryMutable.value = PrimaryRequest(joinerDeviceId = joinerDevice, sas = answer.sas)
+        primaryMutable.value = PrimaryRequest(joinerDeviceId = joinerDevice, sas = answer.sas, deviceShort = shortDeviceId(joinerDevice))
     }
 
     private fun onAnswer(answer: ByteArray, now: Long) {
