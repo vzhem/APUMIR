@@ -38,15 +38,32 @@ object PersonSegmenter {
     fun composite(source: Bitmap, background: Bitmap?): Bitmap {
         if (!available) return source.copy(Bitmap.Config.ARGB_8888, false)
         val mask = try {
-            Tasks.await(
+            val result = Tasks.await(
                 segmenter.process(InputImage.fromBitmap(source, 0)),
                 5, TimeUnit.SECONDS,
-            ).getMask()
+            )
+            extractMask(result)
         } catch (e: Exception) {
             available = false
             return source.copy(Bitmap.Config.ARGB_8888, false)
         } ?: return source.copy(Bitmap.Config.ARGB_8888, false)
         return applyMask(source, background, mask)
+    }
+
+    /**
+     * Маска из результата сегментации. В разных версиях ML Kit доступ к ней
+     * назван по-разному (свойство, метод или поле), поэтому ищем по типу
+     * возвращаемого значения, а не по имени: соберётся и заработает в обеих.
+     */
+    private fun extractMask(result: Any): SegmentationMask? {
+        val type = SegmentationMask::class.java
+        result.javaClass.methods
+            .firstOrNull { it.parameterCount == 0 && type.isAssignableFrom(it.returnType) }
+            ?.let { method -> return runCatching { method.invoke(result) as? SegmentationMask }.getOrNull() }
+        result.javaClass.fields
+            .firstOrNull { type.isAssignableFrom(it.type) }
+            ?.let { field -> return runCatching { field.get(result) as? SegmentationMask }.getOrNull() }
+        return null
     }
 
     /** Размытый вариант кадра для фона BLUR: уменьшение в 12 раз и обратно. */
