@@ -57,6 +57,9 @@ object PersonSegmenter {
      * возвращаемого значения, а не по имени: соберётся и заработает в обеих.
      */
     private fun extractMask(result: Any): SegmentationMask? {
+        // Selfie-сегментация возвращает саму маску, а не обёртку с полем маски:
+        // без этой проверки маска никогда не находилась и фон молча не применялся.
+        if (result is SegmentationMask) return result
         val type = SegmentationMask::class.java
         result.javaClass.methods
             .firstOrNull { it.parameterCount == 0 && type.isAssignableFrom(it.returnType) }

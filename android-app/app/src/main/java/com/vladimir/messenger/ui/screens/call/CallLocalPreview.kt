@@ -16,7 +16,14 @@ import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -205,6 +212,7 @@ private fun CallBackgroundPreview(
     val lastSent = remember { AtomicLong(0L) }
     val jpegSink = rememberUpdatedState(onJpeg)
     var frame by remember { mutableStateOf<Bitmap?>(null) }
+    var backgroundPending by remember { mutableStateOf(true) }
     var renderedBackground by remember { mutableStateOf<Bitmap?>(null) }
     var renderedKey by remember { mutableStateOf("") }
 
@@ -232,8 +240,11 @@ private fun CallBackgroundPreview(
                             com.vladimir.messenger.data.background.VideoBackground.BLUR
                         ) null else background.render(source.width, source.height)
                     }
-                    val composited = com.vladimir.messenger.data.background.PersonSegmenter
-                        .composite(source, renderedBackground)
+                    val segmented = com.vladimir.messenger.data.background.PersonSegmenter
+                        .compositeOrNull(source, renderedBackground)
+                    backgroundPending = segmented == null
+                    val composited = segmented
+                        ?: source.copy(Bitmap.Config.ARGB_8888, false)
                     frame = composited
                     if (sendFlag.get()) {
                         val rotation = image.imageInfo.rotationDegrees
@@ -276,11 +287,28 @@ private fun CallBackgroundPreview(
     }
     val current = frame
     if (current != null) {
-        Image(
-            bitmap = current.asImageBitmap(),
-            contentDescription = null,
-            modifier = modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
-        )
+        Box(modifier = modifier.fillMaxSize()) {
+            Image(
+                bitmap = current.asImageBitmap(),
+                contentDescription = null,
+                // Обычное превью фронтальной камеры зеркалит картинку (так человек
+                // привык себя видеть); кадр сегментации приходит незеркальным,
+                // поэтому без этого выбор фона выглядел как «зеркалирование».
+                // Собеседнику уходит незеркальный кадр — как и без фона.
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(if (front) Modifier.graphicsLayer { scaleX = -1f } else Modifier),
+                contentScale = ContentScale.Crop,
+            )
+            if (backgroundPending) {
+                Text(
+                    text = "Фон подготавливается…",
+                    color = Color.White,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(8.dp),
+                )
+            }
+        }
     }
 }
