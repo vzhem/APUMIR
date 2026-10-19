@@ -26,29 +26,30 @@ object PersonSegmenter {
         )
     }
 
-    @Volatile
-    var available: Boolean = true
-        private set
-
     /**
-     * Кадр с заменённым фоном. [background] = null означает «размыть настоящий
-     * фон» (BLUR): позади человека кладём сильно уменьшенную копию кадра.
-     * При любой неудаче возвращается копия исходного кадра.
+     * Кадр с заменённым фоном или null, если сегментация сейчас недоступна.
+     * [background] = null означает «размыть настоящий фон» (BLUR).
+     *
+     * Неудача НЕ запоминается навсегда: модель ML Kit при первом использовании
+     * может ещё скачиваться, и следующий кадр обязан попробовать снова —
+     * иначе фон молча не работал бы весь сеанс из-за одной ранней ошибки.
      */
-    fun composite(source: Bitmap, background: Bitmap?): Bitmap {
-        if (!available) return source.copy(Bitmap.Config.ARGB_8888, false)
+    fun compositeOrNull(source: Bitmap, background: Bitmap?): Bitmap? {
         val mask = try {
             val result = Tasks.await(
                 segmenter.process(InputImage.fromBitmap(source, 0)),
-                5, TimeUnit.SECONDS,
+                8, TimeUnit.SECONDS,
             )
             extractMask(result)
         } catch (e: Exception) {
-            available = false
-            return source.copy(Bitmap.Config.ARGB_8888, false)
-        } ?: return source.copy(Bitmap.Config.ARGB_8888, false)
+            return null
+        } ?: return null
         return applyMask(source, background, mask)
     }
+
+    /** Как [compositeOrNull], но при неудаче возвращает копию исходного кадра. */
+    fun composite(source: Bitmap, background: Bitmap?): Bitmap =
+        compositeOrNull(source, background) ?: source.copy(Bitmap.Config.ARGB_8888, false)
 
     /**
      * Маска из результата сегментации. В разных версиях ML Kit доступ к ней

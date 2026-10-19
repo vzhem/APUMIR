@@ -522,13 +522,33 @@ private fun CallButtons(
                     }
                     // Второй ряд: показ экрана и живой текст — рядом с трубкой
                     // им не хватило места, а прятать под меню их нельзя.
+                    // Подписанные кнопки, а не значки без текста: владелец не нашёл
+                    // «Показать экран» среди круглых иконок — теперь всё словами.
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(gap),
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        ScreenShareCallButton(state, onScreenShare)
-                        CaptionsCallButton(state, onCaptions)
-                        BackgroundsCallButton(onBackgrounds)
+                        LabeledCallChip(
+                            icon = if (state.screenSharing) Icons.Default.StopScreenShare else Icons.Default.ScreenShare,
+                            label = stringResource(
+                                if (state.screenSharing) R.string.call_stop_share else R.string.call_share_screen,
+                            ),
+                            active = state.screenSharing,
+                            onClick = onScreenShare,
+                        )
+                        LabeledCallChip(
+                            icon = Icons.Default.Subtitles,
+                            label = stringResource(R.string.call_captions),
+                            active = state.captionsOn || state.captionsPreparing,
+                            onClick = onCaptions,
+                        )
+                        LabeledCallChip(
+                            icon = Icons.Default.Wallpaper,
+                            label = stringResource(R.string.call_background),
+                            active = false,
+                            onClick = onBackgrounds,
+                        )
                     }
                 }
             }
@@ -663,6 +683,40 @@ private fun BackgroundsCallButton(onBackgrounds: () -> Unit) {
             Icons.Default.Wallpaper,
             stringResource(R.string.call_background),
             tint = ApuBubbleMutedColor,
+        )
+    }
+}
+
+/** Подписанная кнопка-пилюля второго ряда звонка: значок + слово, чтобы не угадывать. */
+@Composable
+private fun LabeledCallChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    active: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(
+                if (active) MaterialTheme.colorScheme.primary
+                else Color(0xFFF5F7FA).copy(alpha = 0.95f),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            contentDescription = label,
+            tint = if (active) MaterialTheme.colorScheme.onPrimary else ApuBubbleMutedColor,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            label,
+            color = if (active) MaterialTheme.colorScheme.onPrimary else ApuBubbleMutedColor,
+            style = MaterialTheme.typography.labelLarge,
         )
     }
 }

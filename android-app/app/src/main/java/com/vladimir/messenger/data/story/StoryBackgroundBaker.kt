@@ -117,6 +117,7 @@ internal object StoryBackgroundBaker {
             var videoTrackOut = -1
             var audioTrackOut = -1
             var muxerStarted = false
+            var compositedFrames = 0
             var inputDone = false
             var outputDone = false
             var lastVideoPtsUs = 0L
@@ -197,10 +198,11 @@ internal object StoryBackgroundBaker {
                                 if (frame != null) {
                                     val scaled = if (frame.width == width && frame.height == height) frame
                                     else Bitmap.createScaledBitmap(frame, width, height, true)
-                                    val composited = PersonSegmenter.composite(
+                                    val composited = compositeWithRetry(
                                         scaled,
                                         if (background == VideoBackground.BLUR) null else backgroundBitmap,
-                                    )
+                                    ) ?: throw IllegalStateException("segmentation unavailable")
+                                    compositedFrames++
                                     feedEncoder(encoder, composited, ptsUs)
                                     lastVideoPtsUs = ptsUs
                                     if (composited !== scaled) composited.recycle()
@@ -229,6 +231,7 @@ internal object StoryBackgroundBaker {
                     }
                 }
             }
+            if (compositedFrames == 0) throw IllegalStateException("segmentation unavailable")
             pumpAudio(-1)
             onProgress(1f)
         } finally {
@@ -242,6 +245,18 @@ internal object StoryBackgroundBaker {
             audioExtractor.release()
             retriever.release()
         }
+    }
+
+    /**
+     * Композит кадра с повторами: при самом первом использовании модель ML Kit
+     * может ещё докачиваться, и одна ранняя неудача не должна отменять фон.
+     */
+    private fun compositeWithRetry(frame: Bitmap, background: Bitmap?): Bitmap? {
+        repeat(4) { attempt ->
+            PersonSegmenter.compositeOrNull(frame, background)?.let { return it }
+            if (attempt < 3) Thread.sleep(1_500)
+        }
+        return null
     }
 
     /** Закодировать один готовый кадр с его меткой времени. */
