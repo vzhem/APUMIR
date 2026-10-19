@@ -2226,11 +2226,21 @@ class MirrorChannel(
     // р249: закрываем ТОЛЬКО своё соединение. Если мы уже ушли в другую
     // комнату, старый сокет не должен обнулять ссылку на новый.
     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-        if (wsRef.compareAndSet(webSocket, null)) scheduleReconnect()
+        if (wsRef.compareAndSet(webSocket, null)) {
+            // Обрыв посреди догона: сбрасываем флаг сразу, иначе после
+            // переподключения синхронизация ждала бы, пока партнёр «протухнет»
+            // (30 с). Уже принятые порции лежат в базе, догон продолжится с
+            // новейшей имеющейся записи, а не с начала.
+            catchupInFlight = false
+            scheduleReconnect()
+        }
     }
 
     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-        if (wsRef.compareAndSet(webSocket, null)) scheduleReconnect()
+        if (wsRef.compareAndSet(webSocket, null)) {
+            catchupInFlight = false
+            scheduleReconnect()
+        }
     }
 
     companion object {
