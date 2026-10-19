@@ -1,6 +1,10 @@
 package com.vladimir.messenger.data.story
 
+import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.graphics.Rect
+import com.vladimir.messenger.data.background.PersonSegmenter
+import com.vladimir.messenger.data.background.VideoBackground
 import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -24,10 +28,27 @@ internal class StoryFaceTracker(
     @Volatile
     var enabled: Boolean = false
 
+    /**
+     * Живой фон предпросмотра: пока выбран, анализатор дополнительно (не чаще
+     * раза в ~180 мс) собирает кадр с заменённым фоном и отдаёт его экрану —
+     * фон виден сразу при выборе, как в KakaoTalk, а не после записи.
+     */
+    @Volatile
+    var background: VideoBackground? = null
+
+    /** Кадр с фоном (или исходный кадр + причина, если фон не лёг). */
+    @Volatile
+    var onBackgroundFrame: ((Bitmap, String?) -> Unit)? = null
+
+    private var lastBackgroundAtMs = 0L
+    private var cachedBackground: Bitmap? = null
+    private var cachedBackgroundKey = ""
+
     private val detector: FaceDetector = newStoryFaceDetector()
 
     @ExperimentalGetImage
     override fun analyze(image: ImageProxy) {
+        makeBackgroundFrameIfNeeded(image)
         val media = image.image
         if (!enabled || media == null) {
             image.close()
@@ -41,6 +62,35 @@ internal class StoryFaceTracker(
                 onFrame(StoryFaceFrame(input.width, input.height, faces.map { it.toStoryFace() }))
             }
             .addOnCompleteListener { image.close() }
+    }
+
+    private fun makeBackgroundFrameIfNeeded(image: ImageProxy) {
+        val active = background?.takeIf { it.isActive } ?: return
+        val listener = onBackgroundFrame ?: return
+        val now = System.currentTimeMillis()
+        if (now - lastBackgroundAtMs < 180L) return
+        lastBackgroundAtMs = now
+        val raw = runCatching { image.toBitmap() }.getOrNull() ?: return
+        // toBitmap() кадр не поворачивает: приводим в обычное положение сами.
+        val rotation = image.imageInfo.rotationDegrees
+        val upright = if (rotation % 360 == 0) raw else Bitmap.createBitmap(
+            raw, 0, 0, raw.width, raw.height,
+            Matrix().apply { postRotate(rotation.toFloat()) }, true,
+        )
+        if (upright !== raw) raw.recycle()
+        val key = "${active.name}:${upright.width}x${upright.height}"
+        if (cachedBackgroundKey != key) {
+            cachedBackgroundKey = key
+            cachedBackground = if (active == VideoBackground.BLUR) null
+            else active.render(upright.width, upright.height)
+        }
+        val segmented = PersonSegmenter.compositeOrNull(upright, cachedBackground)
+        if (segmented != null) {
+            listener(segmented, null)
+            upright.recycle()
+        } else {
+            listener(upright, PersonSegmenter.lastFailure)
+        }
     }
 
     fun close() {

@@ -232,7 +232,15 @@ private fun CallBackgroundPreview(
                 try {
                     val now = System.currentTimeMillis()
                     if (now - lastSent.get() < 150L) return@setAnalyzer
-                    val source = runCatching { image.toBitmap() }.getOrNull() ?: return@setAnalyzer
+                    val rawSource = runCatching { image.toBitmap() }.getOrNull() ?: return@setAnalyzer
+                    // toBitmap() кадр не поворачивает: приводим в обычное положение
+                    // сами, иначе на части телефонов фон ложился на боковой кадр.
+                    val frameRotation = image.imageInfo.rotationDegrees
+                    val source = if (frameRotation % 360 == 0) rawSource else Bitmap.createBitmap(
+                        rawSource, 0, 0, rawSource.width, rawSource.height,
+                        Matrix().apply { postRotate(frameRotation.toFloat()) }, true,
+                    )
+                    if (source !== rawSource) rawSource.recycle()
                     lastSent.set(now)
                     val key = "${background.name}:${source.width}x${source.height}"
                     if (renderedKey != key) {
@@ -251,7 +259,8 @@ private fun CallBackgroundPreview(
                         ?: source.copy(Bitmap.Config.ARGB_8888, false)
                     frame = composited
                     if (sendFlag.get()) {
-                        val rotation = image.imageInfo.rotationDegrees
+                        // Кадр уже повёрнут выше, второй поворот не нужен.
+                        val rotation = 0
                         var quality = 42
                         var jpeg: ByteArray? = null
                         while (quality >= 18) {

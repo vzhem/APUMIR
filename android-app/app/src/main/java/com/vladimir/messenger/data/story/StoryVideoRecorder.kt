@@ -111,6 +111,15 @@ internal class StoryVideoRecorder(
         runCatching { activeCamera?.cameraControl?.enableTorch(on) }
     }
 
+    /** Живой фон предпросмотра (как в KakaoTalk): кадры с фоном уходят в [onFrame]. */
+    fun setBackgroundPreview(
+        background: com.vladimir.messenger.data.background.VideoBackground?,
+        onFrame: (android.graphics.Bitmap, String?) -> Unit,
+    ) {
+        tracker.background = background
+        tracker.onBackgroundFrame = onFrame
+    }
+
     /** Распознавание включается только при выбранном фильтре, иначе кадры не анализируются. */
     fun setFaceTracking(on: Boolean) {
         tracker.enabled = on && faceTrackingAvailable
