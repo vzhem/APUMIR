@@ -233,6 +233,9 @@ dependencies {
     // Модель языка маленькая и скачивается один раз при первом переводе, в APK её нет.
     implementation("com.alphacephei:vosk-android:0.3.47")
 
+    // Выделение человека для смены фона в видеозвонке и видеосториях (data/background/).
+    implementation("com.google.mlkit:segmentation-selfie:16.0.0-beta6")
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.junit)

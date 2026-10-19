@@ -41,7 +41,13 @@ fun CallLocalPreview(
     front: Boolean,
     onJpeg: (ByteArray) -> Unit,
     modifier: Modifier = Modifier,
+    background: com.vladimir.messenger.data.background.VideoBackground =
+        com.vladimir.messenger.data.background.VideoBackground.NONE,
 ) {
+    if (background.isActive) {
+        CallBackgroundPreview(send = send, front = front, onJpeg = onJpeg, background = background, modifier = modifier)
+        return
+    }
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val previewView = remember {
@@ -172,4 +178,106 @@ private fun ImageProxy.toNv21(): ByteArray? {
         }
     }
     return out
+}
+
+
+/**
+ * Превью с заменённым фоном: камера без поверхности предпросмотра, каждый кадр
+ * вырезается сегментацией и кладётся на фон; тот же кадр уходит собеседнику.
+ * Телефон показывает то же, что видит собеседник.
+ */
+@Composable
+private fun CallBackgroundPreview(
+    send: Boolean,
+    front: Boolean,
+    onJpeg: (ByteArray) -> Unit,
+    background: com.vladimir.messenger.data.background.VideoBackground,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val owner = LocalLifecycleOwner.current
+    val executor = remember { Executors.newSingleThreadExecutor() }
+    val sendFlag = remember { AtomicBoolean(false) }
+    sendFlag.set(send)
+    val lastSent = remember { AtomicLong(0L) }
+    val jpegSink = rememberUpdatedState(onJpeg)
+    var frame by remember { mutableStateOf<Bitmap?>(null) }
+    var renderedBackground by remember { mutableStateOf<Bitmap?>(null) }
+    var renderedKey by remember { mutableStateOf("") }
+
+    DisposableEffect(front, owner, background) {
+        val future = ProcessCameraProvider.getInstance(context)
+        val main = ContextCompat.getMainExecutor(context)
+        future.addListener({
+            val provider = runCatching { future.get() }.getOrNull() ?: return@addListener
+            val selector = if (front) CameraSelector.DEFAULT_FRONT_CAMERA
+            else CameraSelector.DEFAULT_BACK_CAMERA
+            val analysis = ImageAnalysis.Builder()
+                .setTargetResolution(Size(CallVideo.WIDTH, CallVideo.HEIGHT))
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+            analysis.setAnalyzer(executor) { image ->
+                try {
+                    val now = System.currentTimeMillis()
+                    if (now - lastSent.get() < 150L) return@setAnalyzer
+                    val source = runCatching { image.toBitmap() }.getOrNull() ?: return@setAnalyzer
+                    lastSent.set(now)
+                    val key = "${background.name}:${source.width}x${source.height}"
+                    if (renderedKey != key) {
+                        renderedKey = key
+                        renderedBackground = if (background ==
+                            com.vladimir.messenger.data.background.VideoBackground.BLUR
+                        ) null else background.render(source.width, source.height)
+                    }
+                    val composited = com.vladimir.messenger.data.background.PersonSegmenter
+                        .composite(source, renderedBackground)
+                    frame = composited
+                    if (sendFlag.get()) {
+                        val rotation = image.imageInfo.rotationDegrees
+                        var quality = 42
+                        var jpeg: ByteArray? = null
+                        while (quality >= 18) {
+                            val out = ByteArrayOutputStream()
+                            composited.compress(Bitmap.CompressFormat.JPEG, quality, out)
+                            jpeg = out.toByteArray()
+                            if (jpeg.size <= CallVideo.MAX_JPEG_BYTES) break
+                            quality -= 12
+                        }
+                        val bytes = jpeg
+                        if (bytes != null && bytes.size <= CallVideo.MAX_JPEG_BYTES) {
+                            jpegSink.value(CallVideo.pack(rotation, bytes))
+                        }
+                    }
+                    if (composited !== source) source.recycle()
+                } catch (_: Exception) {
+                    // Один битый кадр не должен ронять звонок.
+                } finally {
+                    image.close()
+                }
+            }
+            runCatching {
+                provider.unbindAll()
+                provider.bindToLifecycle(owner, selector, analysis)
+            }
+        }, main)
+        onDispose {
+            if (future.isDone) {
+                runCatching { future.get().unbindAll() }
+            } else {
+                future.addListener({ runCatching { future.get().unbindAll() } }, main)
+            }
+        }
+    }
+    DisposableEffect(Unit) {
+        onDispose { executor.shutdown() }
+    }
+    val current = frame
+    if (current != null) {
+        Image(
+            bitmap = current.asImageBitmap(),
+            contentDescription = null,
+            modifier = modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop,
+        )
+    }
 }

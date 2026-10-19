@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.ScreenShare
 import androidx.compose.material.icons.filled.StopScreenShare
 import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material.icons.filled.VolumeUp
@@ -192,6 +194,10 @@ fun CallScreen(
     }
 
     var frontCamera by remember { mutableStateOf(true) }
+    var callBackground by remember {
+        mutableStateOf(com.vladimir.messenger.data.background.VideoBackground.NONE)
+    }
+    var showBackgrounds by remember { mutableStateOf(false) }
     val mediaLive = state.phase == CallStateMachine.Phase.CONNECTING ||
         state.phase == CallStateMachine.Phase.ACTIVE
     val inCall = state.phase != CallStateMachine.Phase.ENDED &&
@@ -332,6 +338,39 @@ fun CallScreen(
 
                 Spacer(modifier = Modifier.weight(1f))
 
+                if (showBackgrounds && inCall) {
+                    Row(
+                        modifier = Modifier
+                            .padding(bottom = 10.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.Black.copy(alpha = 0.45f))
+                            .androidx.compose.foundation.horizontalScroll(
+                                androidx.compose.foundation.rememberScrollState(),
+                            )
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        com.vladimir.messenger.data.background.VideoBackground.pickerEntries.forEach { entry ->
+                            val selected = entry == callBackground
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(
+                                        if (selected) MaterialTheme.colorScheme.primary
+                                        else Color.White.copy(alpha = 0.16f),
+                                    )
+                                    .clickable { callBackground = entry }
+                                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                            ) {
+                                Text(
+                                    stringResource(entry.labelRes),
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        }
+                    }
+                }
                 CallButtons(
                     state = state,
                     onAccept = {
@@ -361,6 +400,7 @@ fun CallScreen(
                         }
                     },
                     onCaptions = { viewModel.setCaptions(!state.captionsOn && !state.captionsPreparing) },
+                    onBackgrounds = { showBackgrounds = !showBackgrounds },
                     onScreenShare = {
                         if (state.screenSharing) {
                             stopScreenShare()
@@ -393,6 +433,7 @@ fun CallScreen(
                     CallLocalPreview(
                         send = mediaLive,
                         front = frontCamera,
+                        background = callBackground,
                         onJpeg = { viewModel.sendVideoFrame(it) },
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -433,6 +474,7 @@ private fun CallButtons(
     onCamera: () -> Unit,
     onScreenShare: () -> Unit,
     onCaptions: () -> Unit,
+    onBackgrounds: () -> Unit,
 ) {
     val gap = if (state.video) 16.dp else 32.dp
     Row(
@@ -486,6 +528,7 @@ private fun CallButtons(
                     ) {
                         ScreenShareCallButton(state, onScreenShare)
                         CaptionsCallButton(state, onCaptions)
+                        BackgroundsCallButton(onBackgrounds)
                     }
                 }
             }
@@ -605,6 +648,21 @@ private fun CaptionsCallButton(
             Icons.Default.Subtitles,
             stringResource(R.string.call_captions),
             tint = if (active) MaterialTheme.colorScheme.onPrimary else ApuBubbleMutedColor,
+        )
+    }
+}
+
+@Composable
+private fun BackgroundsCallButton(onBackgrounds: () -> Unit) {
+    RoundCallButton(
+        background = Color(0xFFF5F7FA).copy(alpha = 0.95f),
+        description = stringResource(R.string.call_background),
+        onClick = onBackgrounds,
+    ) {
+        Icon(
+            Icons.Default.Wallpaper,
+            stringResource(R.string.call_background),
+            tint = ApuBubbleMutedColor,
         )
     }
 }

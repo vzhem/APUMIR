@@ -61,6 +61,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -140,6 +141,10 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
     var elapsed by remember { mutableStateOf(0L) }
     var error by remember { mutableStateOf<String?>(null) }
     var faceFilter by remember { mutableStateOf(StoryFaceFilter.NONE) }
+    var storyBackground by remember {
+        mutableStateOf(com.vladimir.messenger.data.background.VideoBackground.NONE)
+    }
+    var showBackgrounds by remember { mutableStateOf(false) }
     // Прогресс наложения фильтра после остановки записи (0..1), null — не идёт.
     var processing by remember { mutableStateOf<Float?>(null) }
     var filterPart by remember { mutableStateOf(FilterPart.EARS) }
@@ -200,6 +205,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
         error = null
         // Фильтр фиксируем на старте: смена во время записи не должна менять уже снятое видео.
         val filterForRecording = faceFilter
+        val backgroundForRecording = storyBackground
         try {
             session.start(audio, onElapsed = { elapsed = it }, onFinished = { result ->
                 recording = false
@@ -214,11 +220,18 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                     var produced: File = file
                     scope.launch {
                         try {
-                            // Накладываем фильтр на записанный файл; без фильтра он возвращается как есть.
-                            val baked = StoryFaceBaker.bake(context, file, filterForRecording) { processing = it }
+                            // Сначала фон, потом фильтр лица; без них файл возвращается как есть.
+                            val bgBaked = com.vladimir.messenger.data.story.StoryBackgroundBaker
+                                .bake(context, file, backgroundForRecording) { processing = it * 0.5f }
+                            bgBaked.message?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
+                            val afterBackground = bgBaked.file
+                            val baked = StoryFaceBaker.bake(context, afterBackground, filterForRecording) {
+                                processing = 0.5f + it * 0.5f
+                            }
                             baked.message?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
                             produced = baked.file
-                            if (produced != file) file.delete()
+                            if (afterBackground != file) afterBackground.delete()
+                            if (produced != file && produced != afterBackground) file.delete()
                             val source = withContext(Dispatchers.IO) { StoryVideoFiles.inspect(produced) }
                             recorded(source)
                             handedOff = true
@@ -332,6 +345,12 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                         Text("Фильтры лица на этом устройстве недоступны",
                             color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.bodySmall)
                     } else {
+                        StoryBackgroundPicker(
+                            selected = storyBackground,
+                            expanded = showBackgrounds,
+                            onToggle = { showBackgrounds = !showBackgrounds },
+                            onSelect = { storyBackground = it },
+                        )
                         StoryFilterPicker(
                             filter = faceFilter,
                             part = filterPart,
@@ -569,6 +588,47 @@ private fun StoryFilterPicker(
             items(options) { option ->
                 ApuPremiumChip(label = option.label, selected = option.selected, onClick = option.onSelect)
             }
+        }
+    }
+}
+
+
+@Composable
+private fun StoryBackgroundPicker(
+    selected: com.vladimir.messenger.data.background.VideoBackground,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onSelect: (com.vladimir.messenger.data.background.VideoBackground) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp),
+        ) {
+            item {
+                ApuPremiumChip(
+                    label = "Фон: " + stringResource(selected.labelRes),
+                    selected = selected.isActive,
+                    onClick = onToggle,
+                )
+            }
+            if (expanded) {
+                items(com.vladimir.messenger.data.background.VideoBackground.pickerEntries) { entry ->
+                    ApuPremiumChip(
+                        label = stringResource(entry.labelRes),
+                        selected = entry == selected,
+                        onClick = { onSelect(entry) },
+                    )
+                }
+            }
+        }
+        if (selected.isActive) {
+            Text(
+                "Фон применится, когда запишете видео",
+                color = Color.White.copy(alpha = 0.8f),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
         }
     }
 }
