@@ -23,10 +23,28 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.R
 import com.vladimir.messenger.data.heartgame.HeartGameStore
+import com.vladimir.messenger.ui.theme.LocalAppDarkTheme
 import com.vladimir.messenger.data.heartgame.HeartGameWire
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
+
+/**
+ * Цвета счётчика сердечек поверх обоев: внутри светлых пузырей текст тёмный,
+ * а на главной и в списке настроек счётчик стоит прямо на обоях — в тёмной
+ * теме тёмный текст там пропадал. Поэтому цвет выбирается по теме.
+ */
+@Composable
+private fun heartWallpaperTextColor(): Color =
+    if (LocalAppDarkTheme.current) Color(0xFFE2E9F4) else ApuBubbleTextColor
+
+@Composable
+private fun heartWallpaperMutedColor(): Color =
+    if (LocalAppDarkTheme.current) Color(0xFFB9C6DA) else ApuBubbleMutedColor
+
+@Composable
+private fun heartWallpaperAccentColor(): Color =
+    if (LocalAppDarkTheme.current) Color(0xFFF0C96A) else ApuBubbleAccentColor
 
 @Composable
 fun HeartGameCounter(onlyWhenEnabled: Boolean = false) {
@@ -57,11 +75,12 @@ fun HeartGameCounter(onlyWhenEnabled: Boolean = false) {
         verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(Icons.Default.Favorite, null, tint = Color(0xFFFF537F), modifier = Modifier.size(20.dp))
-            Text(count.toString(), fontWeight = FontWeight.Bold, color = ApuBubbleAccentColor)
-            Text(stringResource(R.string.heart_game_points), style = MaterialTheme.typography.labelMedium)
+            Text(count.toString(), fontWeight = FontWeight.Bold, color = heartWallpaperAccentColor())
+            Text(stringResource(R.string.heart_game_points), style = MaterialTheme.typography.labelMedium,
+                color = heartWallpaperTextColor())
         }
         Text(stringResource(R.string.heart_game_my_place_short, place?.toString() ?: "—"),
-            style = MaterialTheme.typography.labelSmall, color = ApuBubbleMutedColor)
+            style = MaterialTheme.typography.labelSmall, color = heartWallpaperMutedColor())
     }
 }
 
@@ -93,10 +112,10 @@ fun HeartGameHeaderStatus(modifier: Modifier = Modifier) {
         horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Icon(Icons.Default.Favorite, null, tint = Color(0xFFE0245E), modifier = Modifier.size(13.dp))
         Text(score.toString(), style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold, color = ApuBubbleTextColor)
-        Text("·", style = MaterialTheme.typography.labelSmall, color = ApuBubbleMutedColor)
+            fontWeight = FontWeight.Bold, color = heartWallpaperTextColor())
+        Text("·", style = MaterialTheme.typography.labelSmall, color = heartWallpaperMutedColor())
         Text(stringResource(R.string.heart_game_header_place, place?.toString() ?: "—"),
-            style = MaterialTheme.typography.labelSmall, color = ApuBubbleMutedColor, maxLines = 1)
+            style = MaterialTheme.typography.labelSmall, color = heartWallpaperMutedColor(), maxLines = 1)
     }
 }
 

@@ -66,7 +66,9 @@ fun ApuHeaderButton(
         Icon(
             icon,
             contentDescription = null,
-            tint = if (enabled) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f) else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+            // Кружок всегда белый, поэтому значок всегда тёмный: цвет «по теме»
+            // в тёмной теме светлый, и кнопка пропадала (белое на белом).
+            tint = ApuBubbleTextColor.copy(alpha = if (enabled) 0.86f else 0.38f),
             modifier = Modifier.size(size * 0.5f),
         )
     }
