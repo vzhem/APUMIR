@@ -2396,6 +2396,17 @@ class CoreServerService : Service() {
                 // основной приём P2P живёт здесь - и пакет APUTYP1|1 лёг в чат
                 // сообщением с уведомлением (владелец, скрины 30.09). Поэтому
                 // рядом добавлен и страж в ChatRepository.saveIncomingMessage.
+                // Ранг и сердечки едут в ТОЙ ЖЕ обёртке APUTYP1, что и
+                // «печатает…». Разбирать их надо РАНЬШЕ индикатора набора:
+                // зеркальный и релейный пути так и делают, а основной путь
+                // читал конверт как «перестал печатать» и молча терял ранг -
+                // значок VIP не появлялся, хотя собеседник давно VIP.
+                if (heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text)) {
+                    runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                    Log.i(TAG, "Rank/heart envelope handled before typing (main path)")
+                    return
+                }
+
                 val typingSignal = com.vladimir.messenger.data.typing.TypingWire.parse(text)
                 if (typingSignal != null) {
                     if (typingSignal) {
