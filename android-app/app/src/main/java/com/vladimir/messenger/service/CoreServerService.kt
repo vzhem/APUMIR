@@ -728,6 +728,8 @@ class CoreServerService : Service() {
                 // День рождения: своя (видимая) дата — контактам, скрытая не
                 // уходит вовсе. Даты друзей лежат в своей книге.
                 runCatching { groupRepository.publishMyBirthday() }
+                // Эмодзи-статус у профиля: объявить свой сети при старте.
+                runCatching { groupRepository.publishMyEmojiStatus() }
                 // Сколько места под пересылку отдаю - контактам, для их рейтинга.
                 runCatching { groupRepository.publishMyCapabilities() }
             }
@@ -758,6 +760,12 @@ class CoreServerService : Service() {
                 com.vladimir.messenger.data.profile.BirthdayStore.mine
                     .drop(1)
                     .collect { runCatching { groupRepository.publishMyBirthday(force = true) } }
+            }
+            // Сменил или убрал эмодзи-статус — сеть узнаёт сразу (уборка = отзыв).
+            serviceScope.launch {
+                com.vladimir.messenger.data.profile.EmojiStatusStore.mine
+                    .drop(1)
+                    .collect { runCatching { groupRepository.publishMyEmojiStatus(force = true) } }
             }
         }
 

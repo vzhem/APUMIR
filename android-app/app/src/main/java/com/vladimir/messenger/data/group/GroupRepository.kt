@@ -93,6 +93,11 @@ class GroupRepository(
      */
     private val onPeerBirthday: (nodeId: String, day: Int, month: Int, updatedAtMs: Long) -> Unit =
         { _, _, _, _ -> },
+    /** Мой эмодзи-статус (пустая строка — статуса нет). */
+    private val myEmojiStatus: () -> String = { "" },
+    /** Пришёл чужой эмодзи-статус (пустой значок — отзыв). */
+    private val onPeerEmojiStatus: (nodeId: String, emoji: String, updatedAtMs: Long) -> Unit =
+        { _, _, _ -> },
     /**
      * Узнали настоящее @имя узла: контакт с заглушкой вместо имени должен
      * переименоваться, а его двойники от прежних установок - схлопнуться.
@@ -254,6 +259,7 @@ class GroupRepository(
     private var lastAvatarPublishMs: Long = 0L
     private var lastCapabilitiesPublishMs: Long = 0L
     private var lastBirthdayPublishMs: Long = 0L
+    private var lastEmojiStatusPublishMs: Long = 0L
     /** Когда последний раз просили конкретный узел представиться. */
     private val lastWhoIsAskedMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
@@ -496,6 +502,47 @@ class GroupRepository(
     }
 
     /**
+     * Объявить свой эмодзи-статус (`emst`): как @имя и аватар, это публичный
+     * признак человека. Уходит контактам, а они передают дальше с ограничением
+     * прыжков — статус виден и тем, с кем прямой связи ещё не было. Пустой
+     * статус тоже объявляется: это отзыв, у всех он должен убраться.
+     */
+    suspend fun publishMyEmojiStatus(force: Boolean = false) {
+        if (!force && !dueNow(lastEmojiStatusPublishMs, GOSSIP_MIN_INTERVAL_MS)) return
+        val me = myId() ?: return
+        val ids = contactIds()
+        if (ids.isEmpty()) return
+        val envelope = GroupWire.buildEmojiStatus(
+            ownerId = me,
+            emoji = myEmojiStatus(),
+            updatedAtMs = clock(),
+            hops = 0,
+        )
+        runCatching { delivery.deliver("emoji-status", envelope, ids) }
+            .onFailure { Log.w(TAG, "emoji status publish failed: ${it.message}") }
+        lastEmojiStatusPublishMs = clock()
+    }
+
+    /** Чужой эмодзи-статус: сохранить и передать дальше, кроме отправителя. */
+    private suspend fun handleEmojiStatus(packet: GroupWire.Packet.EmojiStatus, senderId: String) {
+        if (packet.ownerId == myId()) return // свой из сети не храним
+        runCatching { onPeerEmojiStatus(packet.ownerId, packet.emoji, packet.updatedAtMs) }
+            .onFailure { Log.w(TAG, "emoji status apply failed: ${it.message}") }
+        if (packet.hops < MAX_DIR_HOPS) {
+            val next = contactIds().filter { it != senderId }
+            if (next.isNotEmpty()) {
+                val envelope = GroupWire.buildEmojiStatus(
+                    ownerId = packet.ownerId,
+                    emoji = packet.emoji,
+                    updatedAtMs = packet.updatedAtMs,
+                    hops = packet.hops + 1,
+                )
+                runCatching { delivery.deliver("emoji-status", envelope, next) }
+            }
+        }
+    }
+
+    /**
      * Объявить контактам, сколько места под пересылку я отдаю (`cap`).
      *
      * Адресно контактам, без эпидемии: это самооценка, у получателя она
@@ -579,6 +626,18 @@ class GroupRepository(
             )
             runCatching { delivery.deliver("birthdays", envelope, listOf(peerId)) }
                 .onFailure { Log.w(TAG, "whois birthday reply failed: ${it.message}") }
+        }
+        // Эмодзи-статус — публичный признак, как имя и аватар: отвечаем им же.
+        val emojiStatus = myEmojiStatus()
+        if (emojiStatus.isNotBlank()) {
+            val envelope = GroupWire.buildEmojiStatus(
+                ownerId = me,
+                emoji = emojiStatus,
+                updatedAtMs = clock(),
+                hops = 0,
+            )
+            runCatching { delivery.deliver("emoji-status", envelope, listOf(peerId)) }
+                .onFailure { Log.w(TAG, "whois emoji status reply failed: ${it.message}") }
         }
     }
 
@@ -4535,6 +4594,7 @@ class GroupRepository(
 
             is GroupWire.Packet.Avatar -> handleAvatar(packet, senderId)
             is GroupWire.Packet.Birthday -> handleBirthday(packet)
+            is GroupWire.Packet.EmojiStatus -> handleEmojiStatus(packet, senderId)
 
             is GroupWire.Packet.Capabilities -> {
                 // Только о себе: чужое объявление от третьего лица - подделка

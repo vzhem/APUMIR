@@ -91,6 +91,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -379,6 +380,9 @@ private fun ProfileTabContent(
     val myUsername by UsernameHolder.name.collectAsStateWithLifecycle()
     val avatarUri by AvatarHolder.uri.collectAsStateWithLifecycle()
     var showAvatarPicker by remember { mutableStateOf(false) }
+    var showEmojiStatusPicker by remember { mutableStateOf(false) }
+    val myEmojiStatus by com.vladimir.messenger.data.profile.EmojiStatusStore.mine
+        .collectAsStateWithLifecycle()
     // Картинка, для которой сейчас выбирают область. null - окна обрезки нет.
     var avatarToCrop by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     // Куда камера положит снимок: URI нужен и при запуске, и при разборе.
@@ -524,6 +528,34 @@ private fun ProfileTabContent(
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.clickable(onClick = { profileTap(onUsername) }).heightIn(min = 48.dp).padding(vertical = 12.dp),
                         )
+                        // Эмодзи-статус: виден всем рядом с профилем; нажатие
+                        // открывает палитру. Пустой — приглашение поставить.
+                        Row(
+                            modifier = Modifier.clip(RoundedCornerShape(20.dp))
+                                .background(ApuBubbleAccentColor.copy(alpha = 0.10f))
+                                .clickable(role = androidx.compose.ui.semantics.Role.Button) {
+                                    profileTap { showEmojiStatusPicker = true }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (myEmojiStatus.isNotBlank()) {
+                                Text(myEmojiStatus, fontSize = 18.sp)
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    stringResource(R.string.emoji_status_title),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = ApuBubbleMutedColor,
+                                )
+                            } else {
+                                Text(
+                                    stringResource(R.string.emoji_status_set),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = ApuBubbleAccentColor,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
                         Spacer(Modifier.height(8.dp))
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -784,6 +816,22 @@ private fun ProfileTabContent(
                 }
             },
             onDismiss = { showAvatarPicker = false },
+        )
+    }
+
+    // Эмодзи-статус у профиля: палитра, свой значок, уборка статуса.
+    if (showEmojiStatusPicker) {
+        com.vladimir.messenger.ui.components.EmojiStatusPickerDialog(
+            current = myEmojiStatus,
+            onPick = { emoji ->
+                com.vladimir.messenger.data.profile.EmojiStatusStore.setMine(context, emoji)
+                showEmojiStatusPicker = false
+            },
+            onRemove = {
+                com.vladimir.messenger.data.profile.EmojiStatusStore.setMine(context, "")
+                showEmojiStatusPicker = false
+            },
+            onDismiss = { showEmojiStatusPicker = false },
         )
     }
 

@@ -151,6 +151,9 @@ fun PeerProfileSheet(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    // Эмодзи-статус собеседника — рядом с именем, как у всех
+                    // на виду: пришёл роевым объявлением владельца.
+                    com.vladimir.messenger.ui.components.EmojiStatusBadge(contactId)
                     if (vip) {
                         Spacer(Modifier.width(6.dp))
                         ApuVipBadge()

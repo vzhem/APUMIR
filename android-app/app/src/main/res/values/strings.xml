@@ -644,6 +644,10 @@
     <string name="settings_set_username">Задать @никнейм</string>
     <string name="settings_complaints_spike">⚠️ Всплеск жалоб: репутация и приоритет узла временно понижены.</string>
     <string name="settings_avatar">Аватар</string>
+    <string name="emoji_status_title">Эмодзи-статус</string>
+    <string name="emoji_status_hint">Один значок рядом с вашим профилем. Его увидят все: статус уходит контактам и передаётся по сети дальше, как имя и аватар.</string>
+    <string name="emoji_status_set">Поставить эмодзи-статус</string>
+    <string name="emoji_status_remove">Убрать статус</string>
     <string name="settings_remove_avatar">Убрать аватар</string>
     <string name="settings_swarm_full">Раздаёт на полную и на мобильном интернете, и при низком заряде</string>
     <string name="settings_counting_space">Считаю занятое место…</string>

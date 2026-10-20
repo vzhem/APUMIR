@@ -476,6 +476,7 @@ class MainActivity : ComponentActivity() {
         // пришедшие роевой рассылкой (`bday`).
         com.vladimir.messenger.data.profile.BirthdayStore.init(this)
         com.vladimir.messenger.data.profile.PeerBirthdayStore.init(this)
+        com.vladimir.messenger.data.profile.EmojiStatusStore.init(this)
         setContent {
             val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
             // Сплэш показывается при запуске приложения (нажатии на иконку).

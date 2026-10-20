@@ -90,6 +90,12 @@ object GroupWire {
      */
     const val KIND_BIRTHDAY = "bday"
     /**
+     * Эмодзи-статус владельца узла: `emst|узел|эмодзи-b64|метка|прыжки`.
+     * Общеизвестный признак человека, как @имя и аватар: едет контактам и
+     * пересылается дальше с ограничением прыжков. Пустой значок — отзыв.
+     */
+    const val KIND_EMOJI_STATUS = "emst"
+    /**
      * Возможности узла как сервера: `cap|nodeId|offeredBytes|atMs`.
      * Сейчас одно поле - сколько места под пересылку узел отдаёт (ползунок
      * «Место под пересылку»). Только от самого узла своим контактам, без
@@ -912,6 +918,14 @@ object GroupWire {
             val updatedAtMs: Long,
         ) : Packet()
 
+        /** Эмодзи-статус владельца: один значок у профиля; пустой — отзыва нет статуса. */
+        data class EmojiStatus(
+            val ownerId: String,
+            val emoji: String,
+            val updatedAtMs: Long,
+            val hops: Int,
+        ) : Packet()
+
         data class GroupInfo(
             val groupId: String,
             val title: String,
@@ -1326,6 +1340,10 @@ object GroupWire {
      */
     fun buildBirthday(ownerId: String, day: Int, month: Int, updatedAtMs: Long): String =
         "$PREFIX|$KIND_BIRTHDAY|$ownerId|$day|$month|$updatedAtMs"
+
+    /** Объявление эмодзи-статуса: свой значок или пустой (отзыв). */
+    fun buildEmojiStatus(ownerId: String, emoji: String, updatedAtMs: Long, hops: Int): String =
+        "$PREFIX|$KIND_EMOJI_STATUS|$ownerId|${encode(emoji)}|$updatedAtMs|$hops"
 
     /** Возможности узла: объявленное место под пересылку. */
     fun buildCapabilities(nodeId: String, offeredBytes: Long, atMs: Long): String =
@@ -2260,6 +2278,27 @@ object GroupWire {
                         dataB64 = dataB64,
                         updatedAtMs = at,
                         hops = parts[5].toIntOrNull() ?: 0,
+                    )
+                }
+            } else {
+                null
+            }
+
+            KIND_EMOJI_STATUS -> if (parts.size == 6) {
+                val ownerId = parts[2]
+                val emoji = decode(parts[3]).orEmpty()
+                val at = parts[4].toLongOrNull() ?: return null
+                val hops = parts[5].toIntOrNull() ?: return null
+                if (ownerId.isBlank() || at < 0L || hops < 0 || emoji.length > 16 ||
+                    emoji.any { it.isISOControl() || it == '|' }
+                ) {
+                    null
+                } else {
+                    Packet.EmojiStatus(
+                        ownerId = ownerId,
+                        emoji = emoji,
+                        updatedAtMs = at,
+                        hops = hops,
                     )
                 }
             } else {

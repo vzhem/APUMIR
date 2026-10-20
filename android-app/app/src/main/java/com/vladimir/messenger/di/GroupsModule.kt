@@ -182,6 +182,18 @@ object GroupsModule {
                 updatedAtMs = updatedAtMs,
             )
         },
+        // Эмодзи-статус: свой читаем из хранилища, чужой кладём туда же.
+        myEmojiStatus = {
+            com.vladimir.messenger.data.profile.EmojiStatusStore.mineValue(context.applicationContext)
+        },
+        onPeerEmojiStatus = { nodeId, emoji, updatedAtMs ->
+            com.vladimir.messenger.data.profile.EmojiStatusStore.applyPeer(
+                context.applicationContext,
+                nodeId = nodeId,
+                emoji = emoji,
+                updatedAtMs = updatedAtMs,
+            )
+        },
         // Наследование владения: «владелец удалился» видно по долгому молчанию
         // (GroupOwnership). Берём наблюдения этого телефона из рейтинга узлов.
         peerLastSeenMs = { nodeId ->

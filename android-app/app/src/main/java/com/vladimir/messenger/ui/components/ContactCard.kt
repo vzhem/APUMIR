@@ -140,6 +140,8 @@ fun ContactCard(
                     Spacer(Modifier.width(6.dp))
                     ApuVipBadge(compact = true)
                 }
+                // Эмодзи-статус собеседника рядом с именем.
+                EmojiStatusBadge(chat.contactId, Modifier.padding(start = 6.dp))
             }
 
             // Оригинальное имя через собаку - золотом, как акценты темы.
