@@ -45,11 +45,13 @@ class HeartGameNetwork @Inject constructor(
         /** Сеть готова и запись подписана. */
         val ready: Boolean,
         /** Сколько собеседников сейчас видны онлайн. */
-        val online: Int,
+        val online: Int = 0,
+        /** Скольким собеседникам вообще можно отправить (все личные чаты). */
+        val targets: Int = 0,
         /** Скольким отправлена своя запись счёта. */
-        val sentScore: Int,
+        val sentScore: Int = 0,
         /** Скольким отправлен запрос их счёта. */
-        val sentRequests: Int,
+        val sentRequests: Int = 0,
     )
 
     suspend fun routeIncoming(text: String): Boolean = routeIncoming("", text)
@@ -121,11 +123,15 @@ class HeartGameNetwork @Inject constructor(
         withContext(Dispatchers.IO) {
             sendLock.withLock {
                 if (!com.vladimir.messenger.service.CoreStatus.ready.value)
-                    return@withLock RefreshResult(false, 0, 0, 0)
-                val id = HeartGameStore.ownId() ?: return@withLock RefreshResult(false, 0, 0, 0)
-                val targets = onlineTargets(id)
+                    return@withLock RefreshResult(false)
+                val id = HeartGameStore.ownId() ?: return@withLock RefreshResult(false)
+                // Шлём не только «видимым онлайн»: пометка присутствия может
+                // отставать или не выставиться, а ядро само доставит пакет,
+                // когда собеседник появится. Так «Обновить» работает всегда.
+                val targets = directTargets(id)
+                val online = onlineTargets(id).size
                 val envelope = buildEnvelope(id, nowMs)
-                    ?: return@withLock RefreshResult(false, targets.size, 0, 0)
+                    ?: return@withLock RefreshResult(false, online, targets.size)
                 var sentScore = 0
                 var sentRequests = 0
                 val request = HeartGameWire.buildRequest(id, nowMs)
@@ -141,7 +147,7 @@ class HeartGameNetwork @Inject constructor(
                     HeartSyncPrefs.markPeer(context, node, nowMs)
                 }
                 if (targets.isNotEmpty()) HeartSyncPrefs.markGlobal(context, nowMs)
-                RefreshResult(true, targets.size, sentScore, sentRequests)
+                RefreshResult(true, online, targets.size, sentScore, sentRequests)
             }
         }
 
@@ -159,7 +165,7 @@ class HeartGameNetwork @Inject constructor(
                 if (!com.vladimir.messenger.service.CoreStatus.ready.value) return@withLock
                 val id = HeartGameStore.ownId() ?: return@withLock
                 if (senderNode == id) return@withLock
-                val chat = chats.getChatByContactId(senderId)?.id ?: return@withLock
+                val chat = directChatFor(senderId, senderNode) ?: return@withLock
                 val envelope = buildEnvelope(id, nowMs) ?: return@withLock
                 HeartSyncPrefs.markRequestResponse(context, senderId, nowMs)
                 deliver(id, envelope, listOf(senderNode to chat))
@@ -179,15 +185,43 @@ class HeartGameNetwork @Inject constructor(
         return targets
     }
 
+    /** Все личные чаты собеседников (онлайн или нет): узел -> адрес переписки. */
+    private suspend fun directTargets(id: String): Map<String, String> {
+        val targets = linkedMapOf<String, String>()
+        for (contact in contacts.allIds()) {
+            val node = RankWire.canonicalNodeId(contact) ?: continue
+            val chat = chats.getChatByContactId(contact) ?: continue
+            targets[node] = chat.id
+        }
+        targets.remove(id)
+        return targets
+    }
+
+    /**
+     * Личный чат по отправителю пакета: отправитель может прийти как id
+     * контакта, так и каноническим узлом — пробуем оба, иначе ответ на
+     * запрос счёта молча терялся и таблица не сходилась.
+     */
+    private suspend fun directChatFor(senderId: String, senderNode: String): String? {
+        chats.getChatByContactId(senderId)?.id?.let { return it }
+        for (contact in contacts.allIds()) {
+            if (RankWire.canonicalNodeId(contact) == senderNode) {
+                chats.getChatByContactId(contact)?.id?.let { return it }
+            }
+        }
+        return null
+    }
+
     /** Ядро поднято, есть подпись, и телефон не занят другой работой. */
     private fun canSendNow(): Boolean {
         if (!com.vladimir.messenger.service.CoreStatus.ready.value) return false
         if (IdentitySigningKeyStore.existingVerifiedBinding(context) == null) return false
         val busy = runCatching {
             RuntimeDiagnostics.snapshot(context).operations.associate { it.operation to it.inFlight }
-        }.getOrNull() ?: return false
+        }.getOrNull()
         val powerSave = context.getSystemService(PowerManager::class.java)?.isPowerSaveMode ?: false
-        val free = HeartSyncPolicy.isPhoneFree(powerSave, HeartSyncPolicy.busyInFlight(busy))
+        // Диагностика недоступна — не повод молчать вечно: считаем телефон свободным.
+        val free = HeartSyncPolicy.isPhoneFree(powerSave, busy?.let { HeartSyncPolicy.busyInFlight(it) } ?: 0)
         if (!free) Log.i(TAG, "heart sync postponed: phone busy or power save")
         return free
     }

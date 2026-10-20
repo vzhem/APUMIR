@@ -1845,9 +1845,9 @@
     <string name="heart_game_leaders">Лидеры по сердечкам</string>
     <string name="heart_game_refresh">Обновить</string>
     <string name="heart_game_refresh_working">Обновляю…</string>
-    <string name="heart_game_refresh_hint">Отправить свой счёт всем, кто сейчас онлайн, и попросить их счета. Ответы придут обычными сообщениями сети и обновят таблицу лидеров.</string>
-    <string name="heart_game_refresh_done">Онлайн: %1$d. Свой счёт отправлен: %2$d, запросы отправлены: %3$d.</string>
-    <string name="heart_game_refresh_none_online">Сейчас никого не видно онлайн. Счёт уйдёт обычной рассылкой, когда собеседники появятся.</string>
+    <string name="heart_game_refresh_hint">Отправить свой счёт всем собеседникам и попросить их счета. Кто онлайн — ответит сразу, остальным сеть доставит запрос при появлении. Ответы обновят таблицу лидеров.</string>
+    <string name="heart_game_refresh_done">Онлайн видно: %1$d, всего собеседников: %2$d. Свой счёт отправлен: %3$d, запросы: %4$d. Ответы появятся в таблице в течение минуты.</string>
+    <string name="heart_game_refresh_none_online">Нет ни одного собеседника с личным чатом. Добавьте собеседника в контакты и откройте с ним чат.</string>
     <string name="heart_game_refresh_not_ready">Сеть ещё не готова. Подождите несколько секунд и нажмите «Обновить» ещё раз.</string>
     <string name="heart_game_you">Вы</string>
     <string name="heart_game_close">Закрыть</string>

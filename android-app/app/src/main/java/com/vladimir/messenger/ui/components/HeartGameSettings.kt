@@ -154,9 +154,9 @@ fun HeartGameSettings() {
             Text(
                 when {
                     !result.ready -> stringResource(R.string.heart_game_refresh_not_ready)
-                    result.online == 0 -> stringResource(R.string.heart_game_refresh_none_online)
+                    result.targets == 0 -> stringResource(R.string.heart_game_refresh_none_online)
                     else -> stringResource(R.string.heart_game_refresh_done,
-                        result.online, result.sentScore, result.sentRequests)
+                        result.online, result.targets, result.sentScore, result.sentRequests)
                 },
                 style = MaterialTheme.typography.labelSmall)
         }
