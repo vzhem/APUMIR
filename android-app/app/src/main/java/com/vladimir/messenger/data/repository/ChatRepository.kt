@@ -38,6 +38,7 @@ class ChatRepository @Inject constructor(
     private val groupDao: GroupDao,
     private val storyVideos: com.vladimir.messenger.data.story.StoryVideoDelivery,
     private val referralAttribution: com.vladimir.messenger.data.referral.ReferralAttributionSender,
+    private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
 ) {
     // Защита от повторного FULL SYNC в течение 30 секунд
     private val lastFullSyncTime = mutableMapOf<String, Long>()
@@ -763,11 +764,14 @@ class ChatRepository @Inject constructor(
         // р235: собеседник прислал сообщение - «печатает…» гаснет сразу, не
         // дожидаясь, пока индикатор протухнет сам (до 6 с).
         runCatching { com.vladimir.messenger.data.typing.TypingPeer.peerStopped(senderId) }
+        // Настройка «Кто может приглашать в группы и каналы»: карточка от
+        // неразрешённого отправителя превращается в заметку без ссылки.
+        val storedContent = filterInviteCard(senderId, content)
         val entity = MessageEntity(
             id = messageId,
             chatId = chatId,
             senderId = senderId,
-            content = content,
+            content = storedContent,
             timestamp = timestamp,
             isFromMe = false,
             status = MessageStatus.DELIVERED.name,
@@ -779,12 +783,65 @@ class ChatRepository @Inject constructor(
             messageDao.deleteByIdChatAndSender(messageId, chatId, senderId)
             return
         }
-        chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
+        chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(storedContent) ?: storedContent, timestamp)
         // Раунд 150: бейдж непрочитанных на пузыре личного чата.
         // Раунд 156: служебные конверты роя (стикеры/миниатюры) - не
         // сообщения, непрочитанные не считают (владелец).
         if (!com.vladimir.messenger.util.ChatPreviews.isServiceEnvelope(content)) {
             runCatching { chatDao.incrementUnread(chatId) }
+        }
+    }
+
+    /**
+     * Фильтр приглашений по настройке «Кто может приглашать в группы и
+     * каналы». Обычный текст возвращается как есть. Карточка (и мульти-
+     * карточка) от запрещённого отправителя заменяется заметкой: название
+     * сообщества видно, а ссылки нет — ни кнопкой, ни копированием текста
+     * войти нельзя. Режим читается из файла на каждое приглашение, чтобы
+     * смена настройки действовала сразу, без перезапуска.
+     */
+    private suspend fun filterInviteCard(senderId: String, content: String): String {
+        val card = com.vladimir.messenger.util.GroupInviteCardSender.parseCard(content)
+        val multi = if (card == null) {
+            com.vladimir.messenger.util.GroupInviteCardSender.parseMultiCard(content)
+        } else {
+            null
+        }
+        if (card == null && multi == null) return content
+        val mode = com.vladimir.messenger.data.profile.InvitePrivacyStore.value(context)
+        if (mode == com.vladimir.messenger.data.profile.InvitePrivacy.ALL) return content
+        val isContact = if (mode == com.vladimir.messenger.data.profile.InvitePrivacy.CONTACTS) {
+            val senderNode = canonicalNode(senderId)
+            runCatching { contactDao.allIds() }.getOrDefault(emptyList())
+                .any { it == senderId || canonicalNode(it) == senderNode }
+        } else {
+            false
+        }
+        if (com.vladimir.messenger.data.profile.InvitePrivacyStore.allows(mode, isContact)) return content
+        val note = context.getString(
+            if (mode == com.vladimir.messenger.data.profile.InvitePrivacy.NOBODY) {
+                com.vladimir.messenger.R.string.invite_hidden_nobody
+            } else {
+                com.vladimir.messenger.R.string.invite_hidden_contacts
+            },
+        )
+        return when {
+            card != null -> (if (card.isChannel) "Канал" else "Группа") +
+                " «" + card.title + "» в APU.\n" + note
+            multi != null -> multi.items.joinToString(", ") { "«" + it.title + "»" } +
+                "\n" + note
+            else -> note
+        }
+    }
+
+    /** Узел из сырого идентификатора: `pk_…` как есть, из ссылки — по `node=`. */
+    private fun canonicalNode(raw: String): String {
+        val v = raw.trim()
+        return when {
+            v.contains("node=pk_") ->
+                "pk_" + v.substringAfter("node=pk_").substringBefore("&").substringBefore("|")
+            v.startsWith("pk_") -> v.substringBefore("|")
+            else -> v
         }
     }
 

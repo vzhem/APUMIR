@@ -935,6 +935,9 @@ private fun SettingsTabContent(
     // Раунд 249: подтверждение выхода из APU.
     var showLogoutDialog by remember { mutableStateOf(false) }
     var muteScope by remember { mutableStateOf<NotificationMuteScope?>(null) }
+    var showInvitePrivacyDialog by remember { mutableStateOf(false) }
+    val invitePrivacyMode by com.vladimir.messenger.data.profile.InvitePrivacyStore.mode
+        .collectAsStateWithLifecycle()
     val muteRevision by viewModel.notificationMuteRevision.collectAsStateWithLifecycle()
     val notificationMuteNowMs = remember(muteRevision) { System.currentTimeMillis() }
     val mqttClipboard = LocalClipboardManager.current
@@ -1255,6 +1258,22 @@ private fun SettingsTabContent(
                         title    = stringResource(R.string.settings_devices),
                         subtitle = stringResource(R.string.settings_devices_hint),
                         onClick  = onDevicesClick,
+                    )
+                    ApuSettingsDivider()
+                    SettingsItem(
+                        icon     = Icons.Default.GroupAdd,
+                        title    = stringResource(R.string.invite_privacy_title),
+                        subtitle = stringResource(
+                            when (invitePrivacyMode) {
+                                com.vladimir.messenger.data.profile.InvitePrivacy.ALL ->
+                                    R.string.invite_privacy_all
+                                com.vladimir.messenger.data.profile.InvitePrivacy.CONTACTS ->
+                                    R.string.invite_privacy_contacts
+                                com.vladimir.messenger.data.profile.InvitePrivacy.NOBODY ->
+                                    R.string.invite_privacy_nobody
+                            },
+                        ),
+                        onClick  = { showInvitePrivacyDialog = true },
                     )
                     ApuSettingsDivider()
                     SettingsItem(
@@ -1921,6 +1940,19 @@ private fun SettingsTabContent(
                 }
             },
 
+        )
+    }
+
+    // «Кто может приглашать в группы и каналы»: выбор применяется сразу и
+    // действует на следующие входящие карточки-приглашения.
+    if (showInvitePrivacyDialog) {
+        com.vladimir.messenger.ui.components.InvitePrivacyDialog(
+            current = invitePrivacyMode,
+            onPick = { mode ->
+                com.vladimir.messenger.data.profile.InvitePrivacyStore.set(settingsContext, mode)
+                showInvitePrivacyDialog = false
+            },
+            onDismiss = { showInvitePrivacyDialog = false },
         )
     }
 
