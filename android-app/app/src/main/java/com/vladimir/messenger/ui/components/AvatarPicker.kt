@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -64,6 +65,8 @@ fun AvatarPickerDialog(
     onPickGallery: () -> Unit,
     /** Снять новое фото камерой телефона. */
     onTakePhoto: () -> Unit,
+    /** Поставить видеоаватар (только личный профиль; у групп кнопка не показывается). */
+    onPickVideo: (() -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     val ids = remember(context) {
@@ -167,6 +170,15 @@ fun AvatarPickerDialog(
                         icon = Icons.Default.Image,
                         onClick = onPickGallery,
                         modifier = Modifier.weight(1f),
+                    )
+                }
+
+                if (onPickVideo != null) {
+                    AvatarSourceButton(
+                        label = stringResource(R.string.av_video),
+                        icon = Icons.Default.Videocam,
+                        onClick = onPickVideo,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
 

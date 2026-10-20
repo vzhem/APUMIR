@@ -471,6 +471,7 @@ class MainActivity : ComponentActivity() {
         com.vladimir.messenger.data.swarm.ServerMode.init(this)
         UsernameHolder.init(this)
         AvatarHolder.init(this)
+        com.vladimir.messenger.data.profile.VideoAvatarStore.init(this)
         // День рождения: своя дата с галочкой видимости и даты друзей,
         // пришедшие роевой рассылкой (`bday`).
         com.vladimir.messenger.data.profile.BirthdayStore.init(this)

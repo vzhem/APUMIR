@@ -404,6 +404,30 @@ private fun ProfileTabContent(
         }
     }
 
+    // Видеоаватар: выбрать короткое видео; постер из него встанет обычным
+    // аватаром, а в профиле будет играть само видео.
+    val videoAvatarPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            val prepared = com.vladimir.messenger.util.AvatarFiles.prepareVideoAvatar(context, uri)
+            prepared.onSuccess { video ->
+                com.vladimir.messenger.util.AvatarFiles.saveCropped(context, video.poster)
+                    ?.let { AvatarHolder.set(context, it) }
+                com.vladimir.messenger.data.profile.VideoAvatarStore.set(context, video.path)
+                android.widget.Toast.makeText(
+                    context, R.string.av_video_set, android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }.onFailure { failure ->
+                android.widget.Toast.makeText(
+                    context,
+                    failure.message ?: context.getString(R.string.av_video_failed),
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
     val photoTaker = rememberLauncherForActivityResult(
         ActivityResultContracts.TakePicture()
     ) { ok ->
@@ -602,7 +626,21 @@ private fun ProfileTabContent(
                             Spacer(Modifier.height(6.dp))
                             ApuTextAction(
                                 label = stringResource(R.string.settings_remove_avatar),
-                                onClick = { AvatarHolder.set(context, null) },
+                                onClick = {
+                                    AvatarHolder.set(context, null)
+                                    com.vladimir.messenger.data.profile.VideoAvatarStore.set(context, null)
+                                },
+                            )
+                        }
+                        val hasVideoAvatar by com.vladimir.messenger.data.profile.VideoAvatarStore.path
+                            .collectAsStateWithLifecycle()
+                        if (hasVideoAvatar != null && avatarUri != null) {
+                            Spacer(Modifier.height(6.dp))
+                            ApuTextAction(
+                                label = stringResource(R.string.settings_remove_video_avatar),
+                                onClick = {
+                                    com.vladimir.messenger.data.profile.VideoAvatarStore.set(context, null)
+                                },
                             )
                         }
                     }
@@ -726,6 +764,10 @@ private fun ProfileTabContent(
             onPickGallery = {
                 showAvatarPicker = false
                 avatarPicker.launch("image/*")
+            },
+            onPickVideo = {
+                showAvatarPicker = false
+                videoAvatarPicker.launch("video/*")
             },
             onTakePhoto = {
                 showAvatarPicker = false

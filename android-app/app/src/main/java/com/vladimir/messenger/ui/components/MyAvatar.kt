@@ -32,6 +32,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.vladimir.messenger.ui.theme.AvatarHolder
+import com.vladimir.messenger.data.profile.VideoAvatarStore
 
 @Composable
 fun MyAvatar(
@@ -41,6 +42,9 @@ fun MyAvatar(
 ) {
     val context = LocalContext.current
     val avatarUri by AvatarHolder.uri.collectAsState()
+    // Видеоаватар играет живьём там, где стою я сам; кадр-постер при этом
+    // остаётся обычным аватаром для списков и собеседников.
+    val videoPath by VideoAvatarStore.path.collectAsState()
     // Чтение файла и разбор картинки - вне главного потока. Раньше это шло
     // прямо в отрисовке: свой аватар читался с диска на каждом показе экрана
     // настроек и на каждой смене вкладки, подвешивая рисование.
@@ -68,7 +72,25 @@ fun MyAvatar(
                 .clip(CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            if (shown != null) {
+            val video = videoPath
+            if (video != null) {
+                // key: при смене видео плеер создаётся заново под новый файл.
+                androidx.compose.runtime.key(video) {
+                androidx.compose.ui.viewinterop.AndroidView(
+                    factory = { ctx ->
+                        android.widget.VideoView(ctx).apply {
+                            setVideoPath(video)
+                            setOnPreparedListener { player ->
+                                player.isLooping = true
+                                player.setVolume(0f, 0f)
+                                start()
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize().clip(CircleShape),
+                )
+                }
+            } else if (shown != null) {
                 Image(
                     bitmap = shown.asImageBitmap(),
                     contentDescription = stringResource(R.string.settings_avatar),
