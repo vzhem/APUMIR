@@ -1303,6 +1303,9 @@ class CoreServerService : Service() {
             notify: Boolean,
         ) {
             val (chatId, name) = chatRepository.applyMirrorIncoming(row)
+            // Пустой chatId = сообщение не сохранено (в т.ч. запрещённое
+            // приглашение): уведомления быть не должно.
+            if (chatId.isBlank()) return
             if (notify) {
                 // р249: у чата на паузе не показываем сообщение в шторке.
                 if (runCatching { chatRepository.isChatMuted(chatId) }.getOrDefault(false)) {
@@ -2553,6 +2556,19 @@ class CoreServerService : Service() {
                     // Иначе — это широковещательное сообщение не для нас (ретранслируем, но не сохраняем)
                     // P2P ФИЛЬТРАЦИЯ: ищем существующий чат с этим контактом
                     // Если чата нет — не создаём (пользователь сам решает с кем общаться)
+                    // Запрещённое настройками приглашение выбрасываем ДО
+                    // создания контакта и чата: ни строки в списке чатов, ни
+                    // уведомления, ни непрочитанных. Подтверждение доставки
+                    // отправителю уходит как обычно - пусть не повторяет.
+                    if (chatRepository.isInviteBlocked(senderId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "blocked invite ACK failed: " + e.message)
+                        }
+                        Log.i(TAG, "invite blocked by privacy setting from $senderId - dropped silently")
+                        return
+                    }
                     var chat = chatRepository.getChatByContactId(senderId)
                     if (chat == null) {
                         Log.i(TAG, "No chat with $senderId - auto-creating contact and chat")
@@ -2576,7 +2592,7 @@ class CoreServerService : Service() {
                         }
                     }
 
-                    chatRepository.saveIncomingMessage(
+                    val incomingSaved = chatRepository.saveIncomingMessage(
                         chatId = chat.id,
                         senderId = senderId,
                         messageId = messageId,
@@ -2592,19 +2608,23 @@ class CoreServerService : Service() {
                     // р242: для диагностики - когда последний раз что-то приходило.
                     com.vladimir.messenger.data.mirror.MirrorHub.noteIncoming()
                     // р226: мгновенно отразить входящее на зеркале-партнёре.
-                    mirror?.publishIncoming(
-                        com.vladimir.messenger.data.mirror.MirrorRow(
-                            id = messageId,
-                            chatId = chat.id,
-                            contactName = chat.contactName,
-                            senderId = senderId,
-                            content = text,
-                            timestamp = timestamp,
-                            mine = false,
-                            recipientId = RustBridge.nodeId() ?: "",
-                            status = "DELIVERED",
+                    // На второй телефон уходит только сохранённое: выброшенное
+                    // приглашение не должно всплыть уведомлением на зеркале.
+                    if (incomingSaved) {
+                        mirror?.publishIncoming(
+                            com.vladimir.messenger.data.mirror.MirrorRow(
+                                id = messageId,
+                                chatId = chat.id,
+                                contactName = chat.contactName,
+                                senderId = senderId,
+                                content = text,
+                                timestamp = timestamp,
+                                mine = false,
+                                recipientId = RustBridge.nodeId() ?: "",
+                                status = "DELIVERED",
+                            )
                         )
-                    )
+                    }
                     
                     // Отправить ACK отправителю
                     try {

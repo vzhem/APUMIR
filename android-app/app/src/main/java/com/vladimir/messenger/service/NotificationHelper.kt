@@ -68,6 +68,25 @@ class NotificationHelper @Inject constructor(
             return
         }
 
+        // Последний страж настройки «Кто может приглашать в группы и каналы»:
+        // карточка-приглашение от запрещённого отправителя не должна звенеть
+        // ни одним путём, даже если сообщение как-то попало в базу раньше.
+        run {
+            val mode = com.vladimir.messenger.data.profile.InvitePrivacyStore.value(context)
+            if (mode != com.vladimir.messenger.data.profile.InvitePrivacy.ALL) {
+                val isCard = com.vladimir.messenger.util.GroupInviteCardSender.parseCard(rawText) != null ||
+                    com.vladimir.messenger.util.GroupInviteCardSender.parseMultiCard(rawText) != null
+                if (isCard) {
+                    val isContact = runCatching { contactRepository.getContactById(senderId) }
+                        .getOrNull() != null
+                    if (!com.vladimir.messenger.data.profile.InvitePrivacyStore.allows(mode, isContact)) {
+                        android.util.Log.i("NotificationHelper", "invite notification suppressed by privacy setting")
+                        return
+                    }
+                }
+            }
+        }
+
         val nowMs = System.currentTimeMillis()
         val group = groupDao.getGroupById(chatId)
         if (isMuted(chatId, topicId, group, nowMs)) {

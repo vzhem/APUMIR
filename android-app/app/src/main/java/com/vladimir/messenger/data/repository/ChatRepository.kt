@@ -637,7 +637,7 @@ class ChatRepository @Inject constructor(
             row.senderId,
             row.contactName.ifBlank { com.vladimir.messenger.util.NodeIds.autoName(row.senderId) },
         )
-        saveIncomingMessage(
+        val saved = saveIncomingMessage(
             chatId = chat.id,
             senderId = row.senderId,
             messageId = row.id,
@@ -646,6 +646,9 @@ class ChatRepository @Inject constructor(
             channel = MessageChannel.UNKNOWN,
             recipientId = row.recipientId,
         )
+        // Не сохранено (служебный пакет, дубликат, запрещённое приглашение) -
+        // пустая пара: вызывающий не покажет уведомление.
+        if (!saved) return Pair("", "")
         return Pair(chat.id, chat.contactName)
     }
 
@@ -725,16 +728,16 @@ class ChatRepository @Inject constructor(
         timestamp: Long,
         channel: MessageChannel = MessageChannel.UNKNOWN,
         recipientId: String = "",
-    ) {
-        if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId)) return
+    ): Boolean {
+        if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId)) return false
         // История: пакет контакта сохраняем в ленту историй, в переписку не пускаем.
         if (com.vladimir.messenger.data.story.StoryStore.isStoryPacket(content)) {
-            if (content.toByteArray(Charsets.UTF_8).size > 16 * 1024) return
-            if (storyVideos.receiveReady(senderId, content)) return
+            if (content.toByteArray(Charsets.UTF_8).size > 16 * 1024) return false
+            if (storyVideos.receiveReady(senderId, content)) return false
             val name = chatDao.getChatsByContactId(senderId).firstOrNull()?.contactName.orEmpty()
             com.vladimir.messenger.data.story.StoryStore.receive(senderId, name, content)
             storyVideos.readyPacket(senderId, content)?.let { sendStoryPacket(senderId, it) }
-            return
+            return false
         }
         // р239/р247: страховка на самом сохранении. Служебный пакет приложения
         // (например, «печатает…» или delivery ACK) в переписку не попадает ни
@@ -751,65 +754,67 @@ class ChatRepository @Inject constructor(
                 com.vladimir.messenger.data.typing.TypingPeer.peerStopped(senderId)
             }
             Log.i(TAG, "service packet not saved to chat: " + content.take(16))
-            return
+            return false
+        }
+        // Настройка «Кто может приглашать в группы и каналы»: запрещённое
+        // приглашение выбрасывается ЗДЕСЬ, до записи. Нет строки в базе -
+        // нет ни заметки в чате, ни непрочитанных, ни уведомления (оно
+        // рождается наблюдателем за базой), ни повода отвлекаться.
+        if (isInviteBlocked(senderId, content)) {
+            Log.i(TAG, "invite blocked by privacy setting from $senderId - dropped silently")
+            return false
         }
         // Защита от дубликатов (FULL SYNC может прислать то же сообщение повторно)
         val exists = messageDao.messageExists(messageId)
         if (exists) {
             Log.i(TAG, "⏩ SKIP duplicate msg $messageId (already in DB)")
-            return
+            return false
         }
         
         Log.i(TAG, "💾 saveIncomingMessage: chatId=$chatId msgId=$messageId ts=$timestamp")
         // р235: собеседник прислал сообщение - «печатает…» гаснет сразу, не
         // дожидаясь, пока индикатор протухнет сам (до 6 с).
         runCatching { com.vladimir.messenger.data.typing.TypingPeer.peerStopped(senderId) }
-        // Настройка «Кто может приглашать в группы и каналы»: карточка от
-        // неразрешённого отправителя превращается в заметку без ссылки.
-        val storedContent = filterInviteCard(senderId, content)
         val entity = MessageEntity(
             id = messageId,
             chatId = chatId,
             senderId = senderId,
-            content = storedContent,
+            content = content,
             timestamp = timestamp,
             isFromMe = false,
             status = MessageStatus.DELIVERED.name,
             recipientId = recipientId,
         )
         // A due-time fallback may race the local hidden-inbox reveal.
-        if (messageDao.insertMessageIgnore(entity) == -1L) return
+        if (messageDao.insertMessageIgnore(entity) == -1L) return false
         if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId)) {
             messageDao.deleteByIdChatAndSender(messageId, chatId, senderId)
-            return
+            return false
         }
-        chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(storedContent) ?: storedContent, timestamp)
+        chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
         // Раунд 150: бейдж непрочитанных на пузыре личного чата.
         // Раунд 156: служебные конверты роя (стикеры/миниатюры) - не
         // сообщения, непрочитанные не считают (владелец).
         if (!com.vladimir.messenger.util.ChatPreviews.isServiceEnvelope(content)) {
             runCatching { chatDao.incrementUnread(chatId) }
         }
+        return true
     }
 
     /**
-     * Фильтр приглашений по настройке «Кто может приглашать в группы и
-     * каналы». Обычный текст возвращается как есть. Карточка (и мульти-
-     * карточка) от запрещённого отправителя заменяется заметкой: название
-     * сообщества видно, а ссылки нет — ни кнопкой, ни копированием текста
-     * войти нельзя. Режим читается из файла на каждое приглашение, чтобы
-     * смена настройки действовала сразу, без перезапуска.
+     * Запрещено ли это приглашение настройкой «Кто может приглашать в
+     * группы и каналы». Обычный текст - не приглашение, пропускается.
+     * Карточка и мульти-карточка проверяются по режиму: ВСЕ - можно всем,
+     * КОНТАКТЫ - только людям из адресной книги, НИКТО - никому. Режим
+     * читается из файла на каждое приглашение, чтобы смена настройки
+     * действовала сразу, без перезапуска.
      */
-    private suspend fun filterInviteCard(senderId: String, content: String): String {
-        val card = com.vladimir.messenger.util.GroupInviteCardSender.parseCard(content)
-        val multi = if (card == null) {
-            com.vladimir.messenger.util.GroupInviteCardSender.parseMultiCard(content)
-        } else {
-            null
-        }
-        if (card == null && multi == null) return content
+    suspend fun isInviteBlocked(senderId: String, content: String): Boolean {
+        val isCard = com.vladimir.messenger.util.GroupInviteCardSender.parseCard(content) != null ||
+            com.vladimir.messenger.util.GroupInviteCardSender.parseMultiCard(content) != null
+        if (!isCard) return false
         val mode = com.vladimir.messenger.data.profile.InvitePrivacyStore.value(context)
-        if (mode == com.vladimir.messenger.data.profile.InvitePrivacy.ALL) return content
+        if (mode == com.vladimir.messenger.data.profile.InvitePrivacy.ALL) return false
         val isContact = if (mode == com.vladimir.messenger.data.profile.InvitePrivacy.CONTACTS) {
             val senderNode = canonicalNode(senderId)
             runCatching { contactDao.allIds() }.getOrDefault(emptyList())
@@ -817,21 +822,7 @@ class ChatRepository @Inject constructor(
         } else {
             false
         }
-        if (com.vladimir.messenger.data.profile.InvitePrivacyStore.allows(mode, isContact)) return content
-        val note = context.getString(
-            if (mode == com.vladimir.messenger.data.profile.InvitePrivacy.NOBODY) {
-                com.vladimir.messenger.R.string.invite_hidden_nobody
-            } else {
-                com.vladimir.messenger.R.string.invite_hidden_contacts
-            },
-        )
-        return when {
-            card != null -> (if (card.isChannel) "Канал" else "Группа") +
-                " «" + card.title + "» в APU.\n" + note
-            multi != null -> multi.items.joinToString(", ") { "«" + it.title + "»" } +
-                "\n" + note
-            else -> note
-        }
+        return !com.vladimir.messenger.data.profile.InvitePrivacyStore.allows(mode, isContact)
     }
 
     /** Узел из сырого идентификатора: `pk_…` как есть, из ссылки — по `node=`. */
