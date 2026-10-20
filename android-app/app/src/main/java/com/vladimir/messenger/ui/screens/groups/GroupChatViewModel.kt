@@ -1620,6 +1620,14 @@ class GroupChatViewModel @Inject constructor(
     }
 
     /** Раунд 135: удалить сообщение только у себя. */
+    /** Отредактировать своё сообщение группы/канала (провод и приёмник уже есть). */
+    fun editMessage(messageId: String, newText: String) {
+        viewModelScope.launch {
+            groupRepository.editMessage(groupId, messageId, newText)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message.orEmpty()) } }
+        }
+    }
+
     fun deleteMessageForMe(messageId: String) {
         viewModelScope.launch {
             runCatching { groupRepository.deleteMessageForMe(groupId, messageId) }

@@ -249,6 +249,10 @@
     <string name="chat_file_to_saved">Файл в избранное</string>
     <string name="chat_to_saved">В избранное</string>
     <string name="chat_add_reaction">Поставить реакцию</string>
+    <string name="chat_edit_message">Редактировать</string>
+    <string name="chat_edit_title">Редактировать сообщение</string>
+    <string name="chat_edit_hint">Новый текст увидят все участники переписки; у сообщения появится пометка «изменено».</string>
+    <string name="msg_edited">изменено</string>
     <string name="chat_delete_for_me">Удалить у себя</string>
     <string name="chat_delete_for_all">Удалить у всех</string>
     <string name="chat_delete_for_all_title">Удалить у всех?</string>

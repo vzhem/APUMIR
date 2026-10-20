@@ -261,11 +261,56 @@ fun GroupChatScreen(
     var showGifCatalog by remember { mutableStateOf(false) }
     // Модальное окно удаления и модерации сообщений (одиночное или пакетное).
     var deleteForAllTarget by remember { mutableStateOf<com.vladimir.messenger.data.local.entity.MessageEntity?>(null) }
+    var groupEditTarget by remember { mutableStateOf<com.vladimir.messenger.data.local.entity.MessageEntity?>(null) }
     var showBulkModeration by remember { mutableStateOf(false) }
 
     // Канал это или группа и корневой пост канала: нужно и окну модерации,
     // и ленте, поэтому считаем до обоих.
     val isChannel = uiState.group?.isChannel == true
+    // Редактирование своего сообщения группы/канала.
+    groupEditTarget?.let { target ->
+        var editText by remember(target.id) { mutableStateOf(target.content) }
+        com.vladimir.messenger.ui.components.ApuSettingsDialog(
+            onDismissRequest = { groupEditTarget = null },
+            title = { Text(stringResource(R.string.chat_edit_title)) },
+            text = {
+                Column {
+                    Text(
+                        stringResource(R.string.chat_edit_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = com.vladimir.messenger.ui.components.ApuBubbleMutedColor,
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    com.vladimir.messenger.ui.components.ApuFormTextField(
+                        value = editText,
+                        onValueChange = { editText = it },
+                        label = stringResource(R.string.chat_edit_message),
+                        singleLine = false,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                com.vladimir.messenger.ui.components.ApuTextAction(
+                    label = stringResource(R.string.action_save),
+                    onClick = {
+                        val text = editText.trim()
+                        groupEditTarget = null
+                        if (text.isNotEmpty() && text != target.content) {
+                            viewModel.editMessage(target.id, text)
+                        }
+                    },
+                )
+            },
+            dismissButton = {
+                com.vladimir.messenger.ui.components.ApuTextAction(
+                    label = stringResource(R.string.action_cancel),
+                    onClick = { groupEditTarget = null },
+                )
+            },
+        )
+    }
+
     val channelRootMessageId = if (isChannel) {
         uiState.messages.firstOrNull {
             !com.vladimir.messenger.util.InlineImage.isPart(it.content)
@@ -1196,6 +1241,7 @@ fun GroupChatScreen(
                         onEnsureGif = { sha -> viewModel.ensureGifRef(sha) },
                         onDeleteForMe = { viewModel.deleteMessageForMe(message.id) },
                         onDeleteForAll = { deleteForAllTarget = message },
+                        onEdit = { groupEditTarget = message },
                         // ── р250: ответы и опросы ──
                         onReply = { viewModel.startReply(message) },
                         poll = uiState.polls[message.id],
@@ -2030,6 +2076,8 @@ private fun MessageBubble(
     /** Раунд 135: удалить сообщение - у себя или у всех. */
     onDeleteForMe: () -> Unit = {},
     onDeleteForAll: () -> Unit = {},
+    /** Правка своего сообщения. */
+    onEdit: () -> Unit = {},
     /** р250: «Ответить» - цитата этого сообщения встанет над полем ввода. */
     onReply: () -> Unit = {},
     /** р250: опрос, приклеенный к сообщению (посту); null - опроса нет. */
@@ -2363,6 +2411,12 @@ private fun MessageBubble(
                             Icons.Filled.PushPin,
                         ) { onTogglePin() }
                     )
+                }
+                // Правка своего сообщения - автору; текст увидят все.
+                if (message.isFromMe && message.content.isNotBlank() &&
+                    !message.content.startsWith("APU")
+                ) {
+                    add(ApuAction(stringResource(R.string.chat_edit_message), Icons.Filled.Edit) { onEdit() })
                 }
                 // Удаление и модерация: доступно автору, администраторам и владельцу.
                 if (canModerate || message.isFromMe) {

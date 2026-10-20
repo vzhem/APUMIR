@@ -143,8 +143,7 @@ class PeerRankBroadcaster @Inject constructor(
         val key = "reply_" + peer.hashCode()
         val nowMs = System.currentTimeMillis()
         if (nowMs - prefs.getLong(key, 0L) < REPLY_MIN_INTERVAL_MS) return@withContext false
-        val chatId = runCatching { chatDao.getChatByContactId(peerId)?.id }
-            .getOrNull() ?: return@withContext false
+        val chatId = resolveChatId(peerId) ?: return@withContext false
         val envelope = RankWire.build(own, ReferralRankStore.qualifiedDirectCount(app), nowMs)
             ?: return@withContext false
         val ok = runCatching {
@@ -168,8 +167,7 @@ class PeerRankBroadcaster @Inject constructor(
         val key = "ask_" + peer.hashCode()
         val nowMs = System.currentTimeMillis()
         if (nowMs - prefs.getLong(key, 0L) < REQUEST_MIN_INTERVAL_MS) return@withContext false
-        val chatId = runCatching { chatDao.getChatByContactId(peerId)?.id }
-            .getOrNull() ?: return@withContext false
+        val chatId = resolveChatId(peerId) ?: return@withContext false
         val ok = runCatching {
             RustBridge.sendMessage(
                 UUID.randomUUID().toString(), chatId, peer, RankWire.buildRankRequest(),
@@ -178,6 +176,21 @@ class PeerRankBroadcaster @Inject constructor(
         if (ok) prefs.edit().putLong(key, nowMs).apply()
         Log.i(TAG, "rank requested from $peer: $ok")
         ok
+    }
+
+    /**
+     * Чат с абонентом: адрес в таблице чатов может храниться и в исходной
+     * форме, и канонической (pk_-узел в нижнем регистре) - пробуем обе,
+     * иначе запрос/ответ ранга молча не уходил части контактов.
+     */
+    private suspend fun resolveChatId(peerRaw: String): String? {
+        val candidates = listOf(peerRaw, RankWire.canonicalNodeId(peerRaw))
+            .filterNotNull().distinct()
+        for (candidate in candidates) {
+            val id = runCatching { chatDao.getChatByContactId(candidate)?.id }.getOrNull()
+            if (id != null) return id
+        }
+        return null
     }
 
     private companion object {

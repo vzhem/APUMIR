@@ -126,6 +126,8 @@ class ChatDetailViewModel @Inject constructor(
     private val readReceipts: com.vladimir.messenger.data.receipt.ReadReceiptRepository,
     private val hearts: com.vladimir.messenger.data.heart.HeartRepository,
     private val messageDeletion: com.vladimir.messenger.data.repository.MessageDeletionRepository,
+    private val messageEdit: com.vladimir.messenger.data.repository.MessageEditRepository,
+    private val peerRankBroadcaster: com.vladimir.messenger.data.rank.PeerRankBroadcaster,
     private val stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary,
     @ApplicationContext private val appContext: Context,
     /** Ранги собеседников: поток узлов-элиты для знака и кольца у аватарки. */
@@ -339,12 +341,25 @@ class ChatDetailViewModel @Inject constructor(
      * никем не обновлялся, а peer_discovered писал только в таблицу contacts.
      * Слушаем строку чата в БД — peer_discovered/peer_lost её же и обновляют.
      */
+    /** Ранг собеседника не знаем - попросить адресно, чтобы значок VIP не ждал рассылку. */
+    private fun requestPeerRankIfUnknown(peer: String) {
+        if (peer.isBlank()) return
+        viewModelScope.launch {
+            runCatching {
+                if (peerRankStore.qualifiedFor(peer) == null) {
+                    peerRankBroadcaster.requestRank(peer)
+                }
+            }
+        }
+    }
+
     private fun observeContactPresence() {
         // Знак VIP и золотое кольцо у имени собеседника обновляем на лету: ранг
         // может приехать в любой момент конвертом APURANK1, а экран уже открыт.
         viewModelScope.launch {
             peerRankStore.vipNodeIds.collect { vipIds ->
                 val peer = peerId.lowercase()
+                requestPeerRankIfUnknown(peer)
                 // В переписке с собственным узлом собеседника нет: кольцо решает
                 // МОЙ ранг (он же виден в профиле и на главной). Свой ранг лежит
                 // в настройках, поэтому читаем его в фоне, а не на главном потоке.
@@ -1572,6 +1587,17 @@ class ChatDetailViewModel @Inject constructor(
     /**
      * Раунд 135: удалить своё сообщение только у себя.
      */
+    /**
+     * Отредактировать своё уже ушедшее сообщение (и прочитанное тоже):
+     * текст меняется у себя сразу, собеседнику уходит конверт правки.
+     */
+    fun editMessage(messageId: String, newText: String) {
+        viewModelScope.launch {
+            messageEdit.editDirect(chatId, messageId, newText)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message.orEmpty()) } }
+        }
+    }
+
     fun deleteMessageForMe(messageId: String) {
         viewModelScope.launch {
             messageDeletion.deleteForMe(chatId, messageId)

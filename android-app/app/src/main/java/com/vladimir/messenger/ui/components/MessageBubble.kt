@@ -331,6 +331,14 @@ fun MessageBubble(
                     horizontalArrangement = Arrangement.End,
                 ) {
                     val yesterdayLabel = stringResource(R.string.msg_yesterday)
+                    if (message.editedAtMs > 0) {
+                        Text(
+                            stringResource(R.string.msg_edited) + " · ",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isOwn) messenger.messageBubbleOwnText.copy(alpha = 0.7f)
+                                    else messenger.messageBubbleOtherText.copy(alpha = 0.6f),
+                        )
+                    }
                     Text(
                         // Раунд 184 (аудит-5): SimpleDateFormat+Calendar создавались
                         // заново на каждую перерисовку каждого пузыря. remember

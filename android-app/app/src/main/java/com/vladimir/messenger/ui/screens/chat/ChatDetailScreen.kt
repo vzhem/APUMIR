@@ -140,6 +140,7 @@ fun ChatDetailScreen(
 
     // Раунд 135: подтверждение «удалить у всех» - действие необратимое.
     var deleteForAllTarget by remember { mutableStateOf<Message?>(null) }
+    var editTarget by remember { mutableStateOf<Message?>(null) }
     // Сообщение, для которого открыт выбор реакции.
     var reactionFor by remember { mutableStateOf<String?>(null) }
     // Текст, открытый в окне выделения части.
@@ -978,6 +979,22 @@ fun ChatDetailScreen(
                         showCopyDialog = null
                         reactionFor = message.id
                     }
+                    // Правка своего ушедшего сообщения (и прочитанного
+                    // тоже). Только обычный текст: файлы, гифки и служебные
+                    // карточки правкой не становятся другим сообщением.
+                    if (message.isFromMe && message.content.isNotBlank() &&
+                        !message.content.startsWith("APU") &&
+                        com.vladimir.messenger.util.GroupFileMarker.parse(message.content) == null &&
+                        !com.vladimir.messenger.data.gif.GifLibrary.isGifRef(message.content)
+                    ) {
+                        com.vladimir.messenger.ui.components.ApuActionBubble(
+                            stringResource(R.string.chat_edit_message),
+                            androidx.compose.material.icons.Icons.Filled.Edit,
+                        ) {
+                            showCopyDialog = null
+                            editTarget = message
+                        }
+                    }
                     // Раунд 135: удаление своего сообщения - у себя и у всех.
                     if (message.isFromMe) {
                         com.vladimir.messenger.ui.components.ApuActionBubble(
@@ -1072,6 +1089,48 @@ fun ChatDetailScreen(
                 },
             )
         }
+    }
+
+    // Редактирование своего сообщения: поле с текущим текстом, «Сохранить»
+    // меняет текст у себя сразу и шлёт правку собеседнику.
+    editTarget?.let { target ->
+        var editText by remember(target.id) { mutableStateOf(target.content) }
+        ApuSettingsDialog(
+            onDismissRequest = { editTarget = null },
+            title = { Text(stringResource(R.string.chat_edit_title)) },
+            text = {
+                Column {
+                    Text(
+                        stringResource(R.string.chat_edit_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = com.vladimir.messenger.ui.components.ApuBubbleMutedColor,
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    com.vladimir.messenger.ui.components.ApuFormTextField(
+                        value = editText,
+                        onValueChange = { editText = it },
+                        label = stringResource(R.string.chat_edit_message),
+                        singleLine = false,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                ApuTextAction(
+                    label = stringResource(R.string.action_save),
+                    onClick = {
+                        val text = editText.trim()
+                        editTarget = null
+                        if (text.isNotEmpty() && text != target.content) {
+                            viewModel.editMessage(target.id, text)
+                        }
+                    },
+                )
+            },
+            dismissButton = {
+                ApuTextAction(label = stringResource(R.string.action_cancel), onClick = { editTarget = null })
+            },
+        )
     }
 
     // Подтверждение удаления у всех, включая прочитанные сообщения.

@@ -1395,6 +1395,7 @@ class ChatRepository @Inject constructor(
         // Тема нужна уведомлениям: тап ведёт в место сообщения.
         topicId = topicId,
         isPinned = isPinned,
+        editedAtMs = editedAtMs,
         replyToId = replyToId,
         replyAuthor = replyAuthor,
         replyText = replyText,

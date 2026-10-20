@@ -54,7 +54,7 @@ import com.vladimir.messenger.data.local.dao.GroupPollDao
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 32
+const val APP_DATABASE_VERSION = 33
 
 @Database(
     entities = [
@@ -113,6 +113,13 @@ abstract class AppDatabase : RoomDatabase() {
          * Реакции: до пяти разных значков от одного человека на сообщение.
          * Ключ таблицы расширяется значком; строки переносятся как есть.
          */
+        val MIGRATION_32_33 = object : Migration(32, 33) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Отметка о правке сообщения («изменено» у пузыря).
+                db.execSQL("ALTER TABLE `messages` ADD COLUMN `editedAtMs` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         val MIGRATION_31_32 = object : Migration(31, 32) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL(

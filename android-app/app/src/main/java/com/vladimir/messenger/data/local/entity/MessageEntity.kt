@@ -50,6 +50,9 @@ data class MessageEntity(
      */
     @ColumnInfo(defaultValue = "0")
     val isPinned: Boolean = false,
+    /** Когда текст последний раз правили (0 - не правили). Показывается «изменено». */
+    @ColumnInfo(defaultValue = "0")
+    val editedAtMs: Long = 0,
     val pinnedAtMs: Long? = null,
     val pinnedBy: String? = null,
 )

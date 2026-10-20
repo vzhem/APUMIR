@@ -76,6 +76,7 @@ class CoreServerService : Service() {
     @Inject lateinit var linkShortener: com.vladimir.messenger.data.link.LinkShortener
     @Inject lateinit var readReceipts: com.vladimir.messenger.data.receipt.ReadReceiptRepository
     @Inject lateinit var messageDeletion: com.vladimir.messenger.data.repository.MessageDeletionRepository
+    @Inject lateinit var messageEdit: com.vladimir.messenger.data.repository.MessageEditRepository
     @Inject lateinit var hearts: com.vladimir.messenger.data.heart.HeartRepository
     @Inject lateinit var postViews: com.vladimir.messenger.data.channel.PostViewRepository
     @Inject lateinit var deferredDelivery: com.vladimir.messenger.data.schedule.DeferredDelivery
@@ -442,6 +443,7 @@ class CoreServerService : Service() {
         }
         if (runCatching { reactionRepository.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { messageDeletion.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { messageEdit.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { postViews.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { hearts.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { addressBookSwarm.routeIncoming(senderId, text) }.getOrDefault(false)) return true
@@ -1750,6 +1752,10 @@ class CoreServerService : Service() {
             Log.i(TAG, "Mirror envelope: deletion from ${senderId.takeLast(8)} applied")
             return true
         }
+        if (runCatching { messageEdit.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            Log.i(TAG, "Mirror envelope: edit from ${senderId.takeLast(8)} applied")
+            return true
+        }
         if (runCatching { postViews.routeIncoming(senderId, text) }.getOrDefault(false)) {
             return true
         }
@@ -1839,6 +1845,12 @@ class CoreServerService : Service() {
             runCatching { messageDeletion.applyMirrorOutgoing(peerId, text) }.getOrDefault(false)
         ) {
             Log.i(TAG, "Mirror action: удаление с тени применено локально")
+            return
+        }
+        if (peerId.isNotBlank() &&
+            runCatching { messageEdit.applyMirrorOutgoing(peerId, text) }.getOrDefault(false)
+        ) {
+            Log.i(TAG, "Mirror action: правка с тени применена локально")
             return
         }
         if (runCatching { postViews.applyMirrorOutgoing(text) }.getOrDefault(false)) return
@@ -2528,6 +2540,17 @@ class CoreServerService : Service() {
                             RustBridge.sendDeliveryAck(messageId, senderId)
                         } catch (e: Exception) {
                             Log.w(TAG, "Delete packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
+                    // Правка своего сообщения (APUEDIT1): применяется к
+                    // строке автора, в переписку служебной строкой не идёт.
+                    if (messageEdit.routeIncoming(senderId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Edit packet ACK failed: " + e.message)
                         }
                         return
                     }

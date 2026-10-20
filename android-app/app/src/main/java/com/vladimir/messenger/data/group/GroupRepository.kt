@@ -2819,7 +2819,7 @@ class GroupRepository(
 
     /** Записать новый текст и, если это пост канала, переименовать его тему. */
     private suspend fun applyEdit(message: MessageEntity, content: String) {
-        messageDao.updateContent(message.id, content)
+        messageDao.updateContentEdited(message.id, content, System.currentTimeMillis())
         val topicId = message.topicId ?: return
         val topic = groupDao.getTopicById(topicId) ?: return
         val group = groupDao.getGroupById(message.chatId) ?: return
