@@ -1,6 +1,7 @@
 package com.vladimir.messenger.ui.components
 
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -85,7 +86,7 @@ fun HeartGameCounter(onlyWhenEnabled: Boolean = false) {
 }
 
 @Composable
-fun HeartGameHeaderStatus(modifier: Modifier = Modifier) {
+fun HeartGameHeaderStatus(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
     val context = LocalContext.current
     val revision by HeartGameStore.revision.collectAsStateWithLifecycle()
     val ready by com.vladimir.messenger.service.CoreStatus.ready.collectAsStateWithLifecycle()
@@ -108,8 +109,11 @@ fun HeartGameHeaderStatus(modifier: Modifier = Modifier) {
         catch (_: Exception) { place = null }
     }
     if (!enabled) return
-    Row(modifier, verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    Row(
+        modifier.then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
         Icon(Icons.Default.Favorite, null, tint = Color(0xFFE0245E), modifier = Modifier.size(13.dp))
         Text(score.toString(), style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold, color = heartWallpaperTextColor())
@@ -181,11 +185,11 @@ fun HeartGameSettings() {
         }
         ApuTextAction(label = stringResource(R.string.heart_game_leaders), onClick = { showBoard = true })
     }
-    if (showBoard) HeartGameLeaderboard(id) { showBoard = false }
+    if (showBoard) HeartGameLeaderboardDialog(id) { showBoard = false }
 }
 
 @Composable
-private fun HeartGameLeaderboard(id: String?, onDismiss: () -> Unit) {
+fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val revision by HeartGameStore.revision.collectAsStateWithLifecycle()
     var entries by remember(id) { mutableStateOf<List<HeartGameWire.Entry>>(emptyList()) }

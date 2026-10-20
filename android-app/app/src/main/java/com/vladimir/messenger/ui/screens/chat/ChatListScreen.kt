@@ -8,7 +8,9 @@ package com.vladimir.messenger.ui.screens.chat
 // FAB для добавления нового контакта.
 // =============================================================================
 
+import com.vladimir.messenger.data.heartgame.HeartGameStore
 import com.vladimir.messenger.ui.components.ApuPremiumSpinner
+import com.vladimir.messenger.ui.components.HeartGameLeaderboardDialog
 import com.vladimir.messenger.ui.components.ApuSearchField
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
@@ -148,6 +150,7 @@ fun ChatListScreen(
     var isSearchVisible by remember { mutableStateOf(false) }
 
     var showConnectDialog by remember { mutableStateOf(false) }
+    var showHeartLeaders by remember { mutableStateOf(false) }
     var connectLink by remember { mutableStateOf("") }
     val context = LocalContext.current
     LaunchedEffect(uiState.error) {
@@ -284,6 +287,7 @@ fun ChatListScreen(
                                     }
                                     com.vladimir.messenger.ui.components.HeartGameHeaderStatus(
                                         modifier = Modifier.padding(start = 32.dp),
+                                        onClick = { showHeartLeaders = true },
                                     )
                                 }
                             }
@@ -869,6 +873,11 @@ fun ChatListScreen(
 
     // Диалог подключения — отдельная фирменная карточка, а не стандартное
     // Material-окно с серо-лиловыми полями поверх обоев.
+    // Счёт сердечек на главной нажимается: сразу таблица лидеров.
+    if (showHeartLeaders) {
+        val heartId = remember { HeartGameStore.ownId() }
+        HeartGameLeaderboardDialog(heartId) { showHeartLeaders = false }
+    }
     if (showConnectDialog) {
         ApuConnectByLinkDialog(
             link = connectLink,
