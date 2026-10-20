@@ -40,6 +40,21 @@ object InvitePrivacyStore {
             InvitePrivacy.valueOf(prefs(context).getString(KEY_MODE, null).orEmpty())
         }.getOrDefault(InvitePrivacy.ALL)
 
+    /**
+     * Заявить право на одно уведомление «приглашение отклонено» этому
+     * отправителю: не чаще раза в час на человека. Отклонений может быть
+     * много (рассылка по списку), а объяснение нужно одно.
+     */
+    fun claimRejectNotice(context: Context, senderId: String): Boolean {
+        if (senderId.isBlank()) return false
+        val key = "rej_" + senderId.hashCode()
+        val prefs = prefs(context)
+        val now = System.currentTimeMillis()
+        if (now - prefs.getLong(key, 0L) < 3_600_000L) return false
+        prefs.edit().putLong(key, now).apply()
+        return true
+    }
+
     /** Разрешён ли этот отправитель при текущем режиме. */
     fun allows(mode: InvitePrivacy, senderIsContact: Boolean): Boolean = when (mode) {
         InvitePrivacy.ALL -> true

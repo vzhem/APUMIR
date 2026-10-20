@@ -300,6 +300,51 @@ class CoreServerService : Service() {
         return chatRepository.markOutgoingMessageDelivered(messageId)
     }
 
+    /**
+     * Уведомить отправителя, что его приглашение отклонено настройками
+     * приватности этого телефона. Самому получателю по-прежнему полная
+     * тишина; отправитель получает служебный пакет и видит человеческое
+     * уведомление «не доставлено: вы не контакт» или «абонент запретил
+     * всем». Не чаще раза в час одному человеку (claimRejectNotice).
+     */
+    private suspend fun sendInviteReject(senderId: String, content: String) {
+        if (!senderId.startsWith("pk_")) return
+        val reason = when (
+            com.vladimir.messenger.data.profile.InvitePrivacyStore.value(applicationContext)
+        ) {
+            com.vladimir.messenger.data.profile.InvitePrivacy.NOBODY ->
+                com.vladimir.messenger.data.invite.InviteRejectWire.Reason.NOBODY
+            com.vladimir.messenger.data.profile.InvitePrivacy.CONTACTS ->
+                com.vladimir.messenger.data.invite.InviteRejectWire.Reason.NOT_CONTACT
+            com.vladimir.messenger.data.profile.InvitePrivacy.ALL -> return
+        }
+        if (!com.vladimir.messenger.data.profile.InvitePrivacyStore
+                .claimRejectNotice(applicationContext, senderId)
+        ) {
+            return
+        }
+        // Название - только у одиночной карточки; у мульти-приглашения
+        // отправителю уходит общая формулировка без названия.
+        val title = com.vladimir.messenger.util.GroupInviteCardSender
+            .parseCard(content)?.title.orEmpty()
+        val packet = com.vladimir.messenger.data.invite.InviteRejectWire.build(reason, title)
+        val direct = runCatching { RustBridge.sendDirectPayload(senderId, packet) }
+            .getOrDefault(false)
+        if (!direct) {
+            runCatching {
+                RustBridge.sendMessage(java.util.UUID.randomUUID().toString(), "", senderId, packet)
+            }
+        }
+        Log.i(TAG, "invite reject notice sent to $senderId reason=$reason")
+    }
+
+    /** Входящий отказ на МОЁ приглашение: заметка в чат + уведомление. */
+    private suspend fun handleInviteReject(senderId: String, text: String) {
+        val notice = com.vladimir.messenger.data.invite.InviteRejectWire.parse(text) ?: return
+        runCatching { chatRepository.insertInviteRejectNotice(senderId, notice) }
+            .onFailure { Log.w(TAG, "invite reject notice insert failed: ${it.message}") }
+    }
+
     private suspend fun routeIncomingEnvelope(
         senderId: String,
         chatId: String,
@@ -340,6 +385,14 @@ class CoreServerService : Service() {
             } else {
                 Log.w(TAG, "malformed delivery ACK on relay path; dropped")
             }
+            return true
+        }
+
+        // Отказ на моё приглашение (настройки приватности получателя):
+        // заметка в чат с ним и обычное уведомление, в переписку служебная
+        // строка не ложится.
+        if (com.vladimir.messenger.data.invite.InviteRejectWire.isPacket(text)) {
+            runCatching { handleInviteReject(senderId, text) }
             return true
         }
 
@@ -1149,6 +1202,9 @@ class CoreServerService : Service() {
                                                 channel = MessageChannel.CF,
                                             )
                                             Log.i(TAG, "CF message handled for chat ${chat.id} msgId=$messageId")
+                                            if (chatRepository.isInviteBlocked(senderId, cfContent)) {
+                                                runCatching { sendInviteReject(senderId, cfContent) }
+                                            }
                                             // Диагностика: и этот путь считает входящие
                                             // - иначе через релей сообщения были бы
                                             // невидимы в отчёте.
@@ -1197,6 +1253,9 @@ class CoreServerService : Service() {
                                         channel = MessageChannel.CF,
                                     )
                                     Log.i(TAG, "CF plain-text saved to chat ${chat.id}: ${parsed.raw.take(30)}")
+                                    if (chatRepository.isInviteBlocked(senderId, parsed.raw)) {
+                                        runCatching { sendInviteReject(senderId, parsed.raw) }
+                                    }
                                     com.vladimir.messenger.data.diagnostics
                                         .TransferDiagnostics.noteMessageIncoming()
                                 }
@@ -2556,6 +2615,19 @@ class CoreServerService : Service() {
                     // Иначе — это широковещательное сообщение не для нас (ретранслируем, но не сохраняем)
                     // P2P ФИЛЬТРАЦИЯ: ищем существующий чат с этим контактом
                     // Если чата нет — не создаём (пользователь сам решает с кем общаться)
+                    // Отказ на МОЁ приглашение: получатель отклонил его
+                    // настройками приватности. Показываем заметку в чате с
+                    // ним и уведомление; служебная строка в переписку не идёт.
+                    if (com.vladimir.messenger.data.invite.InviteRejectWire.isPacket(text)) {
+                        runCatching { handleInviteReject(senderId, text) }
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Invite reject ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
                     // Запрещённое настройками приглашение выбрасываем ДО
                     // создания контакта и чата: ни строки в списке чатов, ни
                     // уведомления, ни непрочитанных. Подтверждение доставки
@@ -2567,6 +2639,9 @@ class CoreServerService : Service() {
                             Log.w(TAG, "blocked invite ACK failed: " + e.message)
                         }
                         Log.i(TAG, "invite blocked by privacy setting from $senderId - dropped silently")
+                        // У меня тишина, но отправитель должен узнать, что
+                        // приглашение не дошло и почему.
+                        runCatching { sendInviteReject(senderId, text) }
                         return
                     }
                     var chat = chatRepository.getChatByContactId(senderId)

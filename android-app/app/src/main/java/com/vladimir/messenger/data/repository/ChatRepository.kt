@@ -825,6 +825,49 @@ class ChatRepository @Inject constructor(
         return !com.vladimir.messenger.data.profile.InvitePrivacyStore.allows(mode, isContact)
     }
 
+    /**
+     * Заметка отправителю приглашения: «не доставлено, и вот почему».
+     * Ложится обычной входящей строкой в чат с получателем, поэтому
+     * срабатывает и штатная machinery: счётчик непрочитанных и уведомление
+     * наблюдателя за базой. Возвращает false, если чата нет (писать некуда).
+     */
+    suspend fun insertInviteRejectNotice(
+        senderId: String,
+        notice: com.vladimir.messenger.data.invite.InviteRejectWire.Notice,
+    ): Boolean {
+        val chat = chatDao.getChatsByContactId(senderId).firstOrNull() ?: return false
+        val title = notice.title.trim()
+        val text = when (notice.reason) {
+            com.vladimir.messenger.data.invite.InviteRejectWire.Reason.NOBODY ->
+                if (title.isNotEmpty()) {
+                    context.getString(com.vladimir.messenger.R.string.invite_rejected_nobody, title)
+                } else {
+                    context.getString(com.vladimir.messenger.R.string.invite_rejected_nobody_generic)
+                }
+            com.vladimir.messenger.data.invite.InviteRejectWire.Reason.NOT_CONTACT ->
+                if (title.isNotEmpty()) {
+                    context.getString(com.vladimir.messenger.R.string.invite_rejected_not_contact, title)
+                } else {
+                    context.getString(com.vladimir.messenger.R.string.invite_rejected_not_contact_generic)
+                }
+        }
+        val now = System.currentTimeMillis()
+        val entity = MessageEntity(
+            id = UUID.randomUUID().toString(),
+            chatId = chat.id,
+            senderId = senderId,
+            content = text,
+            timestamp = now,
+            isFromMe = false,
+            status = MessageStatus.DELIVERED.name,
+            recipientId = "",
+        )
+        if (messageDao.insertMessageIgnore(entity) == -1L) return false
+        chatDao.updateLastMessage(chat.id, text, now)
+        runCatching { chatDao.incrementUnread(chat.id) }
+        return true
+    }
+
     /** Узел из сырого идентификатора: `pk_…` как есть, из ссылки — по `node=`. */
     private fun canonicalNode(raw: String): String {
         val v = raw.trim()
