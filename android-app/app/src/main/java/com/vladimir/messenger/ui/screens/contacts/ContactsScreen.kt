@@ -244,7 +244,9 @@ fun ContactsScreen(
                             // VIP-статус абонента: золотой значок у имени, как
                             // на главной. Раньше адресная книга его не
                             // показывала, хотя ранг человека уже был известен.
-                            peerVip = row.chat.contactId.lowercase() in vipPeerIds,
+                            peerVip = com.vladimir.messenger.data.rank.RankWire
+                                .canonicalNodeId(row.chat.contactId)
+                                ?.let { it in vipPeerIds } ?: false,
                             // Идём через viewModel: он находит настоящий чат.
                             // Прямая передача contact.id открывала «другой»
                             // чат - пустой и с вечными часиками при отправке.

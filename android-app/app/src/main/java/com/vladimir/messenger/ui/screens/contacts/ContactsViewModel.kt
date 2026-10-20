@@ -38,6 +38,7 @@ class ContactsViewModel @Inject constructor(
     private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
     private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
     private val peerRankStore: com.vladimir.messenger.data.rank.PeerRankStore,
+    private val peerRankBroadcaster: com.vladimir.messenger.data.rank.PeerRankBroadcaster,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
@@ -134,6 +135,25 @@ class ContactsViewModel @Inject constructor(
             started = SharingStarted.WhileSubscribed(5_000),
             initialValue = emptyList(),
         )
+
+    init {
+        // Значок VIP нужен при первом же открытии книги, а ранг собеседника
+        // мог никогда не доезжать рассылкой. Кого не знаем - спрашиваем
+        // адресно (дальше ограничитель в самом отправителе: раз в сутки).
+        viewModelScope.launch {
+            contactChatRows.collect { rows ->
+                for (row in rows) {
+                    val node = com.vladimir.messenger.data.rank.RankWire
+                        .canonicalNodeId(row.chat.contactId) ?: continue
+                    runCatching {
+                        if (peerRankStore.qualifiedFor(node) == null) {
+                            peerRankBroadcaster.requestRank(node)
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     /** Ready, sorted address-book rows; filtering by a search phrase stays in the screen. */
     val sortedContactChatRows: StateFlow<List<ContactChatRow>> = combine(

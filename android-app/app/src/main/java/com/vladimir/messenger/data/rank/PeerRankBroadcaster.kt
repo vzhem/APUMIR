@@ -129,8 +129,62 @@ class PeerRankBroadcaster @Inject constructor(
             sent
         }
 
+    /**
+     * Свой ранг одному адресату прямо сейчас (ответ на его запрос
+     * [RankWire.isRankRequest]). Недельный ограничитель рассылки здесь не
+     * действует: человек спросил - отвечаем, но не чаще раза в час одному.
+     */
+    suspend fun sendRankTo(peerId: String): Boolean = withContext(Dispatchers.IO) {
+        val app = context.applicationContext
+        val own = RankWire.canonicalNodeId(RustBridge.nodeId()) ?: return@withContext false
+        val peer = RankWire.canonicalNodeId(peerId) ?: return@withContext false
+        if (peer == own) return@withContext false
+        val prefs = app.getSharedPreferences(REPLY_PREFS, Context.MODE_PRIVATE)
+        val key = "reply_" + peer.hashCode()
+        val nowMs = System.currentTimeMillis()
+        if (nowMs - prefs.getLong(key, 0L) < REPLY_MIN_INTERVAL_MS) return@withContext false
+        val chatId = runCatching { chatDao.getChatByContactId(peerId)?.id }
+            .getOrNull() ?: return@withContext false
+        val envelope = RankWire.build(own, ReferralRankStore.qualifiedDirectCount(app), nowMs)
+            ?: return@withContext false
+        val ok = runCatching {
+            RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, peer, envelope)
+        }.getOrDefault(false)
+        if (ok) prefs.edit().putLong(key, nowMs).apply()
+        ok
+    }
+
+    /**
+     * Попросить ранг у абонента, чей ранг мы ещё не знаем. Не чаще раза в
+     * сутки одному: запрос дешёвый, но долбить незачем - ответ и так ляжет
+     * в таблицу при первом же появлении абонента.
+     */
+    suspend fun requestRank(peerId: String): Boolean = withContext(Dispatchers.IO) {
+        val app = context.applicationContext
+        val own = RankWire.canonicalNodeId(RustBridge.nodeId()) ?: return@withContext false
+        val peer = RankWire.canonicalNodeId(peerId) ?: return@withContext false
+        if (peer == own) return@withContext false
+        val prefs = app.getSharedPreferences(REPLY_PREFS, Context.MODE_PRIVATE)
+        val key = "ask_" + peer.hashCode()
+        val nowMs = System.currentTimeMillis()
+        if (nowMs - prefs.getLong(key, 0L) < REQUEST_MIN_INTERVAL_MS) return@withContext false
+        val chatId = runCatching { chatDao.getChatByContactId(peerId)?.id }
+            .getOrNull() ?: return@withContext false
+        val ok = runCatching {
+            RustBridge.sendMessage(
+                UUID.randomUUID().toString(), chatId, peer, RankWire.buildRankRequest(),
+            )
+        }.getOrDefault(false)
+        if (ok) prefs.edit().putLong(key, nowMs).apply()
+        Log.i(TAG, "rank requested from $peer: $ok")
+        ok
+    }
+
     private companion object {
         const val TAG = "PeerRank"
+        const val REPLY_PREFS = "apu_peer_rank_requests"
+        const val REPLY_MIN_INTERVAL_MS = 3_600_000L
+        const val REQUEST_MIN_INTERVAL_MS = 24L * 3_600_000L
     }
 }
 

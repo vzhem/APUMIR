@@ -87,6 +87,8 @@ class CoreServerService : Service() {
     @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
     @Inject lateinit var heartGameNetwork: com.vladimir.messenger.data.heartgame.HeartGameNetwork
     @Inject lateinit var peerRankRouter: com.vladimir.messenger.data.rank.PeerRankRouter
+    @Inject lateinit var peerRankStore: com.vladimir.messenger.data.rank.PeerRankStore
+    @Inject lateinit var peerRankBroadcaster: com.vladimir.messenger.data.rank.PeerRankBroadcaster
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
     // Отклики на истории: значки и комментарии зрителей (см. docs/STORY_REACTIONS_AND_COMMENTS.md).
@@ -2784,6 +2786,17 @@ class CoreServerService : Service() {
                                 } catch (e: kotlinx.coroutines.CancellationException) {
                                     throw e
                                 } catch (_: Exception) {
+                                }
+                            }
+                            // Ранг новенького не знаем - а значок VIP у его
+                            // имени нужен сразу, не после недельной рассылки.
+                            // Просим конверт ранга адресно (ограничитель
+                            // внутри: не чаще раза в сутки одному).
+                            serviceScope.launch {
+                                runCatching {
+                                    if (peerRankStore.qualifiedFor(peerId) == null) {
+                                        peerRankBroadcaster.requestRank(peerId)
+                                    }
                                 }
                             }
                             Log.i(TAG, "🟢 ONLINE: $peerName")

@@ -1365,7 +1365,9 @@ private fun SectionPage(
                                 showPinnedIndicator = true,
                                 // Знак VIP у имени собеседника: он сам сообщил
                                 // ранг конвертом APURANK1 (см. PeerRankRouter).
-                                peerVip = item.chat.contactId.lowercase() in vipPeerIds,
+                                peerVip = com.vladimir.messenger.data.rank.RankWire
+                                    .canonicalNodeId(item.chat.contactId)
+                                    ?.let { it in vipPeerIds } ?: false,
                                 onClick = {
                                     onChatClick(
                                         item.chat.id,

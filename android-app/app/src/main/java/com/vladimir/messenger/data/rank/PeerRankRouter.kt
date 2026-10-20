@@ -31,6 +31,7 @@ import kotlinx.coroutines.withContext
 @Singleton
 class PeerRankRouter @Inject constructor(
     private val store: PeerRankStore,
+    private val broadcaster: PeerRankBroadcaster,
 ) {
 
     suspend fun routeIncoming(
@@ -38,6 +39,17 @@ class PeerRankRouter @Inject constructor(
         text: String,
         nowMs: Long = System.currentTimeMillis(),
     ): Boolean = withContext(Dispatchers.IO) {
+        // Запрос ранга: собеседник хочет значок у моего имени прямо сейчас,
+        // а не после недельной рассылки. Отвечаем своим конвертом (внутри
+        // ограничитель - не чаще раза в час одному).
+        if (RankWire.isRankRequest(text)) {
+            val sender = RankWire.canonicalNodeId(senderId)
+            if (sender != null) {
+                runCatching { broadcaster.sendRankTo(sender) }
+                    .onFailure { e -> Log.w(TAG, "rank reply to $sender failed: ${e.message}") }
+            }
+            return@withContext true
+        }
         if (!RankWire.isRankPacket(text)) return@withContext false
 
         val packet = RankWire.parse(text, nowMs)
