@@ -37,6 +37,7 @@ class ContactsViewModel @Inject constructor(
     private val groupDao: GroupDao,
     private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
     private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
+    private val peerRankStore: com.vladimir.messenger.data.rank.PeerRankStore,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
 
@@ -88,6 +89,19 @@ class ContactsViewModel @Inject constructor(
             if (chatId != null) onReady(chatId)
         }
     }
+
+    /**
+     * Узлы со статусом VIP (ранг сообщён конвертом APURANK1 и дотягивает до
+     * элиты). Адресная книга показывает тот же золотой значок у имени, что
+     * и главный список чатов: статус человека не должен зависеть от того,
+     * в каком списке на него смотрят.
+     */
+    val vipPeerIds: StateFlow<Set<String>> = peerRankStore.vipNodeIds
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5_000),
+            initialValue = emptySet(),
+        )
 
     val contacts: StateFlow<List<Contact>> = contactRepository
         .observeContacts()
