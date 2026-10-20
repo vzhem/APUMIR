@@ -54,7 +54,7 @@ import com.vladimir.messenger.data.local.dao.GroupPollDao
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 31
+const val APP_DATABASE_VERSION = 32
 
 @Database(
     entities = [
@@ -109,6 +109,39 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun groupPollDao(): GroupPollDao
 
     companion object {
+        /**
+         * Реакции: до пяти разных значков от одного человека на сообщение.
+         * Ключ таблицы расширяется значком; строки переносятся как есть.
+         */
+        val MIGRATION_31_32 = object : Migration(31, 32) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `message_reactions_new` (" +
+                        "`messageId` TEXT NOT NULL, " +
+                        "`nodeId` TEXT NOT NULL, " +
+                        "`chatId` TEXT NOT NULL, " +
+                        "`emoji` TEXT NOT NULL, " +
+                        "`atMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`messageId`, `nodeId`, `emoji`))"
+                )
+                db.execSQL(
+                    "INSERT OR IGNORE INTO `message_reactions_new` " +
+                        "(`messageId`, `nodeId`, `chatId`, `emoji`, `atMs`) " +
+                        "SELECT `messageId`, `nodeId`, `chatId`, `emoji`, `atMs` FROM `message_reactions`"
+                )
+                db.execSQL("DROP TABLE IF EXISTS `message_reactions`")
+                db.execSQL("ALTER TABLE `message_reactions_new` RENAME TO `message_reactions`")
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_message_reactions_messageId` " +
+                        "ON `message_reactions` (`messageId`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_message_reactions_chatId` " +
+                        "ON `message_reactions` (`chatId`)"
+                )
+            }
+        }
+
         val MIGRATION_30_31 = object : Migration(30, 31) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE groups ADD COLUMN wallpaper TEXT NOT NULL DEFAULT ''")

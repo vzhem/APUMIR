@@ -1109,10 +1109,10 @@ fun ChatDetailScreen(
 
     reactionFor?.let { messageId ->
         val mine = uiState.reactions[messageId].orEmpty()
-            .firstOrNull { it.mine }?.emoji
+            .filter { it.mine }.map { it.emoji }.toSet()
         com.vladimir.messenger.ui.components.ReactionPickerDialog(
             onDismiss = { reactionFor = null },
-            myEmoji = mine,
+            myEmojis = mine,
             onRemove = {
                 viewModel.removeReaction(messageId)
                 reactionFor = null

@@ -1209,10 +1209,10 @@ private fun PostCard(
         }
     }
     if (showReactions) {
-        val mine = reactions.firstOrNull { it.mine }?.emoji
+        val mine = reactions.filter { it.mine }.map { it.emoji }.toSet()
         com.vladimir.messenger.ui.components.ReactionPickerDialog(
             onDismiss = { showReactions = false },
-            myEmoji = mine,
+            myEmojis = mine,
             onRemove = {
                 showReactions = false
                 onRemoveReaction()
