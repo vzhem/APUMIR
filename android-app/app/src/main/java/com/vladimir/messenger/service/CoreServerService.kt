@@ -92,6 +92,7 @@ class CoreServerService : Service() {
     @Inject lateinit var peerRankBroadcaster: com.vladimir.messenger.data.rank.PeerRankBroadcaster
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
+    @Inject lateinit var repostRepository: com.vladimir.messenger.data.repost.RepostRepository
     // Отклики на истории: значки и комментарии зрителей (см. docs/STORY_REACTIONS_AND_COMMENTS.md).
     @Inject lateinit var storyFeedback: com.vladimir.messenger.data.story.StoryFeedbackRepository
     @Inject lateinit var groupDao: com.vladimir.messenger.data.local.dao.GroupDao
@@ -442,6 +443,7 @@ class CoreServerService : Service() {
             return true
         }
         if (runCatching { reactionRepository.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { repostRepository.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { messageDeletion.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { messageEdit.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { postViews.routeIncoming(senderId, text) }.getOrDefault(false)) return true
@@ -1748,6 +1750,10 @@ class CoreServerService : Service() {
             Log.i(TAG, "Mirror envelope: reaction from ${senderId.takeLast(8)} applied")
             return true
         }
+        if (runCatching { repostRepository.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            Log.i(TAG, "Mirror envelope: repost from ${senderId.takeLast(8)} applied")
+            return true
+        }
         if (runCatching { messageDeletion.routeIncoming(senderId, text) }.getOrDefault(false)) {
             Log.i(TAG, "Mirror envelope: deletion from ${senderId.takeLast(8)} applied")
             return true
@@ -1839,6 +1845,12 @@ class CoreServerService : Service() {
                 .getOrDefault(false)
         ) {
             Log.i(TAG, "Mirror action: реакция с тени применена локально")
+            return
+        }
+        if (runCatching { repostRepository.applyMirrorOutgoing(peerId, groupId, text) }
+                .getOrDefault(false)
+        ) {
+            Log.i(TAG, "Mirror action: репост с тени применён локально")
             return
         }
         if (peerId.isNotBlank() &&
@@ -2528,6 +2540,15 @@ class CoreServerService : Service() {
                             RustBridge.sendDeliveryAck(messageId, senderId)
                         } catch (e: Exception) {
                             Log.w(TAG, "Reaction packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+                    // Счётчик репостов: APURPOST1 тоже не сообщение, а сигнал.
+                    if (repostRepository.routeIncoming(senderId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Repost packet ACK failed: " + e.message)
                         }
                         return
                     }

@@ -56,6 +56,8 @@ data class ChannelPost(
     val unreadComments: Int = 0,
     /** Сколько разных людей открыли пост. */
     val views: Int = 0,
+    /** Сколько раз пост переслали (счётчик репостов). */
+    val forwards: Int = 0,
     /** Файл, приложенный к посту (визитка `APUFILE1:`, рой этап 9-10); null - файла нет. */
     val file: com.vladimir.messenger.util.GroupFileMarker.Info? = null,
 )
@@ -122,6 +124,7 @@ class ChannelViewModel @Inject constructor(
     private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
     private val reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository,
     private val postViews: com.vladimir.messenger.data.channel.PostViewRepository,
+    private val repostRepository: com.vladimir.messenger.data.repost.RepostRepository,
     private val postCounters: com.vladimir.messenger.data.channel.PostCounterRepository,
     private val groupFiles: com.vladimir.messenger.data.group.GroupFileSwarm,
     private val fileTransferDao: com.vladimir.messenger.data.local.dao.FileTransferDao,
@@ -423,8 +426,13 @@ class ChannelViewModel @Inject constructor(
                 groupRepository.observeMembers(channelId),
                 groupRepository.observeTopics(channelId),
                 messageDao.observeChatMessages(channelId),
-                postViews.observeCounts(),
-            ) { channel, members, topics, messages, viewCounts ->
+                combine(
+                    postViews.observeCounts(),
+                    repostRepository.observeCounts(channelId),
+                ) { views, reposts -> views to reposts },
+            ) { channel, members, topics, messages, counterPair ->
+                val viewCounts = counterPair.first
+                val repostCounts = counterPair.second
                 val names = members.associate { it.nodeId to it.displayName }
                 val me = members.firstOrNull { it.isMe }
                 val byTopic = messages.groupBy { it.topicId.orEmpty() }
@@ -464,6 +472,7 @@ class ChannelViewModel @Inject constructor(
                         // сбрасывает GroupChatViewModel.markRead при чтении.
                         unreadComments = topic.unreadCount,
                         views = viewCounts[topic.id] ?: 0,
+                        forwards = repostCounts[first.id] ?: 0,
                         // Файл поста (этап 10): визитка в тексте, сам файл
                         // тянется у автора или у соседей по нажатию.
                         file = com.vladimir.messenger.util.GroupFileMarker.parse(first.content),
@@ -748,6 +757,10 @@ class ChannelViewModel @Inject constructor(
                 chatRepository.sendMessage(target.id, "", body)
             } else {
                 groupRepository.sendMessage(target.id, target.topicId ?: "", body)
+            }
+            // Счётчик репостов поста: сигнал подписчикам/сборщикам канала.
+            if (res.isSuccess) {
+                runCatching { repostRepository.noteForward(channelId, post.messageId) }
             }
             onResult(res.isSuccess)
         }

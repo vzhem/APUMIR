@@ -519,7 +519,7 @@ fun GroupChatScreen(
             onPick = { target ->
                 if (target.kind == com.vladimir.messenger.ui.components.ForwardKind.FRIEND) {
                     forwardPayload = null
-                    viewModel.forwardMessage(payload.text, payload.label, target) { ok ->
+                    viewModel.forwardMessage(payload.text, payload.label, target, sourceMessageId = payload.messageId) { ok ->
                         if (ok) {
                             fwdSent = true
                         } else {
@@ -545,6 +545,7 @@ fun GroupChatScreen(
                         payload.text,
                         payload.label,
                         target.copy(topicId = topic.id, topicTitle = topic.name),
+                        sourceMessageId = payload.messageId,
                     ) { ok ->
                         if (ok) {
                             fwdSent = true
@@ -1237,6 +1238,7 @@ fun GroupChatScreen(
                             forwardPayload = com.vladimir.messenger.ui.components.ForwardPayload(
                                 message.content,
                                 label,
+                                message.id,
                             )
                         },
                         onOpenForward = { ref ->
@@ -1258,6 +1260,7 @@ fun GroupChatScreen(
                             }
                         },
                         reactions = uiState.reactions[message.id].orEmpty(),
+                        repostCount = uiState.repostCounts[message.id] ?: 0,
                         onToggleReaction = { emoji -> viewModel.toggleReaction(message.id, emoji) },
                         onRemoveReaction = { viewModel.removeReaction(message.id) },
                         fileCard = cardState,
@@ -2127,6 +2130,8 @@ private fun MessageBubble(
     /** Раунд 203: тап по шапке-источнику пересылки. */
     onOpenForward: ((com.vladimir.messenger.util.ForwardMarker.Ref) -> Unit)? = null,
     reactions: List<com.vladimir.messenger.data.reaction.ReactionSummary> = emptyList(),
+    /** Счётчик репостов этого сообщения. */
+    repostCount: Int = 0,
     onToggleReaction: (String) -> Unit = {},
     onRemoveReaction: () -> Unit = {},
     /** Файл, приложенный к сообщению (этап 9), и ход его приёма/раздачи. */
@@ -2431,10 +2436,13 @@ private fun MessageBubble(
                         Icon(Icons.Filled.PushPin, contentDescription = stringResource(R.string.group_pinned), modifier = Modifier.size(12.dp))
                     }
                 }
-                com.vladimir.messenger.ui.components.ReactionRow(
-                    reactions = reactions,
-                    onToggle = { showReactions = true },
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    com.vladimir.messenger.ui.components.ReactionRow(
+                        reactions = reactions,
+                        onToggle = { showReactions = true },
+                    )
+                    com.vladimir.messenger.ui.components.RepostCountChip(count = repostCount)
+                }
             }
         }
         // Раунд 211: меню пузыря - золотыми пузырями (общий стиль точек).

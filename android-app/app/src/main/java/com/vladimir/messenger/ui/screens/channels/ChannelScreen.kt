@@ -1159,6 +1159,22 @@ private fun PostCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = ApuBubbleMutedColor,
                 )
+                // Счётчик репостов: сколько раз пост ушёл дальше по рукам.
+                if (post.forwards > 0) {
+                    Spacer(Modifier.width(12.dp))
+                    Icon(
+                        Icons.Default.Share,
+                        contentDescription = stringResource(R.string.repost_count_label),
+                        tint = ApuBubbleMutedColor,
+                        modifier = Modifier.size(15.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        post.forwards.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ApuBubbleMutedColor,
+                    )
+                }
                 val totalReactions = reactions.sumOf { it.count }
                 if (totalReactions > 0) {
                     Spacer(Modifier.width(12.dp))

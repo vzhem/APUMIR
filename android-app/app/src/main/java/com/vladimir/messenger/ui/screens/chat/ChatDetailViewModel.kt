@@ -107,6 +107,8 @@ data class ChatDetailUiState(
     val swarmStatus: String? = null,
     /** Реакции по сообщениям: ключ - id сообщения. */
     val reactions: Map<String, List<com.vladimir.messenger.data.reaction.ReactionSummary>> = emptyMap(),
+    /** Счётчик репостов по сообщениям: ключ - id сообщения. */
+    val repostCounts: Map<String, Int> = emptyMap(),
     val replyTo: Message? = null,
 )
 
@@ -124,6 +126,7 @@ class ChatDetailViewModel @Inject constructor(
     private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
     private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
     private val reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository,
+    private val repostRepository: com.vladimir.messenger.data.repost.RepostRepository,
     private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
     private val readReceipts: com.vladimir.messenger.data.receipt.ReadReceiptRepository,
     private val hearts: com.vladimir.messenger.data.heart.HeartRepository,
@@ -195,6 +198,7 @@ class ChatDetailViewModel @Inject constructor(
         observeContactPresence()
         observeTransfers()
         observeReactions()
+        observeReposts()
         markAsRead()
         observeGifArrivals()
         observeStickerArrivals()
@@ -301,6 +305,15 @@ class ChatDetailViewModel @Inject constructor(
         viewModelScope.launch {
             reactionRepository.observeChat(chatId).collect { map ->
                 _uiState.update { it.copy(reactions = map) }
+            }
+        }
+    }
+
+    /** Счётчик репостов чата: поток уже уведён на IO внутри репозитория. */
+    private fun observeReposts() {
+        viewModelScope.launch {
+            repostRepository.observeCounts(chatId).collect { map ->
+                _uiState.update { it.copy(repostCounts = map) }
             }
         }
     }
@@ -1771,6 +1784,7 @@ class ChatDetailViewModel @Inject constructor(
         sourceLabel: String,
         target: com.vladimir.messenger.ui.components.ForwardTarget,
         onResult: (Boolean) -> Unit,
+        sourceMessageId: String = "",
     ) {
         viewModelScope.launch {
             val peer = runCatching { chatRepository.forwardChatById(chatId) }.getOrNull()
@@ -1785,6 +1799,10 @@ class ChatDetailViewModel @Inject constructor(
                 chatRepository.sendMessage(target.id, "", body)
             } else {
                 groupRepository.sendMessage(target.id, target.topicId ?: "", body)
+            }
+            // Счётчик репостов исходного сообщения: факт уходит собеседнику.
+            if (res.isSuccess && sourceMessageId.isNotBlank()) {
+                runCatching { repostRepository.noteForward(chatId, sourceMessageId) }
             }
             onResult(res.isSuccess)
         }

@@ -718,11 +718,18 @@ fun ChatDetailScreen(
                                 // Реакции файла/гифки - той же строкой под пузырём,
                                 // что и у текстовых сообщений.
                                 row.message?.let { message ->
-                                    com.vladimir.messenger.ui.components.ReactionRow(
-                                        reactions = uiState.reactions[message.id].orEmpty(),
-                                        onToggle = { reactionFor = message.id },
-                                        modifier = Modifier.padding(horizontal = 14.dp),
-                                    )
+                                    androidx.compose.foundation.layout.Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        com.vladimir.messenger.ui.components.ReactionRow(
+                                            reactions = uiState.reactions[message.id].orEmpty(),
+                                            onToggle = { reactionFor = message.id },
+                                            modifier = Modifier.padding(horizontal = 14.dp),
+                                        )
+                                        com.vladimir.messenger.ui.components.RepostCountChip(
+                                            count = uiState.repostCounts[message.id] ?: 0,
+                                        )
+                                    }
                                 }
                             } else {
                                 val message = row.message!!
@@ -868,13 +875,20 @@ fun ChatDetailScreen(
                                 }
                                 // Реакции живут отдельной строкой под пузырём -
                                 // внутрь его класть нельзя, там своя ширина.
-                                com.vladimir.messenger.ui.components.ReactionRow(
-                                    reactions = uiState.reactions[message.id].orEmpty(),
-                                    // Нажатие на сам значок открывает тот же
-                                    // пузырь: там и меняют, и убирают.
-                                    onToggle = { reactionFor = message.id },
-                                    modifier = Modifier.padding(horizontal = 14.dp),
-                                )
+                                androidx.compose.foundation.layout.Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    com.vladimir.messenger.ui.components.ReactionRow(
+                                        reactions = uiState.reactions[message.id].orEmpty(),
+                                        // Нажатие на сам значок открывает тот же
+                                        // пузырь: там и меняют, и убирают.
+                                        onToggle = { reactionFor = message.id },
+                                        modifier = Modifier.padding(horizontal = 14.dp),
+                                    )
+                                    com.vladimir.messenger.ui.components.RepostCountChip(
+                                        count = uiState.repostCounts[message.id] ?: 0,
+                                    )
+                                }
                                 }
                             }
                         }
@@ -1073,7 +1087,7 @@ fun ChatDetailScreen(
             onPick = { target ->
                 if (target.kind == com.vladimir.messenger.ui.components.ForwardKind.FRIEND) {
                     forwardMessage = null
-                    viewModel.forwardMessage(original.content, sourceLabel, target) { ok ->
+                    viewModel.forwardMessage(original.content, sourceLabel, target, sourceMessageId = original.id) { ok ->
                         if (ok) {
                             fwdSent = true
                         } else {
@@ -1099,6 +1113,7 @@ fun ChatDetailScreen(
                         original.content,
                         sourceLabel,
                         target.copy(topicId = topic.id, topicTitle = topic.name),
+                        sourceMessageId = original.id,
                     ) { ok ->
                         if (ok) {
                             fwdSent = true

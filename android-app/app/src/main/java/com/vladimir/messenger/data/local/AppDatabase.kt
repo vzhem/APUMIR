@@ -16,6 +16,7 @@ import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.InboxPinDao
 import com.vladimir.messenger.data.local.dao.MessageDao
 import com.vladimir.messenger.data.local.dao.MessageReactionDao
+import com.vladimir.messenger.data.local.dao.MessageRepostDao
 import com.vladimir.messenger.data.local.dao.MtProtoProxyDao
 import com.vladimir.messenger.data.local.dao.PostViewDao
 import com.vladimir.messenger.data.local.dao.ProfileHeartDao
@@ -29,6 +30,7 @@ import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import com.vladimir.messenger.data.local.entity.FileExchangePeerEntity
 import com.vladimir.messenger.data.local.entity.MessageEntity
 import com.vladimir.messenger.data.local.entity.MessageReactionEntity
+import com.vladimir.messenger.data.local.entity.MessageRepostEntity
 import com.vladimir.messenger.data.local.entity.GroupEntity
 import com.vladimir.messenger.data.local.entity.GroupInviteEntity
 import com.vladimir.messenger.data.local.entity.GroupJoinRequestEntity
@@ -54,7 +56,7 @@ import com.vladimir.messenger.data.local.dao.GroupPollDao
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 33
+const val APP_DATABASE_VERSION = 34
 
 @Database(
     entities = [
@@ -62,6 +64,7 @@ const val APP_DATABASE_VERSION = 33
         ChatEntity::class,
         MessageEntity::class,
         MessageReactionEntity::class,
+        MessageRepostEntity::class,
         ContactEntity::class,
         PeerRankEntity::class,
         FileTransferEntity::class,
@@ -91,6 +94,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun chatDao(): ChatDao
     abstract fun messageDao(): MessageDao
     abstract fun messageReactionDao(): MessageReactionDao
+    abstract fun messageRepostDao(): MessageRepostDao
     abstract fun mtProtoProxyDao(): MtProtoProxyDao
     abstract fun contactDao(): ContactDao
     abstract fun fileTransferDao(): FileTransferDao
@@ -113,6 +117,29 @@ abstract class AppDatabase : RoomDatabase() {
          * Реакции: до пяти разных значков от одного человека на сообщение.
          * Ключ таблицы расширяется значком; строки переносятся как есть.
          */
+        /** Счётчик репостов: отдельная таблица фактов пересылки. */
+        val MIGRATION_33_34 = object : Migration(33, 34) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `message_reposts` (" +
+                        "`messageId` TEXT NOT NULL, " +
+                        "`chatId` TEXT NOT NULL, " +
+                        "`eventId` TEXT NOT NULL, " +
+                        "`nodeId` TEXT NOT NULL, " +
+                        "`atMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`messageId`, `eventId`))"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_message_reposts_messageId` " +
+                        "ON `message_reposts` (`messageId`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_message_reposts_chatId` " +
+                        "ON `message_reposts` (`chatId`)"
+                )
+            }
+        }
+
         val MIGRATION_32_33 = object : Migration(32, 33) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // Отметка о правке сообщения («изменено» у пузыря).

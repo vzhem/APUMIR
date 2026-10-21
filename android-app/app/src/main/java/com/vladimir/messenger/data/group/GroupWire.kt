@@ -978,6 +978,8 @@ object GroupWire {
         val messageId: String,
         val views: Int,
         val reactions: List<Pair<String, Int>>,
+        /** Сколько раз пост переслали (репосты); старые сборки поля не знают. */
+        val forwards: Int = 0,
     )
 
     data class TopicEntry(val topicId: String, val name: String, val iconEmoji: String = "")
@@ -1240,7 +1242,8 @@ object GroupWire {
                 .sortedByDescending { it.second }
                 .take(MAX_COUNTER_EMOJI)
                 .joinToString("+") { (emoji, count) -> encode(emoji) + "=" + count }
-            encode(cell.topicId) + "," + encode(cell.messageId) + "," + cell.views.coerceAtLeast(0) + "," + reactions
+            encode(cell.topicId) + "," + encode(cell.messageId) + "," + cell.views.coerceAtLeast(0) + "," + reactions +
+                "," + cell.forwards.coerceAtLeast(0)
         }
         return "$PREFIX|$KIND_COUNTERS|$groupId|$body"
     }
@@ -2336,10 +2339,16 @@ object GroupWire {
         for (cell in body.split(';')) {
             if (cell.isBlank()) continue
             val fields = cell.split(',')
-            if (fields.size != 4) return null
+            // Пятое поле (репосты) добавили позже: сводки старых сборщиков без него.
+            if (fields.size !in 4..5) return null
             val topicId = decode(fields[0])?.takeIf { it.isNotBlank() } ?: return null
             val messageId = decode(fields[1]) ?: return null
             val views = fields[2].toIntOrNull()?.takeIf { it >= 0 } ?: return null
+            val forwards = if (fields.size == 5) {
+                fields[4].toIntOrNull()?.takeIf { it >= 0 } ?: return null
+            } else {
+                0
+            }
             val reactions = ArrayList<Pair<String, Int>>()
             if (fields[3].isNotBlank()) {
                 for (entry in fields[3].split('+')) {
@@ -2351,7 +2360,7 @@ object GroupWire {
                 }
             }
             if (reactions.size > MAX_COUNTER_EMOJI) return null
-            out.add(PostCounters(topicId, messageId, views, reactions))
+            out.add(PostCounters(topicId, messageId, views, reactions, forwards))
         }
         if (out.size > MAX_COUNTER_CELLS) return null
         return out

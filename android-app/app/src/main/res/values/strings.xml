@@ -572,6 +572,7 @@
     <string name="channel_post_image">Картинка к посту</string>
     <string name="channel_share">Поделиться</string>
     <string name="channel_views">Просмотры</string>
+    <string name="repost_count_label">Репосты</string>
     <string name="channel_reactions">Реакции</string>
     <string name="channel_reaction">Реакция</string>
     <string name="channel_leave_comment">Оставить комментарий</string>
