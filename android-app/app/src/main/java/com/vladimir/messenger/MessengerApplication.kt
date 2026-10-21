@@ -239,6 +239,33 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
                 setShowBadge(false)
             }
             manager.createNotificationChannel(service)
+            // SOS: тревожные сообщения из групп. Отдельный канал с сигналом
+            // будильника и длинной вибрацией - тревога обязана разбудить
+            // телефон, а не прозвучать как обычное сообщение. Звук и
+            // вибрация на новых Android принадлежат каналу, поэтому каналу
+            // и задаём тревожный характер.
+            val sos = NotificationChannel(
+                CHANNEL_SOS_ID,
+                "SOS — тревога в группах",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Тревожные сообщения SOS: звучат даже при выключенном звуке группы"
+                setShowBadge(true)
+                setSound(
+                    android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM)
+                        ?: android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION),
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_ALARM)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build(),
+                )
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 700, 250, 700, 250, 700)
+                // Если владелец сам даст приложению доступ сквозь «Не
+                // беспокоить» - тревога пройдёт и сквозь него.
+                setBypassDnd(true)
+            }
+            manager.createNotificationChannel(sos)
         }
     }
 
@@ -247,6 +274,9 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
 
         /** Раунд 142: отдельный тихий канал для плашки фоновой службы. */
         const val CHANNEL_SERVICE_ID = "apu_service_status"
+
+        /** Тревожные сообщения SOS из групп: отдельный громкий канал. */
+        const val CHANNEL_SOS_ID = "apu_sos_alerts"
     }
 
 

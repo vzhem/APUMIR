@@ -91,6 +91,10 @@ object ChatPreviews {
         if (raw == null) return null
         // Тихое сообщение: в списке и в уведомлении показываем сам текст.
         if (QuietMessage.isQuiet(raw)) return human(QuietMessage.strip(raw))
+        // Тревога SOS: в списке виден сам сигнал, без служебного префикса.
+        if (com.vladimir.messenger.util.SosMessage.isSos(raw)) {
+            return human(com.vladimir.messenger.util.SosMessage.strip(raw))
+        }
         val t = raw.trim()
         // Ссылка на гифку (раунд 128): «APUGIFREF1|<sha256>».
         // Раунд 203: пересылка - шапка-источник вместо служебной строки.

@@ -820,6 +820,10 @@ class GroupRepository(
             slowModeSeconds = g.slowModeSeconds,
             quietHours = g.quietHours,
             memberListVisible = g.memberListVisible,
+            // Кнопка SOS: видимость, число тревог и кто вправе нажимать.
+            sosEnabled = g.sosEnabled,
+            sosMessageCount = GroupSos.clampCount(g.sosMessageCount),
+            sosPressRole = GroupSos.normalizePressRole(g.sosPressRole),
             wallpaper = g.wallpaper,
             wallpaperRevision = g.wallpaperRevision,
             mutedUntilMs = g.mutedUntilMs,
@@ -1043,6 +1047,13 @@ class GroupRepository(
          * над ним у тех, кто умеет её показывать.
          */
         poll: PollDraft? = null,
+        /**
+         * Тревожное сообщение SOS (см. [sendSos]): не подчиняется тихому
+         * времени, медленному режиму, закрытой теме и запрету обычных
+         * сообщений и уходит напрямую всем участникам, без роевой волны, -
+         * сигнал должен дойти как можно быстрее и до каждого.
+         */
+        sos: Boolean = false,
     ): Result<String> {
         val attached = photos.filter { it.isNotBlank() }.take(InlineImage.MAX_PHOTOS)
         // Визитка файла (этап 9) - служебная строка: из слов её вынимаем и
@@ -1083,17 +1094,17 @@ class GroupRepository(
 
         val isAdmin = GroupRole.isAdminOrOwner(member.role)
         val schedule = GroupQuietSchedule.decode(group.quietHours)
-        if (!isAdmin && schedule?.blocks(clock()) == true) {
+        if (!sos && !isAdmin && schedule?.blocks(clock()) == true) {
             return Result.failure(SecurityException(schedule.notice()))
         }
         val memberMask = GroupPermissions.effectiveMemberPermissions(member.permissions, effectiveMemberMask(group))
-        if (!isAdmin && !GroupPermissions.has(memberMask, GroupPermissions.Member.SEND_MESSAGES)) {
+        if (!sos && !isAdmin && !GroupPermissions.has(memberMask, GroupPermissions.Member.SEND_MESSAGES)) {
             return Result.failure(SecurityException("Отправка сообщений в этой группе запрещена"))
         }
 
         val topic = resolveTopic(group, topicId)
             ?: return Result.failure(IllegalStateException("Тема не найдена"))
-        if (topic.isClosed && !isAdmin) {
+        if (!sos && topic.isClosed && !isAdmin) {
             return Result.failure(SecurityException("Тема закрыта для новых сообщений"))
         }
 
@@ -1110,7 +1121,7 @@ class GroupRepository(
         // р250: медленный режим. Считаем от моего предыдущего сообщения: чужой
         // разговор не должен наказывать участника. Владелец и администраторы
         // пишут без паузы - им приходится гасить всплески сразу.
-        if (!isAdmin) {
+        if (!sos && !isAdmin) {
             val waitMs = slowModeWaitMs(group, me, now)
             if (waitMs > 0L) {
                 val seconds = (waitMs + 999L) / 1000L
@@ -1177,7 +1188,9 @@ class GroupRepository(
         // ключ автора закреплён за ним самим). Маленькие группы и личные
         // сообщения роем не ходят.
         val groupSwarm = !group.isChannel && groupSwarm(group)
-        val manifest = if (isChannelPost || groupSwarm) {
+        // SOS роем не ходит: манифест и первая волна задержали бы сигнал у
+        // остальных участников, а тревоге нужен прямой веер всем и сразу.
+        val manifest = if (sos) null else if (isChannelPost || groupSwarm) {
             signManifest(
                 PostManifest.build(
                     groupId = groupId,
@@ -1473,6 +1486,105 @@ class GroupRepository(
         return Result.success(Unit)
     }
 
+    /**
+     * Настройки красной кнопки SOS: показывать ли кнопку, сколько тревожных
+     * сообщений уходит за одно нажатие (3..5) и кто вправе нажимать.
+     * Менять вправе те же, кто меняет информацию о группе (как медленный
+     * режим): настройка одна на всех, поэтому уходит конвертом всей группе.
+     */
+    suspend fun setSosSettings(
+        groupId: String,
+        enabled: Boolean,
+        count: Int,
+        pressRole: String,
+    ): Result<Unit> {
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (!GroupPermissions.canChangeInfo(member.role, member.permissions, effectiveMemberMask(group))) {
+            return Result.failure(SecurityException("Менять настройки группы вправе администратор"))
+        }
+        val safeCount = GroupSos.clampCount(count)
+        val safeRole = GroupSos.normalizePressRole(pressRole)
+        if (enabled == group.sosEnabled && safeCount == group.sosMessageCount &&
+            safeRole == GroupSos.normalizePressRole(group.sosPressRole)
+        ) {
+            return Result.success(Unit)
+        }
+        groupDao.setSosSettings(groupId, enabled, safeCount, safeRole)
+        backgroundScope.launch {
+            runCatching {
+                delivery.deliver(
+                    groupId,
+                    GroupWire.buildSosSettings(groupId, enabled, safeCount, safeRole),
+                    allRecipients(groupId, me),
+                )
+            }.onFailure { Log.w(TAG, "sos settings fanout failed: ${it.message}") }
+        }
+        Log.i(TAG, "sos settings group=$groupId enabled=$enabled count=$safeCount role=$safeRole by=$me")
+        return Result.success(Unit)
+    }
+
+    /**
+     * Нажатие красной кнопки SOS: за один раз уходит [GroupEntity.sosMessageCount]
+     * тревожных сообщений подряд - их видят и слышат все участники, даже если
+     * телефон спит или группа у них без звука (см. показ уведомления).
+     *
+     * Защита от повторного нажатия - не меньше [GroupSos.COOLDOWN_MS]:
+     * отметка ставится ДО отправки, чтобы и неудавшаяся попытка, и закрытие
+     * приложения на середине не дали нажать снова сразу.
+     *
+     * Тревога не подчиняется тихому времени, медленному режиму, закрытой
+     * теме и запрету обычных сообщений: ситуация чрезвычайная, а кто вправе
+     * нажимать, решает отдельная настройка [GroupEntity.sosPressRole].
+     */
+    suspend fun sendSos(groupId: String, topicId: String): Result<Int> {
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        if (group.isChannel) {
+            return Result.failure(IllegalStateException("В канале кнопки SOS нет"))
+        }
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (member.isBanned) return Result.failure(SecurityException("Вы ограничены в этой группе"))
+        if (!group.sosEnabled) {
+            return Result.failure(IllegalStateException("Кнопка SOS скрыта настройками группы"))
+        }
+        if (!GroupSos.canPress(member.role, group.sosPressRole, member.isBanned)) {
+            return Result.failure(SecurityException("Нажимать SOS в этой группе вам не разрешено"))
+        }
+        val now = clock()
+        val waitMs = GroupSos.cooldownRemainingMs(group.sosLastSentAtMs, now)
+        if (waitMs > 0L) {
+            val seconds = (waitMs + 999L) / 1000L
+            return Result.failure(SecurityException("SOS уже отправлен: подождите $seconds с"))
+        }
+        groupDao.setSosLastSentAt(groupId, now)
+        val count = GroupSos.clampCount(group.sosMessageCount)
+        val text = com.vladimir.messenger.util.SosMessage.wrap(
+            com.vladimir.messenger.util.SosMessage.DEFAULT_TEXT,
+        )
+        var sent = 0
+        repeat(count) {
+            sendMessage(groupId, topicId, text, sos = true)
+                .onSuccess { sent++ }
+                .onFailure { e ->
+                    return if (sent > 0) Result.success(sent) else Result.failure(e)
+                }
+        }
+        Log.i(TAG, "sos sent group=$groupId topic=$topicId count=$sent by=$me")
+        return Result.success(sent)
+    }
+
+    /** Сколько миллисекунд этому телефону ещё нельзя нажимать SOS в группе. */
+    suspend fun sosCooldownRemainingMs(groupId: String): Long {
+        val group = groupDao.getGroupById(groupId) ?: return 0L
+        return GroupSos.cooldownRemainingMs(group.sosLastSentAtMs, clock())
+    }
+
     /** Проголосовать (или отозвать голос): [choices] - номера вариантов, пусто - отозвать. */
     suspend fun votePoll(groupId: String, pollId: String, choices: List<Int>): Result<Unit> {
         val dao = pollDao ?: return Result.failure(IllegalStateException("Опросы недоступны"))
@@ -1716,6 +1828,32 @@ class GroupRepository(
         if (packet.seconds == group.slowModeSeconds) return
         groupDao.setSlowMode(packet.groupId, packet.seconds)
         Log.i(TAG, "slow mode applied group=${packet.groupId} seconds=${packet.seconds} from=$senderId")
+    }
+
+    private suspend fun handleSosSettings(senderId: String, packet: GroupWire.Packet.SosSettings) {
+        val me = myId().orEmpty()
+        if (me.isBlank()) return
+        val group = groupDao.getGroupById(packet.groupId) ?: return
+        if (groupDao.getMember(packet.groupId, me) == null) return
+        // Верим владельцу и администраторам с правом менять информацию -
+        // ровно тем, кто вправе кнопку настраивать.
+        if (senderId != group.ownerId) {
+            val sender = groupDao.getMember(packet.groupId, senderId) ?: return
+            if (!GroupRole.isAdminOrOwner(sender.role)) return
+            if (!GroupPermissions.canChangeInfo(sender.role, sender.permissions, effectiveMemberMask(group))) return
+        }
+        if (packet.enabled == group.sosEnabled &&
+            packet.count == GroupSos.clampCount(group.sosMessageCount) &&
+            packet.pressRole == GroupSos.normalizePressRole(group.sosPressRole)
+        ) {
+            return
+        }
+        groupDao.setSosSettings(packet.groupId, packet.enabled, packet.count, packet.pressRole)
+        Log.i(
+            TAG,
+            "sos settings applied group=${packet.groupId} enabled=${packet.enabled} " +
+                "count=${packet.count} role=${packet.pressRole} from=$senderId",
+        )
     }
 
     // ── Сообщения обычных групп роем (этап 5) ────────────────────────────────
@@ -4578,6 +4716,7 @@ class GroupRepository(
             }
 
             is GroupWire.Packet.SlowMode -> handleSlowMode(senderId, packet)
+            is GroupWire.Packet.SosSettings -> handleSosSettings(senderId, packet)
 
             is GroupWire.Packet.OwnerClaim -> handleOwnerClaim(senderId, packet)
 
@@ -4926,6 +5065,26 @@ class GroupRepository(
                             listOf(nodeId),
                         )
                     }.onFailure { Log.w(TAG, "slow mode for newcomer failed: ${it.message}") }
+                }
+            }
+            // Настройки кнопки SOS новичок тоже пропустил: говорим сразу,
+            // если они отличаются от принятых по умолчанию, иначе его
+            // телефон показал бы кнопку не так, как видит вся группа.
+            if (!group.sosEnabled || GroupSos.clampCount(group.sosMessageCount) != GroupSos.DEFAULT_COUNT ||
+                GroupSos.normalizePressRole(group.sosPressRole) != GroupSos.PRESS_ALL
+            ) {
+                backgroundScope.launch {
+                    runCatching {
+                        delivery.deliver(
+                            groupId,
+                            GroupWire.buildSosSettings(
+                                groupId, group.sosEnabled,
+                                GroupSos.clampCount(group.sosMessageCount),
+                                GroupSos.normalizePressRole(group.sosPressRole),
+                            ),
+                            listOf(nodeId),
+                        )
+                    }.onFailure { Log.w(TAG, "sos settings for newcomer failed: ${it.message}") }
                 }
             }
         } else {
@@ -6468,6 +6627,13 @@ companion object {
         /**
          * Не чаще раза в 10 минут повторяем адресный запрос «представься» к
          * одному и тому же узлу. Имя нужно один раз: как только оно пришло,
+         * запрос больше не отправляется вовсе.
+         */
+        private const val WHOIS_MIN_INTERVAL_MS = 10L * 60 * 1000
+        private const val TAG = "GroupRepository"
+    }
+}
+олько оно пришло,
          * запрос больше не отправляется вовсе.
          */
         private const val WHOIS_MIN_INTERVAL_MS = 10L * 60 * 1000

@@ -56,7 +56,7 @@ import com.vladimir.messenger.data.local.dao.GroupPollDao
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 34
+const val APP_DATABASE_VERSION = 35
 
 @Database(
     entities = [
@@ -117,6 +117,20 @@ abstract class AppDatabase : RoomDatabase() {
          * Реакции: до пяти разных значков от одного человека на сообщение.
          * Ключ таблицы расширяется значком; строки переносятся как есть.
          */
+        /**
+         * Красная кнопка SOS в группах: показывать ли кнопку, сколько
+         * тревожных сообщений слать за нажатие (3..5), кто вправе нажимать
+         * и когда этот телефон нажимал последний раз (пауза от повторов).
+         */
+        val MIGRATION_34_35 = object : Migration(34, 35) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `groups` ADD COLUMN `sosEnabled` INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE `groups` ADD COLUMN `sosMessageCount` INTEGER NOT NULL DEFAULT 3")
+                db.execSQL("ALTER TABLE `groups` ADD COLUMN `sosPressRole` TEXT NOT NULL DEFAULT 'ALL'")
+                db.execSQL("ALTER TABLE `groups` ADD COLUMN `sosLastSentAtMs` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         /** Счётчик репостов: отдельная таблица фактов пересылки. */
         val MIGRATION_33_34 = object : Migration(33, 34) {
             override fun migrate(db: SupportSQLiteDatabase) {

@@ -1372,6 +1372,17 @@ class CoreServerService : Service() {
             // приглашение): уведомления быть не должно.
             if (chatId.isBlank()) return
             if (notify) {
+                // SOS и на зеркальном устройстве - тревога, а не обычное
+                // уведомление: паузы звука её не касаются.
+                if (com.vladimir.messenger.util.SosMessage.isSos(row.content)) {
+                    runCatching {
+                        notificationHelper.showSosNotification(
+                            chatId, row.senderId, null,
+                            messageId = row.id,
+                        )
+                    }
+                    return
+                }
                 // р249: у чата на паузе не показываем сообщение в шторке.
                 if (runCatching { chatRepository.isChatMuted(chatId) }.getOrDefault(false)) {
                     Log.i(TAG, "notification suppressed: чат без звука (зеркало)")
@@ -2062,6 +2073,19 @@ class CoreServerService : Service() {
                     }
                     for (msg in recentIncoming) {
                         try {
+                            // SOS из группы: тревога не знает пауз звука -
+                            // активно оповещаем отдельным громким путём,
+                            // даже если группа у получателя без звука.
+                            if (com.vladimir.messenger.util.SosMessage.isSos(msg.content)) {
+                                runCatching {
+                                    notificationHelper.showSosNotification(
+                                        msg.chatId, msg.senderId,
+                                        msg.topicId?.takeIf { it.isNotBlank() },
+                                        messageId = msg.id,
+                                    )
+                                }.onFailure { Log.w(TAG, "SOS notification failed: ${it.message}") }
+                                continue
+                            }
                             // р249: «без звука» - ни уведомления, ни звука.
                             // Проверяем и личный чат, и группу: у сообщения
                             // один chatId, а чем он окажется - решаем по базе

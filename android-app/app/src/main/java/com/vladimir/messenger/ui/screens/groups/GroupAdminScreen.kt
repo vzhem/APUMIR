@@ -237,6 +237,12 @@ fun GroupAdminScreen(
                     // р250: медленный режим - сколько секунд участник ждёт
                     // между сообщениями (0 - выключен).
                     slowModeSeconds = uiState.group?.slowModeSeconds ?: 0,
+                    // Кнопка SOS: показывать ли, сколько тревог за нажатие и
+                    // кто вправе нажимать. В каналах кнопки нет.
+                    sosEnabled = uiState.group?.sosEnabled != false,
+                    sosMessageCount = uiState.group?.sosMessageCount ?: 3,
+                    sosPressRole = uiState.group?.sosPressRole ?: "ALL",
+                    onSetSosSettings = viewModel::setSosSettings,
                     onSetAvatar = viewModel::setGroupAvatar,
                     onSave = viewModel::updateProfile,
                     onTogglePublic = viewModel::setPublic,
@@ -321,6 +327,14 @@ private fun OverviewTab(
     topicsEnabled: Boolean,
     /** р250: медленный режим, секунд (0 - выключен). */
     slowModeSeconds: Int,
+    /** Кнопка SOS: показывать ли её в группе. */
+    sosEnabled: Boolean,
+    /** Сколько тревожных сообщений уходит за одно нажатие SOS (3..5). */
+    sosMessageCount: Int,
+    /** Кто вправе нажимать SOS: ALL / ADMINS / OWNER. */
+    sosPressRole: String,
+    /** Сохранить настройки SOS (видно, количество, кто нажимает). */
+    onSetSosSettings: (Boolean, Int, String) -> Unit,
     onSetAvatar: (android.net.Uri) -> Unit,
     onSave: (String, String) -> Unit,
     onTogglePublic: (Boolean) -> Unit,
@@ -556,6 +570,91 @@ private fun OverviewTab(
                         style = MaterialTheme.typography.bodySmall,
                         color = ApuBubbleMutedColor,
                     )
+                }
+            }
+        }
+
+        // Красная кнопка SOS (только группы, не каналы): одно нажатие шлёт
+        // всей группе сразу несколько тревожных сообщений, которые звучат
+        // даже на телефонах без звука. Здесь кнопку можно скрыть, выбрать
+        // число сообщений (3-5) и кто вправе нажимать.
+        if (!isChannel) {
+            ApuBubble {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.sos_settings_title), fontWeight = FontWeight.Medium)
+                            Text(
+                                stringResource(R.string.sos_settings_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = ApuBubbleMutedColor,
+                            )
+                        }
+                        ApuPremiumSwitch(
+                            checked = sosEnabled,
+                            enabled = canChangeInfo,
+                            onCheckedChange = { onSetSosSettings(it, sosMessageCount, sosPressRole) },
+                        )
+                    }
+                    if (sosEnabled) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            stringResource(R.string.sos_count_label),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            com.vladimir.messenger.data.group.GroupSos.COUNT_CHOICES.forEach { count ->
+                                ApuPremiumChip(
+                                    label = count.toString(),
+                                    selected = count == sosMessageCount,
+                                    enabled = canChangeInfo,
+                                    onClick = { onSetSosSettings(true, count, sosPressRole) },
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            stringResource(R.string.sos_who_label),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                        ) {
+                            ApuPremiumChip(
+                                label = stringResource(R.string.sos_who_all),
+                                selected = sosPressRole == "ALL",
+                                enabled = canChangeInfo,
+                                onClick = { onSetSosSettings(true, sosMessageCount, "ALL") },
+                            )
+                            ApuPremiumChip(
+                                label = stringResource(R.string.sos_who_admins),
+                                selected = sosPressRole == "ADMINS",
+                                enabled = canChangeInfo,
+                                onClick = { onSetSosSettings(true, sosMessageCount, "ADMINS") },
+                            )
+                            ApuPremiumChip(
+                                label = stringResource(R.string.sos_who_owner),
+                                selected = sosPressRole == "OWNER",
+                                enabled = canChangeInfo,
+                                onClick = { onSetSosSettings(true, sosMessageCount, "OWNER") },
+                            )
+                        }
+                    }
+                    if (!canChangeInfo) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            stringResource(R.string.admin_mode_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                    }
                 }
             }
         }

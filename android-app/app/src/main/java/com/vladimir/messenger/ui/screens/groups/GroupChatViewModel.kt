@@ -125,6 +125,11 @@ data class GroupChatUiState(
     val slowModeSeconds: Int = 0,
     /** Сколько миллисекунд осталось ждать; 0 - писать можно. */
     val slowModeWaitMs: Long = 0L,
+    // ── Кнопка SOS ──
+    /** Сколько миллисекунд ещё нельзя нажимать SOS; 0 - нажимать можно. */
+    val sosCooldownMs: Long = 0L,
+    /** Тревожные сообщения прямо сейчас уходят в группу. */
+    val sosSending: Boolean = false,
 )
 
 @HiltViewModel
@@ -246,6 +251,7 @@ class GroupChatViewModel @Inject constructor(
         // р250: опросы группы/канала и отсчёт медленного режима.
         observePolls()
         observeSlowMode()
+        observeSosCooldown()
         observeAntiRatings()
         observeGroupTyping()
     }
@@ -1084,6 +1090,51 @@ class GroupChatViewModel @Inject constructor(
         viewModelScope.launch {
             groupRepository.setSlowMode(groupId, seconds)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
+    // ── Кнопка SOS ────────────────────────────────────────────────────────
+
+    /**
+     * Остаток паузы после нажатия SOS: пока она длится, красная кнопка
+     * показывает обратный отсчёт и не нажимается. Метка нажатия лежит в
+     * базе, поэтому перезапуск приложения паузу не сбрасывает.
+     */
+    private fun observeSosCooldown() {
+        viewModelScope.launch {
+            while (true) {
+                val wait = runCatching { groupRepository.sosCooldownRemainingMs(groupId) }
+                    .getOrDefault(0L)
+                _uiState.update { it.copy(sosCooldownMs = wait) }
+                kotlinx.coroutines.delay(if (wait > 0L) 500L else 1_000L)
+            }
+        }
+    }
+
+    /**
+     * Нажатие красной кнопки: в открытую тему уходит сразу несколько
+     * тревожных сообщений (сколько - настройка группы). Права, видимость
+     * кнопки и паузу от повторов проверяет репозиторий; сюда приходит
+     * только итог, ошибка показывается общей плашкой.
+     */
+    fun sendSos() {
+        if (_uiState.value.sosSending) return
+        val topicId = _uiState.value.selectedTopicId ?: run {
+            _uiState.update { it.copy(error = appContext.getString(R.string.gc_choose_topic)) }
+            return
+        }
+        _uiState.update { it.copy(sosSending = true, error = null) }
+        viewModelScope.launch {
+            try {
+                groupRepository.sendSos(groupId, topicId)
+                    .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e.message ?: "Не удалось отправить SOS") }
+            } finally {
+                _uiState.update { it.copy(sosSending = false) }
+            }
         }
     }
 

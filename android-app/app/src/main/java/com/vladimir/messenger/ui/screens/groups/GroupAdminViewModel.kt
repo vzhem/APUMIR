@@ -307,6 +307,20 @@ class GroupAdminViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Настройки красной кнопки SOS: показывать ли кнопку, сколько тревожных
+     * сообщений уходит за одно нажатие (3..5) и кто вправе нажимать.
+     * Право то же, что у медленного режима: владелец, администратор с правом
+     * «Изменять информацию» или участник с таким правом.
+     */
+    fun setSosSettings(enabled: Boolean, count: Int, pressRole: String) {
+        viewModelScope.launch {
+            groupRepository.setSosSettings(groupId, enabled, count, pressRole)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                .onSuccess { _uiState.update { it.copy(notice = appContext.getString(R.string.sos_settings_saved)) } }
+        }
+    }
+
     fun setSlowMode(seconds: Int) {
         viewModelScope.launch {
             groupRepository.setSlowMode(groupId, seconds)

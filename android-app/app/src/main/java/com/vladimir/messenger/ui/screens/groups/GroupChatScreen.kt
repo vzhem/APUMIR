@@ -281,6 +281,9 @@ fun GroupChatScreen(
     val iAmGroupAdmin = canDecideRequests
     // Каталог GIF (кнопка «GIF» у скрепки).
     var showGifCatalog by remember { mutableStateOf(false) }
+    // Подтверждение перед тревогой SOS: нажатие уходит всей группе сразу
+    // несколькими сообщениями, случайный тап должен стоить ещё один осознанный.
+    var showSosConfirm by remember { mutableStateOf(false) }
     // Модальное окно удаления и модерации сообщений (одиночное или пакетное).
     var deleteForAllTarget by remember { mutableStateOf<com.vladimir.messenger.data.local.entity.MessageEntity?>(null) }
     var groupEditTarget by remember { mutableStateOf<com.vladimir.messenger.data.local.entity.MessageEntity?>(null) }
@@ -1345,6 +1348,28 @@ fun GroupChatScreen(
                 }
             }
 
+            // ── Красная кнопка SOS: видна, когда группа её не скрыла и этому
+            // участнику нажимать разрешено (настройка «кто может нажимать»).
+            // Во время паузы от повторов кнопка показывает обратный отсчёт.
+            val sosGroup = uiState.group
+            val sosMe = uiState.me
+            val showSosButton = sosGroup != null && sosMe != null && !sosGroup.isChannel &&
+                sosGroup.sosEnabled &&
+                com.vladimir.messenger.data.group.GroupSos.canPress(
+                    sosMe.role, sosGroup.sosPressRole, sosMe.isBanned,
+                )
+            if (showSosButton) {
+                val sosWaitSeconds = (uiState.sosCooldownMs + 999L) / 1000L
+                SosButton(
+                    sending = uiState.sosSending,
+                    waitSeconds = sosWaitSeconds,
+                    onClick = { showSosConfirm = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            }
+
             // ── Поле ввода: подложка следует теме и пропускает обои (раунд 45).
             // Раунд 146: пузырь поля - от края до края экрана; «Отправить» -
             // своим пузырём той же ширины под полем (просьба владельца).
@@ -1581,6 +1606,32 @@ fun GroupChatScreen(
             onCreate = { name, icon ->
                 viewModel.createTopic(name, icon)
                 showNewTopic = false
+            },
+        )
+    }
+
+    // Подтверждение тревоги: сигнал уходит сразу всем участникам и звучит
+    // даже на телефонах с выключенным звуком - случайное нажатие недопустимо.
+    if (showSosConfirm) {
+        val sosCount = uiState.group?.sosMessageCount ?: 3
+        ApuSettingsDialog(
+            onDismissRequest = { showSosConfirm = false },
+            title = { Text(stringResource(R.string.sos_confirm_title)) },
+            text = { Text(stringResource(R.string.sos_confirm_body, sosCount)) },
+            confirmButton = {
+                ApuTextAction(
+                    label = stringResource(R.string.sos_send_action),
+                    onClick = {
+                        showSosConfirm = false
+                        viewModel.sendSos()
+                    },
+                )
+            },
+            dismissButton = {
+                ApuTextAction(
+                    label = stringResource(R.string.action_cancel),
+                    onClick = { showSosConfirm = false },
+                )
             },
         )
     }
@@ -2191,8 +2242,12 @@ private fun MessageBubble(
         // без фона и тени, только картинка, время и реакции.
         val stickerFloat = fileCard != null && fileCard.previewFile != null &&
             GroupFileMarker.isSticker(fileCard.info)
+        // Тревога SOS: красный пузырь у всех, включая самого отправителя, -
+        // сигнал должен отличаться от обычного разговора с первого взгляда.
+        val isSosMessage = com.vladimir.messenger.util.SosMessage.isSos(message.content)
         val messenger = LocalMessengerColors.current
-        val bubbleTextColor = if (stickerFloat) MaterialTheme.colorScheme.onBackground
+        val bubbleTextColor = if (isSosMessage) Color.White
+            else if (stickerFloat) MaterialTheme.colorScheme.onBackground
             else if (message.isFromMe) messenger.messageBubbleOwnText else messenger.messageBubbleOtherText
         ApuBubbleCard(
             modifier = Modifier
@@ -2202,7 +2257,8 @@ private fun MessageBubble(
                     onClick = { if (selectionMode) onToggleSelect() else showReactions = true },
                     onLongClick = { showMenu = true },
                 ),
-            backgroundColor = if (message.isFromMe) messenger.messageBubbleOwn else messenger.messageBubbleOther,
+            backgroundColor = if (isSosMessage) Color(0xFFC62828)
+                else if (message.isFromMe) messenger.messageBubbleOwn else messenger.messageBubbleOther,
             contentColor = bubbleTextColor,
             transparent = stickerFloat,
             // Объём пузыря, как в премиальных мессенджерах (стикеры остаются без фона).
@@ -2281,7 +2337,11 @@ private fun MessageBubble(
                     com.vladimir.messenger.util.InlineImage.extractB64(message.content)
                 }
                 val bodyText = remember(message.content, fileCard?.info) {
-                    val words = com.vladimir.messenger.util.InlineImage.stripImage(com.vladimir.messenger.util.QuietMessage.strip(message.content))
+                    val words = com.vladimir.messenger.util.InlineImage.stripImage(
+                        com.vladimir.messenger.util.SosMessage.strip(
+                            com.vladimir.messenger.util.QuietMessage.strip(message.content),
+                        ),
+                    )
                     // Раунд 203: маркер и шапку пересылки рисуем отдельно.
                     val clean = com.vladimir.messenger.util.ForwardMarker.stripHeader(words)
                     // Подпись «📎 имя (размер)» - для старых версий; здесь её
@@ -2798,5 +2858,43 @@ private fun slowModeHint(seconds: Int, role: String?): String {
         stringResource(R.string.gc_slow_admin, label)
     } else {
         stringResource(R.string.gc_slow_member, label)
+    }
+}
+
+/**
+ * Красная кнопка SOS над полем ввода: сплошной красный цвет и крупная
+ * подпись - кнопку должно быть видно и понятно сразу, без чтения.
+ * Пока идёт пауза от повторного нажатия, кнопка серая и показывает,
+ * сколько секунд осталось; во время отправки - что сигнал уже уходит.
+ */
+@Composable
+private fun SosButton(
+    sending: Boolean,
+    waitSeconds: Long,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val enabled = !sending && waitSeconds <= 0L
+    val label = when {
+        sending -> stringResource(R.string.sos_sending)
+        waitSeconds > 0L -> stringResource(R.string.sos_wait_seconds, waitSeconds)
+        else -> stringResource(R.string.sos_button)
+    }
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(
+                if (enabled) Color(0xFFC62828) else Color(0xFF8E8E93),
+            )
+            .clickable(enabled = enabled) { onClick() }
+            .padding(vertical = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.titleMedium,
+        )
     }
 }

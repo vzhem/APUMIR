@@ -357,6 +357,16 @@ object GroupWire {
      */
     const val KIND_SLOW_MODE = "slow"
 
+    /**
+     * Настройки красной кнопки SOS: `soscfg|groupId|enabled|count|pressRole`.
+     *
+     * Отдельный вид по той же причине, что и медленный режим: старые
+     * телефоны молча отбрасывают неизвестный вид, а кнопку у себя просто
+     * не покажут (и тревожные сообщения увидят обычными - текст сигнала
+     * несёт свой смысл и без раскраски).
+     */
+    const val KIND_SOS_SETTINGS = "soscfg"
+
     /** Режим пакета [KIND_OWNER]: добровольная передача от нынешнего владельца. */
     const val OWNER_MODE_GIVE = "give"
 
@@ -553,6 +563,18 @@ object GroupWire {
         data class QuietHours(val groupId: String, val schedule: String) : Packet()
 
         data class SlowMode(val groupId: String, val seconds: Int) : Packet()
+
+        /**
+         * Настройки кнопки SOS: показывать ли кнопку, сколько тревожных
+         * сообщений уходит за одно нажатие ([count], 3..5) и кто вправе
+         * нажимать ([pressRole] - GroupSos.PRESS_*).
+         */
+        data class SosSettings(
+            val groupId: String,
+            val enabled: Boolean,
+            val count: Int,
+            val pressRole: String,
+        ) : Packet()
 
         /**
          * Просьба прислать последние [limit] постов канала целиком.
@@ -1552,6 +1574,14 @@ object GroupWire {
         return "$PREFIX|$KIND_SLOW_MODE|$groupId|$safe"
     }
 
+    /** Настройки кнопки SOS одним конвертом: видимость, число тревог, кто нажимает. */
+    fun buildSosSettings(groupId: String, enabled: Boolean, count: Int, pressRole: String): String {
+        require(groupId.isNotBlank()) { "bad group id" }
+        val safeCount = GroupSos.clampCount(count)
+        val safeRole = GroupSos.normalizePressRole(pressRole)
+        return "$PREFIX|$KIND_SOS_SETTINGS|$groupId|${if (enabled) 1 else 0}|$safeCount|$safeRole"
+    }
+
     fun buildMemberRestrict(groupId: String, nodeId: String, permissionsMask: Long): String =
         "$PREFIX|$KIND_MEMBER_RESTRICT|$groupId|${encode(nodeId)}|$permissionsMask"
 
@@ -2020,6 +2050,21 @@ object GroupWire {
                     null
                 } else {
                     Packet.SlowMode(groupId, seconds)
+                }
+            } else {
+                null
+            }
+
+            KIND_SOS_SETTINGS -> if (parts.size == 6) {
+                val enabled = when (parts[3]) { "1" -> true; "0" -> false; else -> null }
+                val count = parts[4].toIntOrNull()
+                if (enabled == null || count == null ||
+                    count < GroupSos.MIN_COUNT || count > GroupSos.MAX_COUNT ||
+                    parts[5] !in GroupSos.PRESS_ROLES
+                ) {
+                    null
+                } else {
+                    Packet.SosSettings(groupId, enabled, count, parts[5])
                 }
             } else {
                 null
