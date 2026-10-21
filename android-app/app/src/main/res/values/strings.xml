@@ -273,6 +273,14 @@
     <string name="loc_unavailable">Не удалось определить координаты. Проверьте, что геолокация включена, и попробуйте ещё раз.</string>
     <string name="loc_permission_denied">Без разрешения на геолокацию координаты не определить. Разрешите доступ в настройках приложения.</string>
     <string name="loc_preview">📍 Геопозиция</string>
+    <string name="loc_pick_title">Отправить геопозицию</string>
+    <string name="loc_send_point">Отправить эту точку</string>
+    <string name="loc_my_location">Моё местоположение</string>
+    <string name="loc_search_hint">Поиск: кафе, улица, адрес…</string>
+    <string name="loc_search_action">Найти</string>
+    <string name="loc_search_not_found">Ничего не нашлось. Попробуйте другое название.</string>
+    <string name="loc_search_failed">Поиск не удался (нужен интернет). Точку можно выбрать движением карты.</string>
+    <string name="loc_chosen_point">Выбранная точка</string>
     <string name="chat_attach_rank_hint">Вложения откроются с ранга «Круг друзей»</string>
     <string name="chat_input_placeholder">Сообщение...</string>
     <string name="chat_resend_key">Отправить открытый ключ</string>

@@ -195,6 +195,8 @@ dependencies {
 
     // ZXing QR Code Scanner
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    // Карта выбора точки (OpenStreetMap, без ключей Google): экран «Поделиться координатами».
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
     implementation("com.google.zxing:core:3.5.3")
     implementation(libs.androidx.compose.material.icons.extended)
 

@@ -1149,12 +1149,12 @@ fun ChatDetailScreen(
 
     // Подтверждение отправки координат: точка и необязательная подпись.
     locationFix?.let { fix ->
-        com.vladimir.messenger.ui.components.LocationConfirmDialog(
-            fix = fix,
+        com.vladimir.messenger.ui.components.LocationPickerDialog(
+            ownFix = fix,
             onDismiss = { locationFix = null },
-            onSend = { label ->
+            onSend = { lat, lon, accuracyM, label ->
                 locationFix = null
-                viewModel.sendLocation(fix.lat, fix.lon, fix.accuracyM, label)
+                viewModel.sendLocation(lat, lon, accuracyM, label)
             },
         )
     }
