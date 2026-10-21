@@ -150,6 +150,8 @@ fun SettingsScreen(
     onFeedbackClick: () -> Unit = {},
     /** Полная копия профиля в файл (чаты, контакты, ключи) и восстановление из него. */
     onProfileBackupClick: () -> Unit = {},
+    /** Экран «Папки с чатами»: папки-вкладки главного списка. */
+    onFoldersClick: () -> Unit = {},
     /**
      * Открыть сразу профиль, а не список настроек.
      *
@@ -231,6 +233,7 @@ fun SettingsScreen(
                     onPeerRatingClick = onPeerRatingClick,
                     onIdentityBackupClick = onIdentityBackupClick,
                     onDevicesClick = onDevicesClick,
+                    onFoldersClick = onFoldersClick,
                     onProfileBackupClick = onProfileBackupClick,
                     onProfileClick = onProfileClick,
                     onSupportClick = onSupportClick,
@@ -862,6 +865,7 @@ private fun SettingsTabContent(
     onPeerRatingClick: () -> Unit = {},
     onIdentityBackupClick: () -> Unit = {},
     onDevicesClick: () -> Unit = {},
+    onFoldersClick: () -> Unit = {},
     onProfileBackupClick: () -> Unit = {},
     onProfileClick: () -> Unit = {},
     /** Раунд 219: «Поддержать разработчика» (черновик). */
@@ -1124,6 +1128,17 @@ private fun SettingsTabContent(
             // ЯЗЫК интерфейса: русский / English. Применяется после перезапуска
             // экрана; выбор хранится в p2p_prefs (см. AppLanguageHolder).
             // ----------------------------------------------------------------
+            item {
+                SettingsCard {
+                    SettingsItem(
+                        icon     = Icons.Default.Folder,
+                        title    = stringResource(R.string.folder_title),
+                        subtitle = stringResource(R.string.folder_description),
+                        onClick  = onFoldersClick,
+                    )
+                }
+            }
+
             item { SettingsSectionTitle(stringResource(R.string.language_section)) }
             item {
                 SettingsCard {

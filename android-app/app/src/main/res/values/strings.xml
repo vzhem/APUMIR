@@ -16,6 +16,33 @@
 
     <!-- Вкладки списка чатов -->
     <string name="inbox_all">Все</string>
+    <string name="folder_title">Папки с чатами</string>
+    <string name="folder_description">Вы можете создавать папки с нужными чатами и переключаться между ними.</string>
+    <string name="folder_recommended">Рекомендованные папки</string>
+    <string name="folder_new">Новые</string>
+    <string name="folder_new_desc">Чаты с новыми сообщениями.</string>
+    <string name="folder_personal">Личные</string>
+    <string name="folder_personal_desc">Сообщения из личных чатов.</string>
+    <string name="folder_add">Добавить</string>
+    <string name="folder_added">Добавлена</string>
+    <string name="folder_all_chats">Все чаты</string>
+    <string name="folder_create">Создать новую папку</string>
+    <string name="folder_untitled">Новая папка</string>
+    <string name="folder_name_hint">Название папки</string>
+    <string name="folder_pick_chats">Чаты в папке</string>
+    <string name="folder_pick_hint">Отметьте чаты, группы и каналы, которые должны жить в этой папке.</string>
+    <string name="folder_auto_unread">Новые сообщения подтягиваются сюда сами.</string>
+    <string name="folder_auto_personal">Все личные чаты подтягиваются сюда сами.</string>
+    <string name="folder_edit">Изменить</string>
+    <string name="folder_move_up">Переместить выше</string>
+    <string name="folder_move_down">Переместить ниже</string>
+    <string name="folder_delete">Удалить папку</string>
+    <string name="folder_delete_text">Папка «%1$s» исчезнет из вкладок. Сами чаты не пострадают.</string>
+    <string name="folder_chat_count">Чатов: %1$d</string>
+    <string name="folder_empty_list">В этой папке пока пусто.</string>
+    <string name="folder_type_chat">Личный чат</string>
+    <string name="folder_type_group">Группа</string>
+    <string name="folder_type_channel">Канал</string>
     <string name="inbox_unread">Не прочитано</string>
     <string name="inbox_chats">Чаты</string>
     <string name="inbox_groups">Группы</string>
