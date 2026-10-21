@@ -2482,8 +2482,8 @@ private fun MessageBubble(
                     showReactions = false
                     onRemoveReaction()
                 },
+                // Не закрываем: можно поставить сразу до пяти реакций.
                 onPick = { emoji ->
-                    showReactions = false
                     onToggleReaction(emoji)
                 },
             )

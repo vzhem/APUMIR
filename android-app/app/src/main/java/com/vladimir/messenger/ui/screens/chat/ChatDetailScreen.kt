@@ -691,6 +691,11 @@ fun ChatDetailScreen(
                                             showCopyDialog = message
                                         }
                                     },
+                                    // Реакция на голосовое - из его собственного
+                                    // меню (точки на проигрывателе).
+                                    onReactClick = row.message?.let { message ->
+                                        { reactionFor = message.id }
+                                    },
                                     onSwipeReply = row.message?.let { message ->
                                         { viewModel.startReply(message) }
                                     },
@@ -1203,10 +1208,11 @@ fun ChatDetailScreen(
                 reactionFor = null
                 resetSelection()
             },
+            // Пикер НЕ закрываем после нажатия: владелец просил ставить
+            // сразу до пяти реакций подряд. Закрытие - кнопкой «Закрыть»,
+            // по фону или «Убрать реакцию».
             onPick = { emoji ->
                 viewModel.toggleReaction(messageId, emoji)
-                reactionFor = null
-                resetSelection()
             },
         )
     }

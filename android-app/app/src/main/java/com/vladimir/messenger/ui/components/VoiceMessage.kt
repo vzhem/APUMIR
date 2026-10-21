@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -253,6 +254,8 @@ fun VoiceFileCard(
     isFromMe: Boolean,
     messageActions: List<ApuAction>,
     onLongPress: (() -> Unit)?,
+    /** «Поставить реакцию» в меню голосового (точки): в личке это отдельный путь. */
+    onReact: (() -> Unit)? = null,
 ) {
     val actions = buildList {
         state.onSave?.let { save -> add(ApuAction(stringResource(R.string.ft_save_folder), Icons.Filled.Save) { save() }) }
@@ -266,6 +269,7 @@ fun VoiceFileCard(
         textColor = ApuBubbleTextColor,
         actions = actions,
         onLongPress = onLongPress,
+        onReact = onReact,
     )
 }
 
@@ -279,6 +283,8 @@ fun VoiceActionsRow(
     actions: List<ApuAction>,
     onLongPress: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    /** Поставить реакцию на голосовое - первым пунктом его меню (точки). */
+    onReact: (() -> Unit)? = null,
 ) {
     var showActions by remember { mutableStateOf(false) }
     Row(
@@ -325,7 +331,16 @@ fun VoiceActionsRow(
                         .padding(8.dp)
                         .widthIn(min = 210.dp, max = 320.dp),
                 ) {
-                    actions.forEach { action ->
+                    if (onReact != null) {
+                    ApuActionBubble(
+                        label = stringResource(R.string.chat_add_reaction),
+                        icon = Icons.Filled.EmojiEmotions,
+                    ) {
+                        showActions = false
+                        onReact()
+                    }
+                }
+                actions.forEach { action ->
                         ApuActionBubble(
                             label = action.title,
                             icon = action.icon,
