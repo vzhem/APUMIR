@@ -1428,6 +1428,15 @@ fun GroupChatScreen(
                                     if (uiState.canAttach) {
                                         showGifCatalog = true
                                         viewModel.onGifCatalogOpened()
+                                        if (uiState.gifItems.isEmpty() && !uiState.gifLoading) {
+                                            viewModel.searchGifs("")
+                                        }
+                                    } else {
+                                        viewModel.onAttachLocked()
+                                    }
+                                },
+                                enabled = !uiState.isPreparingFile && !uiState.sending,
+                            )
                             IconButton(
                                 onClick = requestLocation,
                                 enabled = !uiState.isPreparingFile && !uiState.sending,
@@ -1443,15 +1452,6 @@ fun GroupChatScreen(
                                     )
                                 }
                             }
-                                        if (uiState.gifItems.isEmpty() && !uiState.gifLoading) {
-                                            viewModel.searchGifs("")
-                                        }
-                                    } else {
-                                        viewModel.onAttachLocked()
-                                    }
-                                },
-                                enabled = !uiState.isPreparingFile && !uiState.sending,
-                            )
                         }
                     }
                     if (voice.recording) {
