@@ -63,6 +63,8 @@ class PeerRankRouter @Inject constructor(
             // Заявлять чужой узел нельзя: пакет пришёл от senderId, значит и ранг
             // может сообщать только он.
             Log.w(TAG, "rank packet claims ${packet.nodeId} but came from $senderId, dropped")
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                .recordWarning("rank", "конверт ранга отброшен: узел в пакете не совпал с отправителем")
             return@withContext true
         }
 
@@ -81,6 +83,15 @@ class PeerRankRouter @Inject constructor(
         // Пишем в журнал и «не изменилось»: по копипасте должно быть видно, что
         // пакеты доходят, даже когда ранг тот же и обновлять нечего.
         Log.i(TAG, "peer rank from ${packet.nodeId}: ${packet.qualified}, stored=$stored")
+        com.vladimir.messenger.data.diagnostics.TransferDiagnostics.record(
+            "rank",
+            "ранг собеседника получен: приглашённых " + packet.qualified +
+                if (com.vladimir.messenger.data.rank.PeerRankStore.isVipRank(packet.qualified)) {
+                    " (это VIP)"
+                } else {
+                    " (не VIP: нужно от 10)"
+                },
+        )
         true
     }
 

@@ -51,6 +51,8 @@ data class ChatDetailUiState(
      * знак, а вокруг аватарки — объёмное золотое кольцо с блеском.
      */
     val peerVip: Boolean = false,
+    /** Что известно о ранге собеседника (null - ещё не сообщал). */
+    val peerRankQualified: Int? = null,
     /**
      * От собеседника приходят конверты, которые не вскрываются: у него осталась
      * прежняя копия нашего ключа (переустановка/восстановление профиля). Пока
@@ -360,6 +362,8 @@ class ChatDetailViewModel @Inject constructor(
             peerRankStore.vipNodeIds.collect { vipIds ->
                 val peer = peerId.lowercase()
                 requestPeerRankIfUnknown(peer)
+                val knownRank = runCatching { peerRankStore.qualifiedFor(peer) }.getOrNull()
+                _uiState.update { it.copy(peerRankQualified = knownRank) }
                 // В переписке с собственным узлом собеседника нет: кольцо решает
                 // МОЙ ранг (он же виден в профиле и на главной). Свой ранг лежит
                 // в настройках, поэтому читаем его в фоне, а не на главном потоке.

@@ -88,6 +88,14 @@ fun PeerProfileSheet(
     antiRatingMine: Boolean = false,
     /** Собеседник из элиты: знак VIP у имени и золотое кольцо у аватарки. */
     vip: Boolean = false,
+    /**
+     * Что телефон знает о ранге собеседника: число подтверждённых
+     * приглашённых из его конверта; null вместе с showRankLine=false -
+     * строки о ранге нет (вызывающий не знает контекста).
+     */
+    rankQualified: Int? = null,
+    /** Показывать ли строку о ранге (её даёт экран личной переписки). */
+    showRankLine: Boolean = false,
     /** Нажатие на кнопку анти-рейтинга; null - показываем только счётчик. */
     onAntiRatingClick: (() -> Unit)? = null,
     onRename: (() -> Unit)? = null,
@@ -151,19 +159,36 @@ fun PeerProfileSheet(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    // Эмодзи-статус собеседника — рядом с именем, как у всех
-                    // на виду: пришёл роевым объявлением владельца.
-                    com.vladimir.messenger.ui.components.EmojiStatusBadge(contactId)
+                    // Порядок владельца: имя, затем значок VIP, затем
+                    // эмодзи-статус.
                     if (vip) {
                         Spacer(Modifier.width(6.dp))
                         ApuVipBadge()
                     }
+                    com.vladimir.messenger.ui.components.EmojiStatusBadge(
+                        contactId,
+                        Modifier.padding(start = 6.dp),
+                    )
                 }
                 if (username.isNotBlank()) {
                     Text(
                         "@" + username.removePrefix("@"),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                // Что телефон знает о ранге: число из конверта собеседника.
+                // «Ещё не сообщал» - честная подсказка, почему нет значка VIP:
+                // ранг не угадывается, он приходит от самого абонента.
+                if (showRankLine) {
+                    Text(
+                        when {
+                            rankQualified == null -> stringResource(R.string.pps_rank_unknown)
+                            vip -> stringResource(R.string.pps_rank_vip, rankQualified)
+                            else -> stringResource(R.string.pps_rank_known, rankQualified)
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = ApuBubbleMutedColor,
                     )
                 }
                 Text(

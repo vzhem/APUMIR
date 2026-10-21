@@ -253,6 +253,9 @@
     <string name="chat_edit_title">Редактировать сообщение</string>
     <string name="chat_edit_hint">Новый текст увидят все участники переписки; у сообщения появится пометка «изменено».</string>
     <string name="msg_edited">изменено</string>
+    <string name="pps_rank_vip">VIP · подтверждённых приглашённых: %1$d</string>
+    <string name="pps_rank_known">Подтверждённых приглашённых: %1$d</string>
+    <string name="pps_rank_unknown">Ранг ещё не сообщал</string>
     <string name="chat_delete_for_me">Удалить у себя</string>
     <string name="chat_delete_for_all">Удалить у всех</string>
     <string name="chat_delete_for_all_title">Удалить у всех?</string>

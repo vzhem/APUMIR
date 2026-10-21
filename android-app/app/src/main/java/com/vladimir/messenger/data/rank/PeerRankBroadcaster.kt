@@ -149,7 +149,11 @@ class PeerRankBroadcaster @Inject constructor(
         val ok = runCatching {
             RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, peer, envelope)
         }.getOrDefault(false)
-        if (ok) prefs.edit().putLong(key, nowMs).apply()
+        if (ok) {
+            prefs.edit().putLong(key, nowMs).apply()
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                .record("rank", "свой ранг отправлен собеседнику по его запросу")
+        }
         ok
     }
 
@@ -175,6 +179,13 @@ class PeerRankBroadcaster @Inject constructor(
         }.getOrDefault(false)
         if (ok) prefs.edit().putLong(key, nowMs).apply()
         Log.i(TAG, "rank requested from $peer: $ok")
+        if (ok) {
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                .record("rank", "запрос ранга отправлен собеседнику")
+        } else {
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                .recordWarning("rank", "запрос ранга не ушёл: нет чата с собеседником или ядро отказало")
+        }
         ok
     }
 

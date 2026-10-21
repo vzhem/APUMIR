@@ -301,6 +301,8 @@ fun ChatDetailScreen(
             isOnline = uiState.isContactOnline,
             // Знак и кольцо у профиля элиты: ранг собеседник сообщил сам.
             vip = uiState.peerVip || uiState.selfVip,
+            rankQualified = uiState.peerRankQualified,
+            showRankLine = true,
             username = uiState.contactUsername,
             heartCount = uiState.heartCount,
             heartMine = uiState.heartMine,
