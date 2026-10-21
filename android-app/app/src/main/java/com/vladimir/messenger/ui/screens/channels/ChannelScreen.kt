@@ -1354,6 +1354,7 @@ private fun PostEditorDialog(
 ) {
     val pollContext = LocalContext.current
     val voice = com.vladimir.messenger.ui.components.rememberVoiceRecorder { uri -> onVoiceReady?.invoke(uri) }
+    var showVoiceEffectPicker by remember { mutableStateOf(false) }
     var text by remember { mutableStateOf(initialText) }
     // Уже сжатые картинки (base64) по порядку.
     var images by remember { mutableStateOf(initialImages) }
@@ -1509,6 +1510,16 @@ private fun PostEditorDialog(
                                 )
                             }
                             ApuTextAction(
+                                label = if (voice.effect == com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL) {
+                                    stringResource(R.string.voice_effect_short)
+                                } else {
+                                    stringResource(voice.effect.labelRes)
+                                },
+                                onClick = { showVoiceEffectPicker = true },
+                                enabled = !preparingFile && !creating,
+                                icon = androidx.compose.material.icons.Icons.Default.GraphicEq,
+                            )
+                            ApuTextAction(
                                 label = stringResource(R.string.channel_attach_file),
                                 onClick = onPickFile,
                                 enabled = !preparingFile && !creating,
@@ -1518,6 +1529,13 @@ private fun PostEditorDialog(
                             }
                         }
                     }
+                }
+                if (showVoiceEffectPicker) {
+                    com.vladimir.messenger.ui.components.VoiceEffectPickerDialog(
+                        selected = voice.effect,
+                        onSelected = voice.selectEffect,
+                        onDismiss = { showVoiceEffectPicker = false },
+                    )
                 }
                 // р250: опрос к посту. Блок раскрывается по кнопке, чтобы не
                 // загромождать окно, когда опрос не нужен.

@@ -145,6 +145,9 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
     var elapsed by remember { mutableStateOf(0L) }
     var error by remember { mutableStateOf<String?>(null) }
     var faceFilter by remember { mutableStateOf(StoryFaceFilter.NONE) }
+    // Эффект голоса выбирается ДО записи и применяется к звуку готовой истории.
+    var voiceEffect by remember { mutableStateOf(com.vladimir.messenger.data.voice.VoiceEffectPreferences.selected(context)) }
+    var showVoiceEffects by remember { mutableStateOf(false) }
     var storyBackground by remember {
         mutableStateOf(com.vladimir.messenger.data.background.VideoBackground.NONE)
     }
@@ -227,6 +230,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
         // Фильтр фиксируем на старте: смена во время записи не должна менять уже снятое видео.
         val filterForRecording = faceFilter
         val backgroundForRecording = storyBackground
+        val voiceEffectForRecording = voiceEffect
         try {
             session.start(audio, onElapsed = { elapsed = it }, onFinished = { result ->
                 recording = false
@@ -258,6 +262,17 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                                 .distinct()
                                 .filter { it != produced }
                                 .forEach { it.delete() }
+                            // Эффект голоса — финальный шаг по звуковой дорожке.
+                            if (audio && voiceEffectForRecording != com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL) {
+                                processing = 0.97f
+                                val voiced = withContext(Dispatchers.IO) {
+                                    com.vladimir.messenger.data.voice.VoiceEffectVideoProcessor.apply(produced, voiceEffectForRecording)
+                                }
+                                if (voiced != null && voiced != produced) {
+                                    if (produced != file) produced.delete()
+                                    produced = voiced
+                                }
+                            }
                             val source = withContext(Dispatchers.IO) {
                                 try {
                                     StoryVideoFiles.inspect(produced)
@@ -397,6 +412,17 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                 )
             }
 
+            if (showVoiceEffects) {
+                com.vladimir.messenger.ui.components.VoiceEffectPickerDialog(
+                    selected = voiceEffect,
+                    onSelected = {
+                        voiceEffect = it
+                        com.vladimir.messenger.data.voice.VoiceEffectPreferences.select(context, it)
+                    },
+                    onDismiss = { showVoiceEffects = false },
+                )
+            }
+
             // Нижняя панель: фильтры, затвор и подписи. Фон — мягкий градиент, без плашки.
             Column(
                 Modifier
@@ -419,6 +445,22 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                             onToggle = { showBackgrounds = !showBackgrounds },
                             onSelect = { storyBackground = it },
                         )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            StoryCameraIconButton(
+                                androidx.compose.material.icons.Icons.Default.GraphicEq,
+                                "Эффект голоса",
+                                active = voiceEffect != com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL,
+                            ) { showVoiceEffects = true }
+                            Text(
+                                if (voiceEffect == com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL) "Голос: обычный"
+                                else "Голос: " + stringResource(voiceEffect.labelRes),
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
                         StoryFilterPicker(
                             filter = faceFilter,
                             part = filterPart,

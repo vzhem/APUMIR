@@ -1516,7 +1516,20 @@ private fun MessageInputBar(
                 )
             }
             var showSendOptions by remember { mutableStateOf(false) }
+            var showVoiceEffectPicker by remember { mutableStateOf(false) }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // Эффект голоса выбирается ДО записи: та же кнопка, что во время записи.
+                ApuTextAction(
+                    label = if (voice.effect == com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL) {
+                        stringResource(R.string.voice_effect_short)
+                    } else {
+                        stringResource(voice.effect.labelRes)
+                    },
+                    onClick = { showVoiceEffectPicker = true },
+                    enabled = !isSending && !isSelfChat,
+                    icon = androidx.compose.material.icons.Icons.Default.GraphicEq,
+                    modifier = Modifier.weight(1f),
+                )
                 // Три кнопки делят ширину строки: на узких экранах не вылетают за край.
                 ApuTextAction(
                     label = stringResource(R.string.voice_record_short),
@@ -1536,6 +1549,13 @@ private fun MessageInputBar(
                     onClick = { showSendOptions = true },
                     enabled = canSend,
                     modifier = Modifier.weight(1f),
+                )
+            }
+            if (showVoiceEffectPicker) {
+                com.vladimir.messenger.ui.components.VoiceEffectPickerDialog(
+                    selected = voice.effect,
+                    onSelected = voice.selectEffect,
+                    onDismiss = { showVoiceEffectPicker = false },
                 )
             }
             if (showSendOptions) {

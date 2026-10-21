@@ -423,7 +423,7 @@ fun CallScreen(
                 Spacer(modifier = Modifier.height(72.dp))
             }
         }
-        if (showVoiceEffects && inCall) {
+        if (showVoiceEffects) {
             com.vladimir.messenger.ui.components.VoiceEffectPickerDialog(
                 selected = state.voiceEffect,
                 onSelected = viewModel::setVoiceEffect,
@@ -576,8 +576,19 @@ private fun CallButtons(
 
             else -> {
                 // OFFERING / RINGING: гудки в трубку; динамик — отдельная кнопка.
+                // Эффект голоса здесь выбирается ДО соединения: применится с
+                // первого кадра, когда медиа стартует после ответа.
                 if (state.phase != CallStateMachine.Phase.ENDED) {
                     if (state.video) CameraCallButton(state, onCamera)
+                    LabeledCallChip(
+                        icon = Icons.Default.GraphicEq,
+                        label = stringResource(
+                            R.string.call_voice_effect,
+                            stringResource(state.voiceEffect.labelRes),
+                        ),
+                        active = state.voiceEffect != com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL,
+                        onClick = onVoiceEffect,
+                    )
                     SpeakerCallButton(state, onSpeaker)
                     RoundCallButton(
                         background = MaterialTheme.colorScheme.error,

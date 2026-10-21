@@ -464,6 +464,7 @@ fun GroupChatScreen(
     }
     // Голосовое сообщение: запись и отправка тем же путём, что у файла.
     val voice = rememberVoiceRecorder { uri -> viewModel.onFileSelected(uri) }
+    var showVoiceEffectPicker by remember { mutableStateOf(false) }
     var showSendOptions by remember { mutableStateOf(false) }
     val storeContext = LocalContext.current
     remember(Unit) { com.vladimir.messenger.data.schedule.ScheduledSendStore.load(storeContext) }
@@ -1421,6 +1422,21 @@ fun GroupChatScreen(
                                     tint = if (voice.recording) Color(0xFFE5484D) else Color(0xFF5A6472),
                                 )
                             }
+                            IconButton(
+                                onClick = { showVoiceEffectPicker = true },
+                                enabled = !uiState.isPreparingFile && !uiState.sending,
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                Icon(
+                                    androidx.compose.material.icons.Icons.Default.GraphicEq,
+                                    contentDescription = stringResource(R.string.voice_effect_title),
+                                    tint = if (voice.effect == com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL) {
+                                        Color(0xFF5A6472)
+                                    } else {
+                                        Color(0xFFB8860B)
+                                    },
+                                )
+                            }
                             ApuPremiumChip(
                                 label = "GIF",
                                 selected = false,
@@ -1456,6 +1472,13 @@ fun GroupChatScreen(
                     }
                     if (voice.recording || voice.processing) {
                         VoiceRecordBar(voice)
+                    }
+                    if (showVoiceEffectPicker) {
+                        com.vladimir.messenger.ui.components.VoiceEffectPickerDialog(
+                            selected = voice.effect,
+                            onSelected = voice.selectEffect,
+                            onDismiss = { showVoiceEffectPicker = false },
+                        )
                     }
                     ApuBubbleField(
                         value = uiState.draft,

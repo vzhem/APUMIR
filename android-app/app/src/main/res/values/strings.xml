@@ -1745,6 +1745,7 @@
     <string name="voice_effect_done">Готово</string>
     <string name="voice_effect_processing">Применяю эффект…</string>
     <string name="voice_effect_button">Эффект: %1$s</string>
+    <string name="voice_effect_short">Эффект</string>
     <string name="call_voice_effect">Голос: %1$s</string>
     <string name="send_more">Ещё</string>
     <string name="send_options_title">Отправка</string>
