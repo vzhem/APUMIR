@@ -71,6 +71,7 @@ import android.widget.Toast
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Edit
@@ -1158,6 +1159,22 @@ private fun PostCard(
                     style = MaterialTheme.typography.labelSmall,
                     color = ApuBubbleMutedColor,
                 )
+                // Счётчик репостов: сколько раз пост ушёл дальше по рукам.
+                if (post.forwards > 0) {
+                    Spacer(Modifier.width(12.dp))
+                    Icon(
+                        Icons.Default.Share,
+                        contentDescription = stringResource(R.string.repost_count_label),
+                        tint = ApuBubbleMutedColor,
+                        modifier = Modifier.size(15.dp),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        post.forwards.toString(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ApuBubbleMutedColor,
+                    )
+                }
                 val totalReactions = reactions.sumOf { it.count }
                 if (totalReactions > 0) {
                     Spacer(Modifier.width(12.dp))
@@ -1209,16 +1226,16 @@ private fun PostCard(
         }
     }
     if (showReactions) {
-        val mine = reactions.firstOrNull { it.mine }?.emoji
+        val mine = reactions.filter { it.mine }.map { it.emoji }.toSet()
         com.vladimir.messenger.ui.components.ReactionPickerDialog(
             onDismiss = { showReactions = false },
-            myEmoji = mine,
+            myEmojis = mine,
             onRemove = {
                 showReactions = false
                 onRemoveReaction()
             },
+            // Не закрываем: можно поставить сразу до пяти реакций.
             onPick = { emoji ->
-                showReactions = false
                 onToggleReaction(emoji)
             },
         )
@@ -1354,6 +1371,7 @@ private fun PostEditorDialog(
 ) {
     val pollContext = LocalContext.current
     val voice = com.vladimir.messenger.ui.components.rememberVoiceRecorder { uri -> onVoiceReady?.invoke(uri) }
+    var showVoiceEffectPicker by remember { mutableStateOf(false) }
     var text by remember { mutableStateOf(initialText) }
     // Уже сжатые картинки (base64) по порядку.
     var images by remember { mutableStateOf(initialImages) }
@@ -1497,7 +1515,7 @@ private fun PostEditorDialog(
                                 Icon(Icons.Default.Close, contentDescription = stringResource(R.string.channel_remove_file), modifier = Modifier.size(16.dp))
                             }
                         }
-                    } else if (voice.recording) {
+                    } else if (voice.recording || voice.processing) {
                         com.vladimir.messenger.ui.components.VoiceRecordBar(voice)
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1509,6 +1527,16 @@ private fun PostEditorDialog(
                                 )
                             }
                             ApuTextAction(
+                                label = if (voice.effect == com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL) {
+                                    stringResource(R.string.voice_effect_short)
+                                } else {
+                                    stringResource(voice.effect.labelRes)
+                                },
+                                onClick = { showVoiceEffectPicker = true },
+                                enabled = !preparingFile && !creating,
+                                icon = Icons.Filled.GraphicEq,
+                            )
+                            ApuTextAction(
                                 label = stringResource(R.string.channel_attach_file),
                                 onClick = onPickFile,
                                 enabled = !preparingFile && !creating,
@@ -1518,6 +1546,13 @@ private fun PostEditorDialog(
                             }
                         }
                     }
+                }
+                if (showVoiceEffectPicker) {
+                    com.vladimir.messenger.ui.components.VoiceEffectPickerDialog(
+                        selected = voice.effect,
+                        onSelected = voice.selectEffect,
+                        onDismiss = { showVoiceEffectPicker = false },
+                    )
                 }
                 // р250: опрос к посту. Блок раскрывается по кнопке, чтобы не
                 // загромождать окно, когда опрос не нужен.

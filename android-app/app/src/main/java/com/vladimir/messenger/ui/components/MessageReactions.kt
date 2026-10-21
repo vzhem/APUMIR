@@ -167,6 +167,8 @@ fun ReactionPickerDialog(
     onPick: (String) -> Unit,
     /** Значок, который этот телефон уже поставил (null - реакции ещё нет). */
     myEmoji: String? = null,
+    /** Все свои значки на сообщении (до пяти): подсвечиваются все сразу. */
+    myEmojis: Set<String> = setOfNotNull(myEmoji),
     onRemove: (() -> Unit)? = null,
 ) {
     ApuSettingsDialog(
@@ -179,19 +181,35 @@ fun ReactionPickerDialog(
                         line.forEachIndexed { columnIndex, emoji ->
                             PickerEmoji(
                                 emoji = emoji,
-                                isMine = emoji == myEmoji,
+                                isMine = emoji in myEmojis,
                                 orderIndex = rowIndex * PICKER_COLUMNS + columnIndex,
                                 onPick = onPick,
                             )
                         }
                     }
                 }
+                // Счётчик своих и честный предел: шестой значок не встанет,
+                // пока не снимешь один из пяти — лучше сказать об этом здесь.
+                if (myEmojis.isNotEmpty()) {
+                    Text(
+                        stringResource(R.string.mr_yours_count, myEmojis.size),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = ApuBubbleMutedColor,
+                    )
+                }
+                if (myEmojis.size >= 5) {
+                    Text(
+                        stringResource(R.string.mr_limit_hint),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = ApuBubbleMutedColor,
+                    )
+                }
             }
         },
         confirmButton = {
             ApuTextAction(label = stringResource(R.string.action_close), onClick = onDismiss)
         },
-        dismissButton = if (myEmoji != null && onRemove != null) {
+        dismissButton = if (myEmojis.isNotEmpty() && onRemove != null) {
             { ApuTextAction(label = stringResource(R.string.mr_remove), onClick = onRemove) }
         } else {
             null
@@ -266,7 +284,8 @@ private fun PickerEmoji(
             }
             .clickable {
                 // Значок вылетает из пузыря выбора и уходит вверх мимо него.
-                if (spot.second > 0f) {
+                // Снятие своего значка полётом не празднуем.
+                if (!isMine && spot.second > 0f) {
                     ReactionFlight.launch(emoji, spot.first, spot.second)
                 }
                 onPick(emoji)

@@ -22,5 +22,11 @@ internal object HeartSyncPrefs {
     fun markPeer(context: Context, contactId: String, nowMs: Long) =
         prefs(context).edit().putLong(PEER_PREFIX + contactId, nowMs).apply()
 
+    /** Когда последний раз отвечали этому узлу на ручной запрос счёта (антиспам ответов). */
+    fun lastRequestResponse(context: Context, contactId: String): Long =
+        prefs(context).getLong("resp_" + contactId, 0L)
+    fun markRequestResponse(context: Context, contactId: String, nowMs: Long) =
+        prefs(context).edit().putLong("resp_" + contactId, nowMs).apply()
+
     private fun prefs(context: Context) = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 }

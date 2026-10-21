@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +30,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FlashOff
@@ -59,8 +61,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -140,6 +146,16 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
     var elapsed by remember { mutableStateOf(0L) }
     var error by remember { mutableStateOf<String?>(null) }
     var faceFilter by remember { mutableStateOf(StoryFaceFilter.NONE) }
+    // Эффект голоса выбирается ДО записи и применяется к звуку готовой истории.
+    var voiceEffect by remember { mutableStateOf(com.vladimir.messenger.data.voice.VoiceEffectPreferences.load(context)) }
+    var showVoiceEffects by remember { mutableStateOf(false) }
+    var storyBackground by remember {
+        mutableStateOf(com.vladimir.messenger.data.background.VideoBackground.NONE)
+    }
+    var showBackgrounds by remember { mutableStateOf(false) }
+    // Живой кадр с фоном для предпросмотра: фон виден сразу при выборе.
+    var liveBackgroundFrame by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var liveBackgroundStatus by remember { mutableStateOf<String?>(null) }
     // Прогресс наложения фильтра после остановки записи (0..1), null — не идёт.
     var processing by remember { mutableStateOf<Float?>(null) }
     var filterPart by remember { mutableStateOf(FilterPart.EARS) }
@@ -192,6 +208,20 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
     LaunchedEffect(ready, torch) {
         if (ready) session.setTorch(torch && !front)
     }
+    // Выбранный фон сразу включается в живой предпросмотр, как в KakaoTalk:
+    // видно себя на фоне до записи и во время неё, а не вслепую.
+    LaunchedEffect(storyBackground) {
+        if (!storyBackground.isActive) {
+            liveBackgroundFrame = null
+            liveBackgroundStatus = null
+        }
+        session.setBackgroundPreview(
+            if (storyBackground.isActive) storyBackground else null,
+        ) { frame, reason ->
+            liveBackgroundFrame = frame
+            liveBackgroundStatus = reason
+        }
+    }
 
     fun startRecording() {
         recording = true
@@ -200,6 +230,8 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
         error = null
         // Фильтр фиксируем на старте: смена во время записи не должна менять уже снятое видео.
         val filterForRecording = faceFilter
+        val backgroundForRecording = storyBackground
+        val voiceEffectForRecording = voiceEffect
         try {
             session.start(audio, onElapsed = { elapsed = it }, onFinished = { result ->
                 recording = false
@@ -214,12 +246,50 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                     var produced: File = file
                     scope.launch {
                         try {
-                            // Накладываем фильтр на записанный файл; без фильтра он возвращается как есть.
-                            val baked = StoryFaceBaker.bake(context, file, filterForRecording) { processing = it }
+                            // Сначала фон, потом фильтр лица; без них файл возвращается как есть.
+                            val bgBaked = com.vladimir.messenger.data.story.StoryBackgroundBaker
+                                .bake(context, file, backgroundForRecording) { processing = it * 0.5f }
+                            bgBaked.message?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
+                            val afterBackground = bgBaked.file
+                            val baked = StoryFaceBaker.bake(context, afterBackground, filterForRecording) {
+                                processing = 0.5f + it * 0.5f
+                            }
                             baked.message?.let { Toast.makeText(context, it, Toast.LENGTH_LONG).show() }
                             produced = baked.file
-                            if (produced != file) file.delete()
-                            val source = withContext(Dispatchers.IO) { StoryVideoFiles.inspect(produced) }
+                            // Удаляем только промежуточные файлы и никогда — итог:
+                            // когда фильтр лица не выбран, итог и есть файл после фона,
+                            // и его удаление раньше ломало сохранение («файл не существует»).
+                            listOf(file, afterBackground)
+                                .distinct()
+                                .filter { it != produced }
+                                .forEach { it.delete() }
+                            // Эффект голоса — финальный шаг по звуковой дорожке.
+                            if (audio && voiceEffectForRecording != com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL) {
+                                processing = 0.97f
+                                val voiced = withContext(Dispatchers.IO) {
+                                    com.vladimir.messenger.data.voice.VoiceEffectVideoProcessor.apply(produced, voiceEffectForRecording)
+                                }
+                                if (voiced != null && voiced != produced) {
+                                    if (produced != file) produced.delete()
+                                    produced = voiced
+                                }
+                            }
+                            val source = withContext(Dispatchers.IO) {
+                                try {
+                                    StoryVideoFiles.inspect(produced)
+                                } catch (broken: Exception) {
+                                    // Обработанный файл оказался битым: история не должна
+                                    // пропадать — сохраняем исходную запись без фона.
+                                    if (produced == file) throw broken
+                                    produced.delete()
+                                    Toast.makeText(
+                                        context,
+                                        "Обработанное видео повреждено, сохранено без фона",
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                    StoryVideoFiles.inspect(file)
+                                }
+                            }
                             recorded(source)
                             handedOff = true
                         } catch (cancelled: CancellationException) {
@@ -261,6 +331,18 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                         applyStoryVideoShape(it, circle)
                         it.scaleType = PreviewView.ScaleType.FILL_CENTER
                     }, modifier = Modifier.fillMaxSize())
+                    if (storyBackground.isActive) {
+                        liveBackgroundFrame?.let { bmp ->
+                            Image(
+                                bitmap = bmp.asImageBitmap(),
+                                contentDescription = null,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .then(if (mirrored) Modifier.graphicsLayer { scaleX = -1f } else Modifier),
+                                contentScale = ContentScale.Crop,
+                            )
+                        }
+                    }
                     StoryFaceOverlay(faceFrame, faceFilter, mirrored = mirrored, modifier = Modifier.fillMaxSize())
                 }
             } else {
@@ -316,6 +398,32 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                 )
             }
 
+            if (storyBackground.isActive && liveBackgroundStatus != null) {
+                Text(
+                    "Фон не применился: ${liveBackgroundStatus}",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(top = 112.dp, start = 24.dp, end = 24.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.Black.copy(alpha = 0.55f))
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+            }
+
+            if (showVoiceEffects) {
+                com.vladimir.messenger.ui.components.VoiceEffectPickerDialog(
+                    selected = voiceEffect,
+                    onSelected = {
+                        voiceEffect = it
+                        com.vladimir.messenger.data.voice.VoiceEffectPreferences.save(context, it)
+                    },
+                    onDismiss = { showVoiceEffects = false },
+                )
+            }
+
             // Нижняя панель: фильтры, затвор и подписи. Фон — мягкий градиент, без плашки.
             Column(
                 Modifier
@@ -332,6 +440,28 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                         Text("Фильтры лица на этом устройстве недоступны",
                             color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.bodySmall)
                     } else {
+                        StoryBackgroundPicker(
+                            selected = storyBackground,
+                            expanded = showBackgrounds,
+                            onToggle = { showBackgrounds = !showBackgrounds },
+                            onSelect = { storyBackground = it },
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            StoryCameraIconButton(
+                                Icons.Filled.GraphicEq,
+                                "Эффект голоса",
+                                active = voiceEffect != com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL,
+                            ) { showVoiceEffects = true }
+                            Text(
+                                if (voiceEffect == com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL) "Голос: обычный"
+                                else "Голос: " + stringResource(voiceEffect.labelRes),
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
                         StoryFilterPicker(
                             filter = faceFilter,
                             part = filterPart,
@@ -569,6 +699,47 @@ private fun StoryFilterPicker(
             items(options) { option ->
                 ApuPremiumChip(label = option.label, selected = option.selected, onClick = option.onSelect)
             }
+        }
+    }
+}
+
+
+@Composable
+private fun StoryBackgroundPicker(
+    selected: com.vladimir.messenger.data.background.VideoBackground,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onSelect: (com.vladimir.messenger.data.background.VideoBackground) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(horizontal = 16.dp),
+        ) {
+            item {
+                ApuPremiumChip(
+                    label = "Фон: " + stringResource(selected.labelRes),
+                    selected = selected.isActive,
+                    onClick = onToggle,
+                )
+            }
+            if (expanded) {
+                items(com.vladimir.messenger.data.background.VideoBackground.pickerEntries) { entry ->
+                    ApuPremiumChip(
+                        label = stringResource(entry.labelRes),
+                        selected = entry == selected,
+                        onClick = { onSelect(entry) },
+                    )
+                }
+            }
+        }
+        if (selected.isActive) {
+            Text(
+                "Фон уже виден на экране и попадёт в запись",
+                color = Color.White.copy(alpha = 0.8f),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
         }
     }
 }

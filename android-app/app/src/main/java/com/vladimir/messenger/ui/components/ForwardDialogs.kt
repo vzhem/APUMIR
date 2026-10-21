@@ -43,7 +43,7 @@ data class ForwardTarget(
 )
 
 /** Что пересылаем: текст сообщения и подпись источника для шапки. */
-data class ForwardPayload(val text: String, val label: String)
+data class ForwardPayload(val text: String, val label: String, val messageId: String = "")
 
 data class ForwardTopic(val id: String, val name: String, val iconEmoji: String = "")
 

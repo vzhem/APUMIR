@@ -17,6 +17,8 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -46,22 +48,28 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Multi-device pairing (P3). Two roles on one phone screen:
- * - primary: show a QR, compare the code with the new device, confirm;
- * - new device: scan the primary's QR, compare the code, confirm.
+ * Multi-device pairing (P3). Every phone can do both actions on one screen:
+ * - show a QR, compare the code with the other device, confirm;
+ * - scan the other phone's QR, compare the code, confirm.
+ * There is no fixed primary/new role here: the pressed button picks the direction.
  * The codes are the only trust step: the user checks them on both devices.
  */
 @Composable
 fun DevicesScreen(
     onBackClick: () -> Unit,
     onScanClick: () -> Unit,
+    onManualCode: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val primary by DevicePairingController.primary.collectAsStateWithLifecycle()
     val joiner by DevicePairingController.joiner.collectAsStateWithLifecycle()
     val offerOpen by DevicePairingController.isOfferOpen.collectAsStateWithLifecycle()
+    val primaryDone by DevicePairingController.primaryDone.collectAsStateWithLifecycle()
+    var manualCode by remember { mutableStateOf("") }
     var qrText by remember { mutableStateOf<String?>(null) }
+    // Роли на этом экране нет: любой телефон и показывает, и сканирует QR.
+    // Кто сейчас «показывающий», а кто «сканирующий», определяет только нажатая кнопка.
     val qrBitmap = remember(qrText) { qrText?.let { QrCodeGenerator.generateQrCode(it, 800) } }
 
     DisposableEffect(Unit) {
@@ -91,9 +99,14 @@ fun DevicesScreen(
         }
 
         Spacer(Modifier.height(8.dp))
-        Text(stringResource(R.string.devices_primary_title), style = MaterialTheme.typography.titleMedium)
         Text(
-            stringResource(R.string.devices_primary_hint),
+            stringResource(R.string.devices_actions_hint),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(stringResource(R.string.devices_show_title), style = MaterialTheme.typography.titleMedium)
+        Text(
+            stringResource(R.string.devices_show_hint),
             style = MaterialTheme.typography.bodyMedium,
         )
         Spacer(Modifier.height(8.dp))
@@ -126,10 +139,23 @@ fun DevicesScreen(
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.align(Alignment.CenterHorizontally),
             )
+            // Тот же код текстом: его можно скопировать и ввести вручную на
+            // втором телефоне, если камера не справляется.
+            SelectionContainer {
+                Text(
+                    qrText.orEmpty(),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
         }
 
         primary?.let { request ->
             Spacer(Modifier.height(12.dp))
+            Text(
+                stringResource(R.string.devices_joiner_device, request.deviceShort),
+                style = MaterialTheme.typography.titleMedium,
+            )
             Text(stringResource(R.string.devices_code_title), style = MaterialTheme.typography.titleMedium)
             Text(
                 request.sas,
@@ -154,13 +180,46 @@ fun DevicesScreen(
         Spacer(Modifier.height(16.dp))
         HorizontalDivider()
         Spacer(Modifier.height(16.dp))
-        Text(stringResource(R.string.devices_joiner_title), style = MaterialTheme.typography.titleMedium)
-        Text(stringResource(R.string.devices_joiner_hint), style = MaterialTheme.typography.bodyMedium)
+        Text(stringResource(R.string.devices_scan_title), style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.devices_scan_hint), style = MaterialTheme.typography.bodyMedium)
         Spacer(Modifier.height(8.dp))
         DevicesButton(label = stringResource(R.string.devices_scan_qr), onClick = onScanClick, modifier = Modifier.fillMaxWidth())
+        Spacer(Modifier.height(12.dp))
+        Text(stringResource(R.string.devices_manual_title), style = MaterialTheme.typography.titleMedium)
+        Text(stringResource(R.string.devices_manual_hint), style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(8.dp))
+        OutlinedTextField(
+            value = manualCode,
+            onValueChange = { manualCode = it },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = false,
+            minLines = 2,
+        )
+        Spacer(Modifier.height(8.dp))
+        DevicesButton(
+            label = stringResource(R.string.devices_manual_button),
+            onClick = { onManualCode(manualCode) },
+            modifier = Modifier.fillMaxWidth(),
+            primary = false,
+        )
+
+        if (primaryDone) {
+            Spacer(Modifier.height(12.dp))
+            Text(stringResource(R.string.devices_done))
+            Spacer(Modifier.height(8.dp))
+            DevicesButton(
+                label = stringResource(R.string.devices_resend_grant),
+                onClick = { DevicePairingController.resendGrant() },
+                primary = false,
+            )
+        }
 
         joiner?.let { state ->
             Spacer(Modifier.height(12.dp))
+            if (state.deviceShort.isNotBlank()) {
+                Text(stringResource(R.string.devices_this_device, state.deviceShort))
+                Spacer(Modifier.height(4.dp))
+            }
             when (state.phase) {
                 JoinerPhase.WAITING_ANSWER -> Text(stringResource(R.string.devices_waiting_answer))
                 JoinerPhase.CONFIRM_CODE -> {
@@ -191,6 +250,10 @@ fun DevicesScreen(
                     DevicePairingController.dismissJoiner()
                 }, primary = false)
             } else {
+                Spacer(Modifier.height(8.dp))
+                DevicesButton(label = stringResource(R.string.devices_resend_request), onClick = {
+                    DevicePairingController.resendRequest()
+                }, primary = false)
                 Spacer(Modifier.height(8.dp))
                 DevicesButton(label = stringResource(R.string.devices_cancel), onClick = {
                     scope.launch(Dispatchers.IO) { DevicePairingController.cancel() }

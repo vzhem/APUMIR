@@ -76,6 +76,7 @@ class CoreServerService : Service() {
     @Inject lateinit var linkShortener: com.vladimir.messenger.data.link.LinkShortener
     @Inject lateinit var readReceipts: com.vladimir.messenger.data.receipt.ReadReceiptRepository
     @Inject lateinit var messageDeletion: com.vladimir.messenger.data.repository.MessageDeletionRepository
+    @Inject lateinit var messageEdit: com.vladimir.messenger.data.repository.MessageEditRepository
     @Inject lateinit var hearts: com.vladimir.messenger.data.heart.HeartRepository
     @Inject lateinit var postViews: com.vladimir.messenger.data.channel.PostViewRepository
     @Inject lateinit var deferredDelivery: com.vladimir.messenger.data.schedule.DeferredDelivery
@@ -87,8 +88,11 @@ class CoreServerService : Service() {
     @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
     @Inject lateinit var heartGameNetwork: com.vladimir.messenger.data.heartgame.HeartGameNetwork
     @Inject lateinit var peerRankRouter: com.vladimir.messenger.data.rank.PeerRankRouter
+    @Inject lateinit var peerRankStore: com.vladimir.messenger.data.rank.PeerRankStore
+    @Inject lateinit var peerRankBroadcaster: com.vladimir.messenger.data.rank.PeerRankBroadcaster
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
+    @Inject lateinit var repostRepository: com.vladimir.messenger.data.repost.RepostRepository
     // Отклики на истории: значки и комментарии зрителей (см. docs/STORY_REACTIONS_AND_COMMENTS.md).
     @Inject lateinit var storyFeedback: com.vladimir.messenger.data.story.StoryFeedbackRepository
     @Inject lateinit var groupDao: com.vladimir.messenger.data.local.dao.GroupDao
@@ -300,6 +304,51 @@ class CoreServerService : Service() {
         return chatRepository.markOutgoingMessageDelivered(messageId)
     }
 
+    /**
+     * Уведомить отправителя, что его приглашение отклонено настройками
+     * приватности этого телефона. Самому получателю по-прежнему полная
+     * тишина; отправитель получает служебный пакет и видит человеческое
+     * уведомление «не доставлено: вы не контакт» или «абонент запретил
+     * всем». Не чаще раза в час одному человеку (claimRejectNotice).
+     */
+    private suspend fun sendInviteReject(senderId: String, content: String) {
+        if (!senderId.startsWith("pk_")) return
+        val reason = when (
+            com.vladimir.messenger.data.profile.InvitePrivacyStore.value(applicationContext)
+        ) {
+            com.vladimir.messenger.data.profile.InvitePrivacy.NOBODY ->
+                com.vladimir.messenger.data.invite.InviteRejectWire.Reason.NOBODY
+            com.vladimir.messenger.data.profile.InvitePrivacy.CONTACTS ->
+                com.vladimir.messenger.data.invite.InviteRejectWire.Reason.NOT_CONTACT
+            com.vladimir.messenger.data.profile.InvitePrivacy.ALL -> return
+        }
+        if (!com.vladimir.messenger.data.profile.InvitePrivacyStore
+                .claimRejectNotice(applicationContext, senderId)
+        ) {
+            return
+        }
+        // Название - только у одиночной карточки; у мульти-приглашения
+        // отправителю уходит общая формулировка без названия.
+        val title = com.vladimir.messenger.util.GroupInviteCardSender
+            .parseCard(content)?.title.orEmpty()
+        val packet = com.vladimir.messenger.data.invite.InviteRejectWire.build(reason, title)
+        val direct = runCatching { RustBridge.sendDirectPayload(senderId, packet) }
+            .getOrDefault(false)
+        if (!direct) {
+            runCatching {
+                RustBridge.sendMessage(java.util.UUID.randomUUID().toString(), "", senderId, packet)
+            }
+        }
+        Log.i(TAG, "invite reject notice sent to $senderId reason=$reason")
+    }
+
+    /** Входящий отказ на МОЁ приглашение: заметка в чат + уведомление. */
+    private suspend fun handleInviteReject(senderId: String, text: String) {
+        val notice = com.vladimir.messenger.data.invite.InviteRejectWire.parse(text) ?: return
+        runCatching { chatRepository.insertInviteRejectNotice(senderId, notice) }
+            .onFailure { Log.w(TAG, "invite reject notice insert failed: ${it.message}") }
+    }
+
     private suspend fun routeIncomingEnvelope(
         senderId: String,
         chatId: String,
@@ -308,6 +357,15 @@ class CoreServerService : Service() {
         authenticated: Boolean = false,
     ): Boolean {
         if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, authenticated)) return true
+        // P3: пакеты подключения устройств разбираем и на запасном пути приёма.
+        // У устройств одного аккаунта общий nodeId, поэтому «отправитель = я»
+        // здесь не признак мусора: кто именно из устройств прислал пакет,
+        // ядро определяет по device_id и MAC внутри пакета.
+        if (com.vladimir.messenger.data.pairing.DevicePairingWire.isPacket(text)) {
+            com.vladimir.messenger.data.pairing.DevicePairingController
+                .routeIncoming(applicationContext, senderId, text)
+            return true
+        }
         // р243/р244: подтверждение доставки, пришедшее прямым каналом. Второй
         // путь приёма обязан разбирать его так же, как основной: иначе строка
         // «ack|…» вырастет в личный чат. Даже некорректный ACK с зарезервированным
@@ -331,6 +389,14 @@ class CoreServerService : Service() {
             } else {
                 Log.w(TAG, "malformed delivery ACK on relay path; dropped")
             }
+            return true
+        }
+
+        // Отказ на моё приглашение (настройки приватности получателя):
+        // заметка в чат с ним и обычное уведомление, в переписку служебная
+        // строка не ложится.
+        if (com.vladimir.messenger.data.invite.InviteRejectWire.isPacket(text)) {
+            runCatching { handleInviteReject(senderId, text) }
             return true
         }
 
@@ -377,7 +443,9 @@ class CoreServerService : Service() {
             return true
         }
         if (runCatching { reactionRepository.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { repostRepository.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { messageDeletion.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { messageEdit.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { postViews.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { hearts.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { addressBookSwarm.routeIncoming(senderId, text) }.getOrDefault(false)) return true
@@ -386,7 +454,7 @@ class CoreServerService : Service() {
         if (runCatching { referralAttributionRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         // Ранг собеседника (APURANK1): знак VIP у имени. Поглощается здесь же,
         // чтобы служебная строка не стала текстом в переписке.
-        if (runCatching { heartGameNetwork.routeIncoming(text) || peerRankRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (runCatching { heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
         if (runCatching { callManager.routeIncoming(senderId, chatId, messageId, text) }
             .getOrDefault(false)
         ) {
@@ -719,6 +787,8 @@ class CoreServerService : Service() {
                 // День рождения: своя (видимая) дата — контактам, скрытая не
                 // уходит вовсе. Даты друзей лежат в своей книге.
                 runCatching { groupRepository.publishMyBirthday() }
+                // Эмодзи-статус у профиля: объявить свой сети при старте.
+                runCatching { groupRepository.publishMyEmojiStatus() }
                 // Сколько места под пересылку отдаю - контактам, для их рейтинга.
                 runCatching { groupRepository.publishMyCapabilities() }
             }
@@ -749,6 +819,12 @@ class CoreServerService : Service() {
                 com.vladimir.messenger.data.profile.BirthdayStore.mine
                     .drop(1)
                     .collect { runCatching { groupRepository.publishMyBirthday(force = true) } }
+            }
+            // Сменил или убрал эмодзи-статус — сеть узнаёт сразу (уборка = отзыв).
+            serviceScope.launch {
+                com.vladimir.messenger.data.profile.EmojiStatusStore.mine
+                    .drop(1)
+                    .collect { runCatching { groupRepository.publishMyEmojiStatus(force = true) } }
             }
         }
 
@@ -1132,6 +1208,9 @@ class CoreServerService : Service() {
                                                 channel = MessageChannel.CF,
                                             )
                                             Log.i(TAG, "CF message handled for chat ${chat.id} msgId=$messageId")
+                                            if (chatRepository.isInviteBlocked(senderId, cfContent)) {
+                                                runCatching { sendInviteReject(senderId, cfContent) }
+                                            }
                                             // Диагностика: и этот путь считает входящие
                                             // - иначе через релей сообщения были бы
                                             // невидимы в отчёте.
@@ -1180,6 +1259,9 @@ class CoreServerService : Service() {
                                         channel = MessageChannel.CF,
                                     )
                                     Log.i(TAG, "CF plain-text saved to chat ${chat.id}: ${parsed.raw.take(30)}")
+                                    if (chatRepository.isInviteBlocked(senderId, parsed.raw)) {
+                                        runCatching { sendInviteReject(senderId, parsed.raw) }
+                                    }
                                     com.vladimir.messenger.data.diagnostics
                                         .TransferDiagnostics.noteMessageIncoming()
                                 }
@@ -1286,6 +1368,9 @@ class CoreServerService : Service() {
             notify: Boolean,
         ) {
             val (chatId, name) = chatRepository.applyMirrorIncoming(row)
+            // Пустой chatId = сообщение не сохранено (в т.ч. запрещённое
+            // приглашение): уведомления быть не должно.
+            if (chatId.isBlank()) return
             if (notify) {
                 // р249: у чата на паузе не показываем сообщение в шторке.
                 if (runCatching { chatRepository.isChatMuted(chatId) }.getOrDefault(false)) {
@@ -1631,7 +1716,7 @@ class CoreServerService : Service() {
         // Ранг собеседника едет в обёртке «печатает…» (см. RankWire.WRAPPER).
         // Разбираем его РАНЬШЕ индикатора набора: иначе конверт был бы прочитан
         // как «партнёр перестал печатать» и молча пропал бы вместе с рангом.
-        if (runCatching { heartGameNetwork.routeIncoming(text) || peerRankRouter.routeIncoming(senderId, text) }.getOrDefault(false)) {
+        if (runCatching { heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text) }.getOrDefault(false)) {
             Log.i(TAG, "Mirror envelope: ранг собеседника применён")
             return true
         }
@@ -1665,8 +1750,16 @@ class CoreServerService : Service() {
             Log.i(TAG, "Mirror envelope: reaction from ${senderId.takeLast(8)} applied")
             return true
         }
+        if (runCatching { repostRepository.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            Log.i(TAG, "Mirror envelope: repost from ${senderId.takeLast(8)} applied")
+            return true
+        }
         if (runCatching { messageDeletion.routeIncoming(senderId, text) }.getOrDefault(false)) {
             Log.i(TAG, "Mirror envelope: deletion from ${senderId.takeLast(8)} applied")
+            return true
+        }
+        if (runCatching { messageEdit.routeIncoming(senderId, text) }.getOrDefault(false)) {
+            Log.i(TAG, "Mirror envelope: edit from ${senderId.takeLast(8)} applied")
             return true
         }
         if (runCatching { postViews.routeIncoming(senderId, text) }.getOrDefault(false)) {
@@ -1754,10 +1847,22 @@ class CoreServerService : Service() {
             Log.i(TAG, "Mirror action: реакция с тени применена локально")
             return
         }
+        if (runCatching { repostRepository.applyMirrorOutgoing(peerId, groupId, text) }
+                .getOrDefault(false)
+        ) {
+            Log.i(TAG, "Mirror action: репост с тени применён локально")
+            return
+        }
         if (peerId.isNotBlank() &&
             runCatching { messageDeletion.applyMirrorOutgoing(peerId, text) }.getOrDefault(false)
         ) {
             Log.i(TAG, "Mirror action: удаление с тени применено локально")
+            return
+        }
+        if (peerId.isNotBlank() &&
+            runCatching { messageEdit.applyMirrorOutgoing(peerId, text) }.getOrDefault(false)
+        ) {
+            Log.i(TAG, "Mirror action: правка с тени применена локально")
             return
         }
         if (runCatching { postViews.applyMirrorOutgoing(text) }.getOrDefault(false)) return
@@ -2315,6 +2420,17 @@ class CoreServerService : Service() {
                 // основной приём P2P живёт здесь - и пакет APUTYP1|1 лёг в чат
                 // сообщением с уведомлением (владелец, скрины 30.09). Поэтому
                 // рядом добавлен и страж в ChatRepository.saveIncomingMessage.
+                // Ранг и сердечки едут в ТОЙ ЖЕ обёртке APUTYP1, что и
+                // «печатает…». Разбирать их надо РАНЬШЕ индикатора набора:
+                // зеркальный и релейный пути так и делают, а основной путь
+                // читал конверт как «перестал печатать» и молча терял ранг -
+                // значок VIP не появлялся, хотя собеседник давно VIP.
+                if (heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text)) {
+                    runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                    Log.i(TAG, "Rank/heart envelope handled before typing (main path)")
+                    return
+                }
+
                 val typingSignal = com.vladimir.messenger.data.typing.TypingWire.parse(text)
                 if (typingSignal != null) {
                     if (typingSignal) {
@@ -2427,6 +2543,15 @@ class CoreServerService : Service() {
                         }
                         return
                     }
+                    // Счётчик репостов: APURPOST1 тоже не сообщение, а сигнал.
+                    if (repostRepository.routeIncoming(senderId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Repost packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
 
                     // Раунд 135: «удали у всех» в личном чате - конверт
                     // APUDEL1 разбирается до сохранения, в переписку ему
@@ -2436,6 +2561,17 @@ class CoreServerService : Service() {
                             RustBridge.sendDeliveryAck(messageId, senderId)
                         } catch (e: Exception) {
                             Log.w(TAG, "Delete packet ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
+                    // Правка своего сообщения (APUEDIT1): применяется к
+                    // строке автора, в переписку служебной строкой не идёт.
+                    if (messageEdit.routeIncoming(senderId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Edit packet ACK failed: " + e.message)
                         }
                         return
                     }
@@ -2510,7 +2646,7 @@ class CoreServerService : Service() {
                     // Разбирается ДО авто-создания контакта: иначе служебная
                     // строка создала бы чат с мусорным текстом у того, кто ещё
                     // не добавил этого человека.
-                    if (heartGameNetwork.routeIncoming(text) || peerRankRouter.routeIncoming(senderId, text)) {
+                    if (heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text)) {
                         try {
                             RustBridge.sendDeliveryAck(messageId, senderId)
                         } catch (e: Exception) {
@@ -2536,6 +2672,35 @@ class CoreServerService : Service() {
                     // Иначе — это широковещательное сообщение не для нас (ретранслируем, но не сохраняем)
                     // P2P ФИЛЬТРАЦИЯ: ищем существующий чат с этим контактом
                     // Если чата нет — не создаём (пользователь сам решает с кем общаться)
+                    // Отказ на МОЁ приглашение: получатель отклонил его
+                    // настройками приватности. Показываем заметку в чате с
+                    // ним и уведомление; служебная строка в переписку не идёт.
+                    if (com.vladimir.messenger.data.invite.InviteRejectWire.isPacket(text)) {
+                        runCatching { handleInviteReject(senderId, text) }
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Invite reject ACK failed: " + e.message)
+                        }
+                        return
+                    }
+
+                    // Запрещённое настройками приглашение выбрасываем ДО
+                    // создания контакта и чата: ни строки в списке чатов, ни
+                    // уведомления, ни непрочитанных. Подтверждение доставки
+                    // отправителю уходит как обычно - пусть не повторяет.
+                    if (chatRepository.isInviteBlocked(senderId, text)) {
+                        try {
+                            RustBridge.sendDeliveryAck(messageId, senderId)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "blocked invite ACK failed: " + e.message)
+                        }
+                        Log.i(TAG, "invite blocked by privacy setting from $senderId - dropped silently")
+                        // У меня тишина, но отправитель должен узнать, что
+                        // приглашение не дошло и почему.
+                        runCatching { sendInviteReject(senderId, text) }
+                        return
+                    }
                     var chat = chatRepository.getChatByContactId(senderId)
                     if (chat == null) {
                         Log.i(TAG, "No chat with $senderId - auto-creating contact and chat")
@@ -2559,7 +2724,7 @@ class CoreServerService : Service() {
                         }
                     }
 
-                    chatRepository.saveIncomingMessage(
+                    val incomingSaved = chatRepository.saveIncomingMessage(
                         chatId = chat.id,
                         senderId = senderId,
                         messageId = messageId,
@@ -2575,19 +2740,23 @@ class CoreServerService : Service() {
                     // р242: для диагностики - когда последний раз что-то приходило.
                     com.vladimir.messenger.data.mirror.MirrorHub.noteIncoming()
                     // р226: мгновенно отразить входящее на зеркале-партнёре.
-                    mirror?.publishIncoming(
-                        com.vladimir.messenger.data.mirror.MirrorRow(
-                            id = messageId,
-                            chatId = chat.id,
-                            contactName = chat.contactName,
-                            senderId = senderId,
-                            content = text,
-                            timestamp = timestamp,
-                            mine = false,
-                            recipientId = RustBridge.nodeId() ?: "",
-                            status = "DELIVERED",
+                    // На второй телефон уходит только сохранённое: выброшенное
+                    // приглашение не должно всплыть уведомлением на зеркале.
+                    if (incomingSaved) {
+                        mirror?.publishIncoming(
+                            com.vladimir.messenger.data.mirror.MirrorRow(
+                                id = messageId,
+                                chatId = chat.id,
+                                contactName = chat.contactName,
+                                senderId = senderId,
+                                content = text,
+                                timestamp = timestamp,
+                                mine = false,
+                                recipientId = RustBridge.nodeId() ?: "",
+                                status = "DELIVERED",
+                            )
                         )
-                    )
+                    }
                     
                     // Отправить ACK отправителю
                     try {
@@ -2672,6 +2841,17 @@ class CoreServerService : Service() {
                                 } catch (e: kotlinx.coroutines.CancellationException) {
                                     throw e
                                 } catch (_: Exception) {
+                                }
+                            }
+                            // Ранг новенького не знаем - а значок VIP у его
+                            // имени нужен сразу, не после недельной рассылки.
+                            // Просим конверт ранга адресно (ограничитель
+                            // внутри: не чаще раза в сутки одному).
+                            serviceScope.launch {
+                                runCatching {
+                                    if (peerRankStore.qualifiedFor(peerId) == null) {
+                                        peerRankBroadcaster.requestRank(peerId)
+                                    }
                                 }
                             }
                             Log.i(TAG, "🟢 ONLINE: $peerName")

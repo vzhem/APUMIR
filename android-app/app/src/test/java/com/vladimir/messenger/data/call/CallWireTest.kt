@@ -311,4 +311,13 @@ class CallWireTest {
             fail("empty codec set must throw")
         } catch (_: IllegalArgumentException) {}
     }
+
+    @Test fun screenFlagRoundTrip() {
+        val on = CallWire.parse(CallWire.buildScreenFlag(callId, true)) as CallWire.Packet.MediaFlag
+        assertTrue(on.video); assertTrue(on.screen)
+        val off = CallWire.parse(CallWire.buildScreenFlag(callId, false)) as CallWire.Packet.MediaFlag
+        assertTrue(off.video); assertFalse(off.screen)
+        val cam = CallWire.parse(CallWire.buildMediaFlag(callId, video = true)) as CallWire.Packet.MediaFlag
+        assertFalse(cam.screen)
+    }
 }

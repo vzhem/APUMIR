@@ -50,6 +50,7 @@ class PostCounterRepository @Inject constructor(
     private val messageDao: MessageDao,
     private val postViewDao: PostViewDao,
     private val reactionDao: MessageReactionDao,
+    private val repostDao: com.vladimir.messenger.data.local.dao.MessageRepostDao,
     private val swarmBudget: SwarmBudget,
     private val swarmDirectory: SwarmPeerDirectory,
 ) {
@@ -203,7 +204,9 @@ class PostCounterRepository @Inject constructor(
             .eachCount()
             .toList()
             .sortedByDescending { it.second }
-        return GroupWire.PostCounters(topicId, messageId, views, reactions)
+        val forwards = repostDao.getForMessage(messageId)
+            .count { !it.nodeId.startsWith(HUB_PREFIX) }
+        return GroupWire.PostCounters(topicId, messageId, views, reactions, forwards)
     }
 
     // ── Читатель: применить сводку ───────────────────────────────────────────
@@ -232,7 +235,10 @@ class PostCounterRepository @Inject constructor(
             val topic = groupDao.getTopicById(cell.topicId) ?: continue
             if (topic.groupId != group.id) continue
             applyViews(cell.topicId, cell.views, now)
-            if (cell.messageId.isNotBlank()) applyReactions(group.id, cell.messageId, cell.reactions, now)
+            if (cell.messageId.isNotBlank()) {
+                applyReactions(group.id, cell.messageId, cell.reactions, now)
+                applyForwards(group.id, cell.messageId, cell.forwards, now)
+            }
             applied++
         }
         Log.i(TAG, "counters applied group=${group.id} from=${senderId.takeLast(6)} posts=$applied")
@@ -286,6 +292,30 @@ class PostCounterRepository @Inject constructor(
                     )
                 }
             }
+        }
+    }
+
+    /**
+     * Репосты: как просмотры, число только растёт. Живые строки (своя и от
+     * соседей) остаются, недостающее до сводного добивается служебными.
+     */
+    private suspend fun applyForwards(chatId: String, messageId: String, total: Int, now: Long) {
+        if (messageId.isBlank()) return
+        val rows = repostDao.getForMessage(messageId)
+        val live = rows.count { !it.nodeId.startsWith(HUB_PREFIX) }
+        val hubRows = rows.count { it.nodeId.startsWith(HUB_PREFIX) }
+        val wanted = (total - live).coerceAtLeast(0)
+        if (hubRows >= wanted) return
+        for (k in hubRows until wanted) {
+            repostDao.put(
+                com.vladimir.messenger.data.local.entity.MessageRepostEntity(
+                    messageId = messageId,
+                    chatId = chatId,
+                    eventId = HUB_PREFIX + k,
+                    nodeId = HUB_PREFIX + k,
+                    atMs = now,
+                )
+            )
         }
     }
 

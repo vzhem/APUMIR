@@ -26,6 +26,17 @@ interface MessageReactionDao {
     @Query("SELECT * FROM message_reactions WHERE messageId = :messageId AND nodeId = :nodeId")
     suspend fun get(messageId: String, nodeId: String): MessageReactionEntity?
 
+    /** Все значки одного автора на одном сообщении (их до пяти). */
+    @Query("SELECT * FROM message_reactions WHERE messageId = :messageId AND nodeId = :nodeId")
+    suspend fun getAllForUser(messageId: String, nodeId: String): List<MessageReactionEntity>
+
+    @Query("SELECT * FROM message_reactions WHERE messageId = :messageId AND nodeId = :nodeId AND emoji = :emoji")
+    suspend fun getByEmoji(messageId: String, nodeId: String, emoji: String): MessageReactionEntity?
+
+    /** Снять один конкретный значок автора, остальные его реакции не трогать. */
+    @Query("DELETE FROM message_reactions WHERE messageId = :messageId AND nodeId = :nodeId AND emoji = :emoji")
+    suspend fun removeByEmoji(messageId: String, nodeId: String, emoji: String)
+
     /** Раунд 135: реакции удаляемого сообщения - за призраком их не оставляем. */
     @Query("DELETE FROM message_reactions WHERE messageId = :messageId")
     suspend fun deleteForMessage(messageId: String)

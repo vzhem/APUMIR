@@ -77,6 +77,7 @@ fun ContactsScreen(
 ) {
     val contacts by viewModel.contacts.collectAsState()
     val sortOrder by viewModel.sortOrder.collectAsState()
+    val vipPeerIds by viewModel.vipPeerIds.collectAsState()
     // In contrast to the address book, a list row also needs the real chat:
     // message preview, time and unread badge live in the chats table.
     val contactChatRows by viewModel.sortedContactChatRows.collectAsState()
@@ -240,6 +241,12 @@ fun ContactsScreen(
                         // счётчик непрочитанных совпадают с разделом «Чаты».
                         ContactCard(
                             chat = row.chat,
+                            // VIP-статус абонента: золотой значок у имени, как
+                            // на главной. Раньше адресная книга его не
+                            // показывала, хотя ранг человека уже был известен.
+                            peerVip = com.vladimir.messenger.data.rank.RankWire
+                                .canonicalNodeId(row.chat.contactId)
+                                ?.let { it in vipPeerIds } ?: false,
                             // Идём через viewModel: он находит настоящий чат.
                             // Прямая передача contact.id открывала «другой»
                             // чат - пустой и с вечными часиками при отправке.

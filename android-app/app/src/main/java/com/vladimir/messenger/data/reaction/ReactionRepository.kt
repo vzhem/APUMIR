@@ -61,45 +61,63 @@ class ReactionRepository @Inject constructor(
         }
 
     /**
-     * Поставить или снять свою реакцию. Повторное нажатие на тот же значок
-     * снимает его - так же, как в привычных мессенджерах.
+     * Поставить или снять один свой значок. На сообщении может стоять до
+     * [MAX_PER_USER] разных своих реакций: повторное нажатие на тот же значок
+     * снимает только его, остальные не трогаются. Шестой разный значок не
+     * встанет — сначала нужно снять один из пяти.
      */
     suspend fun toggle(chatId: String, messageId: String, emoji: String) {
         withContext(Dispatchers.IO) {
-            val existing = reactionDao.get(messageId, SELF)
             val now = System.currentTimeMillis()
-            val added = if (existing != null && existing.emoji == emoji) {
-                reactionDao.remove(messageId, SELF)
-                false
-            } else {
-                reactionDao.put(
-                    MessageReactionEntity(
-                        messageId = messageId,
-                        nodeId = SELF,
-                        chatId = chatId,
-                        emoji = emoji,
-                        atMs = now,
+            val mine = reactionDao.getAllForUser(messageId, SELF)
+            val added = when {
+                mine.any { it.emoji == emoji } -> {
+                    reactionDao.removeByEmoji(messageId, SELF, emoji)
+                    false
+                }
+                mine.size >= MAX_PER_USER -> {
+                    Log.i(TAG, "reaction limit: already $MAX_PER_USER on $messageId")
+                    return@withContext
+                }
+                else -> {
+                    reactionDao.put(
+                        MessageReactionEntity(
+                            messageId = messageId,
+                            nodeId = SELF,
+                            chatId = chatId,
+                            emoji = emoji,
+                            atMs = now,
+                        )
                     )
-                )
-                true
+                    true
+                }
             }
             runCatching { broadcast(chatId, messageId, emoji, added, now) }
                 .onFailure { Log.w(TAG, "reaction send failed: " + it.message) }
         }
     }
 
-    /** Снять свою реакцию, какой бы она ни была. */
+    /** Снять все свои реакции с сообщения, сколько бы их ни стояло. */
     suspend fun removeMine(chatId: String, messageId: String) {
         withContext(Dispatchers.IO) {
-            val existing = reactionDao.get(messageId, SELF) ?: return@withContext
+            val mine = reactionDao.getAllForUser(messageId, SELF)
+            if (mine.isEmpty()) return@withContext
             reactionDao.remove(messageId, SELF)
-            runCatching {
-                broadcast(chatId, messageId, existing.emoji, false, System.currentTimeMillis())
-            }.onFailure { Log.w(TAG, "reaction remove send failed: " + it.message) }
+            for (row in mine) {
+                runCatching {
+                    broadcast(chatId, messageId, row.emoji, false, System.currentTimeMillis())
+                }.onFailure { Log.w(TAG, "reaction remove send failed: " + it.message) }
+            }
         }
     }
 
-    /** Мой значок на этом сообщении или null. */
+    /** Мои значки на этом сообщении (до пяти). */
+    suspend fun myEmojis(messageId: String): Set<String> =
+        withContext(Dispatchers.IO) {
+            reactionDao.getAllForUser(messageId, SELF).map { it.emoji }.toSet()
+        }
+
+    /** Мой первый значок на этом сообщении или null (старым местам). */
     suspend fun myEmoji(messageId: String): String? =
         withContext(Dispatchers.IO) { reactionDao.get(messageId, SELF)?.emoji }
 
@@ -172,7 +190,7 @@ class ReactionRepository @Inject constructor(
                     )
                 )
             } else {
-                reactionDao.remove(packet.messageId, SELF)
+                reactionDao.removeByEmoji(packet.messageId, SELF, packet.emoji)
             }
         }
         return true
@@ -192,6 +210,12 @@ class ReactionRepository @Inject constructor(
         if (senderId.isBlank()) return true
         withContext(Dispatchers.IO) {
             if (packet.added) {
+                // У отправителя тоже не больше пяти разных значков: шестой от
+                // сломанного или вредного клиента не принимаем.
+                val theirs = reactionDao.getAllForUser(packet.messageId, senderId)
+                if (theirs.none { it.emoji == packet.emoji } && theirs.size >= MAX_PER_USER) {
+                    return@withContext
+                }
                 // chatId из пакета - идентификатор чата ОТПРАВИТЕЛЯ, у нас он
                 // другой: личные чаты заводятся на каждом телефоне отдельно.
                 // Раньше реакция сохранялась с чужим идентификатором и не
@@ -211,7 +235,7 @@ class ReactionRepository @Inject constructor(
                     )
                 )
             } else {
-                reactionDao.remove(packet.messageId, senderId)
+                reactionDao.removeByEmoji(packet.messageId, senderId, packet.emoji)
             }
         }
         return true
@@ -222,5 +246,8 @@ class ReactionRepository @Inject constructor(
 
         /** Своя реакция помечается так же, как свои сообщения в базе. */
         const val SELF = "self"
+
+        /** Сколько разных значков один человек может поставить на сообщение. */
+        const val MAX_PER_USER = 5
     }
 }

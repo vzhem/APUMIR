@@ -53,6 +53,22 @@ object RankWire {
     const val WRAPPER = "APUTYP1|"
 
     /**
+     * Запрос ранга: «сообщи свой ранг прямо сейчас». Едет в той же обёртке,
+     * что и сам конверт ранга. Зачем: раньше знак VIP появлялся только
+     * после очередной рассылки собеседника (раз в неделю или при смене
+     * ранга), и на свежем телефоне контактов без значков можно было ждать
+     * днями, хотя абонент давно VIP.
+     */
+    const val REQUEST_PREFIX = "APURANKREQ1"
+
+    /** Собрать запрос ранга адресату. */
+    fun buildRankRequest(): String = WRAPPER + REQUEST_PREFIX + SEPARATOR + VERSION
+
+    /** Это запрос ранга (а не сам конверт и не обычный текст)? */
+    fun isRankRequest(text: String): Boolean =
+        payload(text).startsWith(REQUEST_PREFIX + SEPARATOR)
+
+    /**
      * Верхняя граница, которую принимаем от собеседника. Совпадает с потолком
      * счётчика в приложении (ReferralRankStore.MAX_SUPPORTED_COUNT): конверт с
      * числом выше — не ранг, а попытка нарисовать себе несуществующую ступень.

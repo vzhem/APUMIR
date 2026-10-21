@@ -369,6 +369,10 @@ interface MessageDao {
     @Query("UPDATE messages SET content = :content WHERE id = :messageId")
     suspend fun updateContent(messageId: String, content: String)
 
+    /** Правка текста с отметкой времени: пузырь покажет «изменено». */
+    @Query("UPDATE messages SET content = :content, editedAtMs = :editedAtMs WHERE id = :messageId")
+    suspend fun updateContentEdited(messageId: String, content: String, editedAtMs: Long)
+
     /**
      * Служебные строки по шаблону содержимого: куски длинного текста одного
      * сообщения (см. InlineImage.textPartPattern) - при правке куски прежней

@@ -16,6 +16,8 @@ import com.vladimir.messenger.R
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.mirror.MirrorHub
 import com.vladimir.messenger.data.repository.ContactRepository
+import com.vladimir.messenger.data.voice.VoiceEffect
+import com.vladimir.messenger.data.voice.VoiceEffectPreferences
 import com.vladimir.messenger.service.CallService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.security.SecureRandom
@@ -75,13 +77,38 @@ class CallManager @Inject constructor(
         val video: Boolean = false,
         /** Свою камеру показываем собеседнику. */
         val cameraOn: Boolean = false,
+        /** Я показываю свой экран вместо камеры. */
+        val screenSharing: Boolean = false,
+        /** Собеседник показывает свой экран. */
+        val remoteScreen: Boolean = false,
+        /** Живой текст звонка включён по требованию (кнопка «Текст звонка»). */
+        val captionsOn: Boolean = false,
+        /** Модель живого текста ещё готовится (первый раз — скачивается). */
+        val captionsPreparing: Boolean = false,
+        /** Живой текст не удалось включить (модель не загрузилась). */
+        val captionsFailed: Boolean = false,
+        /** Эффект изменения голоса: собеседник слышит обработанный микрофон. */
+        val voiceEffect: VoiceEffect = VoiceEffectPreferences.current,
     )
 
     private val _uiState = kotlinx.coroutines.flow.MutableStateFlow(CallUiState())
     val uiState: kotlinx.coroutines.flow.StateFlow<CallUiState> = _uiState
 
+    init {
+        _uiState.value = _uiState.value.copy(
+            voiceEffect = VoiceEffectPreferences.load(appContext),
+        )
+    }
+
     private val _remoteVideo = kotlinx.coroutines.flow.MutableStateFlow<ByteArray?>(null)
     val remoteVideo: kotlinx.coroutines.flow.StateFlow<ByteArray?> = _remoteVideo
+
+    /** Строки живого текста звонка: «Вы» и «Собеседник», текущая фраза обновляется. */
+    private val _captionLines =
+        kotlinx.coroutines.flow.MutableStateFlow<List<com.vladimir.messenger.data.voice.CallCaptioner.Line>>(emptyList())
+    val captionLines: kotlinx.coroutines.flow.StateFlow<List<com.vladimir.messenger.data.voice.CallCaptioner.Line>> =
+        _captionLines
+    @Volatile private var captioner: com.vladimir.messenger.data.voice.CallCaptioner? = null
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private val random = SecureRandom()
@@ -204,7 +231,7 @@ class CallManager @Inject constructor(
             is CallWire.Packet.Probe -> Unit
             is CallWire.Packet.MediaFlag -> synchronized(this) {
                 if (matchesCall(packet.callId)) {
-                    applyVideoFlag(packet.video)
+                    applyVideoFlag(packet.video, packet.screen)
                 } else if (!recentlyEnded.containsKey(packet.callId)) {
                     earlyVideo[packet.callId] = packet.video
                     trimEarly(earlyVideo)
@@ -297,7 +324,7 @@ class CallManager @Inject constructor(
                 callId = offer.callId,
                 outgoing = false,
                 video = videoWanted,
-                speaker = videoWanted,
+                // Громкая связь сама не включается: человек включит кнопкой, когда надо.
                 cameraOn = videoWanted,
             )
             startTicker()
@@ -510,7 +537,7 @@ class CallManager @Inject constructor(
                     is CallWire.Packet.Accept -> onAcceptPacket(sm.peerId, signal)
                     is CallWire.Packet.Reject -> feedMachine { it.onReject(signal.reason, nowMs()) }
                     is CallWire.Packet.Bye -> feedMachine { it.onBye(signal.reason, nowMs()) }
-                    is CallWire.Packet.MediaFlag -> applyVideoFlag(signal.video)
+                    is CallWire.Packet.MediaFlag -> applyVideoFlag(signal.video, signal.screen)
                     else -> Unit
                 }
             }
@@ -727,7 +754,7 @@ class CallManager @Inject constructor(
                 callId = callId,
                 outgoing = true,
                 video = video,
-                speaker = video,
+                // Громкая связь при видеозвонке не активируется сразу (просьба владельца).
                 cameraOn = video,
             )
             startTicker()
@@ -809,6 +836,13 @@ class CallManager @Inject constructor(
         return muted
     }
 
+    /** Сменить эффект голоса (и до, и во время звонка); выбор запоминается. */
+    fun setVoiceEffect(effect: VoiceEffect) {
+        VoiceEffectPreferences.save(appContext, effect)
+        _uiState.value = _uiState.value.copy(voiceEffect = effect)
+        audioEngine?.setVoiceEffect(effect)
+    }
+
     fun toggleSpeaker(): Boolean {
         val on = !_uiState.value.speaker
         _uiState.value = _uiState.value.copy(speaker = on)
@@ -824,9 +858,101 @@ class CallManager @Inject constructor(
         return on
     }
 
+    /**
+     * Демонстрация экрана вкл/выкл (кнопка на экране звонка после системного
+     * разрешения захвата). Кадры экрана едут тем же видео-путём, что камера;
+     * собеседнику уходит флаг «s», чтобы он видел подпись «показывает экран».
+     * Демонстрация включает видеорежим, даже если звонок начинался голосовым.
+     */
+    fun setScreenSharing(on: Boolean) {
+        val sm = machine ?: return
+        if (sm.phase != CallStateMachine.Phase.CONNECTING &&
+            sm.phase != CallStateMachine.Phase.ACTIVE
+        ) return
+        if (on) videoWanted = true
+        val current = _uiState.value
+        _uiState.value = current.copy(
+            video = if (on) true else current.video,
+            screenSharing = on,
+        )
+        if (on && !current.video) {
+            sendSignal(
+                sm.peerId,
+                CallWire.mediaFlagMessageId(sm.callId),
+                CallWire.buildMediaFlag(sm.callId, video = true),
+            )
+        }
+        sendSignal(
+            sm.peerId,
+            CallWire.screenFlagMessageId(sm.callId, nowMs()),
+            CallWire.buildScreenFlag(sm.callId, on),
+        )
+    }
+
+    /**
+     * Живой текст звонка по требованию: обе стороны разговора распознаются
+     * прямо на телефоне (см. [com.vladimir.messenger.data.voice.CallCaptioner]).
+     * Модель при первом включении может скачиваться — UI показывает подготовку.
+     */
+    fun setCaptions(on: Boolean) {
+        if (!on) {
+            stopCaptions()
+            _uiState.value = _uiState.value.copy(
+                captionsOn = false, captionsPreparing = false, captionsFailed = false,
+            )
+            return
+        }
+        val sm = machine ?: return
+        if (sm.phase != CallStateMachine.Phase.CONNECTING &&
+            sm.phase != CallStateMachine.Phase.ACTIVE
+        ) return
+        if (_uiState.value.captionsOn || _uiState.value.captionsPreparing) return
+        _uiState.value = _uiState.value.copy(captionsPreparing = true, captionsFailed = false)
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val model = com.vladimir.messenger.data.voice.VoiceTranscriber.loadModel(appContext)
+            if (model == null || machine !== sm) {
+                if (machine === sm) {
+                    _uiState.value = _uiState.value.copy(
+                        captionsPreparing = false, captionsFailed = true,
+                    )
+                }
+                return@launch
+            }
+            val created = com.vladimir.messenger.data.voice.CallCaptioner(model)
+            captioner = created
+            _captionLines.value = emptyList()
+            audioEngine?.let { attachCaptionTaps(it) }
+            _uiState.value = _uiState.value.copy(
+                captionsOn = true, captionsPreparing = false, captionsFailed = false,
+            )
+        }
+    }
+
+    private fun attachCaptionTaps(engine: CallAudioEngine) {
+        val active = captioner ?: return
+        engine.onLocalPcm = { pcm ->
+            active.feed(com.vladimir.messenger.data.voice.CallCaptioner.Speaker.ME, pcm)
+        }
+        engine.onRemotePcm = { pcm ->
+            active.feed(com.vladimir.messenger.data.voice.CallCaptioner.Speaker.PEER, pcm)
+        }
+        scope.launch {
+            active.lines.collect { lines -> _captionLines.value = lines }
+        }
+    }
+
+    private fun stopCaptions() {
+        captioner?.let { runCatching { it.stop() } }
+        captioner = null
+        audioEngine?.onLocalPcm = null
+        audioEngine?.onRemotePcm = null
+    }
+
     /** JPEG-кадр локальной камеры (уже pack: rotation + jpeg). */
     fun sendVideoFrame(packed: ByteArray) {
-        if (!videoWanted || !_uiState.value.cameraOn || packed.isEmpty()) return
+        if (!videoWanted || (!_uiState.value.cameraOn && !_uiState.value.screenSharing) ||
+            packed.isEmpty()
+        ) return
         val crypto = sendVideoCrypto ?: return
         val sm = machine ?: return
         if (sm.phase != CallStateMachine.Phase.CONNECTING &&
@@ -1031,6 +1157,7 @@ class CallManager @Inject constructor(
         audioViaLan = audioChannel.isOpen()
         engine.outgoingCodec = if (audioViaLan) CallWire.CODEC_PCM_16K else preferredCodec()
         engine.configureJitter(viaLan = audioViaLan)
+        engine.setVoiceEffect(_uiState.value.voiceEffect)
         try {
             engine.start(sk, rk)
         } catch (e: Throwable) {
@@ -1040,6 +1167,7 @@ class CallManager @Inject constructor(
             return
         }
         audioEngine = engine
+        attachCaptionTaps(engine)
         sendVideoCrypto = CallMediaCrypto(sk)
         recvVideoCrypto = CallMediaCrypto(rk)
         lastVideoSeq = -1L
@@ -1276,6 +1404,7 @@ class CallManager @Inject constructor(
     private var audioViaLan = false
 
     private fun stopMedia(keepLink: Boolean = false) {
+        stopCaptions()
         runCatching { audioEngine?.stop() }
         audioEngine = null
         sendVideoCrypto = null
@@ -1642,13 +1771,13 @@ class CallManager @Inject constructor(
         if (sm.phase == CallStateMachine.Phase.ENDED) scheduleIdleReset()
     }
 
-    private fun applyVideoFlag(video: Boolean) {
+    private fun applyVideoFlag(video: Boolean, screen: Boolean = false) {
         videoWanted = video
         val current = _uiState.value
         _uiState.value = current.copy(
             video = video,
+            remoteScreen = video && screen,
             cameraOn = if (video) current.cameraOn || !current.video else false,
-            speaker = if (video && !current.video) true else current.speaker,
         )
         if (video) {
             ringPlayer.setSpeaker(_uiState.value.speaker)

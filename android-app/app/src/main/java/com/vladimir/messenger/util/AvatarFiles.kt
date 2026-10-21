@@ -24,6 +24,9 @@ object AvatarFiles {
     private const val DIR = "avatar"
     private const val CAPTURE = "camera_shot.jpg"
     private const val CROPPED = "avatar_cropped.jpg"
+    /** Потолок видеоаватара: 15 секунд и 24 МБ — аватар, а не фильм. */
+    const val MAX_VIDEO_AVATAR_MS = 15_000L
+    private const val MAX_VIDEO_AVATAR_BYTES = 24L * 1024 * 1024
 
     /** Куда камера положит снимок. Файл создаётся заранее - так требует Android. */
     fun captureTarget(context: Context): Uri {
@@ -84,6 +87,60 @@ object AvatarFiles {
             )
         }
     }.getOrNull()
+
+    /** Подготовленный видеоаватар: файл видео и кадр-постер для обычных мест. */
+    data class PreparedVideo(val path: String, val poster: Bitmap)
+
+    /**
+     * Принять видеоаватар из галереи: скопировать к себе (не держать чужой
+     * URI), проверить длину и снять кадр-постер. Видео длиннее
+     * [MAX_VIDEO_AVATAR_MS] отклоняется с понятной причиной: аватар — не фильм.
+     */
+    fun prepareVideoAvatar(context: Context, uri: Uri): Result<PreparedVideo> = runCatching {
+        val dir = File(context.filesDir, DIR).apply { mkdirs() }
+        val file = File(dir, "video_avatar_${System.currentTimeMillis()}.mp4")
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(file).use { out ->
+                val buffer = ByteArray(64 * 1024)
+                var total = 0L
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    total += count
+                    require(total <= MAX_VIDEO_AVATAR_BYTES) { "Видео слишком большое для аватара" }
+                    out.write(buffer, 0, count)
+                }
+            }
+        } ?: error("Не удалось прочитать видео")
+        val retriever = android.media.MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(file.absolutePath)
+            val durationMs = retriever.extractMetadata(
+                android.media.MediaMetadataRetriever.METADATA_KEY_DURATION,
+            )?.toLongOrNull() ?: 0L
+            require(durationMs in 1..MAX_VIDEO_AVATAR_MS) {
+                "Нужно видео до 15 секунд — это аватар, а не фильм"
+            }
+            val frame = retriever.getFrameAtTime(300_000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: error("Не удалось снять кадр из видео")
+            // Постер — квадрат из центра кадра, как обычная аватарка.
+            val side = minOf(frame.width, frame.height)
+            val square = Bitmap.createBitmap(
+                frame, (frame.width - side) / 2, (frame.height - side) / 2, side, side,
+            )
+            val poster = if (side > 480) Bitmap.createScaledBitmap(square, 480, 480, true) else square
+            // Прежние видеоаватары не копим.
+            dir.listFiles()
+                ?.filter { it.name.startsWith("video_avatar_") && it.name != file.name }
+                ?.forEach { it.delete() }
+            PreparedVideo(file.absolutePath, poster)
+        } catch (failure: Exception) {
+            file.delete()
+            throw failure
+        } finally {
+            retriever.release()
+        }
+    }
 
     /** Сохранить обрезанный аватар и вернуть URI для AvatarHolder. */
     fun saveCropped(context: Context, bitmap: Bitmap): String? = runCatching {

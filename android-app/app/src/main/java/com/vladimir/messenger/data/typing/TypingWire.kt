@@ -17,9 +17,22 @@ object TypingWire {
 
     fun build(typing: Boolean): String = PREFIX + if (typing) "1" else "0"
 
-    /** null - это не наш пакет; true/false - печатает/перестал. */
+    /**
+     * null - это не наш пакет; true/false - печатает/перестал.
+     *
+     * Строго: после префикса допустимы только «1» и «0». Раньше любое другое
+     * содержимое читалось как «перестал печатать», и основной путь приёма
+     * молча проглатывал так конверты ранга и сердечек - они едут в этой же
+     * обёртке (APUTYP1|APURANK1|…, APUTYP1|APUGAME1|…), а ранг разбирался
+     * позже «печатает». Именно поэтому значок VIP не появлялся: конверт
+     * умирал за шаг до таблицы рангов.
+     */
     fun parse(text: String): Boolean? {
         if (!isTypingPacket(text)) return null
-        return text.substring(PREFIX.length).trim() == "1"
+        return when (text.substring(PREFIX.length).trim()) {
+            "1" -> true
+            "0" -> false
+            else -> null
+        }
     }
 }

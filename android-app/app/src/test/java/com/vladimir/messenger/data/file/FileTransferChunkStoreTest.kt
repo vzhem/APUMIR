@@ -210,4 +210,22 @@ class FileTransferChunkStoreTest {
         assertFalse(store.isOldOrphan(transferId, now))
     }
 
+
+    @Test
+    fun apkChunksAreOutsideTransferStatisticsAndHardLimit() {
+        val otherId = "fedcba9876543210fedcba9876543210"
+        // Hard store limit below the APK chunk size: regular chunks would fail.
+        val store = FileTransferChunkStore(root, maxStoreBytes = 1024L)
+        val apk = store.storeEncryptedChunk(otherId, 0, ByteArray(2000) { 3 }, ownerQuotaExempt = true)
+        assertTrue(apk.newlyStored)
+        // The APK does not consume the counted transfer statistics.
+        assertEquals(0L, store.currentStoredBytes())
+        // A regular chunk still sees the hard limit on its own.
+        store.storeEncryptedChunk(transferId, 0, ByteArray(600) { 4 })
+        assertEquals(600L, store.currentStoredBytes())
+        expectFailure { store.storeEncryptedChunk(transferId, 1, ByteArray(600) { 5 }) }
+        // And the APK can keep growing outside the limit.
+        assertTrue(store.storeEncryptedChunk(otherId, 1, ByteArray(2000) { 6 }, ownerQuotaExempt = true).newlyStored)
+        assertEquals(600L, store.currentStoredBytes())
+    }
 }

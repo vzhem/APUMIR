@@ -59,6 +59,9 @@ object AppModule {
                 AppDatabase.MIGRATION_28_29,
                 AppDatabase.MIGRATION_29_30,
                 AppDatabase.MIGRATION_30_31,
+                AppDatabase.MIGRATION_31_32,
+                AppDatabase.MIGRATION_32_33,
+                AppDatabase.MIGRATION_33_34,
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -101,6 +104,10 @@ object AppModule {
         db.postViewDao()
 
     @Provides @Singleton
+    fun provideMessageRepostDao(db: AppDatabase): com.vladimir.messenger.data.local.dao.MessageRepostDao =
+        db.messageRepostDao()
+
+    @Provides @Singleton
     fun provideFileExchangePeerDao(db: AppDatabase): FileExchangePeerDao = db.fileExchangePeerDao()
 
     @Provides
@@ -139,7 +146,8 @@ object AppModule {
         groupDao: GroupDao,
         referralAttribution: com.vladimir.messenger.data.referral.ReferralAttributionSender,
         storyVideos: com.vladimir.messenger.data.story.StoryVideoDelivery,
-    ): ChatRepository = ChatRepository(context, chatDao, messageDao, groupDao, storyVideos, referralAttribution)
+        contactDao: ContactDao,
+    ): ChatRepository = ChatRepository(context, chatDao, messageDao, groupDao, storyVideos, referralAttribution, contactDao)
 
     @Provides @Singleton
     fun provideContactRepository(contactDao: ContactDao, chatRepository: ChatRepository): ContactRepository =

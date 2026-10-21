@@ -45,7 +45,7 @@ internal class StoryVideoRecorder(
     private var cancelled = false
     private var closed = false
 
-    private val tracker = StoryFaceTracker(onFaces)
+    private val tracker = StoryFaceTracker(context.applicationContext, onFaces)
     private var analysisExecutor: ExecutorService? = null
 
     /** true, если на этом устройстве удалось связать распознавание лица с записью. */
@@ -109,6 +109,15 @@ internal class StoryVideoRecorder(
     /** Фонарик на время записи. На камере без вспышки ничего не делает. */
     fun setTorch(on: Boolean) {
         runCatching { activeCamera?.cameraControl?.enableTorch(on) }
+    }
+
+    /** Живой фон предпросмотра (как в KakaoTalk): кадры с фоном уходят в [onFrame]. */
+    fun setBackgroundPreview(
+        background: com.vladimir.messenger.data.background.VideoBackground?,
+        onFrame: (android.graphics.Bitmap, String?) -> Unit,
+    ) {
+        tracker.background = background
+        tracker.onBackgroundFrame = onFrame
     }
 
     /** Распознавание включается только при выбранном фильтре, иначе кадры не анализируются. */

@@ -90,6 +90,12 @@ object GroupWire {
      */
     const val KIND_BIRTHDAY = "bday"
     /**
+     * Эмодзи-статус владельца узла: `emst|узел|эмодзи-b64|метка|прыжки`.
+     * Общеизвестный признак человека, как @имя и аватар: едет контактам и
+     * пересылается дальше с ограничением прыжков. Пустой значок — отзыв.
+     */
+    const val KIND_EMOJI_STATUS = "emst"
+    /**
      * Возможности узла как сервера: `cap|nodeId|offeredBytes|atMs`.
      * Сейчас одно поле - сколько места под пересылку узел отдаёт (ползунок
      * «Место под пересылку»). Только от самого узла своим контактам, без
@@ -912,6 +918,14 @@ object GroupWire {
             val updatedAtMs: Long,
         ) : Packet()
 
+        /** Эмодзи-статус владельца: один значок у профиля; пустой — отзыва нет статуса. */
+        data class EmojiStatus(
+            val ownerId: String,
+            val emoji: String,
+            val updatedAtMs: Long,
+            val hops: Int,
+        ) : Packet()
+
         data class GroupInfo(
             val groupId: String,
             val title: String,
@@ -964,6 +978,8 @@ object GroupWire {
         val messageId: String,
         val views: Int,
         val reactions: List<Pair<String, Int>>,
+        /** Сколько раз пост переслали (репосты); старые сборки поля не знают. */
+        val forwards: Int = 0,
     )
 
     data class TopicEntry(val topicId: String, val name: String, val iconEmoji: String = "")
@@ -1226,7 +1242,8 @@ object GroupWire {
                 .sortedByDescending { it.second }
                 .take(MAX_COUNTER_EMOJI)
                 .joinToString("+") { (emoji, count) -> encode(emoji) + "=" + count }
-            encode(cell.topicId) + "," + encode(cell.messageId) + "," + cell.views.coerceAtLeast(0) + "," + reactions
+            encode(cell.topicId) + "," + encode(cell.messageId) + "," + cell.views.coerceAtLeast(0) + "," + reactions +
+                "," + cell.forwards.coerceAtLeast(0)
         }
         return "$PREFIX|$KIND_COUNTERS|$groupId|$body"
     }
@@ -1326,6 +1343,10 @@ object GroupWire {
      */
     fun buildBirthday(ownerId: String, day: Int, month: Int, updatedAtMs: Long): String =
         "$PREFIX|$KIND_BIRTHDAY|$ownerId|$day|$month|$updatedAtMs"
+
+    /** Объявление эмодзи-статуса: свой значок или пустой (отзыв). */
+    fun buildEmojiStatus(ownerId: String, emoji: String, updatedAtMs: Long, hops: Int): String =
+        "$PREFIX|$KIND_EMOJI_STATUS|$ownerId|${encode(emoji)}|$updatedAtMs|$hops"
 
     /** Возможности узла: объявленное место под пересылку. */
     fun buildCapabilities(nodeId: String, offeredBytes: Long, atMs: Long): String =
@@ -2266,6 +2287,27 @@ object GroupWire {
                 null
             }
 
+            KIND_EMOJI_STATUS -> if (parts.size == 6) {
+                val ownerId = parts[2]
+                val emoji = decode(parts[3]).orEmpty()
+                val at = parts[4].toLongOrNull() ?: return null
+                val hops = parts[5].toIntOrNull() ?: return null
+                if (ownerId.isBlank() || at < 0L || hops < 0 || emoji.length > 16 ||
+                    emoji.any { it.isISOControl() || it == '|' }
+                ) {
+                    null
+                } else {
+                    Packet.EmojiStatus(
+                        ownerId = ownerId,
+                        emoji = emoji,
+                        updatedAtMs = at,
+                        hops = hops,
+                    )
+                }
+            } else {
+                null
+            }
+
             KIND_BIRTHDAY -> if (parts.size == 6) {
                 val ownerId = parts[2]
                 val day = parts[3].toIntOrNull() ?: return null
@@ -2297,10 +2339,16 @@ object GroupWire {
         for (cell in body.split(';')) {
             if (cell.isBlank()) continue
             val fields = cell.split(',')
-            if (fields.size != 4) return null
+            // Пятое поле (репосты) добавили позже: сводки старых сборщиков без него.
+            if (fields.size !in 4..5) return null
             val topicId = decode(fields[0])?.takeIf { it.isNotBlank() } ?: return null
             val messageId = decode(fields[1]) ?: return null
             val views = fields[2].toIntOrNull()?.takeIf { it >= 0 } ?: return null
+            val forwards = if (fields.size == 5) {
+                fields[4].toIntOrNull()?.takeIf { it >= 0 } ?: return null
+            } else {
+                0
+            }
             val reactions = ArrayList<Pair<String, Int>>()
             if (fields[3].isNotBlank()) {
                 for (entry in fields[3].split('+')) {
@@ -2312,7 +2360,7 @@ object GroupWire {
                 }
             }
             if (reactions.size > MAX_COUNTER_EMOJI) return null
-            out.add(PostCounters(topicId, messageId, views, reactions))
+            out.add(PostCounters(topicId, messageId, views, reactions, forwards))
         }
         if (out.size > MAX_COUNTER_CELLS) return null
         return out

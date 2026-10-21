@@ -108,9 +108,24 @@ object StorageSettings {
         val total: Long get() = chunkBytes + receivedBytes + relayBytes + groupFileBytes
     }
 
+    /** Байты кусков передач без льготных (APK): статистика «места под пересылку». */
+    private fun countedChunkBytes(root: File): Long {
+        if (!root.isDirectory) return 0L
+        var total = 0L
+        for (child in root.listFiles().orEmpty()) {
+            if (child.isDirectory &&
+                File(child, com.vladimir.messenger.data.file.FileTransferChunkStore.EXEMPT_MARKER_FILE).isFile
+            ) continue
+            total += sizeOfTree(child)
+        }
+        return total
+    }
+
     fun usage(context: Context): Usage {
         val app = context.applicationContext
-        val chunks = sizeOfTree(File(app.noBackupFilesDir, "file_transfers/v1"))
+        // Статистика пересылки: льготные передачи (APK, пометка в папке передачи)
+        // в «занято» не попадают — они вне лимитов пересылки.
+        val chunks = countedChunkBytes(File(app.noBackupFilesDir, "file_transfers/v1"))
         val received = sizeOfTree(File(app.noBackupFilesDir, "file_received/v1"))
         // Авторские копии файлов сообществ (GroupFileStore): живут неделю,
         // раздаются участникам по просьбе - тоже «данные в пути».

@@ -15,6 +15,7 @@ object DevicePairingWire {
     const val KIND_REQUEST = "req"
     const val KIND_ANSWER = "ans"
     const val KIND_GRANT = "grant"
+    const val KIND_SYNC = "sync"
 
     private const val FLAGS = Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
     private const val MAX_PACKET_CHARS = 4096
@@ -31,7 +32,7 @@ object DevicePairingWire {
         val parts = text.split(':', limit = 3)
         if (parts.size != 3) return null
         val kind = parts[1]
-        if (kind != KIND_REQUEST && kind != KIND_ANSWER && kind != KIND_GRANT) return null
+        if (kind != KIND_REQUEST && kind != KIND_ANSWER && kind != KIND_GRANT && kind != KIND_SYNC) return null
         return try {
             Packet(kind, Base64.decode(parts[2], FLAGS))
         } catch (_: IllegalArgumentException) {

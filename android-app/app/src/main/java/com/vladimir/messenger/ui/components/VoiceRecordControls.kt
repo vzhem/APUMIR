@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -35,8 +36,14 @@ import androidx.core.content.FileProvider
 import android.Manifest
 import android.content.pm.PackageManager
 import com.vladimir.messenger.R
+import com.vladimir.messenger.data.voice.VoiceEffect
+import com.vladimir.messenger.data.voice.VoiceEffectFileProcessor
+import com.vladimir.messenger.data.voice.VoiceEffectPreferences
 import com.vladimir.messenger.data.voice.VoiceRecorder
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.rememberCoroutineScope
 
 /** Состояние записи голоса: идёт ли запись, сколько секунд, старт/стоп, отмена. */
@@ -45,6 +52,11 @@ class VoiceRecordController(
     val seconds: Int,
     val toggle: () -> Unit,
     val cancel: () -> Unit,
+    /** Выбранный эффект изменения голоса (применится ко всей записи). */
+    val effect: VoiceEffect = VoiceEffect.ORIGINAL,
+    /** Идёт обработка записи эффектом перед отправкой. */
+    val processing: Boolean = false,
+    val selectEffect: (VoiceEffect) -> Unit = {},
 )
 
 /**
@@ -59,6 +71,13 @@ fun rememberVoiceRecorder(onReady: (Uri) -> Unit): VoiceRecordController {
     val recorder = remember { VoiceRecorder(context) }
     var recording by remember { mutableStateOf(false) }
     var seconds by remember { mutableIntStateOf(0) }
+    var effect by remember { mutableStateOf(VoiceEffectPreferences.load(context)) }
+    var processing by remember { mutableStateOf(false) }
+
+    fun selectEffect(newEffect: VoiceEffect) {
+        effect = newEffect
+        VoiceEffectPreferences.save(context, newEffect)
+    }
     val readyCallback by rememberUpdatedState(onReady)
 
     LaunchedEffect(recording) {
@@ -75,8 +94,25 @@ fun rememberVoiceRecorder(onReady: (Uri) -> Unit): VoiceRecordController {
     fun stopAndSend() {
         recording = false
         val result = recorder.stop() ?: return
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", result.file)
-        readyCallback(uri)
+        val chosen = effect
+        if (chosen == VoiceEffect.ORIGINAL) {
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", result.file)
+            readyCallback(uri)
+            return
+        }
+        // Эффект применяется ко всей записи; если обработка не удалась,
+        // отправляем оригинал, а не теряем сообщение.
+        processing = true
+        scope.launch {
+            val processed = withContext(Dispatchers.IO) {
+                runCatching { VoiceEffectFileProcessor.process(result.file, chosen) }.getOrNull()
+            }
+            processing = false
+            val file = processed?.file ?: result.file
+            if (processed != null) runCatching { result.file.delete() }
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            readyCallback(uri)
+        }
     }
     fun cancelRecording() {
         recording = false
@@ -100,27 +136,67 @@ fun rememberVoiceRecorder(onReady: (Uri) -> Unit): VoiceRecordController {
         seconds = seconds,
         toggle = { if (recording) stopAndSend() else startRecording() },
         cancel = { cancelRecording() },
+        effect = effect,
+        processing = processing,
+        selectEffect = ::selectEffect,
     )
 }
 
 /** Полоса во время записи: красная точка, время, «Отмена» и «Отправить». */
 @Composable
 fun VoiceRecordBar(controller: VoiceRecordController, modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.size(8.dp).background(Color(0xFFE5484D), CircleShape))
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = stringResource(R.string.voice_recording) + " " + formatVoiceTime(controller.seconds),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+    if (controller.processing) {
+        Row(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ApuPremiumSpinner(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = stringResource(R.string.voice_effect_processing),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        return
+    }
+    var showEffectPicker by remember { mutableStateOf(false) }
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(8.dp).background(Color(0xFFE5484D), CircleShape))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = stringResource(R.string.voice_recording) + " " + formatVoiceTime(controller.seconds),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = controller.cancel) { Text(stringResource(R.string.voice_cancel)) }
+            TextButton(onClick = controller.toggle) { Text(stringResource(R.string.voice_stop)) }
+        }
+        // Эффект можно сменить прямо во время записи: он применится ко всей
+        // записи целиком, когда нажмут «Отправить».
+        TextButton(onClick = { showEffectPicker = true }) {
+            Text(
+                stringResource(
+                    R.string.voice_effect_button,
+                    controller.effect.symbol + " " + stringResource(controller.effect.labelRes),
+                ),
+            )
+        }
+    }
+    if (showEffectPicker) {
+        VoiceEffectPickerDialog(
+            selected = controller.effect,
+            onSelected = controller.selectEffect,
+            onDismiss = { showEffectPicker = false },
         )
-        Spacer(Modifier.weight(1f))
-        TextButton(onClick = controller.cancel) { Text(stringResource(R.string.voice_cancel)) }
-        TextButton(onClick = controller.toggle) { Text(stringResource(R.string.voice_stop)) }
     }
 }

@@ -1,6 +1,7 @@
 package com.vladimir.messenger.ui.components
 
 import android.widget.Toast
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -23,10 +24,28 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.R
 import com.vladimir.messenger.data.heartgame.HeartGameStore
+import com.vladimir.messenger.ui.theme.LocalAppDarkTheme
 import com.vladimir.messenger.data.heartgame.HeartGameWire
 import kotlinx.coroutines.launch
 import java.text.DateFormat
 import java.util.Date
+
+/**
+ * Цвета счётчика сердечек поверх обоев: внутри светлых пузырей текст тёмный,
+ * а на главной и в списке настроек счётчик стоит прямо на обоях — в тёмной
+ * теме тёмный текст там пропадал. Поэтому цвет выбирается по теме.
+ */
+@Composable
+private fun heartWallpaperTextColor(): Color =
+    if (LocalAppDarkTheme.current) Color(0xFFE2E9F4) else ApuBubbleTextColor
+
+@Composable
+private fun heartWallpaperMutedColor(): Color =
+    if (LocalAppDarkTheme.current) Color(0xFFB9C6DA) else ApuBubbleMutedColor
+
+@Composable
+private fun heartWallpaperAccentColor(): Color =
+    if (LocalAppDarkTheme.current) Color(0xFFF0C96A) else ApuBubbleAccentColor
 
 @Composable
 fun HeartGameCounter(onlyWhenEnabled: Boolean = false) {
@@ -57,16 +76,17 @@ fun HeartGameCounter(onlyWhenEnabled: Boolean = false) {
         verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Icon(Icons.Default.Favorite, null, tint = Color(0xFFFF537F), modifier = Modifier.size(20.dp))
-            Text(count.toString(), fontWeight = FontWeight.Bold, color = ApuBubbleAccentColor)
-            Text(stringResource(R.string.heart_game_points), style = MaterialTheme.typography.labelMedium)
+            Text(count.toString(), fontWeight = FontWeight.Bold, color = heartWallpaperAccentColor())
+            Text(stringResource(R.string.heart_game_points), style = MaterialTheme.typography.labelMedium,
+                color = heartWallpaperTextColor())
         }
         Text(stringResource(R.string.heart_game_my_place_short, place?.toString() ?: "—"),
-            style = MaterialTheme.typography.labelSmall, color = ApuBubbleMutedColor)
+            style = MaterialTheme.typography.labelSmall, color = heartWallpaperMutedColor())
     }
 }
 
 @Composable
-fun HeartGameHeaderStatus(modifier: Modifier = Modifier) {
+fun HeartGameHeaderStatus(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
     val context = LocalContext.current
     val revision by HeartGameStore.revision.collectAsStateWithLifecycle()
     val ready by com.vladimir.messenger.service.CoreStatus.ready.collectAsStateWithLifecycle()
@@ -89,14 +109,17 @@ fun HeartGameHeaderStatus(modifier: Modifier = Modifier) {
         catch (_: Exception) { place = null }
     }
     if (!enabled) return
-    Row(modifier, verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+    Row(
+        modifier.then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
         Icon(Icons.Default.Favorite, null, tint = Color(0xFFE0245E), modifier = Modifier.size(13.dp))
         Text(score.toString(), style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Bold, color = ApuBubbleTextColor)
-        Text("·", style = MaterialTheme.typography.labelSmall, color = ApuBubbleMutedColor)
+            fontWeight = FontWeight.Bold, color = heartWallpaperTextColor())
+        Text("·", style = MaterialTheme.typography.labelSmall, color = heartWallpaperMutedColor())
         Text(stringResource(R.string.heart_game_header_place, place?.toString() ?: "—"),
-            style = MaterialTheme.typography.labelSmall, color = ApuBubbleMutedColor, maxLines = 1)
+            style = MaterialTheme.typography.labelSmall, color = heartWallpaperMutedColor(), maxLines = 1)
     }
 }
 
@@ -110,6 +133,10 @@ fun HeartGameSettings() {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var showBoard by remember { mutableStateOf(false) }
+    var refreshing by remember { mutableStateOf(false) }
+    var refreshResult by remember {
+        mutableStateOf<com.vladimir.messenger.data.heartgame.HeartGameNetwork.RefreshResult?>(null)
+    }
     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.heart_game_title), Modifier.weight(1f), fontWeight = FontWeight.Bold)
@@ -127,13 +154,42 @@ fun HeartGameSettings() {
         }
         Text(stringResource(R.string.heart_game_hint), style = MaterialTheme.typography.bodySmall)
         HeartGameCounter()
+        ApuTextAction(
+            label = stringResource(if (refreshing) R.string.heart_game_refresh_working else R.string.heart_game_refresh),
+            enabled = !refreshing && id != null,
+            onClick = {
+                refreshing = true
+                scope.launch {
+                    try {
+                        val network = dagger.hilt.android.EntryPointAccessors.fromApplication(
+                            context.applicationContext,
+                            com.vladimir.messenger.MainActivityEntryPoint::class.java,
+                        ).heartGameNetwork()
+                        refreshResult = network.refreshWithOnlinePeers()
+                    } catch (_: Exception) {
+                        refreshResult = com.vladimir.messenger.data.heartgame.HeartGameNetwork
+                            .RefreshResult(false, 0, 0, 0)
+                    } finally { refreshing = false }
+                }
+            })
+        Text(stringResource(R.string.heart_game_refresh_hint), style = MaterialTheme.typography.bodySmall)
+        refreshResult?.let { result ->
+            Text(
+                when {
+                    !result.ready -> stringResource(R.string.heart_game_refresh_not_ready)
+                    result.targets == 0 -> stringResource(R.string.heart_game_refresh_none_online)
+                    else -> stringResource(R.string.heart_game_refresh_done,
+                        result.online, result.targets, result.sentScore, result.sentRequests)
+                },
+                style = MaterialTheme.typography.labelSmall)
+        }
         ApuTextAction(label = stringResource(R.string.heart_game_leaders), onClick = { showBoard = true })
     }
-    if (showBoard) HeartGameLeaderboard(id) { showBoard = false }
+    if (showBoard) HeartGameLeaderboardDialog(id) { showBoard = false }
 }
 
 @Composable
-private fun HeartGameLeaderboard(id: String?, onDismiss: () -> Unit) {
+fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val revision by HeartGameStore.revision.collectAsStateWithLifecycle()
     var entries by remember(id) { mutableStateOf<List<HeartGameWire.Entry>>(emptyList()) }

@@ -129,9 +129,9 @@ fun ContactCard(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text      = chat.contactName,
-                    style     = MaterialTheme.typography.titleMedium,
+                    style     = apuVipNameStyle(MaterialTheme.typography.titleMedium, peerVip),
                     fontWeight = FontWeight.SemiBold,
-                    color     = Color(0xFF1E2430),
+                    color     = if (peerVip) Color(0xFF8A5F00) else Color(0xFF1E2430),
                     maxLines  = 1,
                     overflow  = TextOverflow.Ellipsis,
                     modifier  = Modifier.weight(1f, fill = false),
@@ -140,6 +140,8 @@ fun ContactCard(
                     Spacer(Modifier.width(6.dp))
                     ApuVipBadge(compact = true)
                 }
+                // Эмодзи-статус собеседника рядом с именем.
+                EmojiStatusBadge(chat.contactId, Modifier.padding(start = 6.dp))
             }
 
             // Оригинальное имя через собаку - золотом, как акценты темы.

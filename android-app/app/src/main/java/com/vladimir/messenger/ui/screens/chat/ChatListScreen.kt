@@ -8,7 +8,9 @@ package com.vladimir.messenger.ui.screens.chat
 // FAB для добавления нового контакта.
 // =============================================================================
 
+import com.vladimir.messenger.data.heartgame.HeartGameStore
 import com.vladimir.messenger.ui.components.ApuPremiumSpinner
+import com.vladimir.messenger.ui.components.HeartGameLeaderboardDialog
 import com.vladimir.messenger.ui.components.ApuSearchField
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
@@ -60,6 +62,7 @@ import com.vladimir.messenger.ui.components.ApuTabActions
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.CoreWarmBar
 import com.vladimir.messenger.ui.components.ApuVipBadge
+import com.vladimir.messenger.ui.components.apuVipNameStyle
 import com.vladimir.messenger.ui.components.RankMedal
 import com.vladimir.messenger.data.group.GroupRole
 import java.text.SimpleDateFormat
@@ -141,6 +144,8 @@ fun ChatListScreen(
     onCallClick: (contactId: String, contactName: String) -> Unit = { _, _ -> },
     /** «Ключ этого телефона не читается»: открыть восстановление профиля из файла. */
     onRestoreProfileClick: () -> Unit = {},
+    /** Экран «Папки с чатами»: создание и порядок папок-вкладок. */
+    onFoldersClick: () -> Unit = {},
     viewModel: ChatListViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -148,6 +153,7 @@ fun ChatListScreen(
     var isSearchVisible by remember { mutableStateOf(false) }
 
     var showConnectDialog by remember { mutableStateOf(false) }
+    var showHeartLeaders by remember { mutableStateOf(false) }
     var connectLink by remember { mutableStateOf("") }
     val context = LocalContext.current
     LaunchedEffect(uiState.error) {
@@ -177,10 +183,12 @@ fun ChatListScreen(
     // Листалка разделов. Страницы едут за пальцем, поэтому выбранный раздел и
     // страница обязаны ходить парой: тап по чипсу листает страницу, а
     // остановившаяся страница выбирает раздел.
-    val sectionCount = uiState.sections.size.coerceAtLeast(1)
+    // Страницы листалки: сначала встроенные разделы, затем папки чатов -
+    // вкладки папок живут в той же полоске и листаются тем же жестом.
+    val tabCount = (uiState.sections.size + uiState.folders.size).coerceAtLeast(1)
     val pagerState = rememberPagerState(
         initialPage = uiState.sections.indexOf(uiState.section).coerceAtLeast(0),
-        pageCount = { sectionCount },
+        pageCount = { tabCount },
     )
     // Листание запускается из обработчика нажатия, а НЕ из LaunchedEffect по
     // разделу. Раньше на середине анимации страница успевала смениться, это
@@ -205,7 +213,12 @@ fun ChatListScreen(
     // подтягиваем страницу, но только когда листалка стоит.
     LaunchedEffect(uiState.section, uiState.sections) {
         val target = uiState.sections.indexOf(uiState.section)
-        if (target >= 0 && target != pagerState.currentPage && !pagerState.isScrollInProgress) {
+        // Стоя на странице-папке, к разделу не прыгаем: папка — не раздел, и
+        // смена раздела в фоне не должна выдёргивать человека из папки.
+        if (target >= 0 && target != pagerState.currentPage &&
+            pagerState.currentPage < uiState.sections.size &&
+            !pagerState.isScrollInProgress
+        ) {
             pagerState.scrollToPage(target)
         }
     }
@@ -271,7 +284,13 @@ fun ChatListScreen(
                                         Spacer(Modifier.width(6.dp))
                                         Text(
                                             uiState.rankBadge,
+                                            style = apuVipNameStyle(
+                                                MaterialTheme.typography.titleMedium,
+                                                uiState.rankVip,
+                                            ),
                                             fontWeight = FontWeight.Bold,
+                                            color = if (uiState.rankVip) Color(0xFF8A5F00)
+                                            else MaterialTheme.colorScheme.onSurface,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                         )
@@ -284,6 +303,7 @@ fun ChatListScreen(
                                     }
                                     com.vladimir.messenger.ui.components.HeartGameHeaderStatus(
                                         modifier = Modifier.padding(start = 32.dp),
+                                        onClick = { showHeartLeaders = true },
                                     )
                                 }
                             }
@@ -326,6 +346,10 @@ fun ChatListScreen(
                                         ApuAction(stringResource(R.string.chat_invite_apu), Icons.Default.PersonAdd) {
                                             showInviteShare = true
                                         },
+                                        ApuAction(stringResource(R.string.folder_title), Icons.Default.Folder) {
+                                            menuOpen = false
+                                            onFoldersClick()
+                                        },
                                     ),
                                 )
                             }
@@ -338,7 +362,8 @@ fun ChatListScreen(
                 // пальцем вбок - разделов может стать больше, чем влезает.
                 // Вкладка «Не прочитано» показывает бейдж с числом чатов с непрочитано >0.
                 ApuTabBar(
-                    titles = uiState.sections.map { stringResource(it.labelRes) },
+                    titles = uiState.sections.map { stringResource(it.labelRes) } +
+                        uiState.folders.map { it.name },
                     selectedIndex = pagerState.currentPage,
                     offsetFraction = pagerState.currentPageOffsetFraction,
                     onSelect = { index ->
@@ -346,7 +371,7 @@ fun ChatListScreen(
                     },
                     badges = uiState.sections.map { sec ->
                         if (sec == InboxSection.Unread) uiState.unreadCount else 0
-                    },
+                    } + uiState.folders.map { uiState.folderUnread[it.id] ?: 0 },
                 )
             }
         },
@@ -408,12 +433,25 @@ fun ChatListScreen(
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier.fillMaxSize(),
-                    key = { page -> uiState.sections.getOrNull(page)?.name ?: page.toString() },
+                    key = { page ->
+                        uiState.sections.getOrNull(page)?.name
+                            ?: uiState.folders.getOrNull(page - uiState.sections.size)
+                                ?.let { "folder:" + it.id }
+                            ?: page.toString()
+                    },
                     // Пролистываем по одной вкладке за жест, как в Телеграме.
                     pageSize = PageSize.Fill,
                     beyondViewportPageCount = 1,
                 ) { page ->
-                    val section = uiState.sections.getOrNull(page) ?: return@HorizontalPager
+                    // Страница за пределами разделов — папка: рисуем её тем же
+                    // списком, что и «Все», но с её собственным набором строк.
+                    val folder = if (page >= uiState.sections.size) {
+                        uiState.folders.getOrNull(page - uiState.sections.size)
+                    } else {
+                        null
+                    }
+                    val section = uiState.sections.getOrNull(page)
+                        ?: if (folder != null) InboxSection.All else return@HorizontalPager
                     SectionPage(
                         section = section,
                         onAddStory = { storyComposer = true },
@@ -425,7 +463,11 @@ fun ChatListScreen(
                         // Готовый список раздела, посчитанный в фоне. Раньше
                         // здесь шёл пересчёт прямо во время отрисовки - при
                         // сотнях чатов это подвешивало жест листания.
-                        items = uiState.itemsBySection[section].orEmpty(),
+                        items = if (folder != null) {
+                            uiState.itemsByFolder[folder.id].orEmpty()
+                        } else {
+                            uiState.itemsBySection[section].orEmpty()
+                        },
                         isSearchActive = uiState.searchQuery.isNotEmpty(),
                         vipPeerIds = uiState.vipPeerIds,
                         onChatClick = onChatClick,
@@ -869,6 +911,11 @@ fun ChatListScreen(
 
     // Диалог подключения — отдельная фирменная карточка, а не стандартное
     // Material-окно с серо-лиловыми полями поверх обоев.
+    // Счёт сердечек на главной нажимается: сразу таблица лидеров.
+    if (showHeartLeaders) {
+        val heartId = remember { HeartGameStore.ownId() }
+        HeartGameLeaderboardDialog(heartId) { showHeartLeaders = false }
+    }
     if (showConnectDialog) {
         ApuConnectByLinkDialog(
             link = connectLink,
@@ -1356,7 +1403,9 @@ private fun SectionPage(
                                 showPinnedIndicator = true,
                                 // Знак VIP у имени собеседника: он сам сообщил
                                 // ранг конвертом APURANK1 (см. PeerRankRouter).
-                                peerVip = item.chat.contactId.lowercase() in vipPeerIds,
+                                peerVip = com.vladimir.messenger.data.rank.RankWire
+                                    .canonicalNodeId(item.chat.contactId)
+                                    ?.let { it in vipPeerIds } ?: false,
                                 onClick = {
                                     onChatClick(
                                         item.chat.id,

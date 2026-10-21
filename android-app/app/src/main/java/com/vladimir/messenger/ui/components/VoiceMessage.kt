@@ -25,6 +25,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -45,7 +47,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
+import androidx.compose.ui.platform.LocalContext
+import com.vladimir.messenger.data.voice.VoiceTranscriber
 import com.vladimir.messenger.util.VoiceNote
+import kotlinx.coroutines.launch
 import java.io.File
 import kotlinx.coroutines.delay
 
@@ -139,7 +144,98 @@ fun VoiceMessagePlayer(
                 style = MaterialTheme.typography.labelSmall,
                 color = textColor.copy(alpha = 0.7f),
             )
+            VoiceTranscript(file = file, textColor = textColor)
         }
+    }
+}
+
+/**
+ * Кнопка «В текст» под голосовым: одна кнопка переводит сообщение в текст
+ * прямо на телефоне (см. [VoiceTranscriber]). Работает и для входящих, и для
+ * своих: проигрывателю направление не важно, у него есть только файл.
+ */
+@Composable
+private fun VoiceTranscript(file: File, textColor: Color) {
+    val context = LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var text by remember(file.path) { mutableStateOf(VoiceTranscriber.cached(context, file)) }
+    var expanded by remember(file.path) { mutableStateOf(false) }
+    var stage by remember(file.path) { mutableStateOf<VoiceTranscriber.Stage?>(null) }
+    var failed by remember(file.path) { mutableStateOf<VoiceTranscriber.Reason?>(null) }
+    val working = stage != null
+
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            Icons.Filled.Subtitles,
+            contentDescription = stringResource(R.string.voice_to_text),
+            tint = textColor.copy(alpha = 0.7f),
+            modifier = Modifier.size(16.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            when {
+                working -> stringResource(
+                    when (stage) {
+                        VoiceTranscriber.Stage.MODEL -> R.string.voice_model_downloading
+                        VoiceTranscriber.Stage.DECODE -> R.string.voice_transcribing
+                        else -> R.string.voice_transcribing
+                    },
+                )
+                text != null && !expanded -> stringResource(R.string.voice_show_text)
+                text != null -> stringResource(R.string.voice_hide_text)
+                else -> stringResource(R.string.voice_to_text)
+            },
+            style = MaterialTheme.typography.labelMedium,
+            color = textColor.copy(alpha = 0.85f),
+            modifier = Modifier.clickable(enabled = !working) {
+                val ready = text
+                if (ready != null) {
+                    expanded = !expanded
+                } else {
+                    failed = null
+                    scope.launch {
+                        stage = VoiceTranscriber.Stage.DECODE
+                        when (val outcome = VoiceTranscriber.transcribe(context, file) { stage = it }) {
+                            is VoiceTranscriber.Outcome.Success -> {
+                                text = outcome.text
+                                expanded = true
+                            }
+                            is VoiceTranscriber.Outcome.Failure -> failed = outcome.reason
+                        }
+                        stage = null
+                    }
+                }
+            },
+        )
+    }
+    if (working) {
+        Text(
+            stringResource(R.string.voice_transcribe_hint),
+            style = MaterialTheme.typography.labelSmall,
+            color = textColor.copy(alpha = 0.6f),
+        )
+    }
+    failed?.let { reason ->
+        Text(
+            stringResource(
+                when (reason) {
+                    VoiceTranscriber.Reason.MODEL_DOWNLOAD -> R.string.voice_model_error
+                    VoiceTranscriber.Reason.TOO_LONG -> R.string.voice_too_long
+                    VoiceTranscriber.Reason.EMPTY -> R.string.voice_empty
+                    else -> R.string.voice_transcribe_error
+                },
+            ),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+    if (expanded && text != null) {
+        Text(
+            text!!,
+            style = MaterialTheme.typography.bodyMedium,
+            color = textColor,
+            modifier = Modifier.padding(top = 2.dp),
+        )
     }
 }
 
@@ -158,6 +254,8 @@ fun VoiceFileCard(
     isFromMe: Boolean,
     messageActions: List<ApuAction>,
     onLongPress: (() -> Unit)?,
+    /** «Поставить реакцию» в меню голосового (точки): в личке это отдельный путь. */
+    onReact: (() -> Unit)? = null,
 ) {
     val actions = buildList {
         state.onSave?.let { save -> add(ApuAction(stringResource(R.string.ft_save_folder), Icons.Filled.Save) { save() }) }
@@ -171,6 +269,7 @@ fun VoiceFileCard(
         textColor = ApuBubbleTextColor,
         actions = actions,
         onLongPress = onLongPress,
+        onReact = onReact,
     )
 }
 
@@ -184,6 +283,8 @@ fun VoiceActionsRow(
     actions: List<ApuAction>,
     onLongPress: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    /** Поставить реакцию на голосовое - первым пунктом его меню (точки). */
+    onReact: (() -> Unit)? = null,
 ) {
     var showActions by remember { mutableStateOf(false) }
     Row(
@@ -230,7 +331,16 @@ fun VoiceActionsRow(
                         .padding(8.dp)
                         .widthIn(min = 210.dp, max = 320.dp),
                 ) {
-                    actions.forEach { action ->
+                    if (onReact != null) {
+                    ApuActionBubble(
+                        label = stringResource(R.string.chat_add_reaction),
+                        icon = Icons.Filled.EmojiEmotions,
+                    ) {
+                        showActions = false
+                        onReact()
+                    }
+                }
+                actions.forEach { action ->
                         ApuActionBubble(
                             label = action.title,
                             icon = action.icon,

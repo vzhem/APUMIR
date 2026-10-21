@@ -451,6 +451,11 @@ object MirrorHub {
         runCatching { channel?.publishReadSync(peerId, groupId, topicId) }
     }
 
+    /** Пэйринг принёс маркер комнаты извне: канал должен перечитать его и переподключиться. */
+    fun refreshRoomToken() {
+        runCatching { channel?.adoptExternalRoomToken() }
+    }
+
     fun close() {
         runCatching { channel?.shutdown() }
         channel = null
@@ -1294,6 +1299,19 @@ class MirrorChannel(
     }
 
     // ── р249: комната зеркала (маркер, разведка, согласование) ────────────────
+
+    /**
+     * Маркер комнаты изменился не нами (пришёл с пэйрингом устройств):
+     * перечитать его и, если полка другая, переподключиться уже в неё.
+     * Дальше обычный механизм сам догонит историю, профиль и остальное.
+     */
+    fun adoptExternalRoomToken() {
+        val loaded = MirrorRoomToken.load(context)
+        if (loaded?.value == token?.value) return
+        token = loaded
+        holdLegacyUntil = 0L
+        reconnect("маркер комнаты получен при подключении устройства")
+    }
 
     /** Полка, в которой нам сейчас место. */
     private fun shelfNow(now: Long = System.currentTimeMillis()): String {
@@ -2208,11 +2226,21 @@ class MirrorChannel(
     // р249: закрываем ТОЛЬКО своё соединение. Если мы уже ушли в другую
     // комнату, старый сокет не должен обнулять ссылку на новый.
     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-        if (wsRef.compareAndSet(webSocket, null)) scheduleReconnect()
+        if (wsRef.compareAndSet(webSocket, null)) {
+            // Обрыв посреди догона: сбрасываем флаг сразу, иначе после
+            // переподключения синхронизация ждала бы, пока партнёр «протухнет»
+            // (30 с). Уже принятые порции лежат в базе, догон продолжится с
+            // новейшей имеющейся записи, а не с начала.
+            catchupInFlight = false
+            scheduleReconnect()
+        }
     }
 
     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-        if (wsRef.compareAndSet(webSocket, null)) scheduleReconnect()
+        if (wsRef.compareAndSet(webSocket, null)) {
+            catchupInFlight = false
+            scheduleReconnect()
+        }
     }
 
     companion object {

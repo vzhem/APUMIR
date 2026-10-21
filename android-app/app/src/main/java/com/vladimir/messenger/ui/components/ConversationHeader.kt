@@ -25,6 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -61,8 +62,8 @@ internal fun ConversationHeader(
                 Column(Modifier.weight(1f)) {
                     // No ellipsis or line limit: long names wrap, including at large system font sizes.
                     Text(name, modifier = Modifier.fillMaxWidth().testTag("conversation-header-name"),
-                        style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
-                        color = ApuBubbleTextColor, softWrap = true)
+                        style = apuVipNameStyle(MaterialTheme.typography.titleMedium, vip), fontWeight = FontWeight.SemiBold,
+                        color = if (vip) Color(0xFF8A5F00) else ApuBubbleTextColor, softWrap = true)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(status, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall,
                             color = if (active) ApuBubbleAccentColor else ApuBubbleMutedColor)

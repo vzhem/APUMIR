@@ -51,6 +51,8 @@ data class ChatDetailUiState(
      * знак, а вокруг аватарки — объёмное золотое кольцо с блеском.
      */
     val peerVip: Boolean = false,
+    /** Что известно о ранге собеседника (null - ещё не сообщал). */
+    val peerRankQualified: Int? = null,
     /**
      * От собеседника приходят конверты, которые не вскрываются: у него осталась
      * прежняя копия нашего ключа (переустановка/восстановление профиля). Пока
@@ -105,6 +107,8 @@ data class ChatDetailUiState(
     val swarmStatus: String? = null,
     /** Реакции по сообщениям: ключ - id сообщения. */
     val reactions: Map<String, List<com.vladimir.messenger.data.reaction.ReactionSummary>> = emptyMap(),
+    /** Счётчик репостов по сообщениям: ключ - id сообщения. */
+    val repostCounts: Map<String, Int> = emptyMap(),
     val replyTo: Message? = null,
 )
 
@@ -122,10 +126,13 @@ class ChatDetailViewModel @Inject constructor(
     private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
     private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
     private val reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository,
+    private val repostRepository: com.vladimir.messenger.data.repost.RepostRepository,
     private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
     private val readReceipts: com.vladimir.messenger.data.receipt.ReadReceiptRepository,
     private val hearts: com.vladimir.messenger.data.heart.HeartRepository,
     private val messageDeletion: com.vladimir.messenger.data.repository.MessageDeletionRepository,
+    private val messageEdit: com.vladimir.messenger.data.repository.MessageEditRepository,
+    private val peerRankBroadcaster: com.vladimir.messenger.data.rank.PeerRankBroadcaster,
     private val stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary,
     @ApplicationContext private val appContext: Context,
     /** Ранги собеседников: поток узлов-элиты для знака и кольца у аватарки. */
@@ -191,6 +198,7 @@ class ChatDetailViewModel @Inject constructor(
         observeContactPresence()
         observeTransfers()
         observeReactions()
+        observeReposts()
         markAsRead()
         observeGifArrivals()
         observeStickerArrivals()
@@ -301,6 +309,15 @@ class ChatDetailViewModel @Inject constructor(
         }
     }
 
+    /** Счётчик репостов чата: поток уже уведён на IO внутри репозитория. */
+    private fun observeReposts() {
+        viewModelScope.launch {
+            repostRepository.observeCounts(chatId).collect { map ->
+                _uiState.update { it.copy(repostCounts = map) }
+            }
+        }
+    }
+
     /** Поставить или снять реакцию на сообщение. */
     fun toggleReaction(messageId: String, emoji: String) {
         viewModelScope.launch { reactionRepository.toggle(chatId, messageId, emoji) }
@@ -339,12 +356,27 @@ class ChatDetailViewModel @Inject constructor(
      * никем не обновлялся, а peer_discovered писал только в таблицу contacts.
      * Слушаем строку чата в БД — peer_discovered/peer_lost её же и обновляют.
      */
+    /** Ранг собеседника не знаем - попросить адресно, чтобы значок VIP не ждал рассылку. */
+    private fun requestPeerRankIfUnknown(peer: String) {
+        if (peer.isBlank()) return
+        viewModelScope.launch {
+            runCatching {
+                if (peerRankStore.qualifiedFor(peer) == null) {
+                    peerRankBroadcaster.requestRank(peer)
+                }
+            }
+        }
+    }
+
     private fun observeContactPresence() {
         // Знак VIP и золотое кольцо у имени собеседника обновляем на лету: ранг
         // может приехать в любой момент конвертом APURANK1, а экран уже открыт.
         viewModelScope.launch {
             peerRankStore.vipNodeIds.collect { vipIds ->
                 val peer = peerId.lowercase()
+                requestPeerRankIfUnknown(peer)
+                val knownRank = runCatching { peerRankStore.qualifiedFor(peer) }.getOrNull()
+                _uiState.update { it.copy(peerRankQualified = knownRank) }
                 // В переписке с собственным узлом собеседника нет: кольцо решает
                 // МОЙ ранг (он же виден в профиле и на главной). Свой ранг лежит
                 // в настройках, поэтому читаем его в фоне, а не на главном потоке.
@@ -738,6 +770,30 @@ class ChatDetailViewModel @Inject constructor(
                     )}
                 }
         }
+    }
+
+    /**
+     * «Поделиться координатами»: точка уходит обычным зашифрованным
+     * сообщением APULOC1 (карточка рисуется по первой строке), поэтому
+     * работают зеркало, офлайн-очередь и старые версии (у них - подпись
+     * со ссылкой на карту второй строкой).
+     */
+    fun sendLocation(lat: Double, lon: Double, accuracyM: Int?, label: String) {
+        viewModelScope.launch {
+            sendMessageUseCase(
+                chatId,
+                com.vladimir.messenger.util.LocationShare.format(lat, lon, accuracyM, label),
+            ).onSuccess {
+                _uiState.update { it.copy(scrollToBottom = true) }
+            }.onFailure { e ->
+                _uiState.update { it.copy(error = appContext.getString(R.string.cd_send_error, e.message)) }
+            }
+        }
+    }
+
+    /** Подсказка по геолокации (нет разрешения / нет фикса) - в общую плашку ошибок чата. */
+    fun showLocationNotice(text: String) {
+        _uiState.update { it.copy(error = text) }
     }
 
     /**
@@ -1572,6 +1628,17 @@ class ChatDetailViewModel @Inject constructor(
     /**
      * Раунд 135: удалить своё сообщение только у себя.
      */
+    /**
+     * Отредактировать своё уже ушедшее сообщение (и прочитанное тоже):
+     * текст меняется у себя сразу, собеседнику уходит конверт правки.
+     */
+    fun editMessage(messageId: String, newText: String) {
+        viewModelScope.launch {
+            messageEdit.editDirect(chatId, messageId, newText)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message.orEmpty()) } }
+        }
+    }
+
     fun deleteMessageForMe(messageId: String) {
         viewModelScope.launch {
             messageDeletion.deleteForMe(chatId, messageId)
@@ -1716,6 +1783,7 @@ class ChatDetailViewModel @Inject constructor(
         text: String,
         sourceLabel: String,
         target: com.vladimir.messenger.ui.components.ForwardTarget,
+        sourceMessageId: String = "",
         onResult: (Boolean) -> Unit,
     ) {
         viewModelScope.launch {
@@ -1731,6 +1799,10 @@ class ChatDetailViewModel @Inject constructor(
                 chatRepository.sendMessage(target.id, "", body)
             } else {
                 groupRepository.sendMessage(target.id, target.topicId ?: "", body)
+            }
+            // Счётчик репостов исходного сообщения: факт уходит собеседнику.
+            if (res.isSuccess && sourceMessageId.isNotBlank()) {
+                runCatching { repostRepository.noteForward(chatId, sourceMessageId) }
             }
             onResult(res.isSuccess)
         }

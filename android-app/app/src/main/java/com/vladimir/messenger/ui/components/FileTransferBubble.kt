@@ -72,6 +72,8 @@ fun FileTransferBubble(
      * картинок, поэтому реакцию на гифке поставить не мог никто.
      */
     onLongPress: (() -> Unit)? = null,
+    /** «Поставить реакцию» в меню голосового сообщения. */
+    onReactClick: (() -> Unit)? = null,
     onSwipeReply: (() -> Unit)? = null,
     /** Explicitly restart a non-delivered outgoing transfer from the system picker. */
     onRetry: (() -> Unit)? = null,
@@ -107,6 +109,7 @@ fun FileTransferBubble(
                     textColor = bubbleTextColor,
                     actions = voiceActions,
                     onLongPress = onLongPress,
+                    onReact = onReactClick,
                 )
             }
         }

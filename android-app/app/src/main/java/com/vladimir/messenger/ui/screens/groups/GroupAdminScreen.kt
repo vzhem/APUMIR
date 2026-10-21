@@ -990,7 +990,12 @@ private fun MemberRow(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             member.displayName.ifBlank { member.nodeId },
+                            style = com.vladimir.messenger.ui.components.apuVipNameStyle(
+                                MaterialTheme.typography.titleMedium, vip,
+                            ),
                             fontWeight = FontWeight.Medium,
+                            color = if (vip) Color(0xFF8A5F00)
+                            else MaterialTheme.colorScheme.onSurface,
                         )
                         if (vip) {
                             Spacer(Modifier.width(6.dp))

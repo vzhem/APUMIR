@@ -15,6 +15,8 @@ data class Message(
     val topicId: String? = null,
     /** Раунд 173: сообщение закреплено (шапка чата, переход по тапу). */
     val isPinned: Boolean = false,
+    /** Когда текст последний раз правили (0 - не правили): подпись «изменено». */
+    val editedAtMs: Long = 0,
     /** Кого и какой текст цитирует ответ (в личных чатах и группах). */
     val replyAuthor: String = "",
     val replyText: String = "",

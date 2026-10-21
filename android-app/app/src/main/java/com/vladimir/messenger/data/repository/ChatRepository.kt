@@ -38,6 +38,7 @@ class ChatRepository @Inject constructor(
     private val groupDao: GroupDao,
     private val storyVideos: com.vladimir.messenger.data.story.StoryVideoDelivery,
     private val referralAttribution: com.vladimir.messenger.data.referral.ReferralAttributionSender,
+    private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
 ) {
     // Защита от повторного FULL SYNC в течение 30 секунд
     private val lastFullSyncTime = mutableMapOf<String, Long>()
@@ -636,7 +637,7 @@ class ChatRepository @Inject constructor(
             row.senderId,
             row.contactName.ifBlank { com.vladimir.messenger.util.NodeIds.autoName(row.senderId) },
         )
-        saveIncomingMessage(
+        val saved = saveIncomingMessage(
             chatId = chat.id,
             senderId = row.senderId,
             messageId = row.id,
@@ -645,6 +646,9 @@ class ChatRepository @Inject constructor(
             channel = MessageChannel.UNKNOWN,
             recipientId = row.recipientId,
         )
+        // Не сохранено (служебный пакет, дубликат, запрещённое приглашение) -
+        // пустая пара: вызывающий не покажет уведомление.
+        if (!saved) return Pair("", "")
         return Pair(chat.id, chat.contactName)
     }
 
@@ -724,16 +728,16 @@ class ChatRepository @Inject constructor(
         timestamp: Long,
         channel: MessageChannel = MessageChannel.UNKNOWN,
         recipientId: String = "",
-    ) {
-        if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId)) return
+    ): Boolean {
+        if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId)) return false
         // История: пакет контакта сохраняем в ленту историй, в переписку не пускаем.
         if (com.vladimir.messenger.data.story.StoryStore.isStoryPacket(content)) {
-            if (content.toByteArray(Charsets.UTF_8).size > 16 * 1024) return
-            if (storyVideos.receiveReady(senderId, content)) return
+            if (content.toByteArray(Charsets.UTF_8).size > 16 * 1024) return false
+            if (storyVideos.receiveReady(senderId, content)) return false
             val name = chatDao.getChatsByContactId(senderId).firstOrNull()?.contactName.orEmpty()
             com.vladimir.messenger.data.story.StoryStore.receive(senderId, name, content)
             storyVideos.readyPacket(senderId, content)?.let { sendStoryPacket(senderId, it) }
-            return
+            return false
         }
         // р239/р247: страховка на самом сохранении. Служебный пакет приложения
         // (например, «печатает…» или delivery ACK) в переписку не попадает ни
@@ -750,13 +754,21 @@ class ChatRepository @Inject constructor(
                 com.vladimir.messenger.data.typing.TypingPeer.peerStopped(senderId)
             }
             Log.i(TAG, "service packet not saved to chat: " + content.take(16))
-            return
+            return false
+        }
+        // Настройка «Кто может приглашать в группы и каналы»: запрещённое
+        // приглашение выбрасывается ЗДЕСЬ, до записи. Нет строки в базе -
+        // нет ни заметки в чате, ни непрочитанных, ни уведомления (оно
+        // рождается наблюдателем за базой), ни повода отвлекаться.
+        if (isInviteBlocked(senderId, content)) {
+            Log.i(TAG, "invite blocked by privacy setting from $senderId - dropped silently")
+            return false
         }
         // Защита от дубликатов (FULL SYNC может прислать то же сообщение повторно)
         val exists = messageDao.messageExists(messageId)
         if (exists) {
             Log.i(TAG, "⏩ SKIP duplicate msg $messageId (already in DB)")
-            return
+            return false
         }
         
         Log.i(TAG, "💾 saveIncomingMessage: chatId=$chatId msgId=$messageId ts=$timestamp")
@@ -774,10 +786,10 @@ class ChatRepository @Inject constructor(
             recipientId = recipientId,
         )
         // A due-time fallback may race the local hidden-inbox reveal.
-        if (messageDao.insertMessageIgnore(entity) == -1L) return
+        if (messageDao.insertMessageIgnore(entity) == -1L) return false
         if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId)) {
             messageDao.deleteByIdChatAndSender(messageId, chatId, senderId)
-            return
+            return false
         }
         chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
         // Раунд 150: бейдж непрочитанных на пузыре личного чата.
@@ -785,6 +797,85 @@ class ChatRepository @Inject constructor(
         // сообщения, непрочитанные не считают (владелец).
         if (!com.vladimir.messenger.util.ChatPreviews.isServiceEnvelope(content)) {
             runCatching { chatDao.incrementUnread(chatId) }
+        }
+        return true
+    }
+
+    /**
+     * Запрещено ли это приглашение настройкой «Кто может приглашать в
+     * группы и каналы». Обычный текст - не приглашение, пропускается.
+     * Карточка и мульти-карточка проверяются по режиму: ВСЕ - можно всем,
+     * КОНТАКТЫ - только людям из адресной книги, НИКТО - никому. Режим
+     * читается из файла на каждое приглашение, чтобы смена настройки
+     * действовала сразу, без перезапуска.
+     */
+    suspend fun isInviteBlocked(senderId: String, content: String): Boolean {
+        val isCard = com.vladimir.messenger.util.GroupInviteCardSender.parseCard(content) != null ||
+            com.vladimir.messenger.util.GroupInviteCardSender.parseMultiCard(content) != null
+        if (!isCard) return false
+        val mode = com.vladimir.messenger.data.profile.InvitePrivacyStore.value(context)
+        if (mode == com.vladimir.messenger.data.profile.InvitePrivacy.ALL) return false
+        val isContact = if (mode == com.vladimir.messenger.data.profile.InvitePrivacy.CONTACTS) {
+            val senderNode = canonicalNode(senderId)
+            runCatching { contactDao.allIds() }.getOrDefault(emptyList())
+                .any { it == senderId || canonicalNode(it) == senderNode }
+        } else {
+            false
+        }
+        return !com.vladimir.messenger.data.profile.InvitePrivacyStore.allows(mode, isContact)
+    }
+
+    /**
+     * Заметка отправителю приглашения: «не доставлено, и вот почему».
+     * Ложится обычной входящей строкой в чат с получателем, поэтому
+     * срабатывает и штатная machinery: счётчик непрочитанных и уведомление
+     * наблюдателя за базой. Возвращает false, если чата нет (писать некуда).
+     */
+    suspend fun insertInviteRejectNotice(
+        senderId: String,
+        notice: com.vladimir.messenger.data.invite.InviteRejectWire.Notice,
+    ): Boolean {
+        val chat = chatDao.getChatsByContactId(senderId).firstOrNull() ?: return false
+        val title = notice.title.trim()
+        val text = when (notice.reason) {
+            com.vladimir.messenger.data.invite.InviteRejectWire.Reason.NOBODY ->
+                if (title.isNotEmpty()) {
+                    context.getString(com.vladimir.messenger.R.string.invite_rejected_nobody, title)
+                } else {
+                    context.getString(com.vladimir.messenger.R.string.invite_rejected_nobody_generic)
+                }
+            com.vladimir.messenger.data.invite.InviteRejectWire.Reason.NOT_CONTACT ->
+                if (title.isNotEmpty()) {
+                    context.getString(com.vladimir.messenger.R.string.invite_rejected_not_contact, title)
+                } else {
+                    context.getString(com.vladimir.messenger.R.string.invite_rejected_not_contact_generic)
+                }
+        }
+        val now = System.currentTimeMillis()
+        val entity = MessageEntity(
+            id = UUID.randomUUID().toString(),
+            chatId = chat.id,
+            senderId = senderId,
+            content = text,
+            timestamp = now,
+            isFromMe = false,
+            status = MessageStatus.DELIVERED.name,
+            recipientId = "",
+        )
+        if (messageDao.insertMessageIgnore(entity) == -1L) return false
+        chatDao.updateLastMessage(chat.id, text, now)
+        runCatching { chatDao.incrementUnread(chat.id) }
+        return true
+    }
+
+    /** Узел из сырого идентификатора: `pk_…` как есть, из ссылки — по `node=`. */
+    private fun canonicalNode(raw: String): String {
+        val v = raw.trim()
+        return when {
+            v.contains("node=pk_") ->
+                "pk_" + v.substringAfter("node=pk_").substringBefore("&").substringBefore("|")
+            v.startsWith("pk_") -> v.substringBefore("|")
+            else -> v
         }
     }
 
@@ -1304,6 +1395,7 @@ class ChatRepository @Inject constructor(
         // Тема нужна уведомлениям: тап ведёт в место сообщения.
         topicId = topicId,
         isPinned = isPinned,
+        editedAtMs = editedAtMs,
         replyToId = replyToId,
         replyAuthor = replyAuthor,
         replyText = replyText,

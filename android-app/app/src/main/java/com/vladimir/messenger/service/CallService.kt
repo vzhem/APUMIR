@@ -33,12 +33,21 @@ class CallService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .build()
+        // Демонстрация экрана: Android 14+ требует, чтобы foreground-service с типом
+        // mediaProjection уже работал ДО создания проекции, поэтому тип заявляем
+        // заранее по extra, когда человек нажал «Экран» и идёт за разрешением системы.
+        val types = if (intent?.getBooleanExtra(EXTRA_SCREEN, false) == true) {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE or
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+        } else {
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        }
         try {
             ServiceCompat.startForeground(
                 this,
                 NOTIFICATION_ID,
                 notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE,
+                types,
             )
         } catch (e: Exception) {
             Log.w(TAG, "startForeground failed: ${e.message}")
@@ -54,6 +63,15 @@ class CallService : Service() {
 
         fun start(context: Context) {
             val intent = Intent(context, CallService::class.java)
+            ContextCompat.startForegroundService(context, intent)
+        }
+
+        private const val EXTRA_SCREEN = "screen"
+
+        /** Поднять сервис с типом mediaProjection до запроса разрешения на захват экрана. */
+        fun startForScreenShare(context: Context) {
+            val intent = Intent(context, CallService::class.java)
+                .putExtra(EXTRA_SCREEN, true)
             ContextCompat.startForegroundService(context, intent)
         }
 

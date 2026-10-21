@@ -120,6 +120,9 @@ sealed class Screen(val route: String) {
     // РќР°СЃС‚СЂРѕР№РєРё
     data object Settings : Screen("settings")
 
+    /** Папки с чатами: вкладки главного списка в стиле Telegram. */
+    data object ChatFolders : Screen("chat_folders")
+
     /**
      * Профиль. Отдельный маршрут, а не вкладка внутри настроек: на него ведёт
      * кнопка нижней панели, и «Назад» должен возвращать туда, откуда пришли.
@@ -452,6 +455,9 @@ fun MessengerNavGraph(
                 onSettingsClick = {
                     navController.navigate(Screen.Settings.route)
                 },
+                onFoldersClick = {
+                    navController.navigate(Screen.ChatFolders.route)
+                },
                 onScanQrClick = {
                     navController.navigate(Screen.QrScanner.route)
                 },
@@ -603,9 +609,22 @@ fun MessengerNavGraph(
         // РќРђРЎРўР РћР™РљР
         // ------------------------------------------------------------------
         composable(route = Screen.Devices.route) {
+            val manualContext = androidx.compose.ui.platform.LocalContext.current
+            val manualScope = androidx.compose.runtime.rememberCoroutineScope()
             DevicesScreen(
                 onBackClick = { navController.popBackStack() },
                 onScanClick = { navController.navigate(Screen.DevicePairScan.route) },
+                onManualCode = { code ->
+                    // Ручной ввод: тот же код, что в QR, только текстом - путь
+                    // подключения дальше ровно тот же, что после сканирования.
+                    if (DevicePairingWire.parseQr(code) != null) {
+                        manualScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                            DevicePairingController.startJoin(code)
+                        }
+                    } else {
+                        android.widget.Toast.makeText(manualContext, manualContext.getString(com.vladimir.messenger.R.string.devices_not_pairing_qr), android.widget.Toast.LENGTH_LONG).show()
+                    }
+                },
             )
         }
 
@@ -641,6 +660,13 @@ fun MessengerNavGraph(
                 onProfileBackupClick = { navController.navigate(Screen.ProfileBackup.route) },
                 onSupportClick = { navController.navigate(Screen.Support.route) },
                 onFeedbackClick = { navController.navigate(Screen.Feedback.route) },
+                onFoldersClick = { navController.navigate(Screen.ChatFolders.route) },
+            )
+        }
+
+        composable(route = Screen.ChatFolders.route) {
+            com.vladimir.messenger.ui.screens.chat.ChatFoldersScreen(
+                onBackClick = { navController.popBackStack() },
             )
         }
 

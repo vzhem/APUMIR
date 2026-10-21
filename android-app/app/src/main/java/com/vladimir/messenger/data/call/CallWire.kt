@@ -84,6 +84,8 @@ object CallWire {
     const val KIND_MEDIA_FLAG = "media"
     const val MEDIA_VIDEO = "v"
     const val MEDIA_AUDIO = "a"
+    /** Идёт демонстрация экрана вместо камеры (видео включено). Старые сборки флаг не поймут и отбросят пакет. */
+    const val MEDIA_SCREEN = "s"
 
     /** Версия голосового канала: v1 — выделенный TCP-сокет 42109 (udp1 добавится позже). */
     const val PROTO_TCP1 = "tcp1"
@@ -176,7 +178,7 @@ object CallWire {
         data class Probe(val callId: String, val seen: Boolean) : Packet()
 
         /** Звонок с видео (v) или только голос (a). */
-        data class MediaFlag(val callId: String, val video: Boolean) : Packet()
+        data class MediaFlag(val callId: String, val video: Boolean, val screen: Boolean = false) : Packet()
     }
 
     fun isCallPacket(text: String?): Boolean =
@@ -301,7 +303,14 @@ object CallWire {
         return "$PREFIX|$KIND_MEDIA_FLAG|$callId|${if (video) MEDIA_VIDEO else MEDIA_AUDIO}"
     }
 
+    /** Демонстрация экрана вкл/выкл. Выключение = возврат к обычному видео (кадры камеры). */
+    fun buildScreenFlag(callId: String, sharing: Boolean): String {
+        requireValidCallId(callId)
+        return "$PREFIX|$KIND_MEDIA_FLAG|$callId|${if (sharing) MEDIA_SCREEN else MEDIA_VIDEO}"
+    }
+
     fun mediaFlagMessageId(callId: String): String = "c${callId}m"
+    fun screenFlagMessageId(callId: String, atMs: Long): String = "c${callId}s$atMs"
 
     // ── Детерминированные messageId для транспортной дедупликации ──────────
 
@@ -432,6 +441,7 @@ object CallWire {
                 val callId = parts[2].takeIf { isValidCallId(it) } ?: return null
                 when (parts[3]) {
                     MEDIA_VIDEO -> Packet.MediaFlag(callId, true)
+                    MEDIA_SCREEN -> Packet.MediaFlag(callId, true, screen = true)
                     MEDIA_AUDIO -> Packet.MediaFlag(callId, false)
                     else -> null
                 }

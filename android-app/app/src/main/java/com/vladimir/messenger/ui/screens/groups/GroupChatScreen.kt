@@ -66,6 +66,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
@@ -73,6 +74,7 @@ import androidx.compose.material.icons.filled.Search
 import android.widget.Toast
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Link
@@ -87,6 +89,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.LaunchedEffect
 import com.vladimir.messenger.util.GroupFileMarker
@@ -235,6 +238,25 @@ fun GroupChatScreen(
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(viewModel::onFileSelected)
     }
+
+    // «Поделиться координатами»: фикс ждёт подтверждения в диалоге.
+    var locationFix by remember {
+        mutableStateOf<com.vladimir.messenger.data.location.CurrentLocation.Fix?>(null)
+    }
+    val (requestLocation, isLocating) = com.vladimir.messenger.ui.components.rememberShareLocationAction(
+        onReady = { locationFix = it },
+        onError = { viewModel.showLocationNotice(it) },
+    )
+    locationFix?.let { fix ->
+        com.vladimir.messenger.ui.components.LocationPickerDialog(
+            ownFix = fix,
+            onDismiss = { locationFix = null },
+            onSend = { lat, lon, accuracyM, label ->
+                locationFix = null
+                viewModel.sendLocation(lat, lon, accuracyM, label)
+            },
+        )
+    }
     val savePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
     ) { uri -> viewModel.onSaveTargetPicked(uri) }
@@ -261,11 +283,56 @@ fun GroupChatScreen(
     var showGifCatalog by remember { mutableStateOf(false) }
     // Модальное окно удаления и модерации сообщений (одиночное или пакетное).
     var deleteForAllTarget by remember { mutableStateOf<com.vladimir.messenger.data.local.entity.MessageEntity?>(null) }
+    var groupEditTarget by remember { mutableStateOf<com.vladimir.messenger.data.local.entity.MessageEntity?>(null) }
     var showBulkModeration by remember { mutableStateOf(false) }
 
     // Канал это или группа и корневой пост канала: нужно и окну модерации,
     // и ленте, поэтому считаем до обоих.
     val isChannel = uiState.group?.isChannel == true
+    // Редактирование своего сообщения группы/канала.
+    groupEditTarget?.let { target ->
+        var editText by remember(target.id) { mutableStateOf(target.content) }
+        com.vladimir.messenger.ui.components.ApuSettingsDialog(
+            onDismissRequest = { groupEditTarget = null },
+            title = { Text(stringResource(R.string.chat_edit_title)) },
+            text = {
+                Column {
+                    Text(
+                        stringResource(R.string.chat_edit_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = com.vladimir.messenger.ui.components.ApuBubbleMutedColor,
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    com.vladimir.messenger.ui.components.ApuFormTextField(
+                        value = editText,
+                        onValueChange = { editText = it },
+                        label = stringResource(R.string.chat_edit_message),
+                        singleLine = false,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                com.vladimir.messenger.ui.components.ApuTextAction(
+                    label = stringResource(R.string.action_save),
+                    onClick = {
+                        val text = editText.trim()
+                        groupEditTarget = null
+                        if (text.isNotEmpty() && text != target.content) {
+                            viewModel.editMessage(target.id, text)
+                        }
+                    },
+                )
+            },
+            dismissButton = {
+                com.vladimir.messenger.ui.components.ApuTextAction(
+                    label = stringResource(R.string.action_cancel),
+                    onClick = { groupEditTarget = null },
+                )
+            },
+        )
+    }
+
     val channelRootMessageId = if (isChannel) {
         uiState.messages.firstOrNull {
             !com.vladimir.messenger.util.InlineImage.isPart(it.content)
@@ -398,6 +465,7 @@ fun GroupChatScreen(
     }
     // Голосовое сообщение: запись и отправка тем же путём, что у файла.
     val voice = rememberVoiceRecorder { uri -> viewModel.onFileSelected(uri) }
+    var showVoiceEffectPicker by remember { mutableStateOf(false) }
     var showSendOptions by remember { mutableStateOf(false) }
     val storeContext = LocalContext.current
     remember(Unit) { com.vladimir.messenger.data.schedule.ScheduledSendStore.load(storeContext) }
@@ -451,7 +519,7 @@ fun GroupChatScreen(
             onPick = { target ->
                 if (target.kind == com.vladimir.messenger.ui.components.ForwardKind.FRIEND) {
                     forwardPayload = null
-                    viewModel.forwardMessage(payload.text, payload.label, target) { ok ->
+                    viewModel.forwardMessage(payload.text, payload.label, target, sourceMessageId = payload.messageId) { ok ->
                         if (ok) {
                             fwdSent = true
                         } else {
@@ -477,6 +545,7 @@ fun GroupChatScreen(
                         payload.text,
                         payload.label,
                         target.copy(topicId = topic.id, topicTitle = topic.name),
+                        sourceMessageId = payload.messageId,
                     ) { ok ->
                         if (ok) {
                             fwdSent = true
@@ -1169,6 +1238,7 @@ fun GroupChatScreen(
                             forwardPayload = com.vladimir.messenger.ui.components.ForwardPayload(
                                 message.content,
                                 label,
+                                message.id,
                             )
                         },
                         onOpenForward = { ref ->
@@ -1190,12 +1260,14 @@ fun GroupChatScreen(
                             }
                         },
                         reactions = uiState.reactions[message.id].orEmpty(),
+                        repostCount = uiState.repostCounts[message.id] ?: 0,
                         onToggleReaction = { emoji -> viewModel.toggleReaction(message.id, emoji) },
                         onRemoveReaction = { viewModel.removeReaction(message.id) },
                         fileCard = cardState,
                         onEnsureGif = { sha -> viewModel.ensureGifRef(sha) },
                         onDeleteForMe = { viewModel.deleteMessageForMe(message.id) },
                         onDeleteForAll = { deleteForAllTarget = message },
+                        onEdit = { groupEditTarget = message },
                         // ── р250: ответы и опросы ──
                         onReply = { viewModel.startReply(message) },
                         poll = uiState.polls[message.id],
@@ -1354,6 +1426,21 @@ fun GroupChatScreen(
                                     tint = if (voice.recording) Color(0xFFE5484D) else Color(0xFF5A6472),
                                 )
                             }
+                            IconButton(
+                                onClick = { showVoiceEffectPicker = true },
+                                enabled = !uiState.isPreparingFile && !uiState.sending,
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.GraphicEq,
+                                    contentDescription = stringResource(R.string.voice_effect_title),
+                                    tint = if (voice.effect == com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL) {
+                                        Color(0xFF5A6472)
+                                    } else {
+                                        Color(0xFFB8860B)
+                                    },
+                                )
+                            }
                             ApuPremiumChip(
                                 label = "GIF",
                                 selected = false,
@@ -1370,10 +1457,32 @@ fun GroupChatScreen(
                                 },
                                 enabled = !uiState.isPreparingFile && !uiState.sending,
                             )
+                            IconButton(
+                                onClick = requestLocation,
+                                enabled = !uiState.isPreparingFile && !uiState.sending,
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                if (isLocating) {
+                                    ApuPremiumSpinner(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(
+                                        Icons.Filled.Place,
+                                        contentDescription = stringResource(R.string.chat_share_location),
+                                        tint = Color(0xFF5A6472),
+                                    )
+                                }
+                            }
                         }
                     }
-                    if (voice.recording) {
+                    if (voice.recording || voice.processing) {
                         VoiceRecordBar(voice)
+                    }
+                    if (showVoiceEffectPicker) {
+                        com.vladimir.messenger.ui.components.VoiceEffectPickerDialog(
+                            selected = voice.effect,
+                            onSelected = voice.selectEffect,
+                            onDismiss = { showVoiceEffectPicker = false },
+                        )
                     }
                     ApuBubbleField(
                         value = uiState.draft,
@@ -2021,6 +2130,8 @@ private fun MessageBubble(
     /** Раунд 203: тап по шапке-источнику пересылки. */
     onOpenForward: ((com.vladimir.messenger.util.ForwardMarker.Ref) -> Unit)? = null,
     reactions: List<com.vladimir.messenger.data.reaction.ReactionSummary> = emptyList(),
+    /** Счётчик репостов этого сообщения. */
+    repostCount: Int = 0,
     onToggleReaction: (String) -> Unit = {},
     onRemoveReaction: () -> Unit = {},
     /** Файл, приложенный к сообщению (этап 9), и ход его приёма/раздачи. */
@@ -2030,6 +2141,8 @@ private fun MessageBubble(
     /** Раунд 135: удалить сообщение - у себя или у всех. */
     onDeleteForMe: () -> Unit = {},
     onDeleteForAll: () -> Unit = {},
+    /** Правка своего сообщения. */
+    onEdit: () -> Unit = {},
     /** р250: «Ответить» - цитата этого сообщения встанет над полем ввода. */
     onReply: () -> Unit = {},
     /** р250: опрос, приклеенный к сообщению (посту); null - опроса нет. */
@@ -2230,11 +2343,17 @@ private fun MessageBubble(
                             color = bubbleTextColor.copy(alpha = 0.7f),
                         )
                     bodyText.isBlank() && fileCard != null -> Unit
+                    com.vladimir.messenger.util.LocationShare.parse(bodyText) != null ->
+                        com.vladimir.messenger.ui.components.LocationCardView(
+                            location = com.vladimir.messenger.util.LocationShare.parse(bodyText)!!,
+                            textColor = bubbleTextColor,
+                        )
                     else -> Text(bodyText)
                 }
                 // Карточка первой ссылки под обычным текстом (не приглашение и не картинка).
                 val bubbleLink = remember(bodyText) { firstLinkIn(bodyText) }
                 if (bubbleLink != null && fileCard == null && imageUrl == null &&
+                    com.vladimir.messenger.util.LocationShare.parse(bodyText) == null &&
                     attachedBitmap == null && !com.vladimir.messenger.data.gif.GifLibrary.isGifRef(bodyText) &&
                     com.vladimir.messenger.data.group.GroupInviteLinks.parseTarget(bubbleLink) == null
                 ) {
@@ -2317,10 +2436,13 @@ private fun MessageBubble(
                         Icon(Icons.Filled.PushPin, contentDescription = stringResource(R.string.group_pinned), modifier = Modifier.size(12.dp))
                     }
                 }
-                com.vladimir.messenger.ui.components.ReactionRow(
-                    reactions = reactions,
-                    onToggle = { showReactions = true },
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    com.vladimir.messenger.ui.components.ReactionRow(
+                        reactions = reactions,
+                        onToggle = { showReactions = true },
+                    )
+                    com.vladimir.messenger.ui.components.RepostCountChip(count = repostCount)
+                }
             }
         }
         // Раунд 211: меню пузыря - золотыми пузырями (общий стиль точек).
@@ -2364,6 +2486,12 @@ private fun MessageBubble(
                         ) { onTogglePin() }
                     )
                 }
+                // Правка своего сообщения - автору; текст увидят все.
+                if (message.isFromMe && message.content.isNotBlank() &&
+                    !message.content.startsWith("APU")
+                ) {
+                    add(ApuAction(stringResource(R.string.chat_edit_message), Icons.Filled.Edit) { onEdit() })
+                }
                 // Удаление и модерация: доступно автору, администраторам и владельцу.
                 if (canModerate || message.isFromMe) {
                     add(
@@ -2378,16 +2506,16 @@ private fun MessageBubble(
             },
         )
         if (showReactions) {
-            val mine = reactions.firstOrNull { it.mine }?.emoji
+            val mine = reactions.filter { it.mine }.map { it.emoji }.toSet()
             com.vladimir.messenger.ui.components.ReactionPickerDialog(
                 onDismiss = { showReactions = false },
-                myEmoji = mine,
+                myEmojis = mine,
                 onRemove = {
                     showReactions = false
                     onRemoveReaction()
                 },
+                // Не закрываем: можно поставить сразу до пяти реакций.
                 onPick = { emoji ->
-                    showReactions = false
                     onToggleReaction(emoji)
                 },
             )

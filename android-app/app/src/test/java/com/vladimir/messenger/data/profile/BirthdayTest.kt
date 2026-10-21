@@ -223,4 +223,15 @@ class BirthdayTest {
                 BirthdayBanner.dismissKey("node-a", today.plusDays(1)),
         )
     }
+
+    @Test fun futureBirthDateIsRejected() {
+        val today = java.time.LocalDate.of(2026, 10, 19)
+        assertTrue(Birthday.isFuture(20, 10, 2026, today))
+        assertTrue(Birthday.isFuture(1, 1, 2027, today))
+        assertFalse(Birthday.isFuture(19, 10, 2026, today))
+        assertFalse(Birthday.isFuture(19, 10, Birthday.NO_YEAR, today))
+        assertFalse(Birthday.isValidBirthDate(31, 12, 2026, today))
+        assertTrue(Birthday.isValidBirthDate(19, 10, 2026, today))
+        assertTrue(Birthday.isValidBirthDate(29, 2, Birthday.NO_YEAR, today))
+    }
 }

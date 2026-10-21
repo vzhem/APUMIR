@@ -77,6 +77,8 @@ data class GroupChatUiState(
     val startInTopic: Boolean = false,
     /** Реакции по сообщениям: ключ - id сообщения. */
     val reactions: Map<String, List<com.vladimir.messenger.data.reaction.ReactionSummary>> = emptyMap(),
+    /** Счётчик репостов по сообщениям: ключ - id сообщения. */
+    val repostCounts: Map<String, Int> = emptyMap(),
     /**
      * Сколько комментариев в этой ветке у сборщика (владельца канала) сверх
      * тех, что уже на телефоне: на большом канале комментарии приходят по
@@ -131,6 +133,7 @@ class GroupChatViewModel @Inject constructor(
     private val groupRepository: GroupRepository,
     private val savedItems: com.vladimir.messenger.data.repository.SavedItemsRepository,
     private val reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository,
+    private val repostRepository: com.vladimir.messenger.data.repost.RepostRepository,
     private val groupFiles: com.vladimir.messenger.data.group.GroupFileSwarm,
     private val fileTransferDao: com.vladimir.messenger.data.local.dao.FileTransferDao,
     private val fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter,
@@ -232,6 +235,7 @@ class GroupChatViewModel @Inject constructor(
         // Репозиторий сам молчит, если это группа, владелец или уже просили.
         viewModelScope.launch { runCatching { groupRepository.requestPosts(groupId) } }
         observeReactions()
+        observeReposts()
         observeCommentCounts()
         observeTransfers()
         // Закрепы подписываем на выбранную тему, а не на всю группу:
@@ -1541,6 +1545,22 @@ class GroupChatViewModel @Inject constructor(
         }
     }
 
+    /** «Поделиться координатами» в группу/тему: тот же провод APULOC1, что в личке. */
+    fun sendLocation(lat: Double, lon: Double, accuracyM: Int?, label: String) {
+        val topicId = _uiState.value.selectedTopicId ?: return
+        viewModelScope.launch {
+            groupRepository.sendMessage(
+                groupId, topicId,
+                com.vladimir.messenger.util.LocationShare.format(lat, lon, accuracyM, label),
+            ).onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
+    /** Подсказка по геолокации - в общую плашку ошибок группы. */
+    fun showLocationNotice(text: String) {
+        _uiState.update { it.copy(error = text) }
+    }
+
     /**
      * Раунд 130: отправить ССЫЛКУ на гифку в группу/тему комментариев.
      * Карточка от лица отправителя; байты каждый участник тихо тянет
@@ -1620,6 +1640,14 @@ class GroupChatViewModel @Inject constructor(
     }
 
     /** Раунд 135: удалить сообщение только у себя. */
+    /** Отредактировать своё сообщение группы/канала (провод и приёмник уже есть). */
+    fun editMessage(messageId: String, newText: String) {
+        viewModelScope.launch {
+            groupRepository.editMessage(groupId, messageId, newText)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message.orEmpty()) } }
+        }
+    }
+
     fun deleteMessageForMe(messageId: String) {
         viewModelScope.launch {
             runCatching { groupRepository.deleteMessageForMe(groupId, messageId) }
@@ -1837,6 +1865,14 @@ class GroupChatViewModel @Inject constructor(
     }
 
     /** Реакции всей группы: поток уже уведён на IO внутри репозитория. */
+    private fun observeReposts() {
+        viewModelScope.launch {
+            repostRepository.observeCounts(groupId).collect { map ->
+                _uiState.update { it.copy(repostCounts = map) }
+            }
+        }
+    }
+
     private fun observeReactions() {
         viewModelScope.launch {
             reactionRepository.observeChat(groupId).collect { map ->
@@ -1889,6 +1925,7 @@ class GroupChatViewModel @Inject constructor(
         text: String,
         sourceLabel: String,
         target: com.vladimir.messenger.ui.components.ForwardTarget,
+        sourceMessageId: String = "",
         onResult: (Boolean) -> Unit,
     ) {
         viewModelScope.launch {
@@ -1908,6 +1945,10 @@ class GroupChatViewModel @Inject constructor(
                 chatRepository.sendMessage(target.id, "", body)
             } else {
                 groupRepository.sendMessage(target.id, target.topicId ?: "", body)
+            }
+            // Счётчик репостов исходного сообщения: сигнал уходит группе.
+            if (res.isSuccess && sourceMessageId.isNotBlank()) {
+                runCatching { repostRepository.noteForward(groupId, sourceMessageId) }
             }
             onResult(res.isSuccess)
         }

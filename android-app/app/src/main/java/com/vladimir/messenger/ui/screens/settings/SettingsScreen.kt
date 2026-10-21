@@ -39,6 +39,7 @@ import com.vladimir.messenger.ui.components.ApuDiagnosticsHero
 import com.vladimir.messenger.ui.components.ApuDiagnosticsPrivacyStrip
 import com.vladimir.messenger.ui.components.ApuDiagnosticsReportCard
 import com.vladimir.messenger.ui.components.ApuDiagnosticsStatusCard
+import com.vladimir.messenger.ui.components.ApuDiagnosticsWarningsCard
 import com.vladimir.messenger.ui.components.DiagnosticsActionIcons
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 import com.vladimir.messenger.ui.components.ApuSettingsItem
@@ -90,6 +91,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -148,6 +150,8 @@ fun SettingsScreen(
     onFeedbackClick: () -> Unit = {},
     /** Полная копия профиля в файл (чаты, контакты, ключи) и восстановление из него. */
     onProfileBackupClick: () -> Unit = {},
+    /** Экран «Папки с чатами»: папки-вкладки главного списка. */
+    onFoldersClick: () -> Unit = {},
     /**
      * Открыть сразу профиль, а не список настроек.
      *
@@ -229,6 +233,7 @@ fun SettingsScreen(
                     onPeerRatingClick = onPeerRatingClick,
                     onIdentityBackupClick = onIdentityBackupClick,
                     onDevicesClick = onDevicesClick,
+                    onFoldersClick = onFoldersClick,
                     onProfileBackupClick = onProfileBackupClick,
                     onProfileClick = onProfileClick,
                     onSupportClick = onSupportClick,
@@ -378,6 +383,9 @@ private fun ProfileTabContent(
     val myUsername by UsernameHolder.name.collectAsStateWithLifecycle()
     val avatarUri by AvatarHolder.uri.collectAsStateWithLifecycle()
     var showAvatarPicker by remember { mutableStateOf(false) }
+    var showEmojiStatusPicker by remember { mutableStateOf(false) }
+    val myEmojiStatus by com.vladimir.messenger.data.profile.EmojiStatusStore.mine
+        .collectAsStateWithLifecycle()
     // Картинка, для которой сейчас выбирают область. null - окна обрезки нет.
     var avatarToCrop by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
     // Куда камера положит снимок: URI нужен и при запуске, и при разборе.
@@ -400,6 +408,30 @@ private fun ProfileTabContent(
             }
             // Не сохраняем сразу: сперва человек выбирает область.
             avatarToCrop = com.vladimir.messenger.util.AvatarFiles.readForCrop(context, uri)
+        }
+    }
+
+    // Видеоаватар: выбрать короткое видео; постер из него встанет обычным
+    // аватаром, а в профиле будет играть само видео.
+    val videoAvatarPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            val prepared = com.vladimir.messenger.util.AvatarFiles.prepareVideoAvatar(context, uri)
+            prepared.onSuccess { video ->
+                com.vladimir.messenger.util.AvatarFiles.saveCropped(context, video.poster)
+                    ?.let { AvatarHolder.set(context, it) }
+                com.vladimir.messenger.data.profile.VideoAvatarStore.set(context, video.path)
+                android.widget.Toast.makeText(
+                    context, R.string.av_video_set, android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }.onFailure { failure ->
+                android.widget.Toast.makeText(
+                    context,
+                    failure.message ?: context.getString(R.string.av_video_failed),
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
         }
     }
 
@@ -499,6 +531,34 @@ private fun ProfileTabContent(
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier.clickable(onClick = { profileTap(onUsername) }).heightIn(min = 48.dp).padding(vertical = 12.dp),
                         )
+                        // Эмодзи-статус: виден всем рядом с профилем; нажатие
+                        // открывает палитру. Пустой — приглашение поставить.
+                        Row(
+                            modifier = Modifier.clip(RoundedCornerShape(20.dp))
+                                .background(ApuBubbleAccentColor.copy(alpha = 0.10f))
+                                .clickable(role = androidx.compose.ui.semantics.Role.Button) {
+                                    profileTap { showEmojiStatusPicker = true }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (myEmojiStatus.isNotBlank()) {
+                                Text(myEmojiStatus, fontSize = 18.sp)
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    stringResource(R.string.emoji_status_title),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = ApuBubbleMutedColor,
+                                )
+                            } else {
+                                Text(
+                                    stringResource(R.string.emoji_status_set),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = ApuBubbleAccentColor,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
                         Spacer(Modifier.height(8.dp))
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -601,7 +661,21 @@ private fun ProfileTabContent(
                             Spacer(Modifier.height(6.dp))
                             ApuTextAction(
                                 label = stringResource(R.string.settings_remove_avatar),
-                                onClick = { AvatarHolder.set(context, null) },
+                                onClick = {
+                                    AvatarHolder.set(context, null)
+                                    com.vladimir.messenger.data.profile.VideoAvatarStore.set(context, null)
+                                },
+                            )
+                        }
+                        val hasVideoAvatar by com.vladimir.messenger.data.profile.VideoAvatarStore.path
+                            .collectAsStateWithLifecycle()
+                        if (hasVideoAvatar != null && avatarUri != null) {
+                            Spacer(Modifier.height(6.dp))
+                            ApuTextAction(
+                                label = stringResource(R.string.settings_remove_video_avatar),
+                                onClick = {
+                                    com.vladimir.messenger.data.profile.VideoAvatarStore.set(context, null)
+                                },
                             )
                         }
                     }
@@ -726,6 +800,10 @@ private fun ProfileTabContent(
                 showAvatarPicker = false
                 avatarPicker.launch("image/*")
             },
+            onPickVideo = {
+                showAvatarPicker = false
+                videoAvatarPicker.launch("video/*")
+            },
             onTakePhoto = {
                 showAvatarPicker = false
                 val granted = androidx.core.content.ContextCompat.checkSelfPermission(
@@ -741,6 +819,22 @@ private fun ProfileTabContent(
                 }
             },
             onDismiss = { showAvatarPicker = false },
+        )
+    }
+
+    // Эмодзи-статус у профиля: палитра, свой значок, уборка статуса.
+    if (showEmojiStatusPicker) {
+        com.vladimir.messenger.ui.components.EmojiStatusPickerDialog(
+            current = myEmojiStatus,
+            onPick = { emoji ->
+                com.vladimir.messenger.data.profile.EmojiStatusStore.setMine(context, emoji)
+                showEmojiStatusPicker = false
+            },
+            onRemove = {
+                com.vladimir.messenger.data.profile.EmojiStatusStore.setMine(context, "")
+                showEmojiStatusPicker = false
+            },
+            onDismiss = { showEmojiStatusPicker = false },
         )
     }
 
@@ -771,6 +865,7 @@ private fun SettingsTabContent(
     onPeerRatingClick: () -> Unit = {},
     onIdentityBackupClick: () -> Unit = {},
     onDevicesClick: () -> Unit = {},
+    onFoldersClick: () -> Unit = {},
     onProfileBackupClick: () -> Unit = {},
     onProfileClick: () -> Unit = {},
     /** Раунд 219: «Поддержать разработчика» (черновик). */
@@ -844,6 +939,9 @@ private fun SettingsTabContent(
     // Раунд 249: подтверждение выхода из APU.
     var showLogoutDialog by remember { mutableStateOf(false) }
     var muteScope by remember { mutableStateOf<NotificationMuteScope?>(null) }
+    var showInvitePrivacyDialog by remember { mutableStateOf(false) }
+    val invitePrivacyMode by com.vladimir.messenger.data.profile.InvitePrivacyStore.mode
+        .collectAsStateWithLifecycle()
     val muteRevision by viewModel.notificationMuteRevision.collectAsStateWithLifecycle()
     val notificationMuteNowMs = remember(muteRevision) { System.currentTimeMillis() }
     val mqttClipboard = LocalClipboardManager.current
@@ -1030,6 +1128,17 @@ private fun SettingsTabContent(
             // ЯЗЫК интерфейса: русский / English. Применяется после перезапуска
             // экрана; выбор хранится в p2p_prefs (см. AppLanguageHolder).
             // ----------------------------------------------------------------
+            item {
+                SettingsCard {
+                    SettingsItem(
+                        icon     = Icons.Default.Folder,
+                        title    = stringResource(R.string.folder_title),
+                        subtitle = stringResource(R.string.folder_description),
+                        onClick  = onFoldersClick,
+                    )
+                }
+            }
+
             item { SettingsSectionTitle(stringResource(R.string.language_section)) }
             item {
                 SettingsCard {
@@ -1164,6 +1273,22 @@ private fun SettingsTabContent(
                         title    = stringResource(R.string.settings_devices),
                         subtitle = stringResource(R.string.settings_devices_hint),
                         onClick  = onDevicesClick,
+                    )
+                    ApuSettingsDivider()
+                    SettingsItem(
+                        icon     = Icons.Default.GroupAdd,
+                        title    = stringResource(R.string.invite_privacy_title),
+                        subtitle = stringResource(
+                            when (invitePrivacyMode) {
+                                com.vladimir.messenger.data.profile.InvitePrivacy.ALL ->
+                                    R.string.invite_privacy_all
+                                com.vladimir.messenger.data.profile.InvitePrivacy.CONTACTS ->
+                                    R.string.invite_privacy_contacts
+                                com.vladimir.messenger.data.profile.InvitePrivacy.NOBODY ->
+                                    R.string.invite_privacy_nobody
+                            },
+                        ),
+                        onClick  = { showInvitePrivacyDialog = true },
                     )
                     ApuSettingsDivider()
                     SettingsItem(
@@ -1672,6 +1797,9 @@ private fun SettingsTabContent(
     }
 
     if (showTransferLogsDialog) {
+        // «Нажал на предупреждения — сразу показал, какие»: карточка со списком
+        // разворачивается прямо под сводкой по нажатию на плашки в шапке.
+        var showDiagnosticsWarnings by remember { mutableStateOf(false) }
         val logsSnapshot = transferLogsSnapshot
         val reportText = logsSnapshot?.report.orEmpty()
         // Владелец 2026-10-07: «как то всё по пенсионерски и по деревенски…
@@ -1700,7 +1828,16 @@ private fun SettingsTabContent(
                         journalSize = logsSnapshot?.journalSize ?: 0,
                         warnCount = logsSnapshot?.warnCount ?: 0,
                         badCount = logsSnapshot?.badCount ?: 0,
+                        onWarningsClick = { showDiagnosticsWarnings = !showDiagnosticsWarnings },
                     )
+                    // Сразу какие предупреждения — прямо под шапкой, чтобы не
+                    // нужно было прокручивать окно ради списка.
+                    if (showDiagnosticsWarnings && !transferLogsLoading) {
+                        ApuDiagnosticsWarningsCard(
+                            lines = logsSnapshot?.statusLines.orEmpty(),
+                            events = logsSnapshot?.events.orEmpty(),
+                        )
+                    }
                     // Ход работ и ошибка говорятся словами — окно никогда не
                     // молчит пустым экраном.
                     val stageLine = when {
@@ -1818,6 +1955,19 @@ private fun SettingsTabContent(
                 }
             },
 
+        )
+    }
+
+    // «Кто может приглашать в группы и каналы»: выбор применяется сразу и
+    // действует на следующие входящие карточки-приглашения.
+    if (showInvitePrivacyDialog) {
+        com.vladimir.messenger.ui.components.InvitePrivacyDialog(
+            current = invitePrivacyMode,
+            onPick = { mode ->
+                com.vladimir.messenger.data.profile.InvitePrivacyStore.set(settingsContext, mode)
+                showInvitePrivacyDialog = false
+            },
+            onDismiss = { showInvitePrivacyDialog = false },
         )
     }
 

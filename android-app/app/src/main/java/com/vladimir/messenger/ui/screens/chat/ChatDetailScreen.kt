@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -140,6 +141,7 @@ fun ChatDetailScreen(
 
     // Раунд 135: подтверждение «удалить у всех» - действие необратимое.
     var deleteForAllTarget by remember { mutableStateOf<Message?>(null) }
+    var editTarget by remember { mutableStateOf<Message?>(null) }
     // Сообщение, для которого открыт выбор реакции.
     var reactionFor by remember { mutableStateOf<String?>(null) }
     // Текст, открытый в окне выделения части.
@@ -152,6 +154,16 @@ fun ChatDetailScreen(
     }
 
     val context = LocalContext.current
+
+    // «Поделиться координатами»: фикс ждёт подтверждения в диалоге -
+    // координаты приватны, поэтому сначала показываем, что именно уйдёт.
+    var locationFix by remember {
+        mutableStateOf<com.vladimir.messenger.data.location.CurrentLocation.Fix?>(null)
+    }
+    val (requestLocation, isLocating) = com.vladimir.messenger.ui.components.rememberShareLocationAction(
+        onReady = { locationFix = it },
+        onError = { viewModel.showLocationNotice(it) },
+    )
 
     // F3: системный выбор файла (SAF) → зашифрованная подготовка → durable отправка
     // Каталог GIF (кнопка «GIF» у скрепки).
@@ -300,6 +312,8 @@ fun ChatDetailScreen(
             isOnline = uiState.isContactOnline,
             // Знак и кольцо у профиля элиты: ранг собеседник сообщил сам.
             vip = uiState.peerVip || uiState.selfVip,
+            rankQualified = uiState.peerRankQualified,
+            showRankLine = true,
             username = uiState.contactUsername,
             heartCount = uiState.heartCount,
             heartMine = uiState.heartMine,
@@ -451,6 +465,8 @@ fun ChatDetailScreen(
                         viewModel.searchGifs("")
                     }
                 },
+                onLocationClick = requestLocation,
+                isLocating = isLocating,
             )
         },
     ) { paddingValues ->
@@ -676,6 +692,11 @@ fun ChatDetailScreen(
                                             showCopyDialog = message
                                         }
                                     },
+                                    // Реакция на голосовое - из его собственного
+                                    // меню (точки на проигрывателе).
+                                    onReactClick = row.message?.let { message ->
+                                        { reactionFor = message.id }
+                                    },
                                     onSwipeReply = row.message?.let { message ->
                                         { viewModel.startReply(message) }
                                     },
@@ -697,11 +718,18 @@ fun ChatDetailScreen(
                                 // Реакции файла/гифки - той же строкой под пузырём,
                                 // что и у текстовых сообщений.
                                 row.message?.let { message ->
-                                    com.vladimir.messenger.ui.components.ReactionRow(
-                                        reactions = uiState.reactions[message.id].orEmpty(),
-                                        onToggle = { reactionFor = message.id },
-                                        modifier = Modifier.padding(horizontal = 14.dp),
-                                    )
+                                    androidx.compose.foundation.layout.Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        com.vladimir.messenger.ui.components.ReactionRow(
+                                            reactions = uiState.reactions[message.id].orEmpty(),
+                                            onToggle = { reactionFor = message.id },
+                                            modifier = Modifier.padding(horizontal = 14.dp),
+                                        )
+                                        com.vladimir.messenger.ui.components.RepostCountChip(
+                                            count = uiState.repostCounts[message.id] ?: 0,
+                                        )
+                                    }
                                 }
                             } else {
                                 val message = row.message!!
@@ -847,13 +875,20 @@ fun ChatDetailScreen(
                                 }
                                 // Реакции живут отдельной строкой под пузырём -
                                 // внутрь его класть нельзя, там своя ширина.
-                                com.vladimir.messenger.ui.components.ReactionRow(
-                                    reactions = uiState.reactions[message.id].orEmpty(),
-                                    // Нажатие на сам значок открывает тот же
-                                    // пузырь: там и меняют, и убирают.
-                                    onToggle = { reactionFor = message.id },
-                                    modifier = Modifier.padding(horizontal = 14.dp),
-                                )
+                                androidx.compose.foundation.layout.Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    com.vladimir.messenger.ui.components.ReactionRow(
+                                        reactions = uiState.reactions[message.id].orEmpty(),
+                                        // Нажатие на сам значок открывает тот же
+                                        // пузырь: там и меняют, и убирают.
+                                        onToggle = { reactionFor = message.id },
+                                        modifier = Modifier.padding(horizontal = 14.dp),
+                                    )
+                                    com.vladimir.messenger.ui.components.RepostCountChip(
+                                        count = uiState.repostCounts[message.id] ?: 0,
+                                    )
+                                }
                                 }
                             }
                         }
@@ -978,6 +1013,22 @@ fun ChatDetailScreen(
                         showCopyDialog = null
                         reactionFor = message.id
                     }
+                    // Правка своего ушедшего сообщения (и прочитанного
+                    // тоже). Только обычный текст: файлы, гифки и служебные
+                    // карточки правкой не становятся другим сообщением.
+                    if (message.isFromMe && message.content.isNotBlank() &&
+                        !message.content.startsWith("APU") &&
+                        com.vladimir.messenger.util.GroupFileMarker.parse(message.content) == null &&
+                        !com.vladimir.messenger.data.gif.GifLibrary.isGifRef(message.content)
+                    ) {
+                        com.vladimir.messenger.ui.components.ApuActionBubble(
+                            stringResource(R.string.chat_edit_message),
+                            androidx.compose.material.icons.Icons.Filled.Edit,
+                        ) {
+                            showCopyDialog = null
+                            editTarget = message
+                        }
+                    }
                     // Раунд 135: удаление своего сообщения - у себя и у всех.
                     if (message.isFromMe) {
                         com.vladimir.messenger.ui.components.ApuActionBubble(
@@ -1036,7 +1087,7 @@ fun ChatDetailScreen(
             onPick = { target ->
                 if (target.kind == com.vladimir.messenger.ui.components.ForwardKind.FRIEND) {
                     forwardMessage = null
-                    viewModel.forwardMessage(original.content, sourceLabel, target) { ok ->
+                    viewModel.forwardMessage(original.content, sourceLabel, target, sourceMessageId = original.id) { ok ->
                         if (ok) {
                             fwdSent = true
                         } else {
@@ -1062,6 +1113,7 @@ fun ChatDetailScreen(
                         original.content,
                         sourceLabel,
                         target.copy(topicId = topic.id, topicTitle = topic.name),
+                        sourceMessageId = original.id,
                     ) { ok ->
                         if (ok) {
                             fwdSent = true
@@ -1072,6 +1124,60 @@ fun ChatDetailScreen(
                 },
             )
         }
+    }
+
+    // Редактирование своего сообщения: поле с текущим текстом, «Сохранить»
+    // меняет текст у себя сразу и шлёт правку собеседнику.
+    editTarget?.let { target ->
+        var editText by remember(target.id) { mutableStateOf(target.content) }
+        ApuSettingsDialog(
+            onDismissRequest = { editTarget = null },
+            title = { Text(stringResource(R.string.chat_edit_title)) },
+            text = {
+                Column {
+                    Text(
+                        stringResource(R.string.chat_edit_hint),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = com.vladimir.messenger.ui.components.ApuBubbleMutedColor,
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    com.vladimir.messenger.ui.components.ApuFormTextField(
+                        value = editText,
+                        onValueChange = { editText = it },
+                        label = stringResource(R.string.chat_edit_message),
+                        singleLine = false,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                ApuTextAction(
+                    label = stringResource(R.string.action_save),
+                    onClick = {
+                        val text = editText.trim()
+                        editTarget = null
+                        if (text.isNotEmpty() && text != target.content) {
+                            viewModel.editMessage(target.id, text)
+                        }
+                    },
+                )
+            },
+            dismissButton = {
+                ApuTextAction(label = stringResource(R.string.action_cancel), onClick = { editTarget = null })
+            },
+        )
+    }
+
+    // Подтверждение отправки координат: точка и необязательная подпись.
+    locationFix?.let { fix ->
+        com.vladimir.messenger.ui.components.LocationPickerDialog(
+            ownFix = fix,
+            onDismiss = { locationFix = null },
+            onSend = { lat, lon, accuracyM, label ->
+                locationFix = null
+                viewModel.sendLocation(lat, lon, accuracyM, label)
+            },
+        )
     }
 
     // Подтверждение удаления у всех, включая прочитанные сообщения.
@@ -1109,19 +1215,20 @@ fun ChatDetailScreen(
 
     reactionFor?.let { messageId ->
         val mine = uiState.reactions[messageId].orEmpty()
-            .firstOrNull { it.mine }?.emoji
+            .filter { it.mine }.map { it.emoji }.toSet()
         com.vladimir.messenger.ui.components.ReactionPickerDialog(
             onDismiss = { reactionFor = null },
-            myEmoji = mine,
+            myEmojis = mine,
             onRemove = {
                 viewModel.removeReaction(messageId)
                 reactionFor = null
                 resetSelection()
             },
+            // Пикер НЕ закрываем после нажатия: владелец просил ставить
+            // сразу до пяти реакций подряд. Закрытие - кнопкой «Закрыть»,
+            // по фону или «Убрать реакцию».
             onPick = { emoji ->
                 viewModel.toggleReaction(messageId, emoji)
-                reactionFor = null
-                resetSelection()
             },
         )
     }
@@ -1171,6 +1278,10 @@ private fun MessageInputBar(
     onPastedMedia: (android.net.Uri) -> Unit = {},
     onPasteLocked: () -> Unit = {},
     onGifClick: () -> Unit = {},
+    /** «Поделиться координатами»: кнопка метки рядом со скрепкой. */
+    onLocationClick: () -> Unit = {},
+    /** Координаты определяются прямо сейчас - на кнопке крутится спиннер. */
+    isLocating: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     // Раунд 42: новый BasicTextField(state) - только он проводит картинки со
@@ -1268,6 +1379,24 @@ private fun MessageInputBar(
                     onClick = onGifClick,
                     enabled = !isPreparingFile && !isSending && canAttach,
                 )
+                IconButton(
+                    onClick = onLocationClick,
+                    enabled = !isPreparingFile && !isSending,
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    if (isLocating) {
+                        ApuPremiumSpinner(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.Place,
+                            contentDescription = stringResource(R.string.chat_share_location),
+                            tint = Color(0xFF5A6472),
+                        )
+                    }
+                }
                 }
             }
 
@@ -1393,7 +1522,7 @@ private fun MessageInputBar(
             // золотая заливка и белый текст (как в темах) - видно сразу.
             val canSend = inputState.text.isNotBlank() && !isSending && !isSelfChat
             val voice = com.vladimir.messenger.ui.components.rememberVoiceRecorder(onVoiceReady)
-            if (voice.recording) {
+            if (voice.recording || voice.processing) {
                 com.vladimir.messenger.ui.components.VoiceRecordBar(voice)
             }
             if (scheduled.isNotEmpty()) {
@@ -1403,7 +1532,20 @@ private fun MessageInputBar(
                 )
             }
             var showSendOptions by remember { mutableStateOf(false) }
+            var showVoiceEffectPicker by remember { mutableStateOf(false) }
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // Эффект голоса выбирается ДО записи: та же кнопка, что во время записи.
+                ApuTextAction(
+                    label = if (voice.effect == com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL) {
+                        stringResource(R.string.voice_effect_short)
+                    } else {
+                        stringResource(voice.effect.labelRes)
+                    },
+                    onClick = { showVoiceEffectPicker = true },
+                    enabled = !isSending && !isSelfChat,
+                    icon = Icons.Filled.GraphicEq,
+                    modifier = Modifier.weight(1f),
+                )
                 // Три кнопки делят ширину строки: на узких экранах не вылетают за край.
                 ApuTextAction(
                     label = stringResource(R.string.voice_record_short),
@@ -1423,6 +1565,13 @@ private fun MessageInputBar(
                     onClick = { showSendOptions = true },
                     enabled = canSend,
                     modifier = Modifier.weight(1f),
+                )
+            }
+            if (showVoiceEffectPicker) {
+                com.vladimir.messenger.ui.components.VoiceEffectPickerDialog(
+                    selected = voice.effect,
+                    onSelected = voice.selectEffect,
+                    onDismiss = { showVoiceEffectPicker = false },
                 )
             }
             if (showSendOptions) {

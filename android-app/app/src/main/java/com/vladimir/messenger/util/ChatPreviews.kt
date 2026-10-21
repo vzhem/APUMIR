@@ -47,11 +47,14 @@ object ChatPreviews {
     private val SERVICE_PACKETS = listOf(
         "ack|",          // подтверждение доставки (r243), страховка от утечки (r247)
         "APUTYP1|",      // «печатает…» (r235)
+        "APUINVREJ1|",   // «приглашение отклонено настройками получателя»
+        "APURANKREQ1|",  // запрос ранга собеседника
         "APUSTK1|",      // рой стикеров
         "APUGIF1|",      // провод гифок
         "APUCALL1|",     // звонковая сигнализация
         "APUCALLHS1|",   // завершение звонка
         "APUDEL1|",      // «удали у всех»
+        "APUEDIT1|",     // правка своего сообщения в личном чате
         "APUDELQ1|",     // очередь удаления
         "APUREACT1|",    // реакции
         "APUREAD1|",     // «прочитано»
@@ -94,6 +97,7 @@ object ChatPreviews {
         if (t.startsWith("APUFWD1|")) {
             ForwardMarker.parseRef(t)?.let { return "↩ Переслано из «" + it.label + "»" }
         }
+        if (t.startsWith(LocationShare.PREFIX)) return "\uD83D\uDCCD Геопозиция"
         if (t.startsWith("APUGIFREF1|")) return GIF_LABEL
         // История (APUSTORY1): в переписке не хранится, но предпросмотр не должен светить пакет.
         if (t.startsWith(com.vladimir.messenger.data.story.StoryStore.PREFIX)) return "История"

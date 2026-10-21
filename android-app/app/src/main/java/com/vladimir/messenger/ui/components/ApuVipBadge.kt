@@ -24,9 +24,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
@@ -42,11 +40,10 @@ import androidx.compose.ui.unit.dp
 private val VipInkColor = Color(0xFF5A3E06)
 
 /**
- * Знак VIP: золотая плашка со звездой и словом VIP.
+ * Знак VIP: золотая плашка со словом VIP (без звёздочки — так попросил
+ * владелец, скрин 2026-10-21: «вместо звёздочки нужно чтобы было написано VIP»).
  *
- * `compact = true` — только звезда, для строки, где и без того тесно (шапка
- * чатов, имя ранга). Полный вариант со словом — на экране рангов, там места
- * достаточно и важнее объяснить, что за знак.
+ * `compact = true` — та же надпись, но мельче, для тесных строк.
  */
 @Composable
 fun ApuVipBadge(
@@ -76,20 +73,28 @@ fun ApuVipBadge(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Icon(
-            Icons.Default.Star,
-            contentDescription = if (compact) label else null,
-            tint = VipInkColor,
-            modifier = Modifier.size(if (compact) 12.dp else 14.dp),
+        Text(
+            label,
+            style = if (compact) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = VipInkColor,
+            maxLines = 1,
         )
-        if (!compact) {
-            Text(
-                label,
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Bold,
-                color = VipInkColor,
-                maxLines = 1,
-            )
-        }
     }
 }
+
+/** Золотой градиент для имени VIP: тёмные края, светлая середина. */
+val ApuVipNameBrush: Brush = Brush.linearGradient(
+    listOf(
+        Color(0xFF8A5F00),
+        Color(0xFFF0BE45),
+        Color(0xFF8A5F00),
+    ),
+)
+
+/**
+ * Стиль имени VIP-абонента: само имя пишется золотом (просьба владельца),
+ * обычный абонент сохраняет переданный стиль без изменений.
+ */
+fun apuVipNameStyle(base: TextStyle, vip: Boolean): TextStyle =
+    if (vip) base.copy(brush = ApuVipNameBrush) else base

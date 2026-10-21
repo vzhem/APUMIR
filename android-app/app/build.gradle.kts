@@ -195,6 +195,8 @@ dependencies {
 
     // ZXing QR Code Scanner
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    // Карта выбора точки (OpenStreetMap, без ключей Google): экран «Поделиться координатами».
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
     implementation("com.google.zxing:core:3.5.3")
     implementation(libs.androidx.compose.material.icons.extended)
 
@@ -228,6 +230,13 @@ dependencies {
 
     // Распознавание лица для AR-фильтров видеоистории (data/story/StoryFaceTracker.kt).
     implementation("com.google.mlkit:face-detection:16.1.7")
+
+    // Офлайн-распознавание речи голосовых сообщений в текст (data/voice/VoiceTranscriber.kt).
+    // Модель языка маленькая и скачивается один раз при первом переводе, в APK её нет.
+    implementation("com.alphacephei:vosk-android:0.3.47")
+
+    // Выделение человека для смены фона в видеозвонке и видеосториях (data/background/).
+    implementation("com.google.mlkit:segmentation-selfie:16.0.0-beta6")
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

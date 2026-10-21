@@ -136,6 +136,12 @@ data class ChatListUiState(
      * готовое.
      */
     val itemsBySection: Map<InboxSection, List<InboxItem>> = emptyMap(),
+    /** Папки чатов (Telegram-стиль): порядок здесь — порядок вкладок. */
+    val folders: List<com.vladimir.messenger.data.folder.ChatFolder> = emptyList(),
+    /** Готовые списки папок по их id, посчитаны тем же проходом, что и разделы. */
+    val itemsByFolder: Map<String, List<InboxItem>> = emptyMap(),
+    /** Сколько чатов с непрочитанным в каждой папке — бейджи папок-вкладок. */
+    val folderUnread: Map<String, Int> = emptyMap(),
     /** Сколько строк сейчас загружено с диска (окно). */
     val loadedWindow: Int = 50,
     /** Есть ли ещё строки за пределами окна - список досыпается на прокрутке. */
@@ -237,6 +243,10 @@ class ChatListViewModel @Inject constructor(
      * готовый результат. Поиск ждёт паузы в наборе, поэтому набор строки
      * больше не пересобирает список на каждую букву.
      */
+    init {
+        com.vladimir.messenger.data.folder.ChatFolderStore.load(appContext)
+    }
+
     private fun observeInbox() {
         val queryFlow = searchQuery
             .debounce { if (it.isBlank()) 0L else SEARCH_DEBOUNCE_MS }
@@ -282,7 +292,8 @@ class ChatListViewModel @Inject constructor(
                 unreadCombined,
                 section,
                 myIdFlow,
-            ) { src, unreadPair, current, _ ->
+                com.vladimir.messenger.data.folder.ChatFolderStore.folders,
+            ) { src, unreadPair, current, _, folders ->
                 val groups = toInboxGroups(src.groups)
                 val unreadGroups = toInboxGroups(unreadPair.second)
                 Snapshot(
@@ -294,6 +305,7 @@ class ChatListViewModel @Inject constructor(
                     totalChats = src.total,
                     unreadChats = unreadPair.first,
                     unreadGroups = unreadGroups,
+                    folders = folders,
                 )
             }
                 // Сборка разделов, поиск и сортировка - на рабочем потоке.
@@ -314,6 +326,9 @@ class ChatListViewModel @Inject constructor(
                             // к уже стёртым буквам.
                             items = built.items,
                             itemsBySection = built.itemsBySection,
+                            folders = built.folders,
+                            itemsByFolder = built.itemsByFolder,
+                            folderUnread = built.folderUnread,
                             loadedWindow = built.window,
                             canLoadMore = built.canLoadMore,
                             unreadCount = built.unreadCount,
@@ -335,6 +350,7 @@ class ChatListViewModel @Inject constructor(
         val totalChats: Int,
         val unreadChats: List<Chat>,
         val unreadGroups: List<InboxGroup>,
+        val folders: List<com.vladimir.messenger.data.folder.ChatFolder> = emptyList(),
     )
 
     /** То, что пришло из базы за один заход. */
@@ -356,6 +372,9 @@ class ChatListViewModel @Inject constructor(
         val query: String,
         val items: List<InboxItem>,
         val itemsBySection: Map<InboxSection, List<InboxItem>>,
+        val folders: List<com.vladimir.messenger.data.folder.ChatFolder> = emptyList(),
+        val itemsByFolder: Map<String, List<InboxItem>> = emptyMap(),
+        val folderUnread: Map<String, Int> = emptyMap(),
         val window: Int,
         val canLoadMore: Boolean,
         val unreadCount: Int,
@@ -501,6 +520,31 @@ class ChatListViewModel @Inject constructor(
             snap.groups.size >= snap.window ||
             snap.totalChats > snap.chats.size
 
+        // Папки считаются из «Все»: ручные — по ключам строк, автоматические
+        // («Новые», «Личные») — по признаку строки. Архив сюда не попадает:
+        // его нет и в общем списке, из которого всё берётся.
+        val allItems = bySection[InboxSection.All].orEmpty()
+        fun unreadOf(item: InboxItem): Int = when (item) {
+            is InboxItem.Personal -> item.chat.unreadCount
+            is InboxItem.Group -> item.group.unreadCount
+        }
+        val itemsByFolder = snap.folders.associate { folder ->
+            val matched = allItems.filter { item ->
+                when (folder.rule) {
+                    com.vladimir.messenger.data.folder.ChatFolder.Rule.CUSTOM ->
+                        stableInboxKey(item) in folder.chatKeys
+                    com.vladimir.messenger.data.folder.ChatFolder.Rule.UNREAD ->
+                        unreadOf(item) > 0
+                    com.vladimir.messenger.data.folder.ChatFolder.Rule.PERSONAL ->
+                        item is InboxItem.Personal
+                }
+            }
+            folder.id to matched
+        }
+        val folderUnread = snap.folders.associate { folder ->
+            folder.id to (itemsByFolder[folder.id].orEmpty().count { unreadOf(it) > 0 })
+        }
+
         return Built(
             chats = snap.chats,
             filtered = filteredChats,
@@ -510,6 +554,9 @@ class ChatListViewModel @Inject constructor(
             query = snap.query,
             items = bySection[section].orEmpty(),
             itemsBySection = bySection,
+            folders = snap.folders,
+            itemsByFolder = itemsByFolder,
+            folderUnread = folderUnread,
             window = snap.window,
             canLoadMore = canLoadMore,
             unreadCount = unreadCount,

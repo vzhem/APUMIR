@@ -31,6 +31,7 @@ import kotlinx.coroutines.withContext
 @Singleton
 class PeerRankRouter @Inject constructor(
     private val store: PeerRankStore,
+    private val broadcaster: PeerRankBroadcaster,
 ) {
 
     suspend fun routeIncoming(
@@ -38,6 +39,17 @@ class PeerRankRouter @Inject constructor(
         text: String,
         nowMs: Long = System.currentTimeMillis(),
     ): Boolean = withContext(Dispatchers.IO) {
+        // Запрос ранга: собеседник хочет значок у моего имени прямо сейчас,
+        // а не после недельной рассылки. Отвечаем своим конвертом (внутри
+        // ограничитель - не чаще раза в час одному).
+        if (RankWire.isRankRequest(text)) {
+            val sender = RankWire.canonicalNodeId(senderId)
+            if (sender != null) {
+                runCatching { broadcaster.sendRankTo(sender) }
+                    .onFailure { e -> Log.w(TAG, "rank reply to $sender failed: ${e.message}") }
+            }
+            return@withContext true
+        }
         if (!RankWire.isRankPacket(text)) return@withContext false
 
         val packet = RankWire.parse(text, nowMs)
@@ -51,6 +63,8 @@ class PeerRankRouter @Inject constructor(
             // Заявлять чужой узел нельзя: пакет пришёл от senderId, значит и ранг
             // может сообщать только он.
             Log.w(TAG, "rank packet claims ${packet.nodeId} but came from $senderId, dropped")
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                .recordWarning("rank", "конверт ранга отброшен: узел в пакете не совпал с отправителем")
             return@withContext true
         }
 
@@ -69,6 +83,15 @@ class PeerRankRouter @Inject constructor(
         // Пишем в журнал и «не изменилось»: по копипасте должно быть видно, что
         // пакеты доходят, даже когда ранг тот же и обновлять нечего.
         Log.i(TAG, "peer rank from ${packet.nodeId}: ${packet.qualified}, stored=$stored")
+        com.vladimir.messenger.data.diagnostics.TransferDiagnostics.record(
+            "rank",
+            "ранг собеседника получен: приглашённых " + packet.qualified +
+                if (com.vladimir.messenger.data.rank.PeerRankStore.isVipRank(packet.qualified)) {
+                    " (это VIP)"
+                } else {
+                    " (не VIP: нужно от 10)"
+                },
+        )
         true
     }
 

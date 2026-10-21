@@ -278,6 +278,8 @@ fun ApuDiagnosticsHero(
     journalSize: Int = 0,
     warnCount: Int = 0,
     badCount: Int = 0,
+    /** Нажатие на плашки предупреждений/ошибок: сразу показать, какие именно. */
+    onWarningsClick: (() -> Unit)? = null,
 ) {
     // Пока проверок нет, «ВСЁ В ПОРЯДКЕ» было бы враньём: показываем сбор.
     val collecting = lines.isEmpty()
@@ -362,12 +364,25 @@ fun ApuDiagnosticsHero(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 ApuDiagnosticsGlassChip(stringResource(R.string.diag_events_label), journalSize.toString(), modifier = Modifier.weight(1f))
-                ApuDiagnosticsGlassChip(stringResource(R.string.diag_warn_label), warnCount.toString(), modifier = Modifier.weight(1f))
+                ApuDiagnosticsGlassChip(
+                    stringResource(R.string.diag_warn_label),
+                    warnCount.toString(),
+                    modifier = Modifier.weight(1f),
+                    onClick = onWarningsClick,
+                )
                 ApuDiagnosticsGlassChip(
                     stringResource(R.string.diag_errors_label),
                     badCount.toString(),
                     alarm = badCount > 0,
                     modifier = Modifier.weight(1f),
+                    onClick = onWarningsClick,
+                )
+            }
+            if (onWarningsClick != null) {
+                Text(
+                    stringResource(R.string.diag_warnings_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.66f),
                 )
             }
         }
@@ -495,11 +510,13 @@ private fun ApuDiagnosticsGlassChip(
     value: String,
     alarm: Boolean = false,
     modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
 ) {
     val shape = RoundedCornerShape(12.dp)
     val accent = if (alarm) diagnosticsLevelColor(DiagnosticsLevel.BAD) else DiagGold
     Column(
         modifier = modifier
+            .then(if (onClick != null) Modifier.clickableDiag(remember { MutableInteractionSource() }, true, onClick) else Modifier)
             .clip(shape)
             .background(Color.White.copy(alpha = 0.12f))
             .border(1.dp, Color.White.copy(alpha = 0.20f), shape)
@@ -697,6 +714,77 @@ private fun ApuDiagnosticsDivider() {
                 ),
             ),
     )
+}
+
+/**
+ * Карточка «какие именно предупреждения»: только строки сводки и записи
+ * журнала уровней WARN/BAD — без чтения всей простыни отчёта. Появляется
+ * сразу по нажатию на плашки «предупр.»/«ошибок» в шапке.
+ */
+@Composable
+fun ApuDiagnosticsWarningsCard(
+    lines: List<DiagnosticsLine>,
+    events: List<DiagnosticsJournalEntry>,
+    modifier: Modifier = Modifier,
+) {
+    val problemLines = lines.filter {
+        it.level == DiagnosticsLevel.WARN || it.level == DiagnosticsLevel.BAD
+    }
+    val problemEvents = events.filter {
+        it.level == DiagnosticsLevel.WARN || it.level == DiagnosticsLevel.BAD
+    }
+    ApuSettingsCard(modifier = modifier) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                stringResource(R.string.diag_warnings_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = ApuBubbleTextColor,
+            )
+            if (problemLines.isEmpty() && problemEvents.isEmpty()) {
+                Text(
+                    stringResource(R.string.diag_warnings_empty),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ApuBubbleMutedColor,
+                )
+            }
+            if (problemLines.isNotEmpty()) {
+                Text(
+                    stringResource(R.string.diag_warnings_checks),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = ApuBubbleMutedColor,
+                )
+                problemLines.forEach { line -> ApuDiagnosticsStatusRow(line) }
+            }
+            if (problemEvents.isNotEmpty()) {
+                Text(
+                    stringResource(R.string.diag_warnings_journal),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = ApuBubbleMutedColor,
+                )
+                val scroll = rememberScrollState()
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(DiagConsoleSurface)
+                        .heightIn(max = 220.dp)
+                        .verticalScroll(scroll)
+                        .padding(vertical = 4.dp),
+                ) {
+                    problemEvents.forEachIndexed { index, event ->
+                        if (index > 0) ApuDiagnosticsDivider()
+                        ApuDiagnosticsEventRow(event)
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

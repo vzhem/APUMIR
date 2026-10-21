@@ -7,6 +7,9 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -17,14 +20,20 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.ScreenShare
+import androidx.compose.material.icons.filled.StopScreenShare
+import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VideocamOff
 import androidx.compose.material.icons.filled.VolumeUp
@@ -75,6 +84,7 @@ fun CallScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val remoteVideo by viewModel.remoteVideo.collectAsStateWithLifecycle()
+    val captionLines by viewModel.captionLines.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     // Микрофон: запрос со входом на экран; «Принять» без разрешения — сначала запрос.
@@ -162,13 +172,43 @@ fun CallScreen(
         onDispose { view.keepScreenOn = false }
     }
 
+    // Демонстрация экрана: системное разрешение -> захват -> кадры тем же
+    // видео-путём, что камера.
+    val screenCapturer = remember {
+        ScreenShareCapturer(context.applicationContext) { viewModel.sendVideoFrame(it) }
+    }
+    val shareLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) { result ->
+        val data = result.data
+        if (result.resultCode == android.app.Activity.RESULT_OK && data != null) {
+            if (screenCapturer.start(result.resultCode, data)) viewModel.setScreenSharing(true)
+        }
+    }
+    fun stopScreenShare() {
+        screenCapturer.stop()
+        if (viewModel.uiState.value.screenSharing) viewModel.setScreenSharing(false)
+    }
+    DisposableEffect(state.screenSharing) {
+        if (!state.screenSharing) screenCapturer.stop()
+        onDispose { }
+    }
+    DisposableEffect(Unit) {
+        onDispose { screenCapturer.stop() }
+    }
+
     var frontCamera by remember { mutableStateOf(true) }
+    var callBackground by remember {
+        mutableStateOf(com.vladimir.messenger.data.background.VideoBackground.NONE)
+    }
+    var showBackgrounds by remember { mutableStateOf(false) }
+    var showVoiceEffects by remember { mutableStateOf(false) }
     val mediaLive = state.phase == CallStateMachine.Phase.CONNECTING ||
         state.phase == CallStateMachine.Phase.ACTIVE
     val inCall = state.phase != CallStateMachine.Phase.ENDED &&
         state.phase != CallStateMachine.Phase.IDLE
-    val showLocalCamera = state.video && state.cameraOn && cameraGranted && inCall
-    val showCameraOffPip = state.video && inCall && !showLocalCamera
+    val showLocalCamera = state.video && state.cameraOn && cameraGranted && inCall && !state.screenSharing
+    val showCameraOffPip = state.video && inCall && !showLocalCamera && !state.screenSharing
 
     Box(modifier = Modifier.fillMaxSize()) {
         ChatWallpaper()
@@ -236,6 +276,46 @@ fun CallScreen(
                     )
                 }
 
+                if (state.captionsPreparing) {
+                    Text(
+                        stringResource(R.string.call_captions_preparing),
+                        color = if (state.video) Color.White.copy(alpha = 0.9f) else ApuBubbleMutedColor,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (state.captionsFailed) {
+                    Text(
+                        stringResource(R.string.call_captions_failed),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                if (state.captionsOn && captionLines.isNotEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .padding(top = 10.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.Black.copy(alpha = 0.45f))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        captionLines.takeLast(5).forEach { line ->
+                            val label = stringResource(
+                                if (line.speaker == com.vladimir.messenger.data.voice.CallCaptioner.Speaker.ME) {
+                                    R.string.call_captions_you
+                                } else {
+                                    R.string.call_captions_peer
+                                },
+                            )
+                            Text(
+                                "$label: ${line.text}",
+                                color = Color.White.copy(alpha = if (line.done) 0.95f else 0.6f),
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                    }
+                }
+
                 if (!state.video) {
                     Spacer(modifier = Modifier.height(48.dp))
 
@@ -263,6 +343,37 @@ fun CallScreen(
 
                 Spacer(modifier = Modifier.weight(1f))
 
+                if (showBackgrounds && inCall) {
+                    Row(
+                        modifier = Modifier
+                            .padding(bottom = 10.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.Black.copy(alpha = 0.45f))
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        com.vladimir.messenger.data.background.VideoBackground.pickerEntries.forEach { entry ->
+                            val selected = entry == callBackground
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(
+                                        if (selected) MaterialTheme.colorScheme.primary
+                                        else Color.White.copy(alpha = 0.16f),
+                                    )
+                                    .clickable { callBackground = entry }
+                                    .padding(horizontal = 12.dp, vertical = 7.dp),
+                            ) {
+                                Text(
+                                    stringResource(entry.labelRes),
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        }
+                    }
+                }
                 CallButtons(
                     state = state,
                     onAccept = {
@@ -291,12 +402,35 @@ fun CallScreen(
                             viewModel.toggleCamera()
                         }
                     },
+                    onCaptions = { viewModel.setCaptions(!state.captionsOn && !state.captionsPreparing) },
+                    onVoiceEffect = { showVoiceEffects = true },
+                    onBackgrounds = { showBackgrounds = !showBackgrounds },
+                    onScreenShare = {
+                        if (state.screenSharing) {
+                            stopScreenShare()
+                        } else {
+                            com.vladimir.messenger.service.CallService.startForScreenShare(context)
+                            val projectionManager = context.getSystemService(
+                                android.media.projection.MediaProjectionManager::class.java,
+                            )
+                            if (projectionManager != null) {
+                                shareLauncher.launch(projectionManager.createScreenCaptureIntent())
+                            }
+                        }
+                    },
                 )
 
                 Spacer(modifier = Modifier.height(72.dp))
             }
         }
-        if (showLocalCamera || showCameraOffPip) {
+        if (showVoiceEffects) {
+            com.vladimir.messenger.ui.components.VoiceEffectPickerDialog(
+                selected = state.voiceEffect,
+                onSelected = viewModel::setVoiceEffect,
+                onDismiss = { showVoiceEffects = false },
+            )
+        }
+        if (showLocalCamera || showCameraOffPip || state.screenSharing) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -310,6 +444,7 @@ fun CallScreen(
                     CallLocalPreview(
                         send = mediaLive,
                         front = frontCamera,
+                        background = callBackground,
                         onJpeg = { viewModel.sendVideoFrame(it) },
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -348,6 +483,10 @@ private fun CallButtons(
     onMute: () -> Unit,
     onSpeaker: () -> Unit,
     onCamera: () -> Unit,
+    onScreenShare: () -> Unit,
+    onCaptions: () -> Unit,
+    onBackgrounds: () -> Unit,
+    onVoiceEffect: () -> Unit,
 ) {
     val gap = if (state.video) 16.dp else 32.dp
     Row(
@@ -373,23 +512,83 @@ private fun CallButtons(
             }
 
             CallStateMachine.Phase.ACTIVE, CallStateMachine.Phase.CONNECTING -> {
-                MuteCallButton(state, onMute)
-                if (state.video) CameraCallButton(state, onCamera)
-                RoundCallButton(
-                    background = MaterialTheme.colorScheme.error,
-                    description = stringResource(R.string.call_end),
-                    onClick = onRed,
-                    big = true,
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Icon(Icons.Default.CallEnd, stringResource(R.string.call_end), tint = Color.White)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(gap),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        MuteCallButton(state, onMute)
+                        if (state.video && !state.screenSharing) CameraCallButton(state, onCamera)
+                        RoundCallButton(
+                            background = MaterialTheme.colorScheme.error,
+                            description = stringResource(R.string.call_end),
+                            onClick = onRed,
+                            big = true,
+                        ) {
+                            Icon(Icons.Default.CallEnd, stringResource(R.string.call_end), tint = Color.White)
+                        }
+                        SpeakerCallButton(state, onSpeaker)
+                    }
+                    // Второй ряд: показ экрана и живой текст — рядом с трубкой
+                    // им не хватило места, а прятать под меню их нельзя.
+                    // Подписанные кнопки, а не значки без текста: владелец не нашёл
+                    // «Показать экран» среди круглых иконок — теперь всё словами.
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        LabeledCallChip(
+                            icon = if (state.screenSharing) Icons.Default.StopScreenShare else Icons.Default.ScreenShare,
+                            label = stringResource(
+                                if (state.screenSharing) R.string.call_stop_share else R.string.call_share_screen,
+                            ),
+                            active = state.screenSharing,
+                            onClick = onScreenShare,
+                        )
+                        LabeledCallChip(
+                            icon = Icons.Default.Subtitles,
+                            label = stringResource(R.string.call_captions),
+                            active = state.captionsOn || state.captionsPreparing,
+                            onClick = onCaptions,
+                        )
+                        LabeledCallChip(
+                            icon = Icons.Default.Wallpaper,
+                            label = stringResource(R.string.call_background),
+                            active = false,
+                            onClick = onBackgrounds,
+                        )
+                        LabeledCallChip(
+                            icon = Icons.Default.GraphicEq,
+                            label = stringResource(
+                                R.string.call_voice_effect,
+                                stringResource(state.voiceEffect.labelRes),
+                            ),
+                            active = state.voiceEffect != com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL,
+                            onClick = onVoiceEffect,
+                        )
+                    }
                 }
-                SpeakerCallButton(state, onSpeaker)
             }
 
             else -> {
                 // OFFERING / RINGING: гудки в трубку; динамик — отдельная кнопка.
+                // Эффект голоса здесь выбирается ДО соединения: применится с
+                // первого кадра, когда медиа стартует после ответа.
                 if (state.phase != CallStateMachine.Phase.ENDED) {
                     if (state.video) CameraCallButton(state, onCamera)
+                    LabeledCallChip(
+                        icon = Icons.Default.GraphicEq,
+                        label = stringResource(
+                            R.string.call_voice_effect,
+                            stringResource(state.voiceEffect.labelRes),
+                        ),
+                        active = state.voiceEffect != com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL,
+                        onClick = onVoiceEffect,
+                    )
                     SpeakerCallButton(state, onSpeaker)
                     RoundCallButton(
                         background = MaterialTheme.colorScheme.error,
@@ -459,6 +658,97 @@ private fun CameraCallButton(
             if (state.cameraOn) Icons.Default.Videocam else Icons.Default.VideocamOff,
             if (state.cameraOn) stringResource(R.string.call_camera_off) else stringResource(R.string.call_camera_on),
             tint = if (state.cameraOn) ApuBubbleMutedColor else Color.White,
+        )
+    }
+}
+
+@Composable
+private fun ScreenShareCallButton(
+    state: com.vladimir.messenger.data.call.CallManager.CallUiState,
+    onScreenShare: () -> Unit,
+) {
+    RoundCallButton(
+        background = if (state.screenSharing) MaterialTheme.colorScheme.primary
+        else Color(0xFFF5F7FA).copy(alpha = 0.95f),
+        description = if (state.screenSharing) stringResource(R.string.call_stop_share)
+        else stringResource(R.string.call_share_screen),
+        onClick = onScreenShare,
+    ) {
+        Icon(
+            if (state.screenSharing) Icons.Default.StopScreenShare else Icons.Default.ScreenShare,
+            if (state.screenSharing) stringResource(R.string.call_stop_share)
+            else stringResource(R.string.call_share_screen),
+            tint = if (state.screenSharing) MaterialTheme.colorScheme.onPrimary
+            else ApuBubbleMutedColor,
+        )
+    }
+}
+
+@Composable
+private fun CaptionsCallButton(
+    state: com.vladimir.messenger.data.call.CallManager.CallUiState,
+    onCaptions: () -> Unit,
+) {
+    val active = state.captionsOn || state.captionsPreparing
+    RoundCallButton(
+        background = if (active) MaterialTheme.colorScheme.primary
+        else Color(0xFFF5F7FA).copy(alpha = 0.95f),
+        description = stringResource(R.string.call_captions),
+        onClick = onCaptions,
+    ) {
+        Icon(
+            Icons.Default.Subtitles,
+            stringResource(R.string.call_captions),
+            tint = if (active) MaterialTheme.colorScheme.onPrimary else ApuBubbleMutedColor,
+        )
+    }
+}
+
+@Composable
+private fun BackgroundsCallButton(onBackgrounds: () -> Unit) {
+    RoundCallButton(
+        background = Color(0xFFF5F7FA).copy(alpha = 0.95f),
+        description = stringResource(R.string.call_background),
+        onClick = onBackgrounds,
+    ) {
+        Icon(
+            Icons.Default.Wallpaper,
+            stringResource(R.string.call_background),
+            tint = ApuBubbleMutedColor,
+        )
+    }
+}
+
+/** Подписанная кнопка-пилюля второго ряда звонка: значок + слово, чтобы не угадывать. */
+@Composable
+private fun LabeledCallChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    active: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(
+                if (active) MaterialTheme.colorScheme.primary
+                else Color(0xFFF5F7FA).copy(alpha = 0.95f),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            icon,
+            contentDescription = label,
+            tint = if (active) MaterialTheme.colorScheme.onPrimary else ApuBubbleMutedColor,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            label,
+            color = if (active) MaterialTheme.colorScheme.onPrimary else ApuBubbleMutedColor,
+            style = MaterialTheme.typography.labelLarge,
         )
     }
 }
