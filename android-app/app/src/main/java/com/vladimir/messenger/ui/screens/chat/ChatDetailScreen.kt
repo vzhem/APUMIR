@@ -154,6 +154,16 @@ fun ChatDetailScreen(
 
     val context = LocalContext.current
 
+    // «Поделиться координатами»: фикс ждёт подтверждения в диалоге -
+    // координаты приватны, поэтому сначала показываем, что именно уйдёт.
+    var locationFix by remember {
+        mutableStateOf<com.vladimir.messenger.data.location.CurrentLocation.Fix?>(null)
+    }
+    val (requestLocation, isLocating) = com.vladimir.messenger.ui.components.rememberShareLocationAction(
+        onReady = { locationFix = it },
+        onError = { viewModel.showLocationNotice(it) },
+    )
+
     // F3: системный выбор файла (SAF) → зашифрованная подготовка → durable отправка
     // Каталог GIF (кнопка «GIF» у скрепки).
     var showGifCatalog by remember { mutableStateOf(false) }
@@ -454,6 +464,8 @@ fun ChatDetailScreen(
                         viewModel.searchGifs("")
                     }
                 },
+                onLocationClick = requestLocation,
+                isLocating = isLocating,
             )
         },
     ) { paddingValues ->
@@ -1135,6 +1147,18 @@ fun ChatDetailScreen(
         )
     }
 
+    // Подтверждение отправки координат: точка и необязательная подпись.
+    locationFix?.let { fix ->
+        com.vladimir.messenger.ui.components.LocationConfirmDialog(
+            fix = fix,
+            onDismiss = { locationFix = null },
+            onSend = { label ->
+                locationFix = null
+                viewModel.sendLocation(fix.lat, fix.lon, fix.accuracyM, label)
+            },
+        )
+    }
+
     // Подтверждение удаления у всех, включая прочитанные сообщения.
     // Для недоступного собеседника запрос сохраняется и повторяется.
     deleteForAllTarget?.let { target ->
@@ -1232,6 +1256,10 @@ private fun MessageInputBar(
     onPastedMedia: (android.net.Uri) -> Unit = {},
     onPasteLocked: () -> Unit = {},
     onGifClick: () -> Unit = {},
+    /** «Поделиться координатами»: кнопка метки рядом со скрепкой. */
+    onLocationClick: () -> Unit = {},
+    /** Координаты определяются прямо сейчас - на кнопке крутится спиннер. */
+    isLocating: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     // Раунд 42: новый BasicTextField(state) - только он проводит картинки со
@@ -1329,6 +1357,24 @@ private fun MessageInputBar(
                     onClick = onGifClick,
                     enabled = !isPreparingFile && !isSending && canAttach,
                 )
+                IconButton(
+                    onClick = onLocationClick,
+                    enabled = !isPreparingFile && !isSending,
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    if (isLocating) {
+                        ApuPremiumSpinner(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.Place,
+                            contentDescription = stringResource(R.string.chat_share_location),
+                            tint = Color(0xFF5A6472),
+                        )
+                    }
+                }
                 }
             }
 

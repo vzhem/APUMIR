@@ -88,6 +88,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.LaunchedEffect
 import com.vladimir.messenger.util.GroupFileMarker
@@ -235,6 +236,25 @@ fun GroupChatScreen(
     // визитка в тексте; сам файл участники просят у автора и друг у друга.
     val filePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let(viewModel::onFileSelected)
+    }
+
+    // «Поделиться координатами»: фикс ждёт подтверждения в диалоге.
+    var locationFix by remember {
+        mutableStateOf<com.vladimir.messenger.data.location.CurrentLocation.Fix?>(null)
+    }
+    val (requestLocation, isLocating) = com.vladimir.messenger.ui.components.rememberShareLocationAction(
+        onReady = { locationFix = it },
+        onError = { viewModel.showLocationNotice(it) },
+    )
+    locationFix?.let { fix ->
+        com.vladimir.messenger.ui.components.LocationConfirmDialog(
+            fix = fix,
+            onDismiss = { locationFix = null },
+            onSend = { label ->
+                locationFix = null
+                viewModel.sendLocation(fix.lat, fix.lon, fix.accuracyM, label)
+            },
+        )
     }
     val savePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
@@ -1408,6 +1428,21 @@ fun GroupChatScreen(
                                     if (uiState.canAttach) {
                                         showGifCatalog = true
                                         viewModel.onGifCatalogOpened()
+                            IconButton(
+                                onClick = requestLocation,
+                                enabled = !uiState.isPreparingFile && !uiState.sending,
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                if (isLocating) {
+                                    ApuPremiumSpinner(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(
+                                        Icons.Filled.Place,
+                                        contentDescription = stringResource(R.string.chat_share_location),
+                                        tint = Color(0xFF5A6472),
+                                    )
+                                }
+                            }
                                         if (uiState.gifItems.isEmpty() && !uiState.gifLoading) {
                                             viewModel.searchGifs("")
                                         }
@@ -2279,11 +2314,17 @@ private fun MessageBubble(
                             color = bubbleTextColor.copy(alpha = 0.7f),
                         )
                     bodyText.isBlank() && fileCard != null -> Unit
+                    com.vladimir.messenger.util.LocationShare.parse(bodyText) != null ->
+                        com.vladimir.messenger.ui.components.LocationCardView(
+                            location = com.vladimir.messenger.util.LocationShare.parse(bodyText)!!,
+                            textColor = bubbleTextColor,
+                        )
                     else -> Text(bodyText)
                 }
                 // Карточка первой ссылки под обычным текстом (не приглашение и не картинка).
                 val bubbleLink = remember(bodyText) { firstLinkIn(bodyText) }
                 if (bubbleLink != null && fileCard == null && imageUrl == null &&
+                    com.vladimir.messenger.util.LocationShare.parse(bodyText) == null &&
                     attachedBitmap == null && !com.vladimir.messenger.data.gif.GifLibrary.isGifRef(bodyText) &&
                     com.vladimir.messenger.data.group.GroupInviteLinks.parseTarget(bubbleLink) == null
                 ) {

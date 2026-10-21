@@ -150,6 +150,10 @@ fun MessageBubble(
                         )
                     }
                 }
+                // «Поделиться координатами»: служебная первая строка APULOC1
+                // рисуется карточкой, а не текстом с цифрами.
+                val location = remember(displayContent) { com.vladimir.messenger.util.LocationShare.parse(displayContent) }
+
                 // Перевод входящего текста на язык приложения (если включён в настройках).
                 // Свои сообщения, карточки и картинки не переводим.
                 val translateOn by com.vladimir.messenger.data.translate.TranslationSettings.enabled
@@ -164,7 +168,7 @@ fun MessageBubble(
                     message.id, displayContent, translateOn, appLang, manualRequested,
                 ) {
                     value = null
-                    if ((translateOn || manualRequested) && !message.isFromMe &&
+                    if ((translateOn || manualRequested) && !message.isFromMe && location == null &&
                         com.vladimir.messenger.data.translate.MessageTranslator.isTranslatableText(displayContent)
                     ) {
                         value = com.vladimir.messenger.data.translate.MessageTranslator
@@ -201,7 +205,9 @@ fun MessageBubble(
                     com.vladimir.messenger.util.GroupInviteCardSender.parseMultiCard(displayContent)
                 }
 
-                if (multiCard != null && onGroupInvite != null) {
+                if (location != null) {
+                    LocationCardView(location = location, textColor = textColor)
+                } else if (multiCard != null && onGroupInvite != null) {
                     MultiInviteCardView(
                         card = multiCard,
                         textColor = textColor,
@@ -310,7 +316,7 @@ fun MessageBubble(
                     )
                 }
                 // Кнопка «Перевести» для входящего текста, когда авто-перевод выключен.
-                if (translation == null && !translateOn && !manualRequested && !message.isFromMe &&
+                if (translation == null && !translateOn && !manualRequested && !message.isFromMe && location == null &&
                     com.vladimir.messenger.data.translate.MessageTranslator.isTranslatableText(displayContent)
                 ) {
                     Text(

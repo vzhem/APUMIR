@@ -97,6 +97,7 @@ object ChatPreviews {
         if (t.startsWith("APUFWD1|")) {
             ForwardMarker.parseRef(t)?.let { return "↩ Переслано из «" + it.label + "»" }
         }
+        if (t.startsWith(LocationShare.PREFIX)) return "\uD83D\uDCCD Геопозиция"
         if (t.startsWith("APUGIFREF1|")) return GIF_LABEL
         // История (APUSTORY1): в переписке не хранится, но предпросмотр не должен светить пакет.
         if (t.startsWith(com.vladimir.messenger.data.story.StoryStore.PREFIX)) return "История"

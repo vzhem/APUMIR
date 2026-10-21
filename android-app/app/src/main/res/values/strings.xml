@@ -262,6 +262,17 @@
     <string name="chat_delete_for_all_text">Сообщение исчезнет и у вас, и у собеседника. Отменить будет нельзя.</string>
     <string name="action_delete">Удалить</string>
     <string name="chat_attach_file">Прикрепить файл</string>
+    <string name="chat_share_location">Поделиться координатами</string>
+    <string name="loc_card_title">Геопозиция</string>
+    <string name="loc_accuracy">точность ±%1$d м</string>
+    <string name="loc_open_maps">Открыть в картах</string>
+    <string name="loc_dialog_title">Отправить мои координаты?</string>
+    <string name="loc_dialog_label_hint">Подпись (необязательно)</string>
+    <string name="loc_send">Отправить</string>
+    <string name="loc_cancel">Отмена</string>
+    <string name="loc_unavailable">Не удалось определить координаты. Проверьте, что геолокация включена, и попробуйте ещё раз.</string>
+    <string name="loc_permission_denied">Без разрешения на геолокацию координаты не определить. Разрешите доступ в настройках приложения.</string>
+    <string name="loc_preview">📍 Геопозиция</string>
     <string name="chat_attach_rank_hint">Вложения откроются с ранга «Круг друзей»</string>
     <string name="chat_input_placeholder">Сообщение...</string>
     <string name="chat_resend_key">Отправить открытый ключ</string>

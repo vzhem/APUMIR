@@ -760,6 +760,30 @@ class ChatDetailViewModel @Inject constructor(
     }
 
     /**
+     * «Поделиться координатами»: точка уходит обычным зашифрованным
+     * сообщением APULOC1 (карточка рисуется по первой строке), поэтому
+     * работают зеркало, офлайн-очередь и старые версии (у них - подпись
+     * со ссылкой на карту второй строкой).
+     */
+    fun sendLocation(lat: Double, lon: Double, accuracyM: Int?, label: String) {
+        viewModelScope.launch {
+            sendMessageUseCase(
+                chatId,
+                com.vladimir.messenger.util.LocationShare.format(lat, lon, accuracyM, label),
+            ).onSuccess {
+                _uiState.update { it.copy(scrollToBottom = true) }
+            }.onFailure { e ->
+                _uiState.update { it.copy(error = appContext.getString(R.string.cd_send_error, e.message)) }
+            }
+        }
+    }
+
+    /** Подсказка по геолокации (нет разрешения / нет фикса) - в общую плашку ошибок чата. */
+    fun showLocationNotice(text: String) {
+        _uiState.update { it.copy(error = text) }
+    }
+
+    /**
      * F3: pick → rank-checked encrypted preparation (manifest, key envelope, durable chunks) →
      * local chat placeholder → immediate pump. Offline multi-day delivery is owned by the
      * durable transport, not by this UI path.

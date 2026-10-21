@@ -1541,6 +1541,22 @@ class GroupChatViewModel @Inject constructor(
         }
     }
 
+    /** «Поделиться координатами» в группу/тему: тот же провод APULOC1, что в личке. */
+    fun sendLocation(lat: Double, lon: Double, accuracyM: Int?, label: String) {
+        val topicId = _uiState.value.selectedTopicId ?: return
+        viewModelScope.launch {
+            groupRepository.sendMessage(
+                groupId, topicId,
+                com.vladimir.messenger.util.LocationShare.format(lat, lon, accuracyM, label),
+            ).onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+        }
+    }
+
+    /** Подсказка по геолокации - в общую плашку ошибок группы. */
+    fun showLocationNotice(text: String) {
+        _uiState.update { it.copy(error = text) }
+    }
+
     /**
      * Раунд 130: отправить ССЫЛКУ на гифку в группу/тему комментариев.
      * Карточка от лица отправителя; байты каждый участник тихо тянет
