@@ -279,6 +279,17 @@ fun GroupChatScreen(
     } == true
     // Администраторы видят состав даже при закрытом списке участников.
     val iAmGroupAdmin = canDecideRequests
+    // Красная кнопка SOS: видна, когда группа её не скрыла и этому участнику
+    // нажимать разрешено (настройка «кто может нажимать»). В каналах кнопки
+    // нет. Во время паузы от повторов кнопка показывает обратный отсчёт.
+    val sosGroup = uiState.group
+    val sosMe = uiState.me
+    val showSosButton = sosGroup != null && sosMe != null && !sosGroup.isChannel &&
+        sosGroup.sosEnabled &&
+        com.vladimir.messenger.data.group.GroupSos.canPress(
+            sosMe.role, sosGroup.sosPressRole, sosMe.isBanned,
+        )
+    val sosWaitSeconds = (uiState.sosCooldownMs + 999L) / 1000L
     // Каталог GIF (кнопка «GIF» у скрепки).
     var showGifCatalog by remember { mutableStateOf(false) }
     // Подтверждение перед тревогой SOS: нажатие уходит всей группе сразу
@@ -923,6 +934,18 @@ fun GroupChatScreen(
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    // Кнопка SOS видна и из списка тем: тревогу шлём в общую
+                    // тему группы, её видят все участники.
+                    if (showSosButton) {
+                        item(key = "sos-button") {
+                            SosButton(
+                                sending = uiState.sosSending,
+                                waitSeconds = sosWaitSeconds,
+                                onClick = { showSosConfirm = true },
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                    }
                     items(uiState.topics, key = { it.id }) { topic ->
                         TopicBubble(topic = topic) {
                             viewModel.selectTopic(topic.id)
@@ -1348,18 +1371,8 @@ fun GroupChatScreen(
                 }
             }
 
-            // ── Красная кнопка SOS: видна, когда группа её не скрыла и этому
-            // участнику нажимать разрешено (настройка «кто может нажимать»).
-            // Во время паузы от повторов кнопка показывает обратный отсчёт.
-            val sosGroup = uiState.group
-            val sosMe = uiState.me
-            val showSosButton = sosGroup != null && sosMe != null && !sosGroup.isChannel &&
-                sosGroup.sosEnabled &&
-                com.vladimir.messenger.data.group.GroupSos.canPress(
-                    sosMe.role, sosGroup.sosPressRole, sosMe.isBanned,
-                )
+            // ── Красная кнопка SOS над полем ввода.
             if (showSosButton) {
-                val sosWaitSeconds = (uiState.sosCooldownMs + 999L) / 1000L
                 SosButton(
                     sending = uiState.sosSending,
                     waitSeconds = sosWaitSeconds,

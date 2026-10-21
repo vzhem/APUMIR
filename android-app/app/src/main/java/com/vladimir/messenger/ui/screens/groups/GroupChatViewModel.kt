@@ -1119,10 +1119,9 @@ class GroupChatViewModel @Inject constructor(
      */
     fun sendSos() {
         if (_uiState.value.sosSending) return
-        val topicId = _uiState.value.selectedTopicId ?: run {
-            _uiState.update { it.copy(error = appContext.getString(R.string.gc_choose_topic)) }
-            return
-        }
+        // Из списка тем тема не выбрана: пустой id репозиторий сам приведёт
+        // к общей теме группы - тревогу должны увидеть все участники.
+        val topicId = _uiState.value.selectedTopicId ?: ""
         _uiState.update { it.copy(sosSending = true, error = null) }
         viewModelScope.launch {
             try {
