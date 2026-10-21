@@ -6633,10 +6633,3 @@ companion object {
         private const val TAG = "GroupRepository"
     }
 }
-олько оно пришло,
-         * запрос больше не отправляется вовсе.
-         */
-        private const val WHOIS_MIN_INTERVAL_MS = 10L * 60 * 1000
-        private const val TAG = "GroupRepository"
-    }
-}
