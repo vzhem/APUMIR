@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -1527,7 +1528,7 @@ private fun MessageInputBar(
                     },
                     onClick = { showVoiceEffectPicker = true },
                     enabled = !isSending && !isSelfChat,
-                    icon = androidx.compose.material.icons.Icons.Default.GraphicEq,
+                    icon = Icons.Filled.GraphicEq,
                     modifier = Modifier.weight(1f),
                 )
                 // Три кнопки делят ширину строки: на узких экранах не вылетают за край.

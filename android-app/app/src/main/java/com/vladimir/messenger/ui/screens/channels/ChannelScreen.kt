@@ -71,6 +71,7 @@ import android.widget.Toast
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Edit
@@ -1517,7 +1518,7 @@ private fun PostEditorDialog(
                                 },
                                 onClick = { showVoiceEffectPicker = true },
                                 enabled = !preparingFile && !creating,
-                                icon = androidx.compose.material.icons.Icons.Default.GraphicEq,
+                                icon = Icons.Filled.GraphicEq,
                             )
                             ApuTextAction(
                                 label = stringResource(R.string.channel_attach_file),

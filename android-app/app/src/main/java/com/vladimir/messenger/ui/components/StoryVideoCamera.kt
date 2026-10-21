@@ -30,6 +30,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FlashOff
@@ -146,7 +147,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
     var error by remember { mutableStateOf<String?>(null) }
     var faceFilter by remember { mutableStateOf(StoryFaceFilter.NONE) }
     // Эффект голоса выбирается ДО записи и применяется к звуку готовой истории.
-    var voiceEffect by remember { mutableStateOf(com.vladimir.messenger.data.voice.VoiceEffectPreferences.selected(context)) }
+    var voiceEffect by remember { mutableStateOf(com.vladimir.messenger.data.voice.VoiceEffectPreferences.load(context)) }
     var showVoiceEffects by remember { mutableStateOf(false) }
     var storyBackground by remember {
         mutableStateOf(com.vladimir.messenger.data.background.VideoBackground.NONE)
@@ -417,7 +418,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                     selected = voiceEffect,
                     onSelected = {
                         voiceEffect = it
-                        com.vladimir.messenger.data.voice.VoiceEffectPreferences.select(context, it)
+                        com.vladimir.messenger.data.voice.VoiceEffectPreferences.save(context, it)
                     },
                     onDismiss = { showVoiceEffects = false },
                 )
@@ -450,7 +451,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             StoryCameraIconButton(
-                                androidx.compose.material.icons.Icons.Default.GraphicEq,
+                                Icons.Filled.GraphicEq,
                                 "Эффект голоса",
                                 active = voiceEffect != com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL,
                             ) { showVoiceEffects = true }

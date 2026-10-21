@@ -66,6 +66,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
@@ -1428,7 +1429,7 @@ fun GroupChatScreen(
                                 modifier = Modifier.size(40.dp),
                             ) {
                                 Icon(
-                                    androidx.compose.material.icons.Icons.Default.GraphicEq,
+                                    Icons.Filled.GraphicEq,
                                     contentDescription = stringResource(R.string.voice_effect_title),
                                     tint = if (voice.effect == com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL) {
                                         Color(0xFF5A6472)
