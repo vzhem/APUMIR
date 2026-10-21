@@ -1497,7 +1497,7 @@ private fun PostEditorDialog(
                                 Icon(Icons.Default.Close, contentDescription = stringResource(R.string.channel_remove_file), modifier = Modifier.size(16.dp))
                             }
                         }
-                    } else if (voice.recording) {
+                    } else if (voice.recording || voice.processing) {
                         com.vladimir.messenger.ui.components.VoiceRecordBar(voice)
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {

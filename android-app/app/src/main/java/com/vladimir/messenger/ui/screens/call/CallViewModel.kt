@@ -51,6 +51,8 @@ class CallViewModel @Inject constructor(
     fun sendVideoFrame(packed: ByteArray) = callManager.sendVideoFrame(packed)
     fun setScreenSharing(on: Boolean) = callManager.setScreenSharing(on)
     fun setCaptions(on: Boolean) = callManager.setCaptions(on)
+    fun setVoiceEffect(effect: com.vladimir.messenger.data.voice.VoiceEffect) =
+        callManager.setVoiceEffect(effect)
 
     /** Строки живого текста звонка. */
     val captionLines = callManager.captionLines

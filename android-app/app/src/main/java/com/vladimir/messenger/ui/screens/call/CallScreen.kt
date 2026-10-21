@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
@@ -201,6 +202,7 @@ fun CallScreen(
         mutableStateOf(com.vladimir.messenger.data.background.VideoBackground.NONE)
     }
     var showBackgrounds by remember { mutableStateOf(false) }
+    var showVoiceEffects by remember { mutableStateOf(false) }
     val mediaLive = state.phase == CallStateMachine.Phase.CONNECTING ||
         state.phase == CallStateMachine.Phase.ACTIVE
     val inCall = state.phase != CallStateMachine.Phase.ENDED &&
@@ -401,6 +403,7 @@ fun CallScreen(
                         }
                     },
                     onCaptions = { viewModel.setCaptions(!state.captionsOn && !state.captionsPreparing) },
+                    onVoiceEffect = { showVoiceEffects = true },
                     onBackgrounds = { showBackgrounds = !showBackgrounds },
                     onScreenShare = {
                         if (state.screenSharing) {
@@ -419,6 +422,13 @@ fun CallScreen(
 
                 Spacer(modifier = Modifier.height(72.dp))
             }
+        }
+        if (showVoiceEffects && inCall) {
+            com.vladimir.messenger.ui.components.VoiceEffectPickerDialog(
+                selected = state.voiceEffect,
+                onSelected = viewModel::setVoiceEffect,
+                onDismiss = { showVoiceEffects = false },
+            )
         }
         if (showLocalCamera || showCameraOffPip || state.screenSharing) {
             Box(
@@ -476,6 +486,7 @@ private fun CallButtons(
     onScreenShare: () -> Unit,
     onCaptions: () -> Unit,
     onBackgrounds: () -> Unit,
+    onVoiceEffect: () -> Unit,
 ) {
     val gap = if (state.video) 16.dp else 32.dp
     Row(
@@ -549,6 +560,15 @@ private fun CallButtons(
                             label = stringResource(R.string.call_background),
                             active = false,
                             onClick = onBackgrounds,
+                        )
+                        LabeledCallChip(
+                            icon = Icons.Default.GraphicEq,
+                            label = stringResource(
+                                R.string.call_voice_effect,
+                                stringResource(state.voiceEffect.labelRes),
+                            ),
+                            active = state.voiceEffect != com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL,
+                            onClick = onVoiceEffect,
                         )
                     }
                 }

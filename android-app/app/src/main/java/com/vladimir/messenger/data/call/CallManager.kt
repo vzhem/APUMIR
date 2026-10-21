@@ -16,6 +16,8 @@ import com.vladimir.messenger.R
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.mirror.MirrorHub
 import com.vladimir.messenger.data.repository.ContactRepository
+import com.vladimir.messenger.data.voice.VoiceEffect
+import com.vladimir.messenger.data.voice.VoiceEffectPreferences
 import com.vladimir.messenger.service.CallService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.security.SecureRandom
@@ -85,10 +87,18 @@ class CallManager @Inject constructor(
         val captionsPreparing: Boolean = false,
         /** Живой текст не удалось включить (модель не загрузилась). */
         val captionsFailed: Boolean = false,
+        /** Эффект изменения голоса: собеседник слышит обработанный микрофон. */
+        val voiceEffect: VoiceEffect = VoiceEffectPreferences.current,
     )
 
     private val _uiState = kotlinx.coroutines.flow.MutableStateFlow(CallUiState())
     val uiState: kotlinx.coroutines.flow.StateFlow<CallUiState> = _uiState
+
+    init {
+        _uiState.value = _uiState.value.copy(
+            voiceEffect = VoiceEffectPreferences.load(appContext),
+        )
+    }
 
     private val _remoteVideo = kotlinx.coroutines.flow.MutableStateFlow<ByteArray?>(null)
     val remoteVideo: kotlinx.coroutines.flow.StateFlow<ByteArray?> = _remoteVideo
@@ -826,6 +836,13 @@ class CallManager @Inject constructor(
         return muted
     }
 
+    /** Сменить эффект голоса (и до, и во время звонка); выбор запоминается. */
+    fun setVoiceEffect(effect: VoiceEffect) {
+        VoiceEffectPreferences.save(appContext, effect)
+        _uiState.value = _uiState.value.copy(voiceEffect = effect)
+        audioEngine?.setVoiceEffect(effect)
+    }
+
     fun toggleSpeaker(): Boolean {
         val on = !_uiState.value.speaker
         _uiState.value = _uiState.value.copy(speaker = on)
@@ -1140,6 +1157,7 @@ class CallManager @Inject constructor(
         audioViaLan = audioChannel.isOpen()
         engine.outgoingCodec = if (audioViaLan) CallWire.CODEC_PCM_16K else preferredCodec()
         engine.configureJitter(viaLan = audioViaLan)
+        engine.setVoiceEffect(_uiState.value.voiceEffect)
         try {
             engine.start(sk, rk)
         } catch (e: Throwable) {

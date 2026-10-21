@@ -14,6 +14,9 @@ import android.media.audiofx.AutomaticGainControl
 import android.media.audiofx.NoiseSuppressor
 import android.os.Process
 import android.util.Log
+import com.vladimir.messenger.data.voice.VoiceEffect
+import com.vladimir.messenger.data.voice.VoiceEffectPreferences
+import com.vladimir.messenger.data.voice.VoiceEffectProcessor
 
 /**
  * Аудио-движок звонка (CALLS_BOOTSTRAP.md, 8.5).
@@ -53,6 +56,24 @@ class CallAudioEngine(context: Context) {
 
     /** Кодек исходящих кадров; менеджер переключает по пути (LAN = PCM, мост = ADPCM). */
     @Volatile var outgoingCodec: Int = CallWire.CODEC_PCM_16K
+
+    /** Выбранный эффект изменения голоса для исходящего звука. */
+    @Volatile
+    var voiceEffect: VoiceEffect = VoiceEffect.ORIGINAL
+        private set
+
+    @Volatile
+    private var voiceProcessor: VoiceEffectProcessor? = null
+
+    /** Сменить эффект прямо во время звонка: следующий же кадр пойдёт новым голосом. */
+    fun setVoiceEffect(effect: VoiceEffect) {
+        voiceEffect = effect
+        voiceProcessor = if (effect == VoiceEffect.ORIGINAL) {
+            null
+        } else {
+            VoiceEffectProcessor(effect, SAMPLE_RATE, live = true)
+        }
+    }
 
     private val adpcmEncoder = AdpcmCodec()
     private val adpcmDecoder = AdpcmCodec()
@@ -102,6 +123,8 @@ class CallAudioEngine(context: Context) {
         framesIn = 0L
         framesOut = 0L
         adpcmEncoder.reset()
+        // Состояние DSP начинаем с чистого листа на каждый звонок.
+        setVoiceEffect(voiceEffect)
 
         audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
         takeAudioFocus()
@@ -234,8 +257,14 @@ class CallAudioEngine(context: Context) {
                 val seq = seqOut++
                 val ptsMs = seq * FRAME_MS
                 val crypto = sendCrypto ?: break
-                val plain = if (muted) ByteArray(FRAME_BYTES) else buf.copyOf()
-                onLocalPcm?.invoke(plain.copyOf())
+                val rawPlain = if (muted) ByteArray(FRAME_BYTES) else buf.copyOf()
+                // Живой текст звонка распознаёт настоящий голос, а не эффект.
+                onLocalPcm?.invoke(rawPlain.copyOf())
+                val plain = if (muted) {
+                    rawPlain
+                } else {
+                    voiceProcessor?.processPcmLe(rawPlain) ?: rawPlain
+                }
                 val codec = outgoingCodec
                 val cipher = try {
                     val payload = if (codec == CallWire.CODEC_ADPCM_16K) adpcmEncoder.encodeFrame(plain) else plain
@@ -354,6 +383,7 @@ class CallAudioEngine(context: Context) {
         onOutgoingCipher = null
         onLocalPcm = null
         onRemotePcm = null
+        voiceProcessor = null
         runCatching { captureThread?.join(300) }
         runCatching { record?.stop() }
         runCatching { record?.release() }

@@ -1454,7 +1454,7 @@ fun GroupChatScreen(
                             }
                         }
                     }
-                    if (voice.recording) {
+                    if (voice.recording || voice.processing) {
                         VoiceRecordBar(voice)
                     }
                     ApuBubbleField(

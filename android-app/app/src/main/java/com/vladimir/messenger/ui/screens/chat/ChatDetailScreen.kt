@@ -1500,7 +1500,7 @@ private fun MessageInputBar(
             // золотая заливка и белый текст (как в темах) - видно сразу.
             val canSend = inputState.text.isNotBlank() && !isSending && !isSelfChat
             val voice = com.vladimir.messenger.ui.components.rememberVoiceRecorder(onVoiceReady)
-            if (voice.recording) {
+            if (voice.recording || voice.processing) {
                 com.vladimir.messenger.ui.components.VoiceRecordBar(voice)
             }
             if (scheduled.isNotEmpty()) {
