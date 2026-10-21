@@ -95,6 +95,3 @@ class ChatFoldersViewModel @Inject constructor(
         ChatFolderStore.save(appContext, mutable)
     }
 }
-
-@Suppress("unused")
-private val unusedFlowType: Flow<Unit>? = null
