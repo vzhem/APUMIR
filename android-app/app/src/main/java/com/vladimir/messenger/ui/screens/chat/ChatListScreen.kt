@@ -62,6 +62,7 @@ import com.vladimir.messenger.ui.components.ApuTabActions
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.CoreWarmBar
 import com.vladimir.messenger.ui.components.ApuVipBadge
+import com.vladimir.messenger.ui.components.apuVipNameStyle
 import com.vladimir.messenger.ui.components.RankMedal
 import com.vladimir.messenger.data.group.GroupRole
 import java.text.SimpleDateFormat
@@ -274,7 +275,13 @@ fun ChatListScreen(
                                         Spacer(Modifier.width(6.dp))
                                         Text(
                                             uiState.rankBadge,
+                                            style = apuVipNameStyle(
+                                                MaterialTheme.typography.titleMedium,
+                                                uiState.rankVip,
+                                            ),
                                             fontWeight = FontWeight.Bold,
+                                            color = if (uiState.rankVip) Color(0xFF8A5F00)
+                                            else MaterialTheme.colorScheme.onSurface,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                         )

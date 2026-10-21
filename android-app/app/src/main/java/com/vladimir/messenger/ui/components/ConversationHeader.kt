@@ -61,8 +61,8 @@ internal fun ConversationHeader(
                 Column(Modifier.weight(1f)) {
                     // No ellipsis or line limit: long names wrap, including at large system font sizes.
                     Text(name, modifier = Modifier.fillMaxWidth().testTag("conversation-header-name"),
-                        style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
-                        color = ApuBubbleTextColor, softWrap = true)
+                        style = apuVipNameStyle(MaterialTheme.typography.titleMedium, vip), fontWeight = FontWeight.SemiBold,
+                        color = if (vip) Color(0xFF8A5F00) else ApuBubbleTextColor, softWrap = true)
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(status, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelSmall,
                             color = if (active) ApuBubbleAccentColor else ApuBubbleMutedColor)

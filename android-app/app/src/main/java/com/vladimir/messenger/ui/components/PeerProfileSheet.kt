@@ -152,9 +152,9 @@ fun PeerProfileSheet(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         name,
-                        style = MaterialTheme.typography.titleMedium,
+                        style = apuVipNameStyle(MaterialTheme.typography.titleMedium, vip),
                         fontWeight = FontWeight.Bold,
-                        color = ApuBubbleTextColor,
+                        color = if (vip) Color(0xFF8A5F00) else ApuBubbleTextColor,
                         textAlign = TextAlign.Center,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
