@@ -1783,8 +1783,8 @@ class ChatDetailViewModel @Inject constructor(
         text: String,
         sourceLabel: String,
         target: com.vladimir.messenger.ui.components.ForwardTarget,
-        onResult: (Boolean) -> Unit,
         sourceMessageId: String = "",
+        onResult: (Boolean) -> Unit,
     ) {
         viewModelScope.launch {
             val peer = runCatching { chatRepository.forwardChatById(chatId) }.getOrNull()
