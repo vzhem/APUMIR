@@ -2227,7 +2227,6 @@ private fun ThemeModeChoices(selected: ThemeMode, onSelect: (ThemeMode) -> Unit)
     }
 }
 
-@Composable
 /** Разделы настроек: корень показывает список, пункт - свой подэкран. */
 private enum class SettingsSection(val titleRes: Int) {
     Chats(R.string.settings_nav_chats),
@@ -2241,6 +2240,7 @@ private enum class SettingsSection(val titleRes: Int) {
     Help(R.string.settings_nav_help),
 }
 
+@Composable
 private fun SettingsSectionTitle(title: String) = ApuSettingsSectionTitle(title)
 
 @Composable
