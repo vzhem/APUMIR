@@ -2009,7 +2009,7 @@ The file is not on this phone</string>
     <string name="settings_reset_section_hint">Reset “%1$s”; conversations and account data will not change.</string>
     <string name="settings_reset_dialog_title">Reset settings to defaults?</string>
     <string name="settings_reset_dialog_body">Choose which local settings to restore. The affected parameters are listed below.</string>
-    <string name="settings_reset_section_body">Only this section's parameters will be restored.</string>
+    <string name="settings_reset_section_body">Only this section\'s parameters will be restored.</string>
     <string name="settings_reset_confirm">Reset to defaults</string>
     <string name="settings_reset_protected_note">Not deleted: messages, contacts, profile, files, device keys, signed receipts, referral data, group membership, backups and APU cards.</string>
     <string name="settings_reset_category_chats">Chats and list</string>
@@ -2025,7 +2025,7 @@ The file is not on this phone</string>
     <string name="settings_reset_details_security">Who may send group and channel invitations: the default is everyone.</string>
     <string name="settings_reset_details_network">The proxy tunnel.</string>
     <string name="settings_reset_details_hearts">Show the falling heart: off by default. Score, ranks and referral data are not changed.</string>
-    <string name="settings_reset_details_files">Swarm mode, helping other phones, whether this phone stores other people's data and the default forwarding quota.</string>
+    <string name="settings_reset_details_files">Swarm mode, helping other phones, whether this phone stores other people\'s data and the default forwarding quota.</string>
     <string name="settings_reset_colors">Reset colours and filter to default</string>
     <string name="settings_reset_colors_hint">Normal theme colour, normal name colour and reading filter off.</string>
 </resources>
