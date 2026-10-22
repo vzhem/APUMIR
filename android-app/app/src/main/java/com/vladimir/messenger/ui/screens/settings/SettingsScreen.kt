@@ -111,6 +111,8 @@ import com.vladimir.messenger.data.swarm.StorageSettings
 import com.vladimir.messenger.data.swarm.SwarmMode
 import com.vladimir.messenger.data.swarm.SwarmPolicy
 import com.vladimir.messenger.data.swarm.SwarmSettings
+import com.vladimir.messenger.data.textcolor.TextColorPalette
+import com.vladimir.messenger.data.textcolor.TextColorSettingsStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -1220,6 +1222,9 @@ private fun SettingsTabContent(
                         )
                     }
                 }
+            }
+            item {
+                MessageTextColorSettingsCard(onNameColorChanged = viewModel::publishMyNameColour)
             }
 
             // ----------------------------------------------------------------

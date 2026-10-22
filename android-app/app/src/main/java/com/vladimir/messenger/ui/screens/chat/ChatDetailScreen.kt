@@ -115,6 +115,11 @@ fun ChatDetailScreen(
     val scheduledAll by com.vladimir.messenger.data.schedule.ScheduledSendStore.items.collectAsStateWithLifecycle()
     val storeContext = androidx.compose.ui.platform.LocalContext.current
     remember(Unit) { com.vladimir.messenger.data.schedule.ScheduledSendStore.load(storeContext) }
+    val textColorRevision by com.vladimir.messenger.data.textcolor.TextColorSettingsStore.revision
+        .collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) {
+        com.vladimir.messenger.data.textcolor.TextColorSettingsStore.initialize(storeContext)
+    }
     // Раунд 189: результат «Вступить/Подписаться» - всплывающей подсказкой.
     val inviteStatus by viewModel.inviteStatus.collectAsStateWithLifecycle()
     val toastContext = LocalContext.current
@@ -581,7 +586,13 @@ fun ChatDetailScreen(
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
-                    if (uiState.pinned.isNotEmpty()) {
+                    val visiblePinned = remember(uiState.pinned, textColorRevision) {
+                        uiState.pinned.filter {
+                            com.vladimir.messenger.data.textcolor.TextColorSettingsStore
+                                .allowsMessage(storeContext, it.textColor)
+                        }
+                    }
+                    if (visiblePinned.isNotEmpty()) {
                         val feedScope = androidx.compose.runtime.rememberCoroutineScope()
                         ApuBubbleCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
                             Column(modifier = Modifier.padding(8.dp)) {
@@ -593,11 +604,11 @@ fun ChatDetailScreen(
                                     )
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        stringResource(R.string.pinned_count, uiState.pinned.size, com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE),
+                                        stringResource(R.string.pinned_count, visiblePinned.size, com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE),
                                         fontWeight = FontWeight.Medium,
                                     )
                                 }
-                                uiState.pinned.forEach { m ->
+                                visiblePinned.forEach { m ->
                                     val pinnedIndex = chatRows.indexOfFirst { it.message?.id == m.id }
                                     val rowModifier = if (pinnedIndex >= 0) {
                                         Modifier.fillMaxWidth().clickable {
@@ -632,10 +643,14 @@ fun ChatDetailScreen(
                         }
                     }
                     // Строка поиска: фильтрует ленту по тексту сообщений.
-                    val shownRows = remember(chatRows, searchQuery) {
+                    val shownRows = remember(chatRows, searchQuery, textColorRevision) {
                         // Истории не лежат в переписке: они открываются из профиля собеседника.
                         val visible = chatRows.filterNot { row ->
                             com.vladimir.messenger.data.story.StoryStore.isStoryPacket(row.message?.content)
+                        }.filter { row ->
+                            row.message == null ||
+                                com.vladimir.messenger.data.textcolor.TextColorSettingsStore
+                                    .allowsMessage(storeContext, row.message.textColor)
                         }
                         if (searchQuery.isBlank()) visible
                         else visible.filter { row ->

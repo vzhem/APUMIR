@@ -42,6 +42,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.vladimir.messenger.data.group.GroupInviteLinks
 import com.vladimir.messenger.data.link.ShortLinks
+import com.vladimir.messenger.data.textcolor.TextColorPalette
 import com.vladimir.messenger.domain.model.Message
 import com.vladimir.messenger.domain.model.MessageStatus
 import com.vladimir.messenger.ui.theme.LocalMessengerColors
@@ -83,7 +84,8 @@ fun MessageBubble(
     val isOwn = message.isFromMe
     val context = LocalContext.current
     val messenger = LocalMessengerColors.current
-    val textColor = if (isOwn) messenger.messageBubbleOwnText else messenger.messageBubbleOtherText
+    val defaultTextColor = if (isOwn) messenger.messageBubbleOwnText else messenger.messageBubbleOtherText
+    val textColor = TextColorPalette.colorOr(message.textColor, defaultTextColor)
 
     Row(
         modifier = modifier

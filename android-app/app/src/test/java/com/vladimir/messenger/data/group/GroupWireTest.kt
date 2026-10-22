@@ -63,6 +63,39 @@ class GroupWireTest {
         assertEquals("", msg.senderName)
     }
 
+    @Test
+    fun colouredMessageStillUsesLegacyFieldCountAndRoundTrips() {
+        val envelope = GroupWire.buildMessage(
+            "grp1",
+            "topic1",
+            "цветной текст",
+            messageId = "msg-colour",
+            senderName = "Владимир",
+            textColor = "blue",
+            senderNameColor = "pink",
+        )
+        // Existing clients accept this shape (id + name); colours are inside
+        // the already existing text cell instead of becoming new columns.
+        assertEquals(7, envelope.split('|').size)
+        val msg = GroupWire.parse(envelope) as GroupWire.Packet.Message
+        val styled = com.vladimir.messenger.data.textcolor.TextColorWire.decode(msg.text)
+            ?: error("colour envelope missing")
+        assertEquals("цветной текст", styled.text)
+        assertEquals("blue", styled.textColor)
+        assertEquals("pink", styled.nameColor)
+    }
+
+    /** Nickname colour is optional, so old six-field nickname packets remain valid. */
+    @Test
+    fun nicknameColourIsOptional() {
+        val old = GroupWire.parse(GroupWire.buildNick("node", "Name", 5L, 0))
+            as GroupWire.Packet.Nick
+        assertEquals("", old.nameColor)
+        val current = GroupWire.parse(GroupWire.buildNick("node", "Name", 5L, 0, "green"))
+            as GroupWire.Packet.Nick
+        assertEquals("green", current.nameColor)
+    }
+
     /** Канал отличается от группы одним полем в карточке. */
     @Test
     fun channelInfoRoundTrip() {

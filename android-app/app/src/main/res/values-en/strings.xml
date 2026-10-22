@@ -1937,4 +1937,28 @@ The file is not on this phone</string>
     <string name="devices_failed">Pairing failed</string>
     <string name="devices_close">Close</string>
     <string name="devices_cancel">Cancel</string>
+
+    <!-- Message text colours -->
+    <string name="text_color_section_title">Message text colour</string>
+    <string name="text_color_section_hint">Separate choices for personal chats, groups, channels and topics. Administrators use the same settings.</string>
+    <string name="text_color_personal">Personal chats</string>
+    <string name="text_color_group">Groups</string>
+    <string name="text_color_channel">Channels</string>
+    <string name="text_color_topic">Topics</string>
+    <string name="text_color_name_title">My name colour</string>
+    <string name="text_color_selected">Selected: %1$s</string>
+    <string name="text_color_filter_title">Read only the selected colour</string>
+    <string name="text_color_filter_hint">Messages in other colours will be hidden. Current: %1$s</string>
+    <string name="text_color_filter_choose">Reading colour</string>
+    <string name="text_color_dialog_hint">The default returns to the normal theme colour.</string>
+    <string name="text_color_default">Theme default</string>
+    <string name="text_color_red">Red</string>
+    <string name="text_color_orange">Orange</string>
+    <string name="text_color_green">Green</string>
+    <string name="text_color_teal">Teal</string>
+    <string name="text_color_blue">Blue</string>
+    <string name="text_color_indigo">Indigo</string>
+    <string name="text_color_purple">Purple</string>
+    <string name="text_color_pink">Pink</string>
+    <string name="text_color_brown">Brown</string>
 </resources>

@@ -71,6 +71,9 @@ data class MirrorRow(
     val replyToId: String = "",
     val replyAuthor: String = "",
     val replyText: String = "",
+    /** Message/name palette ids; old mirror frames omit them. */
+    val textColor: String = "",
+    val senderNameColor: String = "",
     /** Explicit user resend; the active phone refreshes its native relay TTL. */
     val manualRetry: Boolean = false,
 ) {
@@ -87,6 +90,8 @@ data class MirrorRow(
         .put("reply_to", replyToId)
         .put("reply_author", replyAuthor)
         .put("reply_text", replyText)
+        .put("text_color", textColor)
+        .put("sender_name_color", senderNameColor)
         .put("manual_retry", if (manualRetry) 1 else 0)
 
     companion object {
@@ -103,6 +108,8 @@ data class MirrorRow(
             replyToId = o.optString("reply_to"),
             replyAuthor = o.optString("reply_author"),
             replyText = o.optString("reply_text"),
+            textColor = o.optString("text_color"),
+            senderNameColor = o.optString("sender_name_color"),
             manualRetry = o.optInt("manual_retry") == 1,
         )
     }
@@ -155,10 +162,22 @@ object MirrorHub {
         replyToId: String = "",
         replyAuthor: String = "",
         replyText: String = "",
+        textColor: String = "",
+        senderNameColor: String = "",
     ) {
         runCatching {
             channel?.publishSentEcho(
-                id, chatId, content, ts, recipientId, status, replyToId, replyAuthor, replyText,
+                id,
+                chatId,
+                content,
+                ts,
+                recipientId,
+                status,
+                replyToId,
+                replyAuthor,
+                replyText,
+                textColor,
+                senderNameColor,
             )
         }
     }
@@ -923,6 +942,8 @@ class MirrorChannel(
         replyToId: String = "",
         replyAuthor: String = "",
         replyText: String = "",
+        textColor: String = "",
+        senderNameColor: String = "",
     ) {
         if (!engineUp) return
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
@@ -941,6 +962,8 @@ class MirrorChannel(
                     replyToId = replyToId,
                     replyAuthor = replyAuthor,
                     replyText = replyText,
+                    textColor = textColor,
+                    senderNameColor = senderNameColor,
                 ).toJson(),
             )
         }

@@ -186,6 +186,16 @@ object GroupsModule {
         myEmojiStatus = {
             com.vladimir.messenger.data.profile.EmojiStatusStore.mineValue(context.applicationContext)
         },
+        myNameColor = {
+            com.vladimir.messenger.data.textcolor.TextColorSettingsStore.ownNameColor(context.applicationContext)
+        },
+        onPeerNameColor = { nodeId, colorId ->
+            com.vladimir.messenger.data.textcolor.TextColorSettingsStore.rememberPeerNameColor(
+                context.applicationContext,
+                nodeId,
+                colorId,
+            )
+        },
         onPeerEmojiStatus = { nodeId, emoji, updatedAtMs ->
             com.vladimir.messenger.data.profile.EmojiStatusStore.applyPeer(
                 context.applicationContext,
@@ -290,6 +300,7 @@ object GroupsModule {
             val qualified = ReferralRankStore.qualifiedDirectCount(context.applicationContext)
             FileTransferRankPolicy.entitlement(qualified).canCreateGroup
         },
+        appContext = context.applicationContext,
     )
 
     @Provides

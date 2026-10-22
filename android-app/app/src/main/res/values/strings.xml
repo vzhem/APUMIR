@@ -2074,4 +2074,28 @@
     <string name="devices_failed">Подключение не удалось</string>
     <string name="devices_close">Закрыть</string>
     <string name="devices_cancel">Отменить</string>
+
+    <!-- Цвет текста сообщений -->
+    <string name="text_color_section_title">Цвет текста сообщений</string>
+    <string name="text_color_section_hint">Отдельно для личных чатов, групп, каналов и тем. Администраторы используют те же настройки.</string>
+    <string name="text_color_personal">Личные чаты</string>
+    <string name="text_color_group">Группы</string>
+    <string name="text_color_channel">Каналы</string>
+    <string name="text_color_topic">Темы</string>
+    <string name="text_color_name_title">Цвет моего имени</string>
+    <string name="text_color_selected">Выбрано: %1$s</string>
+    <string name="text_color_filter_title">Читать только выбранный цвет</string>
+    <string name="text_color_filter_hint">Сообщения других цветов будут скрыты. Сейчас: %1$s</string>
+    <string name="text_color_filter_choose">Цвет для чтения</string>
+    <string name="text_color_dialog_hint">Пустой цвет возвращает обычный цвет темы.</string>
+    <string name="text_color_default">По теме</string>
+    <string name="text_color_red">Красный</string>
+    <string name="text_color_orange">Оранжевый</string>
+    <string name="text_color_green">Зелёный</string>
+    <string name="text_color_teal">Бирюзовый</string>
+    <string name="text_color_blue">Синий</string>
+    <string name="text_color_indigo">Индиго</string>
+    <string name="text_color_purple">Фиолетовый</string>
+    <string name="text_color_pink">Розовый</string>
+    <string name="text_color_brown">Коричневый</string>
 </resources>

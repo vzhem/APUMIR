@@ -66,6 +66,7 @@ class SettingsViewModel @Inject constructor(
     private val addressBookSwarm: com.vladimir.messenger.data.backup.AddressBookSwarmBackup,
     private val botApi: com.vladimir.messenger.service.BotApi,
     private val identityBackup: com.vladimir.messenger.data.security.IdentityBackup,
+    private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -80,6 +81,13 @@ class SettingsViewModel @Inject constructor(
 
     fun setNotificationMuteUntil(scope: NotificationMuteScope, untilMs: Long) {
         notificationMuteStore.setMutedUntil(scope, untilMs)
+    }
+
+    /** Immediately announce a changed profile-name colour to contacts and group peers. */
+    fun publishMyNameColour() {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { groupRepository.publishMyNickname(force = true) }
+        }
     }
 
     /**

@@ -56,7 +56,7 @@ import com.vladimir.messenger.data.local.dao.GroupPollDao
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 36
+const val APP_DATABASE_VERSION = 37
 
 @Database(
     entities = [
@@ -121,6 +121,14 @@ abstract class AppDatabase : RoomDatabase() {
         val MIGRATION_35_36 = object : Migration(35, 36) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `groups` ADD COLUMN `sosText` TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /** Message body/name palette ids; old messages keep the normal theme colour. */
+        val MIGRATION_36_37 = object : Migration(36, 37) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `messages` ADD COLUMN `textColor` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `messages` ADD COLUMN `senderNameColor` TEXT NOT NULL DEFAULT ''")
             }
         }
 

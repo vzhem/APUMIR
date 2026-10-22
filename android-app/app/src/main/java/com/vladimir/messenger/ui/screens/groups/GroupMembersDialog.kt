@@ -26,6 +26,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalContext
+import com.vladimir.messenger.data.textcolor.TextColorPalette
+import com.vladimir.messenger.data.textcolor.TextColorSettingsStore
 import androidx.compose.ui.unit.dp
 import com.vladimir.messenger.R
 import com.vladimir.messenger.data.group.GroupRole
@@ -48,6 +51,8 @@ internal fun GroupMembersDialog(
 ) {
     var query by remember { mutableStateOf("") }
     val avatars by AvatarStore.avatars.collectAsState()
+    val colorContext = LocalContext.current
+    val colorRevision by TextColorSettingsStore.revision.collectAsState()
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.group_members_title)) },
@@ -95,7 +100,16 @@ internal fun GroupMembersDialog(
                                 )
                                 Spacer(Modifier.width(10.dp))
                                 Column {
-                                    Text(member.displayName.ifBlank { member.nodeId.take(8) })
+                                    val memberNameColor = remember(member.nodeId, colorRevision) {
+                                        TextColorPalette.colorOr(
+                                            TextColorSettingsStore.peerNameColor(colorContext, member.nodeId),
+                                            MaterialTheme.colorScheme.onSurface,
+                                        )
+                                    }
+                                    Text(
+                                        member.displayName.ifBlank { member.nodeId.take(8) },
+                                        color = memberNameColor,
+                                    )
                                     if (member.isMe) Text(stringResource(R.string.call_captions_you))
                                     when (member.role) {
                                         GroupRole.OWNER -> Text(stringResource(R.string.group_role_owner))

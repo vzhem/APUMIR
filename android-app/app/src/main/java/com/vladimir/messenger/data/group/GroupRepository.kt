@@ -30,6 +30,7 @@ import com.vladimir.messenger.data.swarm.SwarmBuffer
 import com.vladimir.messenger.data.swarm.SwarmPolicy
 import com.vladimir.messenger.data.link.ShortLinks
 import com.vladimir.messenger.data.profile.Birthday
+import com.vladimir.messenger.data.textcolor.TextColorSettingsStore
 import com.vladimir.messenger.util.ChatPreviews
 import com.vladimir.messenger.util.GroupInviteRef
 import com.vladimir.messenger.util.InlineImage
@@ -95,6 +96,10 @@ class GroupRepository(
         { _, _, _, _ -> },
     /** Мой эмодзи-статус (пустая строка — статуса нет). */
     private val myEmojiStatus: () -> String = { "" },
+    /** Мой цвет имени; рассылается вместе с @именем и сообщениями. */
+    private val myNameColor: () -> String = { "" },
+    /** Присланный цвет имени участника/контакта. */
+    private val onPeerNameColor: (nodeId: String, colorId: String) -> Unit = { _, _ -> },
     /** Пришёл чужой эмодзи-статус (пустой значок — отзыв). */
     private val onPeerEmojiStatus: (nodeId: String, emoji: String, updatedAtMs: Long) -> Unit =
         { _, _, _ -> },
@@ -212,6 +217,8 @@ class GroupRepository(
      */
     private val pollDao: com.vladimir.messenger.data.local.dao.GroupPollDao? = null,
     private val isDeferredCancelled: (String, String) -> Boolean = { _, _ -> false },
+    /** Android context for local text/name colour preferences; null in JVM tests. */
+    private val appContext: android.content.Context? = null,
 ) {
 
     /** Раунд 137: что уже ретранслировали (и когда) - без повторного шторма. */
@@ -433,14 +440,22 @@ class GroupRepository(
     suspend fun publishMyNickname(force: Boolean = false) {
         if (!force && !dueNow(lastNicknamePublishMs, GOSSIP_MIN_INTERVAL_MS)) return
         val me = myId() ?: return
-        val name = myUsername() ?: return
+        val nameColor = myNameColor()
+        val registeredName = myUsername()
+        // Без @имени цвет всё равно должен попасть в адресные книги. Для этой
+        // цели объявляем обычное отображаемое имя только когда цвет выбран;
+        // пустой профильный цвет сохраняет прежний путь.
+        val name = registeredName ?: myDisplayName().trim()
+            .takeIf { nameColor.isNotBlank() && it.isNotEmpty() && !it.startsWith("Contact ") }
+            ?: return
         val ids = contactIds()
         if (ids.isEmpty()) return
         val envelope = GroupWire.buildNick(
             ownerId = me,
             name = name,
-            registeredAtMs = myRegisteredAt(),
+            registeredAtMs = if (registeredName != null) myRegisteredAt() else 0L,
             hops = 0,
+            nameColor = nameColor,
         )
         runCatching { delivery.deliver("nicknames", envelope, ids) }
             .onFailure { Log.w(TAG, "nick publish failed: ${it.message}") }
@@ -601,6 +616,7 @@ class GroupRepository(
                 name = name,
                 registeredAtMs = myRegisteredAt(),
                 hops = 0,
+                nameColor = myNameColor(),
             )
             runCatching { delivery.deliver("nicknames", envelope, listOf(peerId)) }
                 .onFailure { Log.w(TAG, "whois nick reply failed: ${it.message}") }
@@ -724,6 +740,10 @@ class GroupRepository(
         // так и висел набором букв и цифр, даже когда имя уже было известно.
         runCatching { onNicknameLearned(packet.ownerId, packet.name) }
             .onFailure { Log.w(TAG, "nick apply failed: ${it.message}") }
+        if (packet.nameColor.isNotBlank()) {
+            runCatching { onPeerNameColor(packet.ownerId, packet.nameColor) }
+                .onFailure { Log.w(TAG, "nick colour apply failed: ${it.message}") }
+        }
         nicknameDao.upsert(
             NicknameEntity(
                 ownerId = packet.ownerId,
@@ -753,6 +773,7 @@ class GroupRepository(
                     name = packet.name,
                     registeredAtMs = packet.registeredAtMs,
                     hops = packet.hops + 1,
+                    nameColor = packet.nameColor,
                 )
                 runCatching { delivery.deliver("nicknames", envelope, next) }
             }
@@ -1055,6 +1076,10 @@ class GroupRepository(
          * сигнал должен дойти как можно быстрее и до каждого.
          */
         sos: Boolean = false,
+        /** Optional explicit scope colour; null resolves the local group/topic setting. */
+        textColorOverride: String? = null,
+        /** Optional explicit profile/name colour; null resolves the local profile setting. */
+        senderNameColorOverride: String? = null,
     ): Result<String> {
         val attached = photos.filter { it.isNotBlank() }.take(InlineImage.MAX_PHOTOS)
         // Визитка файла (этап 9) - служебная строка: из слов её вынимаем и
@@ -1105,6 +1130,17 @@ class GroupRepository(
 
         val topic = resolveTopic(group, topicId)
             ?: return Result.failure(IllegalStateException("Тема не найдена"))
+        val effectiveTextColor = TextColorSettingsStore.normalize(textColorOverride)
+            .takeIf { it.isNotBlank() }
+            ?: appContext?.let {
+                TextColorSettingsStore.textColor(
+                    context = it,
+                    scope = TextColorSettingsStore.groupScope(groupId, topic.id, group.isChannel),
+                )
+            }.orEmpty()
+        val effectiveNameColor = TextColorSettingsStore.normalize(senderNameColorOverride)
+            .takeIf { it.isNotBlank() }
+            ?: appContext?.let { TextColorSettingsStore.ownNameColor(it) }.orEmpty()
         if (!sos && topic.isClosed && !isAdmin) {
             return Result.failure(SecurityException("Тема закрыта для новых сообщений"))
         }
@@ -1145,6 +1181,8 @@ class GroupRepository(
                 channel = "GROUP",
                 recipientId = "",
                 topicId = topic.id,
+                textColor = effectiveTextColor,
+                senderNameColor = effectiveNameColor,
                 // р250: цитата ответа пишется сразу - своя лента должна
                 // показывать ответ без ожидания второго конверта.
                 replyToId = reply?.messageId,
@@ -1177,6 +1215,8 @@ class GroupRepository(
                 channel = "GROUP",
                 recipientId = "",
                 topicId = topic.id,
+                textColor = effectiveTextColor,
+                senderNameColor = effectiveNameColor,
             )
             messageDao.insertMessage(row)
             partRows.add(row)
@@ -1236,6 +1276,8 @@ class GroupRepository(
                         text = body,
                         messageId = messageId,
                         senderName = member.displayName,
+                        textColor = effectiveTextColor,
+                        senderNameColor = effectiveNameColor,
                     ),
                     fullRecipients,
                 )
@@ -1260,6 +1302,8 @@ class GroupRepository(
                                 text = row.content,
                                 messageId = row.id,
                                 senderName = senderName,
+                                textColor = effectiveTextColor,
+                                senderNameColor = effectiveNameColor,
                             ),
                             fullRecipients,
                         )
@@ -2202,6 +2246,8 @@ class GroupRepository(
                         senderName = authorName,
                         authorId = row.senderId,
                         sentAtMs = piece.timestamp,
+                        textColor = row.textColor,
+                        senderNameColor = row.senderNameColor,
                     ),
                     listOf(senderId),
                 )
@@ -2240,6 +2286,8 @@ class GroupRepository(
                 senderName = authorName,
                 authorId = authorId,
                 sentAtMs = sentAt,
+                textColor = packet.textColor,
+                senderNameColor = packet.senderNameColor,
             ),
             readers,
         )
@@ -2930,6 +2978,8 @@ class GroupRepository(
                 channel = "GROUP",
                 recipientId = "",
                 topicId = topicIdValue,
+                textColor = message.textColor,
+                senderNameColor = message.senderNameColor,
             )
             messageDao.insertMessage(row)
             partRows.add(row)
@@ -2954,6 +3004,8 @@ class GroupRepository(
                                 text = row.content,
                                 messageId = row.id,
                                 senderName = senderName,
+                                textColor = row.textColor,
+                                senderNameColor = row.senderNameColor,
                             ),
                             excludeSelf = true,
                         )
@@ -3170,6 +3222,8 @@ class GroupRepository(
                         // всё равно поверит только ему, а у сида, получившего
                         // пост вживую, в строке стоит время приёма.
                         sentAtMs = if (row.id == post.id && manifest != null) manifest.sentAtMs else row.timestamp,
+                        textColor = row.textColor,
+                        senderNameColor = row.senderNameColor,
                     ),
                     listOf(nodeId),
                 )
@@ -3282,6 +3336,8 @@ class GroupRepository(
                         senderName = authorName,
                         authorId = manifest.authorId,
                         sentAtMs = if (msg.id == manifest.messageId) manifest.sentAtMs else msg.timestamp,
+                        textColor = msg.textColor,
+                        senderNameColor = msg.senderNameColor,
                     ),
                     listOf(senderId),
                 )
@@ -3672,6 +3728,8 @@ class GroupRepository(
                     senderName = authorName,
                     authorId = manifest.authorId,
                     sentAtMs = manifest.sentAtMs,
+                    textColor = head.textColor,
+                    senderNameColor = head.senderNameColor,
                 ),
                 targets,
             )
@@ -3737,6 +3795,8 @@ class GroupRepository(
                             senderName = authorName,
                             authorId = manifest.authorId,
                             sentAtMs = if (row.id == post.id) manifest.sentAtMs else row.timestamp,
+                            textColor = row.textColor,
+                            senderNameColor = row.senderNameColor,
                         ),
                         listOf(senderId),
                     )
@@ -3954,6 +4014,16 @@ class GroupRepository(
         val me = localNodeId ?: myId().orEmpty()
         when (packet) {
             is GroupWire.Packet.Message -> {
+                // New colour metadata is wrapped in the existing text field so
+                // old clients still accept and deliver the 5/7/9-field packet.
+                val styled = com.vladimir.messenger.data.textcolor.TextColorWire.decode(packet.text)
+                val packet = if (styled != null) {
+                    packet.copy(
+                        text = styled.text,
+                        textColor = styled.textColor,
+                        senderNameColor = styled.nameColor,
+                    )
+                } else packet
                 val group = groupDao.getGroupById(packet.groupId) ?: return
                 val member = groupDao.getMember(packet.groupId, me) ?: return
                 if (member.isBanned) return
@@ -4036,6 +4106,8 @@ class GroupRepository(
                         channel = "GROUP",
                         recipientId = if (isMine) "" else me,
                         topicId = packet.topicId,
+                        textColor = packet.textColor,
+                        senderNameColor = packet.senderNameColor,
                     )
                 )
                 if (inserted == -1L) return // fallback and offline reveal can arrive concurrently
@@ -4046,6 +4118,9 @@ class GroupRepository(
                 // р250: цитата ответа могла приехать раньше самого сообщения -
                 // забираем её из буфера (как куски поста ждут манифест).
                 pendingReplies.take { it.packet.messageId == localId }.forEach { applyReply(it.packet) }
+                if (packet.senderNameColor.isNotBlank()) {
+                    onPeerNameColor(authorId, packet.senderNameColor)
+                }
                 rememberSender(packet.groupId, authorId, packet.senderName, now)
                 // Файл, приложенный к сообщению (этап 9): сам файл не пришёл -
                 // только визитка; рой решает, просить ли его у автора сейчас.

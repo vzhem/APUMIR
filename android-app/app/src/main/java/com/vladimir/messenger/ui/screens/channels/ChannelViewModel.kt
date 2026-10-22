@@ -52,6 +52,10 @@ data class ChannelPost(
     val authorName: String,
     val timeMs: Long,
     val comments: Int,
+    /** Palette id used for the post body. */
+    val textColor: String = "",
+    /** Palette id announced for the author's display name. */
+    val senderNameColor: String = "",
     /** Сколько комментариев поста ещё не прочитано (значок у «Комментарии»). */
     val unreadComments: Int = 0,
     /** Сколько разных людей открыли пост. */
@@ -467,6 +471,8 @@ class ChannelViewModel @Inject constructor(
                             ?: appContext.getString(R.string.name_member_fallback, first.senderId.takeLast(4)),
                         timeMs = first.timestamp,
                         comments = (texts.size - 1).coerceAtLeast(0),
+                        textColor = first.textColor,
+                        senderNameColor = first.senderNameColor,
                         // Непрочитанные комментарии: счётчик темы ведёт
                         // GroupRepository (прибавляет на каждом чужом сообщении),
                         // сбрасывает GroupChatViewModel.markRead при чтении.

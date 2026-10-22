@@ -17,6 +17,8 @@ import com.vladimir.messenger.data.mirror.MirrorHub
 import com.vladimir.messenger.data.mirror.MirrorRow
 import com.vladimir.messenger.data.receipt.DeliveryAckWire
 import com.vladimir.messenger.data.reply.DirectReplyWire
+import com.vladimir.messenger.data.textcolor.TextColorSettingsStore
+import com.vladimir.messenger.data.textcolor.TextColorWire
 import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.domain.model.Message
 import com.vladimir.messenger.domain.model.MessageStatus
@@ -160,6 +162,12 @@ class ChatRepository @Inject constructor(
         return try {
             val messageId = fixedMessageId ?: UUID.randomUUID().toString()
             val timestamp = System.currentTimeMillis()
+            val textColor = TextColorSettingsStore.textColor(
+                context,
+                TextColorSettingsStore.directScope(chatId),
+            )
+            val senderNameColor = TextColorSettingsStore.ownNameColor(context)
+            val wireContent = TextColorWire.wrap(content, textColor, senderNameColor)
 
             // р226: это устройство - зеркало и активный партнёр в сети.
             // Шифросессия у узла одна, поэтому отправляет партнёр, а строка
@@ -180,6 +188,8 @@ class ChatRepository @Inject constructor(
                             status = MessageStatus.PENDING.name,
                             channel = MessageChannel.UNKNOWN.name,
                             recipientId = mirrorRecipient,
+                            textColor = textColor,
+                            senderNameColor = senderNameColor,
                         )
                         messageDao.insertMessage(mirrorEntity)
                         OperationalDiagnostics.tracker.persisted(messageId)
@@ -192,6 +202,8 @@ class ChatRepository @Inject constructor(
                                 replyToId = reply?.messageId.orEmpty(),
                                 replyAuthor = reply?.author.orEmpty(),
                                 replyText = reply?.let { DirectReplyWire.preview(it.text) }.orEmpty(),
+                                textColor = textColor,
+                                senderNameColor = senderNameColor,
                             )
                         )
                         if (offered) {
@@ -239,6 +251,8 @@ class ChatRepository @Inject constructor(
                 replyToId = reply?.messageId,
                 replyAuthor = reply?.author.orEmpty(),
                 replyText = reply?.let { DirectReplyWire.preview(it.text) }.orEmpty(),
+                textColor = textColor,
+                senderNameColor = senderNameColor,
             )
             messageDao.insertMessage(entity)
             OperationalDiagnostics.tracker.persisted(messageId)
@@ -249,7 +263,7 @@ class ChatRepository @Inject constructor(
                 Log.i(TAG, "🚀 SENDING via Rust: messageId=$messageId recipient=$actualRecipientId")
                 // В IO: вызов ядра блокирующий (QUIC до 10 с), а сюда приходят
                 // из viewModelScope, то есть с главного потока.
-                sendViaRust(messageId, chatId, actualRecipientId, content)
+                sendViaRust(messageId, chatId, actualRecipientId, wireContent)
             } else {
                 Log.w(TAG, "❌ sendMessage: recipient id is blank for chatId=$chatId")
                 false
@@ -289,6 +303,8 @@ class ChatRepository @Inject constructor(
                     replyToId = reply?.messageId.orEmpty(),
                     replyAuthor = reply?.author.orEmpty(),
                     replyText = reply?.let { DirectReplyWire.preview(it.text) }.orEmpty(),
+                    textColor = textColor,
+                    senderNameColor = senderNameColor,
                 )
             }
 
@@ -351,6 +367,8 @@ class ChatRepository @Inject constructor(
             replyToId = row.replyToId.takeIf { it.isNotBlank() },
             replyAuthor = row.replyAuthor,
             replyText = row.replyText,
+            textColor = row.textColor,
+            senderNameColor = row.senderNameColor,
         ).also { messageDao.insertMessageIgnore(it) }
         if (!entity.isFromMe) {
             return Result.failure(IllegalArgumentException("Нельзя повторить входящее сообщение"))
@@ -405,6 +423,8 @@ class ChatRepository @Inject constructor(
                         replyToId = original.replyToId.orEmpty(),
                         replyAuthor = original.replyAuthor,
                         replyText = original.replyText,
+                        textColor = original.textColor,
+                        senderNameColor = original.senderNameColor,
                         manualRetry = true,
                     )
                 )
@@ -424,7 +444,7 @@ class ChatRepository @Inject constructor(
             original.id,
             original.chatId,
             recipientId,
-            original.content,
+            TextColorWire.wrap(original.content, original.textColor, original.senderNameColor),
         )
         val nextStatus = if (sentDirectly) MessageStatus.SENT else MessageStatus.QUEUED_OFFLINE
         val nextChannel = if (sentDirectly) MessageChannel.LOCAL else MessageChannel.STORE_FORWARD
@@ -447,6 +467,8 @@ class ChatRepository @Inject constructor(
             replyToId = original.replyToId.orEmpty(),
             replyAuthor = original.replyAuthor,
             replyText = original.replyText,
+            textColor = original.textColor,
+            senderNameColor = original.senderNameColor,
         )
         return Result.success(updated.toDomain())
     }
@@ -469,7 +491,7 @@ class ChatRepository @Inject constructor(
                 val peer = chat.contactId
                 if (peer.isBlank()) continue
                 val ok = try {
-                    sendViaRust(msg.id, msg.chatId, peer, msg.content)
+                    sendViaRust(msg.id, msg.chatId, peer, TextColorWire.wrap(msg.content, msg.textColor, msg.senderNameColor))
                 } catch (_: Exception) {
                     false
                 }
@@ -502,7 +524,12 @@ class ChatRepository @Inject constructor(
                 if (chat.contactId != peerId) continue
 
                 Log.i(TAG, "  📤 retry PENDING msg=${msg.id.take(8)} content=${msg.content.take(20)}")
-                val sent = sendViaRust(msg.id, msg.chatId, peerId, msg.content)
+                val sent = sendViaRust(
+                    msg.id,
+                    msg.chatId,
+                    peerId,
+                    TextColorWire.wrap(msg.content, msg.textColor, msg.senderNameColor),
+                )
                 Log.i(TAG, "  📤 retry result: sent=$sent")
 
                 if (sent) {
@@ -536,7 +563,12 @@ class ChatRepository @Inject constructor(
                 for (msg in recentMessages) {
                     try {
                         Log.i(TAG, "  🚀 sync msg=${msg.id.take(8)} content=${msg.content.take(20)}")
-                        val sent = sendViaRust(msg.id, msg.chatId, peerId, msg.content)
+                        val sent = sendViaRust(
+                            msg.id,
+                            msg.chatId,
+                            peerId,
+                            TextColorWire.wrap(msg.content, msg.textColor, msg.senderNameColor),
+                        )
                         Log.i(TAG, "  📤 sync sent=$sent")
                         if (sent) retried++
                     } catch (e: Exception) {
@@ -567,7 +599,12 @@ class ChatRepository @Inject constructor(
             val peerId = chat.contactId
             if (peerId.isBlank()) continue
 
-            val sent = sendViaRust(msg.id, msg.chatId, peerId, msg.content)
+            val sent = sendViaRust(
+                msg.id,
+                msg.chatId,
+                peerId,
+                TextColorWire.wrap(msg.content, msg.textColor, msg.senderNameColor),
+            )
             Log.i(TAG, "retryAllPendingMessages peer=$peerId msg=${msg.id} sent=$sent")
 
             if (sent) {
@@ -604,6 +641,8 @@ class ChatRepository @Inject constructor(
                     mine = e.isFromMe,
                     recipientId = e.recipientId,
                     status = e.status,
+                    textColor = e.textColor,
+                    senderNameColor = e.senderNameColor,
                 )
             }
 
@@ -620,6 +659,8 @@ class ChatRepository @Inject constructor(
                 mine = true,
                 recipientId = e.recipientId,
                 status = e.status,
+                textColor = e.textColor,
+                senderNameColor = e.senderNameColor,
             )
         }
 
@@ -645,6 +686,8 @@ class ChatRepository @Inject constructor(
             timestamp = row.timestamp,
             channel = MessageChannel.UNKNOWN,
             recipientId = row.recipientId,
+            textColorOverride = row.textColor,
+            senderNameColorOverride = row.senderNameColor,
         )
         // Не сохранено (служебный пакет, дубликат, запрещённое приглашение) -
         // пустая пара: вызывающий не покажет уведомление.
@@ -696,6 +739,8 @@ class ChatRepository @Inject constructor(
                 status = mirrorStatus,
                 channel = MessageChannel.LOCAL.name,
                 recipientId = row.recipientId,
+                textColor = row.textColor,
+                senderNameColor = row.senderNameColor,
             )
         )
         chatDao.updateLastMessage(chat.id, com.vladimir.messenger.util.ChatPreviews.human(row.content) ?: row.content, row.timestamp)
@@ -716,6 +761,8 @@ class ChatRepository @Inject constructor(
             id = messageId, chatId = chatId, senderId = "self", content = text, timestamp = now,
             isFromMe = true, status = if (confirmed) MessageStatus.DELIVERED.name else MessageStatus.SENT.name,
             recipientId = chat.contactId,
+            textColor = TextColorSettingsStore.textColor(context, TextColorSettingsStore.directScope(chatId)),
+            senderNameColor = TextColorSettingsStore.ownNameColor(context),
         ))
         chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(text) ?: text, now)
     }
@@ -728,39 +775,48 @@ class ChatRepository @Inject constructor(
         timestamp: Long,
         channel: MessageChannel = MessageChannel.UNKNOWN,
         recipientId: String = "",
+        textColorOverride: String = "",
+        senderNameColorOverride: String = "",
     ): Boolean {
+        val styled = TextColorWire.decode(content)
+        val cleanContent = styled?.text ?: content
+        val receivedTextColor = styled?.textColor?.takeIf { it.isNotBlank() } ?: textColorOverride
+        val receivedNameColor = styled?.nameColor?.takeIf { it.isNotBlank() } ?: senderNameColorOverride
+        if (receivedNameColor.isNotBlank()) {
+            TextColorSettingsStore.rememberPeerNameColor(context, senderId, receivedNameColor)
+        }
         if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId)) return false
         // История: пакет контакта сохраняем в ленту историй, в переписку не пускаем.
-        if (com.vladimir.messenger.data.story.StoryStore.isStoryPacket(content)) {
-            if (content.toByteArray(Charsets.UTF_8).size > 16 * 1024) return false
-            if (storyVideos.receiveReady(senderId, content)) return false
+        if (com.vladimir.messenger.data.story.StoryStore.isStoryPacket(cleanContent)) {
+            if (cleanContent.toByteArray(Charsets.UTF_8).size > 16 * 1024) return false
+            if (storyVideos.receiveReady(senderId, cleanContent)) return false
             val name = chatDao.getChatsByContactId(senderId).firstOrNull()?.contactName.orEmpty()
-            com.vladimir.messenger.data.story.StoryStore.receive(senderId, name, content)
-            storyVideos.readyPacket(senderId, content)?.let { sendStoryPacket(senderId, it) }
+            com.vladimir.messenger.data.story.StoryStore.receive(senderId, name, cleanContent)
+            storyVideos.readyPacket(senderId, cleanContent)?.let { sendStoryPacket(senderId, it) }
             return false
         }
         // р239/р247: страховка на самом сохранении. Служебный пакет приложения
         // (например, «печатает…» или delivery ACK) в переписку не попадает ни
         // при каком пути приёма: даже если транспортный разборщик его не узнал,
         // мусорной строки не будет.
-        if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(content)) {
+        if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(cleanContent)) {
             // Последний общий страж: даже если входящий ACK обошёл разборщик
             // конкретного транспорта, он подтверждает строку, но не сохраняется.
-            DeliveryAckWire.messageId(content)?.let { markOutgoingMessageDelivered(it) }
-            val typing = com.vladimir.messenger.data.typing.TypingWire.parse(content)
+            DeliveryAckWire.messageId(cleanContent)?.let { markOutgoingMessageDelivered(it) }
+            val typing = com.vladimir.messenger.data.typing.TypingWire.parse(cleanContent)
             if (typing == true) {
                 com.vladimir.messenger.data.typing.TypingPeer.peerTyping(senderId)
             } else if (typing == false) {
                 com.vladimir.messenger.data.typing.TypingPeer.peerStopped(senderId)
             }
-            Log.i(TAG, "service packet not saved to chat: " + content.take(16))
+            Log.i(TAG, "service packet not saved to chat: " + cleanContent.take(16))
             return false
         }
         // Настройка «Кто может приглашать в группы и каналы»: запрещённое
         // приглашение выбрасывается ЗДЕСЬ, до записи. Нет строки в базе -
         // нет ни заметки в чате, ни непрочитанных, ни уведомления (оно
         // рождается наблюдателем за базой), ни повода отвлекаться.
-        if (isInviteBlocked(senderId, content)) {
+        if (isInviteBlocked(senderId, cleanContent)) {
             Log.i(TAG, "invite blocked by privacy setting from $senderId - dropped silently")
             return false
         }
@@ -779,11 +835,13 @@ class ChatRepository @Inject constructor(
             id = messageId,
             chatId = chatId,
             senderId = senderId,
-            content = content,
+            content = cleanContent,
             timestamp = timestamp,
             isFromMe = false,
             status = MessageStatus.DELIVERED.name,
             recipientId = recipientId,
+            textColor = receivedTextColor,
+            senderNameColor = receivedNameColor,
         )
         // A due-time fallback may race the local hidden-inbox reveal.
         if (messageDao.insertMessageIgnore(entity) == -1L) return false
@@ -791,11 +849,11 @@ class ChatRepository @Inject constructor(
             messageDao.deleteByIdChatAndSender(messageId, chatId, senderId)
             return false
         }
-        chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(content) ?: content, timestamp)
+        chatDao.updateLastMessage(chatId, com.vladimir.messenger.util.ChatPreviews.human(cleanContent) ?: cleanContent, timestamp)
         // Раунд 150: бейдж непрочитанных на пузыре личного чата.
         // Раунд 156: служебные конверты роя (стикеры/миниатюры) - не
         // сообщения, непрочитанные не считают (владелец).
-        if (!com.vladimir.messenger.util.ChatPreviews.isServiceEnvelope(content)) {
+        if (!com.vladimir.messenger.util.ChatPreviews.isServiceEnvelope(cleanContent)) {
             runCatching { chatDao.incrementUnread(chatId) }
         }
         return true
@@ -896,7 +954,9 @@ class ChatRepository @Inject constructor(
             val chat = runCatching { chatDao.getChatById(msg.chatId) }.getOrNull() ?: continue
             val peer = chat.contactId.ifBlank { msg.recipientId }
             if (peer.isBlank() || !peer.startsWith("pk_")) continue
-            val ok = runCatching { sendViaRust(msg.id, msg.chatId, peer, msg.content) }
+            val ok = runCatching {
+                sendViaRust(msg.id, msg.chatId, peer, TextColorWire.wrap(msg.content, msg.textColor, msg.senderNameColor))
+            }
                 .getOrDefault(false)
             if (ok) {
                 runCatching { messageDao.updateMessageStatus(msg.id, MessageStatus.SENT.name) }
@@ -1351,6 +1411,8 @@ class ChatRepository @Inject constructor(
             replyToId = row.replyToId.orEmpty(),
             replyAuthor = row.replyAuthor,
             replyText = row.replyText,
+            textColor = row.textColor,
+            senderNameColor = row.senderNameColor,
         )
     }
 
@@ -1399,6 +1461,8 @@ class ChatRepository @Inject constructor(
         replyToId = replyToId,
         replyAuthor = replyAuthor,
         replyText = replyText,
+        textColor = textColor,
+        senderNameColor = senderNameColor,
     )
 
     suspend fun getMessageById(messageId: String): Message? {

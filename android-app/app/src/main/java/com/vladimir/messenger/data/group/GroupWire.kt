@@ -1,5 +1,6 @@
 package com.vladimir.messenger.data.group
 
+import com.vladimir.messenger.data.textcolor.TextColorWire
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 
@@ -483,6 +484,10 @@ object GroupWire {
              * опоздавшему как написанный только что.
              */
             val sentAtMs: Long = 0L,
+            /** Palette id for the message body; empty keeps the bubble theme. */
+            val textColor: String = "",
+            /** Palette id for the sender display name. */
+            val senderNameColor: String = "",
         ) : Packet()
 
         /** Правка текста сообщения: новый текст ложится под тот же id. */
@@ -825,6 +830,8 @@ object GroupWire {
             val name: String,
             val registeredAtMs: Long,
             val hops: Int,
+            /** Palette id for the owner's display name; absent in old packets. */
+            val nameColor: String = "",
         ) : Packet()
 
         /**
@@ -1033,8 +1040,15 @@ object GroupWire {
         senderName: String = "",
         authorId: String = "",
         sentAtMs: Long = 0L,
+        textColor: String = "",
+        senderNameColor: String = "",
     ): String {
-        val base = "$PREFIX|$KIND_MESSAGE|$groupId|$topicId|${encode(text)}"
+        // Цвета живут внутри уже существующего поля текста. Поэтому старый
+        // телефон принимает обычный 5/6/7/9-полевой пакет и доставляет его,
+        // а новый клиент распаковывает цвет до записи в Room. Это важнее, чем
+        // добавлять 10-е/11-е поля, которые старые версии просто отбросили бы.
+        val wireText = TextColorWire.wrap(text, textColor, senderNameColor)
+        val base = "$PREFIX|$KIND_MESSAGE|$groupId|$topicId|${encode(wireText)}"
         // Поля добавляются по порядку и только если есть что добавить:
         // конверт из 5 частей понимают даже телефоны с прошлой версией.
         val relayed = authorId.isNotBlank() || sentAtMs > 0L
@@ -1042,10 +1056,11 @@ object GroupWire {
         val withId = "$base|${encode(messageId)}"
         if (senderName.isBlank() && !relayed) return withId
         val withName = "$withId|${encode(senderName)}"
-        // Восьмое и девятое поля (автор и исходное время) - только при
-        // досылке старых постов: конверт из 7 частей по-прежнему понимают
-        // телефоны с прошлой версией, а 9-полевой они молча отбрасывают.
-        return if (!relayed) withName else "$withName|${encode(authorId)}|${sentAtMs.coerceAtLeast(0L)}"
+        return if (!relayed) {
+            withName
+        } else {
+            "$withName|${encode(authorId)}|${sentAtMs.coerceAtLeast(0L)}"
+        }
     }
 
     /** Правка сообщения: тот же id, новый текст. */
@@ -1366,9 +1381,17 @@ object GroupWire {
         "$PREFIX|$KIND_DIRECTORY|$groupId|${encode(title)}|${encode(about)}|$ownerId|" +
             "${encode(slug)}|${if (isChannel) 1 else 0}|${if (needsApproval) 1 else 0}|$hops"
 
-    /** Роевая публикация @имени. */
-    fun buildNick(ownerId: String, name: String, registeredAtMs: Long, hops: Int): String =
-        "$PREFIX|$KIND_NICK|$ownerId|${encode(name)}|$registeredAtMs|$hops"
+    /** Роевая публикация @имени и его цвета. */
+    fun buildNick(
+        ownerId: String,
+        name: String,
+        registeredAtMs: Long,
+        hops: Int,
+        nameColor: String = "",
+    ): String {
+        val base = "$PREFIX|$KIND_NICK|$ownerId|${encode(name)}|$registeredAtMs|$hops"
+        return if (nameColor.isBlank()) base else "$base|${encode(nameColor)}"
+    }
 
     fun buildAvatar(ownerId: String, dataB64: String, updatedAtMs: Long, hops: Int): String =
         "$PREFIX|$KIND_AVAT|$ownerId|$dataB64|$updatedAtMs|$hops"
@@ -1635,14 +1658,26 @@ object GroupWire {
         if (groupId.isBlank()) return null
 
         return when (parts[1]) {
-            KIND_MESSAGE -> if (parts.size in 5..9) {
+            KIND_MESSAGE -> if (parts.size in 5..11) {
                 val body = decode(parts[4]) ?: return null
                 // Конверты старого образца приходили без id и без имени.
                 val senderMessageId = if (parts.size >= 6) decode(parts[5]).orEmpty() else ""
                 val senderName = if (parts.size >= 7) decode(parts[6]).orEmpty() else ""
                 val authorId = if (parts.size >= 8) decode(parts[7]).orEmpty() else ""
                 val sentAtMs = if (parts.size >= 9) parts[8].toLongOrNull() ?: 0L else 0L
-                Packet.Message(groupId, parts[3], body, senderMessageId, senderName, authorId, sentAtMs)
+                val textColor = if (parts.size >= 10) decode(parts[9]).orEmpty() else ""
+                val senderNameColor = if (parts.size >= 11) decode(parts[10]).orEmpty() else ""
+                Packet.Message(
+                    groupId,
+                    parts[3],
+                    body,
+                    senderMessageId,
+                    senderName,
+                    authorId,
+                    sentAtMs,
+                    textColor,
+                    senderNameColor,
+                )
             } else {
                 null
             }
@@ -2327,10 +2362,11 @@ object GroupWire {
                 null
             }
 
-            KIND_NICK -> if (parts.size == 6) {
+            KIND_NICK -> if (parts.size == 6 || parts.size == 7) {
                 val ownerId = parts[2]
                 val name = decode(parts[3])?.trim()?.trimStart('@').orEmpty()
                 val at = parts[4].toLongOrNull() ?: return null
+                val nameColor = if (parts.size == 7) decode(parts[6]).orEmpty() else ""
                 if (ownerId.isBlank() || name.isBlank()) {
                     null
                 } else {
@@ -2339,6 +2375,7 @@ object GroupWire {
                         name = name,
                         registeredAtMs = at,
                         hops = parts[5].toIntOrNull() ?: 0,
+                        nameColor = nameColor,
                     )
                 }
             } else {

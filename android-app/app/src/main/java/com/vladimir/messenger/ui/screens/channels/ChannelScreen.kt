@@ -5,6 +5,8 @@ import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
 import androidx.compose.material3.HorizontalDivider
 import com.vladimir.messenger.data.local.MessagePinPolicy
+import com.vladimir.messenger.data.textcolor.TextColorPalette
+import com.vladimir.messenger.data.textcolor.TextColorSettingsStore
 
 // =============================================================================
 // CHANNELSCREEN.KT - лента канала
@@ -184,6 +186,8 @@ fun ChannelScreen(
         }
     }
     val context = LocalContext.current
+    val textColorRevision by TextColorSettingsStore.revision.collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) { TextColorSettingsStore.initialize(context) }
     // Файл поста (рой, этап 10): «Сохранить в папку» открывает системное окно.
     val savePicker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/octet-stream"),
@@ -553,8 +557,15 @@ fun ChannelScreen(
                     }
                 }
                 // Раунд 173: закреплённые посты канала; тап - лента прыгает
-                // к самому посту.
-                if (uiState.pinnedPostIds.isNotEmpty()) {
+                // к самому посту. Reader colour filtering applies here too:
+                // a hidden post must not leak through the pinned strip.
+                val visiblePinnedPosts = remember(uiState.posts, uiState.pinnedPostIds, textColorRevision) {
+                    uiState.posts.filter {
+                        it.messageId in uiState.pinnedPostIds &&
+                            TextColorSettingsStore.allowsMessage(context, it.textColor)
+                    }.sortedByDescending { it.timeMs }
+                }
+                if (visiblePinnedPosts.isNotEmpty()) {
                     val feedScope = androidx.compose.runtime.rememberCoroutineScope()
                     ApuBubbleCard(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
@@ -569,13 +580,11 @@ fun ChannelScreen(
                                 )
                                 Spacer(Modifier.width(6.dp))
                                 Text(
-                                    stringResource(R.string.pinned_count, uiState.pinnedPostIds.size, com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE),
+                                    stringResource(R.string.pinned_count, visiblePinnedPosts.size, com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE),
                                     fontWeight = FontWeight.Medium,
                                 )
                             }
-                            uiState.posts.filter { it.messageId in uiState.pinnedPostIds }
-                                .sortedByDescending { it.timeMs }
-                                .forEach { pinnedPost ->
+                            visiblePinnedPosts.forEach { pinnedPost ->
                                     val pinnedIndex = uiState.posts.indexOfFirst { it.topicId == pinnedPost.topicId }
                                     Row(
                                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
@@ -617,9 +626,12 @@ fun ChannelScreen(
                             .padding(horizontal = 12.dp, vertical = 6.dp),
                     )
                 }
-                val shownPosts = remember(uiState.posts, searchQuery) {
-                    if (searchQuery.isBlank()) uiState.posts
-                    else uiState.posts.filter { p ->
+                val shownPosts = remember(uiState.posts, searchQuery, textColorRevision) {
+                    val colourVisible = uiState.posts.filter {
+                        TextColorSettingsStore.allowsMessage(context, it.textColor)
+                    }
+                    if (searchQuery.isBlank()) colourVisible
+                    else colourVisible.filter { p ->
                         (p.title + " " + p.text).contains(searchQuery.trim(), ignoreCase = true)
                     }
                 }
@@ -922,6 +934,8 @@ private fun PostCard(
     val bodyText = remember(post.text, fileCard?.info) {
         if (fileCard != null) GroupFileMarker.stripCaption(post.text, fileCard.info) else post.text
     }
+    val postTextColor = TextColorPalette.colorOr(post.textColor, ApuBubbleTextColor)
+    val authorNameColor = TextColorPalette.colorOr(post.senderNameColor, ApuBubbleTextColor)
     // Копирование текста поста: удержание открывает меню действий (с пунктами
     // «Копировать текст», «Удалить и модерация…» и др.).
     var selectPostText by remember { mutableStateOf(false) }
@@ -983,7 +997,7 @@ private fun PostCard(
                         Text(
                             "${post.authorName} - $time",
                             style = MaterialTheme.typography.labelSmall,
-                            color = ApuBubbleMutedColor,
+                            color = authorNameColor,
                         )
                         ApuAntiRatingInlineBadge(
                             antiCount = authorAntiCount,
@@ -1077,7 +1091,7 @@ private fun PostCard(
                 // с листанием и счётчиком «1/3».
                 PostGallery(images = post.images, pending = post.pendingPhotos)
                 if (bodyText.isNotBlank()) {
-                    Text(bodyText, modifier = Modifier.padding(top = 8.dp))
+                    Text(bodyText, color = postTextColor, modifier = Modifier.padding(top = 8.dp))
                 }
             } else {
             val imageUrl = remember(bodyText) { ImageLinkDetector.directImageUrl(bodyText) }
@@ -1093,12 +1107,13 @@ private fun PostCard(
             } else if (bodyText.isNotBlank() || fileCard == null) {
                 Text(
                     bodyText,
+                    color = postTextColor,
                     modifier = Modifier.padding(top = 8.dp),
                 )
                 com.vladimir.messenger.ui.components.firstLinkIn(bodyText)?.let { link ->
                     com.vladimir.messenger.ui.components.ApuLinkCard(
                         url = link,
-                        textColor = com.vladimir.messenger.ui.components.ApuBubbleTextColor,
+                        textColor = postTextColor,
                     )
                 }
             }

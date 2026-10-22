@@ -142,6 +142,7 @@ import com.vladimir.messenger.data.group.GroupSummary
 import com.vladimir.messenger.data.group.TopicSummary
 import com.vladimir.messenger.data.local.MessagePinPolicy
 import com.vladimir.messenger.data.local.entity.MessageEntity
+import com.vladimir.messenger.data.textcolor.TextColorPalette
 import com.vladimir.messenger.ui.components.AnimatedTopicIcon
 import com.vladimir.messenger.ui.theme.LocalMessengerColors
 import com.vladimir.messenger.ui.components.ApuAction
@@ -197,6 +198,12 @@ fun GroupChatScreen(
     viewModel: GroupChatViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val textColorContext = LocalContext.current
+    val textColorRevision by com.vladimir.messenger.data.textcolor.TextColorSettingsStore.revision
+        .collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) {
+        com.vladimir.messenger.data.textcolor.TextColorSettingsStore.initialize(textColorContext)
+    }
     var showWallpaper by remember { mutableStateOf(false) }
     androidx.compose.runtime.LaunchedEffect(uiState.group?.id) {
         if (uiState.group != null) viewModel.refreshConversationWallpaper()
@@ -983,7 +990,13 @@ fun GroupChatScreen(
             } else {
 
             // ── Закреплённые сообщения
-            if (uiState.pinned.isNotEmpty()) {
+            val visiblePinned = remember(uiState.pinned, textColorRevision) {
+                uiState.pinned.filter {
+                    com.vladimir.messenger.data.textcolor.TextColorSettingsStore
+                        .allowsMessage(textColorContext, it.textColor)
+                }
+            }
+            if (visiblePinned.isNotEmpty()) {
                 // Закрепы у каждой темы свои, поэтому показываем и имя темы.
                 val pinnedTopicName = uiState.topics
                     .firstOrNull { it.id == uiState.selectedTopicId }
@@ -999,7 +1012,7 @@ fun GroupChatScreen(
                             Text(
                                 stringResource(R.string.grp_pinned) +
                                     (pinnedTopicName?.let { " · $it" }.orEmpty()) +
-                                    " (" + uiState.pinned.size + "/" +
+                                    " (" + visiblePinned.size + "/" +
                                     com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE + ")",
                                 fontWeight = FontWeight.Medium,
                             )
@@ -1144,9 +1157,13 @@ fun GroupChatScreen(
             // Раунд 144: при входе в тема открывается на первом непрочитанном
             // (или внизу, если всё прочитано), ниже - остальные непрочитанные.
             // Строка поиска над лентой: фильтрует сообщения по тексту.
-            val shownMessages = remember(uiState.messages, searchQuery) {
-                if (searchQuery.isBlank()) uiState.messages
-                else uiState.messages.filter { m ->
+            val shownMessages = remember(uiState.messages, searchQuery, textColorRevision) {
+                val colourVisible = uiState.messages.filter { message ->
+                    com.vladimir.messenger.data.textcolor.TextColorSettingsStore
+                        .allowsMessage(textColorContext, message.textColor)
+                }
+                if (searchQuery.isBlank()) colourVisible
+                else colourVisible.filter { m ->
                     com.vladimir.messenger.util.ForwardMarker.stripHeader(m.content)
                         .contains(searchQuery.trim(), ignoreCase = true)
                 }
@@ -2292,9 +2309,11 @@ private fun MessageBubble(
         // сигнал должен отличаться от обычного разговора с первого взгляда.
         val isSosMessage = com.vladimir.messenger.util.SosMessage.isSos(message.content)
         val messenger = LocalMessengerColors.current
-        val bubbleTextColor = if (isSosMessage) Color.White
-            else if (stickerFloat) MaterialTheme.colorScheme.onBackground
+        val defaultBubbleTextColor = if (stickerFloat) MaterialTheme.colorScheme.onBackground
             else if (message.isFromMe) messenger.messageBubbleOwnText else messenger.messageBubbleOtherText
+        val bubbleTextColor = if (isSosMessage) Color.White
+            else TextColorPalette.colorOr(message.textColor, defaultBubbleTextColor)
+        val senderLabelColor = TextColorPalette.colorOr(message.senderNameColor, bubbleTextColor)
         ApuBubbleCard(
             modifier = Modifier
                 .widthIn(max = 340.dp)
@@ -2332,6 +2351,7 @@ private fun MessageBubble(
                             senderName,
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
+                            color = senderLabelColor,
                         )
                         ApuAntiRatingInlineBadge(
                             antiCount = senderAntiCount,
