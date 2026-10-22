@@ -1,6 +1,7 @@
 package com.vladimir.messenger.ui.components
 
 import android.media.MediaPlayer
+import android.media.PlaybackParams
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -12,6 +13,7 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -48,6 +50,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.vladimir.messenger.data.voice.VoicePlaybackSpeedStore
 import com.vladimir.messenger.data.voice.VoiceTranscriber
 import com.vladimir.messenger.util.VoiceNote
 import kotlinx.coroutines.launch
@@ -66,8 +70,11 @@ fun VoiceMessagePlayer(
     textColor: Color,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     var playing by remember(file.path) { mutableStateOf(false) }
     var progress by remember(file.path) { mutableFloatStateOf(0f) }
+    var speedMenu by remember(file.path) { mutableStateOf(false) }
+    val playbackSpeed by VoicePlaybackSpeedStore.speed.collectAsStateWithLifecycle()
     val player = remember(file.path) {
         runCatching {
             MediaPlayer().apply {
@@ -80,6 +87,10 @@ fun VoiceMessagePlayer(
                 }
             }
         }.getOrNull()
+    }
+    LaunchedEffect(Unit) { VoicePlaybackSpeedStore.initialize(context) }
+    LaunchedEffect(player, playbackSpeed) {
+        player?.let { applyVoicePlaybackSpeed(it, playbackSpeed) }
     }
     DisposableEffect(player) {
         onDispose { runCatching { player?.release() } }
@@ -110,8 +121,11 @@ fun VoiceMessagePlayer(
                     runCatching { p.pause() }
                     playing = false
                 } else {
-                    runCatching { p.start() }
-                    playing = true
+                    runCatching {
+                        applyVoicePlaybackSpeed(p, playbackSpeed)
+                        p.start()
+                        playing = true
+                    }
                 }
             },
         )
@@ -139,11 +153,41 @@ fun VoiceMessagePlayer(
                     )
                 }
             }
-            Text(
-                formatVoiceTime(info.durationSec),
-                style = MaterialTheme.typography.labelSmall,
-                color = textColor.copy(alpha = 0.7f),
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    formatVoiceTime(info.durationSec),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = textColor.copy(alpha = 0.7f),
+                )
+                Spacer(Modifier.weight(1f))
+                Box {
+                    Text(
+                        stringResource(voiceSpeedLabelRes(playbackSpeed)),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = accent,
+                        modifier = Modifier
+                            .clickable { speedMenu = true }
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                    )
+                    DropdownMenu(
+                        expanded = speedMenu,
+                        onDismissRequest = { speedMenu = false },
+                    ) {
+                        VoicePlaybackSpeedStore.OPTIONS.forEach { option ->
+                            DropdownMenuItem(
+                                text = { Text(stringResource(voiceSpeedLabelRes(option))) },
+                                onClick = {
+                                    VoicePlaybackSpeedStore.set(context, option)
+                                    speedMenu = false
+                                },
+                            )
+                        }
+                    }
+                }
+            }
             VoiceTranscript(file = file, textColor = textColor)
         }
     }
@@ -241,6 +285,27 @@ private fun VoiceTranscript(file: File, textColor: Color) {
 
 /** Время голоса «м:сс». */
 fun formatVoiceTime(total: Int): String = "%d:%02d".format(total / 60, total % 60)
+
+private fun applyVoicePlaybackSpeed(player: MediaPlayer, speed: Float) {
+    runCatching {
+        player.setPlaybackParams(
+            PlaybackParams()
+                .setSpeed(VoicePlaybackSpeedStore.normalize(speed))
+                // Keep the speaker's pitch natural while stretching the timing.
+                .setPitch(1f),
+        )
+    }
+}
+
+@androidx.annotation.StringRes
+private fun voiceSpeedLabelRes(speed: Float): Int = when (VoicePlaybackSpeedStore.normalize(speed)) {
+    0.5f -> R.string.voice_speed_half
+    0.75f -> R.string.voice_speed_three_quarters
+    1.25f -> R.string.voice_speed_one_quarter_up
+    1.5f -> R.string.voice_speed_one_half
+    2f -> R.string.voice_speed_double
+    else -> R.string.voice_speed_normal
+}
 
 /**
  * Голосовое в карточке файла (группы и каналы): проигрыватель и меню «⋯»

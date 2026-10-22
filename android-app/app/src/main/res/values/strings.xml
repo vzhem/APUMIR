@@ -1797,6 +1797,13 @@
     <string name="voice_too_long">Сообщение слишком длинное для перевода в текст (до 12 минут).</string>
     <string name="voice_play">Слушать</string>
     <string name="voice_pause">Пауза</string>
+    <string name="voice_speed_normal">1×</string>
+    <string name="voice_speed_half">0,5×</string>
+    <string name="voice_speed_three_quarters">0,75×</string>
+    <string name="voice_speed_one_quarter_up">1,25×</string>
+    <string name="voice_speed_one_half">1,5×</string>
+    <string name="voice_speed_double">2×</string>
+    <string name="voice_speed_title">Скорость воспроизведения</string>
     <string name="voice_effect_original">Обычный голос</string>
     <string name="voice_effect_darth_vader">Дарт Вейдер</string>
     <string name="voice_effect_minion">Миньон</string>
