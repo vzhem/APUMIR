@@ -2023,9 +2023,9 @@ The file is not on this phone</string>
     <string name="settings_reset_details_notifications">Notification pauses for the app, chats, groups, channels and topics.</string>
     <string name="settings_reset_details_appearance">Theme, text size, wallpaper and tint, text and name colours, reading filter, language, voice speed and voice effect.</string>
     <string name="settings_reset_details_security">Who may send group and channel invitations: the default is everyone.</string>
-    <string name="settings_reset_details_network">Swarm mode, helping other phones and the proxy tunnel.</string>
+    <string name="settings_reset_details_network">The proxy tunnel.</string>
     <string name="settings_reset_details_hearts">Show the falling heart: off by default. Score, ranks and referral data are not changed.</string>
-    <string name="settings_reset_details_files">Whether this phone stores other people's data and the default forwarding quota.</string>
+    <string name="settings_reset_details_files">Swarm mode, helping other phones, whether this phone stores other people's data and the default forwarding quota.</string>
     <string name="settings_reset_colors">Reset colours and filter to default</string>
     <string name="settings_reset_colors_hint">Normal theme colour, normal name colour and reading filter off.</string>
 </resources>

@@ -2138,9 +2138,9 @@
     <string name="settings_reset_details_notifications">Паузы уведомлений приложения, чатов, групп, каналов и тем.</string>
     <string name="settings_reset_details_appearance">Тема, размер текста, обои и оттенок, цвета текста и имени, фильтр чтения, язык, скорость голосовых и эффект голоса.</string>
     <string name="settings_reset_details_security">Кто может присылать приглашения в группы и каналы: значение по умолчанию — все.</string>
-    <string name="settings_reset_details_network">Режим роя, помощь другим телефонам и туннель прокси.</string>
+    <string name="settings_reset_details_network">Туннель прокси.</string>
     <string name="settings_reset_details_hearts">Показывать падающее сердечко: выключено по умолчанию. Счёт, ранги и referral-данные не изменяются.</string>
-    <string name="settings_reset_details_files">Режим хранения чужих данных и стандартная квота места под пересылку.</string>
+    <string name="settings_reset_details_files">Режим роя, помощь другим телефонам, режим хранения чужих данных и стандартная квота места под пересылку.</string>
     <string name="settings_reset_colors">Вернуть цвета и фильтр по умолчанию</string>
     <string name="settings_reset_colors_hint">Обычный цвет темы, обычный цвет имени и фильтр чтения выключен.</string>
 </resources>

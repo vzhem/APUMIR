@@ -117,14 +117,14 @@ object SettingsResetStore {
 
     /** Network behaviour defaults; no account or transport identity is removed. */
     fun resetNetwork(context: Context) {
-        SwarmSettings.set(context, SwarmMode.NORMAL)
-        OnlineHelperSettings.set(context, true)
         context.applicationContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
             .edit().putBoolean("proxy_tunnel_enabled", true).apply()
     }
 
     /** File/seeding defaults; stored files and transfer history remain. */
     fun resetFiles(context: Context) {
+        SwarmSettings.set(context, SwarmMode.NORMAL)
+        OnlineHelperSettings.set(context, true)
         ServerMode.set(context, true)
         StorageSettings.set(context, StoragePolicy.DEFAULT_QUOTA_BYTES)
     }
