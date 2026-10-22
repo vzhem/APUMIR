@@ -151,9 +151,19 @@ fun ChannelScreen(
     androidx.compose.runtime.LaunchedEffect(uiState.channel?.id) {
         if (uiState.channel != null) viewModel.refreshConversationWallpaper()
     }
+    val canChangeSharedWallpaper = uiState.channel?.let { channel ->
+        uiState.members.firstOrNull { it.isMe }?.let { me ->
+            com.vladimir.messenger.data.group.GroupWallpaper.canChange(
+                role = me.role,
+                permissions = me.permissions,
+                memberMask = channel.memberPermissions,
+                banned = me.isBanned,
+            )
+        }
+    } == true
     if (showWallpaper) com.vladimir.messenger.ui.components.ConversationWallpaperDialog(
         scope = "group:${uiState.channelId}", shared = uiState.channel?.wallpaper,
-        onSetShared = if (com.vladimir.messenger.data.group.GroupRole.isAdminOrOwner(uiState.channel?.myRole.orEmpty()))
+        onSetShared = if (canChangeSharedWallpaper)
             { value -> viewModel.setConversationWallpaper(value) } else null,
         onDismiss = { showWallpaper = false },
     )

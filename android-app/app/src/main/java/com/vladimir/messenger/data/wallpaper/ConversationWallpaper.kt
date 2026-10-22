@@ -28,6 +28,15 @@ object ConversationWallpaper {
         check(editor.commit()) { "Не удалось сохранить фон" }
         revision.update { it + 1 }
     }
+
+    /** Remove only personal chat-background overrides; shared group state is untouched. */
+    suspend fun resetAllPersonal(context: Context) = withContext(Dispatchers.IO) {
+        val editor = prefs(context).edit()
+        prefs(context).all.keys.forEach { key -> editor.remove(key) }
+        check(editor.commit()) { "Не удалось вернуть фоны чатов" }
+        revision.update { it + 1 }
+    }
+
     suspend fun import(context: Context, uri: Uri): String = withContext(Dispatchers.IO) {
         val source = StoryPhoto.loadForEdit(context, uri)
         try {

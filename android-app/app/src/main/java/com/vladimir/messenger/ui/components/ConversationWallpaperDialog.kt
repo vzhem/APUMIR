@@ -67,6 +67,7 @@ fun ConversationWallpaperDialog(scope: String, shared: String? = null,
     }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var confirmSharedReset by remember { mutableStateOf(false) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) coroutineScope.launch {
             busy = true
@@ -132,10 +133,29 @@ fun ConversationWallpaperDialog(scope: String, shared: String? = null,
                 }
             }
             selectedTint?.let { Text(stringResource(it.labelRes), color = ApuBubbleAccentColor) }
-            ApuTextAction(label = stringResource(if (forAll) R.string.conversation_wallpaper_reset_shared
-                else R.string.conversation_wallpaper_follow), enabled = !busy, onClick = { apply(null) })
+            ApuTextAction(
+                label = stringResource(if (forAll) R.string.conversation_wallpaper_reset_shared
+                    else R.string.conversation_wallpaper_follow),
+                enabled = !busy,
+                onClick = {
+                    if (forAll) confirmSharedReset = true else apply(null)
+                },
+            )
             if (busy) Text(stringResource(R.string.conversation_wallpaper_wait))
             error?.let { Text(it) }
+        }
+    }
+    if (confirmSharedReset) {
+        ApuPremiumDialog(
+            title = stringResource(R.string.conversation_wallpaper_reset_shared_title),
+            onDismiss = { confirmSharedReset = false },
+            confirmLabel = stringResource(R.string.conversation_wallpaper_reset_shared),
+            onConfirm = {
+                confirmSharedReset = false
+                apply(null)
+            },
+        ) {
+            Text(stringResource(R.string.conversation_wallpaper_reset_shared_body))
         }
     }
 }

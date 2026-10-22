@@ -51,6 +51,8 @@ import com.vladimir.messenger.ui.components.notificationMuteStatus
 import com.vladimir.messenger.data.diagnostics.DiagnosticsReport
 import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.notification.NotificationMuteScope
+import com.vladimir.messenger.data.settings.SettingsResetCategory
+import com.vladimir.messenger.data.settings.SettingsResetStore
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.selection.selectable
@@ -962,6 +964,8 @@ private fun SettingsTabContent(
     var showLogoutDialog by remember { mutableStateOf(false) }
     var muteScope by remember { mutableStateOf<NotificationMuteScope?>(null) }
     var showInvitePrivacyDialog by remember { mutableStateOf(false) }
+    var showGlobalResetDialog by remember { mutableStateOf(false) }
+    var sectionResetCategory by remember { mutableStateOf<SettingsResetCategory?>(null) }
     val invitePrivacyMode by com.vladimir.messenger.data.profile.InvitePrivacyStore.mode
         .collectAsStateWithLifecycle()
     val muteRevision by viewModel.notificationMuteRevision.collectAsStateWithLifecycle()
@@ -1066,6 +1070,13 @@ private fun SettingsTabContent(
                         )
                     }
                 }
+                item {
+                    SettingsResetCard(
+                        title = stringResource(R.string.settings_reset_all),
+                        subtitle = stringResource(R.string.settings_reset_all_hint),
+                        onClick = { showGlobalResetDialog = true },
+                    )
+                }
             }
 
             if (section == SettingsSection.Appearance) {
@@ -1129,6 +1140,12 @@ private fun SettingsTabContent(
                             }
                         }
                     }
+                    SettingsItem(
+                        icon = Icons.Default.RestartAlt,
+                        title = stringResource(R.string.settings_reset_font),
+                        subtitle = stringResource(R.string.settings_font_size_hint),
+                        onClick = { AppFontSizeHolder.set(context, AppFontSize.STANDARD) },
+                    )
 
                     // Свои обои: из галереи или стандартные в тон теме.
                     ApuSettingsDivider()
@@ -1221,6 +1238,16 @@ private fun SettingsTabContent(
                             color = ApuBubbleAccentColor,
                         )
                     }
+                    ApuSettingsDivider()
+                    SettingsItem(
+                        icon = Icons.Default.RestartAlt,
+                        title = stringResource(R.string.settings_reset_wallpaper_tint),
+                        subtitle = stringResource(R.string.settings_reset_wallpaper_tint_hint),
+                        onClick = {
+                            WallpaperHolder.set(context, null)
+                            WallpaperTintHolder.set(context, WallpaperTint.CLASSIC)
+                        },
+                    )
                 }
             }
             item {
@@ -1821,9 +1848,48 @@ private fun SettingsTabContent(
                     )
                 }
             }
+            section?.let { currentSection ->
+                val category = currentSection.resetCategory()
+                item {
+                    SettingsResetCard(
+                        title = stringResource(R.string.settings_reset_section),
+                        subtitle = if (category == null) {
+                            stringResource(R.string.settings_reset_section_unavailable)
+                        } else {
+                            stringResource(
+                                R.string.settings_reset_section_hint,
+                                stringResource(categoryLabelRes(category)),
+                            )
+                        },
+                        onClick = category?.let { chosen -> { sectionResetCategory = chosen } },
+                    )
+                }
             }
         }
         ApuScrollbar(state = settingsScrollState)
+    }
+
+    if (showGlobalResetDialog) {
+        SettingsResetDialog(
+            initialCategories = SettingsResetStore.allCategories,
+            selectable = true,
+            onDismiss = { showGlobalResetDialog = false },
+            onConfirm = { categories ->
+                viewModel.resetSettings(categories)
+                showGlobalResetDialog = false
+            },
+        )
+    }
+    sectionResetCategory?.let { category ->
+        SettingsResetDialog(
+            initialCategories = setOf(category),
+            selectable = false,
+            onDismiss = { sectionResetCategory = null },
+            onConfirm = { categories ->
+                viewModel.resetSettings(categories)
+                sectionResetCategory = null
+            },
+        )
     }
 
     // Раунд 223: окно синхронизации аккаунта.
@@ -2242,8 +2308,134 @@ private fun ThemeModeChoices(selected: ThemeMode, onSelect: (ThemeMode) -> Unit)
                 style = MaterialTheme.typography.bodySmall,
                 color = ApuBubbleMutedColor,
             )
+            ApuTextAction(
+                label = stringResource(R.string.settings_reset_theme),
+                onClick = { onSelect(ThemeMode.SYSTEM) },
+            )
         }
     }
+}
+
+@Composable
+private fun SettingsResetCard(
+    title: String,
+    subtitle: String,
+    onClick: (() -> Unit)?,
+) {
+    SettingsCard {
+        SettingsItem(
+            icon = Icons.Default.RestartAlt,
+            title = title,
+            subtitle = subtitle,
+            onClick = onClick,
+        )
+    }
+}
+
+@Composable
+private fun SettingsResetDialog(
+    initialCategories: Set<SettingsResetCategory>,
+    selectable: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (Set<SettingsResetCategory>) -> Unit,
+) {
+    var selected by remember(initialCategories) { mutableStateOf(initialCategories) }
+    val canConfirm = selected.isNotEmpty()
+    ApuSettingsDialog(
+        onDismissRequest = onDismiss,
+        icon = { ApuPremiumIconTile(icon = Icons.Default.RestartAlt, size = 34.dp, corner = 10.dp) },
+        title = { Text(stringResource(R.string.settings_reset_dialog_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(if (selectable) R.string.settings_reset_dialog_body else R.string.settings_reset_section_body))
+                SettingsResetCategory.entries.forEach { category ->
+                    val checked = category in selected
+                    Column {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .then(
+                                    if (selectable) Modifier.clickable {
+                                        selected = if (checked) selected - category else selected + category
+                                    } else Modifier
+                                )
+                                .padding(vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                stringResource(categoryLabelRes(category)),
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (selectable) {
+                                ApuPremiumSwitch(
+                                    checked = checked,
+                                    onCheckedChange = { value ->
+                                        selected = if (value) selected + category else selected - category
+                                    },
+                                )
+                            } else if (checked) {
+                                Icon(Icons.Default.Check, contentDescription = null, tint = ApuBubbleAccentColor)
+                            }
+                        }
+                        Text(
+                            stringResource(categoryDetailsRes(category)),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Text(
+                    stringResource(R.string.settings_reset_protected_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ApuBubbleMutedColor,
+                )
+            }
+        },
+        confirmButton = {
+            ApuTextAction(
+                label = stringResource(R.string.settings_reset_confirm),
+                onClick = { if (canConfirm) onConfirm(selected) },
+                enabled = canConfirm,
+                danger = true,
+            )
+        },
+        dismissButton = {
+            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
+        },
+    )
+}
+
+private fun SettingsSection.resetCategory(): SettingsResetCategory? = when (this) {
+    SettingsSection.Chats -> SettingsResetCategory.CHATS
+    SettingsSection.Notifications -> SettingsResetCategory.NOTIFICATIONS
+    SettingsSection.Appearance -> SettingsResetCategory.APPEARANCE
+    SettingsSection.Security -> SettingsResetCategory.SECURITY
+    SettingsSection.Network -> SettingsResetCategory.NETWORK
+    SettingsSection.Files -> SettingsResetCategory.FILES
+    SettingsSection.Hearts -> SettingsResetCategory.HEARTS
+    SettingsSection.Updates, SettingsSection.Help -> null
+}
+
+private fun categoryLabelRes(category: SettingsResetCategory): Int = when (category) {
+    SettingsResetCategory.CHATS -> R.string.settings_reset_category_chats
+    SettingsResetCategory.NOTIFICATIONS -> R.string.settings_reset_category_notifications
+    SettingsResetCategory.APPEARANCE -> R.string.settings_reset_category_appearance
+    SettingsResetCategory.SECURITY -> R.string.settings_reset_category_security
+    SettingsResetCategory.NETWORK -> R.string.settings_reset_category_network
+    SettingsResetCategory.FILES -> R.string.settings_reset_category_files
+    SettingsResetCategory.HEARTS -> R.string.settings_reset_category_hearts
+}
+
+private fun categoryDetailsRes(category: SettingsResetCategory): Int = when (category) {
+    SettingsResetCategory.CHATS -> R.string.settings_reset_details_chats
+    SettingsResetCategory.NOTIFICATIONS -> R.string.settings_reset_details_notifications
+    SettingsResetCategory.APPEARANCE -> R.string.settings_reset_details_appearance
+    SettingsResetCategory.SECURITY -> R.string.settings_reset_details_security
+    SettingsResetCategory.NETWORK -> R.string.settings_reset_details_network
+    SettingsResetCategory.FILES -> R.string.settings_reset_details_files
+    SettingsResetCategory.HEARTS -> R.string.settings_reset_details_hearts
 }
 
 /** Разделы настроек: корень показывает список, пункт - свой подэкран. */

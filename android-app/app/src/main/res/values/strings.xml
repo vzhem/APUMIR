@@ -1797,6 +1797,7 @@
     <string name="voice_too_long">Сообщение слишком длинное для перевода в текст (до 12 минут).</string>
     <string name="voice_play">Слушать</string>
     <string name="voice_pause">Пауза</string>
+    <string name="voice_speed_default">1× · По умолчанию</string>
     <string name="voice_speed_normal">1×</string>
     <string name="voice_speed_half">0,5×</string>
     <string name="voice_speed_three_quarters">0,75×</string>
@@ -1974,6 +1975,8 @@
     <string name="story_video_reset_audio">Звук — как в исходнике</string>
     <string name="story_video_reset_caption">Очистить подпись</string>
     <string name="story_video_reset_shape">Форму — обычный формат</string>
+    <string name="chat_reset_local_settings">Вернуть настройки этого чата по умолчанию</string>
+    <string name="chat_reset_local_settings_done">Локальные настройки чата возвращены</string>
     <string name="conversation_wallpaper">Фон чата</string>
     <string name="conversation_wallpaper_apply">Применить</string>
     <string name="conversation_wallpaper_priority">Личный фон виден только вам и важнее общего фона группы или канала.</string>
@@ -1981,8 +1984,10 @@
     <string name="conversation_wallpaper_shared">Для всех участников</string>
     <string name="conversation_wallpaper_preview">Так будут выглядеть сообщения</string>
     <string name="conversation_wallpaper_gallery">Выбрать изображение</string>
+    <string name="conversation_wallpaper_reset_shared_title">Вернуть общий фон по умолчанию?</string>
+    <string name="conversation_wallpaper_reset_shared_body">Стандартный фон будет установлен для всех участников. Личные обои участников не изменятся.</string>
     <string name="conversation_wallpaper_reset_shared">Убрать общий фон</string>
-    <string name="conversation_wallpaper_follow">Использовать общий фон / настройки приложения</string>
+    <string name="conversation_wallpaper_follow">Вернуть настройки этого чата по умолчанию</string>
     <string name="conversation_wallpaper_wait">Подготовка и сохранение…</string>
 
     <string name="heart_game_title">Подними себе рейтинг</string>
@@ -2095,7 +2100,7 @@
     <string name="text_color_filter_hint">Сообщения других цветов будут скрыты. Сейчас: %1$s</string>
     <string name="text_color_filter_choose">Цвет для чтения</string>
     <string name="text_color_dialog_hint">Пустой цвет возвращает обычный цвет темы.</string>
-    <string name="text_color_default">По теме</string>
+    <string name="text_color_default">По умолчанию</string>
     <string name="text_color_red">Красный</string>
     <string name="text_color_orange">Оранжевый</string>
     <string name="text_color_green">Зелёный</string>
@@ -2105,4 +2110,36 @@
     <string name="text_color_purple">Фиолетовый</string>
     <string name="text_color_pink">Розовый</string>
     <string name="text_color_brown">Коричневый</string>
+    <!-- Безопасный возврат локальных настроек: данные аккаунта и переписка не затрагиваются. -->
+    <string name="settings_reset_theme">Тема по умолчанию: как в системе</string>
+    <string name="settings_reset_font">Размер текста по умолчанию: стандартный</string>
+    <string name="settings_reset_wallpaper_tint">Вернуть обои и оттенок по умолчанию</string>
+    <string name="settings_reset_wallpaper_tint_hint">Стандартные обои APU и классический оттенок.</string>
+    <string name="settings_reset_undo">Отменить</string>
+    <string name="settings_reset_section_unavailable">В этом разделе нет локальных параметров для сброса.</string>
+    <string name="settings_reset_all">Вернуть настройки по умолчанию</string>
+    <string name="settings_reset_all_hint">Выбрать разделы. Сообщения, контакты, профиль и ключи останутся на месте.</string>
+    <string name="settings_reset_section">Вернуть настройки раздела по умолчанию</string>
+    <string name="settings_reset_section_hint">Сбросить раздел «%1$s»; переписка и данные аккаунта не изменятся.</string>
+    <string name="settings_reset_dialog_title">Вернуть настройки по умолчанию?</string>
+    <string name="settings_reset_dialog_body">Выберите, какие локальные настройки вернуть. Ниже перечислено, что будет затронуто.</string>
+    <string name="settings_reset_section_body">Будут возвращены только параметры этого раздела.</string>
+    <string name="settings_reset_confirm">Вернуть по умолчанию</string>
+    <string name="settings_reset_protected_note">Не удаляются: сообщения, контакты, профиль, файлы, ключи устройства, подписанные receipt, referral-данные, членство в группах, резервные копии и APU-карточки.</string>
+    <string name="settings_reset_category_chats">Чаты и список</string>
+    <string name="settings_reset_category_notifications">Уведомления</string>
+    <string name="settings_reset_category_appearance">Оформление и голос</string>
+    <string name="settings_reset_category_security">Безопасность</string>
+    <string name="settings_reset_category_network">Сеть</string>
+    <string name="settings_reset_category_hearts">Сердечки</string>
+    <string name="settings_reset_category_files">Файлы и раздача</string>
+    <string name="settings_reset_details_chats">Папки чатов и личные обои конкретных чатов.</string>
+    <string name="settings_reset_details_notifications">Паузы уведомлений приложения, чатов, групп, каналов и тем.</string>
+    <string name="settings_reset_details_appearance">Тема, размер текста, обои и оттенок, цвета текста и имени, фильтр чтения, язык, скорость голосовых и эффект голоса.</string>
+    <string name="settings_reset_details_security">Кто может присылать приглашения в группы и каналы: значение по умолчанию — все.</string>
+    <string name="settings_reset_details_network">Режим роя, помощь другим телефонам и туннель прокси.</string>
+    <string name="settings_reset_details_hearts">Показывать падающее сердечко: выключено по умолчанию. Счёт, ранги и referral-данные не изменяются.</string>
+    <string name="settings_reset_details_files">Режим хранения чужих данных и стандартная квота места под пересылку.</string>
+    <string name="settings_reset_colors">Вернуть цвета и фильтр по умолчанию</string>
+    <string name="settings_reset_colors_hint">Обычный цвет темы, обычный цвет имени и фильтр чтения выключен.</string>
 </resources>

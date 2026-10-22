@@ -89,6 +89,13 @@ object ChatFolderStore {
     fun delete(context: Context, id: String) =
         save(context, current(context).filterNot { it.id == id })
 
+    /** Return the home list to its default without touching chats or messages. */
+    fun reset(context: Context) {
+        _folders.value = emptyList()
+        context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().remove(KEY).apply()
+    }
+
     fun newId(): String = "folder_${System.currentTimeMillis().toString(36)}"
 
     private fun read(context: Context): List<ChatFolder> = try {

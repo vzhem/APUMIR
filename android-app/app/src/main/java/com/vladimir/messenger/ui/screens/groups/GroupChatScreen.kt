@@ -208,9 +208,19 @@ fun GroupChatScreen(
     androidx.compose.runtime.LaunchedEffect(uiState.group?.id) {
         if (uiState.group != null) viewModel.refreshConversationWallpaper()
     }
+    val canChangeSharedWallpaper = uiState.group?.let { group ->
+        uiState.me?.let { me ->
+            com.vladimir.messenger.data.group.GroupWallpaper.canChange(
+                role = me.role,
+                permissions = me.permissions,
+                memberMask = group.memberPermissions,
+                banned = me.isBanned,
+            )
+        }
+    } == true
     if (showWallpaper) com.vladimir.messenger.ui.components.ConversationWallpaperDialog(
         scope = "group:${uiState.groupId}", shared = uiState.group?.wallpaper,
-        onSetShared = if (com.vladimir.messenger.data.group.GroupRole.isAdminOrOwner(uiState.group?.myRole.orEmpty()))
+        onSetShared = if (canChangeSharedWallpaper)
             { value -> viewModel.setConversationWallpaper(value) } else null,
         onDismiss = { showWallpaper = false },
     )

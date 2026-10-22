@@ -7,6 +7,8 @@ import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.diagnostics.MqttLinkText
 import com.vladimir.messenger.data.notification.NotificationMuteScope
 import com.vladimir.messenger.data.notification.NotificationMuteStore
+import com.vladimir.messenger.data.settings.SettingsResetCategory
+import com.vladimir.messenger.data.settings.SettingsResetStore
 import com.vladimir.messenger.util.OwnInvite
 import com.vladimir.messenger.data.repository.NetworkStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -81,6 +83,17 @@ class SettingsViewModel @Inject constructor(
 
     fun setNotificationMuteUntil(scope: NotificationMuteScope, untilMs: Long) {
         notificationMuteStore.setMutedUntil(scope, untilMs)
+    }
+
+    /**
+     * Apply an allow-listed reset.  The confirmation UI supplies the categories;
+     * this method never receives a request to erase the account or its data.
+     */
+    fun resetSettings(categories: Set<SettingsResetCategory>) {
+        if (categories.isEmpty()) return
+        viewModelScope.launch {
+            SettingsResetStore.reset(context, categories, notificationMuteStore)
+        }
     }
 
     /** Immediately announce a changed profile-name colour to contacts and group peers. */

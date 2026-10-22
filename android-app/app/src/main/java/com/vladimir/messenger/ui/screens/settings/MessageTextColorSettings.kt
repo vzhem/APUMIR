@@ -142,6 +142,16 @@ fun MessageTextColorSettingsCard(onNameColorChanged: () -> Unit = {}) {
                 subtitle = colorLabel(context, selectedRead),
                 onClick = { selectedScope = READ_SCOPE },
             )
+            ApuSettingsDivider()
+            ApuSettingsItem(
+                icon = androidx.compose.material.icons.Icons.Default.RestartAlt,
+                title = stringResource(R.string.settings_reset_colors),
+                subtitle = stringResource(R.string.settings_reset_colors_hint),
+                onClick = {
+                    TextColorSettingsStore.resetAll(context)
+                    onNameColorChanged()
+                },
+            )
         }
     }
 
@@ -183,7 +193,12 @@ fun MessageTextColorSettingsCard(onNameColorChanged: () -> Unit = {}) {
                                 TextColorSettingsStore.setOwnNameColor(context, choice.id)
                                 onNameColorChanged()
                             }
-                            READ_SCOPE -> TextColorSettingsStore.setSelectedReadColor(context, choice.id)
+                            READ_SCOPE -> {
+                                TextColorSettingsStore.setSelectedReadColor(context, choice.id)
+                                if (choice.id == TextColorPalette.DEFAULT_ID) {
+                                    TextColorSettingsStore.setReadOnlySelectedColor(context, false)
+                                }
+                            }
                             else -> TextColorSettingsStore.setTextColor(context, scope, choice.id)
                         }
                         selectedScope = null

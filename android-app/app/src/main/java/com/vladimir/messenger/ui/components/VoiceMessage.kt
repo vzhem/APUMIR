@@ -178,7 +178,17 @@ fun VoiceMessagePlayer(
                     ) {
                         VoicePlaybackSpeedStore.OPTIONS.forEach { option ->
                             DropdownMenuItem(
-                                text = { Text(stringResource(voiceSpeedLabelRes(option))) },
+                                text = {
+                                    Text(
+                                        stringResource(
+                                            if (VoicePlaybackSpeedStore.normalize(option) == 1f) {
+                                                R.string.voice_speed_default
+                                            } else {
+                                                voiceSpeedLabelRes(option)
+                                            },
+                                        ),
+                                    )
+                                },
                                 onClick = {
                                     VoicePlaybackSpeedStore.set(context, option)
                                     speedMenu = false

@@ -112,6 +112,18 @@ class NotificationMuteStore @Inject constructor(
         write(topicPreferenceKey(groupId, topicId), untilMs)
     }
 
+    /** Remove only notification pauses, including per-topic pauses. */
+    fun resetAll() {
+        val editor = preferences.edit()
+        preferences.all.keys.forEach { key ->
+            if (key in NotificationMuteScope.entries.map { it.preferenceKey } || key.startsWith(TOPIC_KEY_PREFIX)) {
+                editor.remove(key)
+            }
+        }
+        editor.apply()
+        _revision.update { it + 1L }
+    }
+
     private fun write(key: String, requestedUntilMs: Long) {
         val untilMs = when {
             requestedUntilMs == Long.MAX_VALUE -> Long.MAX_VALUE

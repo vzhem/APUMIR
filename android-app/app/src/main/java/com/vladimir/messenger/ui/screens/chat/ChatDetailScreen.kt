@@ -138,6 +138,7 @@ fun ChatDetailScreen(
     // Раунд 203: «Поделиться в APU» - пересылка с указанием источника.
     var forwardMessage by remember { mutableStateOf<Message?>(null) }
     val fwdScope = androidx.compose.runtime.rememberCoroutineScope()
+    val localSettingsScope = androidx.compose.runtime.rememberCoroutineScope()
     // Раунд 203: подтверждение пересылки - плашка по центру экрана.
     var fwdSent by remember { mutableStateOf(false) }
     if (fwdSent) {
@@ -406,6 +407,32 @@ fun ChatDetailScreen(
                         icon = Icons.Default.Edit, onClick = { onRenameClick(contactId, contactName) }) else null,
                     ApuAction(title = stringResource(R.string.conversation_wallpaper), icon = Icons.Default.Wallpaper,
                         onClick = { showWallpaper = true }),
+                    ApuAction(
+                        title = stringResource(R.string.chat_reset_local_settings),
+                        icon = Icons.Default.RestartAlt,
+                        onClick = {
+                            localSettingsScope.launch {
+                                val scope = "direct:$chatId"
+                                val previousWallpaper = com.vladimir.messenger.data.wallpaper.ConversationWallpaper.personal(context, scope)
+                                val previousTextColor = com.vladimir.messenger.data.textcolor.TextColorSettingsStore.scopeOverride(context, scope)
+                                com.vladimir.messenger.data.wallpaper.ConversationWallpaper.setPersonal(context, scope, null)
+                                com.vladimir.messenger.data.textcolor.TextColorSettingsStore.resetScope(context, scope)
+                                val result = snackbarHostState.showSnackbar(
+                                    message = context.getString(R.string.chat_reset_local_settings_done),
+                                    actionLabel = context.getString(R.string.settings_reset_undo),
+                                    duration = SnackbarDuration.Short,
+                                )
+                                if (result == SnackbarResult.ActionPerformed) {
+                                    com.vladimir.messenger.data.wallpaper.ConversationWallpaper.setPersonal(context, scope, previousWallpaper)
+                                    if (previousTextColor == null) {
+                                        com.vladimir.messenger.data.textcolor.TextColorSettingsStore.resetScope(context, scope)
+                                    } else {
+                                        com.vladimir.messenger.data.textcolor.TextColorSettingsStore.setTextColor(context, scope, previousTextColor)
+                                    }
+                                }
+                            }
+                        },
+                    ),
                     ApuAction(title = stringResource(if (notificationsMuted) R.string.chat_change_mute else R.string.menu_mute),
                         icon = if (notificationsMuted) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
                         onClick = { showNotificationMuteDialog = true }),

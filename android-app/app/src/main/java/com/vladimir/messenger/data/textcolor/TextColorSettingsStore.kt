@@ -82,6 +82,37 @@ object TextColorSettingsStore {
         touch()
     }
 
+    /**
+     * Return every local colour choice and the reader filter to the normal
+     * theme colour.  This deliberately removes only keys owned by this store;
+     * it never clears the preference file wholesale because peer metadata and
+     * future colour settings may live beside the current choices.
+     */
+    fun resetAll(context: Context) {
+        val editor = prefs(context).edit()
+            .remove(OWN_TEXT)
+            .remove(OWN_NAME)
+            .remove(READ_ONLY)
+            .remove(READ_COLOR)
+        prefs(context).all.keys
+            .filter { it.startsWith(SCOPE_PREFIX) || it.startsWith(PEER_NAME_PREFIX) }
+            .forEach { key -> editor.remove(key) }
+        editor.apply()
+        _ownNameColor.value = TextColorPalette.DEFAULT_ID
+        touch()
+    }
+
+    /** Exact override used to offer Undo for a single-chat reset. */
+    fun scopeOverride(context: Context, scope: String): String? =
+        prefs(context).getString(SCOPE_PREFIX + keyPart(scope), null)
+
+    /** Remove only one chat's local message-colour override. */
+    fun resetScope(context: Context, scope: String) {
+        if (scope.isBlank()) return
+        prefs(context).edit().remove(SCOPE_PREFIX + keyPart(scope)).apply()
+        touch()
+    }
+
     /** true when a message is allowed by the optional reader colour filter. */
     fun allowsMessage(context: Context, messageColor: String?): Boolean {
         if (!readOnlySelectedColor(context)) return true
