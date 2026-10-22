@@ -250,6 +250,7 @@ fun SettingsScreen(
                     onFoldersClick = onFoldersClick,
                     onProfileBackupClick = onProfileBackupClick,
                     onProfileClick = onProfileClick,
+                    onRankBenefits = onRankBenefitsClick,
                     onSupportClick = onSupportClick,
                     onFeedbackClick = onFeedbackClick,
                 )
@@ -886,6 +887,7 @@ private fun SettingsTabContent(
     onFoldersClick: () -> Unit = {},
     onProfileBackupClick: () -> Unit = {},
     onProfileClick: () -> Unit = {},
+    onRankBenefits: () -> Unit = {},
     /** Раунд 219: «Поддержать разработчика» (черновик). */
     onSupportClick: () -> Unit = {},
     /** «Написать разработчику»: открывает экран обратной связи. */
