@@ -30,6 +30,24 @@
     <string name="section_server">Server</string>
     <string name="section_devices">Devices</string>
     <string name="section_support">Support</string>
+    <string name="settings_nav_chats">Chats and folders</string>
+    <string name="settings_nav_chats_hint">Folder tabs on the home screen</string>
+    <string name="settings_nav_notifications">Notifications</string>
+    <string name="settings_nav_notifications_hint">Sound, vibration and quiet hours</string>
+    <string name="settings_nav_appearance">Appearance</string>
+    <string name="settings_nav_appearance_hint">Theme, font, wallpaper and language</string>
+    <string name="settings_nav_security">Security and data</string>
+    <string name="settings_nav_security_hint">Identity, devices and backups</string>
+    <string name="settings_nav_network">Network and connection</string>
+    <string name="settings_nav_network_hint">Server, proxy and link status</string>
+    <string name="settings_nav_files">Files and seeding</string>
+    <string name="settings_nav_files_hint">File transfers and helping the network</string>
+    <string name="settings_nav_hearts">Hearts</string>
+    <string name="settings_nav_hearts_hint">Game and rating</string>
+    <string name="settings_nav_updates">Updates</string>
+    <string name="settings_nav_updates_hint">New app versions</string>
+    <string name="settings_nav_help">Help and about</string>
+    <string name="settings_nav_help_hint">Support, logs and version</string>
     <string name="section_about">About</string>
 
     <string name="language_section">Language</string>

@@ -64,6 +64,7 @@ import com.vladimir.messenger.util.AppShare
 import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
@@ -175,6 +176,12 @@ fun SettingsScreen(
     var showMyQrDialog by remember { mutableStateOf(false) }
     var showUsernameDialog by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
+    // Открытый раздел настроек: null - корневой список разделов.
+    var settingsSection by remember { mutableStateOf<SettingsSection?>(null) }
+    // Системная «Назад» внутри раздела возвращает к списку разделов.
+    BackHandler(enabled = settingsSection != null && !showProfile) {
+        settingsSection = null
+    }
     // Вкладок больше нет: профиль - отдельный пункт в списке настроек и
     // отдельная кнопка в нижней панели. Вкладка сверху дублировала их и
     // мешала: список настроек начинался не с начала.
@@ -184,7 +191,7 @@ fun SettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             // Смахивание вправо работает как «Назад».
-            .swipeBack(onBack = onBackClick),
+            .swipeBack(onBack = { if (settingsSection != null && !showProfile) settingsSection = null else onBackClick() }),
     ) {
         ChatWallpaper()
         Scaffold(
@@ -199,10 +206,14 @@ fun SettingsScreen(
                     scrolledContainerColor = Color.Transparent,
                         ),
                         title = {
-                            ApuSettingsHeader(if (showProfile) stringResource(R.string.settings_header_profile) else stringResource(R.string.settings_header_settings))
+                            ApuSettingsHeader(
+                                if (showProfile) stringResource(R.string.settings_header_profile)
+                                else settingsSection?.let { stringResource(it.titleRes) }
+                                    ?: stringResource(R.string.settings_header_settings)
+                            )
                         },
                         navigationIcon = {
-                            IconButton(onClick = onBackClick) {
+                            IconButton(onClick = { if (settingsSection != null && !showProfile) settingsSection = null else onBackClick() }) {
                                 Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back))
                             }
                         },
@@ -229,6 +240,8 @@ fun SettingsScreen(
                     paddingValues = paddingValues,
                     uiState = uiState,
                     viewModel = viewModel,
+                    section = settingsSection,
+                    onSectionChange = { settingsSection = it },
                     onMtProxyClick = onMtProxyClick,
                     onPeerRatingClick = onPeerRatingClick,
                     onIdentityBackupClick = onIdentityBackupClick,
@@ -861,6 +874,10 @@ private fun SettingsTabContent(
     paddingValues: PaddingValues,
     uiState: SettingsUiState,
     viewModel: SettingsViewModel,
+    /** Открытый раздел: null - корневой список разделов. */
+    section: SettingsSection?,
+    /** Переход «список разделов <-> раздел». */
+    onSectionChange: (SettingsSection?) -> Unit,
     onMtProxyClick: () -> Unit,
     onPeerRatingClick: () -> Unit = {},
     onIdentityBackupClick: () -> Unit = {},
@@ -947,6 +964,8 @@ private fun SettingsTabContent(
     val mqttClipboard = LocalClipboardManager.current
     // Бегунок справа: видно, где мы в длинном списке.
     val settingsScrollState = rememberLazyListState()
+    // Смена раздела - всегда с начала списка.
+    LaunchedEffect(section) { settingsScrollState.scrollToItem(0) }
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = settingsScrollState,
@@ -957,6 +976,7 @@ private fun SettingsTabContent(
         ) {
             // Профиль первым пунктом: имя, @никнейм и свой QR нужны чаще
             // остального, а раньше они прятались за вкладкой сверху.
+            if (section == null) {
             item { SettingsSectionTitle(stringResource(R.string.section_my_profile)) }
             item {
                 SettingsCard {
@@ -969,6 +989,81 @@ private fun SettingsTabContent(
                 }
             }
 
+            }
+
+            // Корневой список разделов, как в крупных мессенджерах: пункт
+            // открывает свой подэкран, «Назад» возвращает к этому списку.
+            if (section == null) {
+                item {
+                    SettingsCard {
+                        SettingsItem(
+                            icon = Icons.Default.Folder,
+                            title = stringResource(R.string.settings_nav_chats),
+                            subtitle = stringResource(R.string.settings_nav_chats_hint),
+                            onClick = { onSectionChange(SettingsSection.Chats) },
+                            trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                        )
+                        SettingsItem(
+                            icon = Icons.Default.Notifications,
+                            title = stringResource(R.string.settings_nav_notifications),
+                            subtitle = stringResource(R.string.settings_nav_notifications_hint),
+                            onClick = { onSectionChange(SettingsSection.Notifications) },
+                            trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                        )
+                        SettingsItem(
+                            icon = Icons.Default.Palette,
+                            title = stringResource(R.string.settings_nav_appearance),
+                            subtitle = stringResource(R.string.settings_nav_appearance_hint),
+                            onClick = { onSectionChange(SettingsSection.Appearance) },
+                            trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                        )
+                        SettingsItem(
+                            icon = Icons.Default.Lock,
+                            title = stringResource(R.string.settings_nav_security),
+                            subtitle = stringResource(R.string.settings_nav_security_hint),
+                            onClick = { onSectionChange(SettingsSection.Security) },
+                            trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                        )
+                        SettingsItem(
+                            icon = Icons.Default.Public,
+                            title = stringResource(R.string.settings_nav_network),
+                            subtitle = stringResource(R.string.settings_nav_network_hint),
+                            onClick = { onSectionChange(SettingsSection.Network) },
+                            trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                        )
+                        SettingsItem(
+                            icon = Icons.Default.SwapHoriz,
+                            title = stringResource(R.string.settings_nav_files),
+                            subtitle = stringResource(R.string.settings_nav_files_hint),
+                            onClick = { onSectionChange(SettingsSection.Files) },
+                            trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                        )
+                        SettingsItem(
+                            icon = Icons.Default.Favorite,
+                            title = stringResource(R.string.settings_nav_hearts),
+                            subtitle = stringResource(R.string.settings_nav_hearts_hint),
+                            onClick = { onSectionChange(SettingsSection.Hearts) },
+                            trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                        )
+                        SettingsItem(
+                            icon = Icons.Default.Update,
+                            title = stringResource(R.string.settings_nav_updates),
+                            subtitle = stringResource(R.string.settings_nav_updates_hint),
+                            onClick = { onSectionChange(SettingsSection.Updates) },
+                            trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                        )
+                        SettingsItem(
+                            icon = Icons.Default.Help,
+                            title = stringResource(R.string.settings_nav_help),
+                            subtitle = stringResource(R.string.settings_nav_help_hint),
+                            onClick = { onSectionChange(SettingsSection.Help) },
+                            trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                        )
+                    }
+                }
+            }
+
+            if (section == SettingsSection.Appearance) {
             // ----------------------------------------------------------------
             // ОФОРМЛЕНИЕ: день / ночь / авто + обои
             // ----------------------------------------------------------------
@@ -1128,6 +1223,8 @@ private fun SettingsTabContent(
             // ЯЗЫК интерфейса: русский / English. Применяется после перезапуска
             // экрана; выбор хранится в p2p_prefs (см. AppLanguageHolder).
             // ----------------------------------------------------------------
+            }
+            if (section == SettingsSection.Chats) {
             item {
                 SettingsCard {
                     SettingsItem(
@@ -1139,6 +1236,8 @@ private fun SettingsTabContent(
                 }
             }
 
+            }
+            if (section == SettingsSection.Appearance) {
             item { SettingsSectionTitle(stringResource(R.string.language_section)) }
             item {
                 SettingsCard {
@@ -1228,6 +1327,8 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // Пауза новых сообщений: приложение целиком или нужный раздел.
             // ----------------------------------------------------------------
+            }
+            if (section == SettingsSection.Notifications) {
             item { SettingsSectionTitle(stringResource(R.string.section_notifications)) }
             item {
                 SettingsCard {
@@ -1255,6 +1356,8 @@ private fun SettingsTabContent(
                 }
             }
 
+            }
+            if (section == SettingsSection.Security) {
             item { SettingsSectionTitle(stringResource(R.string.section_security)) }
             item {
                 SettingsCard {
@@ -1311,8 +1414,12 @@ private fun SettingsTabContent(
                 }
             }
 
+            }
+            if (section == SettingsSection.Hearts) {
             item { SettingsCard { com.vladimir.messenger.ui.components.HeartGameSettings() } }
+            }
 
+            if (section == SettingsSection.Network) {
             item { SettingsSectionTitle(stringResource(R.string.section_network)) }
             item {
                 SettingsCard {
@@ -1391,6 +1498,8 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // ПЕРЕДАЧА ФАЙЛОВ
             // ----------------------------------------------------------------
+            }
+            if (section == SettingsSection.Files) {
             item { SettingsSectionTitle(stringResource(R.string.section_file_transfer)) }
             item {
                 SettingsCard {
@@ -1582,12 +1691,16 @@ private fun SettingsTabContent(
             // (docs/UPDATE_SEEDING.md) — без сервера, по кусочкам, как файлы
             // групп. Новая версия видна тем, у кого версия ниже.
             // ----------------------------------------------------------------
+            }
+            if (section == SettingsSection.Updates) {
             item { SettingsSectionTitle(stringResource(R.string.section_updates)) }
             item { ApkUpdatesCard(viewModel) }
 
             // ----------------------------------------------------------------
             // О ПРИЛОЖЕНИИ
             // ----------------------------------------------------------------
+            }
+            if (section == SettingsSection.Network) {
             item { SettingsSectionTitle(stringResource(R.string.section_server)) }
             item {
                 SettingsCard {
@@ -1626,6 +1739,8 @@ private fun SettingsTabContent(
 
             // Обычная синхронизация уже настроенных телефонов идёт в фоне
             // через живое зеркало. Это окно - только разовый перенос профиля.
+            }
+            if (section == SettingsSection.Security) {
             item { SettingsSectionTitle(stringResource(R.string.section_devices)) }
             item {
                 SettingsCard {
@@ -1641,6 +1756,8 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // ЛОГИ: отчёт для проверки прямой F4-передачи на двух телефонах.
             // ----------------------------------------------------------------
+            }
+            if (section == SettingsSection.Help) {
             item { SettingsSectionTitle(stringResource(R.string.section_support)) }
             item {
                 SettingsCard {
@@ -1684,6 +1801,7 @@ private fun SettingsTabContent(
                         subtitle = uiState.rustCoreVersion,
                     )
                 }
+            }
             }
         }
         ApuScrollbar(state = settingsScrollState)
@@ -2110,6 +2228,19 @@ private fun ThemeModeChoices(selected: ThemeMode, onSelect: (ThemeMode) -> Unit)
 }
 
 @Composable
+/** Разделы настроек: корень показывает список, пункт - свой подэкран. */
+private enum class SettingsSection(val titleRes: Int) {
+    Chats(R.string.settings_nav_chats),
+    Notifications(R.string.settings_nav_notifications),
+    Appearance(R.string.settings_nav_appearance),
+    Security(R.string.settings_nav_security),
+    Network(R.string.settings_nav_network),
+    Files(R.string.settings_nav_files),
+    Hearts(R.string.settings_nav_hearts),
+    Updates(R.string.settings_nav_updates),
+    Help(R.string.settings_nav_help),
+}
+
 private fun SettingsSectionTitle(title: String) = ApuSettingsSectionTitle(title)
 
 @Composable

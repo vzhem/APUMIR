@@ -77,6 +77,24 @@
     <string name="section_server">Сервер</string>
     <string name="section_devices">Устройства</string>
     <string name="section_support">Поддержка</string>
+    <string name="settings_nav_chats">Чаты и папки</string>
+    <string name="settings_nav_chats_hint">Папки-вкладки на главном экране</string>
+    <string name="settings_nav_notifications">Уведомления</string>
+    <string name="settings_nav_notifications_hint">Звук, вибрация и тихие часы</string>
+    <string name="settings_nav_appearance">Оформление</string>
+    <string name="settings_nav_appearance_hint">Тема, шрифт, обои и язык</string>
+    <string name="settings_nav_security">Безопасность и данные</string>
+    <string name="settings_nav_security_hint">Личность, устройства и резервные копии</string>
+    <string name="settings_nav_network">Сеть и подключение</string>
+    <string name="settings_nav_network_hint">Сервер, прокси и состояние связи</string>
+    <string name="settings_nav_files">Файлы и раздача</string>
+    <string name="settings_nav_files_hint">Передача файлов и помощь сети</string>
+    <string name="settings_nav_hearts">Сердечки</string>
+    <string name="settings_nav_hearts_hint">Игра и рейтинг</string>
+    <string name="settings_nav_updates">Обновления</string>
+    <string name="settings_nav_updates_hint">Новые версии приложения</string>
+    <string name="settings_nav_help">Помощь и о программе</string>
+    <string name="settings_nav_help_hint">Поддержка, журналы и версия</string>
     <string name="section_about">О приложении</string>
 
     <!-- Язык интерфейса -->
