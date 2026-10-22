@@ -1136,10 +1136,11 @@ private fun MemberRow(
     val textColorRevision by TextColorSettingsStore.revision.collectAsState()
     val textColorContext = LocalContext.current
     LaunchedEffect(Unit) { TextColorSettingsStore.initialize(textColorContext) }
-    val memberNameColor = remember(member.nodeId, textColorRevision) {
+    val defaultMemberNameColor = if (vip) Color(0xFF8A5F00) else MaterialTheme.colorScheme.onSurface
+    val memberNameColor = remember(member.nodeId, textColorRevision, defaultMemberNameColor) {
         TextColorPalette.colorOr(
             TextColorSettingsStore.peerNameColor(textColorContext, member.nodeId),
-            if (vip) Color(0xFF8A5F00) else MaterialTheme.colorScheme.onSurface,
+            defaultMemberNameColor,
         )
     }
 

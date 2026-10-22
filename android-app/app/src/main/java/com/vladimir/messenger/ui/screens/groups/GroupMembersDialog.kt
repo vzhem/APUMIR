@@ -100,10 +100,11 @@ internal fun GroupMembersDialog(
                                 )
                                 Spacer(Modifier.width(10.dp))
                                 Column {
-                                    val memberNameColor = remember(member.nodeId, colorRevision) {
+                                    val defaultMemberNameColor = MaterialTheme.colorScheme.onSurface
+                                    val memberNameColor = remember(member.nodeId, colorRevision, defaultMemberNameColor) {
                                         TextColorPalette.colorOr(
                                             TextColorSettingsStore.peerNameColor(colorContext, member.nodeId),
-                                            MaterialTheme.colorScheme.onSurface,
+                                            defaultMemberNameColor,
                                         )
                                     }
                                     Text(
