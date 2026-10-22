@@ -1875,7 +1875,11 @@ private fun SettingsTabContent(
             selectable = true,
             onDismiss = { showGlobalResetDialog = false },
             onConfirm = { categories ->
-                viewModel.resetSettings(categories)
+                viewModel.resetSettings(categories) {
+                    if (SettingsResetCategory.APPEARANCE in categories) {
+                        (settingsContext as? android.app.Activity)?.recreate()
+                    }
+                }
                 showGlobalResetDialog = false
             },
         )
@@ -1886,7 +1890,11 @@ private fun SettingsTabContent(
             selectable = false,
             onDismiss = { sectionResetCategory = null },
             onConfirm = { categories ->
-                viewModel.resetSettings(categories)
+                viewModel.resetSettings(categories) {
+                    if (SettingsResetCategory.APPEARANCE in categories) {
+                        (settingsContext as? android.app.Activity)?.recreate()
+                    }
+                }
                 sectionResetCategory = null
             },
         )

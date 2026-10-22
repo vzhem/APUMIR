@@ -89,10 +89,14 @@ class SettingsViewModel @Inject constructor(
      * Apply an allow-listed reset.  The confirmation UI supplies the categories;
      * this method never receives a request to erase the account or its data.
      */
-    fun resetSettings(categories: Set<SettingsResetCategory>) {
+    fun resetSettings(categories: Set<SettingsResetCategory>, onComplete: () -> Unit = {}) {
         if (categories.isEmpty()) return
         viewModelScope.launch {
-            SettingsResetStore.reset(context, categories, notificationMuteStore)
+            runCatching {
+                SettingsResetStore.reset(context, categories, notificationMuteStore)
+            }.onSuccess {
+                onComplete()
+            }
         }
     }
 
