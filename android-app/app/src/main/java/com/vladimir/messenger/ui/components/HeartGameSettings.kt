@@ -288,14 +288,19 @@ fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
                                     tint = listOf(Color(0xFFD9A329), Color(0xFF8B9CAD), Color(0xFFB77942))[place - 1],
                                     modifier = Modifier.size(22.dp))
                                 Column(Modifier.weight(1f)) {
-                                    Text(entry.name.ifBlank { entry.keyId.take(12) + "…" }, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        entry.name.ifBlank { stringResource(R.string.heart_game_unknown_player) },
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
                                     if (isMe) {
                                         Text(stringResource(R.string.heart_game_you_place, ownPlace),
                                             style = MaterialTheme.typography.labelSmall, color = ApuBubbleAccentColor)
                                     } else {
-                                        Text(entry.keyId.take(12) + "… · " +
-                                            DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(entry.updated)),
-                                            style = MaterialTheme.typography.labelSmall)
+                                        Text(
+                                            DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+                                                .format(Date(entry.updated)),
+                                            style = MaterialTheme.typography.labelSmall,
+                                        )
                                     }
                                 }
                                 Icon(Icons.Default.Favorite, null, tint = Color(0xFFFF537F), modifier = Modifier.size(16.dp))

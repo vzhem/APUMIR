@@ -1998,6 +1998,7 @@
     <string name="heart_game_refresh_none_online">Нет ни одного собеседника с личным чатом. Добавьте собеседника в контакты и откройте с ним чат.</string>
     <string name="heart_game_refresh_not_ready">Сеть ещё не готова. Подождите несколько секунд и нажмите «Обновить» ещё раз.</string>
     <string name="heart_game_you">Вы</string>
+    <string name="heart_game_unknown_player">Участник</string>
     <string name="heart_game_close">Закрыть</string>
     <string name="heart_game_board_hint">Топ-100 по известным результатам сети, а не только контактам. Данные приходят с задержкой и могут быть неполными. Подпись подтверждает автора результата, но не защищает от изменённых клиентов.</string>
     <string name="heart_game_empty">Результаты других участников пока не получены.</string>
