@@ -1848,6 +1848,7 @@ private fun SettingsTabContent(
                     )
                 }
             }
+            }
             section?.let { currentSection ->
                 val category = currentSection.resetCategory()
                 item {
