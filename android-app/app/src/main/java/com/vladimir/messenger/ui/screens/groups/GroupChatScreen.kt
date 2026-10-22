@@ -223,6 +223,9 @@ fun GroupChatScreen(
     var showNotificationMuteDialog by remember { mutableStateOf(false) }
     var showQrInvite by remember { mutableStateOf(false) }
     var inviteApuGroup by remember { mutableStateOf<GroupSummary?>(null) }
+    // Приглашение из списка участников сначала предлагает способ, затем
+    // открывает выбор получателей APU или системное меню внешних приложений.
+    var inviteMethodGroup by remember { mutableStateOf<GroupSummary?>(null) }
     var groupLinkShareTarget by remember { mutableStateOf<GroupSummary?>(null) }
     var qrLink by remember { mutableStateOf<String?>(null) }
     var qrLoading by remember { mutableStateOf(false) }
@@ -1667,6 +1670,10 @@ fun GroupChatScreen(
             members = uiState.members,
             canView = uiState.group != null && (uiState.group?.memberListVisible == true || iAmGroupAdmin),
             onDismiss = { showMembers = false },
+            onInvite = {
+                showMembers = false
+                inviteMethodGroup = uiState.group
+            },
         )
     }
 
@@ -1681,6 +1688,20 @@ fun GroupChatScreen(
             onCreate = { name, icon ->
                 viewModel.updateTopic(topic.id, name, icon)
                 showEditTopic = false
+            },
+        )
+    }
+
+    inviteMethodGroup?.let { group ->
+        GroupInviteMethodDialog(
+            onDismiss = { inviteMethodGroup = null },
+            onInApu = {
+                inviteMethodGroup = null
+                inviteApuGroup = group
+            },
+            onExternal = {
+                inviteMethodGroup = null
+                groupLinkShareTarget = group
             },
         )
     }

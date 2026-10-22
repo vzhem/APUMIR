@@ -349,6 +349,15 @@
     <string name="invite_send_apu_hint">Выбрать получателей из личных чатов APU</string>
     <string name="group_invite_recipients_hint">Выберите контакты для приглашения в «%1$s».</string>
     <string name="contacts_other_app">Другим приложением</string>
+    <string name="group_invite_choose_method">Выберите, как пригласить друга. В APU можно выбрать получателей из личных чатов, а внешнее приложение откроет список доступных способов отправки.</string>
+    <string name="group_invite_external_hint">Системное меню: выберите приложение и получателя; ссылку можно отправить вместе с APK.</string>
+    <string name="group_members_title">Участники группы</string>
+    <string name="group_members_search">Поиск участников</string>
+    <string name="group_members_hidden">Просмотр списка участников закрыт администратором группы.</string>
+    <string name="group_members_empty">Список участников пока пуст</string>
+    <string name="group_members_not_found">Никого не найдено</string>
+    <string name="group_role_owner">Владелец</string>
+    <string name="group_role_admin">Администратор</string>
     <!-- Перевод входящих сообщений -->
     <string name="translate_title">Переводить входящие сообщения</string>
     <string name="translate_hint">Текст на другом языке переводится на язык приложения прямо на этом телефоне. Текст не отправляется на сервер. При первом переводе загружается языковой пакет (около 30 МБ).</string>

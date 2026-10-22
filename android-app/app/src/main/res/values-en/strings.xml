@@ -275,6 +275,15 @@
     <string name="invite_send_apu_hint">Choose recipients from your APU chats</string>
     <string name="group_invite_recipients_hint">Choose people to invite to “%1$s”.</string>
     <string name="contacts_other_app">Another app</string>
+    <string name="group_invite_choose_method">Choose how to invite your friend. In APU you can select people from personal chats; an external app opens the available sharing options.</string>
+    <string name="group_invite_external_hint">System sharing: choose an app and recipient; the link can be sent together with the APK.</string>
+    <string name="group_members_title">Group members</string>
+    <string name="group_members_search">Search members</string>
+    <string name="group_members_hidden">The group administrator has hidden the member list.</string>
+    <string name="group_members_empty">The member list is empty</string>
+    <string name="group_members_not_found">Nobody found</string>
+    <string name="group_role_owner">Owner</string>
+    <string name="group_role_admin">Administrator</string>
     <!-- Incoming message translation -->
     <string name="translate_title">Translate incoming messages</string>
     <string name="translate_hint">Text in another language is translated into the app language on this phone. The text is not sent to any server. The first translation downloads a language pack (about 30 MB).</string>

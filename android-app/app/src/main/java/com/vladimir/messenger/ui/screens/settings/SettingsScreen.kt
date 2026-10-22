@@ -78,6 +78,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -177,7 +178,7 @@ fun SettingsScreen(
     var showUsernameDialog by remember { mutableStateOf(false) }
     var showNameDialog by remember { mutableStateOf(false) }
     // Открытый раздел настроек: null - корневой список разделов.
-    var settingsSection by remember { mutableStateOf<SettingsSection?>(null) }
+    var settingsSection by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
     // Системная «Назад» внутри раздела возвращает к списку разделов.
     BackHandler(enabled = settingsSection != null && !showProfile) {
         settingsSection = null
