@@ -1710,6 +1710,7 @@ The file is not on this phone</string>
     <string name="voice_speed_one_half">1.5x</string>
     <string name="voice_speed_double">2x</string>
     <string name="voice_speed_title">Playback speed</string>
+    <string name="voice_effect_original_default">Normal voice · Default</string>
     <string name="voice_effect_original">Normal voice</string>
     <string name="voice_effect_darth_vader">Darth Vader</string>
     <string name="voice_effect_minion">Minion</string>

@@ -37,7 +37,13 @@ fun VoiceEffectPickerDialog(
                     ) {
                         rowEffects.forEach { effect ->
                             ApuPremiumChip(
-                                label = effect.symbol + " " + stringResource(effect.labelRes),
+                                label = effect.symbol + " " + stringResource(
+                                    if (effect == VoiceEffect.ORIGINAL) {
+                                        R.string.voice_effect_original_default
+                                    } else {
+                                        effect.labelRes
+                                    },
+                                ),
                                 selected = effect == selected,
                                 onClick = {
                                     onSelected(effect)

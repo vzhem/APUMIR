@@ -1805,6 +1805,7 @@
     <string name="voice_speed_one_half">1,5×</string>
     <string name="voice_speed_double">2×</string>
     <string name="voice_speed_title">Скорость воспроизведения</string>
+    <string name="voice_effect_original_default">Обычный голос · По умолчанию</string>
     <string name="voice_effect_original">Обычный голос</string>
     <string name="voice_effect_darth_vader">Дарт Вейдер</string>
     <string name="voice_effect_minion">Миньон</string>
