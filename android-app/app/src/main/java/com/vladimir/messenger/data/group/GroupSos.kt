@@ -32,6 +32,17 @@ object GroupSos {
     /** Защита от повторного нажатия: не меньше десяти секунд. */
     const val COOLDOWN_MS = 10_000L
 
+    /** Больше знаков в своём тексте тревоги не нужно: сигнал должен читаться целиком. */
+    const val MAX_TEXT_CHARS = 200
+
+    /**
+     * Текст, который реально уйдёт при нажатии: свой из настроек группы,
+     * а если поле пустое - принятый по умолчанию.
+     */
+    fun effectiveText(custom: String?): String =
+        custom?.trim().orEmpty().take(MAX_TEXT_CHARS)
+            .ifBlank { com.vladimir.messenger.util.SosMessage.DEFAULT_TEXT }
+
     fun normalizePressRole(role: String?): String =
         if (role in PRESS_ROLES) role!! else PRESS_ALL
 

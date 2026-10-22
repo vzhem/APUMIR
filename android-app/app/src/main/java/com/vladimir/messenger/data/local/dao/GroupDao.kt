@@ -137,6 +137,10 @@ interface GroupDao {
     )
     suspend fun setSosSettings(groupId: String, enabled: Boolean, count: Int, pressRole: String)
 
+    /** Свой текст тревожного сообщения SOS (пусто - текст по умолчанию). */
+    @Query("UPDATE groups SET sosText = :text WHERE id = :groupId")
+    suspend fun setSosText(groupId: String, text: String)
+
     /** Локальная отметка нажатия SOS этим телефоном (пауза от повторов). */
     @Query("UPDATE groups SET sosLastSentAtMs = :atMs WHERE id = :groupId")
     suspend fun setSosLastSentAt(groupId: String, atMs: Long)

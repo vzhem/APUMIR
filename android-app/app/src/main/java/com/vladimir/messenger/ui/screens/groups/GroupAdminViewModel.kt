@@ -321,6 +321,19 @@ class GroupAdminViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Свой текст тревожного сообщения SOS из поля в настройках (пусто -
+     * вернуть текст по умолчанию). Настройка общая на группу: репозиторий
+     * разошлёт её конвертом всем участникам и новичку при вступлении.
+     */
+    fun setSosText(text: String) {
+        viewModelScope.launch {
+            groupRepository.setSosText(groupId, text)
+                .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
+                .onSuccess { _uiState.update { it.copy(notice = appContext.getString(R.string.sos_text_saved)) } }
+        }
+    }
+
     fun setSlowMode(seconds: Int) {
         viewModelScope.launch {
             groupRepository.setSlowMode(groupId, seconds)

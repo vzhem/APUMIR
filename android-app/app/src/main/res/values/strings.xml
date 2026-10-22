@@ -507,6 +507,9 @@
     <string name="sos_who_admins">Администраторы</string>
     <string name="sos_who_owner">Только владелец</string>
     <string name="sos_settings_saved">Настройки SOS сохранены</string>
+    <string name="sos_text_label">Текст тревожного сообщения</string>
+    <string name="sos_text_hint">Этот текст придёт всем участникам при нажатии SOS. Пустое поле — обычный текст «🆘 SOS! Срочно нужна помощь!». До 200 знаков.</string>
+    <string name="sos_text_saved">Текст SOS сохранён</string>
     <string name="admin_slow_off">Выключен: писать можно как угодно часто.</string>
     <string name="admin_mode_hint">Режим меняют администраторы.</string>
     <string name="admin_unsubscribe_channel">Отписаться от канала</string>

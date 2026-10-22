@@ -824,6 +824,7 @@ class GroupRepository(
             sosEnabled = g.sosEnabled,
             sosMessageCount = GroupSos.clampCount(g.sosMessageCount),
             sosPressRole = GroupSos.normalizePressRole(g.sosPressRole),
+            sosText = g.sosText,
             wallpaper = g.wallpaper,
             wallpaperRevision = g.wallpaperRevision,
             mutedUntilMs = g.mutedUntilMs,
@@ -1565,7 +1566,7 @@ class GroupRepository(
         groupDao.setSosLastSentAt(groupId, now)
         val count = GroupSos.clampCount(group.sosMessageCount)
         val text = com.vladimir.messenger.util.SosMessage.wrap(
-            com.vladimir.messenger.util.SosMessage.DEFAULT_TEXT,
+            GroupSos.effectiveText(group.sosText),
         )
         var sent = 0
         repeat(count) {
@@ -1577,6 +1578,32 @@ class GroupRepository(
         }
         Log.i(TAG, "sos sent group=$groupId topic=$topicId count=$sent by=$me")
         return Result.success(sent)
+    }
+
+    /**
+     * Свой текст тревожного сообщения: [text] из поля в настройках группы
+     * (пусто - вернуть текст по умолчанию). Менять вправе те же, кто меняет
+     * информацию о группе; текст общий на всех, поэтому уходит конвертом.
+     */
+    suspend fun setSosText(groupId: String, text: String): Result<Unit> {
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (!GroupPermissions.canChangeInfo(member.role, member.permissions, effectiveMemberMask(group))) {
+            return Result.failure(SecurityException("Менять настройки группы вправе администратор"))
+        }
+        val safe = text.trim().take(GroupSos.MAX_TEXT_CHARS)
+        if (safe == group.sosText) return Result.success(Unit)
+        groupDao.setSosText(groupId, safe)
+        backgroundScope.launch {
+            runCatching {
+                delivery.deliver(groupId, GroupWire.buildSosText(groupId, safe), allRecipients(groupId, me))
+            }.onFailure { Log.w(TAG, "sos text fanout failed: ${it.message}") }
+        }
+        Log.i(TAG, "sos text group=$groupId chars=${safe.length} by=$me")
+        return Result.success(Unit)
     }
 
     /** Сколько миллисекунд этому телефону ещё нельзя нажимать SOS в группе. */
@@ -1854,6 +1881,23 @@ class GroupRepository(
             "sos settings applied group=${packet.groupId} enabled=${packet.enabled} " +
                 "count=${packet.count} role=${packet.pressRole} from=$senderId",
         )
+    }
+
+    private suspend fun handleSosText(senderId: String, packet: GroupWire.Packet.SosText) {
+        val me = myId().orEmpty()
+        if (me.isBlank()) return
+        val group = groupDao.getGroupById(packet.groupId) ?: return
+        if (groupDao.getMember(packet.groupId, me) == null) return
+        // Верим владельцу и администраторам с правом менять информацию -
+        // ровно тем, кто вправе текст тревоги менять.
+        if (senderId != group.ownerId) {
+            val sender = groupDao.getMember(packet.groupId, senderId) ?: return
+            if (!GroupRole.isAdminOrOwner(sender.role)) return
+            if (!GroupPermissions.canChangeInfo(sender.role, sender.permissions, effectiveMemberMask(group))) return
+        }
+        if (packet.text == group.sosText) return
+        groupDao.setSosText(packet.groupId, packet.text)
+        Log.i(TAG, "sos text applied group=${packet.groupId} chars=${packet.text.length} from=$senderId")
     }
 
     // ── Сообщения обычных групп роем (этап 5) ────────────────────────────────
@@ -4717,6 +4761,7 @@ class GroupRepository(
 
             is GroupWire.Packet.SlowMode -> handleSlowMode(senderId, packet)
             is GroupWire.Packet.SosSettings -> handleSosSettings(senderId, packet)
+            is GroupWire.Packet.SosText -> handleSosText(senderId, packet)
 
             is GroupWire.Packet.OwnerClaim -> handleOwnerClaim(senderId, packet)
 
@@ -5085,6 +5130,18 @@ class GroupRepository(
                             listOf(nodeId),
                         )
                     }.onFailure { Log.w(TAG, "sos settings for newcomer failed: ${it.message}") }
+                }
+            }
+            // Свой текст тревоги новичок тоже не слышал: говорим, если задан.
+            if (group.sosText.isNotBlank()) {
+                backgroundScope.launch {
+                    runCatching {
+                        delivery.deliver(
+                            groupId,
+                            GroupWire.buildSosText(groupId, group.sosText),
+                            listOf(nodeId),
+                        )
+                    }.onFailure { Log.w(TAG, "sos text for newcomer failed: ${it.message}") }
                 }
             }
         } else {

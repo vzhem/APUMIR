@@ -243,6 +243,8 @@ fun GroupAdminScreen(
                     sosMessageCount = uiState.group?.sosMessageCount ?: 3,
                     sosPressRole = uiState.group?.sosPressRole ?: "ALL",
                     onSetSosSettings = viewModel::setSosSettings,
+                    sosText = uiState.group?.sosText.orEmpty(),
+                    onSetSosText = viewModel::setSosText,
                     onSetAvatar = viewModel::setGroupAvatar,
                     onSave = viewModel::updateProfile,
                     onTogglePublic = viewModel::setPublic,
@@ -335,6 +337,10 @@ private fun OverviewTab(
     sosPressRole: String,
     /** Сохранить настройки SOS (видно, количество, кто нажимает). */
     onSetSosSettings: (Boolean, Int, String) -> Unit,
+    /** Свой текст тревожного сообщения; пусто - текст по умолчанию. */
+    sosText: String,
+    /** Сохранить свой текст тревоги (пустым - вернуть умолчание). */
+    onSetSosText: (String) -> Unit,
     onSetAvatar: (android.net.Uri) -> Unit,
     onSave: (String, String) -> Unit,
     onTogglePublic: (Boolean) -> Unit,
@@ -353,6 +359,9 @@ private fun OverviewTab(
     // описанием появлялись только после переключения вкладок туда-сюда.
     var titleDraft by remember(title) { mutableStateOf(title) }
     var aboutDraft by remember(about) { mutableStateOf(about) }
+    // Черновик своего текста SOS: ключ - сохранённый текст, чтобы чужая
+    // правка с другого телефона не затирала набранное на полуслове.
+    var sosTextDraft by remember(sosText) { mutableStateOf(sosText) }
     var showLeaveConfirm by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     // Раунд 42: аватар группы/канала.
@@ -646,6 +655,43 @@ private fun OverviewTab(
                                 onClick = { onSetSosSettings(true, sosMessageCount, "OWNER") },
                             )
                         }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        stringResource(R.string.sos_text_label),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ApuBubbleMutedColor,
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    if (canChangeInfo) {
+                        // Поле и «Сохранить», как у названия и описания:
+                        // черновик не должен уезжать группе на каждый знак.
+                        ApuFormTextField(
+                            value = sosTextDraft,
+                            onValueChange = { sosTextDraft = it },
+                            label = stringResource(R.string.sos_text_label),
+                            singleLine = false,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            stringResource(R.string.sos_text_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        ApuPremiumButton(
+                            label = stringResource(R.string.admin_save),
+                            onClick = { onSetSosText(sosTextDraft) },
+                            style = DiagnosticsActionStyle.PRIMARY,
+                            enabled = sosTextDraft.trim() != sosText,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        // Без права менять информацию - только текущий текст.
+                        Text(
+                            com.vladimir.messenger.data.group.GroupSos.effectiveText(sosText),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
                     }
                     if (!canChangeInfo) {
                         Spacer(modifier = Modifier.height(6.dp))

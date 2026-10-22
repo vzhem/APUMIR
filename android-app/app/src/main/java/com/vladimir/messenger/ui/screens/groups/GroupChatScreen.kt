@@ -1630,7 +1630,19 @@ fun GroupChatScreen(
         ApuSettingsDialog(
             onDismissRequest = { showSosConfirm = false },
             title = { Text(stringResource(R.string.sos_confirm_title)) },
-            text = { Text(stringResource(R.string.sos_confirm_body, sosCount)) },
+            text = {
+                Column {
+                    Text(stringResource(R.string.sos_confirm_body, sosCount))
+                    Spacer(modifier = Modifier.height(8.dp))
+                    // Точный текст сигнала - свой из настроек группы или
+                    // принятый по умолчанию: нажимающий видит, что уйдёт.
+                    Text(
+                        "\u00AB" + com.vladimir.messenger.data.group.GroupSos
+                            .effectiveText(uiState.group?.sosText) + "\u00BB",
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            },
             confirmButton = {
                 ApuTextAction(
                     label = stringResource(R.string.sos_send_action),

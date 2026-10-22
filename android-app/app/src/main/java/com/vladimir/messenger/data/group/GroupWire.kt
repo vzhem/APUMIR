@@ -367,6 +367,17 @@ object GroupWire {
      */
     const val KIND_SOS_SETTINGS = "soscfg"
 
+    /**
+     * Свой текст тревожного сообщения: `sostxt|groupId|b64(text)`.
+     *
+     * Отдельный вид, а не четвёртое поле в `soscfg`: конверт настроек из
+     * шести частей старые телефоны разбирают, а из семи - отбросили бы
+     * целиком, и вместе с текстом потеряли бы видимость кнопки, число
+     * сообщений и кто вправе нажимать. Пустой текст - «вернуть как было»:
+     * у получателя снова действует текст по умолчанию.
+     */
+    const val KIND_SOS_TEXT = "sostxt"
+
     /** Режим пакета [KIND_OWNER]: добровольная передача от нынешнего владельца. */
     const val OWNER_MODE_GIVE = "give"
 
@@ -575,6 +586,9 @@ object GroupWire {
             val count: Int,
             val pressRole: String,
         ) : Packet()
+
+        /** Свой текст тревоги из настроек группы; пусто - текст по умолчанию. */
+        data class SosText(val groupId: String, val text: String) : Packet()
 
         /**
          * Просьба прислать последние [limit] постов канала целиком.
@@ -1582,6 +1596,12 @@ object GroupWire {
         return "$PREFIX|$KIND_SOS_SETTINGS|$groupId|${if (enabled) 1 else 0}|$safeCount|$safeRole"
     }
 
+    /** Свой текст тревоги одним конвертом; пустой текст возвращает умолчание. */
+    fun buildSosText(groupId: String, text: String): String {
+        require(groupId.isNotBlank()) { "bad group id" }
+        return "$PREFIX|$KIND_SOS_TEXT|$groupId|${encode(text.trim().take(GroupSos.MAX_TEXT_CHARS))}"
+    }
+
     fun buildMemberRestrict(groupId: String, nodeId: String, permissionsMask: Long): String =
         "$PREFIX|$KIND_MEMBER_RESTRICT|$groupId|${encode(nodeId)}|$permissionsMask"
 
@@ -2065,6 +2085,17 @@ object GroupWire {
                     null
                 } else {
                     Packet.SosSettings(groupId, enabled, count, parts[5])
+                }
+            } else {
+                null
+            }
+
+            KIND_SOS_TEXT -> if (parts.size == 4) {
+                val text = decode(parts[3])
+                if (text == null || text.length > GroupSos.MAX_TEXT_CHARS) {
+                    null
+                } else {
+                    Packet.SosText(groupId, text)
                 }
             } else {
                 null

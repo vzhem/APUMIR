@@ -35,6 +35,8 @@ data class GroupSummary(
     val sosEnabled: Boolean = true,
     val sosMessageCount: Int = GroupSos.DEFAULT_COUNT,
     val sosPressRole: String = GroupSos.PRESS_ALL,
+    /** Свой текст тревоги из настроек группы; пусто - текст по умолчанию. */
+    val sosText: String = "",
     /** Личная пауза уведомлений группы или канала. */
     val mutedUntilMs: Long = 0L,
     val wallpaper: String = "",

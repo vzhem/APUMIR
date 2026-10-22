@@ -433,6 +433,9 @@
     <string name="sos_who_admins">Admins</string>
     <string name="sos_who_owner">Owner only</string>
     <string name="sos_settings_saved">SOS settings saved</string>
+    <string name="sos_text_label">Alert message text</string>
+    <string name="sos_text_hint">This text is what every member receives when SOS is pressed. Leave it empty for the standard “🆘 SOS! Urgent help needed!” text. Up to 200 characters.</string>
+    <string name="sos_text_saved">SOS text saved</string>
     <string name="admin_slow_off">Off: you can write as often as you like.</string>
     <string name="admin_mode_hint">Only admins can change this mode.</string>
     <string name="admin_unsubscribe_channel">Unsubscribe from channel</string>
