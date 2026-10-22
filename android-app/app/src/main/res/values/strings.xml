@@ -89,8 +89,8 @@
     <string name="settings_nav_network_hint">Сервер, прокси и состояние связи</string>
     <string name="settings_nav_files">Файлы и раздача</string>
     <string name="settings_nav_files_hint">Передача файлов и помощь сети</string>
-    <string name="settings_nav_hearts">Сердечки</string>
-    <string name="settings_nav_hearts_hint">Игра и рейтинг</string>
+    <string name="settings_nav_hearts">Сердечки и ранги</string>
+    <string name="settings_nav_hearts_hint">Игра, ранг и приглашения</string>
     <string name="settings_nav_updates">Обновления</string>
     <string name="settings_nav_updates_hint">Новые версии приложения</string>
     <string name="settings_nav_help">Помощь и о программе</string>
@@ -164,7 +164,7 @@
     <string name="settings_share_profile">Поделиться профилем</string>
     <string name="settings_share_profile_hint">Отправить ссылку для добавления в контакты</string>
     <string name="settings_ranks">Ранги и возможности</string>
-    <string name="settings_ranks_hint">Что открывается за подтверждённые приглашения</string>
+    <string name="settings_ranks_hint">Что открывается за сердечки и подтверждённые приглашения</string>
     <string name="settings_item_profile">Профиль</string>
     <string name="settings_item_profile_hint">Имя, никнейм, мой QR-код и приглашения</string>
     <string name="settings_font_size">Размер текста</string>
@@ -477,8 +477,8 @@
     <string name="rank_vip_body">VIP - элита APU: ваш ранг не ниже «Проводника» (10-й). Знак и золотое кольцо стоят рядом с вашим именем и аватаркой — в чатах, группах и каналах; возможности приложения открываются рангами.</string>
     <string name="rank_your_rank">ваш ранг</string>
     <string name="rank_invite_friend">Пригласить друга</string>
-    <string name="rank_invite_body">Отправьте ссылку другу. Приглашение засчитается, когда он добавит вас в контакты и вы обменяетесь сообщениями.</string>
-    <string name="rank_grows_title">Ранг растёт от приглашённых друзей</string>
+    <string name="rank_invite_body">Отправьте ссылку другу. После подтверждения приглашение добавит в игру 1 000 сердечек — это эквивалент одного шага ранга.</string>
+    <string name="rank_grows_title">Ранг растёт от сердечек и приглашений</string>
     <string name="rank_benefits_title">Ранги и возможности</string>
     <!-- Согласие на языковой пакет -->
     <string name="translate_consent_title">Скачать языковой пакет?</string>
@@ -1979,12 +1979,17 @@
     <string name="conversation_wallpaper_wait">Подготовка и сохранение…</string>
 
     <string name="heart_game_title">Подними себе рейтинг</string>
-    <string name="heart_game_hint">Поймай сердце: +1 к игровым очкам, отдельно от рейтинга и ранга. Сердце появляется раз в 45–55 секунд, пока приложение открыто. Включение публикует ваш ник и игровые очки в сети. После выключения очки сохранятся, а ранее опубликованные результаты могут оставаться у других до 30 дней.</string>
-    <string name="heart_game_points">поймано</string>
+    <string name="heart_game_hint">Поймай сердце: +1 игровое сердечко. Каждые 1 000 сердечек дают +1 ранг; подтверждённое приглашение для ранга сразу добавляет в игру 1 000 сердечек. Сердце появляется раз в 45–55 секунд, пока приложение открыто. Включение публикует ваш ник и счёт в сети.</string>
+    <string name="heart_game_points">в игре</string>
     <string name="heart_game_my_place_short">Место в таблице: %1$s</string>
     <string name="heart_game_header_place">место №%1$s</string>
-    <string name="heart_game_catch">Поймать сердце: плюс одно очко</string>
+    <string name="heart_game_catch">Поймать сердце: плюс одно игровое сердечко</string>
     <string name="heart_game_save_error">Не удалось сохранить или загрузить игровые очки. Попробуйте ещё раз.</string>
+    <string name="heart_game_rank_summary">Ранг «%1$s» · единиц: %2$d</string>
+    <string name="heart_game_rank_rule">1 000 пойманных сердечек = +1 ранг.</string>
+    <string name="heart_game_invite_rule">1 подтверждённое приглашение для ранга = +1 000 сердечек в игре.</string>
+    <string name="heart_game_rank_progress">В игре: %1$d сердечек. До следующего игрового +1: %2$d. Приглашений: %3$d, промокодов: %4$d.</string>
+    <string name="heart_game_open_ranks">Открыть возможности рангов</string>
     <string name="heart_game_leaders">Лидеры по сердечкам</string>
     <string name="heart_game_refresh">Обновить</string>
     <string name="heart_game_refresh_working">Обновляю…</string>

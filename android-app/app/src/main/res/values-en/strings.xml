@@ -42,8 +42,8 @@
     <string name="settings_nav_network_hint">Server, proxy and link status</string>
     <string name="settings_nav_files">Files and seeding</string>
     <string name="settings_nav_files_hint">File transfers and helping the network</string>
-    <string name="settings_nav_hearts">Hearts</string>
-    <string name="settings_nav_hearts_hint">Game and rating</string>
+    <string name="settings_nav_hearts">Hearts and ranks</string>
+    <string name="settings_nav_hearts_hint">Game, rank, and invitations</string>
     <string name="settings_nav_updates">Updates</string>
     <string name="settings_nav_updates_hint">New app versions</string>
     <string name="settings_nav_help">Help and about</string>
@@ -116,7 +116,7 @@
     <string name="settings_share_profile">Share profile</string>
     <string name="settings_share_profile_hint">Send a link so others can add you as a contact</string>
     <string name="settings_ranks">Ranks and perks</string>
-    <string name="settings_ranks_hint">What unlocks with confirmed invitations</string>
+    <string name="settings_ranks_hint">What unlocks with hearts and confirmed invitations</string>
     <string name="settings_item_profile">Profile</string>
     <string name="settings_item_profile_hint">Name, username, my QR code and invitations</string>
     <string name="settings_font_size">Text size</string>
@@ -403,8 +403,8 @@
     <string name="rank_vip_body">VIP is APU’s elite: your rank is no lower than “Pathfinder” (10th). The badge and the gold ring appear next to your name and avatar in chats, groups, and channels. The app’s features unlock with ranks.</string>
     <string name="rank_your_rank">your rank</string>
     <string name="rank_invite_friend">Invite a friend</string>
-    <string name="rank_invite_body">Send a link to a friend. The invitation counts when they add you to their contacts and you exchange messages.</string>
-    <string name="rank_grows_title">Your rank grows with invited friends</string>
+    <string name="rank_invite_body">Send a link to a friend. After the invitation is confirmed, the game gets 1,000 hearts — the equivalent of one rank step.</string>
+    <string name="rank_grows_title">Your rank grows with hearts and invitations</string>
     <string name="rank_benefits_title">Ranks and perks</string>
     <!-- Согласие на языковой пакет -->
     <string name="translate_consent_title">Download language pack?</string>
@@ -1842,12 +1842,17 @@ The file is not on this phone</string>
     <string name="conversation_wallpaper_wait">Preparing and saving…</string>
 
     <string name="heart_game_title">Boost your rating</string>
-    <string name="heart_game_hint">Catch a heart for +1 game point, separate from ratings and rank. A heart appears every 45–55 seconds while the app is open. Enabling shares your username and game score with the network. Turning it off preserves your points; published results may remain on other devices for up to 30 days.</string>
-    <string name="heart_game_points">caught</string>
+    <string name="heart_game_hint">Catch a heart for +1 game heart. Every 1,000 hearts gives +1 rank; a confirmed invitation for rank immediately adds 1,000 hearts to the game. A heart appears every 45–55 seconds while the app is open. Enabling shares your username and score with the network.</string>
+    <string name="heart_game_points">in game</string>
     <string name="heart_game_my_place_short">Leaderboard place: %1$s</string>
     <string name="heart_game_header_place">rank #%1$s</string>
-    <string name="heart_game_catch">Catch heart: one game point</string>
+    <string name="heart_game_catch">Catch heart: one game heart</string>
     <string name="heart_game_save_error">Could not save or load game points. Please try again.</string>
+    <string name="heart_game_rank_summary">Rank “%1$s” · units: %2$d</string>
+    <string name="heart_game_rank_rule">1,000 caught hearts = +1 rank.</string>
+    <string name="heart_game_invite_rule">1 confirmed invitation for rank = +1,000 hearts in the game.</string>
+    <string name="heart_game_rank_progress">In game: %1$d hearts. To the next game +1: %2$d. Invitations: %3$d, promo codes: %4$d.</string>
+    <string name="heart_game_open_ranks">Open rank benefits</string>
     <string name="heart_game_leaders">Heart leaderboard</string>
     <string name="heart_game_refresh">Refresh</string>
     <string name="heart_game_refresh_working">Refreshing…</string>

@@ -1417,7 +1417,18 @@ private fun SettingsTabContent(
 
             }
             if (section == SettingsSection.Hearts) {
-            item { SettingsCard { com.vladimir.messenger.ui.components.HeartGameSettings() } }
+            item {
+                SettingsCard {
+                    com.vladimir.messenger.ui.components.HeartGameSettings(onOpenRanks = onRankBenefits)
+                    ApuSettingsDivider()
+                    SettingsItem(
+                        icon = Icons.Default.EmojiEvents,
+                        title = stringResource(R.string.settings_ranks),
+                        subtitle = stringResource(R.string.settings_ranks_hint),
+                        onClick = onRankBenefits,
+                    )
+                }
+            }
             }
 
             if (section == SettingsSection.Network) {
