@@ -82,6 +82,7 @@ import com.vladimir.messenger.ui.components.ApuBubble
 import com.vladimir.messenger.ui.components.ApuTabBar
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.AvatarPickerDialog
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -97,6 +98,8 @@ import com.vladimir.messenger.data.group.InviteSummary
 import com.vladimir.messenger.data.group.JoinRequestSummary
 import com.vladimir.messenger.data.group.MemberSummary
 import com.vladimir.messenger.data.group.TopicSummary
+import com.vladimir.messenger.data.textcolor.TextColorPalette
+import com.vladimir.messenger.data.textcolor.TextColorSettingsStore
 import com.vladimir.messenger.util.AppShare
 import com.vladimir.messenger.util.QrCodeGenerator
 import com.vladimir.messenger.ui.components.ApuPremiumCheckbox
@@ -905,6 +908,9 @@ private fun AdminsTab(
     var transferTarget by remember { mutableStateOf<MemberSummary?>(null) }
 
     val memberAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars.collectAsState()
+    val textColorRevision by TextColorSettingsStore.revision.collectAsState()
+    val textColorContext = LocalContext.current
+    LaunchedEffect(Unit) { TextColorSettingsStore.initialize(textColorContext) }
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // Наследование: владелец долго не выходил на связь - администратору
         // (а без администраторов и участнику) предлагаем забрать права.
@@ -948,6 +954,12 @@ private fun AdminsTab(
             item { ApuBubble { Text(stringResource(R.string.admin_no_admins)) } }
         }
         items(admins, key = { it.nodeId }) { admin ->
+            val adminNameColor = remember(admin.nodeId, textColorRevision) {
+                TextColorPalette.colorOr(
+                    TextColorSettingsStore.peerNameColor(textColorContext, admin.nodeId),
+                    ApuBubbleTextColor,
+                )
+            }
             ApuBubble {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -958,7 +970,11 @@ private fun AdminsTab(
                         )
                         Spacer(Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(admin.displayName.ifBlank { admin.nodeId }, fontWeight = FontWeight.Medium)
+                            Text(
+                                admin.displayName.ifBlank { admin.nodeId },
+                                fontWeight = FontWeight.Medium,
+                                color = adminNameColor,
+                            )
                             Text(
                                 if (admin.role == GroupRole.OWNER) stringResource(R.string.admin_owner_rights) else stringResource(R.string.admin_role_admin),
                                 style = MaterialTheme.typography.bodySmall,
@@ -1117,6 +1133,15 @@ private fun MemberRow(
     onBlock: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val textColorRevision by TextColorSettingsStore.revision.collectAsState()
+    val textColorContext = LocalContext.current
+    LaunchedEffect(Unit) { TextColorSettingsStore.initialize(textColorContext) }
+    val memberNameColor = remember(member.nodeId, textColorRevision) {
+        TextColorPalette.colorOr(
+            TextColorSettingsStore.peerNameColor(textColorContext, member.nodeId),
+            if (vip) Color(0xFF8A5F00) else MaterialTheme.colorScheme.onSurface,
+        )
+    }
 
     ApuBubble(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
         Column {
@@ -1139,8 +1164,7 @@ private fun MemberRow(
                                 MaterialTheme.typography.titleMedium, vip,
                             ),
                             fontWeight = FontWeight.Medium,
-                            color = if (vip) Color(0xFF8A5F00)
-                            else MaterialTheme.colorScheme.onSurface,
+                            color = memberNameColor,
                         )
                         if (vip) {
                             Spacer(Modifier.width(6.dp))
