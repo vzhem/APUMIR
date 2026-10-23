@@ -78,6 +78,7 @@ class AddContactViewModel @Inject constructor(
         }
         viewModelScope.launch(Dispatchers.IO) {
             val current = currentOwnerId()
+            repairLegacyCurrentOwner(current)
             val found = if (clean.isBlank()) {
                 emptyList()
             } else {
@@ -114,6 +115,20 @@ class AddContactViewModel @Inject constructor(
                 .getString("node_id", null)
                 ?.trim()
                 ?.takeIf { it.isNotBlank() }
+
+    /**
+     * Older onboarding stored a shortened display fingerprint in the ownerId
+     * column.  It is not a valid network address; repair only that exact value
+     * and only when the full current owner is not already present.
+     */
+    private suspend fun repairLegacyCurrentOwner(current: String?) {
+        if (current.isNullOrBlank() || current.length <= 16) return
+        runCatching {
+            if (nicknameDao.byOwner(current) == null) {
+                nicknameDao.migrateLegacyOwnerId(current.take(16) + "...", current)
+            }
+        }.onFailure { Log.w(TAG, "legacy nickname owner repair skipped", it) }
+    }
 
     /**
      * Remove only old registrations proven by the device-local identity

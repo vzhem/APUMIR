@@ -78,6 +78,10 @@ interface NicknameDao {
     @Query("SELECT EXISTS(SELECT 1 FROM nickname_suppressions WHERE ownerId = :ownerId AND name = :name COLLATE NOCASE)")
     suspend fun isSuppressed(ownerId: String, name: String): Boolean
 
+    /** Repair the truncated owner id written by pre-ledger onboarding builds. */
+    @Query("UPDATE nicknames SET ownerId = :currentOwnerId WHERE ownerId = :legacyOwnerId")
+    suspend fun migrateLegacyOwnerId(legacyOwnerId: String, currentOwnerId: String): Int
+
     @Query("DELETE FROM nicknames WHERE ownerId = :ownerId")
     suspend fun deleteByOwner(ownerId: String)
 
