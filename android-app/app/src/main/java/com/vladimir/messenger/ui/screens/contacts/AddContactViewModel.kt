@@ -142,7 +142,6 @@ class AddContactViewModel @Inject constructor(
 
             var removed = 0
             var deletedContacts = 0
-            var preservedForSafety = 0
             val now = System.currentTimeMillis()
             for (entry in eligible) {
                 val normalizedName = entry.name.trim().trimStart('@').lowercase()
@@ -161,21 +160,21 @@ class AddContactViewModel @Inject constructor(
                         } else {
                             null
                         }
-                        val canMoveHistory = oldChat == null || liveContact != null
-                        if (canMoveHistory) {
-                            if (oldChat != null && liveContact != null) {
-                                chatRepository.getOrCreateChat(current, liveContact.displayName)
-                                chatRepository.absorbChatOf(entry.ownerId, current)
-                            }
-                            if (oldContact != null) {
-                                contactRepository.deleteContact(entry.ownerId)
-                                deletedContacts++
-                            }
-                        } else {
-                            // Do not destroy a conversation merely because the
-                            // user asked to forget a dead address: there is no
-                            // verified live destination for it yet.
-                            preservedForSafety++
+                        if (oldChat != null && liveContact != null) {
+                            // Move the whole message history before deleting
+                            // the old contact.  This is the only safe merge
+                            // path because the target is a verified live owner.
+                            chatRepository.getOrCreateChat(current, liveContact.displayName)
+                            chatRepository.absorbChatOf(entry.ownerId, current)
+                        } else if (oldChat != null) {
+                            // The user explicitly confirmed cleanup, but there
+                            // is no live destination for this history.  Do not
+                            // leave a chat that can still send to the dead id.
+                            chatRepository.deleteChatsOf(entry.ownerId)
+                        }
+                        if (oldContact != null) {
+                            contactRepository.deleteContact(entry.ownerId)
+                            deletedContacts++
                         }
                     }
                 }
