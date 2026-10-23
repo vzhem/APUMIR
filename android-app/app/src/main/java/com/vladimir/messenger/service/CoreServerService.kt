@@ -305,6 +305,25 @@ class CoreServerService : Service() {
     }
 
     /**
+     * A successfully opened sealed message proves the sender's signed file/message
+     * binding. Learn it before sending the ACK: otherwise a receiver that missed
+     * HELLO can display the message but cannot send a sealed reply. A changed
+     * binding is reported, never overwritten automatically.
+     */
+    private suspend fun rememberOpenedMessageBinding(senderId: String, wire: String) {
+        when (fileTransferRouter.rememberOpenedMessageBinding(senderId, wire)) {
+            com.vladimir.messenger.data.file.FileTransferRouter.OpenedMessageBindingResult.KEY_CHANGED -> {
+                TransferDiagnostics.notePeerKeyChanged()
+                Log.w(TAG, "opened message binding differs from pinned peer binding")
+            }
+            com.vladimir.messenger.data.file.FileTransferRouter.OpenedMessageBindingResult.PINNED_NEW -> {
+                Log.i(TAG, "learned sender binding from opened message")
+            }
+            else -> Unit
+        }
+    }
+
+    /**
      * Уведомить отправителя, что его приглашение отклонено настройками
      * приватности этого телефона. Самому получателю по-прежнему полная
      * тишина; отправитель получает служебный пакет и видит человеческое
@@ -1178,6 +1197,13 @@ class CoreServerService : Service() {
                                         // копии в пути от настоящего рассинхрона.
                                         com.vladimir.messenger.data.security.KeyDesyncNotice
                                             .opened(applicationContext, senderId)
+                                        if (SealedWire.isSealed(parsed.content)) {
+                                            try {
+                                                rememberOpenedMessageBinding(senderId, parsed.content)
+                                            } catch (error: Exception) {
+                                                Log.w(TAG, "CF opened message binding learn failed: ${error.message}")
+                                            }
+                                        }
                                         // Раунд 140: служебные конверты разбираются ДО
                                         // сохранения - тем же стражем, что и основной
                                         // путь. У неизвестного отправителя чат ради
@@ -2298,6 +2324,29 @@ class CoreServerService : Service() {
                     return
                 }
 
+                // ACK is intentionally a raw control packet so a receiver that
+                // learned the sender binding from the just-opened message can
+                // return it even before HELLO. Handle it before the self-node
+                // filter: mirror devices may share the routing node id, and the
+                // old order turned an ACK into an ACK-of-ACK and dropped it.
+                if (!SealedWire.isSealed(rawText) && DeliveryAckWire.isPacket(rawText)) {
+                    val ackedId = DeliveryAckWire.messageId(rawText)
+                    if (ackedId != null) {
+                        mirror?.publishEnvelope(senderId, chatId, messageId, rawText)
+                        serviceScope.launch {
+                            try {
+                                val changed = markMessageDelivered(ackedId)
+                                Log.i(TAG, "📬 raw delivery ACK: msgId=$ackedId changed=$changed")
+                            } catch (error: Exception) {
+                                Log.w(TAG, "raw delivery ACK apply failed: ${error.message}")
+                            }
+                        }
+                    } else {
+                        Log.w(TAG, "malformed raw delivery ACK; dropped")
+                    }
+                    return
+                }
+
                 // р239: сообщение «от себя». Такое бывает, когда в контактах
                 // оказался собственный узел (в профиле есть «Мой QR» - его
                 // можно отсканировать самому). Показывать эхо входящим и
@@ -2372,6 +2421,11 @@ class CoreServerService : Service() {
                     // открывается» больше не нужна и не должна висеть сутками.
                     com.vladimir.messenger.data.security.KeyDesyncNotice
                         .opened(applicationContext, senderId)
+                    try {
+                        rememberOpenedMessageBinding(senderId, rawText)
+                    } catch (error: Exception) {
+                        Log.w(TAG, "opened message binding learn failed: ${error.message}")
+                    }
                     opened
                 } else {
                     rawText
@@ -2412,8 +2466,9 @@ class CoreServerService : Service() {
                 // его узнаём и помечаем своё сообщение доставленным. Строка
                 // служебная - в переписку не попадает.
                 //
-                // Место важно: разбор идёт ПОСЛЕ расшифровки - конверт до неё
-                // выглядит как «APUSL1|…», и префикс не угадать.
+                // Raw ACKs are handled before the self-node filter above. Keep
+                // this guard for legacy sealed ACKs from older senders: their
+                // prefix only becomes visible after MessageSealer.open().
                 if (DeliveryAckWire.isPacket(text)) {
                     val ackedId = DeliveryAckWire.messageId(text)
                     if (ackedId != null) {

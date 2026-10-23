@@ -274,8 +274,13 @@ class ChatRepository @Inject constructor(
             // р242: отметка для диагностики - когда последний раз отправляли.
             com.vladimir.messenger.data.mirror.MirrorHub.noteOutgoing()
             if (sentDirectly) {
-                messageDao.updateMessageStatus(messageId, MessageStatus.SENT.name)
-                messageDao.updateMessageChannel(messageId, MessageChannel.LOCAL.name)
+                // Guarded update: an early delivery ACK must not be downgraded
+                // back to SENT by this transport completion callback.
+                messageDao.updateOutgoingRetryResult(
+                    messageId,
+                    MessageStatus.SENT.name,
+                    MessageChannel.LOCAL.name,
+                )
                 // Диагностика (2026-10-07): считаем ЗДЕСЬ, а не в конце функции:
                 // отложенное до сети — это ещё не отправка, и путать их нельзя.
                 com.vladimir.messenger.data.diagnostics.TransferDiagnostics
@@ -283,9 +288,13 @@ class ChatRepository @Inject constructor(
             } else if (actualRecipientId.isNotBlank()) {
                 // No transport confirmed delivery. Room remains the phone-owned persistent outbox;
                 // Rust may also retain the compatible relay in its bounded mesh queue. Until a
-                // recipient receipt arrives this is queued, never SENT.
-                messageDao.updateMessageStatus(messageId, MessageStatus.QUEUED_OFFLINE.name)
-                messageDao.updateMessageChannel(messageId, MessageChannel.STORE_FORWARD.name)
+                // recipient receipt arrives this is queued, never SENT. Keep the update guarded
+                // for the same early-ACK race as the direct-success path.
+                messageDao.updateOutgoingRetryResult(
+                    messageId,
+                    MessageStatus.QUEUED_OFFLINE.name,
+                    MessageChannel.STORE_FORWARD.name,
+                )
                 Log.i(TAG, "Message queued offline in phone-owned mesh: $messageId")
                 com.vladimir.messenger.data.diagnostics.TransferDiagnostics
                     .noteMessageQueuedOffline()
@@ -496,7 +505,12 @@ class ChatRepository @Inject constructor(
                     false
                 }
                 if (ok) {
-                    messageDao.updateMessageStatus(msg.id, MessageStatus.SENT.name)
+                    // The ACK may arrive before this callback returns.
+                    messageDao.updateOutgoingRetryResult(
+                        msg.id,
+                        MessageStatus.SENT.name,
+                        MessageChannel.LOCAL.name,
+                    )
                     sent++
                 } else {
                     // Раунд 182 (аудит-3): первая же неудача - скорее всего
@@ -533,7 +547,11 @@ class ChatRepository @Inject constructor(
                 Log.i(TAG, "  📤 retry result: sent=$sent")
 
                 if (sent) {
-                    messageDao.updateMessageStatus(msg.id, MessageStatus.SENT.name)
+                    messageDao.updateOutgoingRetryResult(
+                        msg.id,
+                        MessageStatus.SENT.name,
+                        MessageChannel.LOCAL.name,
+                    )
                     retried++
                 }
             }
@@ -608,7 +626,11 @@ class ChatRepository @Inject constructor(
             Log.i(TAG, "retryAllPendingMessages peer=$peerId msg=${msg.id} sent=$sent")
 
             if (sent) {
-                messageDao.updateMessageStatus(msg.id, MessageStatus.SENT.name)
+                messageDao.updateOutgoingRetryResult(
+                    msg.id,
+                    MessageStatus.SENT.name,
+                    MessageChannel.LOCAL.name,
+                )
                 retried++
             }
         }
@@ -724,7 +746,13 @@ class ChatRepository @Inject constructor(
         }
         if (messageDao.messageExists(row.id)) {
             if (getMessageById(row.id)?.isFromMe == true) {
-                messageDao.updateMessageStatus(row.id, mirrorStatus)
+                // Mirror echoes are transport state, not authority to downgrade
+                // DELIVERED/READ after a receipt raced the echo.
+                messageDao.updateOutgoingRetryResult(
+                    row.id,
+                    mirrorStatus,
+                    MessageChannel.LOCAL.name,
+                )
             }
             return
         }
@@ -959,7 +987,13 @@ class ChatRepository @Inject constructor(
             }
                 .getOrDefault(false)
             if (ok) {
-                runCatching { messageDao.updateMessageStatus(msg.id, MessageStatus.SENT.name) }
+                runCatching {
+                    messageDao.updateOutgoingRetryResult(
+                        msg.id,
+                        MessageStatus.SENT.name,
+                        MessageChannel.LOCAL.name,
+                    )
+                }
                 sent++
             }
         }
@@ -1419,6 +1453,22 @@ class ChatRepository @Inject constructor(
     /** ACKs only acknowledge our outgoing rows; an old ACK cannot downgrade READ. */
     suspend fun markOutgoingMessageDelivered(messageId: String): Boolean {
         if (messageId.isBlank()) return false
+        val target = messageDao.getMessageById(messageId)
+        val targetKind = when {
+            target == null -> "unknown"
+            !target.isFromMe -> "not_mine"
+            target.status in setOf(
+                MessageStatus.PENDING.name,
+                MessageStatus.QUEUED_OFFLINE.name,
+                MessageStatus.SENT.name,
+                MessageStatus.FAILED.name,
+                MessageStatus.LOCAL_FILE.name,
+                MessageStatus.FILE_EXPIRED.name,
+            ) -> "matched"
+            else -> "terminal"
+        }
+        com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+            .noteDeliveryAckTarget(targetKind)
         val changed = messageDao.markOutgoingMessageDelivered(messageId) > 0
         // Диагностика: подтверждение — единственное доказательство, что
         // собеседник ПОЛУЧИЛ сообщение. Считаем только настоящую смену

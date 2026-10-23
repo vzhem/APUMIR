@@ -965,6 +965,60 @@ class FileTransferRouter @Inject constructor(
     /** Сколько чужих байт держим для других (строка «Занято сейчас…» в настройках). */
     suspend fun custodyHeldBytes(): Long = runCatching { transferDao.custodyHeldBytes() }.getOrDefault(0L)
 
+    /**
+     * Result of learning the sender binding from a message that we have already
+     * opened successfully. A sealed message carries a signed binding for both
+     * sides; refusing to remember the sender here leaves a one-way deadlock:
+     * the receiver can read the message but cannot seal its ACK or its next
+     * ordinary reply until a separate HELLO happens to arrive.
+     *
+     * KEY_CHANGED is deliberately not repaired automatically. A different
+     * binding for an existing node is still a TOFU/security event and requires
+     * the existing out-of-band identity check.
+     */
+    enum class OpenedMessageBindingResult {
+        NOT_SEALED,
+        INVALID,
+        PINNED_NEW,
+        ALREADY_PINNED,
+        KEY_CHANGED,
+        FAILED,
+    }
+
+    suspend fun rememberOpenedMessageBinding(
+        senderId: String,
+        wire: String,
+    ): OpenedMessageBindingResult {
+        if (!com.vladimir.messenger.data.security.SealedWire.isSealed(wire)) {
+            return OpenedMessageBindingResult.NOT_SEALED
+        }
+        val binding = com.vladimir.messenger.data.security.SealedWire.senderBinding(wire)
+            ?: return OpenedMessageBindingResult.INVALID
+        val valid = runCatching {
+            crypto.verifyBinding(binding) && crypto.bindingNodeId(binding) == senderId
+        }.getOrDefault(false)
+        if (!valid) return OpenedMessageBindingResult.INVALID
+        return try {
+            val pinned = peerStore.pinFirstSeen(binding, System.currentTimeMillis())
+            com.vladimir.messenger.data.security.MessageSealer
+                .remember(appContext, pinned.nodeId, binding)
+            if (pinned.newlyPinned) {
+                OpenedMessageBindingResult.PINNED_NEW
+            } else {
+                OpenedMessageBindingResult.ALREADY_PINNED
+            }
+        } catch (error: Exception) {
+            if (error.message.orEmpty().contains("key changed", ignoreCase = true) ||
+                error.message.orEmpty().contains("conflicting file exchange pin", ignoreCase = true)
+            ) {
+                OpenedMessageBindingResult.KEY_CHANGED
+            } else {
+                Log.w(TAG, "opened message binding was not persisted: ${error.message}")
+                OpenedMessageBindingResult.FAILED
+            }
+        }
+    }
+
     /** UI escape hatch when preparation reports the recipient binding is not pinned yet. */
     suspend fun requestExchangeBinding(recipientNodeId: String) {
         if (!RustBridge.isRunning()) return

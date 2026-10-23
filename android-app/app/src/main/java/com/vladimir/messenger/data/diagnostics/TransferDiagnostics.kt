@@ -206,6 +206,22 @@ object TransferDiagnostics {
     }
 
     /**
+     * Explain `changed=false` without logging message IDs. The target lookup is
+     * deliberately performed immediately before the guarded DAO update, so the
+     * next diagnostic report can distinguish an unknown transport ID from an
+     * already-terminal row or a row owned by the other side.
+     */
+    fun noteDeliveryAckTarget(kind: String) {
+        val key = when (kind) {
+            "matched" -> Counters.MSG_ACK_TARGET_MATCHED
+            "not_mine" -> Counters.MSG_ACK_TARGET_NOT_MINE
+            "terminal" -> Counters.MSG_ACK_TARGET_TERMINAL
+            else -> Counters.MSG_ACK_TARGET_UNKNOWN
+        }
+        bump(key)
+    }
+
+    /**
      * Failed opens count attempts, not unique messages or confirmed peer-key changes. A relay
      * may hand us someone else's ciphertext. Only a separately verified HELLO pin mismatch
      * is evidence of a changed peer binding.
