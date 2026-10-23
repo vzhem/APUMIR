@@ -10,6 +10,7 @@ import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
+import com.vladimir.messenger.ui.components.ApuPremiumDialog
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.PeerAvatar
 import com.vladimir.messenger.ui.theme.AvatarStore
@@ -87,6 +88,12 @@ private data class ChatRow(
     val orderMs: Long,
 )
 
+private data class LocalSettingsUndo(
+    val scope: String,
+    val wallpaper: String?,
+    val textColor: String?,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatDetailScreen(
@@ -139,6 +146,7 @@ fun ChatDetailScreen(
     var forwardMessage by remember { mutableStateOf<Message?>(null) }
     val fwdScope = androidx.compose.runtime.rememberCoroutineScope()
     val localSettingsScope = androidx.compose.runtime.rememberCoroutineScope()
+    var localSettingsUndo by remember { mutableStateOf<LocalSettingsUndo?>(null) }
     // Раунд 203: подтверждение пересылки - плашка по центру экрана.
     var fwdSent by remember { mutableStateOf(false) }
     if (fwdSent) {
@@ -417,19 +425,7 @@ fun ChatDetailScreen(
                                 val previousTextColor = com.vladimir.messenger.data.textcolor.TextColorSettingsStore.scopeOverride(context, scope)
                                 com.vladimir.messenger.data.wallpaper.ConversationWallpaper.setPersonal(context, scope, null)
                                 com.vladimir.messenger.data.textcolor.TextColorSettingsStore.resetScope(context, scope)
-                                val result = snackbarHostState.showSnackbar(
-                                    message = context.getString(R.string.chat_reset_local_settings_done),
-                                    actionLabel = context.getString(R.string.settings_reset_undo),
-                                    duration = SnackbarDuration.Short,
-                                )
-                                if (result == SnackbarResult.ActionPerformed) {
-                                    com.vladimir.messenger.data.wallpaper.ConversationWallpaper.setPersonal(context, scope, previousWallpaper)
-                                    if (previousTextColor == null) {
-                                        com.vladimir.messenger.data.textcolor.TextColorSettingsStore.resetScope(context, scope)
-                                    } else {
-                                        com.vladimir.messenger.data.textcolor.TextColorSettingsStore.setTextColor(context, scope, previousTextColor)
-                                    }
-                                }
+                                localSettingsUndo = LocalSettingsUndo(scope, previousWallpaper, previousTextColor)
                             }
                         },
                     ),
@@ -1273,6 +1269,35 @@ fun ChatDetailScreen(
                 viewModel.toggleReaction(messageId, emoji)
             },
         )
+    }
+    localSettingsUndo?.let { undo ->
+        ApuPremiumDialog(
+            title = stringResource(R.string.chat_reset_local_settings),
+            onDismiss = { localSettingsUndo = null },
+            confirmLabel = stringResource(R.string.settings_reset_undo),
+            onConfirm = {
+                localSettingsScope.launch {
+                    com.vladimir.messenger.data.wallpaper.ConversationWallpaper.setPersonal(
+                        context,
+                        undo.scope,
+                        undo.wallpaper,
+                    )
+                    if (undo.textColor == null) {
+                        com.vladimir.messenger.data.textcolor.TextColorSettingsStore.resetScope(context, undo.scope)
+                    } else {
+                        com.vladimir.messenger.data.textcolor.TextColorSettingsStore.setTextColor(
+                            context,
+                            undo.scope,
+                            undo.textColor,
+                        )
+                    }
+                }
+                localSettingsUndo = null
+            },
+            dismissLabel = stringResource(R.string.groups_ok),
+        ) {
+            Text(stringResource(R.string.chat_reset_local_settings_done))
+        }
     }
     if (showNotificationMuteDialog) {
         NotificationMuteDialog(

@@ -11,6 +11,7 @@ package com.vladimir.messenger.ui.screens.settings
 import com.vladimir.messenger.ui.components.ApuPremiumChip
 import com.vladimir.messenger.ui.components.ApuPremiumIconTile
 import com.vladimir.messenger.ui.components.ApuPremiumDialog
+import com.vladimir.messenger.ui.components.ApuPremiumNoticeDialog
 import com.vladimir.messenger.ui.components.ApuPremiumChoiceRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
@@ -851,7 +852,6 @@ private fun ProfileTabContent(
             },
             onRemove = {
                 com.vladimir.messenger.data.profile.EmojiStatusStore.setMine(context, "")
-                showEmojiStatusPicker = false
             },
             onDismiss = { showEmojiStatusPicker = false },
         )
@@ -966,6 +966,10 @@ private fun SettingsTabContent(
     var showInvitePrivacyDialog by remember { mutableStateOf(false) }
     var showGlobalResetDialog by remember { mutableStateOf(false) }
     var sectionResetCategory by remember { mutableStateOf<SettingsResetCategory?>(null) }
+    // Every successful default/reset action gets the same APU card.  Keep the
+    // resource id in state so a language change never leaves a stale sentence.
+    var resetNoticeMessage by remember { mutableStateOf<Int?>(null) }
+    var recreateAfterResetNotice by remember { mutableStateOf(false) }
     val invitePrivacyMode by com.vladimir.messenger.data.profile.InvitePrivacyStore.mode
         .collectAsStateWithLifecycle()
     val muteRevision by viewModel.notificationMuteRevision.collectAsStateWithLifecycle()
@@ -1088,7 +1092,16 @@ private fun SettingsTabContent(
                 SettingsCard {
                     val context = LocalContext.current
                     val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
-                    ThemeModeChoices(selected = themeMode, onSelect = { ThemeModeHolder.set(context, it) })
+                    ThemeModeChoices(
+                        selected = themeMode,
+                        onSelect = { mode ->
+                            val returningToDefault = mode == ThemeMode.SYSTEM && themeMode != ThemeMode.SYSTEM
+                            ThemeModeHolder.set(context, mode)
+                            if (returningToDefault) {
+                                resetNoticeMessage = R.string.settings_default_done_body
+                            }
+                        },
+                    )
                     ApuSettingsDivider()
                     val appFontSize by AppFontSizeHolder.size.collectAsStateWithLifecycle()
                     // Раунд 268: у этого блока не было боковых отступов, и
@@ -1129,7 +1142,13 @@ private fun SettingsTabContent(
                                             ApuPremiumChip(
                                                 label = stringResource(option.labelRes),
                                                 selected = appFontSize == option,
-                                                onClick = { AppFontSizeHolder.set(context, option) },
+                                                onClick = {
+                                                    val returningToDefault = option == AppFontSize.STANDARD && appFontSize != option
+                                                    AppFontSizeHolder.set(context, option)
+                                                    if (returningToDefault) {
+                                                        resetNoticeMessage = R.string.settings_default_done_body
+                                                    }
+                                                },
                                                 modifier =
                                                     if (chipsHorizontal) Modifier
                                                     else Modifier.fillMaxWidth(),
@@ -1144,7 +1163,10 @@ private fun SettingsTabContent(
                         icon = Icons.Default.RestartAlt,
                         title = stringResource(R.string.settings_reset_font),
                         subtitle = stringResource(R.string.settings_font_size_hint),
-                        onClick = { AppFontSizeHolder.set(context, AppFontSize.STANDARD) },
+                        onClick = {
+                            AppFontSizeHolder.set(context, AppFontSize.STANDARD)
+                            resetNoticeMessage = R.string.settings_default_done_body
+                        },
                     )
 
                     // Свои обои: из галереи или стандартные в тон теме.
@@ -1191,7 +1213,10 @@ private fun SettingsTabContent(
                                 label = stringResource(R.string.settings_reset_wallpaper),
                                 icon = Icons.Default.RestartAlt,
                                 style = DiagnosticsActionStyle.QUIET,
-                                onClick = { WallpaperHolder.set(context, null) },
+                                onClick = {
+                                    WallpaperHolder.set(context, null)
+                                    resetNoticeMessage = R.string.settings_default_done_body
+                                },
                             )
                         }
                     }
@@ -1227,7 +1252,13 @@ private fun SettingsTabContent(
                                     dark = tintDark,
                                     selected = wallpaperTint == option,
                                     name = stringResource(option.labelRes),
-                                    onClick = { WallpaperTintHolder.set(context, option) },
+                                    onClick = {
+                                        val returningToDefault = option == WallpaperTint.CLASSIC && wallpaperTint != option
+                                        WallpaperTintHolder.set(context, option)
+                                        if (returningToDefault) {
+                                            resetNoticeMessage = R.string.settings_default_done_body
+                                        }
+                                    },
                                 )
                             }
                         }
@@ -1246,6 +1277,7 @@ private fun SettingsTabContent(
                         onClick = {
                             WallpaperHolder.set(context, null)
                             WallpaperTintHolder.set(context, WallpaperTint.CLASSIC)
+                            resetNoticeMessage = R.string.settings_default_done_body
                         },
                     )
                 }
@@ -1877,9 +1909,8 @@ private fun SettingsTabContent(
             onDismiss = { showGlobalResetDialog = false },
             onConfirm = { categories ->
                 viewModel.resetSettings(categories) {
-                    if (SettingsResetCategory.APPEARANCE in categories) {
-                        (settingsContext as? android.app.Activity)?.recreate()
-                    }
+                    recreateAfterResetNotice = SettingsResetCategory.APPEARANCE in categories
+                    resetNoticeMessage = R.string.settings_reset_done_body
                 }
                 showGlobalResetDialog = false
             },
@@ -1892,12 +1923,26 @@ private fun SettingsTabContent(
             onDismiss = { sectionResetCategory = null },
             onConfirm = { categories ->
                 viewModel.resetSettings(categories) {
-                    if (SettingsResetCategory.APPEARANCE in categories) {
-                        (settingsContext as? android.app.Activity)?.recreate()
-                    }
+                    recreateAfterResetNotice = SettingsResetCategory.APPEARANCE in categories
+                    resetNoticeMessage = R.string.settings_reset_done_body
                 }
                 sectionResetCategory = null
             },
+        )
+    }
+
+    resetNoticeMessage?.let { messageRes ->
+        ApuPremiumNoticeDialog(
+            title = stringResource(R.string.settings_reset_done_title),
+            message = stringResource(messageRes),
+            onDismiss = {
+                resetNoticeMessage = null
+                if (recreateAfterResetNotice) {
+                    recreateAfterResetNotice = false
+                    (settingsContext as? android.app.Activity)?.recreate()
+                }
+            },
+            icon = Icons.Default.CheckCircle,
         )
     }
 

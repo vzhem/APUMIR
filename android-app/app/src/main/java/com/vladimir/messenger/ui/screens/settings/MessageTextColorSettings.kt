@@ -52,6 +52,7 @@ fun MessageTextColorSettingsCard(onNameColorChanged: () -> Unit = {}) {
     val revision by TextColorSettingsStore.revision.collectAsStateWithLifecycle()
     var selectedScope by remember { mutableStateOf<String?>(null) }
     var showResetDone by remember { mutableStateOf(false) }
+    var showDefaultDone by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { TextColorSettingsStore.initialize(context) }
 
@@ -168,6 +169,14 @@ fun MessageTextColorSettingsCard(onNameColorChanged: () -> Unit = {}) {
             icon = Icons.Default.CheckCircle,
         )
     }
+    if (showDefaultDone) {
+        ApuPremiumNoticeDialog(
+            title = stringResource(R.string.settings_reset_done_title),
+            message = stringResource(R.string.settings_default_done_body),
+            onDismiss = { showDefaultDone = false },
+            icon = Icons.Default.CheckCircle,
+        )
+    }
 
     selectedScope?.let { scope ->
         val title = when (scope) {
@@ -214,6 +223,9 @@ fun MessageTextColorSettingsCard(onNameColorChanged: () -> Unit = {}) {
                                 }
                             }
                             else -> TextColorSettingsStore.setTextColor(context, scope, choice.id)
+                        }
+                        if (choice.id == TextColorPalette.DEFAULT_ID) {
+                            showDefaultDone = true
                         }
                         selectedScope = null
                     },

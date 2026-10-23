@@ -12,6 +12,7 @@ import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ApuPremiumButton
 import com.vladimir.messenger.ui.components.ApuPremiumChip
+import com.vladimir.messenger.ui.components.ApuPremiumNoticeDialog
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.ExpandLess
@@ -47,6 +48,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -365,6 +367,7 @@ private fun OverviewTab(
     // Черновик своего текста SOS: ключ - сохранённый текст, чтобы чужая
     // правка с другого телефона не затирала набранное на полуслове.
     var sosTextDraft by remember(sosText) { mutableStateOf(sosText) }
+    var showSosDefaultDone by remember { mutableStateOf(false) }
     var showLeaveConfirm by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     // Раунд 42: аватар группы/канала.
@@ -684,7 +687,10 @@ private fun OverviewTab(
                         Spacer(modifier = Modifier.height(6.dp))
                         ApuPremiumButton(
                             label = stringResource(R.string.admin_save),
-                            onClick = { onSetSosText(sosTextDraft) },
+                            onClick = {
+                                onSetSosText(sosTextDraft)
+                                if (sosTextDraft.trim().isEmpty()) showSosDefaultDone = true
+                            },
                             style = DiagnosticsActionStyle.PRIMARY,
                             enabled = sosTextDraft.trim() != sosText,
                             modifier = Modifier.fillMaxWidth(),
@@ -815,6 +821,14 @@ private fun OverviewTab(
                 groupAvatarToCrop = null
             },
             onDismiss = { groupAvatarToCrop = null },
+        )
+    }
+    if (showSosDefaultDone) {
+        ApuPremiumNoticeDialog(
+            title = stringResource(R.string.sos_text_default_done_title),
+            message = stringResource(R.string.sos_text_default_done_body),
+            onDismiss = { showSosDefaultDone = false },
+            icon = Icons.Default.CheckCircle,
         )
     }
 }

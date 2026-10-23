@@ -463,6 +463,8 @@
     <string name="sos_text_label">Alert message text</string>
     <string name="sos_text_hint">This text is what every member receives when SOS is pressed. Leave it empty for the standard “🆘 SOS! Urgent help needed!” text. Up to 200 characters.</string>
     <string name="sos_text_saved">SOS text saved</string>
+    <string name="sos_text_default_done_title">Done</string>
+    <string name="sos_text_default_done_body">The SOS text was cleared and returned to its standard value.</string>
     <string name="admin_slow_off">Off: you can write as often as you like.</string>
     <string name="admin_mode_hint">Only admins can change this mode.</string>
     <string name="admin_unsubscribe_channel">Unsubscribe from channel</string>
@@ -675,10 +677,18 @@
     <string name="peer_reset_confirm_title">Reset node observations?</string>
     <string name="peer_reset_confirm_body">The local node history will be deleted. Scores will build up again as the network is used.</string>
     <string name="peer_reset_confirm">Reset</string>
+    <string name="peer_reset_done_title">Done</string>
+    <string name="peer_reset_done_body">Local node observations were reset. New scores will be collected again.</string>
     <!-- Settings -->
     <string name="settings_set_username">Set @username</string>
     <string name="settings_complaints_spike">⚠️ A spike in complaints: the node’s reputation and priority are temporarily lowered.</string>
     <string name="settings_avatar">Avatar</string>
+    <string name="emoji_status_title">Emoji status</string>
+    <string name="emoji_status_hint">One symbol next to your profile. Everyone can see it: the status is sent to contacts and passed through the network like your name and avatar.</string>
+    <string name="emoji_status_set">Set emoji status</string>
+    <string name="emoji_status_remove">Remove status</string>
+    <string name="emoji_status_default_done_title">Done</string>
+    <string name="emoji_status_default_done_body">The emoji status was removed and returned to its default.</string>
     <string name="settings_remove_avatar">Remove avatar</string>
     <string name="settings_swarm_full">Shares at full speed on mobile data too, even when the battery is low</string>
     <string name="settings_counting_space">Counting used space…</string>
@@ -1729,6 +1739,10 @@ The file is not on this phone</string>
     <string name="voice_effect_title">Voice effect</string>
     <string name="voice_effect_hint">For voice messages the effect is applied to the whole recording when sent. In a call your voice changes immediately and the other person hears the selected version.</string>
     <string name="voice_effect_done">Done</string>
+    <string name="voice_effect_default_done_title">Done</string>
+    <string name="voice_effect_default_done_body">The voice effect has been returned to the normal default.</string>
+    <string name="voice_speed_default_done_title">Done</string>
+    <string name="voice_speed_default_done_body">Playback speed has been returned to its default.</string>
     <string name="voice_effect_processing">Applying effect…</string>
     <string name="voice_effect_button">Effect: %1$s</string>
     <string name="voice_effect_short">Effect</string>
@@ -1792,6 +1806,8 @@ The file is not on this phone</string>
     <string name="story_crop_mirror">Mirror ↔</string>
     <string name="story_crop_flip">Flip ↕</string>
     <string name="story_crop_reset">Reset</string>
+    <string name="story_crop_reset_done_title">Done</string>
+    <string name="story_crop_reset_done_body">The photo crop and rotation have been returned to their original values.</string>
     <string name="story_crop_straighten_value">Level: %1$d°</string>
     <string name="story_crop_hint">Pinch to zoom and rotate, drag to move, corners to crop.</string>
     <string name="story_crop_corner">Crop corner %1$d</string>
@@ -1861,6 +1877,11 @@ The file is not on this phone</string>
     <string name="story_video_reset_audio">Audio — original</string>
     <string name="story_video_reset_caption">Clear caption</string>
     <string name="story_video_reset_shape">Shape — regular</string>
+    <string name="story_video_reset_done_title">Done</string>
+    <string name="story_video_reset_done_body">The selected video-story settings have been returned to their defaults.</string>
+    <string name="story_default_done_title">Done</string>
+    <string name="story_filter_default_done_body">Face filters are off again, as they are by default.</string>
+    <string name="story_background_default_done_body">The video background has been returned to its default: no background.</string>
     <string name="chat_reset_local_settings">Reset this chat to defaults</string>
     <string name="chat_reset_local_settings_done">Chat-local settings reset</string>
     <string name="conversation_wallpaper">Chat background</string>
@@ -1874,6 +1895,9 @@ The file is not on this phone</string>
     <string name="conversation_wallpaper_reset_shared_body">The standard background will be restored for all members. Members’ personal backgrounds will not change.</string>
     <string name="conversation_wallpaper_reset_shared">Remove shared background</string>
     <string name="conversation_wallpaper_follow">Reset this chat to defaults</string>
+    <string name="conversation_wallpaper_reset_done_title">Done</string>
+    <string name="conversation_wallpaper_reset_done_body">This chat’s personal background settings have been returned to their defaults.</string>
+    <string name="conversation_wallpaper_reset_shared_done_body">The shared chat background was removed. Members’ personal backgrounds were not changed.</string>
     <string name="conversation_wallpaper_wait">Preparing and saving…</string>
 
     <string name="heart_game_title">Boost your rating</string>
@@ -2030,4 +2054,7 @@ The file is not on this phone</string>
     <string name="settings_reset_colors_hint">Normal theme colour, normal name colour and reading filter off.</string>
     <string name="settings_reset_colors_done_title">Done</string>
     <string name="settings_reset_colors_done_body">Message colour, name colour and reading filter have been returned to their defaults.</string>
+    <string name="settings_reset_done_title">Done</string>
+    <string name="settings_default_done_body">The setting has been returned to its default.</string>
+    <string name="settings_reset_done_body">The selected settings have been returned to their defaults. Conversations and account data were not changed.</string>
 </resources>

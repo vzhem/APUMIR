@@ -68,6 +68,7 @@ fun ConversationWallpaperDialog(scope: String, shared: String? = null,
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var confirmSharedReset by remember { mutableStateOf(false) }
+    var resetDoneMessage by remember { mutableStateOf<Int?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) coroutineScope.launch {
             busy = true
@@ -77,14 +78,14 @@ fun ConversationWallpaperDialog(scope: String, shared: String? = null,
             finally { busy = false }
         }
     }
-    fun apply(value: String?) {
+    fun apply(value: String?, resetMessageRes: Int? = null) {
         coroutineScope.launch {
             busy = true
             error = null
             try {
                 if (forAll) checkNotNull(onSetShared).invoke(value.orEmpty()).getOrThrow()
                 else ConversationWallpaper.setPersonal(context, scope, value)
-                onDismiss()
+                if (resetMessageRes == null) onDismiss() else resetDoneMessage = resetMessageRes
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) { error = failure.message ?: "Не удалось изменить фон" }
             finally { busy = false }
@@ -138,7 +139,8 @@ fun ConversationWallpaperDialog(scope: String, shared: String? = null,
                     else R.string.conversation_wallpaper_follow),
                 enabled = !busy,
                 onClick = {
-                    if (forAll) confirmSharedReset = true else apply(null)
+                    if (forAll) confirmSharedReset = true
+                    else apply(null, R.string.conversation_wallpaper_reset_done_body)
                 },
             )
             if (busy) Text(stringResource(R.string.conversation_wallpaper_wait))
@@ -152,11 +154,22 @@ fun ConversationWallpaperDialog(scope: String, shared: String? = null,
             confirmLabel = stringResource(R.string.conversation_wallpaper_reset_shared),
             onConfirm = {
                 confirmSharedReset = false
-                apply(null)
+                apply(null, R.string.conversation_wallpaper_reset_shared_done_body)
             },
         ) {
             Text(stringResource(R.string.conversation_wallpaper_reset_shared_body))
         }
+    }
+    resetDoneMessage?.let { messageRes ->
+        ApuPremiumNoticeDialog(
+            title = stringResource(R.string.conversation_wallpaper_reset_done_title),
+            message = stringResource(messageRes),
+            onDismiss = {
+                resetDoneMessage = null
+                onDismiss()
+            },
+            icon = androidx.compose.material.icons.Icons.Default.CheckCircle,
+        )
     }
 }
 

@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -74,6 +75,7 @@ fun VoiceMessagePlayer(
     var playing by remember(file.path) { mutableStateOf(false) }
     var progress by remember(file.path) { mutableFloatStateOf(0f) }
     var speedMenu by remember(file.path) { mutableStateOf(false) }
+    var showSpeedDefaultDone by remember(file.path) { mutableStateOf(false) }
     val playbackSpeed by VoicePlaybackSpeedStore.speed.collectAsStateWithLifecycle()
     val player = remember(file.path) {
         runCatching {
@@ -190,8 +192,11 @@ fun VoiceMessagePlayer(
                                     )
                                 },
                                 onClick = {
+                                    val returningToDefault = VoicePlaybackSpeedStore.normalize(option) == 1f &&
+                                        VoicePlaybackSpeedStore.normalize(playbackSpeed) != 1f
                                     VoicePlaybackSpeedStore.set(context, option)
                                     speedMenu = false
+                                    if (returningToDefault) showSpeedDefaultDone = true
                                 },
                             )
                         }
@@ -200,6 +205,14 @@ fun VoiceMessagePlayer(
             }
             VoiceTranscript(file = file, textColor = textColor)
         }
+    }
+    if (showSpeedDefaultDone) {
+        ApuPremiumNoticeDialog(
+            title = stringResource(R.string.voice_speed_default_done_title),
+            message = stringResource(R.string.voice_speed_default_done_body),
+            onDismiss = { showSpeedDefaultDone = false },
+            icon = Icons.Default.CheckCircle,
+        )
     }
 }
 

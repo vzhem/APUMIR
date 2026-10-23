@@ -537,6 +537,8 @@
     <string name="sos_text_label">Текст тревожного сообщения</string>
     <string name="sos_text_hint">Этот текст придёт всем участникам при нажатии SOS. Пустое поле — обычный текст «🆘 SOS! Срочно нужна помощь!». До 200 знаков.</string>
     <string name="sos_text_saved">Текст SOS сохранён</string>
+    <string name="sos_text_default_done_title">Готово</string>
+    <string name="sos_text_default_done_body">Текст SOS очищен и возвращён к стандартному значению.</string>
     <string name="admin_slow_off">Выключен: писать можно как угодно часто.</string>
     <string name="admin_mode_hint">Режим меняют администраторы.</string>
     <string name="admin_unsubscribe_channel">Отписаться от канала</string>
@@ -750,6 +752,8 @@
     <string name="peer_reset_confirm_title">Сбросить наблюдения?</string>
     <string name="peer_reset_confirm_body">Локальная история узлов будет удалена. Оценки начнут собираться заново по мере работы сети.</string>
     <string name="peer_reset_confirm">Сбросить</string>
+    <string name="peer_reset_done_title">Готово</string>
+    <string name="peer_reset_done_body">Локальные наблюдения узлов сброшены. Новые оценки будут собираться заново.</string>
     <!-- Настройки -->
     <string name="settings_set_username">Задать @никнейм</string>
     <string name="settings_complaints_spike">⚠️ Всплеск жалоб: репутация и приоритет узла временно понижены.</string>
@@ -758,6 +762,8 @@
     <string name="emoji_status_hint">Один значок рядом с вашим профилем. Его увидят все: статус уходит контактам и передаётся по сети дальше, как имя и аватар.</string>
     <string name="emoji_status_set">Поставить эмодзи-статус</string>
     <string name="emoji_status_remove">Убрать статус</string>
+    <string name="emoji_status_default_done_title">Готово</string>
+    <string name="emoji_status_default_done_body">Эмодзи-статус убран и возвращён к значению по умолчанию.</string>
     <string name="settings_remove_avatar">Убрать аватар</string>
     <string name="settings_swarm_full">Раздаёт на полную и на мобильном интернете, и при низком заряде</string>
     <string name="settings_counting_space">Считаю занятое место…</string>
@@ -1824,6 +1830,10 @@
     <string name="voice_effect_title">Эффект голоса</string>
     <string name="voice_effect_hint">В голосовом сообщении эффект применится ко всей записи при отправке. В звонке ваш голос изменится сразу, собеседник услышит выбранный вариант.</string>
     <string name="voice_effect_done">Готово</string>
+    <string name="voice_effect_default_done_title">Готово</string>
+    <string name="voice_effect_default_done_body">Эффект голоса возвращён к обычному значению по умолчанию.</string>
+    <string name="voice_speed_default_done_title">Готово</string>
+    <string name="voice_speed_default_done_body">Скорость воспроизведения возвращена к значению по умолчанию.</string>
     <string name="voice_effect_processing">Применяю эффект…</string>
     <string name="voice_effect_button">Эффект: %1$s</string>
     <string name="voice_effect_short">Эффект</string>
@@ -1889,6 +1899,8 @@
     <string name="story_crop_mirror">Отразить ↔</string>
     <string name="story_crop_flip">Отразить ↕</string>
     <string name="story_crop_reset">Сброс</string>
+    <string name="story_crop_reset_done_title">Готово</string>
+    <string name="story_crop_reset_done_body">Кадрирование и поворот фото возвращены к исходным значениям.</string>
     <string name="story_crop_straighten_value">Ровно: %1$d°</string>
     <string name="story_crop_hint">Двумя пальцами — увеличить и повернуть, одним — сдвинуть, уголками — обрезать.</string>
     <string name="story_crop_corner">Угол кадра %1$d</string>
@@ -1976,6 +1988,11 @@
     <string name="story_video_reset_audio">Звук — как в исходнике</string>
     <string name="story_video_reset_caption">Очистить подпись</string>
     <string name="story_video_reset_shape">Форму — обычный формат</string>
+    <string name="story_video_reset_done_title">Готово</string>
+    <string name="story_video_reset_done_body">Выбранные параметры видеоистории возвращены к значениям по умолчанию.</string>
+    <string name="story_default_done_title">Готово</string>
+    <string name="story_filter_default_done_body">Фильтры лица отключены, как по умолчанию.</string>
+    <string name="story_background_default_done_body">Фон видео возвращён к варианту по умолчанию — без фона.</string>
     <string name="chat_reset_local_settings">Вернуть настройки этого чата по умолчанию</string>
     <string name="chat_reset_local_settings_done">Локальные настройки чата возвращены</string>
     <string name="conversation_wallpaper">Фон чата</string>
@@ -1989,6 +2006,9 @@
     <string name="conversation_wallpaper_reset_shared_body">Стандартный фон будет установлен для всех участников. Личные обои участников не изменятся.</string>
     <string name="conversation_wallpaper_reset_shared">Убрать общий фон</string>
     <string name="conversation_wallpaper_follow">Вернуть настройки этого чата по умолчанию</string>
+    <string name="conversation_wallpaper_reset_done_title">Готово</string>
+    <string name="conversation_wallpaper_reset_done_body">Личные настройки фона этого чата возвращены к значениям по умолчанию.</string>
+    <string name="conversation_wallpaper_reset_shared_done_body">Общий фон чата убран. Личные обои участников не изменены.</string>
     <string name="conversation_wallpaper_wait">Подготовка и сохранение…</string>
 
     <string name="heart_game_title">Подними себе рейтинг</string>
@@ -2145,4 +2165,7 @@
     <string name="settings_reset_colors_hint">Обычный цвет темы, обычный цвет имени и фильтр чтения выключен.</string>
     <string name="settings_reset_colors_done_title">Готово</string>
     <string name="settings_reset_colors_done_body">Цвета текста, цвет имени и фильтр чтения возвращены к значениям по умолчанию.</string>
+    <string name="settings_reset_done_title">Готово</string>
+    <string name="settings_default_done_body">Настройка возвращена к значению по умолчанию.</string>
+    <string name="settings_reset_done_body">Выбранные настройки возвращены к значениям по умолчанию. Переписка и данные аккаунта не изменены.</string>
 </resources>

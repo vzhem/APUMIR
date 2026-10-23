@@ -12,6 +12,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -50,6 +53,7 @@ fun EmojiStatusPickerDialog(
     onRemove: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var showRemoveDone by remember { mutableStateOf(false) }
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.emoji_status_title)) },
@@ -86,9 +90,28 @@ fun EmojiStatusPickerDialog(
             ApuTextAction(label = stringResource(R.string.action_close), onClick = onDismiss)
         },
         dismissButton = if (current.isNotBlank()) {
-            { ApuTextAction(label = stringResource(R.string.emoji_status_remove), onClick = onRemove) }
+            {
+                ApuTextAction(
+                    label = stringResource(R.string.emoji_status_remove),
+                    onClick = {
+                        onRemove()
+                        showRemoveDone = true
+                    },
+                )
+            }
         } else {
             null
         },
     )
+    if (showRemoveDone) {
+        ApuPremiumNoticeDialog(
+            title = stringResource(R.string.emoji_status_default_done_title),
+            message = stringResource(R.string.emoji_status_default_done_body),
+            onDismiss = {
+                showRemoveDone = false
+                onDismiss()
+            },
+            icon = androidx.compose.material.icons.Icons.Default.CheckCircle,
+        )
+    }
 }
