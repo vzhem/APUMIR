@@ -199,6 +199,8 @@ class AddContactViewModel @Inject constructor(
                 // the next login while this app installation remains intact.
                 com.vladimir.messenger.data.security.NicknameRevocationHistory
                     .revoke(appContext, entry.ownerId, normalizedName)
+                com.vladimir.messenger.data.security.NicknameRevocationHistory
+                    .revokeOwner(appContext, entry.ownerId)
                 nicknameDao.suppress(
                     NicknameSuppressionEntity(
                         ownerId = entry.ownerId,

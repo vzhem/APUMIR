@@ -20,6 +20,18 @@ interface NicknameDao {
     )
     fun observeAll(): Flow<List<NicknameEntity>>
 
+    /** Cold-start cleanup needs a one-shot snapshot of active registrations. */
+    @Query(
+        "SELECT n.* FROM nicknames AS n " +
+            "WHERE NOT EXISTS (" +
+            "SELECT 1 FROM nickname_suppressions AS s " +
+            "WHERE s.ownerId = n.ownerId AND s.name = n.name COLLATE NOCASE" +
+            ") " +
+            "ORDER BY CASE WHEN n.registeredAtMs > 0 THEN 0 ELSE 1 END, " +
+            "n.registeredAtMs ASC, n.ownerId ASC"
+    )
+    suspend fun allVisible(): List<NicknameEntity>
+
     /** Name ownership checks must not count a locally revoked announcement. */
     @Query(
         "SELECT n.* FROM nicknames AS n " +

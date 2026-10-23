@@ -24,12 +24,46 @@ import javax.crypto.KeyGenerator
 object NicknameRevocationHistory {
     private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
     private const val ALIAS_PREFIX = "apu_nickname_revocation_v1_"
+    private const val OWNER_ALIAS_PREFIX = "apu_nickname_owner_revocation_v1_"
     private const val KEY_BITS = 256
     private val ownerPattern = Regex("^pk_[0-9a-f]{32}([0-9a-f]{32})?$")
 
     /** Remember the exact owner/name pair as locally revoked. */
     fun revoke(context: Context, ownerId: String, name: String) {
-        val alias = aliasFor(ownerId, name) ?: return
+        aliasFor(ownerId, name)?.let(::createMarker)
+    }
+
+    /** Revoke every future nickname announcement made by this obsolete owner. */
+    fun revokeOwner(context: Context, ownerId: String) {
+        ownerAliasFor(ownerId)?.let(::createMarker)
+    }
+
+    /** Whether this owner or the exact old owner/name pair was revoked locally. */
+    fun isRevoked(context: Context, ownerId: String, name: String): Boolean {
+        val ownerAlias = ownerAliasFor(ownerId)
+        val nameAlias = aliasFor(ownerId, name)
+        return runCatching {
+            val keyStore = keyStore()
+            (ownerAlias != null && keyStore.containsAlias(ownerAlias)) ||
+                (nameAlias != null && keyStore.containsAlias(nameAlias))
+        }.getOrDefault(false)
+    }
+
+    /** Allow an explicit restore of that old identity to reclaim its nickname. */
+    fun clear(context: Context, ownerId: String, name: String) {
+        runCatching {
+            val keyStore = keyStore()
+            aliasFor(ownerId, name)?.let(keyStore::deleteEntry)
+            ownerAliasFor(ownerId)?.let(keyStore::deleteEntry)
+        }
+    }
+
+    /** Clear the owner-wide marker when an old profile is explicitly restored. */
+    fun clearOwner(context: Context, ownerId: String) {
+        runCatching { ownerAliasFor(ownerId)?.let(keyStore()::deleteEntry) }
+    }
+
+    private fun createMarker(alias: String) {
         runCatching {
             val keyStore = keyStore()
             if (keyStore.containsAlias(alias)) return
@@ -51,16 +85,13 @@ object NicknameRevocationHistory {
         }
     }
 
-    /** Whether the exact old owner/name pair was revoked on this installation. */
-    fun isRevoked(context: Context, ownerId: String, name: String): Boolean {
-        val alias = aliasFor(ownerId, name) ?: return false
-        return runCatching { keyStore().containsAlias(alias) }.getOrDefault(false)
-    }
-
-    /** Allow an explicit restore of that old identity to reclaim its nickname. */
-    fun clear(context: Context, ownerId: String, name: String) {
-        val alias = aliasFor(ownerId, name) ?: return
-        runCatching { keyStore().deleteEntry(alias) }
+    private fun ownerAliasFor(ownerId: String): String? {
+        val owner = ownerId.trim().lowercase()
+        if (!ownerPattern.matches(owner)) return null
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(owner.toByteArray(Charsets.US_ASCII))
+        val suffix = digest.joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        return OWNER_ALIAS_PREFIX + suffix
     }
 
     private fun aliasFor(ownerId: String, name: String): String? {

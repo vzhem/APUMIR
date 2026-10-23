@@ -23,6 +23,8 @@ import dagger.hilt.android.HiltAndroidApp
 @HiltAndroidApp
 class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.work.Configuration.Provider {
     @javax.inject.Inject lateinit var workerFactory: androidx.hilt.work.HiltWorkerFactory
+    @javax.inject.Inject lateinit var obsoleteSameDeviceRegistrationCleanup:
+        com.vladimir.messenger.data.security.ObsoleteSameDeviceRegistrationCleanup
 
     override val workManagerConfiguration: androidx.work.Configuration
         get() = androidx.work.Configuration.Builder().setWorkerFactory(workerFactory).build()
@@ -96,6 +98,21 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
                     .remember(applicationContext, currentNode)
             }
         }.onFailure { Log.w("MessengerApp", "identity history backfill skipped", it) }
+        // On an app update, remove every obsolete identity proven to have been
+        // created by this installation before the core can receive old gossip.
+        // The Keystore owner marker makes this idempotent and survives logout.
+        runCatching {
+            val result = kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                obsoleteSameDeviceRegistrationCleanup.runForCurrentBuild()
+            }
+            if (result.removedOwners > 0 || result.failedOwners > 0) {
+                Log.i(
+                    "MessengerApp",
+                    "same-device obsolete identity cleanup: " +
+                        "removed=${result.removedOwners}, failed=${result.failedOwners}",
+                )
+            }
+        }.onFailure { Log.w("MessengerApp", "same-device identity cleanup skipped", it) }
         com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.install(this)
         com.vladimir.messenger.data.diagnostics.RuntimeDiagnostics.install(this)
         // р236: черновики сообщений (недописанный текст поля ввода).
