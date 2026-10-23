@@ -217,11 +217,7 @@ class AddContactViewModel @Inject constructor(
                         R.string.ac_cleanup_done,
                         removed,
                         deletedContacts,
-                    ) + if (preservedForSafety > 0) {
-                        " " + appContext.getString(R.string.ac_cleanup_history_kept, preservedForSafety)
-                    } else {
-                        ""
-                    },
+                    ),
                 )
             }
         }
