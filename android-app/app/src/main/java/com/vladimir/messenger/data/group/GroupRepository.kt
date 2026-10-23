@@ -2645,16 +2645,23 @@ class GroupRepository(
         }.onFailure { Log.w(TAG, "join history save failed: ${it.javaClass.simpleName}: ${it.message}") }
         touchMyJoin()
         // Свою копию храним на этом телефоне: видно, что заявка отправлена, и что с ней решили.
-        groupDao.insertJoinRequest(
-            GroupJoinRequestEntity(
-                groupId = groupId,
-                nodeId = me,
-                displayName = displayName,
-                note = note,
-                requestedAtMs = now,
-                status = "SENT",
+        // ВАЖНО: group_join_requests имеет FK на groups. Для чужой записи из
+        // сетевого каталога строки groups ещё нет, поэтому её нельзя писать в
+        // эту таблицу — именно это раньше роняло APU при «Вступить»/«Подписаться».
+        if (joinRequestStorage(groupDao.getGroupById(groupId) != null) == JoinRequestStorage.LOCAL_GROUP_REQUESTS) {
+            groupDao.insertJoinRequest(
+                GroupJoinRequestEntity(
+                    groupId = groupId,
+                    nodeId = me,
+                    displayName = displayName,
+                    note = note,
+                    requestedAtMs = now,
+                    status = "SENT",
+                )
             )
-        )
+        } else {
+            Log.i(TAG, "join request kept in history/outbox: group is not local yet, group=$groupId")
+        }
         joinOutbox?.put(GroupJoinOutbox.Entry(groupId, displayName, note, slug, targets, now, 0L, 0))
         val envelope = GroupWire.buildJoinRequest(
             groupId = groupId, displayName = displayName, note = note, slug = slug, requestedAtMs = now,
