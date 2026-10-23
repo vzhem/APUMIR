@@ -180,7 +180,10 @@ class IdentityBackup @Inject constructor(
 
         // Метка устройства: без неё восстановленное состояние сочли бы
         // подсунутым из чужой резервной копии и стёрли на следующем запуске.
-        runCatching { DeviceIdentityMarker.create(context) }
+        runCatching {
+            DeviceIdentityMarker.create(context)
+            DeviceIdentityHistory.remember(context, identity.nodeId)
+        }
 
         Log.i(TAG, "Личность @${identity.nickname} восстановлена")
         return RestoreResult.Success(identity.nodeId, identity.displayName)

@@ -25,6 +25,7 @@ import com.vladimir.messenger.data.local.entity.ChatEntity
 import com.vladimir.messenger.data.local.entity.ContactEntity
 import com.vladimir.messenger.data.local.entity.DirectoryEntity
 import com.vladimir.messenger.data.local.entity.NicknameEntity
+import com.vladimir.messenger.data.local.entity.NicknameSuppressionEntity
 import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import com.vladimir.messenger.data.local.entity.FileExchangePeerEntity
@@ -56,7 +57,7 @@ import com.vladimir.messenger.data.local.dao.GroupPollDao
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 37
+const val APP_DATABASE_VERSION = 38
 
 @Database(
     entities = [
@@ -78,6 +79,7 @@ const val APP_DATABASE_VERSION = 37
         GroupMessageStatEntity::class,
         DirectoryEntity::class,
         NicknameEntity::class,
+        NicknameSuppressionEntity::class,
         AvatarEntity::class,
         SavedItemEntity::class,
         ProfileHeartEntity::class,
@@ -129,6 +131,19 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `messages` ADD COLUMN `textColor` TEXT NOT NULL DEFAULT ''")
                 db.execSQL("ALTER TABLE `messages` ADD COLUMN `senderNameColor` TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /** Local tombstones keep revoked nickname gossip from returning after cleanup. */
+        val MIGRATION_37_38 = object : Migration(37, 38) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `nickname_suppressions` (" +
+                        "`ownerId` TEXT NOT NULL, " +
+                        "`name` TEXT NOT NULL, " +
+                        "`revokedAtMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`ownerId`, `name`))"
+                )
             }
         }
 

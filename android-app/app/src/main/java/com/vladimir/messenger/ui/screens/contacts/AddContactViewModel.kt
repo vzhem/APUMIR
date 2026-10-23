@@ -6,7 +6,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.local.dao.NicknameDao
 import com.vladimir.messenger.data.local.entity.NicknameEntity
+import com.vladimir.messenger.data.local.entity.NicknameSuppressionEntity
 import com.vladimir.messenger.data.repository.ChatRepository
+import com.vladimir.messenger.data.security.DeviceIdentityHistory
 import com.vladimir.messenger.data.repository.ContactRepository
 import com.vladimir.messenger.data.referral.ReferralAttributionSender
 import com.vladimir.messenger.data.referral.ReferralWire
@@ -16,6 +18,7 @@ import com.vladimir.messenger.util.InviteLinkParser
 import com.vladimir.messenger.util.VerifiedReferralInviteLink
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -31,6 +34,11 @@ data class AddContactUiState(
     val nickQuery: String = "",
     val nickResults: List<NicknameEntity> = emptyList(),
     val nickSearching: Boolean = false,
+    /** Current profile address on this phone, if the engine is already up. */
+    val currentOwnerId: String? = null,
+    /** Only owners proven by the device-local Keystore history are eligible for cleanup. */
+    val sameDeviceOwnerIds: Set<String> = emptySet(),
+    val notice: String? = null,
 )
 
 @HiltViewModel
@@ -41,6 +49,7 @@ class AddContactViewModel @Inject constructor(
     private val referralAttribution: ReferralAttributionSender,
     private val exchangePeerStore: com.vladimir.messenger.data.file.FileExchangePeerStore,
     private val fileTransferRouter: com.vladimir.messenger.data.file.FileTransferRouter,
+    private val swarmPeerDirectory: com.vladimir.messenger.data.swarm.SwarmPeerDirectory,
     @dagger.hilt.android.qualifiers.ApplicationContext
     private val appContext: android.content.Context,
     private val linkShortener: com.vladimir.messenger.data.link.LinkShortener,
@@ -53,11 +62,22 @@ class AddContactViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(AddContactUiState())
     val uiState = _uiState.asStateFlow()
 
-    /** Поиск по части @никнейма в роевом реестре (кто раньше - тот выше). */
+    /**
+     * Search the visible registry.  The local-history check is deliberately
+     * done separately from nickname equality: same @name is not proof that two
+     * owners are the same person or the same phone.
+     */
     fun onNickQueryChanged(value: String) {
         val clean = value.trim().removePrefix("@")
-        _uiState.update { it.copy(nickQuery = value, nickSearching = clean.isNotBlank()) }
-        viewModelScope.launch {
+        _uiState.update {
+            it.copy(
+                nickQuery = value,
+                nickSearching = clean.isNotBlank(),
+                notice = null,
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val current = currentOwnerId()
             val found = if (clean.isBlank()) {
                 emptyList()
             } else {
@@ -68,13 +88,158 @@ class AddContactViewModel @Inject constructor(
                     emptyList()
                 }
             }
-            _uiState.update { it.copy(nickResults = found, nickSearching = false) }
+            val sameDevice = found.asSequence()
+                .map { it.ownerId }
+                .filter { it != current }
+                .filter { DeviceIdentityHistory.wasCreatedOnThisDevice(appContext, it) }
+                .toSet()
+            _uiState.update {
+                it.copy(
+                    nickResults = found,
+                    nickSearching = false,
+                    currentOwnerId = current,
+                    sameDeviceOwnerIds = sameDevice,
+                )
+            }
         }
     }
 
-    /** Добавить в контакты прямо из поиска по @никнейму. */
+    fun clearNotice() {
+        _uiState.update { it.copy(notice = null) }
+    }
+
+    private fun currentOwnerId(): String? =
+        RustBridge.nodeId()?.trim()?.takeIf { it.isNotBlank() }
+            ?: appContext.getSharedPreferences("p2p_prefs", android.content.Context.MODE_PRIVATE)
+                .getString("node_id", null)
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+
+    /**
+     * Remove only old registrations proven by the device-local identity
+     * ledger.  The selected list is revalidated on the worker thread so a stale
+     * UI cannot turn an equal nickname into a destructive delete.
+     *
+     * [forgetContacts] is opt-in because it removes local contacts and chats;
+     * when a live replacement chat exists, its history is moved first.
+     */
+    fun cleanupSameDeviceEntries(entries: List<NicknameEntity>, forgetContacts: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val current = currentOwnerId()
+            if (current.isNullOrBlank()) {
+                _uiState.update { it.copy(notice = appContext.getString(R.string.ac_cleanup_no_current)) }
+                return@launch
+            }
+
+            val eligible = entries
+                .distinctBy { it.ownerId }
+                .filter { it.ownerId != current }
+                .filter { DeviceIdentityHistory.wasCreatedOnThisDevice(appContext, it.ownerId) }
+            if (eligible.isEmpty()) {
+                _uiState.update { it.copy(notice = appContext.getString(R.string.ac_cleanup_nothing)) }
+                return@launch
+            }
+
+            var removed = 0
+            var deletedContacts = 0
+            var preservedForSafety = 0
+            val now = System.currentTimeMillis()
+            for (entry in eligible) {
+                val normalizedName = entry.name.trim().trimStart('@').lowercase()
+                if (normalizedName.isBlank()) continue
+
+                // Preserve history only when this phone has a live registration
+                // and a current contact/chat that can receive the moved messages.
+                val hasLiveReplacement = nicknameDao.byName(normalizedName)
+                    .any { it.ownerId == current }
+                if (forgetContacts) {
+                    val oldContact = contactRepository.getContactByFingerprint(entry.ownerId)
+                    val oldChat = chatRepository.getChatByContactId(entry.ownerId)
+                    if (oldContact != null || oldChat != null) {
+                        val liveContact = if (hasLiveReplacement) {
+                            contactRepository.getContactByFingerprint(current)
+                        } else {
+                            null
+                        }
+                        val canMoveHistory = oldChat == null || liveContact != null
+                        if (canMoveHistory) {
+                            if (oldChat != null && liveContact != null) {
+                                chatRepository.getOrCreateChat(current, liveContact.displayName)
+                                chatRepository.absorbChatOf(entry.ownerId, current)
+                            }
+                            if (oldContact != null) {
+                                contactRepository.deleteContact(entry.ownerId)
+                                deletedContacts++
+                            }
+                        } else {
+                            // Do not destroy a conversation merely because the
+                            // user asked to forget a dead address: there is no
+                            // verified live destination for it yet.
+                            preservedForSafety++
+                        }
+                    }
+                }
+
+                nicknameDao.suppress(
+                    NicknameSuppressionEntity(
+                        ownerId = entry.ownerId,
+                        name = normalizedName,
+                        revokedAtMs = now,
+                    )
+                )
+                nicknameDao.deleteByOwnerAndName(entry.ownerId, normalizedName)
+                runCatching { exchangePeerStore.forgetPin(entry.ownerId) }
+                com.vladimir.messenger.data.security.MessageSealer
+                    .forget(appContext, entry.ownerId)
+                com.vladimir.messenger.data.peer.PeerRatingStore
+                    .forget(appContext, entry.ownerId)
+                removed++
+            }
+
+            // SwarmPeerDirectory caches its verified set for a minute; cleanup
+            // is an explicit invalidation point so no new message uses the old
+            // owner during that window.
+            runCatching { swarmPeerDirectory.invalidate() }
+            val query = _uiState.value.nickQuery.trim().removePrefix("@")
+            val refreshed = if (query.isBlank()) emptyList() else runCatching {
+                nicknameDao.search(query.lowercase())
+            }.getOrDefault(emptyList())
+            val refreshedSameDevice = refreshed.asSequence()
+                .map { it.ownerId }
+                .filter { it != current }
+                .filter { DeviceIdentityHistory.wasCreatedOnThisDevice(appContext, it) }
+                .toSet()
+            _uiState.update {
+                it.copy(
+                    nickResults = refreshed,
+                    currentOwnerId = current,
+                    sameDeviceOwnerIds = refreshedSameDevice,
+                    notice = appContext.getString(
+                        R.string.ac_cleanup_done,
+                        removed,
+                        deletedContacts,
+                    ) + if (preservedForSafety > 0) {
+                        " " + appContext.getString(R.string.ac_cleanup_history_kept, preservedForSafety)
+                    } else {
+                        ""
+                    },
+                )
+            }
+        }
+    }
+
+    /** Add a live owner to contacts directly from nickname search. */
     fun onAddByNicknameClicked(entry: NicknameEntity) {
-        viewModelScope.launch {
+        val state = _uiState.value
+        if (entry.ownerId == state.currentOwnerId) {
+            _uiState.update { it.copy(notice = appContext.getString(R.string.ac_current_address)) }
+            return
+        }
+        if (entry.ownerId in state.sameDeviceOwnerIds) {
+            _uiState.update { it.copy(notice = appContext.getString(R.string.ac_old_same_device)) }
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
             _uiState.update { it.copy(isLoading = true, error = null, contactAdded = false) }
             val result = contactRepository.addContact(
                 displayName = entry.name,

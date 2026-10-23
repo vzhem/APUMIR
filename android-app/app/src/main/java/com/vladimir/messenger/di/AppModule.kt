@@ -65,6 +65,7 @@ object AppModule {
                 AppDatabase.MIGRATION_34_35,
                 AppDatabase.MIGRATION_35_36,
                 AppDatabase.MIGRATION_36_37,
+                AppDatabase.MIGRATION_37_38,
             )
             .fallbackToDestructiveMigration()
             .build()
@@ -153,6 +154,9 @@ object AppModule {
     ): ChatRepository = ChatRepository(context, chatDao, messageDao, groupDao, storyVideos, referralAttribution, contactDao)
 
     @Provides @Singleton
-    fun provideContactRepository(contactDao: ContactDao, chatRepository: ChatRepository): ContactRepository =
-        ContactRepository(contactDao, chatRepository)
+    fun provideContactRepository(
+        @ApplicationContext context: Context,
+        contactDao: ContactDao,
+        chatRepository: ChatRepository,
+    ): ContactRepository = ContactRepository(contactDao, chatRepository, context)
 }

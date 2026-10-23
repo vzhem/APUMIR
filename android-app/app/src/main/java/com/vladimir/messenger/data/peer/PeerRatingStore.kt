@@ -362,6 +362,15 @@ object PeerRatingStore {
         }
     }
 
+    /** Remove one revoked owner from the local routing score book. */
+    fun forget(context: Context, peerId: String) {
+        if (peerId.isBlank()) return
+        synchronized(lock) {
+            val all = load(context).toMutableMap()
+            if (all.remove(peerId) != null) save(context, all)
+        }
+    }
+
     private fun update(context: Context, peerId: String, change: (PeerStats) -> PeerStats) {
         if (peerId.isBlank()) return
         synchronized(lock) {

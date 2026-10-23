@@ -734,6 +734,16 @@ class GroupRepository(
     }
 
     private suspend fun handleNick(packet: GroupWire.Packet.Nick, senderId: String) {
+        // A local cleanup is a revocation, not just a database delete.  Check
+        // before touching contacts, colours, or the registry so a replayed gossip
+        // packet cannot resurrect the dead address through a side effect.
+        val normalizedName = packet.name.trim().trimStart('@').trim().lowercase()
+        if (packet.ownerId.isBlank() || normalizedName.isBlank() ||
+            nicknameDao.isSuppressed(packet.ownerId, normalizedName)
+        ) {
+            return
+        }
+
         // @имя человека - самое надёжное, что о нём известно: оно приходит
         // роевой рассылкой и переживает переустановку. Записываем его в контакт
         // и подменяем им заглушку «Contact a1b2c3d4», из-за которой собеседник
@@ -744,10 +754,13 @@ class GroupRepository(
             runCatching { onPeerNameColor(packet.ownerId, packet.nameColor) }
                 .onFailure { Log.w(TAG, "nick colour apply failed: ${it.message}") }
         }
+        // Cleanup may have happened while contact/chat reconciliation was
+        // running.  Recheck immediately before persistence and gossip-forward.
+        if (nicknameDao.isSuppressed(packet.ownerId, normalizedName)) return
         nicknameDao.upsert(
             NicknameEntity(
                 ownerId = packet.ownerId,
-                name = packet.name,
+                name = normalizedName,
                 registeredAtMs = packet.registeredAtMs,
             )
         )
@@ -755,7 +768,11 @@ class GroupRepository(
         // регистрация раньше (при равенстве времени - тот, у кого id меньше).
         val me = myId() ?: return
         val mine = myUsername() ?: return
-        if (packet.ownerId != me && packet.name.equals(mine, ignoreCase = true)) {
+        val oldProfileFromThisDevice = appContext?.let {
+            com.vladimir.messenger.data.security.DeviceIdentityHistory
+                .wasCreatedOnThisDevice(it, packet.ownerId)
+        } == true
+        if (packet.ownerId != me && !oldProfileFromThisDevice && normalizedName.equals(mine, ignoreCase = true)) {
             val myAt = myRegisteredAt()
             val iLost = packet.registeredAtMs < myAt ||
                 (packet.registeredAtMs == myAt && packet.ownerId < me)
@@ -764,13 +781,14 @@ class GroupRepository(
                 onUsernameConflict()
             }
         }
-        // Эпидемия дальше, кроме отправителя.
-        if (packet.hops < MAX_DIR_HOPS) {
+        // Эпидемия дальше, кроме отправителя.  Do not forward a packet that
+        // was revoked between the upsert and this point.
+        if (!nicknameDao.isSuppressed(packet.ownerId, normalizedName) && packet.hops < MAX_DIR_HOPS) {
             val next = contactIds().filter { it != senderId }
             if (next.isNotEmpty()) {
                 val envelope = GroupWire.buildNick(
                     ownerId = packet.ownerId,
-                    name = packet.name,
+                    name = normalizedName,
                     registeredAtMs = packet.registeredAtMs,
                     hops = packet.hops + 1,
                     nameColor = packet.nameColor,

@@ -1,9 +1,11 @@
 package com.vladimir.messenger.data.repository
 
+import android.content.Context
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.local.dao.ContactDao
 import com.vladimir.messenger.data.local.entity.ContactEntity
+import com.vladimir.messenger.data.security.DeviceIdentityHistory
 import com.vladimir.messenger.domain.model.Contact
 import com.vladimir.messenger.util.NodeIds
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +19,7 @@ import javax.inject.Singleton
 class ContactRepository @Inject constructor(
     private val contactDao: ContactDao,
     private val chatRepository: ChatRepository,
+    private val appContext: Context,
 ) {
     fun observeContacts(): Flow<List<Contact>> =
         contactDao.observeAllContacts().map { it.map { e -> e.toDomain() } }
@@ -142,25 +145,32 @@ class ContactRepository @Inject constructor(
      *
      * Каждая переустановка приложения даёт новый node_id, и собеседник получал
      * ещё один контакт с тем же @именем - в списке висели дубли, а чат уходил
-     * на мёртвый адрес. Связываем их по @имени: оно у человека одно и переживает
-     * переустановку. Побеждает запись, о которой слышали позже.
+     * на мёртвый адрес. Никнейм помогает найти кандидатов, но сам по себе не
+     * доказывает, что это одна и та же трубка: автоматическая склейка разрешена
+     * только для пар, подтверждённых локальным identity-history ledger.
      *
      * @return идентификаторы устаревших записей, которые вызывающий должен убрать
      *         вместе с их чатами.
      */
     suspend fun findStaleTwins(username: String, keepContactId: String): List<String> {
         val clean = username.trim().trimStart('@').trim()
-        if (clean.isEmpty()) return emptyList()
-        // Двойник ловится двумя способами: по @имени и по видимому имени.
-        // Одного @имени мало - оно есть только у тех, от кого прилетал пакет с
-        // именем, а записи из QR и первых сообщений остаются с пустым полем.
-        // Именно поэтому «Server5» и «server5» не склеивались.
+        if (clean.isEmpty() || keepContactId.isBlank()) return emptyList()
+
+        // Equal @names are not ownership proof.  Automatic chat merging is
+        // allowed only when both the incoming live owner and the old contact
+        // are present in this installation's Keystore-backed identity history.
+        // Otherwise the user can inspect the registry and confirm cleanup, but
+        // gossip must never delete a legitimate different owner.
+        if (!DeviceIdentityHistory.wasCreatedOnThisDevice(appContext, keepContactId)) {
+            return emptyList()
+        }
         val byUsername = contactDao.getContactsByUsername(clean)
         val byDisplayName = contactDao.getContactsByDisplayName(clean)
         return (byUsername + byDisplayName)
             .map { it.id }
             .distinct()
             .filter { it != keepContactId }
+            .filter { DeviceIdentityHistory.wasCreatedOnThisDevice(appContext, it) }
     }
 
     /**
@@ -248,20 +258,28 @@ class ContactRepository @Inject constructor(
             .groupBy { it.displayName.trim().lowercase() }
 
         for ((_, twins) in groups) {
-            if (twins.size < 2) continue
+            // A display-name collision is not enough to delete a contact. Only
+            // merge rows whose node ids are both proven by the device ledger;
+            // unrelated people with the same visible name remain untouched.
+            val sameDeviceTwins = twins.filter {
+                DeviceIdentityHistory.wasCreatedOnThisDevice(appContext, it.id)
+            }
+            if (sameDeviceTwins.size < 2) continue
 
-            // Побеждает запись с живым чатом и историей: терять переписку
-            // нельзя. lastSeen хранится строкой и для сравнения не годится,
-            // поэтому смотрим на то, что важно человеку - есть ли сообщения.
-            val keep = twins.maxByOrNull { twin ->
-                runCatching { chatRepository.chatCountOf(twin.id) }.getOrDefault(0)
+            // Текущий профиль всегда побеждает старый адрес; если текущего
+            // среди контактов нет, выбираем запись с живой историей.
+            val currentId = appContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+                .getString("node_id", null)
+            val keep = sameDeviceTwins.maxByOrNull { twin ->
+                val currentBonus = if (twin.id == currentId) 1_000_000 else 0
+                currentBonus + runCatching { chatRepository.chatCountOf(twin.id) }.getOrDefault(0)
             } ?: continue
             // Перенос истории возможен только в существующий чат, поэтому у
             // выжившей записи он должен быть. Если чата нет - создаём, иначе
             // переписка двойника осталась бы висеть сиротой.
             runCatching { chatRepository.getOrCreateChat(keep.id, keep.displayName) }
 
-            for (dup in twins) {
+            for (dup in sameDeviceTwins) {
                 if (dup.id == keep.id) continue
                 runCatching {
                     // Переписку не теряем - переносим на живую запись.

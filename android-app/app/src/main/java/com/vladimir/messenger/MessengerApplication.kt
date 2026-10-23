@@ -85,6 +85,17 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
         }
         // Must run before Room/services/workers can observe restored stale state.
         DeviceIdentityMarker.discardIfRestored(applicationContext)
+        // Backfill the same-device identity ledger for profiles created before
+        // this feature.  The raw id remains in ordinary prefs only while the
+        // current profile is active; the history marker is a Keystore alias.
+        runCatching {
+            val currentNode = getSharedPreferences("p2p_prefs", MODE_PRIVATE)
+                .getString("node_id", null)
+            if (!currentNode.isNullOrBlank()) {
+                com.vladimir.messenger.data.security.DeviceIdentityHistory
+                    .remember(applicationContext, currentNode)
+            }
+        }.onFailure { Log.w("MessengerApp", "identity history backfill skipped", it) }
         com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.install(this)
         com.vladimir.messenger.data.diagnostics.RuntimeDiagnostics.install(this)
         // р236: черновики сообщений (недописанный текст поля ввода).
