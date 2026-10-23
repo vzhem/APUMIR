@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -19,7 +20,7 @@ import javax.inject.Singleton
 class ContactRepository @Inject constructor(
     private val contactDao: ContactDao,
     private val chatRepository: ChatRepository,
-    private val appContext: Context,
+    @ApplicationContext private val appContext: Context,
 ) {
     fun observeContacts(): Flow<List<Contact>> =
         contactDao.observeAllContacts().map { it.map { e -> e.toDomain() } }
