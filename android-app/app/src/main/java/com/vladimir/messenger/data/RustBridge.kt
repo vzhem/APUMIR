@@ -747,14 +747,13 @@ object RustBridge {
                 // безопасный control fallback: в нём нет текста переписки, а
                 // QUIC peer-auth и MQTT backup сохраняются. Это не даёт raw
                 // fallback обычным сообщениям.
-                val sealed = sealOutgoing(recipientId, payload)
-                val wire = if (sealed != null) {
-                    sealed
-                } else if (DeliveryAckWire.isPacket(payload)) {
-                    payload
+                val sealed = if (DeliveryAckWire.isPacket(payload)) {
+                    sealOutgoing(recipientId, payload)
                 } else {
-                    return false
+                    val sealed = sealOutgoing(recipientId, payload) ?: return false
+                    sealed
                 }
+                val wire = sealed ?: payload
                 handle.sendDirectPayload(recipientId, wire)
             } else {
                 false
