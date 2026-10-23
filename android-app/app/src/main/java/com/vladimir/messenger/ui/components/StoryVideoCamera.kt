@@ -79,6 +79,7 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.vladimir.messenger.R
 import com.vladimir.messenger.data.story.StoryFaceBaker
 import com.vladimir.messenger.data.story.StoryFaceFilter
 import com.vladimir.messenger.data.story.StoryFaceFrame
