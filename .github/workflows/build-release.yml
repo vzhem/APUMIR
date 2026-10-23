@@ -256,6 +256,7 @@ jobs:
             --tests com.vladimir.messenger.data.story.StoryFaceMotionTest \
             --tests com.vladimir.messenger.data.story.StoryFaceTimelineTest \
             --tests com.vladimir.messenger.data.heartgame.HeartSyncPolicyTest \
+            --tests com.vladimir.messenger.data.group.JoinRequestStorageTest \
             --no-daemon > "$RUNNER_TEMP/gradle-release.log" 2>&1
           status=$?
           cat "$RUNNER_TEMP/gradle-release.log"
