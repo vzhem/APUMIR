@@ -194,6 +194,11 @@ class AddContactViewModel @Inject constructor(
                     }
                 }
 
+                // Keep the revocation outside Room as well: logout clears the
+                // database, but the same old gossip must still be rejected on
+                // the next login while this app installation remains intact.
+                com.vladimir.messenger.data.security.NicknameRevocationHistory
+                    .revoke(appContext, entry.ownerId, normalizedName)
                 nicknameDao.suppress(
                     NicknameSuppressionEntity(
                         ownerId = entry.ownerId,

@@ -92,9 +92,13 @@ class OnboardingViewModel @Inject constructor(
     private suspend fun claimUsername(me: String, nick: String) {
         val now = System.currentTimeMillis()
         // A current profile is never blocked by a tombstone left for an older
-        // incarnation of the same owner/name pair.
-        nicknameDao.unsuppress(me, nick.trim().trimStart('@').lowercase())
-        nicknameDao.upsert(NicknameEntity(ownerId = me, name = nick, registeredAtMs = now))
+        // incarnation of the same owner/name pair.  Clear both the Room row and
+        // the Keystore marker when the user explicitly restores that identity.
+        val normalizedNick = nick.trim().trimStart('@').lowercase()
+        nicknameDao.unsuppress(me, normalizedNick)
+        com.vladimir.messenger.data.security.NicknameRevocationHistory
+            .clear(appContext, me, normalizedNick)
+        nicknameDao.upsert(NicknameEntity(ownerId = me, name = normalizedNick, registeredAtMs = now))
         DeviceIdentityHistory.remember(appContext, me)
         appContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
             .edit()
