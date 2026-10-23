@@ -237,6 +237,14 @@
 - Проверено через GitHub API: `/releases/latest` возвращает `v11.74.439`, оба ожидаемых asset доступны. Стабильная ссылка https://github.com/vzhem/APUMIR/releases/latest/download/app-release.apk перенаправляет на APK нового релиза.
 - Финальная UI-проверка остаётся владельцу на реальных телефонах.
 
+## Публичный релиз v11.74.440 (2026-10-23)
+
+- По явному разрешению владельца после показа и одобрения точного текста из `docs/RELEASE_NOTES_v11.74.440.md` создан и отправлен тег `v11.74.440` на коммит `45898e6987e6f866ec310d41a715bb66bf4a420a`.
+- Tag release workflow `39938777626` зелёный: build job `120364827394`; собран `app-release.apk` размером `229230627` bytes и `SHA256SUMS.txt` размером `82` bytes. Публичные notes применены без изменений.
+- Draft prerelease промотирован в стабильный Latest: https://github.com/vzhem/APUMIR/releases/tag/v11.74.440, опубликован `2026-10-23T10:38:54Z`, `draft=false`, `prerelease=false`.
+- Проверено через GitHub API: `/releases/latest` возвращает `v11.74.440`; в релизе доступны оба ожидаемых asset (`app-release.apk` и `SHA256SUMS.txt`), стабильная ссылка https://github.com/vzhem/APUMIR/releases/latest/download/app-release.apk указывает на APK нового релиза.
+- Финальная UI-проверка остаётся владельцу на реальных телефонах.
+
 ## Публикация релиза
 
 - Публиковать релиз, тег или PR можно только после явного разрешения владельца и показа точного
