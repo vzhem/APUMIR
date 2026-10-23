@@ -2143,4 +2143,6 @@
     <string name="settings_reset_details_files">Режим роя, помощь другим телефонам, режим хранения чужих данных и стандартная квота места под пересылку.</string>
     <string name="settings_reset_colors">Вернуть цвета и фильтр по умолчанию</string>
     <string name="settings_reset_colors_hint">Обычный цвет темы, обычный цвет имени и фильтр чтения выключен.</string>
+    <string name="settings_reset_colors_done_title">Готово</string>
+    <string name="settings_reset_colors_done_body">Цвета текста, цвет имени и фильтр чтения возвращены к значениям по умолчанию.</string>
 </resources>

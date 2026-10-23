@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Topic
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Campaign
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -38,6 +39,7 @@ import com.vladimir.messenger.data.textcolor.TextColorPalette
 import com.vladimir.messenger.data.textcolor.TextColorSettingsStore
 import com.vladimir.messenger.ui.components.ApuPremiumChoiceRow
 import com.vladimir.messenger.ui.components.ApuPremiumDialog
+import com.vladimir.messenger.ui.components.ApuPremiumNoticeDialog
 import com.vladimir.messenger.ui.components.ApuPremiumSwitch
 import com.vladimir.messenger.ui.components.ApuSettingsDivider
 import com.vladimir.messenger.ui.components.ApuSettingsItem
@@ -49,6 +51,7 @@ fun MessageTextColorSettingsCard(onNameColorChanged: () -> Unit = {}) {
     val context = LocalContext.current
     val revision by TextColorSettingsStore.revision.collectAsStateWithLifecycle()
     var selectedScope by remember { mutableStateOf<String?>(null) }
+    var showResetDone by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { TextColorSettingsStore.initialize(context) }
 
@@ -151,9 +154,19 @@ fun MessageTextColorSettingsCard(onNameColorChanged: () -> Unit = {}) {
                 onClick = {
                     TextColorSettingsStore.resetAll(context)
                     onNameColorChanged()
+                    showResetDone = true
                 },
             )
         }
+    }
+
+    if (showResetDone) {
+        ApuPremiumNoticeDialog(
+            title = stringResource(R.string.settings_reset_colors_done_title),
+            message = stringResource(R.string.settings_reset_colors_done_body),
+            onDismiss = { showResetDone = false },
+            icon = Icons.Default.CheckCircle,
+        )
     }
 
     selectedScope?.let { scope ->

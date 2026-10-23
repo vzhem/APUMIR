@@ -2028,4 +2028,6 @@ The file is not on this phone</string>
     <string name="settings_reset_details_files">Swarm mode, helping other phones, whether this phone stores other people\'s data and the default forwarding quota.</string>
     <string name="settings_reset_colors">Reset colours and filter to default</string>
     <string name="settings_reset_colors_hint">Normal theme colour, normal name colour and reading filter off.</string>
+    <string name="settings_reset_colors_done_title">Done</string>
+    <string name="settings_reset_colors_done_body">Message colour, name colour and reading filter have been returned to their defaults.</string>
 </resources>
