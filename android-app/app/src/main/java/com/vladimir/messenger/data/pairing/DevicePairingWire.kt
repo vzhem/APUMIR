@@ -42,16 +42,27 @@ object DevicePairingWire {
 
     fun qrPayload(offer: ByteArray): String = QR_PREFIX + Base64.encodeToString(offer, FLAGS)
 
-    /** Offer bytes from a scanned QR text, or null if it is not a pairing code. */
+    /**
+     * Offer bytes from a scanned or pasted QR text, or null if it is not a pairing code.
+     * Clipboard/OCR paths sometimes insert line breaks into the long payload, so whitespace
+     * is ignored here. The six-digit comparison code is deliberately not accepted: it is
+     * derived from the secret in this offer and cannot start a pairing session by itself.
+     */
     fun parseQr(text: String): ByteArray? {
-        val trimmed = text.trim()
-        if (!trimmed.startsWith(QR_PREFIX) || trimmed.length > MAX_PACKET_CHARS) return null
+        val compact = text.filterNot { it.isWhitespace() }
+        if (!compact.startsWith(QR_PREFIX) || compact.length > MAX_PACKET_CHARS) return null
+        val encoded = compact.removePrefix(QR_PREFIX)
+        if (encoded.isEmpty()) return null
         return try {
-            Base64.decode(trimmed.removePrefix(QR_PREFIX), FLAGS)
+            Base64.decode(encoded, FLAGS).takeIf { it.isNotEmpty() }
         } catch (_: IllegalArgumentException) {
             null
         }
     }
+
+    /** True for the human comparison code shown as either `649114` or `649 114`. */
+    fun looksLikeComparisonCode(text: String): Boolean =
+        text.filterNot { it.isWhitespace() }.matches(Regex("\\d{6}"))
 
     fun hex(bytes: ByteArray): String = bytes.joinToString("") { "%02x".format(it) }
 }

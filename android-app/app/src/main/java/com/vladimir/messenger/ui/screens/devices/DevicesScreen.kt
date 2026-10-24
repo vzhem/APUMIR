@@ -71,6 +71,8 @@ fun DevicesScreen(
     val primaryDone by DevicePairingController.primaryDone.collectAsStateWithLifecycle()
     var manualCode by remember { mutableStateOf("") }
     var qrText by remember { mutableStateOf<String?>(null) }
+    var primaryConfirming by remember { mutableStateOf(false) }
+    var joinerConfirming by remember { mutableStateOf(false) }
     // Роли на этом экране нет: любой телефон и показывает, и сканирует QR.
     // Кто сейчас «показывающий», а кто «сканирующий», определяет только нажатая кнопка.
     val qrBitmap = remember(qrText) { qrText?.let { QrCodeGenerator.generateQrCode(it, 800) } }
@@ -188,16 +190,37 @@ fun DevicesScreen(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(stringResource(R.string.devices_code_hint), style = MaterialTheme.typography.bodyMedium)
+                request.error?.let {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        stringResource(R.string.devices_confirm_failed),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    DevicesButton(label = stringResource(R.string.devices_codes_match), onClick = {
-                        scope.launch(Dispatchers.IO) { DevicePairingController.confirmPrimary() }
-                        qrText = null
-                    })
+                    DevicesButton(
+                        label = stringResource(R.string.devices_codes_match),
+                        onClick = {
+                            if (!primaryConfirming) {
+                                primaryConfirming = true
+                                scope.launch(Dispatchers.IO) {
+                                    val confirmed = DevicePairingController.confirmPrimary()
+                                    withContext(Dispatchers.Main) {
+                                        primaryConfirming = false
+                                        if (confirmed) qrText = null
+                                    }
+                                }
+                            }
+                        },
+                        enabled = !primaryConfirming,
+                        progress = primaryConfirming,
+                    )
                     DevicesButton(label = stringResource(R.string.devices_codes_differ), onClick = {
                         DevicePairingController.rejectPrimary()
                         qrText = null
-                    }, primary = false)
+                    }, primary = false, enabled = !primaryConfirming)
                 }
             }
         }
@@ -227,6 +250,7 @@ fun DevicesScreen(
                 value = manualCode,
                 onValueChange = { manualCode = it },
                 modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text(stringResource(R.string.devices_manual_placeholder)) },
                 singleLine = false,
                 minLines = 2,
             )
@@ -270,10 +294,29 @@ fun DevicesScreen(
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(stringResource(R.string.devices_code_hint), style = MaterialTheme.typography.bodyMedium)
+                        state.message?.let {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                        }
                         Spacer(Modifier.height(12.dp))
-                        DevicesButton(label = stringResource(R.string.devices_codes_match), onClick = {
-                            scope.launch(Dispatchers.IO) { DevicePairingController.confirmJoinerCode() }
-                        })
+                        DevicesButton(
+                            label = stringResource(R.string.devices_codes_match),
+                            onClick = {
+                                if (!joinerConfirming) {
+                                    joinerConfirming = true
+                                    scope.launch(Dispatchers.IO) {
+                                        DevicePairingController.confirmJoinerCode()
+                                        withContext(Dispatchers.Main) { joinerConfirming = false }
+                                    }
+                                }
+                            },
+                            enabled = !joinerConfirming,
+                            progress = joinerConfirming,
+                        )
                     }
                     JoinerPhase.WAITING_GRANT -> Text(stringResource(R.string.devices_waiting_grant), style = MaterialTheme.typography.bodyMedium)
                     JoinerPhase.DONE -> Text(stringResource(R.string.devices_done), style = MaterialTheme.typography.bodyMedium)
@@ -326,11 +369,15 @@ private fun DevicesButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     primary: Boolean = true,
+    enabled: Boolean = true,
+    progress: Boolean = false,
 ) {
     ApuPremiumButton(
         label = label,
         onClick = onClick,
         modifier = modifier,
         style = if (primary) DiagnosticsActionStyle.PRIMARY else DiagnosticsActionStyle.GLASS,
+        enabled = enabled,
+        progress = progress,
     )
 }

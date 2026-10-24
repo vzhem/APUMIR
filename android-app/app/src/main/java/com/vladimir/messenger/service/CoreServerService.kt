@@ -2324,6 +2324,19 @@ class CoreServerService : Service() {
                     return
                 }
 
+                // Pairing packets are intentionally raw and use the account routing node. Two
+                // phones of one account therefore look like "from me" here. Route this before
+                // the self-node filter; otherwise the primary silently discards the join request
+                // and the joiner can only sit on the six-digit code screen forever. The controller
+                // still authenticates the packet and ignores an own-device echo by device_id.
+                if (!SealedWire.isSealed(rawText) &&
+                    com.vladimir.messenger.data.pairing.DevicePairingWire.isPacket(rawText)
+                ) {
+                    com.vladimir.messenger.data.pairing.DevicePairingController
+                        .routeIncoming(applicationContext, senderId, rawText)
+                    return
+                }
+
                 // ACK is intentionally a raw control packet so a receiver that
                 // learned the sender binding from the just-opened message can
                 // return it even before HELLO. Handle it before the self-node

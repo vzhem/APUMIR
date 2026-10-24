@@ -615,14 +615,31 @@ fun MessengerNavGraph(
                 onBackClick = { navController.popBackStack() },
                 onScanClick = { navController.navigate(Screen.DevicePairScan.route) },
                 onManualCode = { code ->
-                    // Ручной ввод: тот же код, что в QR, только текстом - путь
-                    // подключения дальше ровно тот же, что после сканирования.
-                    if (DevicePairingWire.parseQr(code) != null) {
+                    // Ручной ввод принимает не короткий SAS, а полную строку QR:
+                    // секрет из QR нужен для построения запроса и не может быть
+                    // восстановлен из одних шести цифр на экране сверки.
+                    val qr = DevicePairingWire.parseQr(code)
+                    if (qr != null) {
                         manualScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            DevicePairingController.startJoin(code)
+                            val started = runCatching { DevicePairingController.startJoin(code) }
+                                .getOrDefault(false)
+                            if (!started) {
+                                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                    android.widget.Toast.makeText(
+                                        manualContext,
+                                        manualContext.getString(com.vladimir.messenger.R.string.devices_pairing_start_failed),
+                                        android.widget.Toast.LENGTH_LONG,
+                                    ).show()
+                                }
+                            }
                         }
                     } else {
-                        android.widget.Toast.makeText(manualContext, manualContext.getString(com.vladimir.messenger.R.string.devices_not_pairing_qr), android.widget.Toast.LENGTH_LONG).show()
+                        val message = if (DevicePairingWire.looksLikeComparisonCode(code)) {
+                            manualContext.getString(com.vladimir.messenger.R.string.devices_comparison_code_hint)
+                        } else {
+                            manualContext.getString(com.vladimir.messenger.R.string.devices_not_pairing_qr)
+                        }
+                        android.widget.Toast.makeText(manualContext, message, android.widget.Toast.LENGTH_LONG).show()
                     }
                 },
             )
