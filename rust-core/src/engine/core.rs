@@ -5181,10 +5181,10 @@ impl P2PCore {
             tracing::warn!("PAIRING rendezvous listener refused: invalid code");
             return false;
         }
-        let Some(runtime) = self.runtime.as_ref() else {
+        if self.runtime.is_none() {
             tracing::warn!("PAIRING rendezvous listener refused: runtime unavailable");
             return false;
-        };
+        }
         let Some(node_id) = self.node_id_str.clone() else {
             tracing::warn!("PAIRING rendezvous listener refused: node id unavailable");
             return false;
@@ -5199,7 +5199,20 @@ impl P2PCore {
             &node_id[..8.min(node_id.len())],
             &nonce[..5]
         );
-        runtime.spawn(async move {
+        // rumqttc::EventLoop is intentionally !Sync; keep this bounded listener on its own
+        // current-thread runtime, just like the normal MQTT owner thread.
+        std::thread::spawn(move || {
+            let runtime = match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    tracing::warn!("PAIRING rendezvous listener runtime failed: {}", error);
+                    return;
+                }
+            };
+            runtime.block_on(async move {
             let shared_state = Arc::new(
                 crate::network::mqtt_transport::MqttSharedRuntimeState::new(
                     crate::network::mqtt_overflow::MQTT_LOSS_INTOLERANT_INBOX_CAPACITY,
@@ -5252,6 +5265,7 @@ impl P2PCore {
                     break;
                 }
             }
+            });
         });
         true
     }
