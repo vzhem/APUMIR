@@ -745,6 +745,17 @@ object RustBridge {
         }
     }
 
+    /** Keep a bounded WSS listener alive while SwarmFirst may pause persistent MQTT. */
+    fun listenPairingCode(code: String): Boolean {
+        if (rejectMainThreadCall("listenPairingCode")) return false
+        return try {
+            engine?.listenPairingCode(code) ?: false
+        } catch (e: Exception) {
+            Log.w(TAG, "listenPairingCode failed: ${e.message}")
+            false
+        }
+    }
+
     fun sendDirectPayload(recipientId: String, payload: String): Boolean {
         if (rejectMainThreadCall("sendDirectPayload")) return false
         return try {

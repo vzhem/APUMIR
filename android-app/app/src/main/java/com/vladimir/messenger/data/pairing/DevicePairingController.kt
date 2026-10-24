@@ -134,7 +134,10 @@ object DevicePairingController {
             null
         }
         if (code != null && payload != null) {
+            Log.i(TAG, "pairing rendezvous offer prepared; retained broadcast scheduled")
             startOfferBroadcast(code, payload)
+        } else {
+            Log.w(TAG, "pairing rendezvous offer could not be prepared")
         }
         return qrText
     }
@@ -165,7 +168,12 @@ object DevicePairingController {
                     offerOpen.value && offerCodeMutable.value == code
                 }
                 if (!active) return@launch
-                RustBridge.publishPairingCode(code, payload)
+                val sent = RustBridge.publishPairingCode(code, payload)
+                if (sent) {
+                    Log.i(TAG, "pairing rendezvous retained publish queued")
+                } else {
+                    Log.w(TAG, "pairing rendezvous retained publish failed; retry remains scheduled")
+                }
             }
         }
     }
@@ -178,6 +186,7 @@ object DevicePairingController {
                 if (rendezvous == null) {
                     Log.w(TAG, "malformed pairing rendezvous from $senderId, dropped")
                 } else {
+                    Log.i(TAG, "pairing rendezvous offer received from broker")
                     onRendezvous(rendezvous)
                 }
             }
@@ -197,9 +206,10 @@ object DevicePairingController {
                     DevicePairingWire.KIND_SYNC -> onSync(context, packet.bytes)
                 }
             } catch (e: Exception) {
-                // A packet that does not fit the current state is simply not for this device.
-                // Keep the visible state intact so a transient/bad duplicate can be retried.
-                Log.d(TAG, "pairing packet ignored: ${e.message}")
+                // Keep identity, certificate, transcript and SAS checks in the Rust pairing
+                // functions. This log distinguishes an authenticated rejection from a missing
+                // rendezvous without exposing keys or packet contents.
+                Log.w(TAG, "pairing packet rejected by authenticated state: ${e.message ?: "unknown"}")
             }
         }
         return true
@@ -209,7 +219,11 @@ object DevicePairingController {
     private fun onRendezvous(offer: DevicePairingWire.RendezvousOffer) {
         lastRendezvous = offer
         lastRendezvousAtMs = System.currentTimeMillis()
-        if (pendingManualCode != offer.code) return
+        if (pendingManualCode != offer.code) {
+            Log.d(TAG, "pairing rendezvous cached; code is not currently requested")
+            return
+        }
+        Log.i(TAG, "pairing rendezvous code matched; starting secure QR flow")
         pendingManualCode = null
         if (!startJoinInternal(offer.qrText)) {
             Log.w(TAG, "pairing rendezvous offer could not start")
@@ -231,7 +245,11 @@ object DevicePairingController {
             joinerDevice,
             DevicePairingWire.encode(DevicePairingWire.KIND_ANSWER, answer.answer),
         )
-        if (!sent) Log.w(TAG, "pairing answer was not delivered")
+        if (!sent) {
+            Log.w(TAG, "pairing answer was not delivered")
+        } else {
+            Log.i(TAG, "pairing answer delivery accepted by transport")
+        }
         primaryMutable.value = PrimaryRequest(joinerDeviceId = joinerDevice, sas = answer.sas, deviceShort = shortDeviceId(joinerDevice))
     }
 
@@ -243,6 +261,7 @@ object DevicePairingController {
         val sas = joinerHandlePairingAnswer(answer, now)
         if (pendingGrant != null && joinerConfirmed) return
         answerReceived = true
+        Log.i(TAG, "pairing answer authenticated; waiting for SAS confirmation")
         joinerMutable.value = JoinerState(JoinerPhase.CONFIRM_CODE, sas = sas, deviceShort = current.deviceShort)
     }
 
@@ -266,6 +285,7 @@ object DevicePairingController {
         }
         pendingGrant = null
         joinerAccountNode = null
+        Log.i(TAG, "pairing certificate authenticated and stored; synchronization bootstrap pending")
         joinerMutable.value = JoinerState(JoinerPhase.DONE)
         // The sync bootstrap may have arrived before the grant: open it now that
         // the pairing keys exist on this side too.
@@ -279,9 +299,18 @@ object DevicePairingController {
     suspend fun startJoin(qrText: String): Boolean = startJoinInternal(qrText)
 
     private fun startJoinInternal(qrText: String): Boolean {
-        val context = appContext ?: return false
-        val offer = DevicePairingWire.parseQr(qrText) ?: return false
-        val accountNode = RustBridge.nodeId() ?: return false
+        val context = appContext ?: run {
+            Log.w(TAG, "pairing offer rejected: application context unavailable")
+            return false
+        }
+        val offer = DevicePairingWire.parseQr(qrText) ?: run {
+            Log.w(TAG, "pairing offer rejected: malformed QR envelope")
+            return false
+        }
+        val accountNode = RustBridge.nodeId() ?: run {
+            Log.w(TAG, "pairing offer rejected: account node unavailable")
+            return false
+        }
         return synchronized(stateLock) {
             pendingManualCode = null
             val primaryDevice = pairingOfferPrimaryDeviceId(offer)
@@ -290,12 +319,17 @@ object DevicePairingController {
             runCatching { pairingOfferContactHints(offer) }
                 .getOrDefault(emptyList())
                 .forEach { hint -> runCatching { recordPairingEndpoint(primaryDevice, hint) } }
-            val started = joinerStartPairing(
-                offer,
-                DeviceKeyStore.deviceId(context),
-                DeviceKeyStore.devicePublicKey(context),
-                System.currentTimeMillis(),
-            )
+            val started = try {
+                joinerStartPairing(
+                    offer,
+                    DeviceKeyStore.deviceId(context),
+                    DeviceKeyStore.devicePublicKey(context),
+                    System.currentTimeMillis(),
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "pairing offer rejected by identity/expiry validation: ${e.message ?: "unknown"}")
+                return@synchronized false
+            }
             joinerConfirmed = false
             answerReceived = false
             pendingGrant = null
@@ -319,7 +353,11 @@ object DevicePairingController {
             )
             // A transient false means only that neither transport was ready at this instant.
             // Keep the code card alive; the retry schedule and the manual retry button continue.
-            if (!sent) Log.w(TAG, "pairing request queued for retry")
+            if (!sent) {
+                Log.w(TAG, "pairing request queued for retry")
+            } else {
+                Log.i(TAG, "pairing request delivery accepted by transport")
+            }
             scheduleRequestRetries()
             true
         }
@@ -329,6 +367,13 @@ object DevicePairingController {
     fun startJoinByCode(code: String): Boolean {
         val normalized = DevicePairingWire.normalizePairingCode(code) ?: return false
         val context = appContext ?: return false
+        Log.i(TAG, "pairing rendezvous code entered; waiting for retained offer")
+        val listenerStarted = RustBridge.listenPairingCode(normalized)
+        if (listenerStarted) {
+            Log.i(TAG, "pairing rendezvous listener started")
+        } else {
+            Log.w(TAG, "pairing rendezvous listener could not start; persistent MQTT will be used")
+        }
         return synchronized(stateLock) {
             runCatching { joinerCancelPairing() }
             pendingManualCode = normalized

@@ -2168,16 +2168,37 @@ impl P2PCore {
         shared_state: Arc<crate::network::mqtt_transport::MqttSharedRuntimeState>,
         own_broker: Option<(String, u16)>,
     ) -> Result<crate::network::mqtt_transport::MqttTransport, String> {
+        Self::connect_ready_mqtt_session_with_client_id(
+            node_id,
+            display_name,
+            shared_state,
+            own_broker,
+            None,
+            false,
+        )
+        .await
+    }
+
+    async fn connect_ready_mqtt_session_with_client_id(
+        node_id: &str,
+        display_name: &str,
+        shared_state: Arc<crate::network::mqtt_transport::MqttSharedRuntimeState>,
+        own_broker: Option<(String, u16)>,
+        client_id: Option<String>,
+        prefer_wss: bool,
+    ) -> Result<crate::network::mqtt_transport::MqttTransport, String> {
         use crate::network::mqtt_transport::MqttTransport;
 
         const MQTT_SESSION_READY_TIMEOUT: std::time::Duration =
             std::time::Duration::from_secs(45);
 
-        let mut transport = MqttTransport::connect_with_shared_state(
+        let mut transport = MqttTransport::connect_with_shared_state_and_client_id(
             node_id,
             display_name,
             shared_state,
             own_broker,
+            client_id,
+            prefer_wss,
         )
         .await?;
         match tokio::time::timeout(MQTT_SESSION_READY_TIMEOUT, transport.subscribe()).await {
@@ -2825,6 +2846,43 @@ impl P2PCore {
             Some((msg.msg_id, msg.recipient, wire))
         }).collect();
         (pending, next)
+    }
+
+    /// Convert a retained six-digit rendezvous publish into the same core event used by the
+    /// normal MQTT session. Cryptographic QR validation remains in Android/Rust pairing code;
+    /// this helper only validates the bounded wire envelope before handing it to the controller.
+    fn pairing_rendezvous_event(
+        topic: &str,
+        payload: &str,
+    ) -> Option<CoreEvent> {
+        if !topic.starts_with("p2pm2/pair/") {
+            return None;
+        }
+        let code = topic.trim_start_matches("p2pm2/pair/");
+        let parts: Vec<&str> = payload.splitn(4, '|').collect();
+        if code.len() != 6
+            || !code.bytes().all(|byte| byte.is_ascii_digit())
+            || parts.len() != 4
+            || parts[0] != "APUPAIRCODE1"
+            || !parts[1].starts_with("pk_")
+            || parts[2] != code
+            || !parts[3].starts_with("apupair:")
+            || parts[3].len() > 8 * 1024
+        {
+            return None;
+        }
+        tracing::info!(
+            "PAIRING rendezvous accepted topic_suffix_len={} offer_bytes={}",
+            code.len(),
+            parts[3].len()
+        );
+        Some(CoreEvent::MessageReceived {
+            message_id: format!("pair-code-{}", uuid::Uuid::new_v4()),
+            chat_id: "pairing-code".to_string(),
+            sender_id: parts[1].to_string(),
+            text: format!("APUPAIRCODE1:{}:{}", code, parts[3]),
+            timestamp: crate::storage::models::now_ms(),
+        })
     }
 
     /// Do not open even a broker-selection TCP probe during direct discovery.
@@ -3556,31 +3614,14 @@ impl P2PCore {
                         // делает только его собственный presence.
                     }
                 } else if evt.topic.starts_with("p2pm2/pair/") {
-                    // P3 short-code rendezvous. The offer is retained on a six-digit topic so
-                    // the second phone can enter the code before its MQTT session is ready.
-                    // Same-account devices intentionally share the routing node id, so do not
-                    // apply the usual self-node drop here; Android has to see the event on both
-                    // phones and only the phone with the entered code will start the flow. Only
-                    // the exact code topic and bounded APUPAIRCODE1 envelope are accepted; the
-                    // Android side still verifies the QR MAC/SAS before granting access.
-                    let code = evt.topic.trim_start_matches("p2pm2/pair/");
-                    let parts: Vec<&str> = evt.payload.splitn(4, '|').collect();
-                    if code.len() == 6
-                        && code.bytes().all(|byte| byte.is_ascii_digit())
-                        && parts.len() == 4
-                        && parts[0] == "APUPAIRCODE1"
-                        && parts[1].starts_with("pk_")
-                        && parts[2] == code
-                        && parts[3].starts_with("apupair:")
-                        && parts[3].len() <= 8 * 1024
-                    {
-                        events.emit(CoreEvent::MessageReceived {
-                            message_id: format!("pair-code-{}", uuid::Uuid::new_v4()),
-                            chat_id: "pairing-code".to_string(),
-                            sender_id: parts[1].to_string(),
-                            text: format!("APUPAIRCODE1:{}:{}", code, parts[3]),
-                            timestamp: crate::storage::models::now_ms(),
-                        });
+                    // P3 short-code rendezvous. Same-account devices intentionally share the
+                    // routing node id, so do not apply the usual self-node drop here; Android
+                    // filters the event by the code currently entered. The exact topic and
+                    // bounded APUPAIRCODE1 envelope are checked before the event is emitted.
+                    if let Some(event) = Self::pairing_rendezvous_event(&evt.topic, &evt.payload) {
+                        events.emit(event);
+                    } else {
+                        tracing::warn!("PAIRING rendezvous rejected malformed offer envelope");
                     }
                 } else if evt.topic.starts_with("p2pm2/msg/") {
                     // ACK: "ack|messageId" — подтверждение обычной прямой доставки.
@@ -4690,65 +4731,81 @@ impl P2PCore {
         self.send_mqtt_topic_oneshot(&topic, payload, false)
     }
 
-    /// Publish one bounded control payload without the normal swarm-first gate. Pairing uses
-    /// `retain=true` so a code entered while the receiver is still connecting is not lost.
+    /// Publish one bounded control payload without the normal swarm-first gate.
+    ///
+    /// This deliberately creates a short-lived *normal* MQTT session rather than using a raw
+    /// rumqttc TCP socket. The normal session selects the WSS relay or SOCKS5 bridge when the
+    /// phone's network blocks broker TCP/1883; the old raw path therefore reported success only
+    /// on unrestricted networks and left the six-digit screen waiting forever on mobile Wi-Fi.
     fn send_mqtt_topic_oneshot(&self, topic: &str, payload: &str, retain: bool) -> bool {
-        use crate::network::mqtt_transport::MQTT_BROKERS;
-        use rumqttc::{AsyncClient, MqttOptions, QoS};
-
-        let nid = self.node_id_str.clone().unwrap_or_default();
-        // Same-account devices share node_id; a deterministic client id would make their
-        // one-shot publishers kick each other off the broker. Keep the MQTT v3 id short but
-        // add a per-publish nonce.
+        let Some(node_id) = self.node_id_str.clone() else {
+            tracing::warn!("MQTT control one-shot refused: node id unavailable");
+            return false;
+        };
+        let display_name = self.config.display_name.clone();
+        let own_broker = self.own_broker_endpoint();
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                tracing::warn!("MQTT control one-shot runtime failed: {}", error);
+                return false;
+            }
+        };
+        // Use a distinct client ID: reusing the persistent ID would make the broker kick the
+        // normal inbound MQTT session off the account while this one-shot publish is connecting.
         let nonce = uuid::Uuid::new_v4().simple().to_string();
-        let client_id = format!("p2pm_snd_{}_{}", &nid[..8.min(nid.len())], &nonce[..5]);
-        let mut sent = false;
-        for (host, port) in MQTT_BROKERS {
-            let mut opts = MqttOptions::new(&client_id, *host, *port);
-            opts.set_keep_alive(std::time::Duration::from_secs(30));
-            // Разовый путь доставки квитанции идёт мимо постоянной сессии, но
-            // предел у него тот же: иначе крупный пакет молча не уйдёт отсюда
-            // (умолчание rumqttc - 10 240 байт, см. MAX_MQTT_PACKET_BYTES).
-            opts.set_max_packet_size(
-                crate::network::mqtt_transport::MAX_MQTT_PACKET_BYTES,
-                crate::network::mqtt_transport::MAX_MQTT_PACKET_BYTES,
+        let client_id = format!(
+            "p2pm_snd_{}_{}",
+            &node_id[..8.min(node_id.len())],
+            &nonce[..5]
+        );
+        let topic = topic.to_string();
+        let payload = payload.as_bytes().to_vec();
+        let result = rt.block_on(async {
+            let shared_state = Arc::new(
+                crate::network::mqtt_transport::MqttSharedRuntimeState::new(
+                    crate::network::mqtt_overflow::MQTT_LOSS_INTOLERANT_INBOX_CAPACITY,
+                ),
             );
-            let (client, mut el) = AsyncClient::new(opts, 10);
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all().build().unwrap();
-            // Бюджет ужат: раньше каждый брокер получал до 5 секунд на
-            // соединение и ещё до 5 на сброс, то есть один вызов удерживал
-            // поток до 10 секунд на двух брокерах. Этот путь блокирующий, и
-            // пока он ждёт, обработка входящих стоит - телефон показывал
-            // «Приложение не отвечает» и грелся. Полутора секунд на брокер
-            // достаточно: связь либо есть, либо запасной путь (постоянное
-            // соединение и relay-очередь) доставит позже.
-            let result = rt.block_on(async {
-                // 1. Poll to establish CONNECT
-                for _ in 0..3 {
-                    let _ = tokio::time::timeout(
-                        std::time::Duration::from_millis(250), el.poll()
-                    ).await;
-                }
-                // 2. Publish
-                client.publish(topic, QoS::AtLeastOnce, retain, payload.as_bytes()).await?;
-                // 3. Poll to flush PUBLISH + receive PUBACK
-                for _ in 0..3 {
-                    let _ = tokio::time::timeout(
-                        std::time::Duration::from_millis(250), el.poll()
-                    ).await;
-                }
-                Ok::<(), rumqttc::ClientError>(())
-            });
-            match result {
-                Ok(_) => {
-                    sent = true;
-                    tracing::info!("MQTT: one-shot publish sent to {} (retain={})", topic, retain);
-                }
-                Err(e) => tracing::warn!("MQTT send failed via {}: {}", host, e),
+            let transport = Self::connect_ready_mqtt_session_with_client_id(
+                &node_id,
+                &display_name,
+                shared_state,
+                own_broker,
+                Some(client_id),
+                true,
+            )
+            .await?;
+            transport
+                .publish_topic("control one-shot publish", &topic, &payload, retain)
+                .await?;
+            // AsyncClient::publish queues into the event loop. Give the WSS/TCP event loop a
+            // bounded flush window before dropping this temporary session.
+            tokio::time::sleep(std::time::Duration::from_millis(750)).await;
+            Ok::<(), String>(())
+        });
+        match result {
+            Ok(()) => {
+                tracing::info!(
+                    "MQTT: WSS-aware one-shot publish queued topic={} retain={}",
+                    topic,
+                    retain
+                );
+                true
+            }
+            Err(error) => {
+                tracing::warn!(
+                    "MQTT: WSS-aware one-shot publish failed topic={} retain={}: {}",
+                    topic,
+                    retain,
+                    error
+                );
+                false
             }
         }
-        sent
     }
     /// Generate invite link with our public address
     pub fn generate_invite(&self) -> String {
@@ -5066,20 +5123,29 @@ impl P2PCore {
         // Дубли безвредны: запрос заменяет свою же сессию, ответ проверяется по
         // MAC, грант после успеха игнорируется состоянием получателя.
         let mut delivered = false;
+        let mut direct_sent = false;
         if addr.is_some() {
             let msg_id = uuid::Uuid::new_v4().to_string();
             let wire_payload = format!("{}|{}|direct|{}", sender_id, msg_id, payload);
             if self.send_via_quic(&target_device_id_hex, addr, wire_payload) {
                 delivered = true;
+                direct_sent = true;
             }
         }
         // Remote devices: use the short-lived MQTT publisher directly. Pairing must not wait
         // for the normal swarm-first gate: during the first discovery window that gate is
         // deliberately closed, which used to turn a perfectly valid request into the visible
         // "request not delivered" error. The receiver still authenticates the packet in Rust.
-        if self.send_message_mqtt_oneshot(&recipient_node_id, &payload) {
+        let mqtt_sent = self.send_message_mqtt_oneshot(&recipient_node_id, &payload);
+        if mqtt_sent {
             delivered = true;
         }
+        tracing::info!(
+            "PAIRING payload delivery direct={} mqtt={} payload_bytes={}",
+            direct_sent,
+            mqtt_sent,
+            payload.len()
+        );
         delivered
     }
 
@@ -5089,13 +5155,105 @@ impl P2PCore {
     /// normal QR/request/SAS/grant protocol afterwards.
     pub fn publish_pairing_code(&self, code: String, payload: String) -> bool {
         if code.len() != 6 || !code.bytes().all(|byte| byte.is_ascii_digit()) {
+            tracing::warn!("PAIRING rendezvous publish refused: invalid code");
             return false;
         }
         if payload.len() > crate::network::mqtt_transport::MAX_MQTT_PACKET_BYTES {
+            tracing::warn!("PAIRING rendezvous publish refused: payload too large");
             return false;
         }
         let topic = format!("p2pm2/pair/{}", code);
-        self.send_mqtt_topic_oneshot(&topic, &payload, true)
+        let sent = self.send_mqtt_topic_oneshot(&topic, &payload, true);
+        tracing::info!(
+            "PAIRING rendezvous publish result={} retain=true payload_bytes={}",
+            sent,
+            payload.len()
+        );
+        sent
+    }
+
+    /// Pairing must still receive a retained offer while SwarmFirstPolicy has paused the normal
+    /// MQTT session because a direct peer is alive. Open a bounded WSS-only listener for the
+    /// entered code; it emits the same validated core event as the persistent session and then
+    /// closes after the first valid offer or the 15-minute rendezvous TTL.
+    pub fn listen_pairing_code(&self, code: String) -> bool {
+        if code.len() != 6 || !code.bytes().all(|byte| byte.is_ascii_digit()) {
+            tracing::warn!("PAIRING rendezvous listener refused: invalid code");
+            return false;
+        }
+        let Some(runtime) = self.runtime.as_ref() else {
+            tracing::warn!("PAIRING rendezvous listener refused: runtime unavailable");
+            return false;
+        };
+        let Some(node_id) = self.node_id_str.clone() else {
+            tracing::warn!("PAIRING rendezvous listener refused: node id unavailable");
+            return false;
+        };
+        let events = Arc::clone(&self.events);
+        let display_name = self.config.display_name.clone();
+        let own_broker = self.own_broker_endpoint();
+        let topic = format!("p2pm2/pair/{code}");
+        let nonce = uuid::Uuid::new_v4().simple().to_string();
+        let client_id = format!(
+            "p2pm_lst_{}_{}",
+            &node_id[..8.min(node_id.len())],
+            &nonce[..5]
+        );
+        runtime.spawn(async move {
+            let shared_state = Arc::new(
+                crate::network::mqtt_transport::MqttSharedRuntimeState::new(
+                    crate::network::mqtt_overflow::MQTT_LOSS_INTOLERANT_INBOX_CAPACITY,
+                ),
+            );
+            let mut transport = match Self::connect_ready_mqtt_session_with_client_id(
+                &node_id,
+                &display_name,
+                shared_state,
+                own_broker,
+                Some(client_id),
+                true,
+            )
+            .await
+            {
+                Ok(transport) => transport,
+                Err(error) => {
+                    tracing::warn!(
+                        "PAIRING rendezvous listener failed before subscribe: {}",
+                        error
+                    );
+                    return;
+                }
+            };
+            tracing::info!(
+                "PAIRING rendezvous listener ready topic_code_len={} ttl_secs=900",
+                code.len()
+            );
+            let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(15 * 60);
+            loop {
+                if tokio::time::Instant::now() >= deadline {
+                    tracing::info!("PAIRING rendezvous listener expired without offer");
+                    break;
+                }
+                if let Some(event) = transport.poll_event().await {
+                    if event.topic == topic {
+                        if let Some(core_event) = Self::pairing_rendezvous_event(
+                            &event.topic,
+                            &event.payload,
+                        ) {
+                            events.emit(core_event);
+                            tracing::info!("PAIRING rendezvous listener received valid offer");
+                            break;
+                        }
+                        tracing::warn!("PAIRING rendezvous listener rejected malformed offer");
+                    }
+                }
+                if transport.restart_reason().is_some() {
+                    tracing::warn!("PAIRING rendezvous listener stopped: MQTT event loop unhealthy");
+                    break;
+                }
+            }
+        });
+        true
     }
 
     /// K3: бинарный кусок файла по прямому QUIC-каналу.
@@ -7065,6 +7223,31 @@ mod tests {
         assert_eq!(P2PCore::idle_history_candidate(&book, &pins, &addresses, now), None);
         addresses.clear();
         assert_eq!(P2PCore::idle_history_candidate(&book, &HashMap::new(), &addresses, now), None);
+    }
+
+    #[test]
+    fn pairing_rendezvous_requires_exact_topic_code_and_bounded_offer_envelope() {
+        let payload = "APUPAIRCODE1|pk_primary|123456|apupair:opaque-qr";
+        let event = P2PCore::pairing_rendezvous_event(
+            "p2pm2/pair/123456",
+            payload,
+        );
+        assert!(event.is_some());
+        assert!(P2PCore::pairing_rendezvous_event(
+            "p2pm2/pair/123457",
+            payload,
+        )
+        .is_none());
+        assert!(P2PCore::pairing_rendezvous_event(
+            "p2pm2/pair/123456/extra",
+            payload,
+        )
+        .is_none());
+        assert!(P2PCore::pairing_rendezvous_event(
+            "p2pm2/pair/123456",
+            "APUPAIRCODE1|pk_primary|123456|not-an-offer",
+        )
+        .is_none());
     }
 
 }
