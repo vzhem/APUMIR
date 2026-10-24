@@ -4327,9 +4327,26 @@ impl P2PCore {
                         // приходят, и проверка адресата обязательна.
                         let recipient_id = evt.topic.trim_start_matches("p2pm2/msg/");
                         let parts: Vec<&str> = evt.payload.splitn(4, '|').collect();
-                        // Страж отправителя (pk_…) - см. QUIC-приёмник: голая строка
-                        // без конверта не должна стать «сообщением от APUCALL1».
-                        if parts.len() == 4 && parts[0] != node_id && parts[0].starts_with("pk_") {  // Skip own messages
+                        // Same-account devices intentionally share the routing node id. Pairing
+                        // packets therefore must be handled before the ordinary self-message
+                        // suppression; the Rust pairing MAC/AEAD still authenticates the exact
+                        // target device and rejects spoofed APUPAIR payloads.
+                        if parts.len() == 4
+                            && parts[0].starts_with("pk_")
+                            && parts[2] == "pairing"
+                            && parts[3].starts_with("APUPAIR:")
+                            && recipient_id == node_id
+                        {
+                            tracing::info!("PAIRING payload received via MQTT");
+                            events.emit(CoreEvent::MessageReceived {
+                                message_id: parts[1].to_string(),
+                                chat_id: "pairing".to_string(),
+                                sender_id: parts[0].to_string(),
+                                text: parts[3].to_string(),
+                                timestamp: crate::storage::models::now_ms(),
+                            });
+                            tracing::info!("PAIRING payload emitted to EventBus");
+                        } else if parts.len() == 4 && parts[0] != node_id && parts[0].starts_with("pk_") {  // Skip own messages
                             let sender_id = parts[0];
                             let message_id = parts[1];
                             let chat_id = parts[2];
@@ -5135,8 +5152,12 @@ impl P2PCore {
         // Remote devices: use the short-lived MQTT publisher directly. Pairing must not wait
         // for the normal swarm-first gate: during the first discovery window that gate is
         // deliberately closed, which used to turn a perfectly valid request into the visible
-        // "request not delivered" error. The receiver still authenticates the packet in Rust.
-        let mqtt_sent = self.send_message_mqtt_oneshot(&recipient_node_id, &payload);
+        // "request not delivered" error. The MQTT message still uses the normal authenticated
+        // sender|message_id|chat|payload envelope; without that envelope the generic MQTT
+        // receiver correctly rejects raw APUPAIR text before Android can run its Rust checks.
+        let mqtt_msg_id = uuid::Uuid::new_v4().to_string();
+        let mqtt_payload = format!("{}|{}|pairing|{}", sender_id, mqtt_msg_id, payload);
+        let mqtt_sent = self.send_message_mqtt_oneshot(&recipient_node_id, &mqtt_payload);
         if mqtt_sent {
             delivered = true;
         }
