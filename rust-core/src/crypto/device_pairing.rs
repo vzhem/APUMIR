@@ -34,7 +34,9 @@ pub const PAIRING_FORMAT_V1: u8 = 1;
 pub const PAIRING_FORMAT_V2: u8 = 2;
 const MAX_CONTACT_HINTS: usize = 8;
 const MAX_CONTACT_HINT_CHARS: usize = 64;
-pub const PAIRING_OFFER_TTL_MS: i64 = 5 * 60 * 1000;
+/// Keep the offer alive long enough for a user to switch phones, type the short code,
+/// and compare the final SAS without racing a five-minute timeout.
+pub const PAIRING_OFFER_TTL_MS: i64 = 15 * 60 * 1000;
 const MAX_SESSIONS: usize = 4;
 const SECRET_BYTES: usize = 32;
 const NONCE_BYTES: usize = 32;

@@ -2330,7 +2330,7 @@ class CoreServerService : Service() {
                 // and the joiner can only sit on the six-digit code screen forever. The controller
                 // still authenticates the packet and ignores an own-device echo by device_id.
                 if (!SealedWire.isSealed(rawText) &&
-                    com.vladimir.messenger.data.pairing.DevicePairingWire.isPacket(rawText)
+                    com.vladimir.messenger.data.pairing.DevicePairingWire.isPairingText(rawText)
                 ) {
                     com.vladimir.messenger.data.pairing.DevicePairingController
                         .routeIncoming(applicationContext, senderId, rawText)

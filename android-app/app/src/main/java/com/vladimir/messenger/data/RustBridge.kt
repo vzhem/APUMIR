@@ -734,6 +734,17 @@ object RustBridge {
         }
     }
 
+    /** Publish the retained short-code rendezvous offer. Must run off the main thread. */
+    fun publishPairingCode(code: String, payload: String): Boolean {
+        if (rejectMainThreadCall("publishPairingCode")) return false
+        return try {
+            engine?.publishPairingCode(code, payload) ?: false
+        } catch (e: Exception) {
+            Log.w(TAG, "publishPairingCode failed: ${e.message}")
+            false
+        }
+    }
+
     fun sendDirectPayload(recipientId: String, payload: String): Boolean {
         if (rejectMainThreadCall("sendDirectPayload")) return false
         return try {

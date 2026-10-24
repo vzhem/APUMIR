@@ -45,7 +45,7 @@ object DevicePairingController {
         val error: String? = null,
     )
 
-    enum class JoinerPhase { WAITING_ANSWER, CONFIRM_CODE, WAITING_GRANT, DONE, FAILED }
+    enum class JoinerPhase { WAITING_CODE, WAITING_ANSWER, CONFIRM_CODE, WAITING_GRANT, DONE, FAILED }
 
     data class JoinerState(
         val phase: JoinerPhase,
@@ -63,6 +63,10 @@ object DevicePairingController {
 
     private val offerOpen = MutableStateFlow(false)
     val isOfferOpen: StateFlow<Boolean> = offerOpen.asStateFlow()
+
+    /** Short code used only to find the full QR offer when a camera is unavailable. */
+    private val offerCodeMutable = MutableStateFlow<String?>(null)
+    val offerCode: StateFlow<String?> = offerCodeMutable.asStateFlow()
 
     /** Granting side: the pairing finished here; automatic data sync is taking over. */
     private val primaryDoneMutable = MutableStateFlow(false)
@@ -87,6 +91,11 @@ object DevicePairingController {
     private var pendingGrant: ByteArray? = null
     private var pendingSync: ByteArray? = null
     private var joinerAccountNode: String? = null
+    /** Code entered on the joiner; a retained broker offer completes this rendezvous. */
+    private var pendingManualCode: String? = null
+    private var lastRendezvous: DevicePairingWire.RendezvousOffer? = null
+    private var lastRendezvousAtMs: Long = 0L
+    private var offerBroadcastJob: kotlinx.coroutines.Job? = null
 
     @Volatile
     private var appContext: Context? = null
@@ -107,24 +116,73 @@ object DevicePairingController {
     }
 
     /** Primary: show a QR that a new device can scan. Returns the QR text. */
-    fun openOffer(): String = synchronized(stateLock) {
-        primaryDoneMutable.value = false
-        prepareLocal()
-        val offer = createPairingOffer(System.currentTimeMillis())
-        offerOpen.value = true
-        return@synchronized DevicePairingWire.qrPayload(offer)
+    fun openOffer(): String {
+        val qrText = synchronized(stateLock) {
+            primaryDoneMutable.value = false
+            prepareLocal()
+            val offer = createPairingOffer(System.currentTimeMillis())
+            val qr = DevicePairingWire.qrPayload(offer)
+            offerOpen.value = true
+            offerCodeMutable.value = DevicePairingWire.pairingCode(qr)
+            qr
+        }
+        val code = offerCodeMutable.value
+        val sender = RustBridge.nodeId()
+        val payload = if (code != null && sender != null) {
+            DevicePairingWire.rendezvousPayload(sender, code, qrText)
+        } else {
+            null
+        }
+        if (code != null && payload != null) {
+            startOfferBroadcast(code, payload)
+        }
+        return qrText
     }
 
     fun closeOffer() {
-        synchronized(stateLock) {
+        val code = synchronized(stateLock) {
+            val oldCode = offerCodeMutable.value
+            offerBroadcastJob?.cancel()
+            offerBroadcastJob = null
             runCatching { closePairingOffer() }
             offerOpen.value = false
+            offerCodeMutable.value = null
             primaryMutable.value = null
+            oldCode
+        }
+        // Remove the retained rendezvous offer; a later user must not enter an old code.
+        if (code != null) {
+            retryScope.launch { RustBridge.publishPairingCode(code, "") }
+        }
+    }
+
+    private fun startOfferBroadcast(code: String, payload: String) {
+        offerBroadcastJob?.cancel()
+        offerBroadcastJob = retryScope.launch {
+            for (waitMs in listOf(0L, 5_000L, 10_000L, 20_000L, 40_000L, 80_000L, 120_000L, 180_000L, 240_000L)) {
+                if (waitMs > 0) delay(waitMs)
+                val active = synchronized(stateLock) {
+                    offerOpen.value && offerCodeMutable.value == code
+                }
+                if (!active) return@launch
+                RustBridge.publishPairingCode(code, payload)
+            }
         }
     }
 
     /** Route one incoming text. Returns true when the text was a pairing packet. */
     suspend fun routeIncoming(context: Context, senderId: String, text: String): Boolean {
+        if (DevicePairingWire.isRendezvousPacket(text)) {
+            val rendezvous = DevicePairingWire.parseRendezvous(text)
+            synchronized(stateLock) {
+                if (rendezvous == null) {
+                    Log.w(TAG, "malformed pairing rendezvous from $senderId, dropped")
+                } else {
+                    onRendezvous(rendezvous)
+                }
+            }
+            return true
+        }
         val packet = DevicePairingWire.decode(text)
             ?: return DevicePairingWire.isPacket(text).also {
                 if (it) Log.w(TAG, "malformed pairing packet from $senderId, dropped")
@@ -145,6 +203,17 @@ object DevicePairingController {
             }
         }
         return true
+    }
+
+    /** A user-entered code found the retained offer. Continue through the normal QR path. */
+    private fun onRendezvous(offer: DevicePairingWire.RendezvousOffer) {
+        lastRendezvous = offer
+        lastRendezvousAtMs = System.currentTimeMillis()
+        if (pendingManualCode != offer.code) return
+        pendingManualCode = null
+        if (!startJoinInternal(offer.qrText)) {
+            Log.w(TAG, "pairing rendezvous offer could not start")
+        }
     }
 
     private fun onRequest(context: Context, senderId: String, request: ByteArray, now: Long) {
@@ -206,12 +275,15 @@ object DevicePairingController {
         }
     }
 
-    /** New device: start pairing from a scanned QR. Returns false if the QR is not a pairing code. */
-    suspend fun startJoin(qrText: String): Boolean {
+    /** New device: start pairing from a scanned or rendezvous-delivered QR. */
+    suspend fun startJoin(qrText: String): Boolean = startJoinInternal(qrText)
+
+    private fun startJoinInternal(qrText: String): Boolean {
         val context = appContext ?: return false
         val offer = DevicePairingWire.parseQr(qrText) ?: return false
         val accountNode = RustBridge.nodeId() ?: return false
         return synchronized(stateLock) {
+            pendingManualCode = null
             val primaryDevice = pairingOfferPrimaryDeviceId(offer)
             // The QR carries the other phone's addresses: remember them as the direct route to
             // that exact device, so the request below does not wait for LAN discovery.
@@ -245,11 +317,40 @@ object DevicePairingController {
                 primaryDevice,
                 requestPacket,
             )
+            // A transient false means only that neither transport was ready at this instant.
+            // Keep the code card alive; the retry schedule and the manual retry button continue.
+            if (!sent) Log.w(TAG, "pairing request queued for retry")
             scheduleRequestRetries()
-            if (!sent) {
-                joinerMutable.value = JoinerState(JoinerPhase.FAILED, message = "request not delivered")
-            }
             true
+        }
+    }
+
+    /** Start from the six-digit rendezvous code shown beside the QR on the other phone. */
+    fun startJoinByCode(code: String): Boolean {
+        val normalized = DevicePairingWire.normalizePairingCode(code) ?: return false
+        val context = appContext ?: return false
+        return synchronized(stateLock) {
+            runCatching { joinerCancelPairing() }
+            pendingManualCode = normalized
+            joinerConfirmed = false
+            answerReceived = false
+            pendingGrant = null
+            pendingSync = null
+            pendingRequestTarget = null
+            pendingRequestPacket = null
+            joinerAccountNode = null
+            joinerMutable.value = JoinerState(
+                phase = JoinerPhase.WAITING_CODE,
+                deviceShort = shortDeviceId(DeviceKeyStore.deviceId(context)),
+            )
+            val cached = lastRendezvous
+                ?.takeIf { it.code == normalized && System.currentTimeMillis() - lastRendezvousAtMs < 15 * 60_000L }
+            if (cached != null) {
+                pendingManualCode = null
+                startJoinInternal(cached.qrText)
+            } else {
+                true
+            }
         }
     }
 
@@ -373,7 +474,10 @@ object DevicePairingController {
 
     /** Either side: stop everything and forget the pending state. */
     fun cancel() {
-        synchronized(stateLock) {
+        val code = synchronized(stateLock) {
+            val oldCode = offerCodeMutable.value
+            offerBroadcastJob?.cancel()
+            offerBroadcastJob = null
             runCatching { joinerCancelPairing() }
             runCatching { closePairingOffer() }
             joinerConfirmed = false
@@ -385,11 +489,17 @@ object DevicePairingController {
             pendingGrant = null
             pendingSync = null
             joinerAccountNode = null
+            pendingManualCode = null
+            lastRendezvous = null
+            lastRendezvousAtMs = 0L
             joinerMutable.value = null
             offerOpen.value = false
+            offerCodeMutable.value = null
             primaryMutable.value = null
             primaryDoneMutable.value = false
+            oldCode
         }
+        if (code != null) retryScope.launch { RustBridge.publishPairingCode(code, "") }
     }
 
     /**
@@ -399,7 +509,9 @@ object DevicePairingController {
      */
     private fun scheduleRequestRetries() {
         retryScope.launch {
-            for (waitMs in listOf(4_000L, 8_000L, 20_000L, 40_000L)) {
+            // The first broker/direct discovery can take longer than the original 40 seconds.
+            // Keep the same request for almost the whole 15-minute offer lifetime.
+            for (waitMs in listOf(5_000L, 10_000L, 20_000L, 40_000L, 80_000L, 120_000L, 180_000L, 240_000L)) {
                 delay(waitMs)
                 val shouldStop = synchronized(stateLock) { answerReceived }
                 if (shouldStop) return@launch

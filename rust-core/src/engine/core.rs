@@ -3555,6 +3555,33 @@ impl P2PCore {
                         // подтверждая давно удалённые установки. Живым узел
                         // делает только его собственный presence.
                     }
+                } else if evt.topic.starts_with("p2pm2/pair/") {
+                    // P3 short-code rendezvous. The offer is retained on a six-digit topic so
+                    // the second phone can enter the code before its MQTT session is ready.
+                    // Same-account devices intentionally share the routing node id, so do not
+                    // apply the usual self-node drop here; Android has to see the event on both
+                    // phones and only the phone with the entered code will start the flow. Only
+                    // the exact code topic and bounded APUPAIRCODE1 envelope are accepted; the
+                    // Android side still verifies the QR MAC/SAS before granting access.
+                    let code = evt.topic.trim_start_matches("p2pm2/pair/");
+                    let parts: Vec<&str> = evt.payload.splitn(4, '|').collect();
+                    if code.len() == 6
+                        && code.bytes().all(|byte| byte.is_ascii_digit())
+                        && parts.len() == 4
+                        && parts[0] == "APUPAIRCODE1"
+                        && parts[1].starts_with("pk_")
+                        && parts[2] == code
+                        && parts[3].starts_with("apupair:")
+                        && parts[3].len() <= 8 * 1024
+                    {
+                        events.emit(CoreEvent::MessageReceived {
+                            message_id: format!("pair-code-{}", uuid::Uuid::new_v4()),
+                            chat_id: "pairing-code".to_string(),
+                            sender_id: parts[1].to_string(),
+                            text: format!("APUPAIRCODE1:{}:{}", code, parts[3]),
+                            timestamp: crate::storage::models::now_ms(),
+                        });
+                    }
                 } else if evt.topic.starts_with("p2pm2/msg/") {
                     // ACK: "ack|messageId" — подтверждение обычной прямой доставки.
                     //
@@ -4659,11 +4686,23 @@ impl P2PCore {
     }
 
     fn send_message_mqtt_oneshot(&self, to_node_id: &str, payload: &str) -> bool {
+        let topic = format!("p2pm2/msg/{}", to_node_id);
+        self.send_mqtt_topic_oneshot(&topic, payload, false)
+    }
+
+    /// Publish one bounded control payload without the normal swarm-first gate. Pairing uses
+    /// `retain=true` so a code entered while the receiver is still connecting is not lost.
+    fn send_mqtt_topic_oneshot(&self, topic: &str, payload: &str, retain: bool) -> bool {
         use crate::network::mqtt_transport::MQTT_BROKERS;
         use rumqttc::{AsyncClient, MqttOptions, QoS};
 
         let nid = self.node_id_str.clone().unwrap_or_default();
-        let client_id = format!("p2pm_snd_{}", &nid[..8.min(nid.len())]);
+        // Same-account devices share node_id; a deterministic client id would make their
+        // one-shot publishers kick each other off the broker. Keep the MQTT v3 id short but
+        // add a per-publish nonce.
+        let nonce = uuid::Uuid::new_v4().simple().to_string();
+        let client_id = format!("p2pm_snd_{}_{}", &nid[..8.min(nid.len())], &nonce[..5]);
+        let mut sent = false;
         for (host, port) in MQTT_BROKERS {
             let mut opts = MqttOptions::new(&client_id, *host, *port);
             opts.set_keep_alive(std::time::Duration::from_secs(30));
@@ -4675,7 +4714,6 @@ impl P2PCore {
                 crate::network::mqtt_transport::MAX_MQTT_PACKET_BYTES,
             );
             let (client, mut el) = AsyncClient::new(opts, 10);
-            let topic = format!("p2pm2/msg/{}", to_node_id);
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all().build().unwrap();
             // Бюджет ужат: раньше каждый брокер получал до 5 секунд на
@@ -4693,7 +4731,7 @@ impl P2PCore {
                     ).await;
                 }
                 // 2. Publish
-                client.publish(&topic, QoS::AtLeastOnce, false, payload.as_bytes()).await?;
+                client.publish(&topic, QoS::AtLeastOnce, retain, payload.as_bytes()).await?;
                 // 3. Poll to flush PUBLISH + receive PUBACK
                 for _ in 0..3 {
                     let _ = tokio::time::timeout(
@@ -4704,13 +4742,13 @@ impl P2PCore {
             });
             match result {
                 Ok(_) => {
-                    tracing::info!("MQTT: message sent to {}", to_node_id);
-                    return true;
+                    sent = true;
+                    tracing::info!("MQTT: one-shot publish sent to {} (retain={})", topic, retain);
                 }
                 Err(e) => tracing::warn!("MQTT send failed via {}: {}", host, e),
             }
         }
-        false
+        sent
     }
     /// Generate invite link with our public address
     pub fn generate_invite(&self) -> String {
@@ -5035,12 +5073,29 @@ impl P2PCore {
                 delivered = true;
             }
         }
-        // Remote devices: the broker route to the account reaches every device subscribed to
-        // it, and the pairing protocol makes the wrong device ignore the packet.
-        if self.send_message_mqtt(&recipient_node_id, &payload) {
+        // Remote devices: use the short-lived MQTT publisher directly. Pairing must not wait
+        // for the normal swarm-first gate: during the first discovery window that gate is
+        // deliberately closed, which used to turn a perfectly valid request into the visible
+        // "request not delivered" error. The receiver still authenticates the packet in Rust.
+        if self.send_message_mqtt_oneshot(&recipient_node_id, &payload) {
             delivered = true;
         }
         delivered
+    }
+
+    /// P3: publish the QR offer under a short human-entered rendezvous code. The topic is
+    /// retained so a second phone may enter the code before its MQTT session is ready; the
+    /// Android controller filters the offer by the code the user entered and still runs the
+    /// normal QR/request/SAS/grant protocol afterwards.
+    pub fn publish_pairing_code(&self, code: String, payload: String) -> bool {
+        if code.len() != 6 || !code.bytes().all(|byte| byte.is_ascii_digit()) {
+            return false;
+        }
+        if payload.len() > crate::network::mqtt_transport::MAX_MQTT_PACKET_BYTES {
+            return false;
+        }
+        let topic = format!("p2pm2/pair/{}", code);
+        self.send_mqtt_topic_oneshot(&topic, &payload, true)
     }
 
     /// K3: бинарный кусок файла по прямому QUIC-каналу.
