@@ -30,6 +30,12 @@
 - Draft prerelease промотирован в стабильный Latest: https://github.com/vzhem/APUMIR/releases/tag/v11.74.444, `draft=false`, `prerelease=false`; через GitHub API `/releases/latest` возвращает `v11.74.444`.
 - Стабильные ссылки: https://github.com/vzhem/APUMIR/releases/download/v11.74.444/app-release.apk и https://github.com/vzhem/APUMIR/releases/download/v11.74.444/SHA256SUMS.txt; shortcut APK: https://github.com/vzhem/APUMIR/releases/latest/download/app-release.apk. Новый PR не создавался. Финальная UI-проверка остаётся владельцу на реальных телефонах.
 
+### Публичный релиз v11.74.445 — подготовка к выпуску (2026-10-24)
+
+- Владелец явно разрешил выпуск для всех и подтвердил точный публичный текст из `docs/RELEASE_NOTES_v11.74.445.md`.
+- К релизу готовится tag `v11.74.445` на вершине `arena/762cd357-apumir`; после зелёного tag workflow нужно проверить APK/checksum и промотировать draft prerelease в стабильный Latest.
+- Новый PR не создаётся. Финальная проверка pairing остаётся владельцу на двух физических устройствах.
+
 ## Исправление синхронизации двух устройств (2026-10-24, после v11.74.443)
 
 - По скриншотам владельца найден корень неработающей кнопки «Совпадает»: два телефона одного аккаунта используют один routing `nodeId`, а основной путь `CoreServerService` отбрасывал входящий сырой `APUPAIR` как «сообщение от себя» ещё до `DevicePairingController`. Поэтому сканирующий видел код `649 114`, но показывающий телефон не получал запрос.
