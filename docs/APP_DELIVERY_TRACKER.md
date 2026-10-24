@@ -5,14 +5,14 @@
 
 ## Где живёт работа
 
-- Линия приложения: `main`. Последний опубликованный стабильный релиз — `v11.74.444` (Latest), tag-коммит `80945b567502c10468a8b9e23161c4d1d5fb5e21`.
+- Линия приложения: `main`. Последний опубликованный стабильный релиз — `v11.74.446` (Latest), tag-коммит `1d152d46b5c68e22642f55a91987c7b95ff0a7dd`.
 - Рабочая ветка этой сессии: `arena/762cd357-apumir`, от коммита `aff66920d08b62246654e4ba04f00c4d8f4735ed`.
 - Все текущие изменения должны попасть только в `arena/762cd357-apumir` и собираться вместе с `main`.
 - Другие ветки `arena/*` не удалять без явного разрешения владельца.
 
 ## Задачи и статус (на 2026-10-24)
 
-Текущий стабильный выпуск: `v11.74.444` — Latest, публичный и стабильный. Новый релиз/тег/PR создаётся только после отдельного разрешения владельца и предварительного показа точного публичного текста.
+Текущий стабильный выпуск: `v11.74.446` — Latest, публичный и стабильный. Новый релиз/тег/PR создаётся только после отдельного разрешения владельца и предварительного показа точного публичного текста.
 
 ### Публичный релиз v11.74.443 (2026-10-24)
 
@@ -38,6 +38,23 @@
 - В релиз загружены `app-release.apk` размером `229275683` bytes, SHA-256 `8e962f463953771ea9ac100f61c2a791930f445956f2bbc2abc3a4173a2dde48`, и `SHA256SUMS.txt` размером `82` bytes, asset digest `47a7112da9d6b3544d0694a69d43177fcae4337427766ecb5a32c0c67b6af850`.
 - Draft prerelease промотирован в стабильный Latest: https://github.com/vzhem/APUMIR/releases/tag/v11.74.445; через GitHub API проверено `draft=false`, `prerelease=false`, `/releases/latest` возвращает `v11.74.445`.
 - Стабильные ссылки: https://github.com/vzhem/APUMIR/releases/download/v11.74.445/app-release.apk и https://github.com/vzhem/APUMIR/releases/download/v11.74.445/SHA256SUMS.txt; shortcut APK: https://github.com/vzhem/APUMIR/releases/latest/download/app-release.apk. Новый PR не создавался. Финальная проверка pairing остаётся владельцу на двух физических устройствах.
+
+### Публичный релиз v11.74.446 (2026-10-24)
+
+- Владелец явно разрешил выпуск для всех и подтвердил точный публичный текст из `docs/RELEASE_NOTES_v11.74.446.md`.
+- Создан и отправлен annotated tag `v11.74.446`; peeled tag commit `1d152d46b5c68e22642f55a91987c7b95ff0a7dd`.
+- Tag release workflow `40120914921` зелёный; build job `120952069337` прошёл ancestry check относительно `v11.74.445`, native/Rust, UniFFI regeneration, Gradle APK build, проверки, подпись и checksum-шаги.
+- В релиз загружены `app-release.apk` размером `229259299` bytes, SHA-256 `436806d725977c159c9b35d4ad98bc6ddaf49305f7967b5e330f9c3e96d5586a`, и `SHA256SUMS.txt` размером `82` bytes.
+- Release промотирован в стабильный Latest: https://github.com/vzhem/APUMIR/releases/tag/v11.74.446; через GitHub API проверено `draft=false`, `prerelease=false`, `/releases/latest` возвращает `v11.74.446`.
+- Стабильные ссылки: https://github.com/vzhem/APUMIR/releases/download/v11.74.446/app-release.apk и https://github.com/vzhem/APUMIR/releases/download/v11.74.446/SHA256SUMS.txt; shortcut APK: https://github.com/vzhem/APUMIR/releases/latest/download/app-release.apk. Новый PR не создавался. Финальная pairing-проверка остаётся владельцу на двух физических устройствах.
+
+## Надёжная доставка pairing по шестизначному коду (выпущено в v11.74.446)
+
+- Исправлен WSS-обход publisher-а: offer и control-пакеты используют WSS-aware временную MQTT-сессию с уникальным client ID, retained публикацией и bounded flush. Временная сессия не очищает presence постоянного устройства.
+- MQTT pairing-пакеты теперь идут через обычный `sender|message_id|chat|payload` envelope и обрабатываются до self-node suppression: устройства одного аккаунта могут иметь общий routing node ID, но request/answer/grant всё равно проходят прежние MAC/AEAD, certificate, account/device binding и SAS проверки.
+- При вводе кода запускается отдельный bounded WSS listener на 15 минут, поэтому pairing не зависит от паузы обычной MQTT-сессии по `SwarmFirstPolicy` при живом direct peer.
+- Добавлены безопасные стадии диагностики: publish queued/failed, listener ready/expired, offer received/matched, authenticated rejection, SAS wait и certificate/sync success. Добавлен Rust-тест точного topic/code/envelope matching.
+- Branch CI run `40117731451` на `0778def1` зелёный; tag run `40120914921` также зелёный. Код опубликован в Latest; физическая проверка pairing владельцем на двух телефонах ещё не выполнена.
 
 ## Исправление синхронизации двух устройств (2026-10-24, после v11.74.443)
 
