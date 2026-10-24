@@ -232,6 +232,10 @@ class GroupChatViewModel @Inject constructor(
         }
         // Вступивший позже не застал создание тем - просим список у владельца.
         viewModelScope.launch { groupRepository.requestTopics(groupId) }
+        // Состав также мог быть пропущен в офлайне или прийти частично.
+        // Открытие списка участников запускает тот же адресный repair-path,
+        // поэтому UI не остаётся на старых двух строках до следующего вступления.
+        viewModelScope.launch { groupRepository.requestRoster(groupId) }
         // р237: черновик темы - из хранилища и от партнёрского устройства.
         draftKey = com.vladimir.messenger.data.draft.DraftStore.groupKey(groupId)
         observeDrafts()

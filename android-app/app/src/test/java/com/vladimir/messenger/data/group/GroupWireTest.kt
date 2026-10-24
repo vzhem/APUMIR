@@ -285,6 +285,40 @@ class GroupWireTest {
         assertEquals(GroupRole.MEMBER, parsed.entries[0].role)
     }
 
+    @Test
+    fun rosterCarriesExpectedCountForPartialRepair() {
+        val envelope = GroupWire.buildRoster(
+            "g",
+            listOf(GroupWire.RosterEntry("pk_new", "Новый", GroupRole.MEMBER)),
+            memberCount = 5,
+        )
+        val parsed = GroupWire.parse(envelope) as GroupWire.Packet.Roster
+        assertEquals(1, parsed.entries.size)
+        assertEquals(5, parsed.memberCount)
+    }
+
+    @Test
+    fun rosterMergeIsMonotonicForRepeatedAndPartialPackets() {
+        val current = listOf(
+            GroupWire.RosterEntry("a", "Аня", GroupRole.MEMBER),
+            GroupWire.RosterEntry("b", "Борис", GroupRole.ADMIN),
+        )
+        val partial = listOf(
+            GroupWire.RosterEntry("b", "", GroupRole.ADMIN),
+            GroupWire.RosterEntry("c", "Света", GroupRole.MEMBER),
+            GroupWire.RosterEntry("d", "Дима", GroupRole.MEMBER),
+            GroupWire.RosterEntry("e", "Елена", GroupRole.MEMBER),
+        )
+        val merged = GroupWire.mergeRosterEntries(current, partial)
+        assertEquals(listOf("a", "b", "c", "d", "e"), merged.map { it.nodeId })
+        assertEquals("Борис", merged[1].displayName)
+        assertEquals(GroupRole.ADMIN, merged[1].role)
+
+        val repeated = GroupWire.mergeRosterEntries(merged, listOf(merged[2]))
+        assertEquals(5, repeated.size)
+        assertEquals(setOf("a", "b", "c", "d", "e"), repeated.map { it.nodeId }.toSet())
+    }
+
     /**
      * р249: «печатает…» в группе едет групповым конвертом.
      *

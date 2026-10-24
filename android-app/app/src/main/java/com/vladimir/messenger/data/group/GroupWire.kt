@@ -762,10 +762,18 @@ object GroupWire {
          */
         data class GroupDeleted(val groupId: String) : Packet()
 
-        /** Список участников: строки "nodeId,displayName,role" через ';'. */
+        /**
+         * Список участников: строки "nodeId,displayName,role" через ';'.
+         *
+         * Старые конверты не содержат [memberCount] и разбираются как 0.
+         * Новые конверты передают ожидаемое число участников даже когда
+         * пакет является частичным: получатель может понять, что состав ещё
+         * не сошёлся, и запросить полный снимок у владельца/администратора.
+         */
         data class Roster(
             val groupId: String,
             val entries: List<RosterEntry>,
+            val memberCount: Int = 0,
         ) : Packet()
 
         /**
@@ -1489,11 +1497,46 @@ object GroupWire {
             "${encode(previousOwnerId)}|${atMs.coerceAtLeast(0L)}|$mode"
     }
 
-    fun buildRoster(groupId: String, entries: List<RosterEntry>): String {
+    /**
+     * Собрать снимок состава. [memberCount] нужен для частичных пакетов:
+     * например, администраторы большого канала могут прислать только свои
+     * строки, но получатель всё равно знает, сколько участников должно быть.
+     * Ноль оставляет старый формат для совместимости со старыми тестовыми и
+     * сетевыми конвертами.
+     */
+    fun buildRoster(
+        groupId: String,
+        entries: List<RosterEntry>,
+        memberCount: Int = 0,
+    ): String {
+        require(memberCount >= 0) { "negative roster member count" }
+        if (memberCount > 0) require(memberCount >= entries.size) { "roster count below entries" }
         val csv = entries.joinToString(";") {
             "${encode(it.nodeId)},${encode(it.displayName)},${it.role}"
         }
-        return "$PREFIX|$KIND_ROSTER|$groupId|$csv"
+        val countCell = if (memberCount > 0) "|$memberCount" else ""
+        return "$PREFIX|$KIND_ROSTER|$groupId|$csv$countCell"
+    }
+
+    /**
+     * Объединить снимок с уже известным составом без destructive replace.
+     * Частичный или повторный пакет не может удалить участника, а пустое имя
+     * из неполного старого пакета не затирает уже известное имя.
+     */
+    fun mergeRosterEntries(
+        current: List<RosterEntry>,
+        incoming: List<RosterEntry>,
+    ): List<RosterEntry> {
+        val merged = LinkedHashMap<String, RosterEntry>()
+        (current + incoming).forEach { entry ->
+            if (entry.nodeId.isBlank()) return@forEach
+            val previous = merged[entry.nodeId]
+            merged[entry.nodeId] = entry.copy(
+                displayName = entry.displayName.ifBlank { previous?.displayName.orEmpty() },
+                role = entry.role.ifBlank { previous?.role ?: GroupRole.MEMBER },
+            )
+        }
+        return merged.values.toList()
     }
 
     /** Список тем: строки "topicId,name[,iconEmoji]" через ';'. */
@@ -1966,9 +2009,14 @@ object GroupWire {
                 null
             }
 
-            KIND_ROSTER -> if (parts.size == 4) {
+            KIND_ROSTER -> if (parts.size == 4 || parts.size == 5) {
                 val entries = parseRoster(parts[3]) ?: return null
-                Packet.Roster(groupId, entries)
+                val memberCount = if (parts.size == 5) {
+                    parts[4].toIntOrNull()?.takeIf { it > 0 && it >= entries.size } ?: return null
+                } else {
+                    0
+                }
+                Packet.Roster(groupId, entries, memberCount)
             } else {
                 null
             }

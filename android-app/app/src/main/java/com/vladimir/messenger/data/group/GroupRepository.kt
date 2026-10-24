@@ -252,6 +252,21 @@ class GroupRepository(
         java.util.Collections.synchronizedSet(mutableSetOf())
 
     /**
+     * Пакет состава может обогнать карточку группы/решение о вступлении.
+     * Держим такой пакет до появления локальной строки группы и участника,
+     * вместо того чтобы безвозвратно выбросить его из обработчика.
+     */
+    private data class PendingRoster(
+        val senderId: String,
+        val packet: GroupWire.Packet.Roster,
+    )
+
+    private val pendingRosters = java.util.concurrent.ConcurrentHashMap<String, MutableList<PendingRoster>>()
+
+    /** Повторный запрос состава не чаще одного раза за интервал на группу. */
+    private val rosterRequestedAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /**
      * Когда последний раз рассылали каталог, @имя и аватар.
      *
      * Эти три рассылки ничего не решают в переписке: они лишь помогают
@@ -4640,6 +4655,11 @@ class GroupRepository(
                         groupDao.bumpMemberCount(packet.groupId)
                         Log.i(TAG, "join approved into group=${group.id}")
                     }
+                    // The decision may arrive before the roster or the roster
+                    // may have been lost while this phone was offline. Ask the
+                    // owner/admins after durable membership is present.
+                    backgroundScope.launch { runCatching { requestRoster(packet.groupId) } }
+                    drainPendingRosters(packet.groupId, me)
                 } else {
                     groupDao.updateJoinRequestStatus(
                         packet.groupId, me, "REJECTED", clock(), senderId,
@@ -4689,7 +4709,10 @@ class GroupRepository(
                 // Обычный участник не отвечает, чтобы на один запрос не
                 // приходило десять одинаковых списков.
                 val member = groupDao.getMember(packet.groupId, me) ?: return
-                if (!GroupRole.isAdminOrOwner(member.role)) return
+                if (member.isBanned || !GroupRole.isAdminOrOwner(member.role)) return
+                // `publishRoster` веером обновляет известных участников, а
+                // если запросивший потерялся из локальной таблицы отправителя,
+                // отдельно доставляет ему тот же снимок напрямую.
                 publishRoster(packet.groupId, newcomer = senderId)
                 Log.i(TAG, "roster resent group=${packet.groupId} to=$senderId")
             }
@@ -4734,25 +4757,34 @@ class GroupRepository(
                         topicsEnabled = packet.topicsEnabled,
                     )
                 }
-                if (current == null && groupDao.getMember(packet.groupId, me) == null) {
+                // Карточка и roster могут прийти в любом порядке. Если info
+                // пришёл первым, сразу создаём собственную строку участника;
+                // если группа уже была в базе, но строка была потеряна,
+                // восстанавливаем её тем же безопасным UPDATE-путём.
+                if (groupDao.getMember(packet.groupId, me) == null) {
                     groupDao.insertMember(
                         GroupMemberEntity(
                             groupId = packet.groupId,
                             nodeId = me,
                             displayName = myDisplayName(),
-                            role = GroupRole.MEMBER,
+                            role = if (me == packet.ownerId) GroupRole.OWNER else GroupRole.MEMBER,
                             joinedAtMs = clock(),
                         )
                     )
                     groupDao.bumpMemberCount(packet.groupId)
                 }
+                // Применяем roster, который обогнал карточку, теперь когда
+                // локальная группа и членство уже известны.
+                drainPendingRosters(packet.groupId, me)
                 // Запрашиваем после применения info: отдельный пакет настройки
-                // мог обогнать карточку группы на другом транспорте.
+                // мог обогнать карточку группы на другом транспорте. Заодно
+                // забираем актуальный roster, если вступление было пропущено.
                 if (senderId == packet.ownerId && senderId != me) {
                     backgroundScope.launch {
                         runCatching { delivery.deliver(packet.groupId, GroupWire.buildQuietHoursRequest(packet.groupId), listOf(senderId)) }
                         runCatching { delivery.deliver(packet.groupId, GroupWire.buildMemberListVisibilityRequest(packet.groupId), listOf(senderId)) }
                         runCatching { requestWallpaper(packet.groupId) }
+                        runCatching { requestRoster(packet.groupId) }
                     }
                 }
                 Log.i(TAG, "group info applied group=${packet.groupId} title=${packet.title}")
@@ -4930,36 +4962,7 @@ class GroupRepository(
                 Log.i(TAG, "topics applied group=${packet.groupId} count=${packet.entries.size}")
             }
 
-            is GroupWire.Packet.Roster -> {
-                if (groupDao.getMember(packet.groupId, me) == null) return
-                val now = clock()
-                packet.entries.forEach { entry ->
-                    val current = groupDao.getMember(packet.groupId, entry.nodeId)
-                    if (current == null) {
-                        groupDao.insertMember(
-                            GroupMemberEntity(
-                                groupId = packet.groupId,
-                                nodeId = entry.nodeId,
-                                displayName = entry.displayName,
-                                role = entry.role,
-                                joinedAtMs = now,
-                            )
-                        )
-                    } else if (current.displayName != entry.displayName || current.role != entry.role) {
-                        groupDao.insertMember(
-                            current.copy(displayName = entry.displayName, role = entry.role)
-                        )
-                    }
-                }
-                // На большом канале список неполный (только администраторы), а
-                // число подписчиков пришло от владельца в `peers`: ниже него
-                // не опускаем.
-                groupDao.bumpMemberCount(packet.groupId)
-                // Состав обновился: манифесты, ждавшие автора-администратора,
-                // можно проверить ещё раз.
-                val ready = pendingManifests.take { (_, m) -> m.groupId == packet.groupId }
-                for ((from, manifest) in ready) handleManifest(from, manifest)
-            }
+            is GroupWire.Packet.Roster -> applyRoster(senderId, packet, me)
 
             is GroupWire.Packet.Typing -> {
                 // р249: «печатает…» в группе. Состояние мимолётное: в базу не
@@ -6349,6 +6352,34 @@ class GroupRepository(
     private val topicsRequested = HashSet<String>()
 
     /**
+     * Попросить у владельца или администратора актуальный состав.
+     *
+     * Это не только реакция на неизвестное имя: экран чата вызывает метод при
+     * открытии, поэтому телефон, который был офлайн во время вступления,
+     * самовосстанавливает roster. Адрес владельца берём из карточки группы,
+     * а локальные admin-строки добавляем как запасной путь, если владелец
+     * временно недоступен.
+     */
+    suspend fun requestRoster(groupId: String) {
+        val me = myId() ?: return
+        val group = groupDao.getGroupById(groupId) ?: return
+        val mine = groupDao.getMember(groupId, me) ?: return
+        if (mine.isBanned || group.ownerId == me) return
+        val now = clock()
+        val previous = rosterRequestedAtMs[groupId] ?: 0L
+        if (previous != 0L && now - previous < ROSTER_REQUEST_GAP_MS) return
+        val targets = (
+            listOf(group.ownerId) + groupDao.getAdmins(groupId).map { it.nodeId }
+        ).filter { it.isNotBlank() && it != me }.distinct()
+        if (targets.isEmpty()) return
+        rosterRequestedAtMs[groupId] = now
+        runCatching {
+            delivery.deliver(groupId, GroupWire.buildRosterRequest(groupId), targets)
+        }.onFailure { Log.w(TAG, "roster request failed group=$groupId: ${it.message}") }
+        Log.i(TAG, "roster requested group=$groupId from=${targets.size} source(s)")
+    }
+
+    /**
      * Попросить у владельца список тем.
      *
      * Вызывается при открытии чата группы: вступивший позже не застал пакеты
@@ -6528,16 +6559,149 @@ class GroupRepository(
                 groupDao.bumpMemberCount(groupId)
             } else if (rosterAsked.add(groupId + '|' + senderId)) {
                 // Отвечают только владелец и администраторы - им и шлём, а не
-                // всем: на большом канале «всем» - это тысячи пакетов.
-                val me = myId().orEmpty()
-                val admins = groupDao.getAdmins(groupId).map { it.nodeId }.filter { it != me }
-                if (admins.isNotEmpty()) delivery.deliver(groupId, GroupWire.buildRosterRequest(groupId), admins)
+                // всем: на большом канале «всем» - это тысячи пакетов. Если
+                // локальная таблица неполна, requestRoster всё равно знает
+                // ownerId из карточки и не теряет единственный адрес ответа.
+                requestRoster(groupId)
             }
             return
         }
         if (known.displayName.isBlank() && senderName.isNotBlank()) {
             groupDao.insertMember(known.copy(displayName = senderName))
         }
+    }
+
+    private fun queuePendingRoster(senderId: String, packet: GroupWire.Packet.Roster) {
+        synchronized(pendingRosters) {
+            val queue = pendingRosters.getOrPut(packet.groupId) { mutableListOf() }
+            // Keep the newest copy from one sender; a burst of duplicate
+            // packets must not grow without bound while the group card waits.
+            queue.removeAll { it.senderId == senderId }
+            queue.add(PendingRoster(senderId, packet))
+            if (queue.size > MAX_PENDING_ROSTERS) {
+                queue.subList(0, queue.size - MAX_PENDING_ROSTERS).clear()
+            }
+        }
+    }
+
+    private suspend fun drainPendingRosters(groupId: String, me: String) {
+        val queued = synchronized(pendingRosters) {
+            pendingRosters.remove(groupId)?.toList().orEmpty()
+        }
+        for (pending in queued) applyRoster(pending.senderId, pending.packet, me)
+    }
+
+    /**
+     * A roster may be relayed by a known non-banned member. The owner is also
+     * accepted before its row appears locally: this is the normal ordering for
+     * a newly admitted phone, whose `info` and `roster` packets race.
+     */
+    private suspend fun isRosterSourceAllowed(groupId: String, group: GroupEntity, senderId: String): Boolean {
+        if (senderId == group.ownerId) return true
+        val sender = groupDao.getMember(groupId, senderId) ?: return false
+        return !sender.isBanned
+    }
+
+    private suspend fun relayRoster(
+        groupId: String,
+        senderId: String,
+        me: String,
+        entries: List<GroupWire.RosterEntry>,
+        memberCount: Int,
+    ) {
+        val targets = groupDao.getMembers(groupId)
+            .asSequence()
+            .filter { !it.isBanned && it.nodeId != me && it.nodeId != senderId }
+            .map { it.nodeId }
+            .toList()
+        if (targets.isEmpty()) return
+        val envelope = GroupWire.buildRoster(groupId, entries, memberCount)
+        runCatching { delivery.deliver(groupId, envelope, targets) }
+            .onFailure { Log.w(TAG, "roster relay failed group=$groupId: ${it.message}") }
+    }
+
+    /**
+     * Apply roster as a monotonic union. A partial/repeated packet never
+     * deletes rows already present; a blank name also cannot erase a known
+     * name. The expected count is retained as a lower bound, so UI and the
+     * next repair request know that two local rows are not the whole group.
+     */
+    private suspend fun applyRoster(
+        senderId: String,
+        packet: GroupWire.Packet.Roster,
+        me: String,
+    ) {
+        val group = groupDao.getGroupById(packet.groupId)
+        if (group == null || groupDao.getMember(packet.groupId, me) == null) {
+            queuePendingRoster(senderId, packet)
+            return
+        }
+        if (!isRosterSourceAllowed(packet.groupId, group, senderId)) {
+            Log.w(TAG, "roster ignored from unknown source group=${packet.groupId} sender=$senderId")
+            return
+        }
+
+        val before = groupDao.getMembers(packet.groupId)
+        val beforeEntries = before.map { GroupWire.RosterEntry(it.nodeId, it.displayName, it.role) }
+        var changed = false
+        val now = clock()
+        for (entry in packet.entries) {
+            val current = groupDao.getMember(packet.groupId, entry.nodeId)
+            if (current == null) {
+                groupDao.insertMember(
+                    GroupMemberEntity(
+                        groupId = packet.groupId,
+                        nodeId = entry.nodeId,
+                        displayName = entry.displayName,
+                        role = entry.role,
+                        joinedAtMs = now,
+                    )
+                )
+                changed = true
+            } else {
+                val displayName = entry.displayName.ifBlank { current.displayName }
+                if (current.displayName != displayName || current.role != entry.role) {
+                    // `copy` preserves permissions, ban state and custom title;
+                    // a roster update must not reset local moderation metadata.
+                    groupDao.insertMember(current.copy(displayName = displayName, role = entry.role))
+                    changed = true
+                }
+            }
+        }
+
+        val mergedEntries = GroupWire.mergeRosterEntries(
+            beforeEntries,
+            packet.entries,
+        )
+        val expectedCount = maxOf(packet.memberCount, group.memberCount, mergedEntries.size)
+        if (packet.memberCount > 0) groupDao.updateMemberCount(packet.groupId, expectedCount)
+        groupDao.bumpMemberCount(packet.groupId)
+
+        // A newly received row is useful to peers that missed the original
+        // admission fanout. Relay the merged snapshot, not only the one-entry
+        // packet, so convergence proceeds through the existing group graph.
+        if (changed) {
+            relayRoster(
+                groupId = packet.groupId,
+                senderId = senderId,
+                me = me,
+                entries = mergedEntries,
+                memberCount = expectedCount,
+            )
+        }
+
+        val localCount = groupDao.countMembers(packet.groupId)
+        if (expectedCount > localCount) {
+            backgroundScope.launch {
+                runCatching { requestRoster(packet.groupId) }
+                    .onFailure { Log.w(TAG, "roster repair request failed: ${it.message}") }
+            }
+        }
+
+        // Состав обновился: манифесты, ждавшие автора-администратора,
+        // можно проверить ещё раз.
+        val ready = pendingManifests.take { (_, m) -> m.groupId == packet.groupId }
+        for ((from, manifest) in ready) handleManifest(from, manifest)
     }
 
     /**
@@ -6555,7 +6719,16 @@ class GroupRepository(
         val members = groupDao.getMembers(groupId)
         if (members.size <= ROSTER_LIMIT) {
             val entries = members.map { GroupWire.RosterEntry(it.nodeId, it.displayName, it.role) }
-            broadcast(groupId, GroupWire.buildRoster(groupId, entries), excludeSelf = true)
+            val envelope = GroupWire.buildRoster(groupId, entries, memberCount = members.size)
+            val knownRecipients = members.map { it.nodeId }.filter { it != myId().orEmpty() }.toSet()
+            broadcast(groupId, envelope, excludeSelf = true)
+            // The requester/newcomer may be absent from the sender's partial
+            // local table. A direct copy makes admission and repair reliable;
+            // existing members still receive the broadcast above.
+            if (!newcomer.isNullOrBlank() && newcomer != myId() && newcomer !in knownRecipients) {
+                runCatching { delivery.deliver(groupId, envelope, listOf(newcomer)) }
+                    .onFailure { Log.w(TAG, "direct roster delivery failed group=$groupId to=$newcomer: ${it.message}") }
+            }
             return
         }
         val me = myId().orEmpty()
@@ -6566,6 +6739,7 @@ class GroupRepository(
         val adminRoster = GroupWire.buildRoster(
             groupId,
             adminMembers.map { GroupWire.RosterEntry(it.nodeId, it.displayName, it.role) },
+            memberCount = members.size,
         )
         if (newcomer == null) {
             // Смена состава без новичка: рассылать нечего, кроме смены ролей -
@@ -6597,6 +6771,7 @@ class GroupRepository(
                 GroupWire.buildRoster(
                     groupId,
                     listOf(GroupWire.RosterEntry(newcomerRow.nodeId, newcomerRow.displayName, newcomerRow.role)),
+                    memberCount = members.size,
                 ),
                 sample,
             )
@@ -6716,6 +6891,8 @@ companion object {
         /** Рой: буфер кусков без манифеста - записей и срок жизни. */
         private const val PENDING_PIECES = 100
         private const val PENDING_MANIFESTS = 40
+        /** Сколько ожидающих roster-пакетов держим до прихода карточки группы. */
+        private const val MAX_PENDING_ROSTERS = 8
         /** р250: буфер цитат, приехавших раньше своего сообщения. */
         private const val PENDING_REPLIES = 40
         private const val PENDING_TTL_MS = 60_000L
@@ -6770,6 +6947,8 @@ companion object {
         private const val FRESH_POST_MS = 15L * 60 * 1000
         /** Рой, этап 2: с такого числа участников владелец шлёт новичку `peers` вместо полного списка. */
         const val ROSTER_LIMIT = 100
+        /** Телефон, пропустивший событие вступления, повторно просит состав не чаще этого. */
+        private const val ROSTER_REQUEST_GAP_MS = 30_000L
         /** Рой, этап 2: сколько соседей владелец даёт новичку в `peers`. */
         const val PEERS_SAMPLE = 30
         /** Рой, этап 2: на большом канале владельца спрашивают о недостающем лишь в одном случае из стольких. */
