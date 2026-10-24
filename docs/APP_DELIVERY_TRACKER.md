@@ -30,11 +30,14 @@
 - Draft prerelease промотирован в стабильный Latest: https://github.com/vzhem/APUMIR/releases/tag/v11.74.444, `draft=false`, `prerelease=false`; через GitHub API `/releases/latest` возвращает `v11.74.444`.
 - Стабильные ссылки: https://github.com/vzhem/APUMIR/releases/download/v11.74.444/app-release.apk и https://github.com/vzhem/APUMIR/releases/download/v11.74.444/SHA256SUMS.txt; shortcut APK: https://github.com/vzhem/APUMIR/releases/latest/download/app-release.apk. Новый PR не создавался. Финальная UI-проверка остаётся владельцу на реальных телефонах.
 
-### Публичный релиз v11.74.445 — подготовка к выпуску (2026-10-24)
+### Публичный релиз v11.74.445 (2026-10-24)
 
 - Владелец явно разрешил выпуск для всех и подтвердил точный публичный текст из `docs/RELEASE_NOTES_v11.74.445.md`.
-- К релизу готовится tag `v11.74.445` на вершине `arena/762cd357-apumir`; после зелёного tag workflow нужно проверить APK/checksum и промотировать draft prerelease в стабильный Latest.
-- Новый PR не создаётся. Финальная проверка pairing остаётся владельцу на двух физических устройствах.
+- Создан и отправлен annotated tag `v11.74.445` на commit `63f926dbfdff3e5ad5fda754280ab9f2377e9c6c`.
+- Tag release workflow `40107585965` зелёный; build job `120912404427` прошёл ancestry check, native/Rust, UniFFI regeneration, Gradle APK build, проверки и checksum-шаги.
+- В релиз загружены `app-release.apk` размером `229275683` bytes, SHA-256 `8e962f463953771ea9ac100f61c2a791930f445956f2bbc2abc3a4173a2dde48`, и `SHA256SUMS.txt` размером `82` bytes, asset digest `47a7112da9d6b3544d0694a69d43177fcae4337427766ecb5a32c0c67b6af850`.
+- Draft prerelease промотирован в стабильный Latest: https://github.com/vzhem/APUMIR/releases/tag/v11.74.445; через GitHub API проверено `draft=false`, `prerelease=false`, `/releases/latest` возвращает `v11.74.445`.
+- Стабильные ссылки: https://github.com/vzhem/APUMIR/releases/download/v11.74.445/app-release.apk и https://github.com/vzhem/APUMIR/releases/download/v11.74.445/SHA256SUMS.txt; shortcut APK: https://github.com/vzhem/APUMIR/releases/latest/download/app-release.apk. Новый PR не создавался. Финальная проверка pairing остаётся владельцу на двух физических устройствах.
 
 ## Исправление синхронизации двух устройств (2026-10-24, после v11.74.443)
 
