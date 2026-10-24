@@ -776,11 +776,6 @@ private fun ProfileTabContent(
                     )
                 }
             }
-            item {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    com.vladimir.messenger.ui.components.HeartGameCounter(onlyWhenEnabled = true)
-                }
-            }
         }
         ApuScrollbar(state = profileScrollState)
     }
