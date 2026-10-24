@@ -201,7 +201,7 @@ object DevicePairingController {
             try {
                 when (packet.kind) {
                     DevicePairingWire.KIND_REQUEST -> onRequest(context, senderId, packet.bytes, now)
-                    DevicePairingWire.KIND_ANSWER -> onAnswer(packet.bytes, now)
+                    DevicePairingWire.KIND_ANSWER -> onAnswer(context, packet.bytes, now)
                     DevicePairingWire.KIND_GRANT -> onGrant(context, packet.bytes, now)
                     DevicePairingWire.KIND_SYNC -> onSync(context, packet.bytes)
                 }
@@ -253,27 +253,66 @@ object DevicePairingController {
         primaryMutable.value = PrimaryRequest(joinerDeviceId = joinerDevice, sas = answer.sas, deviceShort = shortDeviceId(joinerDevice))
     }
 
-    private fun onAnswer(answer: ByteArray, now: Long) {
+    private fun onAnswer(context: Context, answer: ByteArray, now: Long) {
         val current = joinerMutable.value ?: return
-        // With a v2 QR the code is already on screen (CONFIRM_CODE); the arriving answer is
-        // still verified against the transcript and simply confirms the same code.
-        if (current.phase != JoinerPhase.WAITING_ANSWER && current.phase != JoinerPhase.CONFIRM_CODE) return
+        // A v2 QR exposes the SAS before the answer has crossed the network. The user can
+        // therefore confirm while the joiner is already in WAITING_GRANT. The answer must still
+        // be authenticated in Rust, but it must not be discarded just because the user tapped
+        // first.
+        if (current.phase != JoinerPhase.WAITING_ANSWER &&
+            current.phase != JoinerPhase.CONFIRM_CODE &&
+            current.phase != JoinerPhase.WAITING_GRANT
+        ) {
+            Log.d(TAG, "pairing answer ignored in phase=${current.phase}")
+            return
+        }
         val sas = joinerHandlePairingAnswer(answer, now)
-        if (pendingGrant != null && joinerConfirmed) return
         answerReceived = true
-        Log.i(TAG, "pairing answer authenticated; waiting for SAS confirmation")
-        joinerMutable.value = JoinerState(JoinerPhase.CONFIRM_CODE, sas = sas, deviceShort = current.deviceShort)
+        Log.i(TAG, "pairing answer authenticated; sasReady=true confirmed=$joinerConfirmed")
+        val grant = pendingGrant
+        if (joinerConfirmed && grant != null) {
+            // The grant may have arrived before the answer. Keep it until the transcript/root is
+            // ready, then run the normal certificate and identity checks exactly once here.
+            Log.i(TAG, "pairing answer completed after confirmation; accepting buffered grant")
+            acceptGrant(context, grant, now)
+        } else if (joinerConfirmed) {
+            joinerMutable.value = current.copy(
+                phase = JoinerPhase.WAITING_GRANT,
+                sas = sas,
+                message = null,
+            )
+        } else {
+            joinerMutable.value = current.copy(
+                phase = JoinerPhase.CONFIRM_CODE,
+                sas = sas,
+                message = null,
+            )
+        }
     }
 
     private fun onGrant(context: Context, grant: ByteArray, now: Long) {
         val current = joinerMutable.value ?: return
-        if (current.phase != JoinerPhase.CONFIRM_CODE && current.phase != JoinerPhase.WAITING_GRANT) return
+        if (current.phase != JoinerPhase.CONFIRM_CODE && current.phase != JoinerPhase.WAITING_GRANT) {
+            Log.d(TAG, "pairing grant ignored in phase=${current.phase}")
+            return
+        }
+        if (!answerReceived) {
+            // The primary may confirm before the answer arrives. Buffer the authenticated-wire
+            // packet and let onAnswer establish the root before accepting the certificate.
+            pendingGrant = grant
+            val phase = if (joinerConfirmed) JoinerPhase.WAITING_GRANT else JoinerPhase.CONFIRM_CODE
+            Log.i(TAG, "pairing grant buffered; waiting for authenticated answer confirmed=$joinerConfirmed")
+            joinerMutable.value = current.copy(phase = phase)
+            return
+        }
         if (!joinerConfirmed) {
             // The primary confirmed first. Keep the grant until this device confirms its code.
             pendingGrant = grant
+            Log.i(TAG, "pairing grant buffered; waiting for local SAS confirmation")
             joinerMutable.value = current.copy(phase = JoinerPhase.CONFIRM_CODE)
             return
         }
+        Log.i(TAG, "pairing grant received after both confirmations; accepting")
         acceptGrant(context, grant, now)
     }
 
@@ -410,9 +449,13 @@ object DevicePairingController {
         return@synchronized try {
             joinerConfirmed = true
             val grant = pendingGrant
-            if (grant != null) {
+            if (grant != null && answerReceived) {
+                Log.i(TAG, "joiner SAS confirmed; accepting buffered grant")
                 acceptGrant(context, grant, System.currentTimeMillis())
             } else {
+                // A v2 QR lets the user confirm before the authenticated answer arrives. Do not
+                // call the Rust grant opener until that answer has established the transcript.
+                Log.i(TAG, "joiner SAS confirmed; waiting for answer=${!answerReceived}")
                 joinerMutable.value = current.copy(phase = JoinerPhase.WAITING_GRANT, message = null)
             }
             true

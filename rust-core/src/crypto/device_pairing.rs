@@ -864,6 +864,27 @@ mod tests {
     }
 
     #[test]
+    fn grant_arriving_before_answer_can_be_retried_after_answer() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let joiner = device(52);
+        let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 3_000, &[]).unwrap();
+        let started = joiner_start(&offer, &[16u8; 16], &joiner.public_key().0, 3_000).unwrap();
+        let answer = primary_handle_request(&started.request, 3_000).unwrap();
+        let grant = primary_confirm(&answer.device_id, &account(), 3_000).unwrap();
+
+        // The Android state machine may receive the final grant before the answer when the v2
+        // QR already exposed the SAS. Rust must leave the joiner session intact so the buffered
+        // grant can be accepted after the authenticated answer arrives.
+        assert_eq!(
+            joiner_accept_grant(&grant.grant, 3_000).err(),
+            Some(PairingError::UnknownSession)
+        );
+        assert!(joiner_handle_answer(&answer.answer, 3_000).is_ok());
+        assert!(joiner_accept_grant(&grant.grant, 3_000).is_ok());
+        close_pairing_offer();
+    }
+
+    #[test]
     fn request_without_offer_secret_is_rejected() {
         let _guard = TEST_LOCK.lock().unwrap();
         let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 0, &[]).unwrap();
