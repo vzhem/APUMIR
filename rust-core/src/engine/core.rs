@@ -4731,7 +4731,7 @@ impl P2PCore {
                     ).await;
                 }
                 // 2. Publish
-                client.publish(&topic, QoS::AtLeastOnce, retain, payload.as_bytes()).await?;
+                client.publish(topic, QoS::AtLeastOnce, retain, payload.as_bytes()).await?;
                 // 3. Poll to flush PUBLISH + receive PUBACK
                 for _ in 0..3 {
                     let _ = tokio::time::timeout(
