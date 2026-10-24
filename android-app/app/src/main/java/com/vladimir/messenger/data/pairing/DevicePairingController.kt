@@ -85,6 +85,9 @@ object DevicePairingController {
     @Volatile private var answerReceived = false
     private var pendingRequestTarget: Pair<String, ByteArray>? = null
     private var pendingRequestPacket: String? = null
+    /** Granting side: keep the authenticated answer while the final packets are retried. */
+    private var lastAnswerTarget: Pair<String, ByteArray>? = null
+    private var lastAnswerPacket: String? = null
     /** Granting side: last grant+sync packets, so they can be re-sent on demand. */
     private var lastGrantTarget: Pair<String, ByteArray>? = null
     private var lastGrantPackets: List<String> = emptyList()
@@ -240,13 +243,15 @@ object DevicePairingController {
             Log.d(TAG, "pairing request from own device ignored")
             return
         }
-        val sent = RustBridge.sendPairingPayload(
-            senderId,
-            joinerDevice,
-            DevicePairingWire.encode(DevicePairingWire.KIND_ANSWER, answer.answer),
-        )
+        val answerPacket = DevicePairingWire.encode(DevicePairingWire.KIND_ANSWER, answer.answer)
+        // Keep the answer until the grant flow finishes. A v2 QR can show the SAS before this
+        // packet is received, so the primary may be confirmed and the offer closed while the
+        // joiner still needs one more authenticated answer attempt to derive its root.
+        lastAnswerTarget = senderId to joinerDevice
+        lastAnswerPacket = answerPacket
+        val sent = RustBridge.sendPairingPayload(senderId, joinerDevice, answerPacket)
         if (!sent) {
-            Log.w(TAG, "pairing answer was not delivered")
+            Log.w(TAG, "pairing answer was not delivered; retry remains available")
         } else {
             Log.i(TAG, "pairing answer delivery accepted by transport")
         }
@@ -491,9 +496,12 @@ object DevicePairingController {
             lastGrantTarget = accountNode to request.joinerDeviceId
             lastGrantPackets = listOfNotNull(grantPacket, syncPacket)
             retryScope.launch {
-                for (waitMs in listOf(6_000L, 20_000L)) {
+                // Answer first, then grant+sync. The joiner may have confirmed from the v2 QR
+                // before it received the answer, so both stages remain independently retryable.
+                for (waitMs in listOf(2_000L, 6_000L, 20_000L)) {
                     delay(waitMs)
                     if (!primaryDoneMutable.value) return@launch
+                    resendAnswer()
                     resendGrant()
                 }
             }
@@ -572,6 +580,8 @@ object DevicePairingController {
             answerReceived = false
             pendingRequestTarget = null
             pendingRequestPacket = null
+            lastAnswerTarget = null
+            lastAnswerPacket = null
             lastGrantTarget = null
             lastGrantPackets = emptyList()
             pendingGrant = null
@@ -623,6 +633,19 @@ object DevicePairingController {
             }
         } ?: return
         retryScope.launch { RustBridge.sendPairingPayload(request.first.first, request.first.second, request.second) }
+    }
+
+    /** Granting side: re-send the authenticated answer before the grant retry. */
+    private fun resendAnswer() {
+        val answer = synchronized(stateLock) {
+            lastAnswerTarget?.let { target ->
+                lastAnswerPacket?.let { packet -> target to packet }
+            }
+        } ?: return
+        Log.i(TAG, "re-sending pairing answer while final grant is pending")
+        retryScope.launch {
+            RustBridge.sendPairingPayload(answer.first.first, answer.first.second, answer.second)
+        }
     }
 
     /** Granting side, manual: re-send the certificate and the sync bootstrap. */
