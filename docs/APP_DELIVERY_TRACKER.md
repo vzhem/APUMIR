@@ -363,3 +363,11 @@
 - Публиковать релиз, тег или PR можно только после явного разрешения владельца и показа точного
   текста. Правила: `docs/RELEASE_PUBLICATION_POLICY.md`, `docs/RELEASE_LINEAGE_SAFETY.md`.
 - Не запускать тег `v*` без одобрения: тег сам запускает публикацию.
+
+## Публичный релиз v11.74.448 (2026-10-25)
+
+- По явному разрешению владельца после показа и подтверждения точного публичного текста создан и отправлен annotated tag `v11.74.448` на commit `0bee6ec4059aca8f4af91eea3ae1c6cd55b60470`.
+- Tag release workflow `40178511276` зелёный; build job `121124350518` прошёл ancestry gate относительно `v11.74.447`, source contracts, Rust/native build, UniFFI regeneration, `testReleaseUnitTest` с тестами initial-sync, `assembleRelease`, story/community-проверки, подпись и checksum-шаги.
+- Draft prerelease промотирован в стабильный Latest: https://github.com/vzhem/APUMIR/releases/tag/v11.74.448, опубликован `2026-10-25T09:12:09Z`, `draft=false`, `prerelease=false`.
+- В релиз загружены `app-release.apk` размером `229279779` bytes и `SHA256SUMS.txt` размером `82` bytes. GitHub API digest APK: `sha256:de8e539d031e8954a4b45286f911ba227125fa6af4e0873861ebed534901a563`; checksum asset также присутствует и загружен.
+- Проверено через GitHub API: `/releases/latest` возвращает `v11.74.448`; стабильные ссылки https://github.com/vzhem/APUMIR/releases/download/v11.74.448/app-release.apk и https://github.com/vzhem/APUMIR/releases/download/v11.74.448/SHA256SUMS.txt доступны. Финальная UI-проверка и фактическая передача данных остаются владельцу на реальных телефонах.
