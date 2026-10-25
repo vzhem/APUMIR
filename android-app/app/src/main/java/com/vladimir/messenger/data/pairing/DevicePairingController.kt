@@ -729,6 +729,17 @@ object DevicePairingController {
         }
     }
 
+    /**
+     * Retry the complete post-confirmation hand-off. On the granting device the
+     * certificate and sync bootstrap are idempotent, so resend them together
+     * with the initial request; retrying only the mirror request cannot recover
+     * a bootstrap packet lost after the codes were confirmed.
+     */
+    fun retryInitialSync() {
+        if (primaryDoneMutable.value) resendGrant()
+        com.vladimir.messenger.data.mirror.MirrorHub.startInitialSync()
+    }
+
     /** "A1B2-C3D4" from the first bytes of a device id, for human comparison. */
     fun shortDeviceId(deviceId: ByteArray): String =
         DevicePairingWire.hex(deviceId).take(8).uppercase()

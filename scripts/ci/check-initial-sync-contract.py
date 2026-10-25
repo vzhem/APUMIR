@@ -49,6 +49,11 @@ class InitialSyncContract(unittest.TestCase):
         body = section(SERVICE, "private fun startMirrorChannel(", "private fun mirrorBridge()")
         self.assertLess(body.index("channel.start()"), body.index("MirrorHub.bind(channel)"))
 
+    def test_retry_resends_pairing_bootstrap_before_initial_request(self):
+        body = section(PAIRING, "fun retryInitialSync()", "/** \"A1B2-C3D4\"")
+        self.assertIn("if (primaryDoneMutable.value) resendGrant()", body)
+        self.assertIn("MirrorHub.startInitialSync()", body)
+
     def test_initial_sync_is_not_blocked_by_swarm_first_fallback_policy(self):
         transport = section(MIRROR, "private fun transportAllowed()", "private fun connect()")
         self.assertIn("initialSyncRequested || RustBridge.externalTransportAllowed()", transport)
@@ -65,6 +70,7 @@ class InitialSyncContract(unittest.TestCase):
             "MirrorInitialSyncPhase.ERROR",
             "MirrorInitialSyncPhase.NO_DATA",
             "devices_sync_retry",
+            "DevicePairingController.retryInitialSync()",
         ):
             with self.subTest(marker=marker):
                 self.assertIn(marker, DEVICES)

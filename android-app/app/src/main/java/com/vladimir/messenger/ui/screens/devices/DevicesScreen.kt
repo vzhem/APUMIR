@@ -306,7 +306,7 @@ fun DevicesScreen(
                     if (initialSync.phase == MirrorInitialSyncPhase.ERROR) {
                         DevicesButton(
                             label = stringResource(R.string.devices_sync_retry),
-                            onClick = { MirrorHub.startInitialSync() },
+                            onClick = { DevicePairingController.retryInitialSync() },
                             primary = false,
                         )
                     }
@@ -372,7 +372,7 @@ fun DevicesScreen(
                         if (state.phase == JoinerPhase.DONE && initialSync.phase == MirrorInitialSyncPhase.ERROR) {
                             DevicesButton(
                                 label = stringResource(R.string.devices_sync_retry),
-                                onClick = { MirrorHub.startInitialSync() },
+                                onClick = { DevicePairingController.retryInitialSync() },
                                 primary = false,
                             )
                         }
