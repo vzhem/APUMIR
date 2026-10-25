@@ -1468,6 +1468,15 @@ class CoreServerService : Service() {
                 .onFailure { Log.w(TAG, "Mirror file chunk failed: ${it.message}") }
         }
 
+        override suspend fun mirrorFileBytesPresent(
+            transferId: String,
+            displayName: String,
+            totalBytes: Long,
+        ): Boolean = fileTransferRouter.mirrorFileBytesPresent(transferId, displayName, totalBytes)
+
+        override suspend fun mirrorFileBytesReceived(transferId: String): Long =
+            fileTransferRouter.mirrorReceivedBytesOf(transferId)
+
         override suspend fun fileBytesFor(
             transferId: String,
             displayName: String,

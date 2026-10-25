@@ -74,7 +74,7 @@ class InitialSyncContract(unittest.TestCase):
         self.assertIn("sendPairingPayload(node, device, packet)", MIRROR)
         self.assertIn("pair_ack", MIRROR)
         self.assertIn("PAIRING_FRAME_RETRIES", MIRROR)
-        self.assertIn("wsRef.get()?.send(JSONObject(waiting.frame.toString())", MIRROR)
+        self.assertIn("ws.send(waiting.frame.toString())", MIRROR)
         self.assertIn('"_pid"', MIRROR)
 
     def test_direct_snapshot_chunks_can_resume_without_finishing_on_first_chunk(self):
@@ -118,6 +118,34 @@ class InitialSyncContract(unittest.TestCase):
     def test_fallback_route_checks_pairing_before_deferred_delivery(self):
         body = section(SERVICE, "private suspend fun routeIncomingEnvelope(", "    private suspend fun")
         self.assertLess(body.index("isPairingText"), body.index("deferredDelivery.routeIncoming"))
+
+    def test_wss_fallback_preserves_pairing_frame_dedupe_and_ack(self):
+        self.assertIn("wssAttempts", MIRROR)
+        self.assertIn("sendWebSocketPairingAck", MIRROR)
+        transport = section(MIRROR, "private fun handleTransportJson", "    override fun onMessage")
+        self.assertIn('"pair_ack"', transport)
+        self.assertIn('obj.remove("_pid")', transport)
+        self.assertIn("receivedPairingFrames.putIfAbsent", transport)
+        # WSS must carry the same id, not a fresh untracked copy.
+        self.assertIn("ws.send(waiting.frame.toString())", MIRROR)
+        self.assertNotIn("apply { remove(\"_pid\") }", MIRROR)
+
+    def test_initial_sync_waits_for_file_bytes_before_terminal_files_part(self):
+        self.assertIn("initialFilesPending", MIRROR)
+        self.assertIn("initialFilesSnapshotComplete", MIRROR)
+        self.assertIn("mirrorFileBytesPresent", MIRROR)
+        self.assertIn("noteInitialFileChunk", MIRROR)
+        self.assertIn("retryPendingInitialFileRequests", MIRROR)
+        files = section(MIRROR, '"initial_files" -> {', '"initial_done" -> {')
+        self.assertIn("registerInitialFile(meta)", files)
+        self.assertIn("maybeFinishInitialFiles()", files)
+        self.assertNotIn('MirrorHub.initialSyncPart("files", initialFilesSeen)', files)
+        chunk = section(MIRROR, '"filechunk" -> {', '"reqgif" -> {')
+        self.assertIn("noteInitialFileChunk(transferId)", chunk)
+
+    def test_file_router_exposes_committed_mirror_bytes(self):
+        self.assertIn("suspend fun mirrorFileBytesPresent", (JAVA / "data/file/FileTransferRouter.kt").read_text())
+        self.assertIn("override suspend fun mirrorFileBytesPresent", SERVICE)
 
     def test_ui_exposes_non_connected_initial_sync_states(self):
         for marker in (

@@ -1442,6 +1442,16 @@ class FileTransferRouter @Inject constructor(
     /** р249: сколько байтов передачи уже принято по зеркалу. */
     fun mirrorReceivedBytesOf(transferId: String): Long = mirrorReceivedBytes[transferId] ?: 0L
 
+    /** True only when the received-file store has the complete committed payload. */
+    suspend fun mirrorFileBytesPresent(
+        transferId: String,
+        displayName: String,
+        totalBytes: Long,
+    ): Boolean = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val file = receivedStore.receivedFile(transferId, displayName) ?: return@withContext false
+        file.isFile && file.length() >= totalBytes
+    }
+
     /** р249: файлы, которые человек уже просил открыть на этом устройстве. */
     private val bigWanted = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 

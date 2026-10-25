@@ -336,6 +336,7 @@ object DevicePairingController {
             return
         }
         pendingGrant = null
+        joinerAccountNode = null
         Log.i(TAG, "pairing certificate authenticated and stored; synchronization bootstrap pending")
         joinerMutable.value = JoinerState(JoinerPhase.DONE)
         // The sync bootstrap may have arrived before the grant: open it now that
@@ -384,6 +385,7 @@ object DevicePairingController {
             return false
         }
         return synchronized(stateLock) {
+            pendingManualCode = null
             val primaryDevice = pairingOfferPrimaryDeviceId(offer)
             // The QR carries the other phone's addresses: remember them as the direct route to
             // that exact device, so the request below does not wait for LAN discovery.

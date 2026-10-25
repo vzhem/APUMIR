@@ -458,9 +458,9 @@ object MirrorHub {
         totalBytes: Long,
         offset: Long = 0L,
         big: Boolean = false,
-    ) {
-        runCatching { channel?.requestFileBytes(transferId, displayName, totalBytes, offset, big) }
-    }
+    ): Boolean =
+        runCatching { channel?.requestFileBytes(transferId, displayName, totalBytes, offset, big) == true }
+            .getOrDefault(false)
 
     /**
      * р245: попросить у партнёра байты ГИФКИ по её отпечатку.
@@ -716,6 +716,10 @@ class MirrorChannel(
         suspend fun onFileMeta(meta: JSONObject): Boolean
         /** р230: кусок файла от партнёра - сложить в приёмник. */
         suspend fun onFileChunk(transferId: String, seq: Int, last: Boolean, bytes: ByteArray)
+        /** True only after the received-file writer has committed all bytes. */
+        suspend fun mirrorFileBytesPresent(transferId: String, displayName: String, totalBytes: Long): Boolean
+        /** Bytes committed by the resumable mirror writer in the current session. */
+        suspend fun mirrorFileBytesReceived(transferId: String): Long
         /** р230: прочитать кусок своего файла, чтобы отдать партнёру. */
         suspend fun fileBytesFor(transferId: String, displayName: String, offset: Long, size: Int): ByteArray?
         /** р232: начинается прямой (LAN) приём файла - забыть недокачанное. */
@@ -842,10 +846,22 @@ class MirrorChannel(
     @Volatile private var pairedPeerDeviceId: ByteArray? = null
     @Volatile private var initialContactsSeen = false
     @Volatile private var initialFilesSeen = false
+    /** Metadata may arrive before the corresponding file bytes; keep it pending until commit. */
+    private data class PendingInitialFile(
+        val displayName: String,
+        val totalBytes: Long,
+        val big: Boolean,
+        @Volatile var lastRequestedAtMs: Long = 0L,
+    )
+    private val initialFilesPending = java.util.concurrent.ConcurrentHashMap<String, PendingInitialFile>()
+    @Volatile private var initialFilesSnapshotComplete = false
+    @Volatile private var initialFilesHadData = false
+    private val initialFilesPartReported = AtomicBoolean(false)
 
     private data class PendingPairingFrame(
         val frame: JSONObject,
         var attempts: Int = 0,
+        var wssAttempts: Int = 0,
     )
 
     /** Application ACKs make the direct initial-sync path idempotent and resumable. */
@@ -911,6 +927,10 @@ class MirrorChannel(
         initialSnapshotSent = false
         initialContactsSeen = false
         initialFilesSeen = false
+        initialFilesPending.clear()
+        initialFilesSnapshotComplete = false
+        initialFilesHadData = false
+        initialFilesPartReported.set(false)
         initialSyncLastActivityAtMs = System.currentTimeMillis()
         initialSyncTimeoutJob?.cancel()
         initialSyncRetryJob?.cancel()
@@ -929,6 +949,7 @@ class MirrorChannel(
             while (kotlin.coroutines.coroutineContext.isActive && initialSyncRequested) {
                 delay(INITIAL_SYNC_RETRY_INTERVAL_MS)
                 if (!initialSyncRequested) break
+                retryPendingInitialFileRequests()
                 val idleFor = System.currentTimeMillis() - initialSyncLastActivityAtMs
                 if (idleFor < INITIAL_SYNC_RETRY_IDLE_MS) continue
                 initialSnapshotSent = false
@@ -952,6 +973,75 @@ class MirrorChannel(
         if (initialSyncRequested) initialSyncLastActivityAtMs = System.currentTimeMillis()
     }
 
+    /** Register one metadata row and request its bytes without declaring the part done. */
+    private suspend fun registerInitialFile(meta: JSONObject) {
+        val transferId = meta.optString("id")
+        val displayName = meta.optString("name")
+        val totalBytes = meta.optLong("size", 0L)
+        if (transferId.isBlank() || totalBytes <= 0L) return
+        if (bridge.mirrorFileBytesPresent(transferId, displayName, totalBytes)) {
+            initialFilesPending.remove(transferId)
+            return
+        }
+        val pending = initialFilesPending.computeIfAbsent(transferId) {
+            PendingInitialFile(
+                displayName = displayName,
+                totalBytes = totalBytes,
+                big = totalBytes > FILE_MIRROR_MAX_BYTES,
+            )
+        }
+        requestInitialFileBytes(transferId, pending)
+    }
+
+    private suspend fun requestInitialFileBytes(
+        transferId: String,
+        pending: PendingInitialFile,
+        force: Boolean = false,
+    ) {
+        val now = System.currentTimeMillis()
+        if (!force && now - pending.lastRequestedAtMs < INITIAL_FILE_REQUEST_RETRY_MS) return
+        if (bridge.mirrorFileBytesPresent(transferId, pending.displayName, pending.totalBytes)) {
+            initialFilesPending.remove(transferId, pending)
+            maybeFinishInitialFiles()
+            return
+        }
+        val received = bridge.mirrorFileBytesReceived(transferId)
+            .coerceIn(0L, pending.totalBytes)
+        pending.lastRequestedAtMs = now
+        val accepted = requestFileBytes(
+            transferId = transferId,
+            displayName = pending.displayName,
+            totalBytes = pending.totalBytes,
+            offset = received,
+            big = pending.big,
+        )
+        if (!accepted) {
+            Log.i(TAG, "initial file request waiting for transport id=${transferId.take(8)} offset=$received")
+        }
+    }
+
+    private suspend fun retryPendingInitialFileRequests() {
+        if (!initialSyncRequested || initialFilesPending.isEmpty()) return
+        for ((transferId, pending) in initialFilesPending.entries) {
+            requestInitialFileBytes(transferId, pending)
+        }
+        maybeFinishInitialFiles()
+    }
+
+    private fun maybeFinishInitialFiles() {
+        if (!initialFilesSnapshotComplete || initialFilesPending.isNotEmpty()) return
+        if (!initialFilesPartReported.compareAndSet(false, true)) return
+        MirrorHub.initialSyncPart("files", initialFilesHadData)
+    }
+
+    private suspend fun noteInitialFileChunk(transferId: String) {
+        val pending = initialFilesPending[transferId] ?: return
+        if (bridge.mirrorFileBytesPresent(transferId, pending.displayName, pending.totalBytes)) {
+            initialFilesPending.remove(transferId, pending)
+            maybeFinishInitialFiles()
+        }
+    }
+
     /**
      * Stop the local retry loop after a terminal result, but keep the authenticated
      * pairing route alive briefly. A final ACK can be late, and the peer may replay
@@ -962,6 +1052,10 @@ class MirrorChannel(
         initialSnapshotSent = false
         initialContactsSeen = false
         initialFilesSeen = false
+        initialFilesPending.clear()
+        initialFilesSnapshotComplete = false
+        initialFilesHadData = false
+        initialFilesPartReported.set(false)
         initialSyncTimeoutJob?.cancel()
         initialSyncTimeoutJob = null
         initialSyncRetryJob?.cancel()
@@ -1909,21 +2003,25 @@ class MirrorChannel(
             return PairingFrameResult.NOT_AVAILABLE
         }
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            repeat(PAIRING_FRAME_RETRIES) {
+            // Keep the same frame id across direct, MQTT and WSS attempts. The
+            // receiver deduplicates that id, so a lost ACK can never append the
+            // same file chunk twice.
+            while (kotlin.coroutines.coroutineContext.isActive) {
                 delay(PAIRING_FRAME_RETRY_MS)
                 val waiting = pendingPairingFrames[id] ?: return@launch
-                if (waiting.attempts >= PAIRING_FRAME_RETRIES - 1) {
-                    pendingPairingFrames.remove(id)
-                    // The direct peer may disappear after the liveness check. Reuse the same
-                    // authenticated mirror frame over the already-open WSS room as fallback;
-                    // the receiver ignores the local `_pid` field on the WebSocket path.
-                    if (wsOpen) runCatching {
-                        wsRef.get()?.send(JSONObject(waiting.frame.toString()).apply { remove("_pid") }.toString())
-                    }
-                    return@launch
+                if (waiting.attempts < PAIRING_FRAME_RETRIES) {
+                    waiting.attempts += 1
+                    transmitPairingFrame(node, device, waiting.frame, key)
+                    continue
                 }
-                waiting.attempts += 1
-                transmitPairingFrame(node, device, waiting.frame, key)
+                val ws = wsRef.get()
+                if (wsOpen && ws != null && waiting.wssAttempts < PAIRING_WSS_RETRIES) {
+                    waiting.wssAttempts += 1
+                    runCatching { ws.send(waiting.frame.toString()) }
+                    continue
+                }
+                pendingPairingFrames.remove(id)
+                return@launch
             }
         }
         return PairingFrameResult.SENT
@@ -1988,6 +2086,14 @@ class MirrorChannel(
             if (packet.length <= PAIRING_FRAME_MAX_CHARS) {
                 runCatching { RustBridge.sendPairingPayload(node, device, packet) }
             }
+        }
+    }
+
+    /** ACK the WSS fallback without creating another pairing frame. */
+    private fun sendWebSocketPairingAck(id: String) {
+        if (!wsOpen) return
+        runCatching {
+            wsRef.get()?.send(JSONObject().put("t", "pair_ack").put("id", id).toString())
         }
     }
 
@@ -2383,22 +2489,19 @@ class MirrorChannel(
                 val body = openPayload(wire) ?: return
                 noteInitialSyncActivity()
                 val rows = body.optJSONArray("rows") ?: JSONArray()
-                scope.launch {
-                    if (rows.length() > 0) initialFilesSeen = true
+                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    if (rows.length() > 0) {
+                        initialFilesSeen = true
+                        initialFilesHadData = true
+                    }
                     for (i in 0 until rows.length()) {
                         val meta = rows.optJSONObject(i) ?: continue
                         val applied = MirrorHub.duringApply { bridge.onFileMeta(meta) }
-                        if (applied && meta.optLong("size", 0L) > 0L) {
-                            requestFileBytes(
-                                transferId = meta.optString("id"),
-                                displayName = meta.optString("name"),
-                                totalBytes = meta.optLong("size", 0L),
-                                big = meta.optLong("size", 0L) > FILE_MIRROR_MAX_BYTES,
-                            )
-                        }
+                        if (applied) registerInitialFile(meta)
                     }
                     if (body.optInt("more", 0) != 1) {
-                        MirrorHub.initialSyncPart("files", initialFilesSeen)
+                        initialFilesSnapshotComplete = true
+                        maybeFinishInitialFiles()
                     }
                 }
             }
@@ -2453,10 +2556,13 @@ class MirrorChannel(
                 val bytes = runCatching {
                     android.util.Base64.decode(b64, android.util.Base64.NO_WRAP)
                 }.getOrNull() ?: return
-                scope.launch {
+                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    val last = body.optInt("last", 0) == 1
+                    noteInitialSyncActivity()
                     MirrorHub.duringApply {
-                        bridge.onFileChunk(transferId, body.optInt("seq", 0), body.optInt("last", 0) == 1, bytes)
+                        bridge.onFileChunk(transferId, body.optInt("seq", 0), last, bytes)
                     }
+                    if (last) noteInitialFileChunk(transferId)
                 }
             }
             "reqgif" -> {
@@ -2811,6 +2917,7 @@ class MirrorChannel(
         // р246: канал ожил - сразу показать партнёру свой профиль.
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             ProfileMirror.publishNow(context)
+            retryPendingInitialFileRequests()
         }
         // Тень: невостребованные исходящие (ушли, пока партнёра не было).
         flushPendingOutgoing()
@@ -2843,7 +2950,26 @@ class MirrorChannel(
     }
 
     private fun handleTransportJson(obj: JSONObject) {
+        // The WSS fallback carries the same authenticated frame id as the
+        // direct/MQTT route. ACK and dedupe here as well, otherwise a lost direct
+        // ACK could replay a file chunk through WSS and append it twice.
+        val pairingId = obj.optString("_pid").takeIf { it.isNotBlank() }
+        if (pairingId != null) {
+            sendWebSocketPairingAck(pairingId)
+            val old = receivedPairingFrames.putIfAbsent(pairingId, System.currentTimeMillis())
+            if (old != null) return
+            if (receivedPairingFrames.size > RECEIVED_PAIRING_FRAME_LIMIT) {
+                receivedPairingFrames.entries
+                    .sortedBy { it.value }
+                    .take(RECEIVED_PAIRING_FRAME_PRUNE)
+                    .forEach { receivedPairingFrames.remove(it.key, it.value) }
+            }
+            obj.remove("_pid")
+        }
         when (obj.optString("t")) {
+            "pair_ack" -> obj.optString("id").takeIf { it.isNotBlank() }?.let {
+                pendingPairingFrames.remove(it)
+            }
             "hello", "hb" -> onPartnerFrame(obj)
             "req" -> {
                 val dev = obj.optString("dev")
@@ -2897,6 +3023,7 @@ class MirrorChannel(
         private const val INITIAL_SYNC_TIMEOUT_MS = 5 * 60_000L
         private const val INITIAL_SYNC_RETRY_INTERVAL_MS = 8_000L
         private const val INITIAL_SYNC_RETRY_IDLE_MS = 12_000L
+        private const val INITIAL_FILE_REQUEST_RETRY_MS = 15_000L
         private const val PAIRING_COMPLETION_GRACE_MS = 30_000L
         private const val INITIAL_SNAPSHOT_ROWS = 40
 
@@ -2904,6 +3031,7 @@ class MirrorChannel(
         private const val PAIRING_FRAME_MAX_CHARS = MIRROR_PAIRING_MAX_CHARS
         private const val PAIRING_FRAME_RETRY_MS = 1_500L
         private const val PAIRING_FRAME_RETRIES = 4
+        private const val PAIRING_WSS_RETRIES = 4
         private const val RECEIVED_PAIRING_FRAME_LIMIT = 2_048
         private const val RECEIVED_PAIRING_FRAME_PRUNE = 512
 
