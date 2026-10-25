@@ -25,6 +25,7 @@ import com.vladimir.messenger.data.local.entity.ChatEntity
 import com.vladimir.messenger.data.local.entity.ContactEntity
 import com.vladimir.messenger.data.local.entity.DirectoryEntity
 import com.vladimir.messenger.data.local.entity.NicknameEntity
+import com.vladimir.messenger.data.local.entity.NicknameSuppressionEntity
 import com.vladimir.messenger.data.local.entity.FileTransferChunkEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import com.vladimir.messenger.data.local.entity.FileExchangePeerEntity
@@ -56,7 +57,7 @@ import com.vladimir.messenger.data.local.dao.GroupPollDao
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 34
+const val APP_DATABASE_VERSION = 38
 
 @Database(
     entities = [
@@ -78,6 +79,7 @@ const val APP_DATABASE_VERSION = 34
         GroupMessageStatEntity::class,
         DirectoryEntity::class,
         NicknameEntity::class,
+        NicknameSuppressionEntity::class,
         AvatarEntity::class,
         SavedItemEntity::class,
         ProfileHeartEntity::class,
@@ -117,6 +119,48 @@ abstract class AppDatabase : RoomDatabase() {
          * Реакции: до пяти разных значков от одного человека на сообщение.
          * Ключ таблицы расширяется значком; строки переносятся как есть.
          */
+        /** Свой текст тревожного сообщения SOS из настроек группы. */
+        val MIGRATION_35_36 = object : Migration(35, 36) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `groups` ADD COLUMN `sosText` TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /** Message body/name palette ids; old messages keep the normal theme colour. */
+        val MIGRATION_36_37 = object : Migration(36, 37) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `messages` ADD COLUMN `textColor` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `messages` ADD COLUMN `senderNameColor` TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        /** Local tombstones keep revoked nickname gossip from returning after cleanup. */
+        val MIGRATION_37_38 = object : Migration(37, 38) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `nickname_suppressions` (" +
+                        "`ownerId` TEXT NOT NULL, " +
+                        "`name` TEXT NOT NULL, " +
+                        "`revokedAtMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`ownerId`, `name`))"
+                )
+            }
+        }
+
+        /**
+         * Красная кнопка SOS в группах: показывать ли кнопку, сколько
+         * тревожных сообщений слать за нажатие (3..5), кто вправе нажимать
+         * и когда этот телефон нажимал последний раз (пауза от повторов).
+         */
+        val MIGRATION_34_35 = object : Migration(34, 35) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `groups` ADD COLUMN `sosEnabled` INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE `groups` ADD COLUMN `sosMessageCount` INTEGER NOT NULL DEFAULT 3")
+                db.execSQL("ALTER TABLE `groups` ADD COLUMN `sosPressRole` TEXT NOT NULL DEFAULT 'ALL'")
+                db.execSQL("ALTER TABLE `groups` ADD COLUMN `sosLastSentAtMs` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         /** Счётчик репостов: отдельная таблица фактов пересылки. */
         val MIGRATION_33_34 = object : Migration(33, 34) {
             override fun migrate(db: SupportSQLiteDatabase) {

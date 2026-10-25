@@ -31,6 +31,7 @@ class NotificationHelper @Inject constructor(
 ) {
     companion object {
         private const val MESSAGE_NOTIFICATION_BASE_ID = 2000
+        private const val SOS_NOTIFICATION_BASE_ID = 700_000
         const val EXTRA_CHAT_ID = "extra_chat_id"
 
         /**
@@ -141,6 +142,66 @@ class NotificationHelper @Inject constructor(
         
         // Показать notification (ID на основе chatId чтобы группировать)
         val notificationId = MESSAGE_NOTIFICATION_BASE_ID + chatId.hashCode().mod(1000)
+        notificationManager.notify(notificationId, notification)
+    }
+
+    /**
+     * Тревожное сообщение SOS из группы: активно оповещаем, несмотря ни на
+     * какие паузы звука (группа без звука, тихие часы и прочее SOS не
+     * касаются - сигнал чрезвычайный). Отдельный канал с сигналом
+     * будильника, длинная вибрация и попытка полноэкранного показа:
+     * уведомление должно разбудить и спящий телефон.
+     */
+    suspend fun showSosNotification(
+        chatId: String,
+        senderId: String,
+        topicId: String?,
+        messageId: String? = null,
+    ) {
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val group = groupDao.getGroupById(chatId)
+        val contact = contactRepository.getContactById(senderId)
+        val senderName = contact?.displayName
+            ?: groupDao.getMember(chatId, senderId)?.displayName?.takeIf { it.isNotBlank() }
+            ?: senderId.take(8)
+        val groupTitle = group?.title?.takeIf { it.isNotBlank() }
+        val title = if (groupTitle != null) "🆘 SOS — $groupTitle" else "🆘 SOS"
+        val body = "$senderName: ${com.vladimir.messenger.util.SosMessage.DEFAULT_TEXT}"
+
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_CHAT_ID, chatId)
+            if (!topicId.isNullOrBlank()) putExtra(EXTRA_TOPIC_ID, topicId)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            (SOS_NOTIFICATION_BASE_ID + chatId.hashCode()).mod(10_000),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, MessengerApplication.CHANNEL_SOS_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setAutoCancel(true)
+            // Полноэкранный показ будит спящий телефон; где система его не
+            // разрешает (Android 14+ без отдельного разрешения), уведомление
+            // просто всплывёт поверх экрана - тихо оно не останется.
+            .setFullScreenIntent(pendingIntent, true)
+            .setVibrate(longArrayOf(0, 700, 250, 700, 250, 700))
+            .addExtras(android.os.Bundle().apply { putString("apu_message_id", messageId) })
+            .setContentIntent(pendingIntent)
+            .build()
+
+        // ID свой на каждое сообщение: за одно нажатие приходит несколько
+        // тревог, и каждая должна прозвучать, а не перетереть предыдущую.
+        val notificationId = SOS_NOTIFICATION_BASE_ID +
+            ((messageId?.hashCode() ?: chatId.hashCode()).mod(100_000))
         notificationManager.notify(notificationId, notification)
     }
 

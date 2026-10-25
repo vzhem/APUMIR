@@ -195,6 +195,28 @@ class FileTransferChunkStore(
         return readBounded(file)
     }
 
+    /**
+     * Убрать один зашифрованный кусок (приёмник выбросил кусок, не прошедший
+     * проверку подлинности, и ждёт повтор от отправителя). Удаляются оба
+     * именования файла куска - текущее и legacy.
+     */
+    @Synchronized
+    fun deleteEncryptedChunk(transferId: String, chunkIndex: Long): Boolean {
+        validateTransferId(transferId)
+        require(chunkIndex >= 0L) { "Invalid chunk index" }
+        val chunks = chunksDirectory(transferId, create = false)
+        if (!chunks.isDirectory) return true
+        cachedStoredBytes = null
+        var removed = true
+        val current = checkedChild(chunks, chunkFileName(chunkIndex))
+        if (current.exists() && !current.delete()) removed = false
+        if (chunkIndex <= LEGACY_MAX_CHUNK_INDEX) {
+            val legacy = checkedChild(chunks, String.format(Locale.ROOT, "%08d.chunk", chunkIndex))
+            if (legacy != current && legacy.exists() && !legacy.delete()) removed = false
+        }
+        return removed
+    }
+
     @Synchronized
     fun storedChunkIndices(transferId: String): List<Long> {
         validateTransferId(transferId)

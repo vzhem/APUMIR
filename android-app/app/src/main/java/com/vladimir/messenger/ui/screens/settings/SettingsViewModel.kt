@@ -7,6 +7,8 @@ import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.diagnostics.MqttLinkText
 import com.vladimir.messenger.data.notification.NotificationMuteScope
 import com.vladimir.messenger.data.notification.NotificationMuteStore
+import com.vladimir.messenger.data.settings.SettingsResetCategory
+import com.vladimir.messenger.data.settings.SettingsResetStore
 import com.vladimir.messenger.util.OwnInvite
 import com.vladimir.messenger.data.repository.NetworkStatus
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -66,6 +68,7 @@ class SettingsViewModel @Inject constructor(
     private val addressBookSwarm: com.vladimir.messenger.data.backup.AddressBookSwarmBackup,
     private val botApi: com.vladimir.messenger.service.BotApi,
     private val identityBackup: com.vladimir.messenger.data.security.IdentityBackup,
+    private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -80,6 +83,28 @@ class SettingsViewModel @Inject constructor(
 
     fun setNotificationMuteUntil(scope: NotificationMuteScope, untilMs: Long) {
         notificationMuteStore.setMutedUntil(scope, untilMs)
+    }
+
+    /**
+     * Apply an allow-listed reset.  The confirmation UI supplies the categories;
+     * this method never receives a request to erase the account or its data.
+     */
+    fun resetSettings(categories: Set<SettingsResetCategory>, onComplete: () -> Unit = {}) {
+        if (categories.isEmpty()) return
+        viewModelScope.launch {
+            runCatching {
+                SettingsResetStore.reset(context, categories, notificationMuteStore)
+            }.onSuccess {
+                onComplete()
+            }
+        }
+    }
+
+    /** Immediately announce a changed profile-name colour to contacts and group peers. */
+    fun publishMyNameColour() {
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { groupRepository.publishMyNickname(force = true) }
+        }
     }
 
     /**

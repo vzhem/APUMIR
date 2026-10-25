@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,6 +55,7 @@ internal fun StoryVideoEditor(
     val scope = rememberCoroutineScope()
     val currentDraft by rememberUpdatedState(draft)
     var resetDialog by remember { mutableStateOf(false) }
+    var showResetDone by remember { mutableStateOf(false) }
     var error by remember(source.file) { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     var progress by remember { mutableFloatStateOf(0f) }
@@ -181,6 +183,15 @@ internal fun StoryVideoEditor(
         player.pause()
         if (setting == StoryVideoDraft.Reset.COVER) player.seekTo(0)
         resetDialog = false
+        showResetDone = true
     })
+    if (showResetDone) {
+        ApuPremiumNoticeDialog(
+            title = androidx.compose.ui.res.stringResource(com.vladimir.messenger.R.string.story_video_reset_done_title),
+            message = androidx.compose.ui.res.stringResource(com.vladimir.messenger.R.string.story_video_reset_done_body),
+            onDismiss = { showResetDone = false },
+            icon = androidx.compose.material.icons.Icons.Default.CheckCircle,
+        )
+    }
 
 }

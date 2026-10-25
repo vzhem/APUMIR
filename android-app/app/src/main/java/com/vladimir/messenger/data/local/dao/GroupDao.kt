@@ -126,6 +126,25 @@ interface GroupDao {
     @Query("UPDATE groups SET quietHours = :schedule WHERE id = :groupId")
     suspend fun setQuietHours(groupId: String, schedule: String)
 
+    /**
+     * Настройки красной кнопки SOS: показывать ли, сколько тревожных
+     * сообщений слать за нажатие и кто вправе нажимать. Проверка прав -
+     * в GroupRepository; отметку последнего нажатия не трогаем.
+     */
+    @Query(
+        "UPDATE groups SET sosEnabled = :enabled, sosMessageCount = :count, sosPressRole = :pressRole " +
+            "WHERE id = :groupId"
+    )
+    suspend fun setSosSettings(groupId: String, enabled: Boolean, count: Int, pressRole: String)
+
+    /** Свой текст тревожного сообщения SOS (пусто - текст по умолчанию). */
+    @Query("UPDATE groups SET sosText = :text WHERE id = :groupId")
+    suspend fun setSosText(groupId: String, text: String)
+
+    /** Локальная отметка нажатия SOS этим телефоном (пауза от повторов). */
+    @Query("UPDATE groups SET sosLastSentAtMs = :atMs WHERE id = :groupId")
+    suspend fun setSosLastSentAt(groupId: String, atMs: Long)
+
     @Query("UPDATE groups SET memberListVisible = :visible WHERE id = :groupId")
     suspend fun setMemberListVisible(groupId: String, visible: Boolean)
 

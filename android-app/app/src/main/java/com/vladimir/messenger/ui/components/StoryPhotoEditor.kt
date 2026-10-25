@@ -26,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.RotateRight
@@ -88,6 +89,7 @@ internal fun StoryPhotoEditorDialog(
     val imageWidth = source.width
     val imageHeight = source.height
     var state by remember(source) { mutableStateOf(StoryCrop.initialState(imageWidth, imageHeight)) }
+    var showResetDone by remember { mutableStateOf(false) }
     val paint = remember(source) { StoryCrop.bitmapPaint() }
     val density = LocalDensity.current
     BackHandler(onBack = onCancel)
@@ -181,7 +183,10 @@ internal fun StoryPhotoEditorDialog(
                 )
                 ApuPremiumButton(
                     label = stringResource(R.string.story_crop_reset),
-                    onClick = { state = StoryCrop.reset(imageWidth, imageHeight) },
+                    onClick = {
+                        state = StoryCrop.reset(imageWidth, imageHeight)
+                        showResetDone = true
+                    },
                     icon = Icons.Default.Refresh,
                     compact = true,
                     enabled = StoryCrop.isEdited(state, imageWidth, imageHeight),
@@ -209,6 +214,14 @@ internal fun StoryPhotoEditorDialog(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
             )
         }
+    }
+    if (showResetDone) {
+        ApuPremiumNoticeDialog(
+            title = stringResource(R.string.story_crop_reset_done_title),
+            message = stringResource(R.string.story_crop_reset_done_body),
+            onDismiss = { showResetDone = false },
+            icon = Icons.Default.CheckCircle,
+        )
     }
 }
 

@@ -1,6 +1,7 @@
 package com.vladimir.messenger.data.file
 
 import java.nio.file.Files
+import java.security.MessageDigest
 import uniffi.p2p_core.FileTransferManifestFfi
 
 /** Shared JVM fakes for the receiver transport tests: no Android, no native library needed. */
@@ -43,18 +44,33 @@ class FakeFileCryptoGateway(
         manifest: ByteArray,
     ): ByteArray = FILE_KEY.copyOf()
 
-    /** Inverse of [fakeEncrypt]: strips the fake 16-byte tag. */
+    /**
+     * Inverse of [fakeEncrypt]: снимает фейковый 16-байтовый тег, но сначала
+     * сверяет его с содержимым - как настоящий AEAD. Битый шифротекст бросает,
+     * иначе тесты не могут отличить «кусок не прошёл проверку» от хорошего.
+     */
     override fun decryptChunk(
         manifestBytes: ByteArray,
         fileKey: ByteArray,
         chunkIndex: Long,
         ciphertext: ByteArray,
-    ): ByteArray = ciphertext.copyOfRange(16, ciphertext.size)
+    ): ByteArray {
+        require(ciphertext.size > 16) { "ciphertext too short" }
+        val plaintext = ciphertext.copyOfRange(16, ciphertext.size)
+        check(ciphertext.copyOfRange(0, 16).contentEquals(fakeTag(plaintext))) {
+            "chunk authentication failed"
+        }
+        return plaintext
+    }
 
     companion object {
         val FILE_KEY = ByteArray(32) { 9 }
 
-        fun fakeEncrypt(plaintext: ByteArray): ByteArray = ByteArray(16) { 5 } + plaintext
+        /** Фейковый AEAD-тег: первые 16 байт SHA-256 открытого текста. */
+        fun fakeTag(plaintext: ByteArray): ByteArray =
+            MessageDigest.getInstance("SHA-256").digest(plaintext).copyOf(16)
+
+        fun fakeEncrypt(plaintext: ByteArray): ByteArray = fakeTag(plaintext) + plaintext
     }
 }
 

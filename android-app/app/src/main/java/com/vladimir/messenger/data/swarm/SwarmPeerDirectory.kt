@@ -76,6 +76,9 @@ class SwarmPeerDirectory @Inject constructor(
         val contacts = contactDao.allIds().filter { it.isNotBlank() }.toHashSet()
         val verified = HashSet<String>()
         fileExchangePeerDao.getAll().mapTo(verified) { it.nodeId }
+        // NicknameDao excludes locally revoked/tombstoned registrations.  A
+        // deleted row alone would not be enough: stale owners would still be
+        // selected as verified peers until the next gossip packet.
         nicknameDao.allOwnerIds().filterTo(verified) { it.isNotBlank() }
         // Владельцы и админы сообществ, где я состою: они держат ленту, их
         // пакеты нужны всем - им первым, у них первых.

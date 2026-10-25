@@ -55,4 +55,10 @@ data class MessageEntity(
     val editedAtMs: Long = 0,
     val pinnedAtMs: Long? = null,
     val pinnedBy: String? = null,
+    /** Palette id selected for the message body; empty keeps the theme colour. */
+    @ColumnInfo(defaultValue = "''")
+    val textColor: String = "",
+    /** Palette id selected for the author's display name. */
+    @ColumnInfo(defaultValue = "''")
+    val senderNameColor: String = "",
 )

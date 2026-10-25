@@ -27,6 +27,16 @@ data class GroupSummary(
     val slowModeSeconds: Int = 0,
     val quietHours: String = "",
     val memberListVisible: Boolean = true,
+    /**
+     * Красная кнопка SOS: показывать ли её в группе, сколько тревожных
+     * сообщений уходит за одно нажатие (3..5) и кто вправе нажимать
+     * (GroupSos.PRESS_*). Для каналов не используется.
+     */
+    val sosEnabled: Boolean = true,
+    val sosMessageCount: Int = GroupSos.DEFAULT_COUNT,
+    val sosPressRole: String = GroupSos.PRESS_ALL,
+    /** Свой текст тревоги из настроек группы; пусто - текст по умолчанию. */
+    val sosText: String = "",
     /** Личная пауза уведомлений группы или канала. */
     val mutedUntilMs: Long = 0L,
     val wallpaper: String = "",

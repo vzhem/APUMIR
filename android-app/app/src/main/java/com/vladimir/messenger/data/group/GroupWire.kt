@@ -1,5 +1,6 @@
 package com.vladimir.messenger.data.group
 
+import com.vladimir.messenger.data.textcolor.TextColorWire
 import java.nio.charset.StandardCharsets
 import java.util.Base64
 
@@ -357,6 +358,27 @@ object GroupWire {
      */
     const val KIND_SLOW_MODE = "slow"
 
+    /**
+     * Настройки красной кнопки SOS: `soscfg|groupId|enabled|count|pressRole`.
+     *
+     * Отдельный вид по той же причине, что и медленный режим: старые
+     * телефоны молча отбрасывают неизвестный вид, а кнопку у себя просто
+     * не покажут (и тревожные сообщения увидят обычными - текст сигнала
+     * несёт свой смысл и без раскраски).
+     */
+    const val KIND_SOS_SETTINGS = "soscfg"
+
+    /**
+     * Свой текст тревожного сообщения: `sostxt|groupId|b64(text)`.
+     *
+     * Отдельный вид, а не четвёртое поле в `soscfg`: конверт настроек из
+     * шести частей старые телефоны разбирают, а из семи - отбросили бы
+     * целиком, и вместе с текстом потеряли бы видимость кнопки, число
+     * сообщений и кто вправе нажимать. Пустой текст - «вернуть как было»:
+     * у получателя снова действует текст по умолчанию.
+     */
+    const val KIND_SOS_TEXT = "sostxt"
+
     /** Режим пакета [KIND_OWNER]: добровольная передача от нынешнего владельца. */
     const val OWNER_MODE_GIVE = "give"
 
@@ -462,6 +484,10 @@ object GroupWire {
              * опоздавшему как написанный только что.
              */
             val sentAtMs: Long = 0L,
+            /** Palette id for the message body; empty keeps the bubble theme. */
+            val textColor: String = "",
+            /** Palette id for the sender display name. */
+            val senderNameColor: String = "",
         ) : Packet()
 
         /** Правка текста сообщения: новый текст ложится под тот же id. */
@@ -553,6 +579,21 @@ object GroupWire {
         data class QuietHours(val groupId: String, val schedule: String) : Packet()
 
         data class SlowMode(val groupId: String, val seconds: Int) : Packet()
+
+        /**
+         * Настройки кнопки SOS: показывать ли кнопку, сколько тревожных
+         * сообщений уходит за одно нажатие ([count], 3..5) и кто вправе
+         * нажимать ([pressRole] - GroupSos.PRESS_*).
+         */
+        data class SosSettings(
+            val groupId: String,
+            val enabled: Boolean,
+            val count: Int,
+            val pressRole: String,
+        ) : Packet()
+
+        /** Свой текст тревоги из настроек группы; пусто - текст по умолчанию. */
+        data class SosText(val groupId: String, val text: String) : Packet()
 
         /**
          * Просьба прислать последние [limit] постов канала целиком.
@@ -721,10 +762,18 @@ object GroupWire {
          */
         data class GroupDeleted(val groupId: String) : Packet()
 
-        /** Список участников: строки "nodeId,displayName,role" через ';'. */
+        /**
+         * Список участников: строки "nodeId,displayName,role" через ';'.
+         *
+         * Старые конверты не содержат [memberCount] и разбираются как 0.
+         * Новые конверты передают ожидаемое число участников даже когда
+         * пакет является частичным: получатель может понять, что состав ещё
+         * не сошёлся, и запросить полный снимок у владельца/администратора.
+         */
         data class Roster(
             val groupId: String,
             val entries: List<RosterEntry>,
+            val memberCount: Int = 0,
         ) : Packet()
 
         /**
@@ -789,6 +838,8 @@ object GroupWire {
             val name: String,
             val registeredAtMs: Long,
             val hops: Int,
+            /** Palette id for the owner's display name; absent in old packets. */
+            val nameColor: String = "",
         ) : Packet()
 
         /**
@@ -997,8 +1048,15 @@ object GroupWire {
         senderName: String = "",
         authorId: String = "",
         sentAtMs: Long = 0L,
+        textColor: String = "",
+        senderNameColor: String = "",
     ): String {
-        val base = "$PREFIX|$KIND_MESSAGE|$groupId|$topicId|${encode(text)}"
+        // Цвета живут внутри уже существующего поля текста. Поэтому старый
+        // телефон принимает обычный 5/6/7/9-полевой пакет и доставляет его,
+        // а новый клиент распаковывает цвет до записи в Room. Это важнее, чем
+        // добавлять 10-е/11-е поля, которые старые версии просто отбросили бы.
+        val wireText = TextColorWire.wrap(text, textColor, senderNameColor)
+        val base = "$PREFIX|$KIND_MESSAGE|$groupId|$topicId|${encode(wireText)}"
         // Поля добавляются по порядку и только если есть что добавить:
         // конверт из 5 частей понимают даже телефоны с прошлой версией.
         val relayed = authorId.isNotBlank() || sentAtMs > 0L
@@ -1006,10 +1064,11 @@ object GroupWire {
         val withId = "$base|${encode(messageId)}"
         if (senderName.isBlank() && !relayed) return withId
         val withName = "$withId|${encode(senderName)}"
-        // Восьмое и девятое поля (автор и исходное время) - только при
-        // досылке старых постов: конверт из 7 частей по-прежнему понимают
-        // телефоны с прошлой версией, а 9-полевой они молча отбрасывают.
-        return if (!relayed) withName else "$withName|${encode(authorId)}|${sentAtMs.coerceAtLeast(0L)}"
+        return if (!relayed) {
+            withName
+        } else {
+            "$withName|${encode(authorId)}|${sentAtMs.coerceAtLeast(0L)}"
+        }
     }
 
     /** Правка сообщения: тот же id, новый текст. */
@@ -1330,9 +1389,17 @@ object GroupWire {
         "$PREFIX|$KIND_DIRECTORY|$groupId|${encode(title)}|${encode(about)}|$ownerId|" +
             "${encode(slug)}|${if (isChannel) 1 else 0}|${if (needsApproval) 1 else 0}|$hops"
 
-    /** Роевая публикация @имени. */
-    fun buildNick(ownerId: String, name: String, registeredAtMs: Long, hops: Int): String =
-        "$PREFIX|$KIND_NICK|$ownerId|${encode(name)}|$registeredAtMs|$hops"
+    /** Роевая публикация @имени и его цвета. */
+    fun buildNick(
+        ownerId: String,
+        name: String,
+        registeredAtMs: Long,
+        hops: Int,
+        nameColor: String = "",
+    ): String {
+        val base = "$PREFIX|$KIND_NICK|$ownerId|${encode(name)}|$registeredAtMs|$hops"
+        return if (nameColor.isBlank()) base else "$base|${encode(nameColor)}"
+    }
 
     fun buildAvatar(ownerId: String, dataB64: String, updatedAtMs: Long, hops: Int): String =
         "$PREFIX|$KIND_AVAT|$ownerId|$dataB64|$updatedAtMs|$hops"
@@ -1430,11 +1497,46 @@ object GroupWire {
             "${encode(previousOwnerId)}|${atMs.coerceAtLeast(0L)}|$mode"
     }
 
-    fun buildRoster(groupId: String, entries: List<RosterEntry>): String {
+    /**
+     * Собрать снимок состава. [memberCount] нужен для частичных пакетов:
+     * например, администраторы большого канала могут прислать только свои
+     * строки, но получатель всё равно знает, сколько участников должно быть.
+     * Ноль оставляет старый формат для совместимости со старыми тестовыми и
+     * сетевыми конвертами.
+     */
+    fun buildRoster(
+        groupId: String,
+        entries: List<RosterEntry>,
+        memberCount: Int = 0,
+    ): String {
+        require(memberCount >= 0) { "negative roster member count" }
+        if (memberCount > 0) require(memberCount >= entries.size) { "roster count below entries" }
         val csv = entries.joinToString(";") {
             "${encode(it.nodeId)},${encode(it.displayName)},${it.role}"
         }
-        return "$PREFIX|$KIND_ROSTER|$groupId|$csv"
+        val countCell = if (memberCount > 0) "|$memberCount" else ""
+        return "$PREFIX|$KIND_ROSTER|$groupId|$csv$countCell"
+    }
+
+    /**
+     * Объединить снимок с уже известным составом без destructive replace.
+     * Частичный или повторный пакет не может удалить участника, а пустое имя
+     * из неполного старого пакета не затирает уже известное имя.
+     */
+    fun mergeRosterEntries(
+        current: List<RosterEntry>,
+        incoming: List<RosterEntry>,
+    ): List<RosterEntry> {
+        val merged = LinkedHashMap<String, RosterEntry>()
+        (current + incoming).forEach { entry ->
+            if (entry.nodeId.isBlank()) return@forEach
+            val previous = merged[entry.nodeId]
+            merged[entry.nodeId] = entry.copy(
+                displayName = entry.displayName.ifBlank { previous?.displayName.orEmpty() },
+                role = entry.role.ifBlank { previous?.role ?: GroupRole.MEMBER },
+            )
+        }
+        return merged.values.toList()
     }
 
     /** Список тем: строки "topicId,name[,iconEmoji]" через ';'. */
@@ -1552,6 +1654,20 @@ object GroupWire {
         return "$PREFIX|$KIND_SLOW_MODE|$groupId|$safe"
     }
 
+    /** Настройки кнопки SOS одним конвертом: видимость, число тревог, кто нажимает. */
+    fun buildSosSettings(groupId: String, enabled: Boolean, count: Int, pressRole: String): String {
+        require(groupId.isNotBlank()) { "bad group id" }
+        val safeCount = GroupSos.clampCount(count)
+        val safeRole = GroupSos.normalizePressRole(pressRole)
+        return "$PREFIX|$KIND_SOS_SETTINGS|$groupId|${if (enabled) 1 else 0}|$safeCount|$safeRole"
+    }
+
+    /** Свой текст тревоги одним конвертом; пустой текст возвращает умолчание. */
+    fun buildSosText(groupId: String, text: String): String {
+        require(groupId.isNotBlank()) { "bad group id" }
+        return "$PREFIX|$KIND_SOS_TEXT|$groupId|${encode(text.trim().take(GroupSos.MAX_TEXT_CHARS))}"
+    }
+
     fun buildMemberRestrict(groupId: String, nodeId: String, permissionsMask: Long): String =
         "$PREFIX|$KIND_MEMBER_RESTRICT|$groupId|${encode(nodeId)}|$permissionsMask"
 
@@ -1585,14 +1701,26 @@ object GroupWire {
         if (groupId.isBlank()) return null
 
         return when (parts[1]) {
-            KIND_MESSAGE -> if (parts.size in 5..9) {
+            KIND_MESSAGE -> if (parts.size in 5..11) {
                 val body = decode(parts[4]) ?: return null
                 // Конверты старого образца приходили без id и без имени.
                 val senderMessageId = if (parts.size >= 6) decode(parts[5]).orEmpty() else ""
                 val senderName = if (parts.size >= 7) decode(parts[6]).orEmpty() else ""
                 val authorId = if (parts.size >= 8) decode(parts[7]).orEmpty() else ""
                 val sentAtMs = if (parts.size >= 9) parts[8].toLongOrNull() ?: 0L else 0L
-                Packet.Message(groupId, parts[3], body, senderMessageId, senderName, authorId, sentAtMs)
+                val textColor = if (parts.size >= 10) decode(parts[9]).orEmpty() else ""
+                val senderNameColor = if (parts.size >= 11) decode(parts[10]).orEmpty() else ""
+                Packet.Message(
+                    groupId,
+                    parts[3],
+                    body,
+                    senderMessageId,
+                    senderName,
+                    authorId,
+                    sentAtMs,
+                    textColor,
+                    senderNameColor,
+                )
             } else {
                 null
             }
@@ -1881,9 +2009,14 @@ object GroupWire {
                 null
             }
 
-            KIND_ROSTER -> if (parts.size == 4) {
+            KIND_ROSTER -> if (parts.size == 4 || parts.size == 5) {
                 val entries = parseRoster(parts[3]) ?: return null
-                Packet.Roster(groupId, entries)
+                val memberCount = if (parts.size == 5) {
+                    parts[4].toIntOrNull()?.takeIf { it > 0 && it >= entries.size } ?: return null
+                } else {
+                    0
+                }
+                Packet.Roster(groupId, entries, memberCount)
             } else {
                 null
             }
@@ -2020,6 +2153,32 @@ object GroupWire {
                     null
                 } else {
                     Packet.SlowMode(groupId, seconds)
+                }
+            } else {
+                null
+            }
+
+            KIND_SOS_SETTINGS -> if (parts.size == 6) {
+                val enabled = when (parts[3]) { "1" -> true; "0" -> false; else -> null }
+                val count = parts[4].toIntOrNull()
+                if (enabled == null || count == null ||
+                    count < GroupSos.MIN_COUNT || count > GroupSos.MAX_COUNT ||
+                    parts[5] !in GroupSos.PRESS_ROLES
+                ) {
+                    null
+                } else {
+                    Packet.SosSettings(groupId, enabled, count, parts[5])
+                }
+            } else {
+                null
+            }
+
+            KIND_SOS_TEXT -> if (parts.size == 4) {
+                val text = decode(parts[3])
+                if (text == null || text.length > GroupSos.MAX_TEXT_CHARS) {
+                    null
+                } else {
+                    Packet.SosText(groupId, text)
                 }
             } else {
                 null
@@ -2251,10 +2410,11 @@ object GroupWire {
                 null
             }
 
-            KIND_NICK -> if (parts.size == 6) {
+            KIND_NICK -> if (parts.size == 6 || parts.size == 7) {
                 val ownerId = parts[2]
                 val name = decode(parts[3])?.trim()?.trimStart('@').orEmpty()
                 val at = parts[4].toLongOrNull() ?: return null
+                val nameColor = if (parts.size == 7) decode(parts[6]).orEmpty() else ""
                 if (ownerId.isBlank() || name.isBlank()) {
                     null
                 } else {
@@ -2263,6 +2423,7 @@ object GroupWire {
                         name = name,
                         registeredAtMs = at,
                         hops = parts[5].toIntOrNull() ?: 0,
+                        nameColor = nameColor,
                     )
                 }
             } else {

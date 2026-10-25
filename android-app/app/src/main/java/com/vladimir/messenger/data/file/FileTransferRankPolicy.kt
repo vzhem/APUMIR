@@ -1,7 +1,10 @@
 package com.vladimir.messenger.data.file
 
 /**
- * Community feature ranks based on qualified direct referrals.
+ * Community feature ranks based on rank-equivalent units: 1,000 game hearts or one confirmed direct referral.
+ *
+ * Ранг-эквивалент растёт от общей шкалы: 1 000 игровых сердечек дают один
+ * шаг. Подтверждённое прямое приглашение добавляет в игру те же 1 000 сердечек.
  *
  * Решение владельца от 2026-08-27: текстовые сообщения доступны всегда, а
  * отправка файлов, фото, видео, GIF и стикеров открывается с третьего

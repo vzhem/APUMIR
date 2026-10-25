@@ -52,6 +52,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
@@ -66,6 +67,7 @@ import androidx.compose.foundation.relocation.bringIntoViewRequester
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.referral.PromoCodes
 import com.vladimir.messenger.data.referral.ReferralRankStore
+import com.vladimir.messenger.data.heartgame.HeartGameStore
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuScrollbar
 import com.vladimir.messenger.ui.components.ChatWallpaper
@@ -85,8 +87,12 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
     // числом друзей перечитываются из хранилища.
     var refresh by remember { mutableIntStateOf(0) }
     var showInviteShare by remember { mutableStateOf(false) }
-    val qualified = remember(refresh) { ReferralRankStore.qualifiedDirectCount(context) }
-    val earned = remember(refresh) { ReferralRankStore.earnedDirectCount(context) }
+    val heartRevision by HeartGameStore.revision.collectAsStateWithLifecycle()
+    val rankRevision by ReferralRankStore.changes.collectAsStateWithLifecycle()
+    val qualified = remember(refresh, heartRevision, rankRevision) {
+        ReferralRankStore.qualifiedDirectCount(context)
+    }
+    val earned = remember(refresh, rankRevision) { ReferralRankStore.earnedDirectCount(context) }
     val promoBonus = remember(refresh) { PromoCodes.bonus(context) }
     val current = FileTransferRankPolicy.entitlement(qualified)
     val next = FileTransferRankPolicy.nextTier(qualified)
@@ -132,7 +138,15 @@ fun RankBenefitsScreen(onBackClick: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 item {
-                    // Ранг растёт только от приглашённых, поэтому кнопка «позвать друга»
+                    // Переход из профиля тоже открывает общую связку: игровой
+                    // счёт, бонус за приглашение и ранг должны быть рядом.
+                    ApuSettingsCard(modifier = Modifier.fillMaxWidth()) {
+                        com.vladimir.messenger.ui.components.HeartGameSettings()
+                    }
+                }
+                item {
+                    // Ранг растёт от единой шкалы сердечек и приглашений, поэтому
+                    // кнопка «позвать друга» остаётся рядом с игровым счётом.
                     // стоит прямо здесь, а не спрятана в настройках.
                     ApuSettingsCard(modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {

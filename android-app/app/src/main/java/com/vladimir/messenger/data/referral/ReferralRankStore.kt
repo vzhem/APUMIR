@@ -2,6 +2,8 @@ package com.vladimir.messenger.data.referral
 
 import android.content.Context
 import com.vladimir.messenger.BuildConfig
+import com.vladimir.messenger.data.heartgame.HeartGameStore
+import com.vladimir.messenger.data.rank.RankProgressPolicy
 
 /** Local read boundary for qualified-direct-referral entitlements. */
 object ReferralRankStore {
@@ -30,11 +32,13 @@ object ReferralRankStore {
     const val MAX_SUPPORTED_COUNT = 1_000
 
     /**
-     * Число, по которому считается ранг: подтверждённые друзья плюс промо-бонус.
+     * Единицы, по которым открываются ранги.
      *
-     * Промокод хранится ОТДЕЛЬНО и сюда только прибавляется. Счётчик реальных
-     * приглашений он не трогает, поэтому учёт приглашений остаётся честным, а
-     * ранг при этом растёт - как и обещано за код.
+     * Игровой счёт теперь является общей шкалой: 1 000 сердечек = +1 единица
+     * ранга. Подтверждённые приглашения заранее превращаются в такие же
+     * сердечки в [HeartGameStore], поэтому здесь они не прибавляются второй раз.
+     * Промокод остаётся отдельным бонусом к рангу и не притворяется игровыми
+     * сердечками или приглашённым человеком.
      */
     fun qualifiedDirectCount(context: Context): Int {
         val app = context.applicationContext
@@ -45,7 +49,10 @@ object ReferralRankStore {
         }
         val earned = qualifiedDirectCountIn(context, REAL_PREFS)
         val promo = PromoCodes.bonus(context)
-        return (earned + promo).coerceIn(0, MAX_SUPPORTED_COUNT)
+        val heartScore = runCatching {
+            HeartGameStore.ownId()?.let { HeartGameStore.score(app, it) }
+        }.getOrNull() ?: RankProgressPolicy.referralBonusHearts(earned)
+        return RankProgressPolicy.rankUnits(heartScore, promo)
     }
 
     /** Только настоящие приглашения, без промо-бонуса - для честной статистики. */

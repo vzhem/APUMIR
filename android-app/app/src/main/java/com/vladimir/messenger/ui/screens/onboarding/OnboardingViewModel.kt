@@ -16,6 +16,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.local.dao.NicknameDao
 import com.vladimir.messenger.data.local.entity.NicknameEntity
+import com.vladimir.messenger.data.security.DeviceIdentityHistory
 import com.vladimir.messenger.domain.usecase.CreateIdentityUseCase
 import com.vladimir.messenger.domain.usecase.CheckIdentityUseCase
 import com.vladimir.messenger.ui.theme.UsernameHolder
@@ -90,7 +91,15 @@ class OnboardingViewModel @Inject constructor(
      */
     private suspend fun claimUsername(me: String, nick: String) {
         val now = System.currentTimeMillis()
-        nicknameDao.upsert(NicknameEntity(ownerId = me, name = nick, registeredAtMs = now))
+        // A current profile is never blocked by a tombstone left for an older
+        // incarnation of the same owner/name pair.  Clear both the Room row and
+        // the Keystore marker when the user explicitly restores that identity.
+        val normalizedNick = nick.trim().trimStart('@').lowercase()
+        nicknameDao.unsuppress(me, normalizedNick)
+        com.vladimir.messenger.data.security.NicknameRevocationHistory
+            .clear(appContext, me, normalizedNick)
+        nicknameDao.upsert(NicknameEntity(ownerId = me, name = normalizedNick, registeredAtMs = now))
+        DeviceIdentityHistory.remember(appContext, me)
         appContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
             .edit()
             .putString("my_username", nick)
@@ -101,7 +110,11 @@ class OnboardingViewModel @Inject constructor(
 
     /** Занят ли никнейм кем-то другим в известной части сети. */
     suspend fun isNicknameTaken(nick: String, me: String): Boolean =
-        runCatching { nicknameDao.byName(nick).any { it.ownerId != me } }.getOrDefault(false)
+        runCatching {
+            nicknameDao.byName(nick).any {
+                it.ownerId != me && !DeviceIdentityHistory.wasCreatedOnThisDevice(appContext, it.ownerId)
+            }
+        }.getOrDefault(false)
 
     private val _uiState = MutableStateFlow(OnboardingUiState())
     val uiState: StateFlow<OnboardingUiState> = _uiState.asStateFlow()
@@ -166,6 +179,11 @@ class OnboardingViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true, error = null) }
             when (val result = identityBackup.restore(appContext, nick, state.password)) {
                 is com.vladimir.messenger.data.security.IdentityBackup.RestoreResult.Success -> {
+                    // A clearApplicationUserData wiped the local registry too;
+                    // restore the live owner row so the current address is
+                    // visible and can be the safe destination for history.
+                    runCatching { claimUsername(result.nodeId, nick) }
+                        .onFailure { Log.w("OnboardingVM", "restored username row failed", it) }
                     UsernameHolder.set(appContext, nick)
                     // Раунд 256: запираем пароль входа для автосинхронизации -
                     // окно переноса подставит его само, без повторного ввода.
@@ -241,7 +259,7 @@ class OnboardingViewModel @Inject constructor(
                     // Занятость проверяем ПОСЛЕ создания ключей: до этого нет
                     // своего адреса, а чужой владелец того же имени определяется
                     // именно сравнением с ним.
-                    if (isNicknameTaken(nick, identity.fingerprint)) {
+                    if (isNicknameTaken(nick, identity.nodeId)) {
                         _uiState.update {
                             it.copy(
                                 step = OnboardingStep.EnterName,
@@ -254,7 +272,7 @@ class OnboardingViewModel @Inject constructor(
                     // Никнейм человек выбрал сам - он же служит именем для
                     // восстановления, поэтому случайный больше не назначаем.
                     try {
-                        claimUsername(identity.fingerprint, nick)
+                        claimUsername(identity.nodeId, nick)
                     } catch (e: Exception) {
                         Log.e("OnboardingVM", "username claim failed", e)
                     }

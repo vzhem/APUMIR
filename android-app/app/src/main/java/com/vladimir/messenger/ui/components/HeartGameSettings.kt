@@ -24,6 +24,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.R
 import com.vladimir.messenger.data.heartgame.HeartGameStore
+import com.vladimir.messenger.data.file.FileTransferRankPolicy
+import com.vladimir.messenger.data.rank.RankProgressPolicy
+import com.vladimir.messenger.data.referral.ReferralRankStore
 import com.vladimir.messenger.ui.theme.LocalAppDarkTheme
 import com.vladimir.messenger.data.heartgame.HeartGameWire
 import kotlinx.coroutines.launch
@@ -124,12 +127,25 @@ fun HeartGameHeaderStatus(modifier: Modifier = Modifier, onClick: (() -> Unit)? 
 }
 
 @Composable
-fun HeartGameSettings() {
+fun HeartGameSettings(onOpenRanks: (() -> Unit)? = null) {
     val context = LocalContext.current
     val revision by HeartGameStore.revision.collectAsStateWithLifecycle()
     val ready by com.vladimir.messenger.service.CoreStatus.ready.collectAsStateWithLifecycle()
     val id = remember(ready, revision) { HeartGameStore.ownId() }
     val enabled = remember(id, revision) { id?.let { HeartGameStore.enabled(context, it) } ?: false }
+    val rankRevision by ReferralRankStore.changes.collectAsStateWithLifecycle()
+    val account = id
+    val gameScore = remember(account, revision) {
+        account?.let { HeartGameStore.score(context, it) } ?: 0L
+    }
+    val qualified = remember(account, revision, rankRevision) {
+        ReferralRankStore.qualifiedDirectCount(context)
+    }
+    val earnedInvites = remember(rankRevision) {
+        ReferralRankStore.earnedDirectCount(context)
+    }
+    val promoBonus = remember(rankRevision) { com.vladimir.messenger.data.referral.PromoCodes.bonus(context) }
+    val currentRank = remember(qualified) { FileTransferRankPolicy.entitlement(qualified) }
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var showBoard by remember { mutableStateOf(false) }
@@ -153,6 +169,42 @@ fun HeartGameSettings() {
             }, enabled = !busy && id != null)
         }
         Text(stringResource(R.string.heart_game_hint), style = MaterialTheme.typography.bodySmall)
+        HintBubble {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.EmojiEvents, contentDescription = null,
+                        tint = ApuBubbleAccentColor, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        stringResource(R.string.heart_game_rank_summary, currentRank.rankName, qualified),
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Text(stringResource(R.string.heart_game_rank_rule), style = MaterialTheme.typography.bodySmall)
+                Text(
+                    stringResource(R.string.heart_game_invite_rule),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ApuBubbleMutedColor,
+                )
+                Text(
+                    stringResource(
+                        R.string.heart_game_rank_progress,
+                        gameScore,
+                        RankProgressPolicy.heartsToNextRank(gameScore),
+                        earnedInvites,
+                        promoBonus,
+                    ),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = ApuBubbleMutedColor,
+                )
+                if (onOpenRanks != null) {
+                    ApuTextAction(
+                        label = stringResource(R.string.heart_game_open_ranks),
+                        onClick = onOpenRanks,
+                    )
+                }
+            }
+        }
         HeartGameCounter()
         ApuTextAction(
             label = stringResource(if (refreshing) R.string.heart_game_refresh_working else R.string.heart_game_refresh),
@@ -236,14 +288,19 @@ fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
                                     tint = listOf(Color(0xFFD9A329), Color(0xFF8B9CAD), Color(0xFFB77942))[place - 1],
                                     modifier = Modifier.size(22.dp))
                                 Column(Modifier.weight(1f)) {
-                                    Text(entry.name.ifBlank { entry.keyId.take(12) + "…" }, fontWeight = FontWeight.SemiBold)
+                                    Text(
+                                        entry.name.ifBlank { stringResource(R.string.heart_game_unknown_player) },
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
                                     if (isMe) {
                                         Text(stringResource(R.string.heart_game_you_place, ownPlace),
                                             style = MaterialTheme.typography.labelSmall, color = ApuBubbleAccentColor)
                                     } else {
-                                        Text(entry.keyId.take(12) + "… · " +
-                                            DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(entry.updated)),
-                                            style = MaterialTheme.typography.labelSmall)
+                                        Text(
+                                            DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+                                                .format(Date(entry.updated)),
+                                            style = MaterialTheme.typography.labelSmall,
+                                        )
                                     }
                                 }
                                 Icon(Icons.Default.Favorite, null, tint = Color(0xFFFF537F), modifier = Modifier.size(16.dp))

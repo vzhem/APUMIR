@@ -141,7 +141,7 @@ object MirrorHub {
     @Volatile private var initialSyncRequested = false
     @Volatile private var initialSyncSessionId = ""
 
-    /** The exact paired device and its current account route; a fresh joiner may have another node id. */
+    /** The exact paired device is needed because two phones share one account node id. */
     @Volatile private var pairingPeer: Pair<String, ByteArray>? = null
     private val pendingPairingFrames = java.util.concurrent.ConcurrentLinkedQueue<String>()
 

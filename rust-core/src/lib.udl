@@ -272,8 +272,10 @@ interface P2PCoreHandle {
     // Parallel QUIC file stream: direct send WITHOUT relay queue (bulk transfer).
     boolean send_direct_payload(string recipient_id, string payload);
     boolean send_pairing_payload(string recipient_node_id, bytes target_device_id, string payload);
-    // P3 rendezvous: publish/listen for a retained QR offer under a six-digit code.
+    // Short-code rendezvous for pairing: publishes the QR offer on a retained one-time topic.
     boolean publish_pairing_code(string code, string payload);
+    // Keep a bounded WSS listener for the entered code even when direct-peer policy pauses
+    // the normal MQTT session.
     boolean listen_pairing_code(string code);
 
     // K3: бинарный кусок файла по прямому QUIC-каналу. Ядро собирает из

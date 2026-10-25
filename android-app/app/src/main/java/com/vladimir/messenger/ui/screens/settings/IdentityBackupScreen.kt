@@ -279,6 +279,7 @@ fun IdentityBackupScreen(
 
                 state.message?.let { message ->
                     item {
+                        ApuSettingsCard {
                         Text(
                             message,
                             style = MaterialTheme.typography.bodyMedium,
@@ -287,8 +288,9 @@ fun IdentityBackupScreen(
                             } else {
                                 MaterialTheme.colorScheme.primary
                             },
-                            modifier = Modifier.padding(horizontal = 4.dp),
+                            modifier = Modifier.padding(16.dp),
                         )
+                        }
                     }
                 }
             }

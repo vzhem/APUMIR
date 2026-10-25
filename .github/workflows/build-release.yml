@@ -2,6 +2,10 @@ name: Build Release APK
 
 on:
   push:
+    # Branch pushes run the same compile/test/APK verification but never create
+    # a release; release-only steps below are guarded by ref_type == tag.
+    branches:
+      - 'arena/**'
     tags:
       - 'v*'
   # Поддерживаемый ручной прогон для диагностики сборки из ветки.
@@ -57,7 +61,7 @@ jobs:
       # latest public release (the v330-from-v206 failure mode). Compare with
       # GitHub's latest published stable release, not `main`, which may lag.
       - name: Require ancestry from the latest stable release
-        if: github.event_name != 'workflow_dispatch'
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -93,10 +97,11 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Check helper and diagnostics source contracts
+      - name: Check helper, diagnostics, and initial-sync source contracts
         run: |
           python3 scripts/ci/check-online-helper.py
           python3 scripts/ci/check-diagnostics-report.py
+          python3 scripts/ci/check-initial-sync-contract.py
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -256,6 +261,9 @@ jobs:
             --tests com.vladimir.messenger.data.story.StoryFaceMotionTest \
             --tests com.vladimir.messenger.data.story.StoryFaceTimelineTest \
             --tests com.vladimir.messenger.data.heartgame.HeartSyncPolicyTest \
+            --tests com.vladimir.messenger.data.group.JoinRequestStorageTest \
+            --tests com.vladimir.messenger.data.mirror.MirrorFrameCipherTest \
+            --tests com.vladimir.messenger.data.mirror.MirrorInitialSyncTrackerTest \
             --no-daemon > "$RUNNER_TEMP/gradle-release.log" 2>&1
           status=$?
           cat "$RUNNER_TEMP/gradle-release.log"
@@ -375,7 +383,7 @@ jobs:
           retention-days: 30
 
       - name: Create Release
-        if: github.event_name != 'workflow_dispatch'
+        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -398,7 +406,7 @@ jobs:
       # стоит на вершине main - так делает бот. Релиз к этому моменту уже
       # опубликован, поэтому неудача здесь релиз не отменяет.
       - name: Push regenerated bindings and core back to main
-        if: success() && github.event_name != 'workflow_dispatch'
+        if: success() && github.ref_type == 'tag'
         continue-on-error: true
         run: |
           BIND=android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt

@@ -13,6 +13,7 @@ import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.util.GroupInviteCardSender
 import com.vladimir.messenger.data.group.requestSentMessage
 import com.vladimir.messenger.data.local.entity.DirectoryEntity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -25,6 +26,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
 data class GroupsUiState(
@@ -69,6 +71,12 @@ class GroupsViewModel @Inject constructor(
 
     /** Последнее состояние сетевого каталога - для матчинга по запросу. */
     private var latestDirectory: List<DirectoryEntity> = emptyList()
+
+    /**
+     * Атомарный барьер для кнопок каталога. Одно только чтение StateFlow перед
+     * запуском coroutine оставляет окно для двух быстрых тапов подряд.
+     */
+    private val joinInFlight = AtomicBoolean(false)
 
     init {
         // Всё, что читает диск, - только в фоне: `viewModelScope.launch` без
@@ -306,55 +314,79 @@ class GroupsViewModel @Inject constructor(
      * Ссылка без одобрения — сразу участник; иначе владельцу уходит заявка.
      */
     fun joinByLink(raw: String) {
-        if (raw.isBlank() || _uiState.value.joining) return
+        // The StateFlow check below is useful for rendering, but it is not an
+        // atomic click guard: two taps can enter before the launched coroutine
+        // publishes joining=true. The CAS closes that small window.
+        if (raw.isBlank() || _uiState.value.joining || !joinInFlight.compareAndSet(false, true)) return
         viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    joining = true,
-                    joinMessage = null,
-                    joinedGroupId = null,
-                    joinedIsChannel = false,
-                    joinedPostTopicId = null,
-                )
-            }
-            // Короткая ссылка /s/<код>: сперва узнаём у сервиса полную. Не
-            // ответил - говорим прямо, а не «это не ссылка».
-            val link = withContext(Dispatchers.IO) {
-                runCatching { groupRepository.expandLink(raw) }.getOrNull()
-            }
-            if (link == null) {
+            try {
+                _uiState.update {
+                    it.copy(
+                        joining = true,
+                        joinMessage = null,
+                        joinedGroupId = null,
+                        joinedIsChannel = false,
+                        joinedPostTopicId = null,
+                    )
+                }
+                // Короткая ссылка /s/<код>: сперва узнаём у сервиса полную. Не
+                // ответил - говорим прямо, а не «это не ссылка».
+                val link = withContext(Dispatchers.IO) {
+                    try {
+                        groupRepository.expandLink(raw)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+                if (link == null) {
+                    _uiState.update {
+                        it.copy(
+                            joining = false,
+                            joinMessage = appContext.getString(R.string.acvm_link_failed),
+                        )
+                    }
+                    return@launch
+                }
+                // Тема поста едет в самой ссылке: достаём до вступления, чтобы
+                // потом открыть нужную запись, а не начало ленты.
+                val postTopicId = com.vladimir.messenger.data.group.GroupInviteLinks
+                    .parseTarget(link)?.postTopicId
+                val outcome = withContext(Dispatchers.IO) { groupRepository.joinByLink(link) }
+                when (outcome) {
+                    is JoinOutcome.Joined -> _uiState.update {
+                        it.copy(
+                            joining = false,
+                            joinedGroupId = outcome.groupId,
+                            joinedIsChannel = outcome.isChannel,
+                            joinedPostTopicId = postTopicId,
+                            joinMessage = joinedMessage(outcome),
+                        )
+                    }
+                    is JoinOutcome.RequestSent -> _uiState.update {
+                        it.copy(
+                            joining = false,
+                            joinMessage = requestSentMessage(outcome, postTopicId != null),
+                        )
+                    }
+                    is JoinOutcome.Failed -> _uiState.update {
+                        it.copy(joining = false, joinMessage = appContext.getString(R.string.groups_join_failed, outcome.reason))
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Repository/Room failures are shown in the same APU dialog;
+                // they must never escape viewModelScope and kill the process.
                 _uiState.update {
                     it.copy(
                         joining = false,
-                        joinMessage = appContext.getString(R.string.acvm_link_failed),
+                        joinMessage = appContext.getString(R.string.cd_join_failed2),
                     )
                 }
-                return@launch
-            }
-            // Тема поста едет в самой ссылке: достаём до вступления, чтобы
-            // потом открыть нужную запись, а не начало ленты.
-            val postTopicId = com.vladimir.messenger.data.group.GroupInviteLinks
-                .parseTarget(link)?.postTopicId
-            val outcome = withContext(Dispatchers.IO) { groupRepository.joinByLink(link) }
-            when (outcome) {
-                is JoinOutcome.Joined -> _uiState.update {
-                    it.copy(
-                        joining = false,
-                        joinedGroupId = outcome.groupId,
-                        joinedIsChannel = outcome.isChannel,
-                        joinedPostTopicId = postTopicId,
-                        joinMessage = joinedMessage(outcome),
-                    )
-                }
-                is JoinOutcome.RequestSent -> _uiState.update {
-                    it.copy(
-                        joining = false,
-                        joinMessage = requestSentMessage(outcome, postTopicId != null),
-                    )
-                }
-                is JoinOutcome.Failed -> _uiState.update {
-                    it.copy(joining = false, joinMessage = appContext.getString(R.string.groups_join_failed, outcome.reason))
-                }
+            } finally {
+                joinInFlight.set(false)
             }
         }
     }
