@@ -63,6 +63,23 @@ class InitialSyncContract(unittest.TestCase):
         self.assertNotIn("!RustBridge.externalTransportAllowed() || wsRef", MIRROR)
         self.assertNotIn("wsRef.get() !== webSocket || !RustBridge.externalTransportAllowed()", MIRROR)
 
+    def test_initial_sync_has_authenticated_direct_swarm_frames_with_ack_retry(self):
+        self.assertIn("setPairingPeer(accountNode, primaryDevice)", PAIRING)
+        self.assertIn("setPairingPeer(accountNode, request.joinerDeviceId)", PAIRING)
+        self.assertIn("routePairingFrame(text)", PAIRING)
+        self.assertIn("RustBridge.liveSwarmPeerIds()", MIRROR)
+        self.assertIn("sendPairingPayload(node, device, packet)", MIRROR)
+        self.assertIn("pair_ack", MIRROR)
+        self.assertIn("PAIRING_FRAME_RETRIES", MIRROR)
+        self.assertIn("wsRef.get()?.send(JSONObject(waiting.frame.toString())", MIRROR)
+        self.assertIn('"_pid"', MIRROR)
+
+    def test_direct_snapshot_chunks_can_resume_without_finishing_on_first_chunk(self):
+        self.assertIn('.put("more", if (more) 1 else 0)', MIRROR)
+        self.assertIn('body.optInt("more", 0) != 1', MIRROR)
+        self.assertIn("initialContactsSeen", MIRROR)
+        self.assertIn("initialFilesSeen", MIRROR)
+
     def test_ui_exposes_non_connected_initial_sync_states(self):
         for marker in (
             "val initialSync by MirrorHub.initialSync.collectAsStateWithLifecycle()",

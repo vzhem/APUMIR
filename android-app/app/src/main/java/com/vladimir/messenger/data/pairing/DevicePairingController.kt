@@ -185,6 +185,10 @@ object DevicePairingController {
 
     /** Route one incoming text. Returns true when the text was a pairing packet. */
     suspend fun routeIncoming(context: Context, senderId: String, text: String): Boolean {
+        // Initial mirror frames reuse the authenticated `sync` transport kind but are larger than
+        // the small pairing-control decoder allows. MirrorHub validates the outer encoding and
+        // opens the frame with the shared key before dispatching it to MirrorChannel.
+        if (com.vladimir.messenger.data.mirror.MirrorHub.routePairingFrame(text)) return true
         if (DevicePairingWire.isRendezvousPacket(text)) {
             val rendezvous = DevicePairingWire.parseRendezvous(text)
             synchronized(stateLock) {
@@ -381,6 +385,9 @@ object DevicePairingController {
             pendingGrant = null
             pendingSync = null
             joinerAccountNode = accountNode
+            // Both phones share the account node id; direct initial-sync packets target this
+            // exact authenticated device id instead of guessing which local session is online.
+            com.vladimir.messenger.data.mirror.MirrorHub.setPairingPeer(accountNode, primaryDevice)
             // A v2 offer already contained the whole handshake: the comparison code is known
             // right now, without waiting for the other phone's answer.
             val myShort = shortDeviceId(DeviceKeyStore.deviceId(context))
@@ -488,6 +495,7 @@ object DevicePairingController {
         return@synchronized try {
             // Clear an earlier transient error before retrying the same request.
             primaryMutable.value = request.copy(error = null)
+            com.vladimir.messenger.data.mirror.MirrorHub.setPairingPeer(accountNode, request.joinerDeviceId)
             val granted = primaryConfirmPairing(request.joinerDeviceId, System.currentTimeMillis())
             val grantPacket = DevicePairingWire.encode(DevicePairingWire.KIND_GRANT, granted.grant)
             val sent = RustBridge.sendPairingPayload(accountNode, request.joinerDeviceId, grantPacket)

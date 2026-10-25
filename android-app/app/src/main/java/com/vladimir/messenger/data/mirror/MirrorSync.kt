@@ -28,8 +28,10 @@ package com.vladimir.messenger.data.mirror
 // =============================================================================
 
 import android.content.Context
+import android.util.Base64
 import android.util.Log
 import com.vladimir.messenger.data.channel.PostViewWire
+import com.vladimir.messenger.data.pairing.DevicePairingWire
 import com.vladimir.messenger.data.file.FileExchangeKeyStore
 import com.vladimir.messenger.data.gif.GifLibrary
 import com.vladimir.messenger.data.RustBridge
@@ -58,6 +60,11 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONArray
 import org.json.JSONObject
+
+/** Raw pairing payload marker for authenticated initial-sync frames. */
+private const val MIRROR_PAIRING_FRAME_PREFIX = "APUPAIR:sync:"
+private const val MIRROR_PAIRING_CIPHER_PREFIX = "APUMIRROR2:"
+private const val MIRROR_PAIRING_MAX_CHARS = 120 * 1024
 
 /** Строка переписки, гуляющая между устройствами одной личности. */
 data class MirrorRow(
@@ -131,9 +138,53 @@ object MirrorHub {
     /** A successful pairing leaves this set until the channel has reported a result. */
     @Volatile private var initialSyncRequested = false
 
-    /** Bind the service channel and replay a pairing-triggered initial-sync request. */
+    /** The exact paired device is needed because two phones share one account node id. */
+    @Volatile private var pairingPeer: Pair<String, ByteArray>? = null
+    private val pendingPairingFrames = java.util.concurrent.ConcurrentLinkedQueue<String>()
+
+    /** Remember the authenticated peer even when the mirror service is not bound yet. */
+    fun setPairingPeer(recipientNodeId: String, deviceId: ByteArray) {
+        if (recipientNodeId.isBlank() || deviceId.isEmpty()) return
+        val copy = deviceId.copyOf()
+        pairingPeer = recipientNodeId to copy
+        channel?.setPairingPeer(recipientNodeId, copy)
+    }
+
+    /**
+     * Route the large initial-sync extension before the legacy pairing decoder. The normal
+     * pairing decoder deliberately caps control packets at 4096 characters; mirror frames use
+     * the same authenticated sync kind but may contain a bounded snapshot chunk.
+     */
+    fun routePairingFrame(text: String): Boolean {
+        if (!text.startsWith(MIRROR_PAIRING_FRAME_PREFIX)) return false
+        if (text.length > MIRROR_PAIRING_MAX_CHARS) return true
+        val raw = runCatching {
+            val parts = text.split(':', limit = 3)
+            require(parts.size == 3 && parts[0] == "APUPAIR" && parts[1] == "sync")
+            Base64.decode(
+                parts[2],
+                Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING,
+            )
+        }.getOrNull() ?: return true
+        val cipher = raw.toString(Charsets.UTF_8)
+        if (!cipher.startsWith(MIRROR_PAIRING_CIPHER_PREFIX)) return false
+        val current = channel
+        if (current == null) {
+            pendingPairingFrames.offer(cipher)
+        } else {
+            current.acceptPairingFrame(cipher)
+        }
+        return true
+    }
+
+    /** Bind the service channel and replay pairing-triggered state and frames. */
     fun bind(newChannel: MirrorChannel) {
         channel = newChannel
+        pairingPeer?.let { (node, device) -> newChannel.setPairingPeer(node, device) }
+        while (true) {
+            val frame = pendingPairingFrames.poll() ?: break
+            newChannel.acceptPairingFrame(frame)
+        }
         if (initialSyncRequested) newChannel.startInitialSync()
     }
 
@@ -738,6 +789,7 @@ class MirrorChannel(
     @Volatile private var lastAuthAt = 0L
 
     private val wsRef = AtomicReference<WebSocket?>(null)
+    @Volatile private var wsOpen = false
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
         .pingInterval(30, java.util.concurrent.TimeUnit.SECONDS)
@@ -761,6 +813,19 @@ class MirrorChannel(
     private var catchupInFlight = false
     @Volatile private var initialSyncRequested = false
     @Volatile private var initialSnapshotSent = false
+    @Volatile private var pairedPeerNodeId: String? = null
+    @Volatile private var pairedPeerDeviceId: ByteArray? = null
+    @Volatile private var initialContactsSeen = false
+    @Volatile private var initialFilesSeen = false
+
+    private data class PendingPairingFrame(
+        val frame: JSONObject,
+        var attempts: Int = 0,
+    )
+
+    /** Application ACKs make the direct initial-sync path idempotent and resumable. */
+    private val pendingPairingFrames = java.util.concurrent.ConcurrentHashMap<String, PendingPairingFrame>()
+    private val receivedPairingFrames = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private var initialSyncTimeoutJob: Job? = null
     /** р231: когда в последний раз просили движок (передача роли). */
     @Volatile private var lastClaimAt = 0L
@@ -771,6 +836,23 @@ class MirrorChannel(
     /** Ведёт ли ЭТО устройство сеть (активное) или живёт зеркалом. */
     fun isEngineUp(): Boolean = engineUp
 
+    /** Set the exact paired device route; the account node is shared by both phones. */
+    fun setPairingPeer(recipientNodeId: String, deviceId: ByteArray) {
+        if (recipientNodeId.isBlank() || deviceId.isEmpty()) return
+        pairedPeerNodeId = recipientNodeId
+        pairedPeerDeviceId = deviceId.copyOf()
+    }
+
+    private fun hasPairingPeer(): Boolean =
+        !pairedPeerNodeId.isNullOrBlank() && pairedPeerDeviceId?.isNotEmpty() == true
+
+    /** A signed QUIC peer is the preferred initial-sync transport. */
+    private fun directPairingAvailable(): Boolean {
+        val node = pairedPeerNodeId ?: return false
+        if (!hasPairingPeer() || !initialSyncRequested) return false
+        return RustBridge.liveSwarmPeerIds().contains(node)
+    }
+
     /**
      * Start the first catch-up as soon as the authenticated pairing has completed.
      * This is deliberately separate from ordinary live mirroring: a paired phone
@@ -779,6 +861,8 @@ class MirrorChannel(
     fun startInitialSync() {
         initialSyncRequested = true
         initialSnapshotSent = false
+        initialContactsSeen = false
+        initialFilesSeen = false
         initialSyncTimeoutJob?.cancel()
         initialSyncTimeoutJob = scope.launch {
             delay(INITIAL_SYNC_TIMEOUT_MS)
@@ -786,13 +870,13 @@ class MirrorChannel(
                 MirrorHub.initialSyncFailed("Не удалось запустить начальную синхронизацию: второе устройство не отвечает")
             }
         }
-        if (wsRef.get() == null) {
-            MirrorHub.initialSyncConnected()
-            connect()
-        } else {
-            MirrorHub.initialSyncConnected()
+        MirrorHub.initialSyncConnected()
+        if (wsRef.get() == null) connect()
+        // Rust refuses native sends on the UI thread. The direct route is therefore started from
+        // the channel scope even when pairing completed from a UI callback.
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             sendJson(hello())
-            maybeStartInitialExchange()
+            maybeStartInitialExchange(forcePairing = true)
         }
     }
 
@@ -800,6 +884,9 @@ class MirrorChannel(
     fun finishInitialSync() {
         initialSyncRequested = false
         initialSnapshotSent = false
+        initialContactsSeen = false
+        initialFilesSeen = false
+        pendingPairingFrames.clear()
         initialSyncTimeoutJob?.cancel()
         initialSyncTimeoutJob = null
     }
@@ -840,10 +927,11 @@ class MirrorChannel(
         }
     }
 
-    /** Активный всегда может нести исходящие; тень - только при живом партнёре. */
+    /** Активный всегда может нести исходящие; initial sync may use the paired QUIC route. */
     fun canCarryOutgoing(): Boolean =
-        if (engineUp) wsRef.get() != null
-        else partnerEng && partnerFresh() && wsRef.get() != null
+        if (initialSyncRequested && hasPairingPeer()) true
+        else if (engineUp) wsOpen
+        else partnerEng && partnerFresh() && wsOpen
 
     /**
      * р231: тень, рядом с которой есть живой активный. Именно у него можно
@@ -1019,6 +1107,8 @@ class MirrorChannel(
         loopJob?.cancel()
         initialSyncTimeoutJob?.cancel()
         initialSyncTimeoutJob = null
+        wsOpen = false
+        pendingPairingFrames.clear()
         runCatching { wsRef.getAndSet(null)?.close(1000, "bye") }
     }
 
@@ -1454,6 +1544,7 @@ class MirrorChannel(
         // Ссылку обнуляем ДО закрытия: тогда отложенный onClosed старого
         // сокета не погасит новое соединение (сравнение по ссылке в onClosed).
         val stale = wsRef.getAndSet(null)
+        wsOpen = false
         runCatching { stale?.close(1000, "room") }
         connect()
     }
@@ -1617,12 +1708,9 @@ class MirrorChannel(
     // ── Транспорт ────────────────────────────────────────────────────────────
 
     /**
-     * A paired-device sync is not an arbitrary fallback request. The core may
-     * deliberately suppress external transports while a direct QUIC peer is
-     * healthy, but that policy must not cancel the already authenticated
-     * pairing hand-off: the mirror WebSocket is the channel used to copy the
-     * two devices' local databases. Without this exception the normal message
-     * path can be perfectly healthy while initial sync always times out.
+     * A paired-device initial sync is an authenticated data hand-off, not an ordinary broadcast.
+     * The live signed QUIC peer is selected first by [sendJson]; WSS remains the fallback when
+     * that exact peer is not live. The swarm-first policy must not cancel the hand-off entirely.
      */
     private fun transportAllowed(): Boolean =
         initialSyncRequested || RustBridge.externalTransportAllowed()
@@ -1636,6 +1724,7 @@ class MirrorChannel(
                 .url("wss://" + GroupInviteLinks.WEB_HOST + "/mirror/" + room + "?dev=" + deviceTag)
                 .build()
             val ws = client.newWebSocket(request, this)
+            wsOpen = false
             wsRef.set(ws)
             // Полку запоминаем только когда соединение реально открылось:
             // иначе неудачная попытка перехода осталась бы незамеченной.
@@ -1660,11 +1749,119 @@ class MirrorChannel(
 
     private fun sendJson(obj: JSONObject): Boolean {
         if (!transportAllowed()) return false
-        val ws = wsRef.get() ?: return false
+
+        // Initial sync is swarm-first only when the core reports the exact paired node as a
+        // live signed QUIC peer. `sendPairingPayload` still carries the broker fallback owned by
+        // the pairing protocol, while WSS remains the fallback for a peer that is not live.
+        if (directPairingAvailable() && sendPairingFrame(obj)) return true
+
+        val ws = wsRef.get()
+        if (!wsOpen || ws == null) return false
         return try {
             ws.send(obj.toString())
         } catch (e: Exception) {
             false
+        }
+    }
+
+    /**
+     * Send one authenticated initial-sync JSON frame through the exact paired device route.
+     * Every frame gets an application ACK and a bounded retry window. Duplicate retries are
+     * dropped by [acceptPairingFrame], while batch/file offsets make a later request resumable.
+     */
+    private fun sendPairingFrame(obj: JSONObject): Boolean {
+        val node = pairedPeerNodeId ?: return false
+        val device = pairedPeerDeviceId?.copyOf() ?: return false
+        val key = MirrorRoomToken.loadSyncKey(context) ?: return false
+        val id = java.util.UUID.randomUUID().toString()
+        val frame = JSONObject(obj.toString()).put("_pid", id)
+        val pending = PendingPairingFrame(frame)
+        pendingPairingFrames[id] = pending
+        val accepted = transmitPairingFrame(node, device, frame, key)
+        if (!accepted) {
+            pendingPairingFrames.remove(id)
+            return false
+        }
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            repeat(PAIRING_FRAME_RETRIES) {
+                delay(PAIRING_FRAME_RETRY_MS)
+                val waiting = pendingPairingFrames[id] ?: return@launch
+                if (waiting.attempts >= PAIRING_FRAME_RETRIES - 1) {
+                    pendingPairingFrames.remove(id)
+                    // The direct peer may disappear after the liveness check. Reuse the same
+                    // authenticated mirror frame over the already-open WSS room as fallback;
+                    // the receiver ignores the local `_pid` field on the WebSocket path.
+                    if (wsOpen) runCatching {
+                        wsRef.get()?.send(JSONObject(waiting.frame.toString()).apply { remove("_pid") }.toString())
+                    }
+                    return@launch
+                }
+                waiting.attempts += 1
+                transmitPairingFrame(node, device, waiting.frame, key)
+            }
+        }
+        return true
+    }
+
+    private fun transmitPairingFrame(
+        node: String,
+        device: ByteArray,
+        frame: JSONObject,
+        key: ByteArray,
+    ): Boolean {
+        val sealed = MirrorFrameCipher.seal(key, frame.toString()) ?: return false
+        val packet = DevicePairingWire.encode(
+            DevicePairingWire.KIND_SYNC,
+            sealed.toByteArray(Charsets.UTF_8),
+        )
+        if (packet.length > PAIRING_FRAME_MAX_CHARS) {
+            Log.w(TAG, "initial-sync pairing frame is too large: ${packet.length} chars")
+            return false
+        }
+        return runCatching {
+            RustBridge.sendPairingPayload(node, device, packet)
+        }.getOrDefault(false)
+    }
+
+    /** Receive one pairing-frame ciphertext after MirrorHub has decoded its outer packet. */
+    fun acceptPairingFrame(cipher: String): Boolean {
+        val key = MirrorRoomToken.loadSyncKey(context) ?: return true
+        val plain = MirrorFrameCipher.open(key, cipher) ?: return true
+        val frame = runCatching { JSONObject(plain) }.getOrNull() ?: return true
+        if (frame.optString("t") == "pair_ack") {
+            frame.optString("id").takeIf { it.isNotBlank() }?.let { pendingPairingFrames.remove(it) }
+            return true
+        }
+        val id = frame.optString("_pid")
+        if (id.isBlank()) return true
+        sendPairingAck(id, key)
+        val now = System.currentTimeMillis()
+        val old = receivedPairingFrames.putIfAbsent(id, now)
+        if (old != null) return true
+        if (receivedPairingFrames.size > RECEIVED_PAIRING_FRAME_LIMIT) {
+            receivedPairingFrames.entries
+                .sortedBy { it.value }
+                .take(RECEIVED_PAIRING_FRAME_PRUNE)
+                .forEach { receivedPairingFrames.remove(it.key, it.value) }
+        }
+        frame.remove("_pid")
+        handleTransportJson(frame)
+        return true
+    }
+
+    private fun sendPairingAck(id: String, key: ByteArray) {
+        val node = pairedPeerNodeId ?: return
+        val device = pairedPeerDeviceId?.copyOf() ?: return
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val ack = JSONObject().put("t", "pair_ack").put("id", id)
+            val sealed = MirrorFrameCipher.seal(key, ack.toString()) ?: return@launch
+            val packet = DevicePairingWire.encode(
+                DevicePairingWire.KIND_SYNC,
+                sealed.toByteArray(Charsets.UTF_8),
+            )
+            if (packet.length <= PAIRING_FRAME_MAX_CHARS) {
+                runCatching { RustBridge.sendPairingPayload(node, device, packet) }
+            }
         }
     }
 
@@ -1691,7 +1888,6 @@ class MirrorChannel(
         .put("pb", ProfileMirror.cachedBirthdayDigest(context))
 
     private fun sendEvent(kind: String, payload: JSONObject): Boolean {
-        if (wsRef.get() == null) return false
         val sealed = sealPayload(payload) ?: return false
         return sendJson(JSONObject().put("t", "ev").put("k", kind).put("d", sealed))
     }
@@ -1699,12 +1895,24 @@ class MirrorChannel(
     private fun sendInitialSnapshot(kind: String, rows: List<JSONObject>) {
         val chunks: List<List<JSONObject>> =
             if (rows.isEmpty()) listOf(emptyList()) else rows.chunked(INITIAL_SNAPSHOT_ROWS)
-        chunks.forEach { chunk ->
-            sendEvent(
-                kind,
-                JSONObject().put("rows", JSONArray().apply { chunk.forEach { put(it) } }),
-            )
+        chunks.forEachIndexed { index, chunk ->
+            sendInitialSnapshotChunk(kind, chunk, more = index < chunks.lastIndex)
         }
+    }
+
+    /** Split a snapshot again if the bounded pairing envelope cannot hold the first chunk. */
+    private fun sendInitialSnapshotChunk(kind: String, rows: List<JSONObject>, more: Boolean) {
+        val body = JSONObject()
+            .put("rows", JSONArray().apply { rows.forEach { put(it) } })
+            .put("more", if (more) 1 else 0)
+        if (sendEvent(kind, body)) return
+        if (rows.size <= 1) {
+            Log.w(TAG, "initial-sync $kind row could not be sent")
+            return
+        }
+        val middle = rows.size / 2
+        sendInitialSnapshotChunk(kind, rows.subList(0, middle), more = true)
+        sendInitialSnapshotChunk(kind, rows.subList(middle, rows.size), more = more)
     }
 
     // ── Шифрование: запечатать на самого себя ────────────────────────────────
@@ -1729,7 +1937,7 @@ class MirrorChannel(
         // MessageSealer cannot open the frame on the other phone. Once both
         // sides advertise protocol 2, use the key delivered in pairing.
         val sharedKey = MirrorRoomToken.loadSyncKey(context)
-        if (sharedKey != null && partnerRoomV >= SHARED_FRAME_PROTOCOL_V) {
+        if (sharedKey != null && (partnerRoomV >= SHARED_FRAME_PROTOCOL_V || hasPairingPeer())) {
             MirrorFrameCipher.seal(sharedKey, payload.toString())?.let { return it }
         }
         // Compatibility path for older mirror peers and for the short interval
@@ -1862,19 +2070,28 @@ class MirrorChannel(
      * channel. Message history uses the existing batch protocol; contacts,
      * profile and completed files use the explicit snapshot response below.
      */
-    private fun maybeStartInitialExchange() {
-        if (!initialSyncRequested || initialSnapshotSent || !partnerFresh()) return
+    private fun maybeStartInitialExchange(forcePairing: Boolean = false) {
+        val pairingReady = forcePairing && hasPairingPeer()
+        if (!initialSyncRequested || initialSnapshotSent || (!partnerFresh() && !pairingReady)) return
         initialSnapshotSent = true
         MirrorHub.initialSyncTransferring()
         catchupInFlight = true
-        sendJson(
+        val requestSent = sendJson(
             JSONObject()
                 .put("t", "req")
                 .put("dev", deviceTag)
                 .put("since", 0L)
                 .put("initial", 1),
         )
-        if (partnerRoomV >= SHARED_FRAME_PROTOCOL_V) {
+        if (!requestSent) {
+            // A direct peer may disappear between liveness observation and the send. Leave the
+            // marker clear so the WSS hello path can retry instead of timing out with a false
+            // "started" state.
+            initialSnapshotSent = false
+            catchupInFlight = false
+            return
+        }
+        if (partnerRoomV >= SHARED_FRAME_PROTOCOL_V || pairingReady) {
             sendEvent("initial_req", JSONObject().put("v", 1))
         } else {
             // A legacy peer cannot answer the snapshot contract. Keep the
@@ -1928,12 +2145,13 @@ class MirrorChannel(
             while (chunk.isNotEmpty()) {
                 val body = JSONObject()
                     .put("rows", JSONArray().apply { chunk.forEach { put(it.toJson()) } })
-                    .put("more", if (chunk.size == rows.size) more else false)
+                    .put("more", if (chunk.size == rows.size) more else true)
                     .put("upto", upto)
                     .put("initial", if (initial) 1 else 0)
                 val sealed = sealPayload(body)
-                if (sealed != null) {
+                if (sealed != null &&
                     sendJson(JSONObject().put("t", "ev").put("k", "batch").put("d", sealed))
+                ) {
                     return@launch
                 }
                 chunk = chunk.take(chunk.size / 2)
@@ -2022,22 +2240,24 @@ class MirrorChannel(
                 val body = openPayload(wire) ?: return
                 val rows = body.optJSONArray("rows") ?: JSONArray()
                 scope.launch {
+                    if (rows.length() > 0) initialContactsSeen = true
                     for (i in 0 until rows.length()) {
                         val contact = rows.optJSONObject(i) ?: continue
                         MirrorHub.duringApply { bridge.onContactFromPartner(contact) }
                     }
-                    MirrorHub.initialSyncPart("contacts", rows.length() > 0)
+                    if (body.optInt("more", 0) != 1) {
+                        MirrorHub.initialSyncPart("contacts", initialContactsSeen)
+                    }
                 }
             }
             "initial_files" -> {
                 val body = openPayload(wire) ?: return
                 val rows = body.optJSONArray("rows") ?: JSONArray()
                 scope.launch {
-                    var copied = false
+                    if (rows.length() > 0) initialFilesSeen = true
                     for (i in 0 until rows.length()) {
                         val meta = rows.optJSONObject(i) ?: continue
                         val applied = MirrorHub.duringApply { bridge.onFileMeta(meta) }
-                        copied = applied || copied
                         if (applied && meta.optLong("size", 0L) > 0L) {
                             requestFileBytes(
                                 transferId = meta.optString("id"),
@@ -2047,7 +2267,9 @@ class MirrorChannel(
                             )
                         }
                     }
-                    MirrorHub.initialSyncPart("files", copied)
+                    if (body.optInt("more", 0) != 1) {
+                        MirrorHub.initialSyncPart("files", initialFilesSeen)
+                    }
                 }
             }
             "initial_done" -> {
@@ -2433,12 +2655,16 @@ class MirrorChannel(
             webSocket.cancel()
             return
         }
+        wsOpen = true
         backoffMs = 2_000L
         if (initialSyncRequested) {
-            initialSnapshotSent = false
+            // A direct request may already be in flight. Resetting this flag here used to cause
+            // a second full exchange as soon as WSS opened, and could mark a partial snapshot
+            // complete before the direct frame retries arrived.
             MirrorHub.initialSyncConnected()
         }
         sendJson(hello())
+        if (initialSyncRequested) maybeStartInitialExchange()
         // р246: канал ожил - сразу показать партнёру свой профиль.
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             ProfileMirror.publishNow(context)
@@ -2473,26 +2699,29 @@ class MirrorChannel(
         }
     }
 
+    private fun handleTransportJson(obj: JSONObject) {
+        when (obj.optString("t")) {
+            "hello", "hb" -> onPartnerFrame(obj)
+            "req" -> {
+                val dev = obj.optString("dev")
+                if (dev.isNotBlank() && dev != deviceTag) {
+                    serveCatchup(
+                        since = obj.optLong("since", 0L),
+                        initial = obj.optInt("initial", 0) == 1,
+                    )
+                }
+            }
+            "ev" -> handleEvent(obj.optString("k"), obj.optString("d"))
+        }
+    }
+
     override fun onMessage(webSocket: WebSocket, text: String) {
         if (wsRef.get() !== webSocket || !transportAllowed()) {
             webSocket.cancel()
             return
         }
         try {
-            val obj = JSONObject(text)
-            when (obj.optString("t")) {
-                "hello", "hb" -> onPartnerFrame(obj)
-                "req" -> {
-                    val dev = obj.optString("dev")
-                    if (dev.isNotBlank() && dev != deviceTag) {
-                        serveCatchup(
-                            since = obj.optLong("since", 0L),
-                            initial = obj.optInt("initial", 0) == 1,
-                        )
-                    }
-                }
-                "ev" -> handleEvent(obj.optString("k"), obj.optString("d"))
-            }
+            handleTransportJson(JSONObject(text))
         } catch (e: Exception) {
             Log.d(TAG, "bad frame: ${e.message}")
         }
@@ -2502,6 +2731,7 @@ class MirrorChannel(
     // комнату, старый сокет не должен обнулять ссылку на новый.
     override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
         if (wsRef.compareAndSet(webSocket, null)) {
+            wsOpen = false
             // Обрыв посреди догона: сбрасываем флаг сразу, иначе после
             // переподключения синхронизация ждала бы, пока партнёр «протухнет»
             // (30 с). Уже принятые порции лежат в базе, догон продолжится с
@@ -2513,6 +2743,7 @@ class MirrorChannel(
 
     override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
         if (wsRef.compareAndSet(webSocket, null)) {
+            wsOpen = false
             catchupInFlight = false
             scheduleReconnect()
         }
@@ -2522,6 +2753,13 @@ class MirrorChannel(
         private const val BATCH_ROWS = 30
         private const val INITIAL_SYNC_TIMEOUT_MS = 90_000L
         private const val INITIAL_SNAPSHOT_ROWS = 40
+
+        /** Pairing control remains small; initial mirror chunks have a bounded larger envelope. */
+        private const val PAIRING_FRAME_MAX_CHARS = MIRROR_PAIRING_MAX_CHARS
+        private const val PAIRING_FRAME_RETRY_MS = 1_500L
+        private const val PAIRING_FRAME_RETRIES = 4
+        private const val RECEIVED_PAIRING_FRAME_LIMIT = 2_048
+        private const val RECEIVED_PAIRING_FRAME_PRUNE = 512
 
         /** р227: потолок открытого текста зеркального конверта (кадр - 512 КиБ). */
         private const val MAX_ENVELOPE_CHARS = 48_000
