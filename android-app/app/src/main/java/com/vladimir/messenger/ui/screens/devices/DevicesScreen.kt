@@ -406,6 +406,7 @@ private fun InitialSyncStatus(state: MirrorInitialSyncState) {
         MirrorInitialSyncPhase.STARTING -> stringResource(R.string.devices_sync_starting)
         MirrorInitialSyncPhase.CONNECTING -> stringResource(R.string.devices_sync_connecting)
         MirrorInitialSyncPhase.TRANSFERRING -> stringResource(R.string.devices_sync_transferring)
+        MirrorInitialSyncPhase.RETRYING -> stringResource(R.string.devices_sync_retrying)
         MirrorInitialSyncPhase.COMPLETE -> stringResource(R.string.devices_sync_complete)
         MirrorInitialSyncPhase.NO_DATA -> stringResource(R.string.devices_sync_no_data)
         MirrorInitialSyncPhase.ERROR -> stringResource(R.string.devices_sync_error, state.detail)

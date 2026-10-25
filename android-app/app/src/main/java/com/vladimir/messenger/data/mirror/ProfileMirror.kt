@@ -122,6 +122,9 @@ object ProfileMirror {
         val bdayMonth: Int = 0,
         val bdayVisible: Boolean = false,
         val tBday: Long = 0L,
+        /** Exact byte sizes let the resumable profile stream verify its final chunk. */
+        val avBytes: Long = 0L,
+        val wallBytes: Long = 0L,
     ) {
         /** Отпечаток СОДЕРЖИМОГО (метки времени не входят): им сравниваются устройства. */
         fun digest(): String = sha256(
@@ -171,6 +174,8 @@ object ProfileMirror {
             .put("bdmon", bdayMonth)
             .put("bdvis", bdayVisible)
             .put("tbday", tBday)
+            .put("avb", avBytes)
+            .put("walb", wallBytes)
 
         companion object {
             fun fromJson(o: JSONObject): State = State(
@@ -192,6 +197,8 @@ object ProfileMirror {
                 bdayMonth = o.optInt("bdmon", 0),
                 bdayVisible = o.optBoolean("bdvis", false),
                 tBday = o.optLong("tbday", 0L),
+                avBytes = o.optLong("avb", 0L),
+                wallBytes = o.optLong("walb", 0L),
             )
         }
     }
@@ -229,6 +236,8 @@ object ProfileMirror {
             bdayMonth = birthday?.month ?: 0,
             bdayVisible = birthday?.visible == true,
             tBday = upd.getLong("upd_" + FIELD_BDAY, 0L),
+            avBytes = imageBytes(app, FIELD_AV, avName),
+            wallBytes = imageBytes(app, FIELD_WALL, wallName),
         )
     }
 
@@ -413,6 +422,145 @@ object ProfileMirror {
             .getOrDefault(false)
     }
 
+    data class ImageChunkResult(
+        val accepted: Boolean,
+        val complete: Boolean,
+        val nextOffset: Long,
+    )
+
+    private val imageLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
+
+    /** Bytes already durable in the resumable profile-image staging file. */
+    fun remoteImageBytesReceived(context: Context, kind: String, name: String): Long {
+        if (kind != FIELD_AV && kind != FIELD_WALL || !isSafeName(name)) return 0L
+        val part = File(dirFor(context.applicationContext, kind), ".${name}.mirror.part")
+        val length = part.takeIf { it.isFile }?.length() ?: 0L
+        if (length > IMAGE_MAX_BYTES) {
+            runCatching { part.delete() }
+            return 0L
+        }
+        return length
+    }
+
+    /**
+     * Append one profile-image chunk at an explicit offset. Duplicate/replayed chunks are
+     * compared with the durable staging file and ignored; gaps are rejected so the next request
+     * can resume from the exact committed offset. The final image is only exposed after size and
+     * SHA-256 verification.
+     */
+    fun applyRemoteImageChunk(
+        context: Context,
+        kind: String,
+        name: String,
+        expectedSha: String,
+        expectedBytes: Long,
+        offset: Long,
+        last: Boolean,
+        bytes: ByteArray,
+    ): ImageChunkResult {
+        val app = context.applicationContext
+        if (kind != FIELD_AV && kind != FIELD_WALL || !isSafeName(name)) {
+            return ImageChunkResult(false, false, 0L)
+        }
+        // expectedBytes == 0 is the compatibility form used by older peers. In that
+        // form the final frame defines the length; the SHA-256 check still protects
+        // the committed file and the hard cap prevents an unbounded stream.
+        val sizeKnown = expectedBytes > 0L
+        val finalEmpty = last && sizeKnown && offset == expectedBytes
+        if ((sizeKnown && expectedBytes > IMAGE_MAX_BYTES) || offset < 0L ||
+            (!finalEmpty && bytes.isEmpty()) ||
+            (sizeKnown && (offset > expectedBytes || bytes.size.toLong() > expectedBytes - offset)) ||
+            (!sizeKnown && (offset > IMAGE_MAX_BYTES || bytes.size.toLong() > IMAGE_MAX_BYTES - offset)) ||
+            expectedSha.length != 64 || !expectedSha.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
+        ) {
+            return ImageChunkResult(false, false, remoteImageBytesReceived(app, kind, name))
+        }
+        val key = kind + "|" + name
+        val lock = imageLocks.computeIfAbsent(key) { Any() }
+        synchronized(lock) {
+            val dir = dirFor(app, kind)
+            val part = File(dir, ".${name}.mirror.part")
+            val target = File(dir, name)
+            dir.mkdirs()
+            val targetLengthMatches = target.isFile && target.length() > 0L &&
+                (!sizeKnown || target.length() == expectedBytes)
+            if (targetLengthMatches && sha256Of(target).equals(expectedSha, ignoreCase = true)) {
+                return ImageChunkResult(true, true, target.length())
+            }
+            if (part.isFile && part.length() > IMAGE_MAX_BYTES) {
+                runCatching { part.delete() }
+            }
+            var current = part.takeIf { it.isFile }?.length() ?: 0L
+            var append = bytes
+            if (offset > current) return ImageChunkResult(false, false, current)
+            if (offset < current) {
+                val overlap = minOf(bytes.size.toLong(), current - offset).toInt()
+                val existing = readRange(part, offset, overlap) ?: return ImageChunkResult(false, false, current)
+                if (!existing.contentEquals(bytes.copyOfRange(0, overlap))) {
+                    // The prefix belongs to an older image (same filename) or
+                    // was damaged. Keeping it would make every later SHA check
+                    // fail, so restart from zero regardless of the offset.
+                    runCatching { part.delete() }
+                    if (offset != 0L) {
+                        return ImageChunkResult(false, false, 0L)
+                    }
+                    current = 0L
+                    append = bytes
+                } else if (overlap == bytes.size) {
+                    append = ByteArray(0)
+                } else {
+                    append = bytes.copyOfRange(overlap, bytes.size)
+                }
+            }
+            if (append.isNotEmpty()) {
+                runCatching {
+                    java.io.FileOutputStream(part, true).use {
+                        it.write(append)
+                        it.flush()
+                        it.fd.sync()
+                    }
+                }.getOrElse { return ImageChunkResult(false, false, current) }
+                current += append.size
+            }
+            if (!last) return ImageChunkResult(true, false, current)
+            if ((sizeKnown && current != expectedBytes) || current <= 0L ||
+                !sha256Of(part).equals(expectedSha, ignoreCase = true)
+            ) {
+                // A final hash mismatch means the durable prefix itself is not
+                // trustworthy. Retrying from its end would reproduce the same
+                // bad digest forever, so discard it and request offset zero.
+                runCatching { part.delete() }
+                return ImageChunkResult(false, false, 0L)
+            }
+            val committed = runCatching {
+                java.nio.file.Files.move(
+                    part.toPath(),
+                    target.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+                )
+                val uri = fileProviderUri(app, target)
+                applyingRemote = true
+                try {
+                    if (kind == FIELD_AV) AvatarHolder.set(app, uri) else WallpaperHolder.set(app, uri)
+                } finally {
+                    applyingRemote = false
+                }
+                invalidateCache()
+            }.isSuccess
+            return ImageChunkResult(committed, committed, if (committed) expectedBytes else current)
+        }
+    }
+
+    private fun readRange(file: File, offset: Long, length: Int): ByteArray? = runCatching {
+        val bytes = ByteArray(length)
+        java.io.RandomAccessFile(file, "r").use {
+            it.seek(offset)
+            it.readFully(bytes)
+        }
+        bytes
+    }.getOrNull()
+
     /** Отдать файл картинки профиля (для «reqpbytes»). */
     fun imageFile(context: Context, kind: String, name: String): File? {
         if (!isSafeName(name)) return null
@@ -477,6 +625,11 @@ object ProfileMirror {
         val file = File(dirFor(context, kind), name)
         if (!file.isFile) return name to ""
         return name to sha256Of(file)
+    }
+
+    private fun imageBytes(context: Context, kind: String, name: String): Long {
+        if (name.isBlank()) return 0L
+        return File(dirFor(context, kind), name).takeIf { it.isFile }?.length() ?: 0L
     }
 
     /**

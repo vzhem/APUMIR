@@ -12,6 +12,7 @@ import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.repository.ChatRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
@@ -1417,17 +1418,23 @@ class FileTransferRouter @Inject constructor(
     suspend fun transfersMissingBytes(limit: Int): List<com.vladimir.messenger.data.local.entity.FileTransferEntity> =
         kotlinx.coroutines.withContext(Dispatchers.IO) {
             val cap = com.vladimir.messenger.data.mirror.MirrorChannel.FILE_MIRROR_MAX_BYTES
-            runCatching { transferDao.getCompleted() }.getOrDefault(emptyList())
-                .asSequence()
-                .filter { it.totalBytes > 0 && it.totalBytes <= cap }
-                .filter { receivedStore.receivedFile(it.transferId, it.displayName) == null }
-                .take(limit.coerceAtLeast(1))
-                .toList()
+            val wanted = limit.coerceAtLeast(1)
+            val result = ArrayList<com.vladimir.messenger.data.local.entity.FileTransferEntity>(wanted)
+            for (row in runCatching { transferDao.getCompleted() }.getOrDefault(emptyList())) {
+                if (row.totalBytes <= 0L || row.totalBytes > cap) continue
+                // Existence alone is not enough: a corrupted committed file must
+                // re-enter the resumable path and be replaced after SHA-256.
+                if (!mirrorFileBytesPresent(row.transferId, row.displayName, row.totalBytes)) {
+                    result += row
+                    if (result.size >= wanted) break
+                }
+            }
+            result
         }
 
     /** Куски файла от партнёра: пишем в тот же приёмник, что и обычную передачу. */
     private val mirrorWriters =
-        java.util.concurrent.ConcurrentHashMap<String, Pair<ReceivedFileStore.Writer, Triple<String, Long, Int>>>()
+        java.util.concurrent.ConcurrentHashMap<String, Pair<ReceivedFileStore.ResumableWriter, Triple<String, Long, Int>>>()
 
     /**
      * р249: сколько байтов этой передачи уже принято по зеркалу в ЭТОМ сеансе.
@@ -1439,18 +1446,43 @@ class FileTransferRouter @Inject constructor(
      */
     private val mirrorReceivedBytes = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
-    /** р249: сколько байтов передачи уже принято по зеркалу. */
+    /** р249: сколько байтов передачи уже принято по зеркалу in this process. */
     fun mirrorReceivedBytesOf(transferId: String): Long = mirrorReceivedBytes[transferId] ?: 0L
 
-    /** True only when the received-file store has the complete committed payload. */
+    /** Durable offset used after the service/process has been recreated. */
+    suspend fun mirrorReceivedBytesDurable(transferId: String): Long =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            mirrorReceivedBytes[transferId]?.let { return@withContext it }
+            val row = runCatching { transferDao.getTransfer(transferId) }.getOrNull()
+                ?: return@withContext 0L
+            receivedStore.mirrorPartLength(transferId, row.displayName)
+        }
+
+    /** True only when the received-file store has the complete verified payload. */
     suspend fun mirrorFileBytesPresent(
         transferId: String,
         displayName: String,
         totalBytes: Long,
     ): Boolean = kotlinx.coroutines.withContext(Dispatchers.IO) {
         val file = receivedStore.receivedFile(transferId, displayName) ?: return@withContext false
-        file.isFile && file.length() >= totalBytes
+        if (!file.isFile || file.length() != totalBytes) return@withContext false
+        val expected = runCatching { transferDao.getTransfer(transferId)?.fileSha256.orEmpty() }
+            .getOrDefault("")
+        expected.isBlank() || sha256File(file).equals(expected, ignoreCase = true)
     }
+
+    private fun sha256File(file: File): String = runCatching {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        digest.digest().joinToString("") { "%02x".format(it) }
+    }.getOrDefault("")
 
     /** р249: файлы, которые человек уже просил открыть на этом устройстве. */
     private val bigWanted = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
@@ -1466,13 +1498,16 @@ class FileTransferRouter @Inject constructor(
         kotlinx.coroutines.withContext(Dispatchers.IO) {
             val auto = com.vladimir.messenger.data.mirror.MirrorChannel.FILE_MIRROR_MAX_BYTES
             val cap = com.vladimir.messenger.data.mirror.MirrorChannel.FILE_MIRROR_BIG_MAX_BYTES
-            runCatching { transferDao.getCompleted() }.getOrDefault(emptyList())
-                .asSequence()
-                .filter { it.totalBytes > auto && it.totalBytes <= cap }
-                .filter { it.transferId in bigWanted }
-                .filter { receivedStore.receivedFile(it.transferId, it.displayName) == null }
-                .take(limit.coerceAtLeast(1))
-                .toList()
+            val wanted = limit.coerceAtLeast(1)
+            val result = ArrayList<com.vladimir.messenger.data.local.entity.FileTransferEntity>(wanted)
+            for (row in runCatching { transferDao.getCompleted() }.getOrDefault(emptyList())) {
+                if (row.totalBytes <= auto || row.totalBytes > cap || row.transferId !in bigWanted) continue
+                if (!mirrorFileBytesPresent(row.transferId, row.displayName, row.totalBytes)) {
+                    result += row
+                    if (result.size >= wanted) break
+                }
+            }
+            result
         }
 
     /** р249: когда в последний раз просили байты этой передачи (не частим). */
@@ -1500,12 +1535,15 @@ class FileTransferRouter @Inject constructor(
         if (transfer.totalBytes > com.vladimir.messenger.data.mirror.MirrorChannel.FILE_MIRROR_MAX_BYTES) {
             bigWanted.add(transfer.transferId)
         }
+        val durableOffset = mirrorReceivedBytesOf(transfer.transferId).takeIf { it > 0L }
+            ?: receivedStore.mirrorPartLength(transfer.transferId, transfer.displayName)
         com.vladimir.messenger.data.mirror.MirrorHub.requestFileBytes(
             transfer.transferId,
             transfer.displayName,
             transfer.totalBytes,
-            offset = mirrorReceivedBytesOf(transfer.transferId),
+            offset = durableOffset,
             big = transfer.totalBytes > com.vladimir.messenger.data.mirror.MirrorChannel.FILE_MIRROR_MAX_BYTES,
+            sha256 = transfer.fileSha256,
         )
     }
 
@@ -1525,22 +1563,65 @@ class FileTransferRouter @Inject constructor(
      * [ReceivedFileStore], что и обычный приём: имя каталога - идентификатор
      * передачи, поэтому и открытие файла в чате сработает как обычно.
      */
-    suspend fun applyMirrorFileChunk(transferId: String, seq: Int, last: Boolean, bytes: ByteArray) =
-        kotlinx.coroutines.withContext(Dispatchers.IO) {
+    suspend fun applyMirrorFileChunk(
+        transferId: String,
+        offset: Long,
+        seq: Int,
+        last: Boolean,
+        bytes: ByteArray,
+    ) = kotlinx.coroutines.withContext(Dispatchers.IO) {
         val row = transferDao.getTransfer(transferId) ?: return@withContext
+        if ((bytes.isEmpty() && !(last && offset == row.totalBytes)) || offset < 0L) return@withContext
         val entry = mirrorWriters[transferId]
-        val writerState = entry ?: run {
-            val writer = receivedStore.openWriter(transferId, row.displayName, row.totalBytes)
+        val writerState = entry ?: runCatching {
+            val writer = receivedStore.openResumableWriter(transferId, row.displayName, row.totalBytes)
             val triple = Triple(row.displayName, row.totalBytes, row.chunkSize)
-            mirrorWriters[transferId] = Pair(writer, triple)
-            Pair(writer, triple)
+            val state = Pair(writer, triple)
+            mirrorWriters[transferId] = state
+            state
+        }.getOrElse { error ->
+            // A stale partial from a reused transfer id must not block every
+            // future request. The next request starts from a clean, trusted
+            // staging path.
+            Log.w(TAG, "mirror file staging open failed id=$transferId: ${error.message}")
+            mirrorWriters.remove(transferId)
+            runCatching { receivedStore.deleteTransfer(transferId) }
+            return@withContext
         }
         try {
-            writerState.first.write(bytes, bytes.size)
-            // р249: счётчик принятого - по нему возобновляем после обрыва.
-            mirrorReceivedBytes[transferId] = mirrorReceivedBytesOf(transferId) + bytes.size
+            val writer = writerState.first
+            val current = writer.existingBytes
+            if (offset > current) {
+                // A gap means an earlier chunk was lost. Do not append out of order; the
+                // receiver's next request will advertise `current` and the sender resumes there.
+                Log.w(TAG, "mirror file gap id=$transferId off=$offset current=$current seq=$seq")
+                return@withContext
+            }
+            if (offset < current) {
+                val overlap = minOf(bytes.size.toLong(), current - offset).toInt()
+                val existing = writer.readAt(offset, overlap)
+                if (existing == null || !existing.contentEquals(bytes.copyOfRange(0, overlap))) {
+                    Log.w(TAG, "mirror file replay mismatch id=$transferId off=$offset current=$current")
+                    return@withContext
+                }
+                if (overlap < bytes.size) {
+                    writer.append(bytes.copyOfRange(overlap, bytes.size))
+                }
+            } else if (bytes.isNotEmpty()) {
+                writer.append(bytes)
+            }
+            mirrorReceivedBytes[transferId] = writer.existingBytes
             if (last) {
-                writerState.first.commit()
+                if (writer.existingBytes != row.totalBytes) {
+                    Log.w(TAG, "mirror file early-last id=$transferId ${writer.existingBytes}/${row.totalBytes}")
+                    return@withContext
+                }
+                val committed = writer.commit()
+                val expected = row.fileSha256.orEmpty()
+                if (expected.isNotBlank() && !sha256File(committed).equals(expected, ignoreCase = true)) {
+                    runCatching { receivedStore.deleteTransfer(transferId) }
+                    throw IllegalStateException("mirror file hash mismatch")
+                }
                 mirrorWriters.remove(transferId)
                 mirrorReceivedBytes.remove(transferId)
                 bigWanted.remove(transferId)
@@ -1548,9 +1629,12 @@ class FileTransferRouter @Inject constructor(
             }
         } catch (error: Exception) {
             runCatching { writerState.first.abort() }
+            // Gap/replay mismatches return above and preserve the verified prefix.
+            // Anything that reaches the catch block is a writer/hash failure and is
+            // discarded so the next request starts from a trusted staging file.
             runCatching { receivedStore.deleteTransfer(transferId) }
-            mirrorWriters.remove(transferId)
             mirrorReceivedBytes.remove(transferId)
+            mirrorWriters.remove(transferId)
             Log.w(TAG, "mirror file chunk failed id=$transferId: ${error.message}")
         }
     }

@@ -44,8 +44,9 @@ class InitialSyncContract(unittest.TestCase):
         body = section(MIRROR, "object MirrorHub", "    @Volatile\n    @PublishedApi")
         self.assertIn("initialSyncRequested = true", body)
         self.assertIn("initialSyncTracker.begin()", body)
-        self.assertIn("current.startInitialSync()", body)
-        self.assertIn("if (initialSyncRequested) newChannel.startInitialSync()", body)
+        self.assertIn("newChannel.startInitialSync(", body)
+        self.assertIn("if (initialSyncRequested)", body)
+        self.assertIn("newChannel.startInitialSync(", body)
 
     def test_service_starts_channel_before_binding_it(self):
         body = section(SERVICE, "private fun startMirrorChannel(", "private fun mirrorBridge()")
@@ -130,6 +131,15 @@ class InitialSyncContract(unittest.TestCase):
         self.assertIn("ws.send(waiting.frame.toString())", MIRROR)
         self.assertNotIn("apply { remove(\"_pid\") }", MIRROR)
 
+    def test_durable_part_ack_drives_sender_final_and_receiver_retirement(self):
+        self.assertIn('"initial_ack"', MIRROR)
+        self.assertIn("initialSyncAckedPart", MIRROR)
+        self.assertIn("if (!initialSyncRequested || sessionChanged)", MIRROR)
+        self.assertIn('"initial_final"', MIRROR)
+        self.assertIn("initialSyncFinal", MIRROR)
+        self.assertIn("isAwaitingInitialFinal", MIRROR)
+        self.assertIn("MirrorSyncStore.finish(context)", MIRROR)
+
     def test_initial_sync_waits_for_file_bytes_before_terminal_files_part(self):
         self.assertIn("initialFilesPending", MIRROR)
         self.assertIn("initialFilesSnapshotComplete", MIRROR)
@@ -142,6 +152,15 @@ class InitialSyncContract(unittest.TestCase):
         self.assertNotIn('MirrorHub.initialSyncPart("files", initialFilesSeen)', files)
         chunk = section(MIRROR, '"filechunk" -> {', '"reqgif" -> {')
         self.assertIn("noteInitialFileChunk(transferId)", chunk)
+
+    def test_profile_and_file_prefixes_reset_on_hash_or_gap_failure(self):
+        profile = (JAVA / "data/mirror/ProfileMirror.kt").read_text()
+        files = (JAVA / "data/file/FileTransferRouter.kt").read_text()
+        self.assertIn("SHA-256 verification", profile)
+        self.assertIn("part.delete()", profile)
+        self.assertIn("mirror file gap", files)
+        self.assertIn("writer.readAt", files)
+        self.assertIn("sha256File(committed)", files)
 
     def test_file_router_exposes_committed_mirror_bytes(self):
         self.assertIn("suspend fun mirrorFileBytesPresent", (JAVA / "data/file/FileTransferRouter.kt").read_text())

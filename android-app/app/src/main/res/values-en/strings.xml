@@ -2019,6 +2019,7 @@ The file is not on this phone</string>
     <string name="devices_sync_starting">Starting initial synchronization…</string>
     <string name="devices_sync_connecting">Connecting the synchronization channel…</string>
     <string name="devices_sync_transferring">Syncing chats, profile, contacts and files…</string>
+    <string name="devices_sync_retrying">Connection is recovering; synchronization will continue automatically…</string>
     <string name="devices_sync_complete">Initial synchronization complete.</string>
     <string name="devices_sync_no_data">Initial synchronization complete: there is no data to transfer from the other device.</string>
     <string name="devices_sync_error">Initial synchronization is temporarily waiting for the other device: %1$s. Automatic retries continue.</string>

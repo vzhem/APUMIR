@@ -6,6 +6,8 @@ enum class MirrorInitialSyncPhase {
     STARTING,
     CONNECTING,
     TRANSFERRING,
+    /** The channel is still retrying; this is not a terminal error. */
+    RETRYING,
     COMPLETE,
     NO_DATA,
     ERROR,
@@ -44,6 +46,13 @@ class MirrorInitialSyncTracker {
     @Synchronized
     fun transferring(nowMs: Long = System.currentTimeMillis()): MirrorInitialSyncState =
         update(MirrorInitialSyncPhase.TRANSFERRING, "Передаём чаты, профиль, контакты и файлы", nowMs)
+
+    @Synchronized
+    fun retrying(
+        detail: String = "Связь восстанавливается, синхронизация продолжится автоматически",
+        nowMs: Long = System.currentTimeMillis(),
+    ): MirrorInitialSyncState =
+        update(MirrorInitialSyncPhase.RETRYING, detail, nowMs)
 
     @Synchronized
     fun part(name: String, hasData: Boolean, nowMs: Long = System.currentTimeMillis()): MirrorInitialSyncState {

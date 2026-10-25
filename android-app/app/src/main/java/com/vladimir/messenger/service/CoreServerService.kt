@@ -1463,8 +1463,14 @@ class CoreServerService : Service() {
                 .onFailure { Log.w(TAG, "Mirror file meta failed: ${it.message}") }
                 .getOrDefault(false)
 
-        override suspend fun onFileChunk(transferId: String, seq: Int, last: Boolean, bytes: ByteArray) {
-            runCatching { fileTransferRouter.applyMirrorFileChunk(transferId, seq, last, bytes) }
+        override suspend fun onFileChunk(
+            transferId: String,
+            offset: Long,
+            seq: Int,
+            last: Boolean,
+            bytes: ByteArray,
+        ) {
+            runCatching { fileTransferRouter.applyMirrorFileChunk(transferId, offset, seq, last, bytes) }
                 .onFailure { Log.w(TAG, "Mirror file chunk failed: ${it.message}") }
         }
 
@@ -1475,7 +1481,7 @@ class CoreServerService : Service() {
         ): Boolean = fileTransferRouter.mirrorFileBytesPresent(transferId, displayName, totalBytes)
 
         override suspend fun mirrorFileBytesReceived(transferId: String): Long =
-            fileTransferRouter.mirrorReceivedBytesOf(transferId)
+            fileTransferRouter.mirrorReceivedBytesDurable(transferId)
 
         override suspend fun fileBytesFor(
             transferId: String,
@@ -1729,7 +1735,7 @@ class CoreServerService : Service() {
             val last = mirrorFileAskedAt[row.transferId] ?: 0L
             if (now - last < MIRROR_FILE_RETRY_MS) continue
             mirrorFileAskedAt[row.transferId] = now
-            val offset = fileTransferRouter.mirrorReceivedBytesOf(row.transferId)
+            val offset = fileTransferRouter.mirrorReceivedBytesDurable(row.transferId)
             val big = row.totalBytes > com.vladimir.messenger.data.mirror.MirrorChannel.FILE_MIRROR_MAX_BYTES
             com.vladimir.messenger.data.mirror.MirrorHub.requestFileBytes(
                 row.transferId,
@@ -1737,6 +1743,7 @@ class CoreServerService : Service() {
                 row.totalBytes,
                 offset = offset,
                 big = big,
+                sha256 = row.fileSha256,
             )
             Log.i(TAG, "file bytes pump: прошу ${row.displayName} (${row.totalBytes} Б, с $offset)")
             break

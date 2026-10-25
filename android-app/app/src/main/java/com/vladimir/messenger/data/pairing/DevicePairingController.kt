@@ -110,6 +110,7 @@ object DevicePairingController {
     /** Called once from Application.onCreate. */
     fun attach(context: Context) {
         appContext = context.applicationContext
+        com.vladimir.messenger.data.mirror.MirrorHub.attach(context)
     }
 
     /**
@@ -519,6 +520,7 @@ object DevicePairingController {
             // Clear an earlier transient error before retrying the same request.
             primaryMutable.value = request.copy(error = null)
             com.vladimir.messenger.data.mirror.MirrorHub.setPairingPeer(accountNode, request.joinerDeviceId)
+            com.vladimir.messenger.data.mirror.MirrorHub.beginNewInitialSyncSession()
             val granted = primaryConfirmPairing(request.joinerDeviceId, System.currentTimeMillis())
             val grantPacket = DevicePairingWire.encode(DevicePairingWire.KIND_GRANT, granted.grant)
             val sent = RustBridge.sendPairingPayload(accountNode, request.joinerDeviceId, grantPacket)
@@ -576,10 +578,15 @@ object DevicePairingController {
         val syncKey = com.vladimir.messenger.data.mirror.MirrorRoomToken.loadSyncKey(context)
             ?: com.vladimir.messenger.data.mirror.MirrorRoomToken.createSyncKey(context)
             ?: return null
+        // One durable id names the whole hand-off on both phones. Retries and a
+        // service restart therefore resume the same session instead of creating a
+        // second logical sync.
+        val sessionId = com.vladimir.messenger.data.mirror.MirrorHub.prepareInitialSyncSession()
         // Our own mirror channel may predate this token: make it adopt the same one.
         com.vladimir.messenger.data.mirror.MirrorHub.refreshRoomToken()
         val bootstrap = JSONObject()
-            .put("v", 2)
+            .put("v", 3)
+            .put("sid", sessionId)
             .put("room", token.value)
             .put("at", token.createdAtMs)
             .put("key", Base64.encodeToString(syncKey, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING))
@@ -607,9 +614,11 @@ object DevicePairingController {
         val value: String
         val at: Long
         val syncKey: ByteArray?
+        val sessionId: String?
         if (bootstrap != null && bootstrap.optInt("v", 0) >= 2) {
             value = bootstrap.optString("room")
             at = bootstrap.optLong("at", 0L)
+            sessionId = bootstrap.optString("sid").takeIf { it.isNotBlank() }
             syncKey = runCatching {
                 Base64.decode(
                     bootstrap.optString("key"),
@@ -621,6 +630,7 @@ object DevicePairingController {
             // those peers continue with their legacy MessageSealer channel.
             value = text.substringBefore(':')
             at = text.substringAfter(':', "").toLongOrNull() ?: System.currentTimeMillis()
+            sessionId = null
             syncKey = null
         }
         if (!value.matches(Regex("^[0-9a-f]{32}$"))) {
@@ -657,8 +667,8 @@ object DevicePairingController {
         // relying only on a later service heartbeat was the reason the UI could
         // say "connected" while no initial transfer had begun.
         com.vladimir.messenger.data.mirror.MirrorHub.refreshRoomToken()
-        com.vladimir.messenger.data.mirror.MirrorHub.startInitialSync()
-        Log.i(TAG, "pairing sync bootstrap adopted; mirror room and frame key shared; initial sync started")
+        com.vladimir.messenger.data.mirror.MirrorHub.startInitialSync(sessionId)
+        Log.i(TAG, "pairing sync bootstrap adopted; mirror room and frame key shared; durable initial sync started sid=${sessionId?.take(8) ?: "legacy"}")
     }
 
     fun rejectPrimary() {
