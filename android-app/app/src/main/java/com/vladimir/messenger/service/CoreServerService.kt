@@ -1376,8 +1376,8 @@ class CoreServerService : Service() {
             bridge = mirrorBridge(),
         )
         mirror = channel
-        com.vladimir.messenger.data.mirror.MirrorHub.channel = channel
         channel.start()
+        com.vladimir.messenger.data.mirror.MirrorHub.bind(channel)
     }
 
     private fun mirrorBridge() = object : com.vladimir.messenger.data.mirror.MirrorChannel.Bridge {
@@ -1572,6 +1572,12 @@ class CoreServerService : Service() {
                 else -> Unit
             }
         }
+
+        override suspend fun mirrorContactSnapshot(): List<org.json.JSONObject> =
+            contactRepository.mirrorContactSnapshot()
+
+        override suspend fun mirrorFileSnapshot(): List<org.json.JSONObject> =
+            fileTransferRouter.mirrorCompletedFileSnapshot()
 
         override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {
             // id чатов на устройствах разные - ищем чат по узлу получателя.

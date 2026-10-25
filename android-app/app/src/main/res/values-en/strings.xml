@@ -2014,7 +2014,15 @@ The file is not on this phone</string>
     <string name="devices_confirm_failed">Could not confirm pairing. The request is still on screen — try again.</string>
     <string name="devices_waiting_answer">Waiting for the other device…</string>
     <string name="devices_waiting_grant">The code is confirmed here. Now press Matches on the phone showing the QR code…</string>
-    <string name="devices_done">Device connected. From here it is automatic: chats, profile, contacts and files sync on their own until the phones are copies of each other</string>
+    <string name="devices_done">Device connected. Initial synchronization starts automatically.</string>
+    <string name="devices_sync_not_started">Connected, but initial synchronization has not started yet.</string>
+    <string name="devices_sync_starting">Starting initial synchronization…</string>
+    <string name="devices_sync_connecting">Connecting the synchronization channel…</string>
+    <string name="devices_sync_transferring">Syncing chats, profile, contacts and files…</string>
+    <string name="devices_sync_complete">Initial synchronization complete.</string>
+    <string name="devices_sync_no_data">Initial synchronization complete: there is no data to transfer from the other device.</string>
+    <string name="devices_sync_error">Initial synchronization did not start or failed: %1$s</string>
+    <string name="devices_sync_retry">Retry synchronization</string>
     <string name="devices_failed">Pairing failed</string>
     <string name="devices_close">Close</string>
     <string name="devices_cancel">Cancel</string>

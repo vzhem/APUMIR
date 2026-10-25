@@ -37,6 +37,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.widget.Toast
 import com.vladimir.messenger.R
+import com.vladimir.messenger.data.mirror.MirrorHub
+import com.vladimir.messenger.data.mirror.MirrorInitialSyncPhase
+import com.vladimir.messenger.data.mirror.MirrorInitialSyncState
 import com.vladimir.messenger.data.pairing.DevicePairingController
 import com.vladimir.messenger.data.pairing.DevicePairingWire
 import com.vladimir.messenger.ui.components.ApuBubbleField
@@ -71,6 +74,7 @@ fun DevicesScreen(
     val offerOpen by DevicePairingController.isOfferOpen.collectAsStateWithLifecycle()
     val offerCode by DevicePairingController.offerCode.collectAsStateWithLifecycle()
     val primaryDone by DevicePairingController.primaryDone.collectAsStateWithLifecycle()
+    val initialSync by MirrorHub.initialSync.collectAsStateWithLifecycle()
     var manualCode by remember { mutableStateOf("") }
     var qrText by remember { mutableStateOf<String?>(null) }
     var primaryConfirming by remember { mutableStateOf(false) }
@@ -290,12 +294,23 @@ fun DevicesScreen(
         if (primaryDone) {
             DevicesSectionCard {
                 Text(stringResource(R.string.devices_done), style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(8.dp))
+                InitialSyncStatus(state = initialSync)
                 Spacer(Modifier.height(12.dp))
-                DevicesButton(
-                    label = stringResource(R.string.devices_resend_grant),
-                    onClick = { DevicePairingController.resendGrant() },
-                    primary = false,
-                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DevicesButton(
+                        label = stringResource(R.string.devices_resend_grant),
+                        onClick = { DevicePairingController.resendGrant() },
+                        primary = false,
+                    )
+                    if (initialSync.phase == MirrorInitialSyncPhase.ERROR) {
+                        DevicesButton(
+                            label = stringResource(R.string.devices_sync_retry),
+                            onClick = { MirrorHub.startInitialSync() },
+                            primary = false,
+                        )
+                    }
+                }
             }
         }
 
@@ -344,7 +359,7 @@ fun DevicesScreen(
                         )
                     }
                     JoinerPhase.WAITING_GRANT -> Text(stringResource(R.string.devices_waiting_grant), style = MaterialTheme.typography.bodyMedium)
-                    JoinerPhase.DONE -> Text(stringResource(R.string.devices_done), style = MaterialTheme.typography.bodyMedium)
+                    JoinerPhase.DONE -> InitialSyncStatus(state = initialSync)
                     JoinerPhase.FAILED -> Text(
                         stringResource(R.string.devices_failed) + (state.message?.let { ": $it" } ?: ""),
                         color = MaterialTheme.colorScheme.error,
@@ -353,9 +368,18 @@ fun DevicesScreen(
                 }
                 if (state.phase == JoinerPhase.DONE || state.phase == JoinerPhase.FAILED) {
                     Spacer(Modifier.height(12.dp))
-                    DevicesButton(label = stringResource(R.string.devices_close), onClick = {
-                        DevicePairingController.dismissJoiner()
-                    }, primary = false)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (state.phase == JoinerPhase.DONE && initialSync.phase == MirrorInitialSyncPhase.ERROR) {
+                            DevicesButton(
+                                label = stringResource(R.string.devices_sync_retry),
+                                onClick = { MirrorHub.startInitialSync() },
+                                primary = false,
+                            )
+                        }
+                        DevicesButton(label = stringResource(R.string.devices_close), onClick = {
+                            DevicePairingController.dismissJoiner()
+                        }, primary = false)
+                    }
                 } else {
                     Spacer(Modifier.height(12.dp))
                     if (state.phase != JoinerPhase.WAITING_CODE) {
@@ -373,6 +397,28 @@ fun DevicesScreen(
 
         Spacer(Modifier.height(16.dp))
     }
+}
+
+@Composable
+private fun InitialSyncStatus(state: MirrorInitialSyncState) {
+    val text = when (state.phase) {
+        MirrorInitialSyncPhase.IDLE -> stringResource(R.string.devices_sync_not_started)
+        MirrorInitialSyncPhase.STARTING -> stringResource(R.string.devices_sync_starting)
+        MirrorInitialSyncPhase.CONNECTING -> stringResource(R.string.devices_sync_connecting)
+        MirrorInitialSyncPhase.TRANSFERRING -> stringResource(R.string.devices_sync_transferring)
+        MirrorInitialSyncPhase.COMPLETE -> stringResource(R.string.devices_sync_complete)
+        MirrorInitialSyncPhase.NO_DATA -> stringResource(R.string.devices_sync_no_data)
+        MirrorInitialSyncPhase.ERROR -> stringResource(R.string.devices_sync_error, state.detail)
+    }
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = if (state.phase == MirrorInitialSyncPhase.ERROR) {
+            MaterialTheme.colorScheme.error
+        } else {
+            MaterialTheme.colorScheme.onSurface
+        },
+    )
 }
 
 /** Карточка раздела экрана: заголовок, пояснение и действие на одном пузыре. */

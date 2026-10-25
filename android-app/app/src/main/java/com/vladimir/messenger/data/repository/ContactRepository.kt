@@ -25,6 +25,17 @@ class ContactRepository @Inject constructor(
     fun observeContacts(): Flow<List<Contact>> =
         contactDao.observeAllContacts().map { it.map { e -> e.toDomain() } }
 
+    /** Full, key-free contact snapshot used only inside the authenticated mirror channel. */
+    suspend fun mirrorContactSnapshot(): List<org.json.JSONObject> =
+        contactDao.observeAllContactsOnce().map { entity ->
+            org.json.JSONObject()
+                .put("a", "put")
+                .put("id", entity.id)
+                .put("name", entity.displayName)
+                .put("user", entity.username)
+                .put("fp", entity.fingerprint)
+        }
+
     suspend fun addContact(
         displayName: String,
         fingerprint: String,

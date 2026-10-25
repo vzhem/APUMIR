@@ -1,6 +1,7 @@
 package com.vladimir.messenger.data.pairing
 
 import android.content.Context
+import android.util.Base64
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.security.DeviceKeyStore
@@ -12,6 +13,7 @@ import kotlinx.coroutines.Dispatchers as CoroutineDispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 import uniffi.p2p_core.closePairingOffer
 import uniffi.p2p_core.createPairingOffer
 import uniffi.p2p_core.joinerAcceptPairingGrant
@@ -336,7 +338,7 @@ object DevicePairingController {
         pendingSync?.let { packet ->
             pendingSync = null
             onSync(context, packet)
-        }
+        } ?: com.vladimir.messenger.data.mirror.MirrorHub.startInitialSync()
     }
 
     /** New device: start pairing from a scanned or rendezvous-delivered QR. */
@@ -491,6 +493,15 @@ object DevicePairingController {
             val sent = RustBridge.sendPairingPayload(accountNode, request.joinerDeviceId, grantPacket)
             if (!sent) Log.w(TAG, "pairing grant was not delivered")
             val syncPacket = sendSyncBootstrap(accountNode, request.joinerDeviceId)
+            // The primary also enters the same observable lifecycle. This is
+            // not left to a later hello/heartbeat, so both screens show whether
+            // the initial transfer actually ran.
+            com.vladimir.messenger.data.mirror.MirrorHub.startInitialSync()
+            if (syncPacket == null) {
+                com.vladimir.messenger.data.mirror.MirrorHub.initialSyncFailed(
+                    "Не удалось передать настройки канала начальной синхронизации",
+                )
+            }
             // The new device may miss the grant (same delivery risks as the request):
             // keep both packets and repeat them on a schedule and on demand.
             lastGrantTarget = accountNode to request.joinerDeviceId
@@ -528,9 +539,21 @@ object DevicePairingController {
         val token = com.vladimir.messenger.data.mirror.MirrorRoomToken.load(context)
             ?: com.vladimir.messenger.data.mirror.MirrorRoomToken.create(context)
             ?: return null
+        // A paired phone has a different device/file-exchange key. Give both
+        // mirror channels a dedicated symmetric frame key instead of copying
+        // the primary device key or signing identity.
+        val syncKey = com.vladimir.messenger.data.mirror.MirrorRoomToken.loadSyncKey(context)
+            ?: com.vladimir.messenger.data.mirror.MirrorRoomToken.createSyncKey(context)
+            ?: return null
         // Our own mirror channel may predate this token: make it adopt the same one.
         com.vladimir.messenger.data.mirror.MirrorHub.refreshRoomToken()
-        val sealed = primarySealPairingSync(joinerDeviceId, "${token.value}:${token.createdAtMs}")
+        val bootstrap = JSONObject()
+            .put("v", 2)
+            .put("room", token.value)
+            .put("at", token.createdAtMs)
+            .put("key", Base64.encodeToString(syncKey, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING))
+            .toString()
+        val sealed = primarySealPairingSync(joinerDeviceId, bootstrap)
         if (sealed.isEmpty()) return null
         val packet = DevicePairingWire.encode(DevicePairingWire.KIND_SYNC, sealed)
         val sent = RustBridge.sendPairingPayload(accountNode, joinerDeviceId, packet)
@@ -547,18 +570,62 @@ object DevicePairingController {
             if (joinerMutable.value?.phase != JoinerPhase.DONE) pendingSync = packet
             return
         }
-        val value = text.substringBefore(':')
-        val at = text.substringAfter(':', "").toLongOrNull() ?: System.currentTimeMillis()
-        if (!value.matches(Regex("^[0-9a-f]{32}$"))) return
-        val theirs = com.vladimir.messenger.data.mirror.MirrorRoomToken.RoomToken(value, at)
+        val bootstrap = runCatching { JSONObject(text) }.getOrNull()
+        val value: String
+        val at: Long
+        val syncKey: ByteArray?
+        if (bootstrap != null && bootstrap.optInt("v", 0) >= 2) {
+            value = bootstrap.optString("room")
+            at = bootstrap.optLong("at", 0L)
+            syncKey = runCatching {
+                Base64.decode(
+                    bootstrap.optString("key"),
+                    Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING,
+                )
+            }.getOrNull()
+        } else {
+            // Accept the original token-only bootstrap from an older primary;
+            // those peers continue with their legacy MessageSealer channel.
+            value = text.substringBefore(':')
+            at = text.substringAfter(':', "").toLongOrNull() ?: System.currentTimeMillis()
+            syncKey = null
+        }
+        if (!value.matches(Regex("^[0-9a-f]{32}$"))) {
+            com.vladimir.messenger.data.mirror.MirrorHub.initialSyncFailed(
+                "Синхронизационный пакет содержит неверный маркер комнаты",
+            )
+            return
+        }
+        if (bootstrap != null && bootstrap.optInt("v", 0) >= 2 &&
+            (syncKey == null || syncKey.size != 32)
+        ) {
+            Log.w(TAG, "pairing sync bootstrap has no valid mirror frame key")
+            com.vladimir.messenger.data.mirror.MirrorHub.initialSyncFailed(
+                "Синхронизационный пакет не содержит общего ключа кадров",
+            )
+            return
+        }
+        val theirs = com.vladimir.messenger.data.mirror.MirrorRoomToken.RoomToken(
+            value,
+            at.takeIf { it > 0L } ?: System.currentTimeMillis(),
+        )
         // Пэйринг - прямое указание «мы теперь пара»: маркер показывающего телефона
         // главный без правила «старший побеждает». Иначе пустой телефон, только что
         // создавший себе свежий маркер, и полный телефон со старым маркером ушли бы
         // в разные комнаты и никогда не встретились - синхронизации бы не было.
-        com.vladimir.messenger.data.mirror.MirrorRoomToken.save(context, theirs, sync = true)
-        // Same room from now on: the channel reconnects there and catch-up starts on its own.
+        val roomSaved = com.vladimir.messenger.data.mirror.MirrorRoomToken.save(context, theirs, sync = true)
+        val keySaved = syncKey == null ||
+            com.vladimir.messenger.data.mirror.MirrorRoomToken.saveSyncKey(context, syncKey, sync = true)
+        if (!roomSaved || !keySaved) {
+            Log.w(TAG, "pairing sync bootstrap could not be persisted")
+            return
+        }
+        // Same room from now on, and explicitly start the first catch-up now;
+        // relying only on a later service heartbeat was the reason the UI could
+        // say "connected" while no initial transfer had begun.
         com.vladimir.messenger.data.mirror.MirrorHub.refreshRoomToken()
-        Log.i(TAG, "pairing sync bootstrap adopted; mirror room shared")
+        com.vladimir.messenger.data.mirror.MirrorHub.startInitialSync()
+        Log.i(TAG, "pairing sync bootstrap adopted; mirror room and frame key shared; initial sync started")
     }
 
     fun rejectPrimary() {

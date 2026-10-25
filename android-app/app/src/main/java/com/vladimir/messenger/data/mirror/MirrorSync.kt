@@ -48,6 +48,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -119,6 +122,58 @@ data class MirrorRow(
 object MirrorHub {
     @Volatile
     var channel: MirrorChannel? = null
+        private set
+
+    private val initialSyncTracker = MirrorInitialSyncTracker()
+    private val initialSyncMutable = MutableStateFlow(initialSyncTracker.snapshot())
+    val initialSync: StateFlow<MirrorInitialSyncState> = initialSyncMutable.asStateFlow()
+
+    /** A successful pairing leaves this set until the channel has reported a result. */
+    @Volatile private var initialSyncRequested = false
+
+    /** Bind the service channel and replay a pairing-triggered initial-sync request. */
+    fun bind(newChannel: MirrorChannel) {
+        channel = newChannel
+        if (initialSyncRequested) newChannel.startInitialSync()
+    }
+
+    /** Called by pairing immediately after the authenticated confirmation succeeds. */
+    fun startInitialSync(): Boolean {
+        initialSyncRequested = true
+        initialSyncMutable.value = initialSyncTracker.begin()
+        val current = channel
+        if (current == null) {
+            initialSyncMutable.value = initialSyncTracker.fail("Канал синхронизации ещё не запущен")
+            return false
+        }
+        current.startInitialSync()
+        return true
+    }
+
+    internal fun initialSyncConnected() {
+        initialSyncMutable.value = initialSyncTracker.connected()
+    }
+
+    internal fun initialSyncTransferring() {
+        initialSyncMutable.value = initialSyncTracker.transferring()
+    }
+
+    internal fun initialSyncPart(name: String, hasData: Boolean) {
+        val result = initialSyncTracker.part(name, hasData)
+        initialSyncMutable.value = result
+        if (result.phase == MirrorInitialSyncPhase.COMPLETE ||
+            result.phase == MirrorInitialSyncPhase.NO_DATA
+        ) {
+            initialSyncRequested = false
+            channel?.finishInitialSync()
+        }
+    }
+
+    internal fun initialSyncFailed(message: String) {
+        initialSyncMutable.value = initialSyncTracker.fail(message)
+        initialSyncRequested = false
+        channel?.finishInitialSync()
+    }
 
     /**
      * р229: сейчас применяется зеркальный кадр. Пока флаг стоит, ответные
@@ -254,7 +309,10 @@ object MirrorHub {
         val me = selfNodeId.ifBlank {
             runCatching { com.vladimir.messenger.data.RustBridge.nodeId() }.getOrNull().orEmpty()
         }
+        val initial = initialSync.value
         return mirror +
+            "\nначальная синхронизация: " + initial.phase.name.lowercase() +
+            (if (initial.detail.isBlank()) "" else " (" + initial.detail + ")") +
             "\nмой узел: " + me.take(16).ifBlank { "неизвестен" } +
             "\nпоследнее входящее: " + ago(lastIncomingAt) +
             "\nпоследнее исходящее: " + ago(lastOutgoingAt) +
@@ -626,6 +684,10 @@ class MirrorChannel(
             pinned: Boolean,
             pinnedAtMs: Long,
         )
+        /** Full contact snapshot requested immediately after pairing. */
+        suspend fun mirrorContactSnapshot(): List<JSONObject>
+        /** Full completed-file metadata snapshot requested immediately after pairing. */
+        suspend fun mirrorFileSnapshot(): List<JSONObject>
         fun onPromote()
         fun onDeferToShadow()
         /**
@@ -697,6 +759,9 @@ class MirrorChannel(
     private val deferFired = AtomicBoolean(false)
     private val promoteFired = AtomicBoolean(false)
     private var catchupInFlight = false
+    @Volatile private var initialSyncRequested = false
+    @Volatile private var initialSnapshotSent = false
+    private var initialSyncTimeoutJob: Job? = null
     /** р231: когда в последний раз просили движок (передача роли). */
     @Volatile private var lastClaimAt = 0L
 
@@ -705,6 +770,39 @@ class MirrorChannel(
 
     /** Ведёт ли ЭТО устройство сеть (активное) или живёт зеркалом. */
     fun isEngineUp(): Boolean = engineUp
+
+    /**
+     * Start the first catch-up as soon as the authenticated pairing has completed.
+     * This is deliberately separate from ordinary live mirroring: a paired phone
+     * must get an observable result even when its databases are already empty.
+     */
+    fun startInitialSync() {
+        initialSyncRequested = true
+        initialSnapshotSent = false
+        initialSyncTimeoutJob?.cancel()
+        initialSyncTimeoutJob = scope.launch {
+            delay(INITIAL_SYNC_TIMEOUT_MS)
+            if (initialSyncRequested) {
+                MirrorHub.initialSyncFailed("Не удалось запустить начальную синхронизацию: второе устройство не отвечает")
+            }
+        }
+        if (wsRef.get() == null) {
+            MirrorHub.initialSyncConnected()
+            connect()
+        } else {
+            MirrorHub.initialSyncConnected()
+            sendJson(hello())
+            maybeStartInitialExchange()
+        }
+    }
+
+    /** Stop the local request after a terminal result; a later pairing can retry it. */
+    fun finishInitialSync() {
+        initialSyncRequested = false
+        initialSnapshotSent = false
+        initialSyncTimeoutJob?.cancel()
+        initialSyncTimeoutJob = null
+    }
 
     /**
      * р240: человекочитаемое состояние для экрана диагностики (владелец,
@@ -919,6 +1017,8 @@ class MirrorChannel(
     fun shutdown() {
         closedByUs = true
         loopJob?.cancel()
+        initialSyncTimeoutJob?.cancel()
+        initialSyncTimeoutJob = null
         runCatching { wsRef.getAndSet(null)?.close(1000, "bye") }
     }
 
@@ -1068,7 +1168,9 @@ class MirrorChannel(
         offset: Long = 0L,
         big: Boolean = false,
     ): Boolean {
-        if (engineUp) return false
+        // Initial sync may be requested by either role. The paired channel is
+        // authenticated, so an active device may also request bytes from a
+        // shadow that already has a completed local file.
         if (!canCarryOutgoing()) return false
         if (transferId.isBlank()) return false
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
@@ -1583,6 +1685,17 @@ class MirrorChannel(
         return sendJson(JSONObject().put("t", "ev").put("k", kind).put("d", sealed))
     }
 
+    private fun sendInitialSnapshot(kind: String, rows: List<JSONObject>) {
+        val chunks: List<List<JSONObject>> =
+            if (rows.isEmpty()) listOf(emptyList()) else rows.chunked(INITIAL_SNAPSHOT_ROWS)
+        chunks.forEach { chunk ->
+            sendEvent(
+                kind,
+                JSONObject().put("rows", JSONArray().apply { chunk.forEach { put(it) } }),
+            )
+        }
+    }
+
     // ── Шифрование: запечатать на самого себя ────────────────────────────────
 
     private fun ensureSelfBinding() {
@@ -1598,10 +1711,18 @@ class MirrorChannel(
     private fun sealPayload(payload: JSONObject): String? {
         ensureSelfBinding()
         // р249: метка комнаты внутри кадра. Запечатанный кадр может вскрыть
-        // только устройство этой личности, но ЗАПЕЧАТАТЬ на наш открытый ключ
-        // умеет кто угодно - метка и отличает своих от чужих.
+        // устройство этой личности, а метка отличает свою комнату от чужой.
         val mark = MirrorRoomToken.frameMark(token?.value)
         if (mark.isNotBlank()) runCatching { payload.put("mk", mark) }
+        // A newly paired device has a different device/file-exchange key, so
+        // MessageSealer cannot open the frame on the other phone. Once both
+        // sides advertise protocol 2, use the key delivered in pairing.
+        val sharedKey = MirrorRoomToken.loadSyncKey(context)
+        if (sharedKey != null && partnerRoomV >= SHARED_FRAME_PROTOCOL_V) {
+            MirrorFrameCipher.seal(sharedKey, payload.toString())?.let { return it }
+        }
+        // Compatibility path for older mirror peers and for the short interval
+        // before the pairing bootstrap reaches the joiner.
         return MessageSealer.seal(context, nodeId, payload.toString())
     }
 
@@ -1613,7 +1734,10 @@ class MirrorChannel(
      * требовать её - значит оглохнуть к партнёру, который ещё не обновился.
      */
     private fun openPayload(wire: String): JSONObject? {
-        val payload = MessageSealer.open(context, wire)?.let { JSONObject(it) } ?: return null
+        val sharedKey = MirrorRoomToken.loadSyncKey(context)
+        val plaintext = sharedKey?.let { MirrorFrameCipher.open(it, wire) }
+            ?: MessageSealer.open(context, wire)
+        val payload = plaintext?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
         val mark = MirrorRoomToken.frameMark(token?.value)
         if (mark.isNotBlank() && inSecureRoom() && payload.optString("mk") != mark) {
             Log.w(TAG, "кадр без метки комнаты - чужой, отбрасываю")
@@ -1707,7 +1831,10 @@ class MirrorChannel(
         val becameFreshMax = max > partnerMaxTs
         partnerMaxTs = max
         partnerLastSeen = System.currentTimeMillis()
-        maybeCatchup(force = becameFreshMax)
+        maybeStartInitialExchange()
+        if (!initialSyncRequested) {
+            maybeCatchup(force = becameFreshMax)
+        }
         // р249: партнёр объявился - у тени могли копиться исходящие, которым
         // некому было уйти (писали при отсутствующем активном).
         if (partnerAppeared) flushPendingOutgoing()
@@ -1716,6 +1843,35 @@ class MirrorChannel(
         ProfileMirror.notePartnerDigest(obj.optString("pd", ""))
         ProfileMirror.notePartnerBirthdayDigest(obj.optString("pb", ""))
         maybeRequestProfile()
+    }
+
+    /**
+     * Send the authenticated initial-sync request exactly once per connected
+     * channel. Message history uses the existing batch protocol; contacts,
+     * profile and completed files use the explicit snapshot response below.
+     */
+    private fun maybeStartInitialExchange() {
+        if (!initialSyncRequested || initialSnapshotSent || !partnerFresh()) return
+        initialSnapshotSent = true
+        MirrorHub.initialSyncTransferring()
+        catchupInFlight = true
+        sendJson(
+            JSONObject()
+                .put("t", "req")
+                .put("dev", deviceTag)
+                .put("since", 0L)
+                .put("initial", 1),
+        )
+        if (partnerRoomV >= SHARED_FRAME_PROTOCOL_V) {
+            sendEvent("initial_req", JSONObject().put("v", 1))
+        } else {
+            // A legacy peer cannot answer the snapshot contract. Keep the
+            // message catch-up compatible and make the limitation visible in
+            // the lifecycle instead of claiming that all data was copied.
+            MirrorHub.initialSyncPart("contacts", false)
+            MirrorHub.initialSyncPart("profile", false)
+            MirrorHub.initialSyncPart("files", false)
+        }
     }
 
     /** р246: расхождение отпечатков профиля - запросить снимок (не чаще 10 с). */
@@ -1750,7 +1906,7 @@ class MirrorChannel(
     }
 
     /** Партнёр отстал - выслать хвост порциями. */
-    private fun serveCatchup(since: Long) {
+    private fun serveCatchup(since: Long, initial: Boolean = false) {
         scope.launch {
             val rows = bridge.rowsSince(since, BATCH_ROWS)
             val more = rows.size >= BATCH_ROWS
@@ -1762,6 +1918,7 @@ class MirrorChannel(
                     .put("rows", JSONArray().apply { chunk.forEach { put(it.toJson()) } })
                     .put("more", if (chunk.size == rows.size) more else false)
                     .put("upto", upto)
+                    .put("initial", if (initial) 1 else 0)
                 val sealed = sealPayload(body)
                 if (sealed != null) {
                     sendJson(JSONObject().put("t", "ev").put("k", "batch").put("d", sealed))
@@ -1771,7 +1928,11 @@ class MirrorChannel(
             }
             // Даже одна строка не запечаталась (экзотика) - всё равно сдвинуть
             // партнёра с места, иначе он будет просить один и тот же хвост.
-            val body = JSONObject().put("rows", JSONArray()).put("more", false).put("upto", upto)
+            val body = JSONObject()
+                .put("rows", JSONArray())
+                .put("more", false)
+                .put("upto", upto)
+                .put("initial", if (initial) 1 else 0)
             sealPayload(body)?.let { sealed ->
                 sendJson(JSONObject().put("t", "ev").put("k", "batch").put("d", sealed))
             }
@@ -1783,6 +1944,7 @@ class MirrorChannel(
         val rows = body.optJSONArray("rows") ?: return
         val upto = body.optLong("upto", 0L)
         val more = body.optBoolean("more", false)
+        val initial = body.optInt("initial", 0) == 1 || (initialSyncRequested && catchupInFlight)
         scope.launch {
             var last = 0L
             for (i in 0 until rows.length()) {
@@ -1792,12 +1954,18 @@ class MirrorChannel(
                 last = row.timestamp
             }
             if (more && last > 0) {
-                sendJson(JSONObject().put("t", "req").put("dev", deviceTag).put("since", last))
-            } else if (rows.length() == 0 && upto > 0) {
-                // Пустая порция со сдвигом: дальше просить уже от upto.
-                sendJson(JSONObject().put("t", "req").put("dev", deviceTag).put("since", upto))
+                sendJson(
+                    JSONObject()
+                        .put("t", "req")
+                        .put("dev", deviceTag)
+                        .put("since", last)
+                        .put("initial", if (initial) 1 else 0),
+                )
             } else {
                 catchupInFlight = false
+                if (initial) {
+                    MirrorHub.initialSyncPart("messages", rows.length() > 0)
+                }
             }
         }
     }
@@ -1822,6 +1990,60 @@ class MirrorChannel(
                 scope.launch { bridge.onOutgoingFromPartner(row) }
             }
             "batch" -> handleEventBatch(wire)
+            "initial_req" -> {
+                // The authenticated peer asks for the non-message parts of the
+                // first sync. Keep this request independent from live event
+                // publication so an already-idle account still reports a result.
+                openPayload(wire) ?: return
+                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    sendInitialSnapshot("initial_contacts", bridge.mirrorContactSnapshot())
+                    sendInitialSnapshot("initial_files", bridge.mirrorFileSnapshot())
+                    // Send the profile in this same ordered sequence so the
+                    // recipient can finish the lifecycle even when the profile
+                    // is the only non-empty part of a new account.
+                    val profile = ProfileMirror.snapshot(context, localize = true)
+                    val profileSent = sendEvent("profstate", profile.toJson())
+                    sendEvent("initial_done", JSONObject().put("profile", if (profileSent) 1 else 0))
+                }
+            }
+            "initial_contacts" -> {
+                val body = openPayload(wire) ?: return
+                val rows = body.optJSONArray("rows") ?: JSONArray()
+                scope.launch {
+                    for (i in 0 until rows.length()) {
+                        val contact = rows.optJSONObject(i) ?: continue
+                        MirrorHub.duringApply { bridge.onContactFromPartner(contact) }
+                    }
+                    MirrorHub.initialSyncPart("contacts", rows.length() > 0)
+                }
+            }
+            "initial_files" -> {
+                val body = openPayload(wire) ?: return
+                val rows = body.optJSONArray("rows") ?: JSONArray()
+                scope.launch {
+                    var copied = false
+                    for (i in 0 until rows.length()) {
+                        val meta = rows.optJSONObject(i) ?: continue
+                        val applied = MirrorHub.duringApply { bridge.onFileMeta(meta) }
+                        copied = applied || copied
+                        if (applied && meta.optLong("size", 0L) > 0L) {
+                            requestFileBytes(
+                                transferId = meta.optString("id"),
+                                displayName = meta.optString("name"),
+                                totalBytes = meta.optLong("size", 0L),
+                                big = meta.optLong("size", 0L) > FILE_MIRROR_MAX_BYTES,
+                            )
+                        }
+                    }
+                    MirrorHub.initialSyncPart("files", copied)
+                }
+            }
+            "initial_done" -> {
+                // It is an ordered completion marker for the sender's snapshot
+                // work. The profile part is accounted for by the profstate frame
+                // itself, so an empty profile remains visible as NO_DATA.
+                openPayload(wire) ?: return
+            }
             "filemeta" -> {
                 // р230: файл принят на партнёрском устройстве - показать его
                 // и здесь и попросить байты.
@@ -1838,10 +2060,9 @@ class MirrorChannel(
                 }
             }
             "reqfile" -> {
-                // р230: тень просит байты - отдаём порциями (канал общий).
+                // р230: партнёр просит байты - отдаём порциями (канал общий).
                 // р249: со смещением (продолжение после обрыва) и с явным
                 // согласием на большой файл.
-                if (!engineUp) return
                 val body = openPayload(wire) ?: return
                 val transferId = body.optString("id")
                 if (transferId.isBlank()) return
@@ -2087,6 +2308,16 @@ class MirrorChannel(
                 // обои победили, но байтов ещё нет - попросить их.
                 val body = openPayload(wire) ?: return
                 val incoming = ProfileMirror.State.fromJson(body)
+                val profileHasData = incoming.name.isNotBlank() ||
+                    incoming.nick.isNotBlank() ||
+                    incoming.theme.isNotBlank() ||
+                    incoming.avSha.isNotBlank() ||
+                    incoming.wallSha.isNotBlank() ||
+                    incoming.bdayDay > 0 && incoming.bdayMonth > 0
+                // Mark this part before launching the merge coroutine; WebSocket
+                // ordering must not let the following initial_done frame win a
+                // race with the actual profile snapshot.
+                MirrorHub.initialSyncPart("profile", profileHasData)
                 scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                     val need = ProfileMirror.onPartnerState(context, incoming)
                     need.forEach { kind ->
@@ -2191,6 +2422,10 @@ class MirrorChannel(
             return
         }
         backoffMs = 2_000L
+        if (initialSyncRequested) {
+            initialSnapshotSent = false
+            MirrorHub.initialSyncConnected()
+        }
         sendJson(hello())
         // р246: канал ожил - сразу показать партнёру свой профиль.
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
@@ -2237,7 +2472,12 @@ class MirrorChannel(
                 "hello", "hb" -> onPartnerFrame(obj)
                 "req" -> {
                     val dev = obj.optString("dev")
-                    if (dev.isNotBlank() && dev != deviceTag) serveCatchup(obj.optLong("since", 0L))
+                    if (dev.isNotBlank() && dev != deviceTag) {
+                        serveCatchup(
+                            since = obj.optLong("since", 0L),
+                            initial = obj.optInt("initial", 0) == 1,
+                        )
+                    }
                 }
                 "ev" -> handleEvent(obj.optString("k"), obj.optString("d"))
             }
@@ -2268,6 +2508,8 @@ class MirrorChannel(
 
     companion object {
         private const val BATCH_ROWS = 30
+        private const val INITIAL_SYNC_TIMEOUT_MS = 90_000L
+        private const val INITIAL_SNAPSHOT_ROWS = 40
 
         /** р227: потолок открытого текста зеркального конверта (кадр - 512 КиБ). */
         private const val MAX_ENVELOPE_CHARS = 48_000
@@ -2351,9 +2593,11 @@ class MirrorChannel(
         private const val OLD_PARTNER_HOLD_MS = 5 * 60_000L
 
         /**
-         * р249: версия договора о комнате. Её же шлём в hello/hb: сборка без
-         * этого поля договор не понимает, и мы остаёмся с ней в общей комнате.
+         * Версия договора о комнате. Вторая версия добавляет shared frame
+         * crypto для устройств, подключённых через pairing; старые peers
+         * остаются на общей полке и получают legacy MessageSealer frames.
          */
-        const val ROOM_PROTOCOL_V = 1
+        const val ROOM_PROTOCOL_V = 2
+        const val SHARED_FRAME_PROTOCOL_V = 2
     }
 }

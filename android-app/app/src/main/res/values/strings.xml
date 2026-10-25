@@ -2125,7 +2125,15 @@
     <string name="devices_confirm_failed">Не удалось подтвердить подключение. Запрос остался на экране — попробуйте ещё раз.</string>
     <string name="devices_waiting_answer">Ждём ответ второго устройства…</string>
     <string name="devices_waiting_grant">Код подтверждён здесь. Теперь нажмите «Совпадает» на телефоне, который показывает QR-код…</string>
-    <string name="devices_done">Устройство подключено. Дальше всё само: чаты, профиль, контакты и файлы синхронизируются автоматически, телефоны станут копиями друг друга</string>
+    <string name="devices_done">Устройство подключено. Начальная синхронизация запускается автоматически.</string>
+    <string name="devices_sync_not_started">Подключено, но начальная синхронизация ещё не запущена.</string>
+    <string name="devices_sync_starting">Начальная синхронизация запускается…</string>
+    <string name="devices_sync_connecting">Подключаем канал синхронизации…</string>
+    <string name="devices_sync_transferring">Синхронизируем чаты, профиль, контакты и файлы…</string>
+    <string name="devices_sync_complete">Начальная синхронизация завершена.</string>
+    <string name="devices_sync_no_data">Начальная синхронизация завершена: на втором устройстве нет данных для передачи.</string>
+    <string name="devices_sync_error">Начальная синхронизация не запущена или завершилась ошибкой: %1$s</string>
+    <string name="devices_sync_retry">Повторить синхронизацию</string>
     <string name="devices_failed">Подключение не удалось</string>
     <string name="devices_close">Закрыть</string>
     <string name="devices_cancel">Отменить</string>

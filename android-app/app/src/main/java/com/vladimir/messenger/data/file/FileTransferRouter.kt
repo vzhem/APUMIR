@@ -1271,6 +1271,26 @@ class FileTransferRouter @Inject constructor(
         .put("ts", row.createdAtMs)
 
     /**
+     * Full metadata for the first mirror sync. Completed transfers are safe to
+     * re-announce: applyMirrorFileMeta is idempotent and the bytes stay in the
+     * existing private store until the authenticated peer asks for them.
+     */
+    suspend fun mirrorCompletedFileSnapshot(): List<org.json.JSONObject> =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            val result = ArrayList<org.json.JSONObject>()
+            val completed = runCatching { transferDao.getCompleted() }.getOrDefault(emptyList())
+            for (row in completed) {
+                if (row.messageId.isBlank() ||
+                    com.vladimir.messenger.data.story.StoryVideoWire.reserved(row.displayName)
+                ) continue
+                val groupId = runCatching { if (isGroupChat(row.chatId)) row.chatId else "" }
+                    .getOrDefault("")
+                result += mirrorFileMeta(row, peer = row.peerNodeId, groupId = groupId)
+            }
+            result
+        }
+
+    /**
      * р230: рассказать партнёрскому устройству о СВОИХ исходящих передачах -
      * оно покажет те же отправленные файлы и сможет их открыть. Зовётся из
      * насоса: передача к этому моменту уже подготовлена.
