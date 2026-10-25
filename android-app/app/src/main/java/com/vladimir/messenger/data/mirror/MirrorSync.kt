@@ -1616,8 +1616,19 @@ class MirrorChannel(
 
     // ── Транспорт ────────────────────────────────────────────────────────────
 
+    /**
+     * A paired-device sync is not an arbitrary fallback request. The core may
+     * deliberately suppress external transports while a direct QUIC peer is
+     * healthy, but that policy must not cancel the already authenticated
+     * pairing hand-off: the mirror WebSocket is the channel used to copy the
+     * two devices' local databases. Without this exception the normal message
+     * path can be perfectly healthy while initial sync always times out.
+     */
+    private fun transportAllowed(): Boolean =
+        initialSyncRequested || RustBridge.externalTransportAllowed()
+
     private fun connect() {
-        if (closedByUs || !RustBridge.externalTransportAllowed()) return
+        if (closedByUs || !transportAllowed()) return
         try {
             val room = shelfNow()
             val previous = currentShelf
@@ -1648,7 +1659,7 @@ class MirrorChannel(
     }
 
     private fun sendJson(obj: JSONObject): Boolean {
-        if (!RustBridge.externalTransportAllowed()) return false
+        if (!transportAllowed()) return false
         val ws = wsRef.get() ?: return false
         return try {
             ws.send(obj.toString())
@@ -1752,9 +1763,10 @@ class MirrorChannel(
         var lastHb = 0L
         while (kotlin.coroutines.coroutineContext.isActive) {
             val now = System.currentTimeMillis()
-            if (!RustBridge.externalTransportAllowed()) {
-                // An already-open mirror WebSocket is external transport too;
-                // do not leave its ping loop alive when a direct peer appears.
+            if (!transportAllowed()) {
+                // An ordinary mirror socket is still subject to the swarm-first
+                // fallback policy. During an authenticated initial sync,
+                // transportAllowed() deliberately keeps it alive.
                 runCatching { wsRef.getAndSet(null)?.cancel() }
             } else if (wsRef.get() == null && !closedByUs) {
                 connect()
@@ -2417,7 +2429,7 @@ class MirrorChannel(
     // ── WebSocketListener ────────────────────────────────────────────────────
 
     override fun onOpen(webSocket: WebSocket, response: Response) {
-        if (!RustBridge.externalTransportAllowed() || wsRef.get() !== webSocket) {
+        if (!transportAllowed() || wsRef.get() !== webSocket) {
             webSocket.cancel()
             return
         }
@@ -2462,7 +2474,7 @@ class MirrorChannel(
     }
 
     override fun onMessage(webSocket: WebSocket, text: String) {
-        if (wsRef.get() !== webSocket || !RustBridge.externalTransportAllowed()) {
+        if (wsRef.get() !== webSocket || !transportAllowed()) {
             webSocket.cancel()
             return
         }

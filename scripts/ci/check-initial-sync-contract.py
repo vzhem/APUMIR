@@ -49,6 +49,15 @@ class InitialSyncContract(unittest.TestCase):
         body = section(SERVICE, "private fun startMirrorChannel(", "private fun mirrorBridge()")
         self.assertLess(body.index("channel.start()"), body.index("MirrorHub.bind(channel)"))
 
+    def test_initial_sync_is_not_blocked_by_swarm_first_fallback_policy(self):
+        transport = section(MIRROR, "private fun transportAllowed()", "private fun connect()")
+        self.assertIn("initialSyncRequested || RustBridge.externalTransportAllowed()", transport)
+        # Every WebSocket gate must use the pairing-aware decision. Otherwise a
+        # healthy direct chat peer can still make initial sync time out.
+        self.assertEqual(MIRROR.count("!transportAllowed()"), 5)
+        self.assertNotIn("!RustBridge.externalTransportAllowed() || wsRef", MIRROR)
+        self.assertNotIn("wsRef.get() !== webSocket || !RustBridge.externalTransportAllowed()", MIRROR)
+
     def test_ui_exposes_non_connected_initial_sync_states(self):
         for marker in (
             "val initialSync by MirrorHub.initialSync.collectAsStateWithLifecycle()",
