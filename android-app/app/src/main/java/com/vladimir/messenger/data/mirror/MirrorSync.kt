@@ -318,7 +318,6 @@ object MirrorHub {
     internal fun initialSyncFinal(sessionId: String) {
         if (sessionId.isBlank() || sessionId != initialSyncSessionId) return
         initialSyncRequested = false
-        awaitingInitialFinal = false
         // Keep the short completion-grace journal alive so a lost final marker
         // or a process restart can replay the same control frame idempotently.
         channel?.finishInitialSync()
