@@ -44,6 +44,8 @@ object DevicePairingController {
         val sas: String,
         /** Short human-checkable id of the device asking to join, e.g. "A1B2-C3D4". */
         val deviceShort: String,
+        /** The node that delivered the request; a fresh device may not share the primary's node yet. */
+        val recipientNodeId: String = "",
         /** Non-null when the last local confirmation attempt failed and can be retried. */
         val error: String? = null,
     )
@@ -264,7 +266,12 @@ object DevicePairingController {
         } else {
             Log.i(TAG, "pairing answer delivery accepted by transport")
         }
-        primaryMutable.value = PrimaryRequest(joinerDeviceId = joinerDevice, sas = answer.sas, deviceShort = shortDeviceId(joinerDevice))
+        primaryMutable.value = PrimaryRequest(
+            joinerDeviceId = joinerDevice,
+            sas = answer.sas,
+            deviceShort = shortDeviceId(joinerDevice),
+            recipientNodeId = senderId,
+        )
     }
 
     private fun onAnswer(context: Context, answer: ByteArray, now: Long) {
@@ -381,13 +388,18 @@ object DevicePairingController {
             Log.w(TAG, "pairing offer rejected: malformed QR envelope")
             return false
         }
-        val accountNode = RustBridge.nodeId() ?: run {
-            Log.w(TAG, "pairing offer rejected: account node unavailable")
-            return false
-        }
         return synchronized(stateLock) {
             pendingManualCode = null
-            val primaryDevice = pairingOfferPrimaryDeviceId(offer)
+            val primaryDevice = try {
+                pairingOfferPrimaryDeviceId(offer)
+            } catch (e: Exception) {
+                Log.w(TAG, "pairing offer has no valid primary device: ${e.message ?: "unknown"}")
+                return@synchronized false
+            }
+            val primaryNode = DevicePairingWire.primaryNodeId(offer) ?: run {
+                Log.w(TAG, "pairing offer has no valid primary account route")
+                return@synchronized false
+            }
             // The QR carries the other phone's addresses: remember them as the direct route to
             // that exact device, so the request below does not wait for LAN discovery.
             runCatching { pairingOfferContactHints(offer) }
@@ -408,10 +420,12 @@ object DevicePairingController {
             answerReceived = false
             pendingGrant = null
             pendingSync = null
-            joinerAccountNode = accountNode
-            // Both phones share the account node id; direct initial-sync packets target this
-            // exact authenticated device id instead of guessing which local session is online.
-            com.vladimir.messenger.data.mirror.MirrorHub.setPairingPeer(accountNode, primaryDevice)
+            joinerAccountNode = primaryNode
+            // The account route is embedded in the QR. Using this installation's local
+            // node id here is wrong on a fresh device and sends the request/bootstrap
+            // to the empty account instead of to the phone that showed the QR. The
+            // authenticated Rust pairing transcript still decides whether the offer is valid.
+            com.vladimir.messenger.data.mirror.MirrorHub.setPairingPeer(primaryNode, primaryDevice)
             // A v2 offer already contained the whole handshake: the comparison code is known
             // right now, without waiting for the other phone's answer.
             val myShort = shortDeviceId(DeviceKeyStore.deviceId(context))
@@ -421,10 +435,10 @@ object DevicePairingController {
                 JoinerState(JoinerPhase.WAITING_ANSWER, deviceShort = myShort)
             }
             val requestPacket = DevicePairingWire.encode(DevicePairingWire.KIND_REQUEST, started.request)
-            pendingRequestTarget = accountNode to primaryDevice
+            pendingRequestTarget = primaryNode to primaryDevice
             pendingRequestPacket = requestPacket
             val sent = RustBridge.sendPairingPayload(
-                accountNode,
+                primaryNode,
                 primaryDevice,
                 requestPacket,
             )
@@ -445,11 +459,15 @@ object DevicePairingController {
         val normalized = DevicePairingWire.normalizePairingCode(code) ?: return false
         val context = appContext ?: return false
         Log.i(TAG, "pairing rendezvous code entered; waiting for retained offer")
-        val listenerStarted = RustBridge.listenPairingCode(normalized)
-        if (listenerStarted) {
-            Log.i(TAG, "pairing rendezvous listener started")
-        } else {
-            Log.w(TAG, "pairing rendezvous listener could not start; persistent MQTT will be used")
+        // The Rust listener opens its own bounded MQTT runtime, but the FFI call still
+        // touches native state. Keep it off the UI thread just like packet delivery.
+        retryScope.launch {
+            val listenerStarted = RustBridge.listenPairingCode(normalized)
+            if (listenerStarted) {
+                Log.i(TAG, "pairing rendezvous listener started")
+            } else {
+                Log.w(TAG, "pairing rendezvous listener could not start; persistent MQTT will be used")
+            }
         }
         return synchronized(stateLock) {
             runCatching { joinerCancelPairing() }
@@ -510,22 +528,26 @@ object DevicePairingController {
     /** Primary: the user says the codes match. Issues the certificate and sends it. */
     fun confirmPrimary(): Boolean = synchronized(stateLock) {
         val request = primaryMutable.value ?: return@synchronized false
-        val accountNode = RustBridge.nodeId()
-        if (accountNode.isNullOrBlank()) {
-            Log.w(TAG, "cannot confirm primary pairing: account node is unavailable")
-            primaryMutable.value = request.copy(error = "account node unavailable")
+        // Route final packets to the node that actually delivered the request. A
+        // fresh device may still have its pre-pairing node id, so using the
+        // primary's own node here loses the grant/bootstrap on MQTT even though
+        // the QR/SAS exchange already succeeded.
+        val recipientNode = request.recipientNodeId.takeIf { it.isNotBlank() }
+        if (recipientNode == null) {
+            Log.w(TAG, "cannot confirm primary pairing: request sender account node is unavailable")
+            primaryMutable.value = request.copy(error = "request sender node unavailable")
             return@synchronized false
         }
         return@synchronized try {
             // Clear an earlier transient error before retrying the same request.
             primaryMutable.value = request.copy(error = null)
-            com.vladimir.messenger.data.mirror.MirrorHub.setPairingPeer(accountNode, request.joinerDeviceId)
+            com.vladimir.messenger.data.mirror.MirrorHub.setPairingPeer(recipientNode, request.joinerDeviceId)
             com.vladimir.messenger.data.mirror.MirrorHub.beginNewInitialSyncSession()
             val granted = primaryConfirmPairing(request.joinerDeviceId, System.currentTimeMillis())
             val grantPacket = DevicePairingWire.encode(DevicePairingWire.KIND_GRANT, granted.grant)
-            val sent = RustBridge.sendPairingPayload(accountNode, request.joinerDeviceId, grantPacket)
+            val sent = RustBridge.sendPairingPayload(recipientNode, request.joinerDeviceId, grantPacket)
             if (!sent) Log.w(TAG, "pairing grant was not delivered")
-            val syncPacket = sendSyncBootstrap(accountNode, request.joinerDeviceId)
+            val syncPacket = sendSyncBootstrap(recipientNode, request.joinerDeviceId)
             // The primary also enters the same observable lifecycle. This is
             // not left to a later hello/heartbeat, so both screens show whether
             // the initial transfer actually ran.
@@ -537,7 +559,7 @@ object DevicePairingController {
             }
             // The new device may miss the grant (same delivery risks as the request):
             // keep both packets and repeat them on a schedule and on demand.
-            lastGrantTarget = accountNode to request.joinerDeviceId
+            lastGrantTarget = recipientNode to request.joinerDeviceId
             lastGrantPackets = listOfNotNull(grantPacket, syncPacket)
             retryScope.launch {
                 // Answer first, then grant+sync. The joiner may have confirmed from the v2 QR

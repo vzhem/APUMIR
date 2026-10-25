@@ -73,6 +73,33 @@ object DevicePairingWire {
     }
 
     /**
+     * Read the account routing id embedded in a validated pairing offer.
+     *
+     * The Rust pairing protocol signs/authenticates the offer and uses this same
+     * field as the account route. The scanner must address its request to the
+     * account named by the QR, not to its own pre-pairing account id: a fresh
+     * installation can legitimately have a different local id. Keeping this
+     * small read-only parser here avoids adding a second native call merely for
+     * routing; [joinerStartPairing] still performs the authoritative validation.
+     */
+    fun primaryNodeId(offer: ByteArray): String? {
+        if (offer.size < 3 || (offer[0].toInt() and 0xff) !in 1..2) return null
+        val legacyLength = ((offer[1].toInt() and 0xff) shl 8) or
+            (offer[2].toInt() and 0xff)
+        val start = 3
+        val end = start + legacyLength
+        if (legacyLength !in 1..67 || end > offer.size) return null
+        val node = runCatching {
+            offer.copyOfRange(start, end).toString(Charsets.US_ASCII)
+        }.getOrNull() ?: return null
+        val suffix = node.removePrefix("pk_")
+        if (!node.startsWith("pk_") || suffix.length !in setOf(32, 64) ||
+            suffix.any { it !in '0'..'9' && it !in 'a'..'f' }
+        ) return null
+        return node
+    }
+
+    /**
      * A short rendezvous code is derived from the full offer only to find that offer on the
      * broker. It is not the SAS and never replaces the Rust MAC/SAS confirmation step.
      */

@@ -67,9 +67,19 @@ class InitialSyncContract(unittest.TestCase):
         self.assertNotIn("!RustBridge.externalTransportAllowed() || wsRef", MIRROR)
         self.assertNotIn("wsRef.get() !== webSocket || !RustBridge.externalTransportAllowed()", MIRROR)
 
+    def test_joiner_routes_to_the_account_named_by_the_qr(self):
+        self.assertIn("fun primaryNodeId(offer: ByteArray): String?", (JAVA / "data/pairing/DevicePairingWire.kt").read_text())
+        self.assertIn("val primaryNode = DevicePairingWire.primaryNodeId(offer)", PAIRING)
+        self.assertIn("setPairingPeer(primaryNode, primaryDevice)", PAIRING)
+        self.assertIn("pendingRequestTarget = primaryNode to primaryDevice", PAIRING)
+        # The granting side still addresses the exact new device on the account
+        # route learned from its own running identity.
+        self.assertIn("recipientNodeId = senderId", PAIRING)
+        self.assertIn("setPairingPeer(recipientNode, request.joinerDeviceId)", PAIRING)
+        self.assertIn("sendPairingPayload(recipientNode, request.joinerDeviceId", PAIRING)
+        self.assertIn("lastGrantTarget = recipientNode to request.joinerDeviceId", PAIRING)
+
     def test_initial_sync_has_authenticated_direct_swarm_frames_with_ack_retry(self):
-        self.assertIn("setPairingPeer(accountNode, primaryDevice)", PAIRING)
-        self.assertIn("setPairingPeer(accountNode, request.joinerDeviceId)", PAIRING)
         self.assertIn("routePairingFrame(text)", PAIRING)
         self.assertIn("RustBridge.liveSwarmPeerIds()", MIRROR)
         self.assertIn("sendPairingPayload(node, device, packet)", MIRROR)
