@@ -132,18 +132,31 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
                 }
             }.onFailure { Log.w("MessengerApp", "Deferred work recovery failed", it) }
         }
-        // Раунд 260: ядро стартует как можно раньше - ещё до отрисовки
-        // первого экрана, чтобы к открытию чатов движок уже поднимался.
-        // На фоновых пробуждениях система может запретить - там сервис
-        // поднимут будильник и приёмник сети, как и раньше.
-        runCatching {
-            val coreIntent = android.content.Intent(this, com.vladimir.messenger.service.CoreServerService::class.java)
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                startForegroundService(coreIntent)
-            } else {
-                startService(coreIntent)
-            }
-        }.onFailure { android.util.Log.w("MessengerApp", "early core start skipped: ${it.message}") }
+        // Раунд 260: ядро стартует как можно раньше, но только после того,
+        // как на этой установке действительно создана identity. Раньше этот
+        // безусловный старт поднимал Anonymous-движок прямо на экране
+        // онбординга. CreateIdentityUseCase затем видел уже работающий движок,
+        // забирал его временный адрес и launcher получал другую/пустую identity
+        // вместо аккаунта телефона.
+        val identityPrefs = getSharedPreferences("p2p_prefs", MODE_PRIVATE)
+        val localIdentityReady = identityPrefs.getBoolean("identity_created", false) &&
+            DeviceIdentityMarker.isPresent(applicationContext)
+        if (localIdentityReady) {
+            // Ещё до отрисовки первого экрана, чтобы к открытию чатов движок
+            // уже поднимался. На фоновых пробуждениях систему может попросить
+            // сервис снова; его собственная проверка identity остаётся второй
+            // линией защиты от запуска в онбординге.
+            runCatching {
+                val coreIntent = android.content.Intent(this, com.vladimir.messenger.service.CoreServerService::class.java)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    startForegroundService(coreIntent)
+                } else {
+                    startService(coreIntent)
+                }
+            }.onFailure { android.util.Log.w("MessengerApp", "early core start skipped: ${it.message}") }
+        } else {
+            android.util.Log.i("MessengerApp", "early core start deferred: local identity is not ready")
+        }
 
         // Automatic collection is an Organizer (20 qualified referrals) entitlement.
         try {

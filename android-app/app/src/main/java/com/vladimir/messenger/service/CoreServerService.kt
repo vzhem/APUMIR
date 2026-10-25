@@ -716,6 +716,21 @@ class CoreServerService : Service() {
         Log.i(TAG, "CoreServerService started (action=" + (intent?.action ?: "null") + ")")
         startForeground(NOTIFICATION_ID, buildNotification("Подключение..."))
 
+        // Никогда не создаём native engine до завершения онбординга. Сервис
+        // может быть поднят будильником или старым APK, пока prefs ещё не
+        // содержат identity; такой Anonymous engine затем перехватывает
+        // CreateIdentityUseCase и оставляет launcher на пустом routing id.
+        val prefs = getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+        val identityReady = prefs.getBoolean("identity_created", false) &&
+            com.vladimir.messenger.data.security.DeviceIdentityMarker.isPresent(applicationContext)
+        if (!identityReady) {
+            Log.i(TAG, "CoreServerService deferred: local identity is not ready")
+            CoreStatus.report("Ожидание создания identity")
+            CoreStatus.markReady()
+            stopServiceSafely()
+            return START_NOT_STICKY
+        }
+
         // Раунд 141: аварийный каркас - каждый старт перевзводит системный
         // будильник «+5 минут». Если процесс убьют или усыпят, будильник
         // поднимет сервис сам и письмо доложится (см. EmergencyKeepAlive).
@@ -848,7 +863,6 @@ class CoreServerService : Service() {
             }
         }
 
-        val prefs = getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
         var displayName = prefs.getString("display_name", "Anonymous") ?: "Anonymous"
         // сли Anonymous но профиль уже создан - перечитать
         if (displayName == "Anonymous" && prefs.getBoolean("identity_created", false)) {

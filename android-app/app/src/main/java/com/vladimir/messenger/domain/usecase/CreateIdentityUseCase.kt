@@ -30,6 +30,15 @@ class CreateIdentityUseCase @Inject constructor(
             // ключа = честный RAM-only degrade первого запуска.
             val atRestKeyOk = RelayAtRestMasterKey.installIntoCore(context)
             Log.i("CreateIdentityUseCase", "Relay at-rest key installed: $atRestKeyOk")
+            // A pre-v11.74.450 process may still have the old eager-start
+            // Anonymous engine alive while this screen is being completed.
+            // Stop it before generating the permanent identity; otherwise
+            // RustBridge.initialize() quite correctly returns the already
+            // running engine and the new profile inherits its temporary route.
+            val prefs = context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+            if (!prefs.getBoolean("identity_created", false)) {
+                RustBridge.shutdown()
+            }
             val relayDbPath = File(context.filesDir, "apu_relay.sqlite").absolutePath
             val isInitialized = RustBridge.initialize(name, relayDbPath = relayDbPath)
             if (!isInitialized) {
@@ -60,7 +69,6 @@ class CreateIdentityUseCase @Inject constructor(
             DeviceIdentityHistory.remember(context, nodeId)
 
             // Сохраняем все данные identity включая "секрет" для восстановления
-            val prefs = context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
             prefs.edit()
                 .putBoolean("identity_created", true)
                 .putString("display_name", name)
