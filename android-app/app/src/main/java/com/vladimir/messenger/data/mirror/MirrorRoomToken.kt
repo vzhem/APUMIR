@@ -27,6 +27,7 @@ package com.vladimir.messenger.data.mirror
 // =============================================================================
 
 import android.content.Context
+import android.util.Base64
 import java.security.MessageDigest
 import java.security.SecureRandom
 
@@ -35,7 +36,11 @@ object MirrorRoomToken {
     private const val MAIN_PREFS = "p2p_prefs"
     private const val KEY_TOKEN = "mirror_room_v1"
     private const val KEY_AT = "mirror_room_at_v1"
+    /** Shared only by devices paired for the mirror room, never sent in hello/hb. */
+    private const val KEY_SYNC = "mirror_sync_key_v1"
     private const val TOKEN_BYTES = 16
+    private const val SYNC_KEY_BYTES = 32
+    private const val B64_FLAGS = Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
 
     /** Маркер комнаты и время его рождения (по нему два маркера сравнивают). */
     data class RoomToken(
@@ -79,9 +84,43 @@ object MirrorRoomToken {
             false
         }
 
-    /** Забыть маркер (личность сброшена - комната больше не наша). */
+    /**
+     * Ключ кадров живого зеркала. Он не выводится из nodeId и не попадает в
+     * открытые hello/hb: новый телефон получает его только внутри
+     * аутентифицированного pairing bootstrap.
+     */
+    fun loadSyncKey(context: Context): ByteArray? = runCatching {
+        val encoded = prefs(context).getString(KEY_SYNC, null) ?: return null
+        Base64.decode(encoded, B64_FLAGS).takeIf { it.size == SYNC_KEY_BYTES }
+    }.getOrNull()
+
+    /** Создать ключ кадров на показывающем телефоне, если его ещё нет. */
+    fun createSyncKey(context: Context): ByteArray? {
+        loadSyncKey(context)?.let { return it }
+        val key = ByteArray(SYNC_KEY_BYTES).also { random.nextBytes(it) }
+        return if (saveSyncKey(context, key, sync = true)) key else null
+    }
+
+    /** Записать ключ кадров, полученный из pairing bootstrap. */
+    fun saveSyncKey(context: Context, key: ByteArray, sync: Boolean = false): Boolean {
+        if (key.size != SYNC_KEY_BYTES) return false
+        return runCatching {
+            val encoded = Base64.encodeToString(key, B64_FLAGS)
+            val editor = prefs(context).edit().putString(KEY_SYNC, encoded)
+            if (sync) editor.commit() else editor.apply()
+            true
+        }.getOrDefault(false)
+    }
+
+    /** Забыть маркер и ключ зеркала (личность сброшена - комната больше не наша). */
     fun clear(context: Context) {
-        runCatching { prefs(context).edit().remove(KEY_TOKEN).remove(KEY_AT).apply() }
+        runCatching {
+            prefs(context).edit()
+                .remove(KEY_TOKEN)
+                .remove(KEY_AT)
+                .remove(KEY_SYNC)
+                .apply()
+        }
     }
 
     /** Полка защищённой комнаты: из маркера, а не из открытого адреса личности. */

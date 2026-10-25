@@ -733,6 +733,29 @@ object RustBridge {
         }
     }
 
+
+    /** Retain a QR rendezvous offer on the broker; called from the pairing IO scope. */
+    fun publishPairingCode(code: String, payload: String): Boolean {
+        if (rejectMainThreadCall("publishPairingCode")) return false
+        return try {
+            engine?.publishPairingCode(code, payload) ?: false
+        } catch (e: Exception) {
+            Log.w(TAG, "publishPairingCode failed: ${e.message}")
+            false
+        }
+    }
+
+    /** Listen for one retained QR rendezvous offer; the Rust side owns the bounded listener. */
+    fun listenPairingCode(code: String): Boolean {
+        if (rejectMainThreadCall("listenPairingCode")) return false
+        return try {
+            engine?.listenPairingCode(code) ?: false
+        } catch (e: Exception) {
+            Log.w(TAG, "listenPairingCode failed: ${e.message}")
+            false
+        }
+    }
+
     fun sendDirectPayload(recipientId: String, payload: String): Boolean {
         if (rejectMainThreadCall("sendDirectPayload")) return false
         return try {

@@ -272,6 +272,9 @@ interface P2PCoreHandle {
     // Parallel QUIC file stream: direct send WITHOUT relay queue (bulk transfer).
     boolean send_direct_payload(string recipient_id, string payload);
     boolean send_pairing_payload(string recipient_node_id, bytes target_device_id, string payload);
+    // P3 rendezvous: publish/listen for a retained QR offer under a six-digit code.
+    boolean publish_pairing_code(string code, string payload);
+    boolean listen_pairing_code(string code);
 
     // K3: бинарный кусок файла по прямому QUIC-каналу. Ядро собирает из
     // аргументов APUF-кадр (file_wire) и уезжает им одним стримом с

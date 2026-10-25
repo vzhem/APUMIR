@@ -144,6 +144,22 @@ impl P2PCoreHandle {
             .send_pairing_payload(recipient_node_id, bytes_to_hex(&id), payload)
     }
 
+    /// P3 rendezvous: retain the QR offer under its six-digit comparison code.
+    pub fn publish_pairing_code(&self, code: String, payload: String) -> bool {
+        self.inner
+            .lock()
+            .unwrap()
+            .publish_pairing_code(code, payload)
+    }
+
+    /// P3 rendezvous: open a bounded listener for a retained QR offer.
+    pub fn listen_pairing_code(&self, code: String) -> bool {
+        self.inner
+            .lock()
+            .unwrap()
+            .listen_pairing_code(code)
+    }
+
     /// K3: бинарный кусок файла по прямому QUIC-каналу (APUF-кадр).
     /// `true` = получатель подтвердил приём стрима; `false` = не удалось —
     /// вызывающий ждёт следующего цикла (передача не прерывается).

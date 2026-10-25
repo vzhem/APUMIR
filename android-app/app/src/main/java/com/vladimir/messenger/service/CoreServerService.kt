@@ -356,16 +356,16 @@ class CoreServerService : Service() {
         text: String,
         authenticated: Boolean = false,
     ): Boolean {
-        if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, authenticated)) return true
-        // P3: пакеты подключения устройств разбираем и на запасном пути приёма.
-        // У устройств одного аккаунта общий nodeId, поэтому «отправитель = я»
-        // здесь не признак мусора: кто именно из устройств прислал пакет,
-        // ядро определяет по device_id и MAC внутри пакета.
-        if (com.vladimir.messenger.data.pairing.DevicePairingWire.isPacket(text)) {
+        // Pairing and large authenticated mirror frames must win over deferred
+        // delivery as well as over the normal chat parser. Devices of one
+        // account share a routing node id, so neither path may self-drop these
+        // control packets before the pairing/device MAC is checked.
+        if (com.vladimir.messenger.data.pairing.DevicePairingWire.isPairingText(text)) {
             com.vladimir.messenger.data.pairing.DevicePairingController
                 .routeIncoming(applicationContext, senderId, text)
             return true
         }
+        if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, authenticated)) return true
         // р243/р244: подтверждение доставки, пришедшее прямым каналом. Второй
         // путь приёма обязан разбирать его так же, как основной: иначе строка
         // «ack|…» вырастет в личный чат. Даже некорректный ACK с зарезервированным
@@ -1350,8 +1350,8 @@ class CoreServerService : Service() {
             bridge = mirrorBridge(),
         )
         mirror = channel
-        com.vladimir.messenger.data.mirror.MirrorHub.channel = channel
         channel.start()
+        com.vladimir.messenger.data.mirror.MirrorHub.bind(channel)
     }
 
     private fun mirrorBridge() = object : com.vladimir.messenger.data.mirror.MirrorChannel.Bridge {
@@ -1426,10 +1426,25 @@ class CoreServerService : Service() {
                 .onFailure { Log.w(TAG, "Mirror file meta failed: ${it.message}") }
                 .getOrDefault(false)
 
-        override suspend fun onFileChunk(transferId: String, seq: Int, last: Boolean, bytes: ByteArray) {
-            runCatching { fileTransferRouter.applyMirrorFileChunk(transferId, seq, last, bytes) }
+        override suspend fun onFileChunk(
+            transferId: String,
+            offset: Long,
+            seq: Int,
+            last: Boolean,
+            bytes: ByteArray,
+        ) {
+            runCatching { fileTransferRouter.applyMirrorFileChunk(transferId, offset, seq, last, bytes) }
                 .onFailure { Log.w(TAG, "Mirror file chunk failed: ${it.message}") }
         }
+
+        override suspend fun mirrorFileBytesPresent(
+            transferId: String,
+            displayName: String,
+            totalBytes: Long,
+        ): Boolean = fileTransferRouter.mirrorFileBytesPresent(transferId, displayName, totalBytes)
+
+        override suspend fun mirrorFileBytesReceived(transferId: String): Long =
+            fileTransferRouter.mirrorReceivedBytesDurable(transferId)
 
         override suspend fun fileBytesFor(
             transferId: String,
@@ -1535,6 +1550,12 @@ class CoreServerService : Service() {
                 else -> Unit
             }
         }
+
+        override suspend fun mirrorContactSnapshot(): List<org.json.JSONObject> =
+            contactRepository.mirrorContactSnapshot()
+
+        override suspend fun mirrorFileSnapshot(): List<org.json.JSONObject> =
+            fileTransferRouter.mirrorCompletedFileSnapshot()
 
         override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {
             // id чатов на устройствах разные - ищем чат по узлу получателя.
@@ -1677,7 +1698,7 @@ class CoreServerService : Service() {
             val last = mirrorFileAskedAt[row.transferId] ?: 0L
             if (now - last < MIRROR_FILE_RETRY_MS) continue
             mirrorFileAskedAt[row.transferId] = now
-            val offset = fileTransferRouter.mirrorReceivedBytesOf(row.transferId)
+            val offset = fileTransferRouter.mirrorReceivedBytesDurable(row.transferId)
             val big = row.totalBytes > com.vladimir.messenger.data.mirror.MirrorChannel.FILE_MIRROR_MAX_BYTES
             com.vladimir.messenger.data.mirror.MirrorHub.requestFileBytes(
                 row.transferId,
@@ -1685,6 +1706,7 @@ class CoreServerService : Service() {
                 row.totalBytes,
                 offset = offset,
                 big = big,
+                sha256 = row.fileSha256,
             )
             Log.i(TAG, "file bytes pump: прошу ${row.displayName} (${row.totalBytes} Б, с $offset)")
             break
@@ -2271,6 +2293,42 @@ class CoreServerService : Service() {
                     // НИКОГДА, и без счётчика он выглядел бы как «сообщение не
                     // пришло» без причины. Число видно в разделе [сообщения].
                     com.vladimir.messenger.data.diagnostics.TransferDiagnostics.noteBadSender()
+                    return
+                }
+
+                // Pairing packets are intentionally raw and use the account routing node. Two
+                // phones of one account therefore look like "from me" here. Route this before
+                // the self-node filter; otherwise the primary silently discards the join request
+                // and the joiner can only sit on the six-digit code screen forever. The controller
+                // still authenticates the packet and ignores an own-device echo by device_id.
+                if (!SealedWire.isSealed(rawText) &&
+                    com.vladimir.messenger.data.pairing.DevicePairingWire.isPairingText(rawText)
+                ) {
+                    com.vladimir.messenger.data.pairing.DevicePairingController
+                        .routeIncoming(applicationContext, senderId, rawText)
+                    return
+                }
+
+                // ACK is intentionally a raw control packet so a receiver that
+                // learned the sender binding from the just-opened message can
+                // return it even before HELLO. Handle it before the self-node
+                // filter: mirror devices may share the routing node id, and the
+                // old order turned an ACK into an ACK-of-ACK and dropped it.
+                if (!SealedWire.isSealed(rawText) && DeliveryAckWire.isPacket(rawText)) {
+                    val ackedId = DeliveryAckWire.messageId(rawText)
+                    if (ackedId != null) {
+                        mirror?.publishEnvelope(senderId, chatId, messageId, rawText)
+                        serviceScope.launch {
+                            try {
+                                val changed = markMessageDelivered(ackedId)
+                                Log.i(TAG, "📬 raw delivery ACK: msgId=$ackedId changed=$changed")
+                            } catch (error: Exception) {
+                                Log.w(TAG, "raw delivery ACK apply failed: ${error.message}")
+                            }
+                        }
+                    } else {
+                        Log.w(TAG, "malformed raw delivery ACK; dropped")
+                    }
                     return
                 }
 
