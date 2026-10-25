@@ -34,17 +34,18 @@ class PeerRankStore @Inject constructor(
         .map { ids -> ids.mapTo(HashSet()) { it.lowercase() } }
         .distinctUntilChanged()
 
-    /** Сообщённый ранг узла или null, если он ещё не сообщал. */
+    /** Известный ранг-эквивалент узла или null, если он ещё не сообщал. */
     suspend fun qualifiedFor(nodeId: String): Int? =
         dao.qualifiedFor(nodeId.trim().lowercase())
 
-    /** VIP ли этот узел по последнему сообщённому рангу. */
+    /** VIP ли этот узел по максимальному известному рангу. */
     suspend fun isVip(nodeId: String): Boolean =
         isVipRank(qualifiedFor(nodeId))
 
     /**
-     * Запомнить ранг, пришедший конвертом. true — запись изменилась (было
-     * пусто или пришло более свежее), false — пакет опоздал и ничего не тронул.
+     * Запомнить ранг, пришедший конвертом. true — запись изменилась (узел новый,
+     * пришло более свежее время или вырос ранг), false — пакет полностью старее.
+     * DAO сохраняет максимум qualified, поэтому VIP нельзя случайно откатить.
      */
     suspend fun remember(nodeId: String, qualified: Int, updatedAtMs: Long): Boolean {
         val id = nodeId.trim().lowercase()

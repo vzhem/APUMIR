@@ -27,12 +27,23 @@ interface PeerRankDao {
     suspend fun qualifiedFor(nodeId: String): Int?
 
     /**
-     * Обновить ранг, только если он свежее уже записанного. Возвращает число
-     * строк: 0 — запись не тронута (пакет опоздал или узла ещё нет).
+     * Обновить сведения только вперёд.
+     *
+     * `qualified` — монотонный прогресс: подтверждённый ранг собеседника не
+     * должен откатываться из-за позднего пакета, пересланной старой копии или
+     * временно меньшего значения. Поэтому сохраняем максимум и по рангу, и по
+     * времени. Это важно именно для VIP: после достижения порога строка не
+     * должна исчезать из [observeVipNodeIds].
+     *
+     * Возвращает число строк: 0 — запись не тронута (пакет полностью старее
+     * известного состояния или узла ещё нет).
      */
     @Query(
-        "UPDATE peer_ranks SET qualified = :qualified, updatedAtMs = :updatedAtMs " +
-            "WHERE nodeId = :nodeId AND updatedAtMs < :updatedAtMs"
+        "UPDATE peer_ranks SET " +
+            "qualified = MAX(qualified, :qualified), " +
+            "updatedAtMs = MAX(updatedAtMs, :updatedAtMs) " +
+            "WHERE nodeId = :nodeId AND " +
+            "(updatedAtMs < :updatedAtMs OR qualified < :qualified)"
     )
     suspend fun updateIfNewer(nodeId: String, qualified: Int, updatedAtMs: Long): Int
 
