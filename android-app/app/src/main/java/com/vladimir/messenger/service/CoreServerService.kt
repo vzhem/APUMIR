@@ -375,16 +375,16 @@ class CoreServerService : Service() {
         text: String,
         authenticated: Boolean = false,
     ): Boolean {
-        if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, authenticated)) return true
-        // P3: пакеты подключения устройств разбираем и на запасном пути приёма.
-        // У устройств одного аккаунта общий nodeId, поэтому «отправитель = я»
-        // здесь не признак мусора: кто именно из устройств прислал пакет,
-        // ядро определяет по device_id и MAC внутри пакета.
-        if (com.vladimir.messenger.data.pairing.DevicePairingWire.isPacket(text)) {
+        // Pairing and large authenticated mirror frames must win over deferred
+        // delivery as well as over the normal chat parser. Devices of one
+        // account share a routing node id, so neither path may self-drop these
+        // control packets before the pairing/device MAC is checked.
+        if (com.vladimir.messenger.data.pairing.DevicePairingWire.isPairingText(text)) {
             com.vladimir.messenger.data.pairing.DevicePairingController
                 .routeIncoming(applicationContext, senderId, text)
             return true
         }
+        if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, authenticated)) return true
         // р243/р244: подтверждение доставки, пришедшее прямым каналом. Второй
         // путь приёма обязан разбирать его так же, как основной: иначе строка
         // «ack|…» вырастет в личный чат. Даже некорректный ACK с зарезервированным

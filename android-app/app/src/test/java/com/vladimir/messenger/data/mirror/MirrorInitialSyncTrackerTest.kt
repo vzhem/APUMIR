@@ -39,6 +39,23 @@ class MirrorInitialSyncTrackerTest {
     }
 
     @Test
+    fun timeoutIsRecoverableWhenTransportReturns() {
+        val tracker = MirrorInitialSyncTracker()
+        tracker.begin(1L)
+        val timedOut = tracker.fail("peer temporarily unavailable", 2L)
+
+        assertEquals(MirrorInitialSyncPhase.ERROR, timedOut.phase)
+        tracker.connected(10L)
+        tracker.transferring(11L)
+        tracker.part("messages", true, 12L)
+        tracker.part("contacts", false, 13L)
+        tracker.part("profile", true, 14L)
+        val recovered = tracker.part("files", false, 15L)
+
+        assertEquals(MirrorInitialSyncPhase.COMPLETE, recovered.phase)
+    }
+
+    @Test
     fun failureKeepsDiagnosticMessage() {
         val tracker = MirrorInitialSyncTracker()
         tracker.begin(1L)

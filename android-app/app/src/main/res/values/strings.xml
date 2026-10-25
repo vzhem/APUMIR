@@ -2132,7 +2132,7 @@
     <string name="devices_sync_transferring">Синхронизируем чаты, профиль, контакты и файлы…</string>
     <string name="devices_sync_complete">Начальная синхронизация завершена.</string>
     <string name="devices_sync_no_data">Начальная синхронизация завершена: на втором устройстве нет данных для передачи.</string>
-    <string name="devices_sync_error">Начальная синхронизация не запущена или завершилась ошибкой: %1$s</string>
+    <string name="devices_sync_error">Начальная синхронизация временно не отвечает: %1$s. Повторные попытки продолжаются автоматически.</string>
     <string name="devices_sync_retry">Повторить синхронизацию</string>
     <string name="devices_failed">Подключение не удалось</string>
     <string name="devices_close">Закрыть</string>

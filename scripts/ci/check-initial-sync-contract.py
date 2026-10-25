@@ -11,6 +11,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 JAVA = ROOT / "android-app/app/src/main/java/com/vladimir/messenger"
+RUST_CORE = ROOT / "rust-core/src/engine/core.rs"
+RUST = RUST_CORE.read_text()
 PAIRING = (JAVA / "data/pairing/DevicePairingController.kt").read_text()
 MIRROR = (JAVA / "data/mirror/MirrorSync.kt").read_text()
 SERVICE = (JAVA / "service/CoreServerService.kt").read_text()
@@ -56,7 +58,8 @@ class InitialSyncContract(unittest.TestCase):
 
     def test_initial_sync_is_not_blocked_by_swarm_first_fallback_policy(self):
         transport = section(MIRROR, "private fun transportAllowed()", "private fun connect()")
-        self.assertIn("initialSyncRequested || RustBridge.externalTransportAllowed()", transport)
+        self.assertIn("initialSyncRequested || pairingGraceActive()", transport)
+        self.assertIn("RustBridge.externalTransportAllowed()", transport)
         # Every WebSocket gate must use the pairing-aware decision. Otherwise a
         # healthy direct chat peer can still make initial sync time out.
         self.assertEqual(MIRROR.count("!transportAllowed()"), 5)
@@ -79,6 +82,42 @@ class InitialSyncContract(unittest.TestCase):
         self.assertIn('body.optInt("more", 0) != 1', MIRROR)
         self.assertIn("initialContactsSeen", MIRROR)
         self.assertIn("initialFilesSeen", MIRROR)
+
+    def test_pairing_route_is_available_without_a_live_swarm_peer(self):
+        self.assertIn("private fun pairingTransportAvailable()", MIRROR)
+        send = section(MIRROR, "private fun sendJson", "private fun sendPairingFrame")
+        self.assertIn("pairingTransportAvailable()", send)
+        self.assertIn("sendPairingFrame(obj)", send)
+        self.assertIn("RustBridge.liveSwarmPeerIds()", MIRROR)
+        # The native pairing route must not reuse the ordinary external-transport
+        # gate: direct discovery is exactly what may be unavailable here.
+        pairing = section(RUST, "pub fn send_pairing_payload(", "pub fn send_file_chunk(")
+        self.assertIn("send_message_mqtt_oneshot", pairing)
+        self.assertNotIn("self.send_message_mqtt(&recipient_node_id, &payload)", pairing)
+
+    def test_pairing_frame_size_fits_the_mqtt_packet_budget(self):
+        marker = "private const val MIRROR_PAIRING_MAX_CHARS = "
+        value = MIRROR.split(marker, 1)[1].split("\n", 1)[0].strip()
+        # 60 KiB leaves room below the native 64 KiB MQTT client limit for
+        # packet/topic overhead; larger frames are recursively chunked.
+        self.assertEqual(value, "60 * 1024")
+        self.assertIn("if (packet.length > PAIRING_FRAME_MAX_CHARS)", MIRROR)
+        self.assertIn("sendInitialSnapshotChunk", MIRROR)
+
+    def test_initial_sync_retries_after_timeout_and_waits_for_bootstrap(self):
+        self.assertIn("initialSyncRetryJob", MIRROR)
+        self.assertIn("initialSyncTimedOut", MIRROR)
+        self.assertIn("initialSyncWaitingForBootstrap", MIRROR)
+        self.assertIn("scheduleSyncBootstrapFallback", PAIRING)
+        # A grant arriving before the sealed bootstrap must not open the old room
+        # and report a false transport failure.
+        joiner = section(PAIRING, "private fun acceptGrant(", "/** New device: start pairing")
+        self.assertIn("initialSyncWaitingForBootstrap()", joiner)
+        self.assertNotIn("?: com.vladimir.messenger.data.mirror.MirrorHub.startInitialSync()", joiner)
+
+    def test_fallback_route_checks_pairing_before_deferred_delivery(self):
+        body = section(SERVICE, "private suspend fun routeIncomingEnvelope(", "    private suspend fun")
+        self.assertLess(body.index("isPairingText"), body.index("deferredDelivery.routeIncoming"))
 
     def test_ui_exposes_non_connected_initial_sync_states(self):
         for marker in (

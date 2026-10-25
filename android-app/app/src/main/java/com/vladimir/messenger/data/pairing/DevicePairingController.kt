@@ -36,6 +36,7 @@ import uniffi.p2p_core.setLocalDeviceId
  */
 object DevicePairingController {
     private const val TAG = "DevicePairing"
+    private const val SYNC_BOOTSTRAP_WAIT_MS = 30_000L
 
     /** Primary side: a new device asked to join and the code to compare. */
     data class PrimaryRequest(
@@ -101,6 +102,7 @@ object DevicePairingController {
     private var lastRendezvous: DevicePairingWire.RendezvousOffer? = null
     private var lastRendezvousAtMs: Long = 0L
     private var offerBroadcastJob: kotlinx.coroutines.Job? = null
+    private var syncBootstrapWaitJob: kotlinx.coroutines.Job? = null
 
     @Volatile
     private var appContext: Context? = null
@@ -217,7 +219,7 @@ object DevicePairingController {
             } catch (e: Exception) {
                 // Keep identity, certificate, transcript and SAS checks in the Rust pairing
                 // functions. This log distinguishes an authenticated rejection from a missing
-                // rendezvous without exposing keys or packet contents.
+                // delivery without exposing keys or packet contents.
                 Log.w(TAG, "pairing packet rejected by authenticated state: ${e.message ?: "unknown"}")
             }
         }
@@ -334,18 +336,38 @@ object DevicePairingController {
             return
         }
         pendingGrant = null
-        joinerAccountNode = null
         Log.i(TAG, "pairing certificate authenticated and stored; synchronization bootstrap pending")
         joinerMutable.value = JoinerState(JoinerPhase.DONE)
         // The sync bootstrap may have arrived before the grant: open it now that
-        // the pairing keys exist on this side too.
+        // the pairing keys exist on this side too. Do not start a mirror channel
+        // with this device's pre-pairing room while the bootstrap is still in
+        // flight: that was the source of the false "second device does not
+        // respond" state. The primary retries the bootstrap; the delayed legacy
+        // fallback is only for an older primary that has no bootstrap packet.
         pendingSync?.let { packet ->
             pendingSync = null
             onSync(context, packet)
-        } ?: com.vladimir.messenger.data.mirror.MirrorHub.startInitialSync()
+        } ?: run {
+            com.vladimir.messenger.data.mirror.MirrorHub.initialSyncWaitingForBootstrap()
+            scheduleSyncBootstrapFallback(context)
+        }
     }
 
-    /** New device: start pairing from a scanned or rendezvous-delivered QR. */
+    private fun scheduleSyncBootstrapFallback(context: Context) {
+        syncBootstrapWaitJob?.cancel()
+        syncBootstrapWaitJob = retryScope.launch {
+            delay(SYNC_BOOTSTRAP_WAIT_MS)
+            synchronized(stateLock) {
+                if (joinerMutable.value?.phase != JoinerPhase.DONE) return@synchronized
+                if (com.vladimir.messenger.data.mirror.MirrorRoomToken.loadSyncKey(context) == null) {
+                    Log.w(TAG, "pairing sync bootstrap did not arrive; starting legacy mirror fallback")
+                    com.vladimir.messenger.data.mirror.MirrorHub.startInitialSync()
+                }
+            }
+        }
+    }
+
+    /** New device: start pairing from a scanned QR. */
     suspend fun startJoin(qrText: String): Boolean = startJoinInternal(qrText)
 
     private fun startJoinInternal(qrText: String): Boolean {
@@ -362,7 +384,6 @@ object DevicePairingController {
             return false
         }
         return synchronized(stateLock) {
-            pendingManualCode = null
             val primaryDevice = pairingOfferPrimaryDeviceId(offer)
             // The QR carries the other phone's addresses: remember them as the direct route to
             // that exact device, so the request below does not wait for LAN discovery.
@@ -517,7 +538,7 @@ object DevicePairingController {
             retryScope.launch {
                 // Answer first, then grant+sync. The joiner may have confirmed from the v2 QR
                 // before it received the answer, so both stages remain independently retryable.
-                for (waitMs in listOf(2_000L, 6_000L, 20_000L)) {
+                for (waitMs in listOf(2_000L, 6_000L, 20_000L, 45_000L, 90_000L, 180_000L)) {
                     delay(waitMs)
                     if (!primaryDoneMutable.value) return@launch
                     resendAnswer()
@@ -578,6 +599,8 @@ object DevicePairingController {
             if (joinerMutable.value?.phase != JoinerPhase.DONE) pendingSync = packet
             return
         }
+        syncBootstrapWaitJob?.cancel()
+        syncBootstrapWaitJob = null
         val bootstrap = runCatching { JSONObject(text) }.getOrNull()
         val value: String
         val at: Long
@@ -645,6 +668,8 @@ object DevicePairingController {
 
     /** Either side: stop everything and forget the pending state. */
     fun cancel() {
+        syncBootstrapWaitJob?.cancel()
+        syncBootstrapWaitJob = null
         val code = synchronized(stateLock) {
             val oldCode = offerCodeMutable.value
             offerBroadcastJob?.cancel()
@@ -723,16 +748,33 @@ object DevicePairingController {
         }
     }
 
-    /** Granting side, manual: re-send the certificate and the sync bootstrap. */
+    /**
+     * Granting side, manual/automatic: re-send the certificate and mint the same
+     * idempotent bootstrap again. Rebuilding the bootstrap matters when the first
+     * attempt failed before the shared frame key could be persisted or delivered.
+     */
     fun resendGrant() {
         val packets = synchronized(stateLock) {
             lastGrantTarget?.let { target ->
-                if (lastGrantPackets.isEmpty()) null else target to lastGrantPackets.toList()
+                val grant = lastGrantPackets.firstOrNull() ?: return@let null
+                target to grant
             }
         } ?: return
         retryScope.launch {
-            packets.second.forEach { packet ->
-                RustBridge.sendPairingPayload(packets.first.first, packets.first.second, packet)
+            RustBridge.sendPairingPayload(packets.first.first, packets.first.second, packets.second)
+            val freshSync = runCatching {
+                sendSyncBootstrap(packets.first.first, packets.first.second)
+            }.getOrNull()
+            if (freshSync != null) {
+                synchronized(stateLock) {
+                    val current = lastGrantTarget
+                    if (current != null &&
+                        current.first == packets.first.first &&
+                        current.second.contentEquals(packets.first.second)
+                    ) {
+                        lastGrantPackets = listOf(packets.second, freshSync)
+                    }
+                }
             }
         }
     }

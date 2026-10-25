@@ -64,7 +64,8 @@ import org.json.JSONObject
 /** Raw pairing payload marker for authenticated initial-sync frames. */
 private const val MIRROR_PAIRING_FRAME_PREFIX = "APUPAIR:sync:"
 private const val MIRROR_PAIRING_CIPHER_PREFIX = "APUMIRROR2:"
-private const val MIRROR_PAIRING_MAX_CHARS = 120 * 1024
+private const val MIRROR_PAIRING_MAX_CHARS = 60 * 1024
+private const val MIRROR_PENDING_PAIRING_FRAME_LIMIT = 128
 
 /** Строка переписки, гуляющая между устройствами одной личности. */
 data class MirrorRow(
@@ -170,7 +171,11 @@ object MirrorHub {
         if (!cipher.startsWith(MIRROR_PAIRING_CIPHER_PREFIX)) return false
         val current = channel
         if (current == null) {
-            pendingPairingFrames.offer(cipher)
+            if (pendingPairingFrames.size < MIRROR_PENDING_PAIRING_FRAME_LIMIT) {
+                pendingPairingFrames.offer(cipher)
+            } else {
+                Log.w("MirrorHub", "dropping pairing frame while mirror service is unbound: queue full")
+            }
         } else {
             current.acceptPairingFrame(cipher)
         }
@@ -186,6 +191,14 @@ object MirrorHub {
             newChannel.acceptPairingFrame(frame)
         }
         if (initialSyncRequested) newChannel.startInitialSync()
+    }
+
+    /**
+     * The grant can arrive a little before its sealed sync bootstrap. Expose a
+     * starting state without opening a channel into the old, pre-pairing room.
+     */
+    fun initialSyncWaitingForBootstrap() {
+        initialSyncMutable.value = initialSyncTracker.begin()
     }
 
     /** Called by pairing immediately after the authenticated confirmation succeeds. */
@@ -210,14 +223,26 @@ object MirrorHub {
     }
 
     internal fun initialSyncPart(name: String, hasData: Boolean) {
+        val wasTerminal = initialSyncMutable.value.phase == MirrorInitialSyncPhase.COMPLETE ||
+            initialSyncMutable.value.phase == MirrorInitialSyncPhase.NO_DATA
         val result = initialSyncTracker.part(name, hasData)
         initialSyncMutable.value = result
-        if (result.phase == MirrorInitialSyncPhase.COMPLETE ||
-            result.phase == MirrorInitialSyncPhase.NO_DATA
+        if (!wasTerminal &&
+            (result.phase == MirrorInitialSyncPhase.COMPLETE ||
+                result.phase == MirrorInitialSyncPhase.NO_DATA)
         ) {
             initialSyncRequested = false
             channel?.finishInitialSync()
         }
+    }
+
+    /**
+     * A timeout is diagnostic, not proof that the peer is permanently gone.
+     * Keep the channel and retry loop alive so a later MQTT/WSS/direct recovery
+     * can move the same session back to TRANSFERRING without a button tap.
+     */
+    internal fun initialSyncTimedOut(message: String) {
+        initialSyncMutable.value = initialSyncTracker.fail(message)
     }
 
     internal fun initialSyncFailed(message: String) {
@@ -827,6 +852,11 @@ class MirrorChannel(
     private val pendingPairingFrames = java.util.concurrent.ConcurrentHashMap<String, PendingPairingFrame>()
     private val receivedPairingFrames = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private var initialSyncTimeoutJob: Job? = null
+    private var initialSyncRetryJob: Job? = null
+    @Volatile private var initialSyncLastActivityAtMs = 0L
+    /** Keep the authenticated pairing route briefly after completion for late ACKs/replays. */
+    @Volatile private var pairingGraceUntilMs = 0L
+    private var pairingGraceJob: Job? = null
     /** р231: когда в последний раз просили движок (передача роли). */
     @Volatile private var lastClaimAt = 0L
 
@@ -854,20 +884,58 @@ class MirrorChannel(
     }
 
     /**
+     * Pairing owns an authenticated one-device route even while the ordinary
+     * swarm-first policy is still searching. It is deliberately separate from
+     * [directPairingAvailable]: the Rust pairing sender tries the signed direct
+     * route and the broker route together, so an empty live-peer list must not
+     * turn a completed pairing into a dead initial-sync request.
+     */
+    private fun pairingTransportAvailable(): Boolean =
+        (initialSyncRequested || pairingGraceActive()) && hasPairingPeer() &&
+            MirrorRoomToken.loadSyncKey(context) != null
+
+    private fun pairingGraceActive(nowMs: Long = System.currentTimeMillis()): Boolean =
+        pairingGraceUntilMs > nowMs
+
+    /**
      * Start the first catch-up as soon as the authenticated pairing has completed.
      * This is deliberately separate from ordinary live mirroring: a paired phone
      * must get an observable result even when its databases are already empty.
      */
     fun startInitialSync() {
+        pairingGraceJob?.cancel()
+        pairingGraceJob = null
+        pairingGraceUntilMs = 0L
+        pendingPairingFrames.clear()
         initialSyncRequested = true
         initialSnapshotSent = false
         initialContactsSeen = false
         initialFilesSeen = false
+        initialSyncLastActivityAtMs = System.currentTimeMillis()
         initialSyncTimeoutJob?.cancel()
+        initialSyncRetryJob?.cancel()
         initialSyncTimeoutJob = scope.launch {
             delay(INITIAL_SYNC_TIMEOUT_MS)
             if (initialSyncRequested) {
-                MirrorHub.initialSyncFailed("Не удалось запустить начальную синхронизацию: второе устройство не отвечает")
+                MirrorHub.initialSyncTimedOut("Не удалось запустить начальную синхронизацию: второе устройство не отвечает; продолжаем попытки")
+            }
+        }
+        // A transport can be alive while the first pairing packet is lost (or MQTT
+        // can reconnect after a ping timeout). Keep the authenticated request alive
+        // and start a fresh idempotent exchange after an idle interval. The receiver
+        // deduplicates frame ids and applies rows/files by their stable ids, so this
+        // never turns a reconnect into duplicated data.
+        initialSyncRetryJob = scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            while (kotlin.coroutines.coroutineContext.isActive && initialSyncRequested) {
+                delay(INITIAL_SYNC_RETRY_INTERVAL_MS)
+                if (!initialSyncRequested) break
+                val idleFor = System.currentTimeMillis() - initialSyncLastActivityAtMs
+                if (idleFor < INITIAL_SYNC_RETRY_IDLE_MS) continue
+                initialSnapshotSent = false
+                catchupInFlight = false
+                Log.i(TAG, "initial-sync retry after transport idle (${idleFor}ms)")
+                sendJson(hello())
+                maybeStartInitialExchange(forcePairing = true)
             }
         }
         MirrorHub.initialSyncConnected()
@@ -880,15 +948,33 @@ class MirrorChannel(
         }
     }
 
-    /** Stop the local request after a terminal result; a later pairing can retry it. */
+    private fun noteInitialSyncActivity() {
+        if (initialSyncRequested) initialSyncLastActivityAtMs = System.currentTimeMillis()
+    }
+
+    /**
+     * Stop the local retry loop after a terminal result, but keep the authenticated
+     * pairing route alive briefly. A final ACK can be late, and the peer may replay
+     * an idempotent request after receiving its own terminal marker.
+     */
     fun finishInitialSync() {
         initialSyncRequested = false
         initialSnapshotSent = false
         initialContactsSeen = false
         initialFilesSeen = false
-        pendingPairingFrames.clear()
         initialSyncTimeoutJob?.cancel()
         initialSyncTimeoutJob = null
+        initialSyncRetryJob?.cancel()
+        initialSyncRetryJob = null
+        initialSyncLastActivityAtMs = 0L
+        pairingGraceJob?.cancel()
+        pairingGraceUntilMs = System.currentTimeMillis() + PAIRING_COMPLETION_GRACE_MS
+        pairingGraceJob = scope.launch {
+            delay(PAIRING_COMPLETION_GRACE_MS)
+            pairingGraceUntilMs = 0L
+            pendingPairingFrames.clear()
+            pairingGraceJob = null
+        }
     }
 
     /**
@@ -1107,6 +1193,11 @@ class MirrorChannel(
         loopJob?.cancel()
         initialSyncTimeoutJob?.cancel()
         initialSyncTimeoutJob = null
+        initialSyncRetryJob?.cancel()
+        initialSyncRetryJob = null
+        pairingGraceJob?.cancel()
+        pairingGraceJob = null
+        pairingGraceUntilMs = 0L
         wsOpen = false
         pendingPairingFrames.clear()
         runCatching { wsRef.getAndSet(null)?.close(1000, "bye") }
@@ -1713,7 +1804,7 @@ class MirrorChannel(
      * that exact peer is not live. The swarm-first policy must not cancel the hand-off entirely.
      */
     private fun transportAllowed(): Boolean =
-        initialSyncRequested || RustBridge.externalTransportAllowed()
+        initialSyncRequested || pairingGraceActive() || RustBridge.externalTransportAllowed()
 
     private fun connect() {
         if (closedByUs || !transportAllowed()) return
@@ -1750,10 +1841,25 @@ class MirrorChannel(
     private fun sendJson(obj: JSONObject): Boolean {
         if (!transportAllowed()) return false
 
-        // Initial sync is swarm-first only when the core reports the exact paired node as a
-        // live signed QUIC peer. `sendPairingPayload` still carries the broker fallback owned by
-        // the pairing protocol, while WSS remains the fallback for a peer that is not live.
-        if (directPairingAvailable() && sendPairingFrame(obj)) return true
+        // Initial sync first uses the authenticated pairing route. When the exact
+        // signed QUIC peer is live, Rust sends it directly; otherwise the same
+        // pairing packet is sent through the broker without waiting for ordinary
+        // swarm discovery to declare the peer live. WSS remains a final fallback.
+        if (pairingTransportAvailable()) {
+            val direct = directPairingAvailable()
+            when (sendPairingFrame(obj)) {
+                PairingFrameResult.SENT -> {
+                    Log.d(TAG, "initial-sync frame accepted via pairing route direct=$direct")
+                    return true
+                }
+                // The pairing envelope is bounded by the native MQTT packet
+                // budget. Force the snapshot caller to split it instead of
+                // silently accepting an oversized frame on a WSS socket whose
+                // peer may not yet be connected.
+                PairingFrameResult.TOO_LARGE -> return false
+                PairingFrameResult.NOT_AVAILABLE -> Unit
+            }
+        }
 
         val ws = wsRef.get()
         if (!wsOpen || ws == null) return false
@@ -1769,18 +1875,38 @@ class MirrorChannel(
      * Every frame gets an application ACK and a bounded retry window. Duplicate retries are
      * dropped by [acceptPairingFrame], while batch/file offsets make a later request resumable.
      */
-    private fun sendPairingFrame(obj: JSONObject): Boolean {
-        val node = pairedPeerNodeId ?: return false
-        val device = pairedPeerDeviceId?.copyOf() ?: return false
-        val key = MirrorRoomToken.loadSyncKey(context) ?: return false
+    private enum class PairingFrameResult { SENT, NOT_AVAILABLE, TOO_LARGE }
+
+    private fun sendPairingFrame(obj: JSONObject): PairingFrameResult {
+        val node = pairedPeerNodeId ?: return PairingFrameResult.NOT_AVAILABLE
+        val device = pairedPeerDeviceId?.copyOf() ?: return PairingFrameResult.NOT_AVAILABLE
+        val key = MirrorRoomToken.loadSyncKey(context) ?: return PairingFrameResult.NOT_AVAILABLE
         val id = java.util.UUID.randomUUID().toString()
         val frame = JSONObject(obj.toString()).put("_pid", id)
         val pending = PendingPairingFrame(frame)
         pendingPairingFrames[id] = pending
-        val accepted = transmitPairingFrame(node, device, frame, key)
+        val packet = runCatching {
+            val sealed = MirrorFrameCipher.seal(key, frame.toString()) ?: return@runCatching null
+            DevicePairingWire.encode(
+                DevicePairingWire.KIND_SYNC,
+                sealed.toByteArray(Charsets.UTF_8),
+            )
+        }.getOrNull()
+        if (packet == null) {
+            pendingPairingFrames.remove(id)
+            return PairingFrameResult.NOT_AVAILABLE
+        }
+        if (packet.length > PAIRING_FRAME_MAX_CHARS) {
+            pendingPairingFrames.remove(id)
+            Log.i(TAG, "initial-sync frame requires chunking: ${packet.length} chars")
+            return PairingFrameResult.TOO_LARGE
+        }
+        val accepted = runCatching {
+            RustBridge.sendPairingPayload(node, device, packet)
+        }.getOrDefault(false)
         if (!accepted) {
             pendingPairingFrames.remove(id)
-            return false
+            return PairingFrameResult.NOT_AVAILABLE
         }
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             repeat(PAIRING_FRAME_RETRIES) {
@@ -1800,7 +1926,7 @@ class MirrorChannel(
                 transmitPairingFrame(node, device, waiting.frame, key)
             }
         }
-        return true
+        return PairingFrameResult.SENT
     }
 
     private fun transmitPairingFrame(
@@ -2074,6 +2200,7 @@ class MirrorChannel(
         val pairingReady = forcePairing && hasPairingPeer()
         if (!initialSyncRequested || initialSnapshotSent || (!partnerFresh() && !pairingReady)) return
         initialSnapshotSent = true
+        noteInitialSyncActivity()
         MirrorHub.initialSyncTransferring()
         catchupInFlight = true
         val requestSent = sendJson(
@@ -2175,6 +2302,7 @@ class MirrorChannel(
         val upto = body.optLong("upto", 0L)
         val more = body.optBoolean("more", false)
         val initial = body.optInt("initial", 0) == 1 || (initialSyncRequested && catchupInFlight)
+        if (initial) noteInitialSyncActivity()
         scope.launch {
             var last = 0L
             for (i in 0 until rows.length()) {
@@ -2238,6 +2366,7 @@ class MirrorChannel(
             }
             "initial_contacts" -> {
                 val body = openPayload(wire) ?: return
+                noteInitialSyncActivity()
                 val rows = body.optJSONArray("rows") ?: JSONArray()
                 scope.launch {
                     if (rows.length() > 0) initialContactsSeen = true
@@ -2252,6 +2381,7 @@ class MirrorChannel(
             }
             "initial_files" -> {
                 val body = openPayload(wire) ?: return
+                noteInitialSyncActivity()
                 val rows = body.optJSONArray("rows") ?: JSONArray()
                 scope.launch {
                     if (rows.length() > 0) initialFilesSeen = true
@@ -2274,9 +2404,15 @@ class MirrorChannel(
             }
             "initial_done" -> {
                 // It is an ordered completion marker for the sender's snapshot
-                // work. The profile part is accounted for by the profstate frame
-                // itself, so an empty profile remains visible as NO_DATA.
-                openPayload(wire) ?: return
+                // work. If the profile frame was not accepted (for example while
+                // MQTT was reconnecting), account for the explicit empty marker
+                // instead of leaving the UI in TRANSFERRING forever; a later
+                // retry can still deliver and merge the real profile.
+                val body = openPayload(wire) ?: return
+                noteInitialSyncActivity()
+                if (body.optInt("profile", 1) == 0) {
+                    MirrorHub.initialSyncPart("profile", false)
+                }
             }
             "filemeta" -> {
                 // р230: файл принят на партнёрском устройстве - показать его
@@ -2538,6 +2674,7 @@ class MirrorChannel(
                 }
             }
             "profstate" -> {
+                noteInitialSyncActivity()
                 // р246: снимок профиля партнёра - слить поля; если аватар или
                 // обои победили, но байтов ещё нет - попросить их.
                 val body = openPayload(wire) ?: return
@@ -2664,7 +2801,13 @@ class MirrorChannel(
             MirrorHub.initialSyncConnected()
         }
         sendJson(hello())
-        if (initialSyncRequested) maybeStartInitialExchange()
+        if (initialSyncRequested) {
+            if (System.currentTimeMillis() - initialSyncLastActivityAtMs >= INITIAL_SYNC_RETRY_IDLE_MS) {
+                initialSnapshotSent = false
+                catchupInFlight = false
+            }
+            maybeStartInitialExchange(forcePairing = true)
+        }
         // р246: канал ожил - сразу показать партнёру свой профиль.
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             ProfileMirror.publishNow(context)
@@ -2751,7 +2894,10 @@ class MirrorChannel(
 
     companion object {
         private const val BATCH_ROWS = 30
-        private const val INITIAL_SYNC_TIMEOUT_MS = 90_000L
+        private const val INITIAL_SYNC_TIMEOUT_MS = 5 * 60_000L
+        private const val INITIAL_SYNC_RETRY_INTERVAL_MS = 8_000L
+        private const val INITIAL_SYNC_RETRY_IDLE_MS = 12_000L
+        private const val PAIRING_COMPLETION_GRACE_MS = 30_000L
         private const val INITIAL_SNAPSHOT_ROWS = 40
 
         /** Pairing control remains small; initial mirror chunks have a bounded larger envelope. */
