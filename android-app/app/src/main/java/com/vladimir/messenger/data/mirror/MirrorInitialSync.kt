@@ -33,7 +33,7 @@ class MirrorInitialSyncTracker {
     @Synchronized
     fun begin(nowMs: Long = System.currentTimeMillis()): MirrorInitialSyncState {
         pendingParts.clear()
-        pendingParts += setOf("messages", "contacts", "profile", "files")
+        pendingParts += setOf("messages", "contacts", "profile", "files", "account")
         receivedData = false
         state = MirrorInitialSyncState()
         return update(MirrorInitialSyncPhase.STARTING, "Синхронизация запускается", nowMs)
@@ -45,7 +45,7 @@ class MirrorInitialSyncTracker {
 
     @Synchronized
     fun transferring(nowMs: Long = System.currentTimeMillis()): MirrorInitialSyncState =
-        update(MirrorInitialSyncPhase.TRANSFERRING, "Передаём чаты, профиль, контакты и файлы", nowMs)
+        update(MirrorInitialSyncPhase.TRANSFERRING, "Передаём аккаунт: чаты, группы, каналы, профиль и файлы", nowMs)
 
     @Synchronized
     fun retrying(

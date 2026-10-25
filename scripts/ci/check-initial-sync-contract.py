@@ -94,6 +94,33 @@ class InitialSyncContract(unittest.TestCase):
         self.assertIn("initialContactsSeen", MIRROR)
         self.assertIn("initialFilesSeen", MIRROR)
 
+    def test_initial_sync_copies_account_owned_groups_and_other_room_state(self):
+        snapshot = (JAVA / "data/mirror/MirrorAccountSnapshot.kt").read_text()
+        for marker in (
+            '"groups"',
+            '"group_members"',
+            '"group_topics"',
+            '"group_polls"',
+            '"group_poll_votes"',
+            '"message_reactions"',
+            '"post_views"',
+            '"profile_hearts"',
+            'initial_account',
+            'applyAccountSnapshot',
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, MIRROR + snapshot)
+        # Device-local exchange keys and relay chunks must never be cloned as
+        # account data; file bytes use the resumable file channel instead.
+        self.assertNotIn('"file_exchange_peers"', snapshot)
+        self.assertNotIn('"file_transfer_chunks"', snapshot)
+        self.assertIn("initialManifestAccountCount", MIRROR)
+        self.assertIn("personalMessagesSince", (JAVA / "data/local/dao/MessageDao.kt").read_text())
+        self.assertIn("MAX_ROW_CHARS", snapshot)
+        self.assertIn("MAX_ROW_COLUMNS", snapshot)
+        self.assertIn('put("account", 1)', MIRROR)
+        self.assertIn('body.optInt("account", 0) != 1', MIRROR)
+
     def test_pairing_route_is_available_without_a_live_swarm_peer(self):
         self.assertIn("private fun pairingTransportAvailable()", MIRROR)
         send = section(MIRROR, "private fun sendJson", "private fun sendPairingFrame")

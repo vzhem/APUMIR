@@ -22,9 +22,10 @@ package com.vladimir.messenger.data.mirror
 //  - Догон: устройства обмениваются «свежестью» (максимальный ts сообщения),
 //    отставшее само запрашивает хвост - так пропуски закрываются без кнопок.
 //
-// В v1 зеркалятся ТЕКСТЫ личных чатов (входящие и исходящие) и их догон.
-// Файлы, звонки, каналы/сообщества - остаются на принявшем их устройстве и
-// переносятся полной копией («Синхронизировать аккаунт»).
+// Живой канал переносит тексты и события, а authenticated initial-sync
+// дополнительно делает account snapshot: группы, каналы, memberships, роли,
+// темы, polls, реакции, настройки, рейтинги и историю сообщений. Файловые
+// байты остаются отдельным resumable потоком, чтобы не раздувать control frames.
 // =============================================================================
 
 import android.content.Context
@@ -50,6 +51,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -892,6 +895,10 @@ class MirrorChannel(
         suspend fun mirrorContactSnapshot(): List<JSONObject>
         /** Full completed-file metadata snapshot requested immediately after pairing. */
         suspend fun mirrorFileSnapshot(): List<JSONObject>
+        /** Full Room account snapshot: groups, channels, memberships, roles, polls, reactions and settings. */
+        suspend fun mirrorAccountSnapshot(): List<JSONObject>
+        /** Apply one bounded account snapshot chunk without cascading parent replacement. */
+        suspend fun applyAccountSnapshot(rows: List<JSONObject>): Int
         fun onPromote()
         fun onDeferToShadow()
         /**
@@ -971,6 +978,11 @@ class MirrorChannel(
     @Volatile private var pairedPeerDeviceId: ByteArray? = null
     @Volatile private var initialContactsSeen = false
     @Volatile private var initialFilesSeen = false
+    /** Account rows cover groups/channels, memberships, roles, polls, reactions and local settings. */
+    @Volatile private var initialAccountSeen = false
+    @Volatile private var initialAccountSnapshotComplete = false
+    @Volatile private var initialAccountRowsApplied = 0
+    @Volatile private var initialManifestAccountCount = -1
     /** Metadata may arrive before the corresponding file bytes; keep it pending until commit. */
     private data class PendingInitialFile(
         val displayName: String,
@@ -987,6 +999,8 @@ class MirrorChannel(
     @Volatile private var initialManifestFileDigest = ""
     private val initialFileManifest = java.util.concurrent.ConcurrentHashMap<String, String>()
     private val initialFilesPartReported = AtomicBoolean(false)
+    /** Serialize account-row application so parent-first ordering is retained across frames. */
+    private val initialAccountApplyMutex = Mutex()
 
     private data class PendingProfileImage(
         val kind: String,
@@ -1128,6 +1142,10 @@ class MirrorChannel(
         initialSnapshotSent = false
         initialContactsSeen = false
         initialFilesSeen = false
+        initialAccountSeen = false
+        initialAccountSnapshotComplete = false
+        initialAccountRowsApplied = 0
+        initialManifestAccountCount = -1
         initialFilesPending.clear()
         initialFilesSnapshotComplete = false
         initialFilesHadData = false
@@ -1163,6 +1181,9 @@ class MirrorChannel(
                 if (idleFor < INITIAL_SYNC_RETRY_IDLE_MS) continue
                 initialSnapshotSent = false
                 catchupInFlight = false
+                initialAccountSeen = false
+                initialAccountSnapshotComplete = false
+                initialAccountRowsApplied = 0
                 Log.i(TAG, "initial-sync retry after transport idle (${idleFor}ms)")
                 sendJson(hello())
                 maybeStartInitialExchange(forcePairing = true)
@@ -1367,6 +1388,10 @@ class MirrorChannel(
         initialSnapshotSent = false
         initialContactsSeen = false
         initialFilesSeen = false
+        initialAccountSeen = false
+        initialAccountSnapshotComplete = false
+        initialAccountRowsApplied = 0
+        initialManifestAccountCount = -1
         initialFilesPending.clear()
         initialFilesSnapshotComplete = false
         initialFilesHadData = false
@@ -2348,6 +2373,7 @@ class MirrorChannel(
         return type == "req" || (type == "ev" && kind in setOf(
             "initial_req",
             "initial_manifest",
+            "initial_account",
             "initial_done",
             "initial_ack",
             "initial_final",
@@ -2572,6 +2598,7 @@ class MirrorChannel(
     private fun sendInitialManifest(
         sessionId: String,
         files: List<JSONObject>,
+        accountRows: List<JSONObject>,
         profile: ProfileMirror.State,
     ) {
         sendEvent(
@@ -2579,9 +2606,10 @@ class MirrorChannel(
             JSONObject()
                 .put("v", 1)
                 .put("sid", sessionId)
-                .put("parts", JSONArray().put("messages").put("contacts").put("profile").put("files"))
+                .put("parts", JSONArray().put("messages").put("contacts").put("profile").put("files").put("account"))
                 .put("file_count", files.count { it.optString("id").isNotBlank() })
                 .put("file_digest", fileManifestDigest(files))
+                .put("account_count", MirrorAccountSnapshot.rowCount(accountRows))
                 .put("profile_digest", profile.digest()),
         )
     }
@@ -2806,6 +2834,7 @@ class MirrorChannel(
             MirrorHub.initialSyncPart("contacts", false)
             MirrorHub.initialSyncPart("profile", false)
             MirrorHub.initialSyncPart("files", false)
+            MirrorHub.initialSyncPart("account", false)
         }
     }
 
@@ -2982,12 +3011,19 @@ class MirrorChannel(
                 scope.launch(kotlinx.coroutines.Dispatchers.IO) {
                     val contacts = bridge.mirrorContactSnapshot()
                     val files = bridge.mirrorFileSnapshot()
+                    // The account snapshot is the part that turns a fresh
+                    // launcher into the same account instead of only a list of
+                    // personal messages. It contains groups/channels,
+                    // memberships, roles, topics, polls, reactions and local
+                    // conversation settings; file bytes remain a separate stream.
+                    val accountRows = bridge.mirrorAccountSnapshot()
                     // Send a compact manifest before data. It lets the receiver
                     // distinguish a complete snapshot from a prefix that merely
                     // happened to arrive before the socket dropped.
                     val profile = ProfileMirror.snapshot(context, localize = true)
-                    sendInitialManifest(sessionId, files, profile)
+                    sendInitialManifest(sessionId, files, accountRows, profile)
                     sendInitialSnapshot("initial_contacts", contacts, sessionId)
+                    sendInitialSnapshot("initial_account", accountRows, sessionId)
                     sendInitialSnapshot("initial_files", files, sessionId)
                     // Send the profile in this same ordered sequence so the
                     // recipient can finish the lifecycle even when the profile
@@ -2998,7 +3034,8 @@ class MirrorChannel(
                         "initial_done",
                         JSONObject()
                             .put("sid", sessionId)
-                            .put("profile", if (profileSent) 1 else 0),
+                            .put("profile", if (profileSent) 1 else 0)
+                            .put("account", 1),
                     )
                 }
             }
@@ -3011,6 +3048,7 @@ class MirrorChannel(
                 initialManifestSeen = true
                 initialManifestFileCount = body.optInt("file_count", -1)
                 initialManifestFileDigest = body.optString("file_digest")
+                initialManifestAccountCount = body.optInt("account_count", -1)
                 noteInitialSyncActivity()
                 maybeFinishInitialFiles()
             }
@@ -3027,6 +3065,42 @@ class MirrorChannel(
                     }
                     if (body.optInt("more", 0) != 1) {
                         MirrorHub.initialSyncPart("contacts", initialContactsSeen)
+                    }
+                }
+            }
+            "initial_account" -> {
+                val body = openPayload(wire) ?: return
+                if (!belongsToInitialSession(body)) return
+                noteInitialSyncActivity()
+                val rows = body.optJSONArray("rows") ?: JSONArray()
+                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    initialAccountApplyMutex.withLock {
+                        if (rows.length() > 0) initialAccountSeen = true
+                        val chunk = ArrayList<JSONObject>(rows.length())
+                        for (i in 0 until rows.length()) {
+                            rows.optJSONObject(i)?.let { chunk += it }
+                        }
+                        val applied = runCatching { bridge.applyAccountSnapshot(chunk) }
+                            .onFailure { Log.w(TAG, "initial account snapshot failed: ${it.message}") }
+                            .getOrDefault(0)
+                        if (applied != chunk.size) {
+                            Log.w(TAG, "initial account snapshot applied=$applied received=${chunk.size}")
+                        }
+                        // Count successfully applied rows. UPDATE-first returns
+                        // success for an already-present row too, while malformed
+                        // or forbidden rows keep the account part incomplete and
+                        // force the sender's retry/final lifecycle to remain open.
+                        initialAccountRowsApplied += applied
+                        if (body.optInt("more", 0) != 1) {
+                            initialAccountSnapshotComplete = true
+                            val expected = initialManifestAccountCount
+                            if (expected >= 0 && expected != initialAccountRowsApplied) {
+                                Log.w(TAG, "initial account snapshot incomplete expected=$expected received=$initialAccountRowsApplied")
+                                initialAccountSnapshotComplete = false
+                            } else {
+                                MirrorHub.initialSyncPart("account", initialAccountSeen)
+                            }
+                        }
                     }
                 }
             }
@@ -3065,6 +3139,14 @@ class MirrorChannel(
                 val body = openPayload(wire) ?: return
                 if (!belongsToInitialSession(body)) return
                 noteInitialSyncActivity()
+                // A pre-account peer can still send the old terminal marker.
+                // Do not leave the current tracker waiting forever for a part
+                // that this peer could not know about. A current sender marks
+                // the capability explicitly, while a missing manifest keeps
+                // this fallback limited to the legacy response.
+                if (body.optInt("account", 0) != 1 && !initialManifestSeen) {
+                    MirrorHub.initialSyncPart("account", false)
+                }
             }
             "filemeta" -> {
                 // р230: файл принят на партнёрском устройстве - показать его
@@ -3617,7 +3699,7 @@ class MirrorChannel(
     }
 
     companion object {
-        private val INITIAL_PARTS = setOf("messages", "contacts", "profile", "files")
+        private val INITIAL_PARTS = setOf("messages", "contacts", "profile", "files", "account")
         private const val BATCH_ROWS = 30
         private const val INITIAL_SYNC_TIMEOUT_MS = 5 * 60_000L
         private const val INITIAL_SYNC_RETRY_INTERVAL_MS = 8_000L

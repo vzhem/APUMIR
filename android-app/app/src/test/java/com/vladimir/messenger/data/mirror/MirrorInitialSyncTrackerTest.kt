@@ -16,7 +16,8 @@ class MirrorInitialSyncTrackerTest {
         tracker.part("messages", hasData = true, nowMs = 40L)
         tracker.part("contacts", hasData = false, nowMs = 50L)
         tracker.part("profile", hasData = true, nowMs = 60L)
-        val done = tracker.part("files", hasData = false, nowMs = 70L)
+        tracker.part("files", hasData = false, nowMs = 70L)
+        val done = tracker.part("account", hasData = true, nowMs = 80L)
 
         assertEquals(MirrorInitialSyncPhase.COMPLETE, done.phase)
         assertTrue(done.detail.contains("завершена"))
@@ -32,7 +33,8 @@ class MirrorInitialSyncTrackerTest {
         tracker.part("messages", false, 4L)
         tracker.part("contacts", false, 5L)
         tracker.part("profile", false, 6L)
-        val result = tracker.part("files", false, 7L)
+        tracker.part("files", false, 7L)
+        val result = tracker.part("account", false, 8L)
 
         assertEquals(MirrorInitialSyncPhase.NO_DATA, result.phase)
         assertTrue(result.detail.contains("нет данных"))
@@ -50,7 +52,8 @@ class MirrorInitialSyncTrackerTest {
         tracker.part("messages", true, 12L)
         tracker.part("contacts", false, 13L)
         tracker.part("profile", true, 14L)
-        val recovered = tracker.part("files", false, 15L)
+        tracker.part("files", false, 15L)
+        val recovered = tracker.part("account", true, 16L)
 
         assertEquals(MirrorInitialSyncPhase.COMPLETE, recovered.phase)
     }

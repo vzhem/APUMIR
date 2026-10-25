@@ -96,6 +96,7 @@ class CoreServerService : Service() {
     // Отклики на истории: значки и комментарии зрителей (см. docs/STORY_REACTIONS_AND_COMMENTS.md).
     @Inject lateinit var storyFeedback: com.vladimir.messenger.data.story.StoryFeedbackRepository
     @Inject lateinit var groupDao: com.vladimir.messenger.data.local.dao.GroupDao
+    @Inject lateinit var appDatabase: com.vladimir.messenger.data.local.AppDatabase
     @Inject lateinit var inboxPinDao: com.vladimir.messenger.data.local.dao.InboxPinDao
     @Inject lateinit var counters: com.vladimir.messenger.data.channel.PostCounterRepository
     @Inject lateinit var swarmBudget: com.vladimir.messenger.data.swarm.SwarmBudget
@@ -1593,6 +1594,12 @@ class CoreServerService : Service() {
 
         override suspend fun mirrorFileSnapshot(): List<org.json.JSONObject> =
             fileTransferRouter.mirrorCompletedFileSnapshot()
+
+        override suspend fun mirrorAccountSnapshot(): List<org.json.JSONObject> =
+            com.vladimir.messenger.data.mirror.MirrorAccountSnapshot.exportRows(applicationContext, appDatabase)
+
+        override suspend fun applyAccountSnapshot(rows: List<org.json.JSONObject>): Int =
+            com.vladimir.messenger.data.mirror.MirrorAccountSnapshot.applyRows(applicationContext, appDatabase, rows)
 
         override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {
             // id чатов на устройствах разные - ищем чат по узлу получателя.

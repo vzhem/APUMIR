@@ -649,7 +649,7 @@ class ChatRepository @Inject constructor(
 
     /** Хвост переписки для догана отставшего устройства. */
     suspend fun mirrorRowsSince(since: Long, limit: Int): List<MirrorRow> =
-        messageDao.messagesSince(since, limit)
+        messageDao.personalMessagesSince(since, limit)
             // Do not replay ACK rows left by an older install to a mirror peer.
             .filterNot { DeliveryAckWire.isPacket(it.content) }
             .map { e ->
