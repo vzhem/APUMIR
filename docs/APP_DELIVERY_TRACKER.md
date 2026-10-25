@@ -5,14 +5,14 @@
 
 ## Где живёт работа
 
-- Линия приложения: `main`. Последний опубликованный стабильный релиз — `v11.74.446` (Latest), tag-коммит `1d152d46b5c68e22642f55a91987c7b95ff0a7dd`.
+- Линия приложения: `main`. Последний опубликованный стабильный релиз — `v11.74.447` (Latest), tag-коммит `adc18eca23473d07195160f8e292f674e9e23fae`.
 - Рабочая ветка этой сессии: `arena/762cd357-apumir`, от коммита `aff66920d08b62246654e4ba04f00c4d8f4735ed`.
 - Все текущие изменения должны попасть только в `arena/762cd357-apumir` и собираться вместе с `main`.
 - Другие ветки `arena/*` не удалять без явного разрешения владельца.
 
 ## Задачи и статус (на 2026-10-24)
 
-Текущий стабильный выпуск: `v11.74.446` — Latest, публичный и стабильный. Новый релиз/тег/PR создаётся только после отдельного разрешения владельца и предварительного показа точного публичного текста.
+Текущий стабильный выпуск: `v11.74.447` — Latest, публичный и стабильный. Новый релиз/тег/PR создаётся только после отдельного разрешения владельца и предварительного показа точного публичного текста.
 
 ### Публичный релиз v11.74.443 (2026-10-24)
 
@@ -48,6 +48,15 @@
 - Release промотирован в стабильный Latest: https://github.com/vzhem/APUMIR/releases/tag/v11.74.446; через GitHub API проверено `draft=false`, `prerelease=false`, `/releases/latest` возвращает `v11.74.446`.
 - Стабильные ссылки: https://github.com/vzhem/APUMIR/releases/download/v11.74.446/app-release.apk и https://github.com/vzhem/APUMIR/releases/download/v11.74.446/SHA256SUMS.txt; shortcut APK: https://github.com/vzhem/APUMIR/releases/latest/download/app-release.apk. Новый PR не создавался. Финальная pairing-проверка остаётся владельцу на двух физических устройствах.
 
+### Публичный релиз v11.74.447 (2026-10-25)
+
+- Владелец явно разрешил выпуск для всех и подтвердил точный публичный текст из `docs/RELEASE_NOTES_v11.74.447.md`.
+- Создан и отправлен annotated tag `v11.74.447`; peeled tag commit `adc18eca23473d07195160f8e292f674e9e23fae`.
+- Tag release workflow `40152608861` зелёный; build job `121047128181` прошёл ancestry check относительно `v11.74.446`, native/Rust, UniFFI regeneration, Gradle APK build, проверки, подпись и checksum-шаги.
+- В релиз загружены `app-release.apk` размером `229259299` bytes, SHA-256 `b623a8d03fb7868b2e7db2eb4bedba5216e8eda2536c9635a0fc719d5090259e`, и `SHA256SUMS.txt` размером `82` bytes, asset digest `d604a8c7d5c7b14bdf2ca12d0cee5ab148eb52ae2def258825c8a9fab722d734`.
+- Release промотирован в стабильный Latest: https://github.com/vzhem/APUMIR/releases/tag/v11.74.447; через GitHub API проверено `draft=false`, `prerelease=false`, `/releases/latest` возвращает `v11.74.447`.
+- Стабильные ссылки: https://github.com/vzhem/APUMIR/releases/download/v11.74.447/app-release.apk и https://github.com/vzhem/APUMIR/releases/download/v11.74.447/SHA256SUMS.txt; shortcut APK: https://github.com/vzhem/APUMIR/releases/latest/download/app-release.apk. Новый PR не создавался. Финальная pairing-проверка остаётся владельцу на двух физических устройствах.
+
 ## Надёжная доставка pairing по шестизначному коду (выпущено в v11.74.446)
 
 - Исправлен WSS-обход publisher-а: offer и control-пакеты используют WSS-aware временную MQTT-сессию с уникальным client ID, retained публикацией и bounded flush. Временная сессия не очищает presence постоянного устройства.
@@ -61,7 +70,7 @@
 - Владелец сообщил: QR отсканирован, примерно через 15 секунд на обоих телефонах появились одинаковые коды, на обоих нажато «Совпадает», после этого несколько минут нет прогресса. Физические logcat-логи обоих телефонов пока не переданы; до их получения не утверждается, был ли потерян пакет на транспорте.
 - Кодовый аудит локализовал отдельный race в Kotlin state machine: QR v2 показывает joiner-у SAS ещё до authenticated `answer`; если joiner подтверждает код первым, а `grant` приходит до `answer`, контроллер вызывал `joinerAcceptPairingGrant` без установленного Rust transcript/root. Исключение поглощалось общим маршрутизатором, grant не сохранялся, а поздний `answer` отбрасывался в `WAITING_GRANT`. Это оставляло экран в ожидании навсегда даже при совпавшем SAS.
 - Исправление в рабочей ветке буферизует grant до authenticated answer, принимает поздний answer также в `WAITING_GRANT`, а затем повторно запускает прежние Rust certificate/account/device binding/AEAD/SAS проверки. Показывающий телефон также сохраняет authenticated answer и повторяет его перед grant+sync, чтобы закрытие QR offer не превращало потерянный answer в вечное ожидание. Никаких identity или trust checks не ослаблено. Добавлен Rust regression test для порядка `grant -> answer -> grant`.
-- Статус: исправление ещё не опубликовано, новый тег/release/PR не создавались и не разрешены. Branch CI `40126871755` на `c07bde1263477e0d0a18a3dfd39f901b63542db1` зелёный: native/Rust, новый regression test, UniFFI, Gradle APK и проверки прошли; release-only шаги пропущены. Локальная Gradle/Rust-проверка невозможна (в sandbox нет Java/cargo); требуется повторная физическая проверка на двух телефонах. Для диагностики нужны строки `DevicePairing` и `PAIRING` с обоих устройств от сканирования до `DONE`/ошибки.
+- Статус: исправление опубликовано в `v11.74.447`; новый tag workflow `40152608861` зелёный, APK и checksum опубликованы в стабильном Latest. Локальная Gradle/Rust-проверка невозможна (в sandbox нет Java/cargo); требуется повторная физическая проверка на двух телефонах. Для диагностики по-прежнему нужны строки `DevicePairing` и `PAIRING` с обоих устройств от сканирования до `DONE`/ошибки.
 
 ## Исправление синхронизации двух устройств (2026-10-24, после v11.74.443)
 
