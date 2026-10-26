@@ -112,6 +112,33 @@ jobs:
           PY
           exit "$status"
 
+      # Логи Actions из песочницы не скачиваются (EOF на blob-хранилище), а при
+      # ошибке конфигурации Gradle XML-отчётов нет вообще — тогда причина
+      # видна только в логе. Печатаем её аннотацией.
+      - name: Expose Gradle failure
+        if: failure()
+        run: |
+          test -f "$RUNNER_TEMP/gradle-unit.log" || exit 0
+          python3 - "$RUNNER_TEMP/gradle-unit.log" <<'PY'
+          from pathlib import Path
+          import sys
+
+          lines = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines()
+          lines = [line for line in lines if not line.startswith(("w: ", "warning:"))]
+
+          def annotate(title, text):
+              if len(text) > 3500:
+                  text = "...[truncated]\n" + text[-3480:]
+              escaped = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title={title}::{escaped}")
+
+          for i, line in enumerate(lines):
+              if line.startswith("FAILURE:"):
+                  annotate("Gradle failure", "\n".join(lines[i:i + 18]))
+                  break
+          annotate("Gradle log tail", "\n".join(lines[-60:]))
+          PY
+
       - name: Upload unit test report
         if: always()
         uses: actions/upload-artifact@v4
