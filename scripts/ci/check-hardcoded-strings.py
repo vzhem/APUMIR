@@ -21,7 +21,10 @@
     String/x more than one time) — это ошибка, а не предупреждение;
   * ключи, которые есть в `values`, но отсутствуют в `values-en`, при
     английской локали остаются русскими — их число хранится в baseline
-    (`missing_en`) и может только уменьшаться.
+    (`missing_en`) и может только уменьшаться;
+  * подстановки `%1$d`/`%2$s` в переводе обязаны совпадать с оригиналом:
+    лишние аргументы `getString` молча игнорирует, то есть часть данных
+    просто исчезает из фразы.
 
 Запуск:
     python3 scripts/ci/check-hardcoded-strings.py            # проверить
@@ -92,12 +95,44 @@ def counts():
     return result
 
 
-STRING_NAME = re.compile(r'<string\s+name="([A-Za-z0-9_]+)"')
+STRING_NAME = re.compile(r'<string\s+name="([A-Za-z0-9_]+)"[^>]*>(.*?)</string>', re.S)
+PLACEHOLDER = re.compile(r"%(\d+)\$[a-zA-Z]")
+
+
+def string_entries(path):
+    """Пары (имя, текст) строковых ресурсов в файле."""
+    return STRING_NAME.findall(path.read_text(encoding="utf-8"))
 
 
 def resource_names(path):
     """Имена строковых ресурсов в файле (в порядке файла)."""
-    return STRING_NAME.findall(path.read_text(encoding="utf-8"))
+    return [name for name, _ in string_entries(path)]
+
+
+def placeholder_problems():
+    """Подстановки `%1$s` в переводе должны совпадать с русским оригиналом.
+
+    Если в переводе меньше подстановок, пользователь не видит часть данных
+    (а лишние аргументы `getString` молча игнорирует), если больше или они
+    перепутаны — падает форматирование. И то, и другое ловится только на
+    устройстве, поэтому проверяем на CI.
+    """
+    ru_path = RES_ROOT / "values/strings.xml"
+    en_path = RES_ROOT / "values-en/strings.xml"
+    if not ru_path.is_file() or not en_path.is_file():
+        return []
+    ru = dict(string_entries(ru_path))
+    en = dict(string_entries(en_path))
+    problems = []
+    for name, text in sorted(en.items()):
+        if name not in ru:
+            continue
+        want = PLACEHOLDER.findall(ru[name])
+        got = PLACEHOLDER.findall(text)
+        if sorted(want) != sorted(got):
+            problems.append(f"values-en/strings.xml: {name}: подстановки {got or 'нет'} вместо "
+                            f"{want or 'нет'} — перевод должен повторять русский оригинал.")
+    return problems
 
 
 def resource_problems():
@@ -150,6 +185,7 @@ def check():
     allowed, allowed_missing_en = load_baseline()
     actual = counts()
     problems, missing_en = resource_problems()
+    problems += placeholder_problems()
     improved = []
 
     for name, count in sorted(actual.items()):
