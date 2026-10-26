@@ -38,7 +38,6 @@
 156 классов / 1292 теста без падений, APK собран и переподписан ротированным
 ключом, 24 контрактных скрипта зелёные.
 
-Готовится выпуск `v11.74.453`.
 
 Тест ядра `crypto::device_pairing` приведён к нынешнему v2-QR: ожидание «грант,
 приехавший раньше answer, — `UnknownSession`» верно только для старого v1-QR и
@@ -49,7 +48,7 @@
 теста больше не превращает остальные в каскад `PoisonError`, и настоящая причина
 видна сразу.
 
-Текущий стабильный выпуск: `v11.74.452` — Latest, публичный и стабильный. Новый релиз/тег/PR создаётся только после отдельного разрешения владельца и предварительного показа точного публичного текста.
+Текущий стабильный выпуск: `v11.74.453` — Latest, публичный и стабильный. Новый релиз/тег/PR создаётся только после отдельного разрешения владельца и предварительного показа точного публичного текста.
 
 ## Задачи и статус (на 2026-10-24)
 
@@ -395,6 +394,16 @@
 - Tag release workflow `39968167615` зелёный: build job `120463485231`; собраны `app-release.apk` размером `229255203` bytes и `SHA256SUMS.txt` размером `82` bytes.
 - Draft prerelease промотирован в стабильный Latest: https://github.com/vzhem/APUMIR/releases/tag/v11.74.441, опубликован `2026-10-23T14:37:42Z`, `draft=false`, `prerelease=false`.
 - Проверено через GitHub API: `/releases/latest` возвращает `v11.74.441`; в релизе доступны оба ожидаемых asset, а стабильные ссылки ведут на https://github.com/vzhem/APUMIR/releases/download/v11.74.441/app-release.apk и https://github.com/vzhem/APUMIR/releases/download/v11.74.441/SHA256SUMS.txt.
+- Финальная UI-проверка остаётся владельцу на реальных телефонах.
+
+## Публичный релиз v11.74.453 (2026-10-26)
+
+- По явному разрешению владельца («выпускай релиз для всех») после показа точного публичного текста из `docs/RELEASE_NOTES_v11.74.453.md` создан и отправлен annotated tag `v11.74.453` на commit `af390a09e0fe2e18f1acfabe6ecbcd929427491f` (merge PR #58 в `main`).
+- Tag release workflow `40382465769` зелёный, build job `121782088185`: ancestry gate относительно `v11.74.452`, source contracts, Rust/native build, UniFFI regeneration, `testReleaseUnitTest`, `assembleRelease`, подпись ротированным ключом (старый первым для Android 8, новый с `rotation-min-sdk-version 28`) и checksum-шаг.
+- Draft prerelease промотирован в стабильный Latest: https://github.com/vzhem/APUMIR/releases/tag/v11.74.453, опубликован `2026-10-26T19:19:00Z`, `draft=false`, `prerelease=false`.
+- В релиз загружены `app-release.apk` размером `232388387` bytes и `SHA256SUMS.txt` размером `82` bytes. GitHub API digest APK: `sha256:cf3e8325afe1895a62a2d4fce2183d499c7f4be53aa6d1b9789e1519b2ec79a1`.
+- Проверено через GitHub API: `/releases/latest` возвращает `v11.74.453` с обоими asset; стабильные ссылки `/releases/latest/download/app-release.apk` и `/releases/latest/download/SHA256SUMS.txt` отдают редирект на ассеты выпуска.
+- Пост-релизный шаг воркфлоу запушил в `main` перегенерированный uniffi-мост и пересобранное ядро (`416dbcae`) — открытый пункт P1 «чистый клон `main` не собирается» закрыт.
 - Финальная UI-проверка остаётся владельцу на реальных телефонах.
 
 ## Публикация релиза
