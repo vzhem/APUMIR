@@ -958,7 +958,7 @@ class ChatListViewModel @Inject constructor(
                         needsApproval = !group.isPublic,
                     )
                 } else {
-                    "Приглашение в $what «$title»:\n$link"
+                    appContext.getString(R.string.vm_invite_share, what, title, link)
                 }
                 val result = chatRepository.sendMessage(chatId, chat.contactId, body)
                 if (result.isSuccess) sent++ else failed++
@@ -1026,20 +1026,20 @@ class ChatListViewModel @Inject constructor(
             try {
                 withContext(Dispatchers.IO) {
                     val me = com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
-                    check(me.isNotBlank()) { "Дождитесь подключения перед публикацией" }
+                    check(me.isNotBlank()) { appContext.getString(R.string.vm_wait_connection) }
                     val id = java.util.UUID.randomUUID().toString()
                     val cover = com.vladimir.messenger.data.story.StoryPhoto.prepare(appContext, android.net.Uri.fromFile(exported.cover))
                     com.vladimir.messenger.data.story.StoryVideoStorage.install(appContext, me, id, exported.file, exported.media)
                     val story = com.vladimir.messenger.data.story.StoryStore.publish(me, exported.draft.caption, 0,
                         cover, video = exported.media, id = id, videoCircle = exported.draft.circle)
                     check(chatRepository.enqueueStory(story)) {
-                        "Видео сохранено у вас, но очередь доставки недоступна или нет адресатов."
+                        appContext.getString(R.string.vm_video_queued_no_recipients)
                     }
                     chatRepository.pumpStoryOutbox()
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (failure: Exception) {
-                _uiState.update { it.copy(error = failure.message ?: "Не удалось опубликовать видеоисторию") }
+                _uiState.update { it.copy(error = failure.message ?: appContext.getString(R.string.vm_video_publish_failed)) }
             }
         }.invokeOnCompletion { exported.delete() }
     }
@@ -1052,12 +1052,12 @@ class ChatListViewModel @Inject constructor(
                 com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()
             }
             if (me.isBlank()) {
-                _uiState.update { it.copy(error = "Ядро ещё не готово: дождитесь подключения перед публикацией истории.") }
+                _uiState.update { it.copy(error = appContext.getString(R.string.vm_core_not_ready)) }
                 return@launch
             }
             val story = com.vladimir.messenger.data.story.StoryStore.publish(me, text.take(200), bg, photoB64, photoCircle)
             if (!chatRepository.enqueueStory(story)) {
-                _uiState.update { it.copy(error = "История сохранена у вас, но нет адресатов либо очередь доставки недоступна или заполнена. Проверьте Логи.") }
+                _uiState.update { it.copy(error = appContext.getString(R.string.vm_story_saved_no_recipients)) }
             } else {
                 chatRepository.pumpStoryOutbox()
             }
@@ -1106,7 +1106,7 @@ class ChatListViewModel @Inject constructor(
             } ?: return@launch
             com.vladimir.messenger.data.story.StoryOutbox.cancel(story.id)
             if (!chatRepository.enqueueStory(story, revoke = true)) {
-                _uiState.update { it.copy(error = "История удалена у вас, но не все запросы удаления удалось сохранить. Проверьте Логи.") }
+                _uiState.update { it.copy(error = appContext.getString(R.string.vm_story_deleted_queue_failed)) }
             } else {
                 chatRepository.pumpStoryOutbox()
             }

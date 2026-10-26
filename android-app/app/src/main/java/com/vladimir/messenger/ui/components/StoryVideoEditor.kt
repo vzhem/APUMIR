@@ -25,6 +25,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -71,7 +73,7 @@ internal fun StoryVideoEditor(
         val listener = object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying }
             override fun onPlayerError(playbackError: androidx.media3.common.PlaybackException) {
-                error = "Не удалось воспроизвести видео: ${playbackError.errorCodeName}"
+                error = context.getString(R.string.story_record_playback_failed, playbackError.errorCodeName)
             }
         }
         player.addListener(listener)
@@ -96,20 +98,20 @@ internal fun StoryVideoEditor(
         ApuSettingsCard(Modifier.fillMaxSize().safeDrawingPadding()) {
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Видеоистория · до 60 секунд")
+                Text(stringResource(R.string.story_record_title))
                 StoryVideoShapeSelector(draft.circle, enabled = !busy, onChange = {
                     onDraftChange(draft.copy(circle = it))
                 })
                 StoryVideoSurface(player, draft.circle, Modifier.fillMaxWidth().height(300.dp))
-                ApuPremiumButton(label = androidx.compose.ui.res.stringResource(
-                    if (playing) com.vladimir.messenger.R.string.story_pause else com.vladimir.messenger.R.string.story_resume),
+                ApuPremiumButton(label = stringResource(
+                    if (playing) R.string.story_pause else R.string.story_resume),
                     enabled = !busy, onClick = {
                         if (playing) player.pause() else {
                             if (player.playbackState == Player.STATE_ENDED) player.seekTo(0)
                             player.play()
                         }
                     })
-                Text("Начало: ${draft.startMs / 1000} с · конец: ${draft.endMs / 1000} с")
+                Text(stringResource(R.string.story_record_range, draft.startMs / 1000, draft.endMs / 1000))
                 // Move the start while preserving an interval within the maximum duration.
                 ApuPremiumSlider(value = draft.startMs.toFloat(), enabled = !busy,
                     valueRange = 0f..(source.durationMs - StoryVideoDraft.MIN_DURATION_MS).coerceAtLeast(1).toFloat(),
@@ -118,7 +120,7 @@ internal fun StoryVideoEditor(
                         val end = (start + draft.durationMs).coerceAtMost(source.durationMs)
                         onDraftChange(draft.trim(start, end))
                     })
-                Text("Длительность: ${draft.durationMs / 1000.0} с")
+                Text(stringResource(R.string.story_record_duration, draft.durationMs / 1000.0))
                 val maxDuration = minOf(StoryVideoDraft.MAX_DURATION_MS, source.durationMs - draft.startMs)
                 if (maxDuration > StoryVideoDraft.MIN_DURATION_MS) {
                     ApuPremiumSlider(value = draft.durationMs.toFloat(), enabled = !busy,
@@ -126,11 +128,11 @@ internal fun StoryVideoEditor(
                         onValueChange = { onDraftChange(draft.trim(draft.startMs, draft.startMs + it.toLong())) })
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Без звука")
+                    Text(stringResource(R.string.story_record_muted))
                     ApuPremiumSwitch(checked = draft.muted, enabled = !busy,
                         onCheckedChange = { onDraftChange(draft.copy(muted = it)) })
                 }
-                Text("Обложка: ${(draft.coverMs - draft.startMs) / 1000.0} с от начала фрагмента")
+                Text(stringResource(R.string.story_record_cover, (draft.coverMs - draft.startMs) / 1000.0))
                 ApuPremiumSlider(value = draft.coverMs.toFloat(), enabled = !busy,
                     valueRange = draft.startMs.toFloat()..(draft.endMs - 1).toFloat(),
                     onValueChange = {
@@ -139,14 +141,14 @@ internal fun StoryVideoEditor(
                         player.pause()
                         player.seekTo(changed.exportedCoverMs)
                     })
-                ApuFormTextField(value = draft.caption, label = "Подпись (до 200 символов)",
+                ApuFormTextField(value = draft.caption, label = stringResource(R.string.story_record_caption_label),
                     singleLine = false, enabled = !busy,
                     onValueChange = { onDraftChange(draft.copy(caption = it.take(StoryVideoDraft.MAX_CAPTION_CHARS))) })
-                ApuTextAction(label = androidx.compose.ui.res.stringResource(com.vladimir.messenger.R.string.story_video_reset),
+                ApuTextAction(label = stringResource(R.string.story_video_reset),
                     enabled = !busy, onClick = { player.pause(); resetDialog = true })
                 error?.let { Text(it) }
-                if (busy) Text("Подготовка видео: ${(progress * 100).toInt()}%")
-                ApuPremiumButton(label = if (busy) "Подготавливаем…" else "Подготовить видео",
+                if (busy) Text(stringResource(R.string.story_record_preparing_progress, (progress * 100).toInt()))
+                ApuPremiumButton(label = if (busy) stringResource(R.string.story_record_preparing_short) else stringResource(R.string.story_record_prepare),
                     enabled = !busy, onClick = {
                         player.pause()
                         busy = true
@@ -157,20 +159,20 @@ internal fun StoryVideoEditor(
                             var result: StoryVideoExporter.Exported? = null
                             try {
                                 result = StoryVideoExporter.export(context, source, snapshot) { progress = it }
-                                check(result.matches(source.file, currentDraft)) { "Редактирование изменилось, повторите экспорт" }
+                                check(result.matches(source.file, currentDraft)) { context.getString(R.string.story_record_edit_changed) }
                                 onReady(result)
                                 result = null // Ownership transfers to caller only after successful handoff.
                             } catch (cancelled: CancellationException) {
                                 throw cancelled
                             } catch (failure: Exception) {
-                                error = failure.message ?: "Не удалось подготовить видео"
+                                error = failure.message ?: context.getString(R.string.story_record_prepare_failed)
                             } finally {
                                 result?.delete()
                                 busy = false
                             }
                         }
                     })
-                ApuTextAction(label = if (busy) "Отменить подготовку" else "Закрыть",
+                ApuTextAction(label = if (busy) stringResource(R.string.story_record_cancel_prepare) else stringResource(R.string.action_close),
                     onClick = { if (busy) exportJob?.cancel() else onDismiss() })
             }
         }
@@ -187,8 +189,8 @@ internal fun StoryVideoEditor(
     })
     if (showResetDone) {
         ApuPremiumNoticeDialog(
-            title = androidx.compose.ui.res.stringResource(com.vladimir.messenger.R.string.story_video_reset_done_title),
-            message = androidx.compose.ui.res.stringResource(com.vladimir.messenger.R.string.story_video_reset_done_body),
+            title = stringResource(R.string.story_video_reset_done_title),
+            message = stringResource(R.string.story_video_reset_done_body),
             onDismiss = { showResetDone = false },
             icon = androidx.compose.material.icons.Icons.Default.CheckCircle,
         )

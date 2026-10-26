@@ -367,7 +367,7 @@ class SavedViewModel @Inject constructor(
                         mediaType = if (webm) "video/webm" else "image/webp",
                         sizeBytes = entry.file.length(),
                         storageRef = "local:stk:" + entry.sha256,
-                        sourceTitle = "Стикеры",
+                        sourceTitle = appContext.getString(R.string.saved_source_stickers),
                     )
                     result == com.vladimir.messenger.data.repository.SaveResult.Saved ||
                         result == com.vladimir.messenger.data.repository.SaveResult.AlreadySaved
@@ -399,7 +399,7 @@ class SavedViewModel @Inject constructor(
                         mediaType = mediaType,
                         sizeBytes = bytes.size.toLong(),
                         storageRef = "local:doc:" + disk.name,
-                        sourceTitle = "С телефона",
+                        sourceTitle = appContext.getString(R.string.saved_source_from_phone),
                     )
                     if (result == com.vladimir.messenger.data.repository.SaveResult.Saved) name else null
                 }.getOrNull()
@@ -428,7 +428,7 @@ class SavedViewModel @Inject constructor(
                     val added = com.vladimir.messenger.data.gif.GifLibrary.add(
                         appContext, bytes, null, "своя", name,
                     ) ?: return@withContext false
-                    favoriteLibraryGif(added, "С телефона")
+                    favoriteLibraryGif(added, appContext.getString(R.string.saved_source_from_phone))
                 }.getOrDefault(false)
             }
             _uiState.update {
@@ -450,7 +450,7 @@ class SavedViewModel @Inject constructor(
                         val bytes = botApi.downloadGif(item.gif) ?: return@runCatching false
                         com.vladimir.messenger.data.gif.GifLibrary.add(appContext, bytes, item.id, "каталог", null)
                     } ?: return@runCatching false
-                    favoriteLibraryGif(entry, "Из каталога")
+                    favoriteLibraryGif(entry, appContext.getString(R.string.saved_source_from_catalog))
                 }.getOrDefault(false)
             }
             _uiState.update {
@@ -463,7 +463,7 @@ class SavedViewModel @Inject constructor(
     fun addLibraryGif(entry: com.vladimir.messenger.data.gif.GifLibEntry) {
         viewModelScope.launch {
             val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                runCatching { favoriteLibraryGif(entry, "Мои гифки") }.getOrDefault(false)
+                runCatching { favoriteLibraryGif(entry, appContext.getString(R.string.saved_source_my_gifs)) }.getOrDefault(false)
             }
             _uiState.update {
                 it.copy(message = if (ok) appContext.getString(R.string.sv_already) else appContext.getString(R.string.sv_add_failed))

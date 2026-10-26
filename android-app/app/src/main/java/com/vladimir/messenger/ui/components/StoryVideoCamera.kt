@@ -105,8 +105,17 @@ import java.io.File
 private val recordRed = Color(0xFFE5484D)
 
 /** Какая часть лица сейчас выбирается в панели фильтров. */
-private enum class FilterPart(val label: String) {
-    EARS("Уши"), NOSE("Нос"), EYES("Глаза"), LIPS("Губы"), BROWS("Брови"), WHISKERS("Кошачьи усы"), CHEEKS("Щёки"), HAIR("Прически"), BEARD("Бороды"), MUSTACHE("Усы людей")
+private enum class FilterPart(@androidx.annotation.StringRes val labelRes: Int) {
+    EARS(R.string.story_record_part_ears),
+    NOSE(R.string.story_record_part_nose),
+    EYES(R.string.story_record_part_eyes),
+    LIPS(R.string.story_record_part_lips),
+    BROWS(R.string.story_record_part_brows),
+    WHISKERS(R.string.story_record_part_whiskers),
+    CHEEKS(R.string.story_record_part_cheeks),
+    HAIR(R.string.story_record_part_hair),
+    BEARD(R.string.story_record_part_beard),
+    MUSTACHE(R.string.story_record_part_mustache),
 }
 
 /**
@@ -164,11 +173,11 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
     var filterPart by remember { mutableStateOf(FilterPart.EARS) }
     val cameraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         cameraAllowed = it
-        if (!it) error = "Для записи нужен доступ к камере. Можно выбрать видео из галереи."
+        if (!it) error = context.getString(R.string.story_record_camera_denied)
     }
     val audioPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         audio = it
-        if (!it) error = "Микрофон недоступен. Можно записать видео без звука."
+        if (!it) error = context.getString(R.string.story_record_mic_denied)
     }
     // Просим микрофон сразу при открытии экрана, если его ещё нет; отказ оставит запись без звука.
     LaunchedEffect(Unit) {
@@ -199,7 +208,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {
-                error = failure.message ?: "Не удалось открыть камеру"
+                error = failure.message ?: context.getString(R.string.story_record_open_failed)
             }
         }
     }
@@ -242,7 +251,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                 val file = result.getOrNull()
                 if (file == null) {
                     stopping = false
-                    error = result.exceptionOrNull()?.message ?: "Запись не удалась"
+                    error = result.exceptionOrNull()?.message ?: context.getString(R.string.story_record_failed)
                 } else {
                     // Completion handler also runs if the scope was already cancelled.
                     var handedOff = false
@@ -287,7 +296,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                                     produced.delete()
                                     Toast.makeText(
                                         context,
-                                        "Обработанное видео повреждено, сохранено без фона",
+                                        context.getString(R.string.story_record_processed_broken),
                                         Toast.LENGTH_LONG,
                                     ).show()
                                     StoryVideoFiles.inspect(file)
@@ -298,7 +307,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                         } catch (cancelled: CancellationException) {
                             throw cancelled
                         } catch (failure: Exception) {
-                            error = failure.message ?: "Не удалось прочитать запись"
+                            error = failure.message ?: context.getString(R.string.story_record_read_failed)
                         } finally {
                             stopping = false
                             processing = null
@@ -313,7 +322,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
             })
         } catch (failure: Exception) {
             recording = false
-            error = failure.message ?: "Не удалось начать запись"
+            error = failure.message ?: context.getString(R.string.story_record_start_failed)
         }
     }
 
@@ -351,9 +360,9 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
             } else {
                 Column(Modifier.align(Alignment.Center).padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Камера выключена", color = Color.White, style = MaterialTheme.typography.titleMedium)
+                    Text(stringResource(R.string.story_record_camera_off), color = Color.White, style = MaterialTheme.typography.titleMedium)
                     Spacer(Modifier.height(12.dp))
-                    ApuPremiumButton(label = "Разрешить камеру", onClick = {
+                    ApuPremiumButton(label = stringResource(R.string.story_record_allow_camera), onClick = {
                         cameraPermission.launch(Manifest.permission.CAMERA)
                     })
                 }
@@ -364,7 +373,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                 Modifier.align(Alignment.TopCenter).fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                StoryCameraIconButton(Icons.Default.Close, "Закрыть", enabled = !stopping) {
+                StoryCameraIconButton(Icons.Default.Close, stringResource(R.string.action_close), enabled = !stopping) {
                     session.close(); dismiss()
                 }
                 Spacer(Modifier.weight(1f))
@@ -373,13 +382,13 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                 if (hasTorch && !front) {
                     StoryCameraIconButton(
                         if (torch) Icons.Default.FlashOn else Icons.Default.FlashOff,
-                        if (torch) "Выключить фонарик" else "Включить фонарик",
+                        if (torch) stringResource(R.string.story_record_torch_off) else stringResource(R.string.story_record_torch_on),
                         enabled = ready && !stopping,
                         active = torch,
                     ) { torch = !torch }
                     Spacer(Modifier.width(8.dp))
                 }
-                StoryCameraIconButton(Icons.Default.Cameraswitch, "Переключить камеру",
+                StoryCameraIconButton(Icons.Default.Cameraswitch, stringResource(R.string.story_camera_switch),
                     enabled = cameraAllowed && !recording && !stopping) {
                     front = !front
                     error = null
@@ -403,7 +412,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
 
             if (storyBackground.isActive && liveBackgroundStatus != null) {
                 Text(
-                    "Фон не применился: ${liveBackgroundStatus}",
+                    stringResource(R.string.story_record_background_failed, liveBackgroundStatus.orEmpty()),
                     color = Color.White,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier
@@ -440,7 +449,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
             ) {
                 if (cameraAllowed && !recording && !stopping) {
                     if (ready && !session.faceTrackingAvailable) {
-                        Text("Фильтры лица на этом устройстве недоступны",
+                        Text(stringResource(R.string.story_record_face_filters_unavailable),
                             color = Color.White.copy(alpha = 0.8f), style = MaterialTheme.typography.bodySmall)
                     } else {
                         StoryBackgroundPicker(
@@ -462,12 +471,12 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                         ) {
                             StoryCameraIconButton(
                                 Icons.Filled.GraphicEq,
-                                "Эффект голоса",
+                                stringResource(R.string.voice_effect_title),
                                 active = voiceEffect != com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL,
                             ) { showVoiceEffects = true }
                             Text(
-                                if (voiceEffect == com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL) "Голос: обычный"
-                                else "Голос: " + stringResource(voiceEffect.labelRes),
+                                if (voiceEffect == com.vladimir.messenger.data.voice.VoiceEffect.ORIGINAL) stringResource(R.string.story_record_voice_normal)
+                                else stringResource(R.string.story_record_voice_named, stringResource(voiceEffect.labelRes)),
                                 color = Color.White,
                                 style = MaterialTheme.typography.bodySmall,
                             )
@@ -496,7 +505,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                         if (recording) {
                             StoryCameraIconButton(
                                 if (paused) Icons.Default.PlayArrow else Icons.Default.Pause,
-                                if (paused) "Продолжить" else "Пауза",
+                                if (paused) stringResource(R.string.story_record_resume) else stringResource(R.string.story_record_pause),
                                 enabled = !stopping,
                             ) {
                                 if (paused) session.resume() else session.pause()
@@ -505,7 +514,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                         } else {
                             StoryCameraIconButton(
                                 if (audio) Icons.Default.Mic else Icons.Default.MicOff,
-                                if (audio) "Звук включён" else "Звук выключен",
+                                if (audio) stringResource(R.string.story_record_sound_on) else stringResource(R.string.story_record_sound_off),
                                 enabled = !recording && !stopping,
                                 active = audio,
                             ) {
@@ -537,17 +546,17 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                 }
                 Text(
                     when {
-                        stopping -> processing?.let { "Накладываем фильтр… ${(it * 100).toInt()}%" } ?: "Сохраняем…"
-                        recording -> if (paused) "Пауза · нажмите кнопку, чтобы завершить" else "Нажмите, чтобы завершить"
-                        !ready && cameraAllowed -> "Подготовка камеры…"
-                        else -> "Видеоистория · до 60 секунд"
+                        stopping -> processing?.let { stringResource(R.string.story_record_applying_filter, (it * 100).toInt()) } ?: stringResource(R.string.story_record_saving)
+                        recording -> if (paused) stringResource(R.string.story_record_paused_hint) else stringResource(R.string.story_record_finish_hint)
+                        !ready && cameraAllowed -> stringResource(R.string.story_record_preparing)
+                        else -> stringResource(R.string.story_record_title)
                     },
                     color = Color.White.copy(alpha = 0.85f),
                     style = MaterialTheme.typography.labelLarge,
                 )
                 if (!recording && !stopping) {
                     Text(
-                        "Отменить",
+                        stringResource(R.string.action_cancel),
                         color = Color.White,
                         style = MaterialTheme.typography.titleSmall,
                         modifier = Modifier
@@ -613,7 +622,7 @@ private fun StoryTimerPill(elapsedMs: Long, recording: Boolean, paused: Boolean)
             Spacer(Modifier.width(7.dp))
         }
         Text(
-            "%d:%02d / 1:00".format(seconds / 60, seconds % 60) + if (paused) " · пауза" else "",
+            "%d:%02d / 1:00".format(seconds / 60, seconds % 60) + if (paused) stringResource(R.string.story_record_paused_suffix) else "",
             color = Color.White,
             style = MaterialTheme.typography.labelLarge,
         )
@@ -710,10 +719,10 @@ private fun StoryFilterPicker(
         ) {
             // Быстрый сброс: все части в «Без» одним нажатием.
             item {
-                ApuPremiumChip(label = "Без фильтров", selected = !filter.isActive, onClick = { onFilter(StoryFaceFilter.NONE) })
+                ApuPremiumChip(label = stringResource(R.string.story_record_no_filters), selected = !filter.isActive, onClick = { onFilter(StoryFaceFilter.NONE) })
             }
             items(FilterPart.entries) { entry ->
-                ApuPremiumChip(label = entry.label, selected = part == entry, onClick = { onPart(entry) })
+                ApuPremiumChip(label = stringResource(entry.labelRes), selected = part == entry, onClick = { onPart(entry) })
             }
         }
         LazyRow(
@@ -742,7 +751,7 @@ private fun StoryBackgroundPicker(
         ) {
             item {
                 ApuPremiumChip(
-                    label = "Фон: " + stringResource(selected.labelRes),
+                    label = stringResource(R.string.story_record_background_prefix, stringResource(selected.labelRes)),
                     selected = selected.isActive,
                     onClick = onToggle,
                 )
@@ -759,7 +768,7 @@ private fun StoryBackgroundPicker(
         }
         if (selected.isActive) {
             Text(
-                "Фон уже виден на экране и попадёт в запись",
+                stringResource(R.string.story_record_background_live_hint),
                 color = Color.White.copy(alpha = 0.8f),
                 style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 16.dp),

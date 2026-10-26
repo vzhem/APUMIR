@@ -33,9 +33,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.vladimir.messenger.R
 import com.vladimir.messenger.data.call.CallVideo
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
@@ -315,8 +317,8 @@ private fun CallBackgroundPreview(
             )
             if (backgroundPending) {
                 Text(
-                    text = backgroundStatus?.let { "Фон не применился: $it" }
-                        ?: "Фон подготавливается…",
+                    text = backgroundStatus?.let { context.getString(R.string.call_background_failed, it) }
+                        ?: context.getString(R.string.call_background_preparing),
                     color = Color.White,
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
