@@ -1,5 +1,9 @@
 # Release handoff — 2026-10-12
 
+> **Это исторический документ.** Здесь зафиксирован срез на дату, и «текущий релиз»
+> внутри — тот, что был актуален тогда. Текущее состояние проекта: `docs/APP_DELIVERY_TRACKER.md`;
+> карта всех документов: `docs/README.md`.
+
 ## Fixed branch and restored line
 
 Continue only on `arena/4f0b31c5-apumir`; do not switch to PR #43's `arena/7ab0e8d6-apumir`.

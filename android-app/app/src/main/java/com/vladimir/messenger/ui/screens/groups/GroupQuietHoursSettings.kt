@@ -33,6 +33,7 @@ private data class QuietIntervalDraft(
 @Composable
 internal fun GroupQuietHoursSettings(raw: String, canEdit: Boolean, onSave: (String) -> Unit) {
     val language by AppLanguageHolder.language.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
     val locale = remember(language) { java.util.Locale.forLanguageTag(language.code) }
     val stored = remember(raw) { GroupQuietSchedule.decode(raw) }
     val localScheduleNotice = rememberGroupScheduleNotice(stored)
@@ -48,7 +49,12 @@ internal fun GroupQuietHoursSettings(raw: String, canEdit: Boolean, onSave: (Str
     var zoneSearch by remember { mutableStateOf("") }
     val zoneDisplayTime = remember(chooseZone, locale) { java.time.Instant.now() }
     val zoneLabel = remember(zone, locale, zoneDisplayTime) { GroupTimeZones.entry(zone, locale, zoneDisplayTime).label }
-    val dayNames = listOf("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
+    val dayNames = listOf(
+        R.string.group_quiet_hours_day_mon, R.string.group_quiet_hours_day_tue,
+        R.string.group_quiet_hours_day_wed, R.string.group_quiet_hours_day_thu,
+        R.string.group_quiet_hours_day_fri, R.string.group_quiet_hours_day_sat,
+        R.string.group_quiet_hours_day_sun,
+    ).map { stringResource(it) }
     fun update(index: Int, draft: QuietIntervalDraft) {
         drafts = drafts.mapIndexed { i, value -> if (i == index) draft else value }
     }
@@ -74,28 +80,28 @@ internal fun GroupQuietHoursSettings(raw: String, canEdit: Boolean, onSave: (Str
     }
     ApuBubble {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Расписание запрета сообщений")
-            Text("Для обычных участников во всех темах. Владелец и администраторы могут писать.")
+            Text(stringResource(R.string.group_quiet_hours_title))
+            Text(stringResource(R.string.group_quiet_hours_scope_hint))
             if (!canEdit) {
-                if (stored == null) Text("Выключено")
+                if (stored == null) Text(stringResource(R.string.group_quiet_hours_state_off))
                 if (localScheduleNotice.isNotBlank()) Text(localScheduleNotice)
-                if (stored != null) Text(if (language.code == "en") "Original schedule in the group time zone:" else "Исходное расписание по часовому поясу группы:")
+                if (stored != null) Text(stringResource(R.string.group_quiet_hours_original_zone))
                 stored?.intervals?.forEach { interval ->
                     Text("${interval.days.sorted().joinToString { dayNames[it - 1] }}: ${GroupQuietHours.time(interval.startMinute)}–${GroupQuietHours.time(interval.endMinute)} (${GroupTimeZones.entry(interval.zoneId, locale, zoneDisplayTime).label})")
                 }
             } else {
                 Row {
-                    Text("Включено", Modifier.weight(1f))
+                    Text(stringResource(R.string.group_quiet_hours_state_on), Modifier.weight(1f))
                     ApuPremiumSwitch(checked = enabled, onCheckedChange = { enabled = it })
                 }
                 if (enabled) {
                     ApuTextAction(label = stringResource(R.string.group_timezone_selected, zoneLabel), onClick = { chooseZone = true })
-                    Text("Каждому интервалу можно задать свои дни и любое время с точностью до минуты. Ночной интервал относится к дню начала: Пн 23:00–08:00 — до утра вторника.")
+                    Text(stringResource(R.string.group_quiet_hours_window_hint))
                     drafts.forEachIndexed { index, draft ->
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             Row {
-                                Text("Интервал ${index + 1}", Modifier.weight(1f))
-                                ApuTextAction(label = "Удалить", onClick = {
+                                Text(stringResource(R.string.group_quiet_hours_window_number, index + 1), Modifier.weight(1f))
+                                ApuTextAction(label = stringResource(R.string.group_quiet_hours_remove), onClick = {
                                     drafts = drafts.filterIndexed { i, _ -> i != index }
                                 })
                             }
@@ -106,23 +112,23 @@ internal fun GroupQuietHoursSettings(raw: String, canEdit: Boolean, onSave: (Str
                                         onClick = { update(index, draft.copy(days = if (day in draft.days) draft.days - day else draft.days + day)) })
                                 }
                             }
-                            ApuFormTextField(value = draft.start, onValueChange = { update(index, draft.copy(start = it)) }, label = "Нельзя писать с (ЧЧ:ММ)")
-                            ApuFormTextField(value = draft.end, onValueChange = { update(index, draft.copy(end = it)) }, label = "Окончание запрета (ЧЧ:ММ)")
+                            ApuFormTextField(value = draft.start, onValueChange = { update(index, draft.copy(start = it)) }, label = stringResource(R.string.group_quiet_hours_start_label))
+                            ApuFormTextField(value = draft.end, onValueChange = { update(index, draft.copy(end = it)) }, label = stringResource(R.string.group_quiet_hours_end_label))
                         }
                     }
-                    ApuTextAction(label = "Добавить интервал", enabled = drafts.size < 32,
+                    ApuTextAction(label = stringResource(R.string.group_quiet_hours_add_window), enabled = drafts.size < 32,
                         onClick = { drafts = drafts + QuietIntervalDraft() })
-                    Text("Пересекающиеся интервалы объединяются: писать можно, когда ни один запрет не действует.")
+                    Text(stringResource(R.string.group_quiet_hours_overlap_hint))
                 }
                 error?.let { Text(it) }
-                ApuPremiumButton(label = "Сохранить расписание", style = DiagnosticsActionStyle.PRIMARY, onClick = {
+                ApuPremiumButton(label = stringResource(R.string.group_quiet_hours_save), style = DiagnosticsActionStyle.PRIMARY, onClick = {
                     val result = runCatching {
                         if (!enabled) "" else GroupQuietSchedule(drafts.map { draft ->
                             GroupQuietHours(draft.days, GroupQuietHours.minute(draft.start.trim()), GroupQuietHours.minute(draft.end.trim()), zone)
                         }).encode()
                     }
                     result.onSuccess { error = null; onSave(it) }
-                        .onFailure { error = "Проверьте дни и время. ${it.message.orEmpty()}" }
+                        .onFailure { error = context.getString(R.string.group_quiet_hours_invalid) + " " + it.message.orEmpty() }
                 })
             }
         }

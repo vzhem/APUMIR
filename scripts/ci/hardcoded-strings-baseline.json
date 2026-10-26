@@ -1,0 +1,28 @@
+{
+  "_comment": "Разрешённое число русских строковых литералов в файлах ui/**. Уменьшать можно и нужно; увеличение — только осознанно, с планом перевода.",
+  "allowed": {
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/components/ConversationWallpaperDialog.kt": 1,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/components/LocationPicker.kt": 1,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/components/Stories.kt": 1,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/components/StoryVideoCamera.kt": 43,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/components/StoryVideoComposer.kt": 9,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/components/StoryVideoEditor.kt": 14,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/components/StoryVideoPlayer.kt": 4,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/components/TopicEmojiPicker.kt": 299,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/i18n/AppLanguage.kt": 1,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/call/CallLocalPreview.kt": 2,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/channels/ChannelViewModel.kt": 5,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/chat/ChatDetailViewModel.kt": 11,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/chat/ChatListViewModel.kt": 11,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/contacts/ContactPresence.kt": 7,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupAdminScreen.kt": 3,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupAdminViewModel.kt": 1,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupChatScreen.kt": 2,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupChatViewModel.kt": 10,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/saved/SavedViewModel.kt": 12,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsScreen.kt": 1,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsViewModel.kt": 2,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/share/ShareProfileScreen.kt": 1,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/update/UpdateViewModel.kt": 1
+  }
+}

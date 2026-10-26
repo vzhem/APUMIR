@@ -175,31 +175,31 @@ class SettingsViewModel @Inject constructor(
     // ── Рой APK (docs/UPDATE_SEEDING.md): карточка «Обновления» ─────────────
 
     /** Моя раздача обновления (сидер — синглтон, потоки живые). */
-    val apkSeed: kotlinx.coroutines.flow.StateFlow<com.vladimir.messenger.data.update.ApkSeeder.SeedUi?>
+    val apkSeed: kotlinx.coroutines.flow.StateFlow<com.vladimir.messenger.data.update.SeedUi?>
         get() = apkSeeder.seed
 
     /** Объявления соседей: только версии новее моей, лучшие первыми. */
-    val apkOffers: kotlinx.coroutines.flow.StateFlow<List<com.vladimir.messenger.data.update.ApkSeeder.Offer>>
+    val apkOffers: kotlinx.coroutines.flow.StateFlow<List<com.vladimir.messenger.data.update.Offer>>
         get() = apkSeeder.offers
 
     /** Приём обновления: ход в байтах. */
-    val apkDownload: kotlinx.coroutines.flow.StateFlow<com.vladimir.messenger.data.update.ApkSeeder.Download?>
+    val apkDownload: kotlinx.coroutines.flow.StateFlow<com.vladimir.messenger.data.update.Download?>
         get() = apkSeeder.download
 
     /** Скачанное обновление: можно ставить, раздача уже идёт. */
-    val apkReady: kotlinx.coroutines.flow.StateFlow<com.vladimir.messenger.data.update.ApkSeeder.Ready?>
+    val apkReady: kotlinx.coroutines.flow.StateFlow<com.vladimir.messenger.data.update.Ready?>
         get() = apkSeeder.ready
 
     /** Принятые APK-файлы: кандидаты на «отметить как обновление». */
-    val apkReceivedApks: kotlinx.coroutines.flow.StateFlow<List<com.vladimir.messenger.data.update.ApkSeeder.ReceivedApk>>
+    val apkReceivedApks: kotlinx.coroutines.flow.StateFlow<List<com.vladimir.messenger.data.update.ReceivedApk>>
         get() = apkSeeder.receivedApks
 
     /** Раунд 133: предложения соседей — дифф-патчи для ровно моей версии. */
-    val apkPatchOffers: kotlinx.coroutines.flow.StateFlow<List<com.vladimir.messenger.data.update.ApkSeeder.PatchOfferUi>>
+    val apkPatchOffers: kotlinx.coroutines.flow.StateFlow<List<com.vladimir.messenger.data.update.PatchOfferUi>>
         get() = apkSeeder.patchOffers
 
     /** Раунд 133: ход приёма дифф-патча. */
-    val apkPatchDownload: kotlinx.coroutines.flow.StateFlow<com.vladimir.messenger.data.update.ApkSeeder.PatchDownload?>
+    val apkPatchDownload: kotlinx.coroutines.flow.StateFlow<com.vladimir.messenger.data.update.PatchDownload?>
         get() = apkSeeder.patchDownload
 
     /**

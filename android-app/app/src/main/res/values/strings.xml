@@ -2199,4 +2199,25 @@
     <string name="settings_reset_done_title">Готово</string>
     <string name="settings_default_done_body">Настройка возвращена к значению по умолчанию.</string>
     <string name="settings_reset_done_body">Выбранные настройки возвращены к значениям по умолчанию. Переписка и данные аккаунта не изменены.</string>
+    <string name="group_quiet_hours_title">Расписание запрета сообщений</string>
+    <string name="group_quiet_hours_scope_hint">Для обычных участников во всех темах. Владелец и администраторы могут писать.</string>
+    <string name="group_quiet_hours_state_off">Выключено</string>
+    <string name="group_quiet_hours_state_on">Включено</string>
+    <string name="group_quiet_hours_original_zone">Исходное расписание по часовому поясу группы:</string>
+    <string name="group_quiet_hours_window_hint">Каждому интервалу можно задать свои дни и любое время с точностью до минуты. Ночной интервал относится к дню начала: Пн 23:00–08:00 — до утра вторника.</string>
+    <string name="group_quiet_hours_window_number">Интервал %1$d</string>
+    <string name="group_quiet_hours_remove">Удалить</string>
+    <string name="group_quiet_hours_start_label">Нельзя писать с (ЧЧ:ММ)</string>
+    <string name="group_quiet_hours_end_label">Окончание запрета (ЧЧ:ММ)</string>
+    <string name="group_quiet_hours_add_window">Добавить интервал</string>
+    <string name="group_quiet_hours_overlap_hint">Пересекающиеся интервалы объединяются: писать можно, когда ни один запрет не действует.</string>
+    <string name="group_quiet_hours_save">Сохранить расписание</string>
+    <string name="group_quiet_hours_invalid">Проверьте дни и время.</string>
+    <string name="group_quiet_hours_day_mon">Пн</string>
+    <string name="group_quiet_hours_day_tue">Вт</string>
+    <string name="group_quiet_hours_day_wed">Ср</string>
+    <string name="group_quiet_hours_day_thu">Чт</string>
+    <string name="group_quiet_hours_day_fri">Пт</string>
+    <string name="group_quiet_hours_day_sat">Сб</string>
+    <string name="group_quiet_hours_day_sun">Вс</string>
 </resources>
