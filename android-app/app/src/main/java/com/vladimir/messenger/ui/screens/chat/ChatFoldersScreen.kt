@@ -28,7 +28,6 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -63,6 +62,7 @@ import com.vladimir.messenger.R
 import com.vladimir.messenger.data.folder.ChatFolder
 import com.vladimir.messenger.ui.components.ApuBubbleField
 import com.vladimir.messenger.ui.components.ApuPremiumButton
+import com.vladimir.messenger.ui.components.ApuPremiumCheckbox
 import com.vladimir.messenger.ui.components.ApuPremiumChip
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuTextAction
@@ -540,7 +540,7 @@ private fun FolderEditor(
                             .padding(vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Checkbox(
+                        ApuPremiumCheckbox(
                             checked = option.key in selected,
                             onCheckedChange = { checked ->
                                 selected = if (checked) selected + option.key else selected - option.key
