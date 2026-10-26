@@ -1070,14 +1070,6 @@ class ApkSeeder @Inject constructor(
     }
 
     /**
-     * Установить скачанное обновление (FileProvider, как у UpdateChecker).
-     * Возвращает текст ошибки для карточки: пусто — установщик запущен.
-     * Ошибки НЕ молчат: молчаливый отказ выглядит как «кнопка не работает»
-     * (так и было: файл принятого обновления лежит в noBackupFilesDir,
-     * которого не было в file_paths.xml — getUriForFile бросал, корутина
-     * умирала молча).
-     */
-    /**
      * Android 8+ требует отдельное разрешение «устанавливать неизвестные
      * приложения». Без него установщик открывается и сразу закрывается, а
      * человек видит только «Android не открыл установщик». Спрашиваем заранее —
@@ -1086,6 +1078,14 @@ class ApkSeeder @Inject constructor(
     fun installPermissionMissing(): Boolean =
         Build.VERSION.SDK_INT >= 26 && !appContext.packageManager.canRequestPackageInstalls()
 
+    /**
+     * Установить скачанное обновление (FileProvider, как у UpdateChecker).
+     * Возвращает текст ошибки для карточки: пусто — установщик запущен.
+     * Ошибки НЕ молчат: молчаливый отказ выглядит как «кнопка не работает»
+     * (так и было: файл принятого обновления лежит в noBackupFilesDir,
+     * которого не было в file_paths.xml — getUriForFile бросал, корутина
+     * умирала молча).
+     */
     suspend fun installReady(): String {
         val readyInfo = _ready.value ?: return "Обновление уже установлено — карточка устарела"
         if (installPermissionMissing()) return INSTALL_PERMISSION_HINT
