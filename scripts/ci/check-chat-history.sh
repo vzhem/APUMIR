@@ -4,6 +4,9 @@
 # Uses the same Kotlin/coroutines/JUnit versions as the app. All downloads and
 # compiled output stay in ignored target/. Requires Java 17+, curl and Python 3.
 set -euo pipefail
+# Логи Actions из песочницы не выкачиваются: без этой строки при падении
+# видно только хвост вывода, а не команду, на которой всё встало.
+trap 'status=$?; echo "chat-history: FAILED at line $LINENO: $BASH_COMMAND (exit $status)" >&2' ERR
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 python3 "$ROOT/scripts/ci/check-deferred-cancel.py"
 python3 "$ROOT/scripts/ci/check-delete-read.py"
