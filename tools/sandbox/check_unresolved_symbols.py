@@ -80,6 +80,8 @@ AUTO_IMPORTED = {
     # kotlin.text.* / kotlin.collections.* (тоже без импорта)
     'Charsets', 'RegexOption', 'MatchNamedGroupCollection', 'MatchGroupCollection',
     'MatchGroup', 'ArrayDeque', 'Comparator',
+    # kotlin.io.*: константы потокового копирования, импорт не нужен
+    'DEFAULT_BUFFER_SIZE', 'DEFAULT_BLOCK_SIZE',
 }
 
 # `*` обязателен в шаблоне: `import androidx.compose.foundation.layout.*` иначе

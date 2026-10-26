@@ -42,6 +42,8 @@ import com.vladimir.messenger.MainActivity
 import com.vladimir.messenger.R
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.group.GroupInviteLinks
+import com.vladimir.messenger.util.copyWithLimit
+import com.vladimir.messenger.util.readBytesAtMost
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -63,6 +65,9 @@ object ProfileSyncNet {
     private const val TAG = "ProfileSyncNet"
     private const val HTTP_TIMEOUT = 30_000
     private const val READ_TIMEOUT = 120_000
+    private const val COPY_BUFFER_BYTES = 64 * 1024
+    /** Тело ошибки релея всего лишь показывается в сообщении — 8 КБ хватает с запасом. */
+    private const val ERROR_BODY_BYTES = 8L * 1024
 
     // nodeId личности ОДИНАКОВ на всех её телефонах, поэтому по нему нельзя
     // понять, кто выложил копию. Этот идентификатор установки хранится отдельно
@@ -72,6 +77,14 @@ object ProfileSyncNet {
 
     /** Лимит релея: 24 МБ base64 (копия без медиа обычно 1-5 МБ). */
     const val MAX_B64_CHARS = 24_000_000
+
+    /**
+     * Сколько сырых байт помещается в [MAX_B64_CHARS]: base64 кодирует каждые
+     * 3 байта в 4 символа, поэтому 24 000 000 символов — это 18 000 000 байт.
+     * Раньше проверялось уже ПОСЛЕ сборки строки base64, то есть файл успевал
+     * целиком оказаться в куче (аудит 2026-10-26, п. 4.5).
+     */
+    const val MAX_RAW_BYTES = MAX_B64_CHARS / 4L * 3L
 
     /** Итог ручной отправки. fp - отпечаток данных отправленной копии. */
     sealed interface UploadResult {
@@ -189,20 +202,29 @@ object ProfileSyncNet {
                 else -> UploadResult.Failed("копия не собралась")
             }
         }
-        val bytes = temp.readBytes()
-        temp.delete()
-        if (bytes.isEmpty()) return UploadResult.Failed("копия пуста")
-        val b64 = Base64.encodeToString(bytes, Base64.NO_WRAP)
-        if (b64.length > MAX_B64_CHARS) {
-            return UploadResult.TooBig((bytes.size / (1024L * 1024L)).toInt() + 1)
+        // Размер проверяем ДО чтения и ни разу не держим копию в памяти
+        // целиком: base64 кодируется потоком сразу в сокет.
+        val size = temp.length()
+        if (size <= 0L) {
+            temp.delete()
+            return UploadResult.Failed("копия пуста")
+        }
+        if (size > MAX_RAW_BYTES) {
+            temp.delete()
+            return UploadResult.TooBig((size / (1024L * 1024L)).toInt() + 1)
         }
         // The snapshot may take seconds to assemble: re-check before any HTTP.
         if (!RustBridge.externalTransportAllowed()) {
+            temp.delete()
             return UploadResult.Failed("Рой снова доступен; внешняя копия отложена")
         }
         // Выкладываем с меткой устройства: авто-режим отличит свою копию от чужой.
         val conn = (URL(baseUrl() + slot).openConnection() as HttpURLConnection).apply {
             requestMethod = "PUT"
+            // Без явной длины HttpURLConnection копит тело запроса в памяти
+            // целиком — то есть потоковое кодирование выше ничего бы не дало.
+            // Длина base64 считается точно: 4 символа на каждые 3 байта.
+            setFixedLengthStreamingMode(4L * ((size + 2) / 3))
             doOutput = true
             setRequestProperty("Content-Type", "text/plain")
             setRequestProperty("X-Apu-Check", sha256(code))
@@ -211,13 +233,23 @@ object ProfileSyncNet {
             readTimeout = READ_TIMEOUT
         }
         try {
-            conn.outputStream.use { it.write(b64.toByteArray(Charsets.US_ASCII)) }
+            // Base64.getEncoder().wrap() даёт поток без переводов строк — то же,
+            // что Base64.NO_WRAP, но без строки на 24 МБ в куче.
+            try {
+                conn.outputStream.use { raw ->
+                    java.util.Base64.getEncoder().wrap(raw).use { encoder ->
+                        temp.inputStream().use { input -> input.copyTo(encoder, COPY_BUFFER_BYTES) }
+                    }
+                }
+            } finally {
+                temp.delete()
+            }
             val resp = conn.responseCode
             if (resp !in 200..299) {
                 // Раунд 256: тело ошибки релея ({"error": …}) - в сообщение,
                 // чтобы по скриншоту была видна серверная причина.
                 val detail = runCatching {
-                    conn.errorStream?.readBytes()?.decodeToString()?.trim()?.take(140)
+                    conn.errorStream?.readBytesAtMost(ERROR_BODY_BYTES)?.decodeToString()?.trim()?.take(140)
                 }.getOrNull()
                 return UploadResult.Failed(
                     "сервис ответил $resp" + (detail?.let { ": $it" } ?: ""),
@@ -228,7 +260,7 @@ object ProfileSyncNet {
         } finally {
             conn.disconnect()
         }
-        return UploadResult.Ok(bytes.size.toLong(), created.dataFp)
+        return UploadResult.Ok(size, created.dataFp)
     }
 
     /** Есть ли копия в релее (без скачивания). */
@@ -280,17 +312,31 @@ object ProfileSyncNet {
                     !in 200..299 -> {
                         // Раунд 256: серверная причина - в сообщение.
                         val detail = runCatching {
-                            conn.errorStream?.readBytes()?.decodeToString()?.trim()?.take(140)
+                            conn.errorStream?.readBytesAtMost(ERROR_BODY_BYTES)?.decodeToString()?.trim()?.take(140)
                         }.getOrNull()
                         return@withContext FetchResult.Failed(
                             "сервис ответил ${conn.responseCode}" + (detail?.let { ": $it" } ?: ""),
                         )
                     }
                 }
-                val b64 = conn.inputStream.bufferedReader().use { it.readText() }
-                val bytes = Base64.decode(b64, Base64.NO_WRAP)
+                // Ответ тоже разбираем потоком: раньше здесь сначала появлялась
+                // строка base64 (до 48 МБ в куче), потом массив байт рядом с ней.
+                val declared = conn.contentLengthLong
+                if (declared > MAX_B64_CHARS.toLong() + 4096L) {
+                    return@withContext FetchResult.Failed("копия больше допустимого размера")
+                }
                 val dest = File(context.applicationContext.noBackupFilesDir, "profile_net.apubak")
-                dest.writeBytes(bytes)
+                val decodedOk = dest.outputStream().use { out ->
+                    conn.inputStream.use { raw ->
+                        android.util.Base64InputStream(raw, Base64.NO_WRAP).use { decoded ->
+                            copyWithLimit(decoded, out, MAX_RAW_BYTES)
+                        }
+                    }
+                }
+                if (!decodedOk) {
+                    dest.delete()
+                    return@withContext FetchResult.Failed("копия больше допустимого размера")
+                }
                 FetchResult.Ready(dest)
             } catch (e: Exception) {
                 Log.w(TAG, "fetch failed: ${e.message}")

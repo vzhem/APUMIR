@@ -17,6 +17,7 @@ import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
 import java.io.EOFException
 import java.io.File
+import com.vladimir.messenger.util.readBytesAtMost
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
@@ -396,6 +397,8 @@ class ProfileBackup @Inject constructor(
         private const val RECEIVED_ROOT = "file_received/v1"
         private const val PREVIEW_ROOT = "file_preview/v1"
         private const val MAX_MANIFEST_BYTES = 16 * 1024
+        /** Потолок для файлов секретов при восстановлении (аудит 2026-10-26, п. 4.5). */
+        private const val MAX_SECRET_BYTES = 64L * 1024
 
         /**
          * Применить подготовленную копию, если она есть. Зовётся из
@@ -468,8 +471,16 @@ class ProfileBackup @Inject constructor(
 
             // 3. Секреты: заворачиваем ключом Keystore этого телефона.
             val fx = File(root, BackupLayout.SECRET_FILE_EXCHANGE)
-            if (fx.isFile) {
-                val secret = fx.readBytes()
+            // Секреты — это десятки байт; лимит здесь только чтобы испорченный
+            // или чужой файл не читался в память целиком (аудит, п. 4.5).
+            val secret = if (fx.isFile) {
+                runCatching { fx.readBytesAtMost(MAX_SECRET_BYTES) }.getOrNull()?.also {
+                    if (it.isEmpty()) Log.w(TAG, "restore: file exchange secret is empty, binding dropped")
+                }
+            } else {
+                null
+            }
+            if (secret != null) {
                 val ok = FileExchangeKeyStore.importSecret(app, secret)
                 secret.fill(0)
                 if (!ok) {
@@ -481,8 +492,14 @@ class ProfileBackup @Inject constructor(
                 app.getSharedPreferences("apu_file_exchange", Context.MODE_PRIVATE).edit().clear().commit()
             }
             val seedFile = File(root, BackupLayout.SECRET_SIGNING_SEED)
-            if (seedFile.isFile) {
-                val seed = seedFile.readBytes()
+            val seed = if (seedFile.isFile) {
+                runCatching { seedFile.readBytesAtMost(MAX_SECRET_BYTES) }.getOrNull()?.also {
+                    if (it.isEmpty()) Log.w(TAG, "restore: signing seed is empty, binding dropped")
+                }
+            } else {
+                null
+            }
+            if (seed != null) {
                 val ok = IdentitySigningKeyStore.importSeed(app, seed)
                 seed.fill(0)
                 if (!ok) {

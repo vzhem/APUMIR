@@ -2088,4 +2088,25 @@ The file is not on this phone</string>
     <string name="settings_reset_done_title">Done</string>
     <string name="settings_default_done_body">The setting has been returned to its default.</string>
     <string name="settings_reset_done_body">The selected settings have been returned to their defaults. Conversations and account data were not changed.</string>
+    <string name="group_quiet_hours_title">Quiet hours schedule</string>
+    <string name="group_quiet_hours_scope_hint">For regular members in every topic. The owner and admins can still post.</string>
+    <string name="group_quiet_hours_state_off">Off</string>
+    <string name="group_quiet_hours_state_on">On</string>
+    <string name="group_quiet_hours_original_zone">Original schedule in the group time zone:</string>
+    <string name="group_quiet_hours_window_hint">Each window has its own days and any time down to the minute. A night window belongs to the day it starts: Mon 23:00–08:00 runs until Tuesday morning.</string>
+    <string name="group_quiet_hours_window_number">Window %1$d</string>
+    <string name="group_quiet_hours_remove">Delete</string>
+    <string name="group_quiet_hours_start_label">No posting from (HH:MM)</string>
+    <string name="group_quiet_hours_end_label">Quiet hours end (HH:MM)</string>
+    <string name="group_quiet_hours_add_window">Add a window</string>
+    <string name="group_quiet_hours_overlap_hint">Overlapping windows merge: posting is allowed when no window is active.</string>
+    <string name="group_quiet_hours_save">Save the schedule</string>
+    <string name="group_quiet_hours_invalid">Check the days and times.</string>
+    <string name="group_quiet_hours_day_mon">Mon</string>
+    <string name="group_quiet_hours_day_tue">Tue</string>
+    <string name="group_quiet_hours_day_wed">Wed</string>
+    <string name="group_quiet_hours_day_thu">Thu</string>
+    <string name="group_quiet_hours_day_fri">Fri</string>
+    <string name="group_quiet_hours_day_sat">Sat</string>
+    <string name="group_quiet_hours_day_sun">Sun</string>
 </resources>

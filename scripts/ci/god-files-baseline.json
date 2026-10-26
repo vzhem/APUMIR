@@ -1,0 +1,28 @@
+{
+  "_comment": "Потолок строк для больших файлов. Опускать можно и нужно; поднимать — только вместе с объяснением в PR, почему код нельзя было вынести.",
+  "threshold": 1200,
+  "ceilings": {
+    "android-app/app/src/main/java/com/vladimir/messenger/data/call/CallManager.kt": 1894,
+    "android-app/app/src/main/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReport.kt": 1561,
+    "android-app/app/src/main/java/com/vladimir/messenger/data/file/FileTransferReceiver.kt": 2452,
+    "android-app/app/src/main/java/com/vladimir/messenger/data/file/FileTransferRouter.kt": 1889,
+    "android-app/app/src/main/java/com/vladimir/messenger/data/group/GroupFileSwarm.kt": 1207,
+    "android-app/app/src/main/java/com/vladimir/messenger/data/group/GroupRepository.kt": 6979,
+    "android-app/app/src/main/java/com/vladimir/messenger/data/group/GroupWire.kt": 2595,
+    "android-app/app/src/main/java/com/vladimir/messenger/data/mirror/MirrorSync.kt": 3810,
+    "android-app/app/src/main/java/com/vladimir/messenger/data/repository/ChatRepository.kt": 1626,
+    "android-app/app/src/main/java/com/vladimir/messenger/data/update/ApkSeeder.kt": 1786,
+    "android-app/app/src/main/java/com/vladimir/messenger/service/CoreServerService.kt": 3329,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/components/AnimatedTopicIcon.kt": 1575,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/components/ApuDiagnosticsUi.kt": 1241,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/channels/ChannelScreen.kt": 1631,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/chat/ChatDetailScreen.kt": 1674,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/chat/ChatDetailViewModel.kt": 1865,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/chat/ChatListScreen.kt": 1898,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupAdminScreen.kt": 1525,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupChatScreen.kt": 2976,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupChatViewModel.kt": 2054,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupsScreen.kt": 1531,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsScreen.kt": 2915
+  }
+}
