@@ -202,7 +202,7 @@ class UpdateChecker @Inject constructor(
         val live = RustBridge.liveSwarmPeerIds().toSet()
         if (live.isEmpty()) return false
         val now = System.currentTimeMillis()
-        val store = ApkUpdateStore(File(context.noBackupFilesDir, ApkUpdate.DIR_NAME))
+        val store = ApkUpdateStore(com.vladimir.messenger.data.update.UpdateFileRoots.seed(context))
         return store.loadOffers().any { offer ->
             offer.nodeId in live && ApkUpdate.isNewer(offer.version, currentVersion) &&
                 now - offer.atMs in 0L..(5L * 60_000L)

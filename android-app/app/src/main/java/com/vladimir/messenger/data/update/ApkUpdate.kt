@@ -61,7 +61,11 @@ object ApkUpdate {
         }
     }
 
-    /** Корень файловых папок раздачи (в `noBackupFilesDir`). */
+    /**
+     * Корень файловых папок раздачи. Путь относительный: настоящий каталог
+     * выбирает [UpdateFileRoots.seed] (`filesDir`, не `noBackupFilesDir` —
+     * иначе FileProvider не может отдать APK установщику без `root-path`).
+     */
     const val DIR_NAME = "apk_seed/v1"
 
     /** Память о помеченной раздаче и о предложениях соседей. */

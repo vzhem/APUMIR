@@ -316,6 +316,29 @@ jobs:
             android-app/app/build/reports/tests/testReleaseUnitTest
           retention-days: 14
 
+      # Тег без секретов не должен доходить до 40-минутной сборки: APK,
+      # подписанный старым ключом, не установится поверх ротированного
+      # (телефоны Android 9+ уже доверяют только новому), а выяснится это
+      # на шаге подписи. Проверяем ДО сборки; на ветке секрета нет — это
+      # нормально, релиз с ветки не выпускается.
+      - name: Require rotated signing key for a release
+        if: github.ref_type == 'tag'
+        env:
+          APU_KS_B64: ${{ secrets.APU_RELEASE_KEYSTORE_B64 }}
+          APU_KS_PASS: ${{ secrets.APU_RELEASE_KEYSTORE_PASSWORD }}
+          APU_KS_ALIAS: ${{ secrets.APU_RELEASE_KEY_ALIAS }}
+        run: |
+          set -e
+          missing=""
+          [ -n "$APU_KS_B64" ] || missing="$missing APU_RELEASE_KEYSTORE_B64"
+          [ -n "$APU_KS_PASS" ] || missing="$missing APU_RELEASE_KEYSTORE_PASSWORD"
+          [ -n "$APU_KS_ALIAS" ] || missing="$missing APU_RELEASE_KEY_ALIAS"
+          if [ -n "$missing" ]; then
+            echo "::error::Релизный тег без секретов подписи:$missing. APK, подписанный старым ключом из репозитория, телефоны после ротации не примут. Секреты ставит scripts/rotate-signing-key.ps1 (docs/SIGNING_KEY_ROTATION.md)."
+            exit 1
+          fi
+          echo "rotated signing key secrets present"
+
       - name: Build Release APK
         working-directory: ./android-app
         run: |
