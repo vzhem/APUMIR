@@ -52,6 +52,24 @@ jobs:
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
+      # Компиляция из чистого клона невозможна без перегенерации моста:
+      # закоммиченный p2p_core.kt отстал от lib.udl (после merge PR #57 в нём
+      # нет devicePublicKeyFromSeed, joinerCancelPairing и
+      # closePairingOffer, а Kotlin их вызывает). build-release.yml и
+      # scripts/ci/check-android-compile.sh делают этот шаг перед сборкой —
+      # здесь он тоже обязателен, иначе тесты не компилируются вообще.
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Regenerate uniffi Kotlin bindings from lib.udl
+        working-directory: ./rust-core
+        run: |
+          cargo run --manifest-path ../tools/uniffi-bindgen/Cargo.toml -- \
+            generate src/lib.udl --language kotlin --config uniffi.toml \
+            --out-dir ../android-app/app/src/main/java --no-format
+          grep -q "ffi_p2p_core_uniffi_contract_version" \
+            ../android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt
+
       - name: Grant execute permission for gradlew
         run: chmod +x ./android-app/gradlew
 
