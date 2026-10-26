@@ -16,10 +16,11 @@
 
 | # | Что | Статус |
 |---|---|---|
-| P0-2 | `check_unresolved_symbols.py`: вложенные `private data class Row/Column` больше не разрешают одноимённые Compose-вызовы; проверка перестала быть вечно красной (было 27 ложных имён, стало 0; `--self-test` расширен) | код в ветке; локально проверено |
-| P0-1 | `CoreServerService`: явный тип foreground через `ServiceCompat` (`specialUse` на API 34+, `dataSync` на 29-33), реализован `onTimeout()`, отказ `startForeground` больше не теряется — счётчик `FOREGROUND_START_REFUSED`, лог, перевзвод будильника | код в ветке; CI ожидается |
-| P0-1 | `EmergencyKeepAliveReceiver`: принимает только `ACTION_PUMP`/`BOOT_COMPLETED`, отказ старта логируется и перевзводит будильник | код в ветке; CI ожидается |
-| P0-5 | `AppModule`: убран `fallbackToDestructiveMigration()`, оставлен адресный `fallbackToDestructiveMigrationFrom(1..4)` — ошибка миграции 5..38 теперь падает громко, а не стирает базу | код в ветке; CI ожидается |
+| P0-2 | `check_unresolved_symbols.py`: вложенные `private data class Row/Column` больше не разрешают одноимённые Compose-вызовы; проверка перестала быть вечно красной (было 27 ложных имён, стало 0; `--self-test` расширен) | код в ветке; зелёный `build-release` 40307752351 |
+| P0-1 | `CoreServerService`: явный тип foreground через `ServiceCompat` (`specialUse` на API 34+, `dataSync` на 29-33), реализован `onTimeout()`, отказ `startForeground` больше не теряется — счётчик `FOREGROUND_START_REFUSED`, лог, перевзвод будильника | код в ветке; зелёный `build-release` 40307752351 |
+| P0-1 | `EmergencyKeepAliveReceiver`: принимает только `ACTION_PUMP`/`BOOT_COMPLETED`, отказ старта логируется и перевзводит будильник | код в ветке; зелёный `build-release` 40307752351 |
+| P0-5 | `AppModule`: убран `fallbackToDestructiveMigration()`, оставлен адресный `fallbackToDestructiveMigrationFrom(1..4)` — ошибка миграции 5..38 теперь падает громко, а не стирает базу | код в ветке; зелёный `build-release` 40307752351 |
+| P0-3 | `build-release.yml`: вместо списка `--tests` (47 классов из 154) запускается весь `testReleaseUnitTest`; сводка по классам печатается в аннотациях и уходит артефактом | первый прогон идёт; режим «пока не блокирует» снимается после разбора падений |
 
 Текущий стабильный выпуск: `v11.74.452` — Latest, публичный и стабильный. Новый релиз/тег/PR создаётся только после отдельного разрешения владельца и предварительного показа точного публичного текста.
 
