@@ -15,3 +15,6 @@
    Правило проверяется в `ci-core-check`.
 9. Файлы читаем потоком, а не `readBytes()`, если размер не ограничен на месте:
    `util/BoundedFiles.kt` (`readBytesAtMost`, `sha256Hex`, `copyWithLimit`).
+10. `catch` не молчит: без `Log.*`/счётчика диагностики широкий `catch` не добавляем,
+    пустой `catch` — только с комментарием, почему глотать безопасно. Проверяется
+    `scripts/ci/check-silent-catch.py` (храповик `silent-catch-baseline.json`).

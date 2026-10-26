@@ -125,4 +125,18 @@ class OperationalHealthTest {
         assertEquals(1L, window.failures)
     }
 
+    /**
+     * Аудит 2026-10-26, п. 4.2: упавший роутер входящих пакетов не должен
+     * исчезать бесследно. `CoreServerService.routePacket` пишет причину в лог и
+     * этот счётчик; здесь проверяется, что счётчик виден в снимке диагностики —
+     * иначе «тихий» отказ снова стал бы невидимым.
+     */
+    @Test fun failedRouterIsCountedAndVisibleInSnapshot() {
+        val tracker = OperationalHealthTracker { 42L }
+        tracker.count(OperationalCounter.ROUTER_FAILED)
+        tracker.count(OperationalCounter.ROUTER_FAILED)
+        assertEquals(2L, tracker.snapshot().counters[OperationalCounter.ROUTER_FAILED])
+        // Метрики печатаются в нижнем регистре: router_failed=2
+        assertTrue(tracker.snapshot().render().contains("router_failed=2"))
+    }
 }

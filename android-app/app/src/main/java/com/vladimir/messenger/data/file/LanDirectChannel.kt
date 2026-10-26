@@ -102,6 +102,8 @@ class LanDirectChannel internal constructor() {
                 }
             }
         } catch (ignored: Exception) {
+            // Настроить сокет не удалось: сервер всё равно стартует, а сбой
+            // виден в diag() строкой ниже.
         }
         diag("lan-server started on port $serverPort, wifi-endpoint=${lanEndpoint()?.hostAddress ?: "none"}, ifaces=[$ifaceSummary]")
         executor.execute { acceptLoop(local) }
@@ -237,7 +239,9 @@ class LanDirectChannel internal constructor() {
             channels[recipientNodeId] = socket
             true
         } else {
-            try { socket.close() } catch (ignored: IOException) { }
+            try { socket.close() } catch (ignored: IOException) {
+                // Сокет не открылся или уже закрыт: освобождение ресурса.
+            }
             false
         }
     }
@@ -297,7 +301,9 @@ class LanDirectChannel internal constructor() {
                             } catch (expected: Exception) {
                                 // Refused/timeout: the normal case while scanning.
                             } finally {
-                                try { socket?.close() } catch (ignored: IOException) { }
+                                try { socket?.close() } catch (ignored: IOException) {
+                                    // Освобождение после неудачного подключения.
+                                }
                             }
                         }
                     }
@@ -313,7 +319,9 @@ class LanDirectChannel internal constructor() {
 
     fun dropChannel(recipientNodeId: String) {
         val socket = channels.remove(recipientNodeId) ?: return
-        try { socket.close() } catch (ignored: IOException) { }
+        try { socket.close() } catch (ignored: IOException) {
+            // Канал уже снят с учёта: закрываем и не разбираем ошибку.
+        }
     }
 
     /**
@@ -481,7 +489,9 @@ class LanDirectChannel internal constructor() {
 
     fun closeAll() {
         channels.keys.toList().forEach { dropChannel(it) }
-        try { server?.close() } catch (ignored: IOException) { }
+        try { server?.close() } catch (ignored: IOException) {
+            // Сервер уже остановлен: освобождение ресурса.
+        }
         server = null
         serverPort = 0
     }

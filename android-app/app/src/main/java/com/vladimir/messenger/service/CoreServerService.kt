@@ -419,7 +419,7 @@ class CoreServerService : Service() {
         // заметка в чат с ним и обычное уведомление, в переписку служебная
         // строка не ложится.
         if (com.vladimir.messenger.data.invite.InviteRejectWire.isPacket(text)) {
-            runCatching { handleInviteReject(senderId, text) }
+            routePacket(TAG, "inviteReject") { handleInviteReject(senderId, text); true }
             return true
         }
 
@@ -430,9 +430,7 @@ class CoreServerService : Service() {
         // Раунд 141: каждый страж в защитной обёртке - если какой-то
         // роутер упал на обычном письме, письмо ДОЛЖНО доехать до чата
         // и уведомления, а не исчезнуть молча.
-        if (runCatching { fileTransferRouter.routeIncoming(senderId, chatId, messageId, text) }
-            .getOrDefault(false)
-        ) {
+        if (routePacket(TAG, "fileTransfer") { fileTransferRouter.routeIncoming(senderId, chatId, messageId, text) }) {
             return true
         }
         if (com.vladimir.messenger.data.gif.GifLibrary.isGifRef(text)) {
@@ -453,41 +451,40 @@ class CoreServerService : Service() {
             return true
         }
         if (com.vladimir.messenger.data.gif.GifLibrary.isGifPacket(text)) {
-            runCatching { handleGifEnvelope(senderId, chatId, messageId, text) }
+            routePacket(TAG, "gif") { handleGifEnvelope(senderId, chatId, messageId, text); true }
             return true
         }
         if (com.vladimir.messenger.data.sticker.StickerLibrary.isStickerPacket(text)) {
-            runCatching { handleStickerEnvelope(senderId, chatId, messageId, text) }
+            routePacket(TAG, "sticker") { handleStickerEnvelope(senderId, chatId, messageId, text); true }
             return true
         }
-        if (runCatching { groupRouter.routeIncoming(senderId, chatId, messageId, text) }
-            .getOrDefault(false)
-        ) {
+        if (routePacket(TAG, "group") { groupRouter.routeIncoming(senderId, chatId, messageId, text) }) {
             return true
         }
-        if (runCatching { reactionRepository.routeIncoming(senderId, text) }.getOrDefault(false)) return true
-        if (runCatching { repostRepository.routeIncoming(senderId, text) }.getOrDefault(false)) return true
-        if (runCatching { messageDeletion.routeIncoming(senderId, text) }.getOrDefault(false)) return true
-        if (runCatching { messageEdit.routeIncoming(senderId, text) }.getOrDefault(false)) return true
-        if (runCatching { postViews.routeIncoming(senderId, text) }.getOrDefault(false)) return true
-        if (runCatching { hearts.routeIncoming(senderId, text) }.getOrDefault(false)) return true
-        if (runCatching { addressBookSwarm.routeIncoming(senderId, text) }.getOrDefault(false)) return true
-        if (runCatching { linkShortener.routeIncoming(senderId, text) }.getOrDefault(false)) return true
-        if (runCatching { readReceipts.routeIncoming(senderId, text) }.getOrDefault(false)) return true
-        if (runCatching { referralAttributionRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
+        if (routePacket(TAG, "reaction") { reactionRepository.routeIncoming(senderId, text) }) return true
+        if (routePacket(TAG, "repost") { repostRepository.routeIncoming(senderId, text) }) return true
+        if (routePacket(TAG, "deletion") { messageDeletion.routeIncoming(senderId, text) }) return true
+        if (routePacket(TAG, "edit") { messageEdit.routeIncoming(senderId, text) }) return true
+        if (routePacket(TAG, "postViews") { postViews.routeIncoming(senderId, text) }) return true
+        if (routePacket(TAG, "hearts") { hearts.routeIncoming(senderId, text) }) return true
+        if (routePacket(TAG, "addressBook") { addressBookSwarm.routeIncoming(senderId, text) }) return true
+        if (routePacket(TAG, "linkShortener") { linkShortener.routeIncoming(senderId, text) }) return true
+        if (routePacket(TAG, "readReceipts") { readReceipts.routeIncoming(senderId, text) }) return true
+        if (routePacket(TAG, "referral") { referralAttributionRouter.routeIncoming(senderId, text) }) return true
         // Ранг собеседника (APURANK1): знак VIP у имени. Поглощается здесь же,
         // чтобы служебная строка не стала текстом в переписке.
-        if (runCatching { heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text) }.getOrDefault(false)) return true
-        if (runCatching { callManager.routeIncoming(senderId, chatId, messageId, text) }
-            .getOrDefault(false)
-        ) {
+        if (routePacket(TAG, "rank") {
+                heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text)
+            }
+        ) return true
+        if (routePacket(TAG, "call") { callManager.routeIncoming(senderId, chatId, messageId, text) }) {
             return true
         }
         // р235: «печатает…» - самый лёгкий служебный пакет; разбирается
         // последним, чтобы не мешать остальным.
-        if (runCatching {
+        if (routePacket(TAG, "typing") {
                 com.vladimir.messenger.data.typing.TypingRouter.routeIncoming(senderId, text)
-            }.getOrDefault(false)
+            }
         ) {
             return true
         }
@@ -1859,7 +1856,10 @@ class CoreServerService : Service() {
         // Ранг собеседника едет в обёртке «печатает…» (см. RankWire.WRAPPER).
         // Разбираем его РАНЬШЕ индикатора набора: иначе конверт был бы прочитан
         // как «партнёр перестал печатать» и молча пропал бы вместе с рангом.
-        if (runCatching { heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text) }.getOrDefault(false)) {
+        if (routePacket(TAG, "rank") {
+                heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text)
+            }
+        ) {
             Log.i(TAG, "Mirror envelope: ранг собеседника применён")
             return true
         }
@@ -1882,36 +1882,35 @@ class CoreServerService : Service() {
         // Групповой конверт: у группы один и тот же id на всех устройствах,
         // поэтому разбираем его тем же путём, что и обычное входящее.
         if (com.vladimir.messenger.data.group.GroupWire.isGroupPacket(text)) {
-            val applied = runCatching { groupRouter.routeIncoming(senderId, chatId, messageId, text) }
-                .getOrDefault(false)
+            val applied = routePacket(TAG, "group") { groupRouter.routeIncoming(senderId, chatId, messageId, text) }
             if (applied) Log.i(TAG, "Mirror envelope: групповой конверт применён")
             return applied
         }
         val localChatId = runCatching { chatRepository.getChatByContactId(senderId)?.id }
             .getOrNull() ?: chatId
-        if (runCatching { reactionRepository.routeIncoming(senderId, text) }.getOrDefault(false)) {
+        if (routePacket(TAG, "reaction") { reactionRepository.routeIncoming(senderId, text) }) {
             Log.i(TAG, "Mirror envelope: reaction from ${senderId.takeLast(8)} applied")
             return true
         }
-        if (runCatching { repostRepository.routeIncoming(senderId, text) }.getOrDefault(false)) {
+        if (routePacket(TAG, "repost") { repostRepository.routeIncoming(senderId, text) }) {
             Log.i(TAG, "Mirror envelope: repost from ${senderId.takeLast(8)} applied")
             return true
         }
-        if (runCatching { messageDeletion.routeIncoming(senderId, text) }.getOrDefault(false)) {
+        if (routePacket(TAG, "deletion") { messageDeletion.routeIncoming(senderId, text) }) {
             Log.i(TAG, "Mirror envelope: deletion from ${senderId.takeLast(8)} applied")
             return true
         }
-        if (runCatching { messageEdit.routeIncoming(senderId, text) }.getOrDefault(false)) {
+        if (routePacket(TAG, "edit") { messageEdit.routeIncoming(senderId, text) }) {
             Log.i(TAG, "Mirror envelope: edit from ${senderId.takeLast(8)} applied")
             return true
         }
-        if (runCatching { postViews.routeIncoming(senderId, text) }.getOrDefault(false)) {
+        if (routePacket(TAG, "postViews") { postViews.routeIncoming(senderId, text) }) {
             return true
         }
-        if (runCatching { hearts.routeIncoming(senderId, text) }.getOrDefault(false)) {
+        if (routePacket(TAG, "hearts") { hearts.routeIncoming(senderId, text) }) {
             return true
         }
-        if (runCatching { readReceipts.routeIncoming(senderId, text) }.getOrDefault(false)) {
+        if (routePacket(TAG, "readReceipts") { readReceipts.routeIncoming(senderId, text) }) {
             return true
         }
         if (com.vladimir.messenger.data.gif.GifLibrary.isGifRef(text)) {
@@ -1984,33 +1983,29 @@ class CoreServerService : Service() {
             Log.i(TAG, "Mirror action: групповой конверт применён локально")
             return
         }
-        if (runCatching { reactionRepository.applyMirrorOutgoing(peerId, groupId, text) }
-                .getOrDefault(false)
-        ) {
+        if (routePacket(TAG, "reaction.mirror") { reactionRepository.applyMirrorOutgoing(peerId, groupId, text) }) {
             Log.i(TAG, "Mirror action: реакция с тени применена локально")
             return
         }
-        if (runCatching { repostRepository.applyMirrorOutgoing(peerId, groupId, text) }
-                .getOrDefault(false)
-        ) {
+        if (routePacket(TAG, "repost.mirror") { repostRepository.applyMirrorOutgoing(peerId, groupId, text) }) {
             Log.i(TAG, "Mirror action: репост с тени применён локально")
             return
         }
         if (peerId.isNotBlank() &&
-            runCatching { messageDeletion.applyMirrorOutgoing(peerId, text) }.getOrDefault(false)
+            routePacket(TAG, "deletion.mirror") { messageDeletion.applyMirrorOutgoing(peerId, text) }
         ) {
             Log.i(TAG, "Mirror action: удаление с тени применено локально")
             return
         }
         if (peerId.isNotBlank() &&
-            runCatching { messageEdit.applyMirrorOutgoing(peerId, text) }.getOrDefault(false)
+            routePacket(TAG, "edit.mirror") { messageEdit.applyMirrorOutgoing(peerId, text) }
         ) {
             Log.i(TAG, "Mirror action: правка с тени применена локально")
             return
         }
-        if (runCatching { postViews.applyMirrorOutgoing(text) }.getOrDefault(false)) return
-        if (runCatching { hearts.applyMirrorOutgoing(text) }.getOrDefault(false)) return
-        if (runCatching { readReceipts.applyMirrorOutgoing(text) }.getOrDefault(false)) return
+        if (routePacket(TAG, "postViews.mirror") { postViews.applyMirrorOutgoing(text) }) return
+        if (routePacket(TAG, "hearts.mirror") { hearts.applyMirrorOutgoing(text) }) return
+        if (routePacket(TAG, "readReceipts.mirror") { readReceipts.applyMirrorOutgoing(text) }) return
         Log.w(TAG, "Mirror action: конверт с тени не распознан, только пересылка")
     }
 
@@ -2150,7 +2145,7 @@ class CoreServerService : Service() {
         try {
             multicastLock?.release()
             Log.i(TAG, "MulticastLock released")
-        } catch (_: Exception) {}
+        } catch (_: Exception) { /* освобождение блокировки в onDestroy: повторять нечего */ }
         OperationalDiagnostics.wake.release(SystemClock.elapsedRealtime())
         wakeLock?.release()
         super.onDestroy()
@@ -3031,15 +3026,14 @@ class CoreServerService : Service() {
                         }
                         if (becameOnline) {
                             // И в чаты: шапка лички и точка в списке читают таблицу chats
-                            try { chatRepository.updateContactOnlineStatus(peerId, true) } catch (_: Exception) {}
+                            try { chatRepository.updateContactOnlineStatus(peerId, true) } catch (e: Exception) { Log.w(TAG, "presence online failed for ${peerId.takeLast(8)}: ${e.message}") }
                             // Новенький в сети: точечно синхронизируем сердечки (с антиспамом в HeartSyncPolicy).
                             serviceScope.launch {
                                 try {
                                     heartGameNetwork.syncWithNewcomer(existing.id)
                                 } catch (e: kotlinx.coroutines.CancellationException) {
                                     throw e
-                                } catch (_: Exception) {
-                                }
+                                } catch (e: Exception) { Log.w(TAG, "heart sync for newcomer failed: ${e.message}") }
                             }
                             // Ранг новенького не знаем - а значок VIP у его
                             // имени нужен сразу, не после недельной рассылки.
@@ -3169,8 +3163,8 @@ class CoreServerService : Service() {
                 // остаётся временем, когда контакт действительно видели.
                 val lastSeenAtMs = knownPeers.remove(peerId) ?: System.currentTimeMillis()
                 fileTransferRouter.markOffline(peerId)
-                try { contactRepository.updatePresence(peerId, false, lastSeenAtMs) } catch (_: Exception) {}
-                try { chatRepository.updateContactOnlineStatus(peerId, false) } catch (_: Exception) {}
+                try { contactRepository.updatePresence(peerId, false, lastSeenAtMs) } catch (e: Exception) { Log.w(TAG, "presence offline failed: ${e.message}") }
+                try { chatRepository.updateContactOnlineStatus(peerId, false) } catch (e: Exception) { Log.w(TAG, "chat online flag failed: ${e.message}") }
             }
 
             "network_status_changed" -> {
@@ -3264,8 +3258,8 @@ class CoreServerService : Service() {
                             .recordMiss(applicationContext, pid)
                     }
                     Log.i(TAG, "⚫ OFFLINE (TTL): $pid")
-                    try { contactRepository.updatePresence(pid, false, lastSeenAtMs) } catch (_: Exception) {}
-                    try { chatRepository.updateContactOnlineStatus(pid, false) } catch (_: Exception) {}
+                    try { contactRepository.updatePresence(pid, false, lastSeenAtMs) } catch (e: Exception) { Log.w(TAG, "presence TTL-offline failed: ${e.message}") }
+                    try { chatRepository.updateContactOnlineStatus(pid, false) } catch (e: Exception) { Log.w(TAG, "chat TTL-offline flag failed: ${e.message}") }
                 }
             }
         }

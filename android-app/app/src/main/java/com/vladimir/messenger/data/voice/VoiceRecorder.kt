@@ -106,7 +106,11 @@ class VoiceRecorder(private val context: Context) {
         sampler?.cancel()
         sampler = null
         level = 0
-        try { rec?.stop() } catch (_: Exception) { }
+        try {
+            rec?.stop()
+        } catch (_: Exception) {
+            // Остановка уже освобождённого рекордера: нужен только release() ниже.
+        }
         rec?.release()
         file?.delete()
         file = null

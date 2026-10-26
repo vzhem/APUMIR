@@ -424,8 +424,7 @@ private fun ProfileTabContent(
                     uri,
                     Intent.FLAG_GRANT_READ_URI_PERMISSION,
                 )
-            } catch (_: Exception) {
-            }
+            } catch (_: Exception) { /* провайдер не даёт постоянного доступа: читаем разово ниже */ }
             // Не сохраняем сразу: сперва человек выбирает область.
             avatarToCrop = com.vladimir.messenger.util.AvatarFiles.readForCrop(context, uri)
         }
@@ -1176,8 +1175,7 @@ private fun SettingsTabContent(
                                     uri,
                                     Intent.FLAG_GRANT_READ_URI_PERMISSION,
                                 )
-                            } catch (_: Exception) {
-                            }
+                            } catch (_: Exception) { /* доступ живёт до перезапуска, обои применим */ }
                             WallpaperHolder.set(context, uri.toString())
                         }
                     }

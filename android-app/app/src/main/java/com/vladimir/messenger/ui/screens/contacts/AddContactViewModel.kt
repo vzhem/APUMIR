@@ -374,7 +374,13 @@ class AddContactViewModel @Inject constructor(
                     if (error.message == "Contact already exists") {
                         Log.i(TAG, "Contact already exists, finding existing chat")
                         // Всё равно регистрируем peer в Rust
-                        try { RustBridge.connectViaInvite(raw) } catch (_: Exception) {}
+                        try {
+                            RustBridge.connectViaInvite(raw)
+                        } catch (e: Exception) {
+                            // Контакт уже есть: регистрация в ядре — вспомогательный
+                            // шаг, её сбой не отменяет поиск существующего чата.
+                            Log.w(TAG, "connectViaInvite failed for existing contact: ${e.message}")
+                        }
                         // Пересканирование QR уже известного контакта = явное
                         // подтверждение личности. Только здесь снимаем
                         // закреплённый ключ: после переустановки у собеседника

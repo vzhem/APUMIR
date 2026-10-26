@@ -691,7 +691,11 @@ class MainActivity : ComponentActivity() {
                 val updateChecker = entryPoint.updateChecker()
                 val appVersion = try {
                         packageManager.getPackageInfo(packageName, 0).versionName ?: "v0.0.0"
-                    } catch (_: Exception) { "v0.0.0" }
+                    } catch (_: Exception) {
+                        // Имя версии нужно только для проверки обновлений:
+                        // без него запрос уйдёт с "v0.0.0" и всё равно сработает.
+                        "v0.0.0"
+                    }
                     val release = updateChecker.checkForUpdate(appVersion, manual = manual)
                 if (release != null) {
                     if (release.version == dismissedUpdateVersion) {

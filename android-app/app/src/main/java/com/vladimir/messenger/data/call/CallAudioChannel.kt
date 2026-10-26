@@ -170,11 +170,17 @@ class CallAudioChannel private constructor() {
                 true
             } else {
                 // Гонка: входящее соединение уже принято — исходящее не нужно.
-                try { socket.close() } catch (ignored: IOException) { }
+                try { socket.close() } catch (ignored: IOException) {
+            // Сокет уже закрыт или закрывается: освобождение ресурса,
+            // вторая ошибка ничего не добавляет (docs/AUDIT_2026-10-26.md, п. 4.2).
+        }
                 isOpen()
             }
         } else {
-            try { socket.close() } catch (ignored: IOException) { }
+            try { socket.close() } catch (ignored: IOException) {
+            // Сокет уже закрыт или закрывается: освобождение ресурса,
+            // вторая ошибка ничего не добавляет (docs/AUDIT_2026-10-26.md, п. 4.2).
+        }
             false
         }
     }
@@ -228,7 +234,10 @@ class CallAudioChannel private constructor() {
     fun closeCall() {
         val socket = callSocket ?: return
         callSocket = null
-        try { socket.close() } catch (ignored: IOException) { }
+        try { socket.close() } catch (ignored: IOException) {
+            // Сокет уже закрыт или закрывается: освобождение ресурса,
+            // вторая ошибка ничего не добавляет (docs/AUDIT_2026-10-26.md, п. 4.2).
+        }
     }
 
     /** Гонка двух подключений: первое живое остаётся, лишний сокет не принимается. */
@@ -247,7 +256,10 @@ class CallAudioChannel private constructor() {
             callSocket = null
             executor.execute { onClosed?.invoke() }
         }
-        try { socket.close() } catch (ignored: IOException) { }
+        try { socket.close() } catch (ignored: IOException) {
+            // Сокет уже закрыт или закрывается: освобождение ресурса,
+            // вторая ошибка ничего не добавляет (docs/AUDIT_2026-10-26.md, п. 4.2).
+        }
     }
 
     private fun readTextFrame(input: DataInputStream): String {
