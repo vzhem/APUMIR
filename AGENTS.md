@@ -18,3 +18,7 @@
 10. `catch` не молчит: без `Log.*`/счётчика диагностики широкий `catch` не добавляем,
     пустой `catch` — только с комментарием, почему глотать безопасно. Проверяется
     `scripts/ci/check-silent-catch.py` (храповик `silent-catch-baseline.json`).
+11. Текст интерфейса — только в `res/values/strings.xml`, новый ключ сразу и в
+    `values-en/strings.xml`: одинаковые имена в одном файле ломают сборку, а ключ
+    только в `values` при английском языке остаётся русским. Проверяется
+    `scripts/ci/check-hardcoded-strings.py` (храповик + `missing_en`).

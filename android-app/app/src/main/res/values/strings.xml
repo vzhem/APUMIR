@@ -2304,7 +2304,6 @@
     <string name="story_video_loading_hint">Видео загружается. Можно перейти к следующей истории.</string>
     <string name="story_video_play_failed">Не удалось воспроизвести видео</string>
     <string name="story_video_buffering">Буферизация…</string>
-    <string name="action_retry">Повторить</string>
     <string name="group_members_hidden_by_admin">Просмотр списка участников закрыт администратором группы.</string>
     <string name="group_show_members_title">Показывать список участников</string>
     <string name="group_show_members_hint">Если выключено, список видят только владелец и администраторы.</string>

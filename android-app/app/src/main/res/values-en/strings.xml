@@ -2193,7 +2193,6 @@ The file is not on this phone</string>
     <string name="story_video_loading_hint">The video is loading. You can move on to the next story.</string>
     <string name="story_video_play_failed">Couldn’t play the video</string>
     <string name="story_video_buffering">Buffering…</string>
-    <string name="action_retry">Retry</string>
     <string name="group_members_hidden_by_admin">The group admin has hidden the member list.</string>
     <string name="group_show_members_title">Show the member list</string>
     <string name="group_show_members_hint">When off, only the owner and admins can see the list.</string>

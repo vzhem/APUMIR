@@ -16,6 +16,13 @@
 Строки-пунктуация (`·`, `—`) и однобуквенные не считаются: это разделители,
 а не текст.
 
+Вторая часть контракта — сами `res/values*/strings.xml`:
+  * одинаковое имя дважды ломает сборку (`mergeReleaseResources`: Found item
+    String/x more than one time) — это ошибка, а не предупреждение;
+  * ключи, которые есть в `values`, но отсутствуют в `values-en`, при
+    английской локали остаются русскими — их число хранится в baseline
+    (`missing_en`) и может только уменьшаться.
+
 Запуск:
     python3 scripts/ci/check-hardcoded-strings.py            # проверить
     python3 scripts/ci/check-hardcoded-strings.py --write    # опустить счётчики
@@ -28,6 +35,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 UI_ROOT = ROOT / "android-app/app/src/main/java/com/vladimir/messenger/ui"
+RES_ROOT = ROOT / "android-app/app/src/main/res"
 BASELINE = ROOT / "scripts/ci/hardcoded-strings-baseline.json"
 
 CYRILLIC = re.compile(r"[А-Яа-яЁё]")
@@ -84,13 +92,48 @@ def counts():
     return result
 
 
+STRING_NAME = re.compile(r'<string\s+name="([A-Za-z0-9_]+)"')
+
+
+def resource_names(path):
+    """Имена строковых ресурсов в файле (в порядке файла)."""
+    return STRING_NAME.findall(path.read_text(encoding="utf-8"))
+
+
+def resource_problems():
+    """Проблемы самих res/values*: дубликаты имён и отставание values-en.
+
+    Дубликат ломает сборку (`mergeReleaseResources`: Found item String/x more
+    than one time), причём только на CI — поэтому ловится здесь. Пропуски в
+    values-en не ломают сборку, но при английской локали строка остаётся
+    русской; их число — храповик `missing_en` в baseline.
+    """
+    problems = []
+    duplicates = {}
+    for values in sorted(RES_ROOT.glob("values*/strings.xml")):
+        seen = {}
+        for name in resource_names(values):
+            seen[name] = seen.get(name, 0) + 1
+        repeated = sorted(name for name, count in seen.items() if count > 1)
+        if repeated:
+            problems.append(f"{values.relative_to(ROOT).as_posix()}: имя объявлено дважды — "
+                            + ", ".join(repeated) + ". Оставьте одно объявление.")
+        duplicates[values.parent.name] = set(seen)
+    if "values" in duplicates and "values-en" in duplicates:
+        missing = duplicates["values"] - duplicates["values-en"]
+    else:
+        missing = set()
+    return problems, missing
+
+
 def load_baseline():
     if not BASELINE.is_file():
-        return {}
-    return json.loads(BASELINE.read_text(encoding="utf-8")).get("allowed", {})
+        return {}, None
+    payload = json.loads(BASELINE.read_text(encoding="utf-8"))
+    return payload.get("allowed", {}), payload.get("missing_en")
 
 
-def write_baseline(allowed):
+def write_baseline(allowed, missing_en=None):
     payload = {
         "_comment": (
             "Разрешённое число русских строковых литералов в файлах ui/**. "
@@ -98,13 +141,15 @@ def write_baseline(allowed):
         ),
         "allowed": dict(sorted(allowed.items())),
     }
+    if missing_en is not None:
+        payload["missing_en"] = missing_en
     BASELINE.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def check():
-    allowed = load_baseline()
+    allowed, allowed_missing_en = load_baseline()
     actual = counts()
-    problems = []
+    problems, missing_en = resource_problems()
     improved = []
 
     for name, count in sorted(actual.items()):
@@ -121,14 +166,24 @@ def check():
     for name in sorted(set(allowed) - set(actual)):
         improved.append(f"{name}: русских строк больше нет — запись можно убрать (--write)")
 
+    if allowed_missing_en is not None and len(missing_en) > allowed_missing_en:
+        problems.append(
+            f"values-en: без перевода {len(missing_en)} строк (разрешено {allowed_missing_en}). "
+            "Новый ключ добавляйте сразу в values/strings.xml и values-en/strings.xml."
+        )
+    elif allowed_missing_en is not None and len(missing_en) < allowed_missing_en:
+        improved.append(f"values-en: без перевода {len(missing_en)} < {allowed_missing_en} — "
+                        "можно опустить (--write)")
+
     if problems:
-        print("в ui/** появились новые русские строки:")
+        print("контракт локализации нарушен:")
         for problem in problems:
             print("  -", problem)
         return 1
 
     total = sum(actual.values())
-    print(f"в порядке: {total} русских строк в {len(actual)} файлах, все в пределах baseline")
+    print(f"в порядке: {total} русских строк в {len(actual)} файлах, все в пределах baseline; "
+          f"values-en без перевода — {len(missing_en)}")
     for note in improved:
         print("  подсказка:", note)
     return 0
@@ -136,7 +191,8 @@ def check():
 
 def main(argv):
     if "--write" in argv:
-        write_baseline(counts())
+        _, missing_en = resource_problems()
+        write_baseline(counts(), len(missing_en))
         print(f"baseline записан: {BASELINE.relative_to(ROOT)}")
         return 0
     if argv:
