@@ -9,9 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -73,19 +71,22 @@ fun CustomSendTimeDialog(onDismiss: () -> Unit, onConfirm: (Long) -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.send_custom_time)) },
         confirmButton = {
-            TextButton(onClick = {
-                // Recheck the clock on confirmation: the dialog may have stayed open for hours.
-                val at = SendTimePolicy.resolve(date, time, zone)
-                if (SendTimePolicy.isFuture(at, System.currentTimeMillis())) onConfirm(requireNotNull(at))
-                else error = true
-            }) { Text(stringResource(R.string.send_schedule_confirm)) }
+            ApuTextAction(
+                label = stringResource(R.string.send_schedule_confirm),
+                onClick = {
+                    // Recheck the clock on confirmation: the dialog may have stayed open for hours.
+                    val at = SendTimePolicy.resolve(date, time, zone)
+                    if (SendTimePolicy.isFuture(at, System.currentTimeMillis())) onConfirm(requireNotNull(at))
+                    else error = true
+                },
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.voice_cancel)) }
+            ApuTextAction(label = stringResource(R.string.voice_cancel), onClick = onDismiss)
         },
         text = {
             Column {
-                OutlinedTextField(
+                ApuBubbleField(
                     value = date,
                     onValueChange = { date = it; error = false },
                     label = { Text(stringResource(R.string.send_date_label)) },
@@ -95,7 +96,7 @@ fun CustomSendTimeDialog(onDismiss: () -> Unit, onConfirm: (Long) -> Unit) {
                 ApuActionBubble(stringResource(R.string.send_open_calendar), Icons.Filled.DateRange) {
                     picker = "date"
                 }
-                OutlinedTextField(
+                ApuBubbleField(
                     value = time,
                     onValueChange = { time = it; error = false },
                     label = { Text(stringResource(R.string.send_time_label)) },

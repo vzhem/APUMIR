@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -178,19 +177,18 @@ fun VoiceRecordBar(controller: VoiceRecordController, modifier: Modifier = Modif
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.weight(1f))
-            TextButton(onClick = controller.cancel) { Text(stringResource(R.string.voice_cancel)) }
-            TextButton(onClick = controller.toggle) { Text(stringResource(R.string.voice_stop)) }
+            ApuTextAction(label = stringResource(R.string.voice_cancel), onClick = controller.cancel)
+            ApuTextAction(label = stringResource(R.string.voice_stop), onClick = controller.toggle)
         }
         // Эффект можно сменить прямо во время записи: он применится ко всей
         // записи целиком, когда нажмут «Отправить».
-        TextButton(onClick = { showEffectPicker = true }) {
-            Text(
-                stringResource(
-                    R.string.voice_effect_button,
-                    controller.effect.symbol + " " + stringResource(controller.effect.labelRes),
-                ),
-            )
-        }
+        ApuTextAction(
+            label = stringResource(
+                R.string.voice_effect_button,
+                controller.effect.symbol + " " + stringResource(controller.effect.labelRes),
+            ),
+            onClick = { showEffectPicker = true },
+        )
     }
     if (showEffectPicker) {
         VoiceEffectPickerDialog(

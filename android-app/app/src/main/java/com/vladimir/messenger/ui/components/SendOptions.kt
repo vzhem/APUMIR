@@ -12,7 +12,6 @@ import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -51,7 +50,7 @@ fun SendOptionsDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.send_options_title)) },
         confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.voice_cancel)) }
+            ApuTextAction(label = stringResource(R.string.voice_cancel), onClick = onDismiss)
         },
         text = {
             Column {
@@ -114,9 +113,10 @@ fun ScheduledSendBanner(
                         color = MaterialTheme.colorScheme.error)
                 }
                 if (!item.cancelRequested) {
-                    TextButton(onClick = { onCancel(item.id) }) {
-                        Text(stringResource(R.string.send_scheduled_cancel))
-                    }
+                    ApuTextAction(
+                        label = stringResource(R.string.send_scheduled_cancel),
+                        onClick = { onCancel(item.id) },
+                    )
                 }
             }
         }
