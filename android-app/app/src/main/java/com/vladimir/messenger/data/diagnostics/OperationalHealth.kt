@@ -18,6 +18,10 @@ enum class OperationalCounter {
     // Отклики на истории (реакции и комментарии): приём, рассылка сводки, досылка.
     STORY_FEEDBACK_RECEIVED, STORY_FEEDBACK_INVALID, STORY_FEEDBACK_IGNORED,
     STORY_FEEDBACK_BROADCAST, STORY_FEEDBACK_SENT, STORY_FEEDBACK_DEFERRED,
+    // Android 12+ отказ во входе в foreground и Android 15 истечение бюджета
+    // сервиса: без этих счётчиков такие отказы невидимы в диагностике
+    // (docs/AUDIT_2026-10-26.md, P0-1).
+    FOREGROUND_START_REFUSED, FOREGROUND_TIMEOUT,
 }
 enum class OperationalTiming { MESSAGE_ACK_UPTIME, MESSAGE_FIRST_TRANSPORT_UPTIME, CORE_READY_UPTIME, RESUME_READY_UPTIME, FILE_COMPLETE_IN_WALL, FILE_COMPLETE_OUT_WALL }
 enum class KeyModeReason { NOT_PROBED, READ_PREFS, ABSENT, LOOKUP_KEY, MISSING_WRAP_KEY, KEYSTORE_ERROR, UNWRAP, UNWRAP_FAILED, CHECK_BINDING, BINDING_INVALID, INCOMPLETE_RECORD, READY }

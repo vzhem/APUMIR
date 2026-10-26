@@ -7,6 +7,9 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.PowerManager
+import android.util.Log
+import com.vladimir.messenger.data.diagnostics.OperationalCounter
+import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
 
 /**
  * Раунд 141: аварийный каркас доставки уведомлений (просьба владельца:
@@ -29,6 +32,16 @@ import android.os.PowerManager
 class EmergencyKeepAliveReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
+        // Приёмник объявлен exported="true": BOOT_COMPLETED должен доходить на
+        // всех прошивках (docs/AUDIT_2026-10-26.md, P1-6). Поэтому принимаем
+        // только два своих действия, а остальное игнорируем — постороннее
+        // приложение не должно поднимать наш foreground-сервис произвольным
+        // intent'ом.
+        val action = intent.action
+        if (action != ACTION_PUMP && action != Intent.ACTION_BOOT_COMPLETED) {
+            Log.w(TAG, "emergency receiver ignored unexpected action=" + (action ?: "null"))
+            return
+        }
         // Короткий карман бодрости (20 секунд): дать MQTT-связи и помпам
         // докрутиться, пока система не усыпила процесс обратно.
         runCatching {
@@ -37,16 +50,31 @@ class EmergencyKeepAliveReceiver : BroadcastReceiver() {
                 .acquire(20_000L)
         }
         val service = Intent(context, CoreServerService::class.java)
-        runCatching {
+        val started = try {
             if (Build.VERSION.SDK_INT >= 26) {
                 context.startForegroundService(service)
             } else {
                 context.startService(service)
             }
+            true
+        } catch (e: Exception) {
+            // Android 12+ запрещает старт foreground-сервиса из фона, Android 15
+            // запрещает dataSync из BOOT_COMPLETED. Раньше отказ молча
+            // проглатывался: сервис не поднимался, и в логах не оставалось
+            // следа — «после перезагрузки ничего не приходит» без причины.
+            OperationalDiagnostics.tracker.count(OperationalCounter.FOREGROUND_START_REFUSED)
+            Log.w(TAG, "emergency start refused (sdk=" + Build.VERSION.SDK_INT + ")", e)
+            false
+        }
+        if (!started) {
+            // Не терять цепочку: следующий будильник попробует снова, когда
+            // система будет к этому расположена.
+            scheduleNext(context)
         }
     }
 
     companion object {
+        private const val TAG = "EmergencyKeepAlive"
         private const val ACTION_PUMP = "com.vladimir.messenger.EMERGENCY_PUMP"
         private const val REQUEST_CODE = 1001
 

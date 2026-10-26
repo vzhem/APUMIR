@@ -12,10 +12,13 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
+import androidx.core.app.ServiceCompat
 import com.vladimir.messenger.data.call.CallIncoming
 import android.util.Log
 import com.vladimir.messenger.domain.model.MessageChannel
@@ -711,10 +714,68 @@ class CoreServerService : Service() {
         networkMonitor = NetworkMonitor(this).also { it.start() }
     }
 
+    /**
+     * Войти в foreground с ЯВНЫМ типом сервиса.
+     *
+     * Android 14+ проверяет разрешения по объявленному типу, а Android 15
+     * ограничивает `dataSync` шестью часами в сутки и запрещает запускать его
+     * из BOOT_COMPLETED (docs/AUDIT_2026-10-26.md, P0-1). Поэтому на API 34+
+     * берём `specialUse` («постоянная p2p-доставка»), а на 29-33 — `dataSync`:
+     * тип `specialUse` появился только в API 34, и передавать его неизвестной
+     * системе нельзя.
+     *
+     * Тип передаётся явно, а не через манифест (двухаргументный
+     * `startForeground`), иначе на Android 15 учитывался бы и `dataSync`
+     * из манифеста, и лимит в 6 часов вернулся бы.
+     *
+     * @return false — система отказала в foreground (тогда сервис уже
+     *         остановлен, а будильник разбудит его позже).
+     */
+    private fun enterForeground(notification: Notification): Boolean {
+        val type =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            } else {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            }
+        return try {
+            ServiceCompat.startForeground(this, NOTIFICATION_ID, notification, type)
+            true
+        } catch (e: Exception) {
+            // Android 12+ может запретить старт из фона (например, BOOT_COMPLETED
+            // на части прошивок). Раньше это исключение не перехватывалось
+            // вообще на этом пути, а внешние стартеры глушили его runCatching —
+            // сервис молча не работал, и причина нигде не появлялась.
+            OperationalDiagnostics.tracker.count(OperationalCounter.FOREGROUND_START_REFUSED)
+            Log.w(TAG, "startForeground refused (sdk=" + Build.VERSION.SDK_INT + ")", e)
+            runCatching { EmergencyKeepAliveReceiver.scheduleNext(applicationContext) }
+            stopSelf()
+            false
+        }
+    }
+
+    /**
+     * Android 15: истёк бюджет времени foreground-сервиса. Остановиться нужно
+     * за несколько секунд, иначе система убивает процесс
+     * (`ForegroundServiceDidNotStopInTimeException`). На API 34+ основной путь
+     * идёт через `specialUse`, у которого такого лимита нет, поэтому сюда
+     * попадаем только в крайнем случае (старый APK, нестандартная прошивка).
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        OperationalDiagnostics.tracker.count(OperationalCounter.FOREGROUND_TIMEOUT)
+        Log.w(TAG, "foreground timeout (type=" + fgsType + "); stopping and rescheduling")
+        runCatching { EmergencyKeepAliveReceiver.scheduleNext(applicationContext) }
+        stopSelf(startId)
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         OperationalDiagnostics.tracker.count(OperationalCounter.SERVICE_START_COMMAND)
         Log.i(TAG, "CoreServerService started (action=" + (intent?.action ?: "null") + ")")
-        startForeground(NOTIFICATION_ID, buildNotification("Подключение..."))
+        if (!enterForeground(buildNotification("Подключение..."))) {
+            // Без foreground сервис живёт секунды и будет убит системой с
+            // невнятной ошибкой; выходим сами, будильник поднимет позже.
+            return START_NOT_STICKY
+        }
 
         // Никогда не создаём native engine до завершения онбординга. Сервис
         // может быть поднят будильником или старым APK, пока prefs ещё не
