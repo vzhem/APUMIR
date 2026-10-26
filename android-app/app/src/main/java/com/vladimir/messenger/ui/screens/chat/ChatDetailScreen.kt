@@ -10,6 +10,7 @@ import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
+import com.vladimir.messenger.ui.components.ApuPremiumDialog
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.PeerAvatar
 import com.vladimir.messenger.ui.theme.AvatarStore
@@ -87,6 +88,12 @@ private data class ChatRow(
     val orderMs: Long,
 )
 
+private data class LocalSettingsUndo(
+    val scope: String,
+    val wallpaper: String?,
+    val textColor: String?,
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatDetailScreen(
@@ -115,6 +122,11 @@ fun ChatDetailScreen(
     val scheduledAll by com.vladimir.messenger.data.schedule.ScheduledSendStore.items.collectAsStateWithLifecycle()
     val storeContext = androidx.compose.ui.platform.LocalContext.current
     remember(Unit) { com.vladimir.messenger.data.schedule.ScheduledSendStore.load(storeContext) }
+    val textColorRevision by com.vladimir.messenger.data.textcolor.TextColorSettingsStore.revision
+        .collectAsStateWithLifecycle()
+    LaunchedEffect(Unit) {
+        com.vladimir.messenger.data.textcolor.TextColorSettingsStore.initialize(storeContext)
+    }
     // Раунд 189: результат «Вступить/Подписаться» - всплывающей подсказкой.
     val inviteStatus by viewModel.inviteStatus.collectAsStateWithLifecycle()
     val toastContext = LocalContext.current
@@ -133,6 +145,8 @@ fun ChatDetailScreen(
     // Раунд 203: «Поделиться в APU» - пересылка с указанием источника.
     var forwardMessage by remember { mutableStateOf<Message?>(null) }
     val fwdScope = androidx.compose.runtime.rememberCoroutineScope()
+    val localSettingsScope = androidx.compose.runtime.rememberCoroutineScope()
+    var localSettingsUndo by remember { mutableStateOf<LocalSettingsUndo?>(null) }
     // Раунд 203: подтверждение пересылки - плашка по центру экрана.
     var fwdSent by remember { mutableStateOf(false) }
     if (fwdSent) {
@@ -401,6 +415,20 @@ fun ChatDetailScreen(
                         icon = Icons.Default.Edit, onClick = { onRenameClick(contactId, contactName) }) else null,
                     ApuAction(title = stringResource(R.string.conversation_wallpaper), icon = Icons.Default.Wallpaper,
                         onClick = { showWallpaper = true }),
+                    ApuAction(
+                        title = stringResource(R.string.chat_reset_local_settings),
+                        icon = Icons.Default.RestartAlt,
+                        onClick = {
+                            localSettingsScope.launch {
+                                val scope = "direct:$chatId"
+                                val previousWallpaper = com.vladimir.messenger.data.wallpaper.ConversationWallpaper.personal(context, scope)
+                                val previousTextColor = com.vladimir.messenger.data.textcolor.TextColorSettingsStore.scopeOverride(context, scope)
+                                com.vladimir.messenger.data.wallpaper.ConversationWallpaper.setPersonal(context, scope, null)
+                                com.vladimir.messenger.data.textcolor.TextColorSettingsStore.resetScope(context, scope)
+                                localSettingsUndo = LocalSettingsUndo(scope, previousWallpaper, previousTextColor)
+                            }
+                        },
+                    ),
                     ApuAction(title = stringResource(if (notificationsMuted) R.string.chat_change_mute else R.string.menu_mute),
                         icon = if (notificationsMuted) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
                         onClick = { showNotificationMuteDialog = true }),
@@ -581,7 +609,13 @@ fun ChatDetailScreen(
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
-                    if (uiState.pinned.isNotEmpty()) {
+                    val visiblePinned = remember(uiState.pinned, textColorRevision) {
+                        uiState.pinned.filter {
+                            com.vladimir.messenger.data.textcolor.TextColorSettingsStore
+                                .allowsMessage(storeContext, it.textColor)
+                        }
+                    }
+                    if (visiblePinned.isNotEmpty()) {
                         val feedScope = androidx.compose.runtime.rememberCoroutineScope()
                         ApuBubbleCard(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
                             Column(modifier = Modifier.padding(8.dp)) {
@@ -593,11 +627,11 @@ fun ChatDetailScreen(
                                     )
                                     Spacer(Modifier.width(6.dp))
                                     Text(
-                                        stringResource(R.string.pinned_count, uiState.pinned.size, com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE),
+                                        stringResource(R.string.pinned_count, visiblePinned.size, com.vladimir.messenger.data.local.MessagePinPolicy.MAX_PINNED_PER_SCOPE),
                                         fontWeight = FontWeight.Medium,
                                     )
                                 }
-                                uiState.pinned.forEach { m ->
+                                visiblePinned.forEach { m ->
                                     val pinnedIndex = chatRows.indexOfFirst { it.message?.id == m.id }
                                     val rowModifier = if (pinnedIndex >= 0) {
                                         Modifier.fillMaxWidth().clickable {
@@ -632,10 +666,14 @@ fun ChatDetailScreen(
                         }
                     }
                     // Строка поиска: фильтрует ленту по тексту сообщений.
-                    val shownRows = remember(chatRows, searchQuery) {
+                    val shownRows = remember(chatRows, searchQuery, textColorRevision) {
                         // Истории не лежат в переписке: они открываются из профиля собеседника.
                         val visible = chatRows.filterNot { row ->
                             com.vladimir.messenger.data.story.StoryStore.isStoryPacket(row.message?.content)
+                        }.filter { row ->
+                            row.message == null ||
+                                com.vladimir.messenger.data.textcolor.TextColorSettingsStore
+                                    .allowsMessage(storeContext, row.message.textColor)
                         }
                         if (searchQuery.isBlank()) visible
                         else visible.filter { row ->
@@ -1231,6 +1269,35 @@ fun ChatDetailScreen(
                 viewModel.toggleReaction(messageId, emoji)
             },
         )
+    }
+    localSettingsUndo?.let { undo ->
+        ApuPremiumDialog(
+            title = stringResource(R.string.chat_reset_local_settings),
+            onDismiss = { localSettingsUndo = null },
+            confirmLabel = stringResource(R.string.settings_reset_undo),
+            onConfirm = {
+                localSettingsScope.launch {
+                    com.vladimir.messenger.data.wallpaper.ConversationWallpaper.setPersonal(
+                        context,
+                        undo.scope,
+                        undo.wallpaper,
+                    )
+                    if (undo.textColor == null) {
+                        com.vladimir.messenger.data.textcolor.TextColorSettingsStore.resetScope(context, undo.scope)
+                    } else {
+                        com.vladimir.messenger.data.textcolor.TextColorSettingsStore.setTextColor(
+                            context,
+                            undo.scope,
+                            undo.textColor,
+                        )
+                    }
+                }
+                localSettingsUndo = null
+            },
+            dismissLabel = stringResource(R.string.groups_ok),
+        ) {
+            Text(stringResource(R.string.chat_reset_local_settings_done))
+        }
     }
     if (showNotificationMuteDialog) {
         NotificationMuteDialog(

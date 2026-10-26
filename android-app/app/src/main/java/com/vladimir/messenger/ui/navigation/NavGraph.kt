@@ -615,14 +615,33 @@ fun MessengerNavGraph(
                 onBackClick = { navController.popBackStack() },
                 onScanClick = { navController.navigate(Screen.DevicePairScan.route) },
                 onManualCode = { code ->
-                    // Ручной ввод: тот же код, что в QR, только текстом - путь
-                    // подключения дальше ровно тот же, что после сканирования.
-                    if (DevicePairingWire.parseQr(code) != null) {
-                        manualScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                            DevicePairingController.startJoin(code)
+                    // Camera path and text path now share the same state machine. A full QR line
+                    // remains accepted for compatibility, while the normal manual path uses only
+                    // the six-digit rendezvous code shown beside the QR on the other phone.
+                    val qr = DevicePairingWire.parseQr(code)
+                    val rendezvousCode = DevicePairingWire.normalizePairingCode(code)
+                    if (qr != null || rendezvousCode != null) {
+                        manualScope.launch(Dispatchers.IO) {
+                            val started = runCatching {
+                                if (qr != null) DevicePairingController.startJoin(code)
+                                else DevicePairingController.startJoinByCode(rendezvousCode.orEmpty())
+                            }.getOrDefault(false)
+                            if (!started) {
+                                withContext(Dispatchers.Main) {
+                                    Toast.makeText(
+                                        manualContext,
+                                        manualContext.getString(com.vladimir.messenger.R.string.devices_pairing_start_failed),
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                }
+                            }
                         }
                     } else {
-                        android.widget.Toast.makeText(manualContext, manualContext.getString(com.vladimir.messenger.R.string.devices_not_pairing_qr), android.widget.Toast.LENGTH_LONG).show()
+                        Toast.makeText(
+                            manualContext,
+                            manualContext.getString(com.vladimir.messenger.R.string.devices_not_pairing_qr),
+                            Toast.LENGTH_LONG,
+                        ).show()
                     }
                 },
             )

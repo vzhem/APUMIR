@@ -85,6 +85,32 @@ class FakeFileTransferDao : FileTransferDao {
     override suspend fun countChunks(transferId: String): Long =
         chunks.keys.count { it.first == transferId }.toLong()
 
+    override suspend fun deleteChunk(transferId: String, chunkIndex: Long): Int =
+        if (chunks.remove(transferId to chunkIndex) != null) 1 else 0
+
+    // Откат прогресса при ремонте приёма: счётчики здесь законно уменьшаются,
+    // монотонный страж advanceProgress для этого вызова не применим.
+    override suspend fun resetProgress(
+        transferId: String,
+        state: String,
+        completedChunks: Long,
+        transferredBytes: Long,
+        updatedAtMs: Long,
+        errorCode: String?,
+    ): Int {
+        val current = transfers[transferId] ?: return 0
+        if (current.state == "COMPLETE" || current.state == "CANCELLED") return 0
+        transfers[transferId] = current.copy(
+            state = state,
+            completedChunks = completedChunks,
+            transferredBytes = transferredBytes,
+            updatedAtMs = updatedAtMs,
+            errorCode = errorCode,
+        )
+        observe.value += 1
+        return 1
+    }
+
     override suspend fun receivedPlaintextBytes(transferId: String): Long =
         chunks.filterKeys { it.first == transferId }.values.sumOf {
             it.ciphertextBytes - FileTransferChunkStore.AEAD_TAG_BYTES

@@ -3,6 +3,7 @@ package com.vladimir.messenger.data.referral
 import android.content.Context
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.heartgame.HeartGameStore
 import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -118,7 +119,15 @@ class ReferralAttributionRouter @Inject constructor(
                 val fresh = ReferralAttributionStore.markCredited(app, decision.inviteeNodeId)
                 if (fresh) {
                     val total = ReferralRankStore.creditQualifiedDirect(app)
-                    Log.i(TAG, "referral credited from ${decision.inviteeNodeId}, qualified=$total")
+                    // Одна подтверждённая атрибуция даёт игре ровно 1 000
+                    // сердечек. Синхронизация идемпотентна и также чинит
+                    // состояние после сбоя между двумя хранилищами.
+                    HeartGameStore.synchronizeReferralBonuses(
+                        app,
+                        HeartGameStore.ownId(),
+                        ReferralRankStore.earnedDirectCount(app),
+                    )
+                    Log.i(TAG, "referral credited from ${decision.inviteeNodeId}, qualifiedInvites=$total")
                 } else {
                     Log.i(TAG, "referral from ${decision.inviteeNodeId} already recorded")
                 }

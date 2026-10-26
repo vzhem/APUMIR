@@ -32,6 +32,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.remember
 import com.vladimir.messenger.ui.theme.AvatarStore
+import com.vladimir.messenger.data.textcolor.TextColorPalette
+import com.vladimir.messenger.data.textcolor.TextColorSettingsStore
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -72,6 +75,12 @@ fun ContactCard(
     // Разбор картинки - в фоне и один раз на строку base64 (AvatarBitmaps);
     // рисует её PeerAvatar, поэтому отдельная копия битмапа тут не нужна.
     val avatars by AvatarStore.avatars.collectAsState()
+    val colorContext = LocalContext.current
+    val colorRevision by TextColorSettingsStore.revision.collectAsState()
+    val peerNameColor = remember(chat.contactId, colorRevision) {
+        TextColorSettingsStore.peerNameColor(colorContext, chat.contactId)
+    }
+    val displayedNameColor = TextColorPalette.colorOr(peerNameColor, Color(0xFF1E2430))
     // Раунд 255: недописанный текст поля ввода виден прямо в пузыре списка.
     val drafts by com.vladimir.messenger.data.draft.DraftStore.drafts.collectAsState()
     val draftText = drafts[
@@ -131,7 +140,7 @@ fun ContactCard(
                     text      = chat.contactName,
                     style     = apuVipNameStyle(MaterialTheme.typography.titleMedium, peerVip),
                     fontWeight = FontWeight.SemiBold,
-                    color     = if (peerVip) Color(0xFF8A5F00) else Color(0xFF1E2430),
+                    color     = if (peerVip && peerNameColor.isBlank()) Color(0xFF8A5F00) else displayedNameColor,
                     maxLines  = 1,
                     overflow  = TextOverflow.Ellipsis,
                     modifier  = Modifier.weight(1f, fill = false),

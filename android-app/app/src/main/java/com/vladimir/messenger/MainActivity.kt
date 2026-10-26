@@ -446,7 +446,17 @@ class MainActivity : ComponentActivity() {
         requestNotificationPermission()
         requestIgnoreBatteryOptimizations()
         requestFullScreenIntentPermission()
-        startCoreService()
+        // Do not create a temporary Anonymous native identity while the
+        // onboarding form is open. The service is started again from the
+        // authenticated profile-complete transition.
+        val identityPrefs = getSharedPreferences("p2p_prefs", MODE_PRIVATE)
+        if (identityPrefs.getBoolean("identity_created", false) &&
+            com.vladimir.messenger.data.security.DeviceIdentityMarker.isPresent(applicationContext)
+        ) {
+            startCoreService()
+        } else {
+            Log.i("MainActivity", "core start deferred until local identity exists")
+        }
         checkForUpdates()
         // Раунд 251: убираем из «Скачанных» наш мусор `.trashed-*APU*` -
         // остатки старых APK обновлений, которые DownloadManager не стирает,

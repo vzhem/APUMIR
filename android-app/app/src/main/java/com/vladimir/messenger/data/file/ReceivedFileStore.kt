@@ -23,6 +23,15 @@ class ReceivedFileStore(private val root: File) {
         fun abort()
     }
 
+    /** A process-death-safe append writer used by the authenticated mirror stream. */
+    interface ResumableWriter {
+        val existingBytes: Long
+        fun readAt(offset: Long, length: Int): ByteArray?
+        fun append(bytes: ByteArray)
+        fun commit(): File
+        fun abort()
+    }
+
     fun openWriter(transferIdHex: String, displayName: String, expectedBytes: Long): Writer {
         FileTransferWire.requireValidTransferId(transferIdHex)
         require(expectedBytes >= 0)
@@ -71,6 +80,89 @@ class ReceivedFileStore(private val root: File) {
             }
         }
     }
+
+    /**
+     * Open the stable `.mirror.part` for a transfer. Unlike [openWriter], the staging file is not
+     * randomised, so its committed length survives process death and can be advertised as the
+     * next offset to the sender.
+     */
+    fun openResumableWriter(transferIdHex: String, displayName: String, expectedBytes: Long): ResumableWriter {
+        FileTransferWire.requireValidTransferId(transferIdHex)
+        require(expectedBytes > 0)
+        val directory = checkedChild(rootDirectory(create = true), transferIdHex)
+        check(directory.mkdirs() || directory.isDirectory) { "Cannot create received file directory" }
+        val target = checkedChild(directory, sanitize(displayName))
+        val part = checkedChild(directory, ".${target.name}.mirror.part")
+        check(!part.exists() || part.isFile) { "Mirror staging path is not a file" }
+        check(part.length() <= expectedBytes) { "Mirror staging file exceeds expected size" }
+        return object : ResumableWriter {
+            private val output = FileOutputStream(part, true)
+            private var current = part.length()
+            private var finished = false
+
+            override val existingBytes: Long
+                get() = current
+
+            override fun readAt(offset: Long, length: Int): ByteArray? = runCatching {
+                if (offset < 0L || length < 0 || offset + length > current) return@runCatching null
+                val bytes = ByteArray(length)
+                java.io.RandomAccessFile(part, "r").use { input ->
+                    input.seek(offset)
+                    input.readFully(bytes)
+                }
+                bytes
+            }.getOrNull()
+
+            override fun append(bytes: ByteArray) {
+                check(!finished) { "Mirror writer already finished" }
+                check(bytes.isNotEmpty()) { "Empty mirror chunk" }
+                current = Math.addExact(current, bytes.size.toLong())
+                check(current <= expectedBytes) { "Mirror file exceeds expected size" }
+                output.write(bytes)
+                output.flush()
+                // The offset exposed after this method is a committed offset, not merely a
+                // userspace buffer position. This is what makes a killed process resumable.
+                output.fd.sync()
+            }
+
+            override fun commit(): File {
+                check(!finished) { "Mirror writer already finished" }
+                finished = true
+                output.flush()
+                output.fd.sync()
+                output.close()
+                check(part.length() == expectedBytes) { "Incomplete mirror file write" }
+                try {
+                    Files.move(
+                        part.toPath(),
+                        target.toPath(),
+                        StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING,
+                    )
+                } catch (unsupported: java.nio.file.AtomicMoveNotSupportedException) {
+                    throw IllegalStateException("Atomic mirror file move unavailable", unsupported)
+                }
+                return target
+            }
+
+            override fun abort() {
+                if (finished) return
+                finished = true
+                runCatching { output.close() }
+                part.delete()
+            }
+        }
+    }
+
+    /** Durable length of a mirror staging file, or zero when none exists. */
+    fun mirrorPartLength(transferIdHex: String, displayName: String): Long = runCatching {
+        FileTransferWire.requireValidTransferId(transferIdHex)
+        val part = checkedChild(
+            checkedChild(rootDirectory(create = false), transferIdHex),
+            ".${sanitize(displayName)}.mirror.part",
+        )
+        part.takeIf { it.isFile }?.length() ?: 0L
+    }.getOrDefault(0L)
 
     fun deleteTransfer(transferIdHex: String): Boolean {
         FileTransferWire.requireValidTransferId(transferIdHex)

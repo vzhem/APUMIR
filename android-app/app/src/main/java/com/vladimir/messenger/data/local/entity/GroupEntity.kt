@@ -61,4 +61,32 @@ data class GroupEntity(
     val wallpaper: String = "",
     @ColumnInfo(defaultValue = "''")
     val wallpaperRevision: String = "",
+    /**
+     * SOS: красная тревожная кнопка в группе. [sosEnabled] - кнопку видно
+     * (или скрыта настройкой), [sosMessageCount] - сколько тревожных
+     * сообщений уходит за одно нажатие (3..5), [sosPressRole] - кто вправе
+     * нажимать (GroupSos.PRESS_*). Все три - общие настройки группы: едут
+     * конвертом `soscfg`, как медленный режим.
+     */
+    @ColumnInfo(defaultValue = "1")
+    val sosEnabled: Boolean = true,
+    @ColumnInfo(defaultValue = "3")
+    val sosMessageCount: Int = 3,
+    @ColumnInfo(defaultValue = "'ALL'")
+    val sosPressRole: String = "ALL",
+    /**
+     * Свой текст тревожного сообщения из настроек группы; пусто - текст по
+     * умолчанию (SosMessage.DEFAULT_TEXT). Тоже общая настройка: едет
+     * отдельным конвертом `sostxt`, чтобы старые телефоны, не знающие его,
+     * по-прежнему получали остальные настройки SOS.
+     */
+    @ColumnInfo(defaultValue = "''")
+    val sosText: String = "",
+    /**
+     * Когда ЭТОТ телефон последний раз нажал SOS в группе (защита от
+     * повторного нажатия, не меньше 10 секунд). Локальная отметка: по сети
+     * не едет и в резервную копию настроек группы не входит.
+     */
+    @ColumnInfo(defaultValue = "0")
+    val sosLastSentAtMs: Long = 0L,
 )

@@ -2,10 +2,12 @@ package com.vladimir.messenger.ui.screens.contacts
 
 import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.ui.components.ApuHeaderIconBubble
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.swipeBack
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Box
 import com.vladimir.messenger.ui.components.ApuScrollbar
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
@@ -30,6 +33,7 @@ import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.SortByAlpha
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.*
@@ -41,6 +45,7 @@ import com.vladimir.messenger.util.OwnInvite
 import androidx.compose.ui.Alignment
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -118,13 +123,16 @@ fun ContactsScreen(
                 },
                 actions = {
                     // Адресная книга может быть длинной: выбор порядка всегда
-                    // под рукой, а текущий вариант отмечен галочкой в меню.
+                    // под рукой, а текущий вариант отмечен компактным chip-пузырём.
                     Box {
-                        IconButton(onClick = { sortMenuExpanded = true }) {
-                            Icon(
-                                Icons.Default.SortByAlpha,
-                                contentDescription = stringResource(R.string.contacts_sort_desc, stringResource(sortOrder.titleRes)),
-                            )
+                        ApuHeaderIconBubble(
+                            onClick = { sortMenuExpanded = true },
+                            contentDescription = stringResource(
+                                R.string.contacts_sort_desc,
+                                stringResource(sortOrder.titleRes),
+                            ),
+                        ) {
+                            Icon(Icons.Default.SortByAlpha, contentDescription = null)
                         }
                         ContactSortMenu(
                             expanded = sortMenuExpanded,
@@ -137,15 +145,17 @@ fun ContactsScreen(
                         )
                     }
                     // Пригласить друга — в один тап, прямо из списка контактов.
-                    IconButton(
-                        onClick = {
-                            showInviteShare = true
-                        },
+                    ApuHeaderIconBubble(
+                        onClick = { showInviteShare = true },
+                        contentDescription = stringResource(R.string.contacts_invite_friend),
                     ) {
-                        Icon(Icons.Default.Share, contentDescription = stringResource(R.string.contacts_invite_friend))
+                        Icon(Icons.Default.Share, contentDescription = null)
                     }
-                    IconButton(onClick = onAddContactClick) {
-                        Icon(Icons.Default.Add, contentDescription = stringResource(R.string.chat_add_contact))
+                    ApuHeaderIconBubble(
+                        onClick = onAddContactClick,
+                        contentDescription = stringResource(R.string.chat_add_contact),
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null)
                     }
                 }
             )
@@ -404,43 +414,106 @@ private fun ContactSortMenu(
     DropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismiss,
-        modifier = Modifier.widthIn(min = 244.dp),
-        shape = ApuBubbleShape,
+        modifier = Modifier
+            .widthIn(min = 232.dp)
+            .padding(6.dp),
+        shape = RoundedCornerShape(22.dp),
         containerColor = ApuBubbleSurfaceColor,
         tonalElevation = 0.dp,
-        shadowElevation = 0.dp,
+        shadowElevation = 14.dp,
         border = BorderStroke(
             1.dp,
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.30f),
         ),
     ) {
-        ContactSortOrder.entries.forEach { order ->
-            DropdownMenuItem(
-                text = {
-                    Column {
-                        Text(
-                            text = stringResource(order.titleRes),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = ApuBubbleTextColor,
-                        )
-                        Text(
-                            text = stringResource(order.descRes),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = ApuBubbleMutedColor,
-                        )
-                    }
-                },
-                trailingIcon = {
-                    if (order == selected) {
-                        Icon(
-                            Icons.Default.Check,
-                            contentDescription = stringResource(R.string.contacts_selected),
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                },
-                onClick = { onSelect(order) },
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(
+                    R.string.contacts_sort_desc,
+                    stringResource(selected.titleRes),
+                ),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                color = ApuBubbleTextColor,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             )
+            Spacer(Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(2.dp))
+        ContactSortOrder.entries.forEach { order ->
+            val isSelected = order == selected
+            val icon = when (order) {
+                ContactSortOrder.LAST_ACTIVITY -> Icons.Default.AccessTime
+                ContactSortOrder.ALPHABETICAL -> Icons.Default.SortByAlpha
+                ContactSortOrder.ONLINE_FIRST -> Icons.Default.Wifi
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        if (isSelected) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                        } else {
+                            androidx.compose.ui.graphics.Color.Transparent
+                        },
+                    )
+                    .clickable(
+                        role = Role.RadioButton,
+                        onClick = { onSelect(order) },
+                    )
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(
+                            if (isSelected) {
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
+                            } else {
+                                ApuBubbleMutedColor.copy(alpha = 0.10f)
+                            },
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = if (isSelected) MaterialTheme.colorScheme.primary else ApuBubbleMutedColor,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(order.titleRes),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.SemiBold else androidx.compose.ui.text.font.FontWeight.Medium,
+                        color = ApuBubbleTextColor,
+                        maxLines = 1,
+                    )
+                    Text(
+                        text = stringResource(order.descRes),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = ApuBubbleMutedColor,
+                        maxLines = 1,
+                    )
+                }
+                if (isSelected) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = stringResource(R.string.contacts_selected),
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
         }
     }
 }

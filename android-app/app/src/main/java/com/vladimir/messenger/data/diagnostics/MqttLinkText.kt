@@ -19,7 +19,7 @@ object MqttLinkText {
 
     /** Разобранная строка. null — это не строка MQTT (пусто/другой формат). */
     data class State(
-        /** «через наш сервер», «напрямую», «через мост»… Адрес сервера не показываем. */
+        /** «через relay по TLS-443», «через брокер по TCP», «через SOCKS5»… Адрес сервера не показываем. */
         val path: String,
         val connAckAgoSec: Int?,
         val errorAgoSec: Int?,
@@ -73,13 +73,18 @@ object MqttLinkText {
         val mode = body.substringBefore(", ConnAck").trim()
         return when {
             mode.isEmpty() -> null
-            mode.startsWith("wss") -> "через обходной канал"
+            // The launcher/VM-safe route is an outbound WebSocket over TLS 443.
+            // Say that explicitly: «обходной канал» did not tell a person
+            // whether the app was using the permitted HTTPS path or a local
+            // proxy.
+            mode.startsWith("wss") || mode.contains("relay") ->
+                "через relay по TLS-443"
             mode.contains("наш брокер") &&
                 (mode.contains("переход") || mode.contains("не ответили")) ->
                 "через наш сервер (прямой путь не прошёл)"
             mode.contains("наш брокер") -> "через наш сервер"
-            mode.contains("SOCKS5") -> "через мост"
-            mode.startsWith("tcp") -> "напрямую"
+            mode.contains("SOCKS5") -> "через SOCKS5-мост"
+            mode.startsWith("tcp") -> "через брокер по TCP"
             else -> mode
         }
     }

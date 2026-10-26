@@ -2,6 +2,7 @@ package com.vladimir.messenger.data
 
 import android.content.Context
 import android.util.Log
+import com.vladimir.messenger.data.receipt.DeliveryAckWire
 import com.vladimir.messenger.data.security.MessageSealer
 import com.vladimir.messenger.data.security.OutgoingPayloadPolicy
 import kotlinx.coroutines.launch
@@ -733,15 +734,49 @@ object RustBridge {
         }
     }
 
+    /** Publish the retained short-code rendezvous offer. Must run off the main thread. */
+    fun publishPairingCode(code: String, payload: String): Boolean {
+        if (rejectMainThreadCall("publishPairingCode")) return false
+        return try {
+            engine?.publishPairingCode(code, payload) ?: false
+        } catch (e: Exception) {
+            Log.w(TAG, "publishPairingCode failed: ${e.message}")
+            false
+        }
+    }
+
+    /** Keep a bounded WSS listener alive while SwarmFirst may pause persistent MQTT. */
+    fun listenPairingCode(code: String): Boolean {
+        if (rejectMainThreadCall("listenPairingCode")) return false
+        return try {
+            engine?.listenPairingCode(code) ?: false
+        } catch (e: Exception) {
+            Log.w(TAG, "listenPairingCode failed: ${e.message}")
+            false
+        }
+    }
+
     fun sendDirectPayload(recipientId: String, payload: String): Boolean {
         if (rejectMainThreadCall("sendDirectPayload")) return false
         return try {
             val handle = engine
             if (handle != null) {
-                // Прямой путь уже под TLS 1.3, но запечатываем и его: тот же
-                // payload при смене маршрута может уйти через ретранслятор.
-                val sealed = sealOutgoing(recipientId, payload) ?: return false
-                handle.sendDirectPayload(recipientId, sealed)
+                // Прямой путь уже под TLS 1.3, но обычные control/data payloads
+                // запечатываем: тот же кадр при смене маршрута может уйти через
+                // ретранслятор. Сначала пробуем запечатать и ACK. Если входящее
+                // сообщение только что открылось, но sender pin всё ещё не был
+                // сохранён (старый клиент/ошибка bootstrap), raw `ack|id` —
+                // безопасный control fallback: в нём нет текста переписки, а
+                // QUIC peer-auth и MQTT backup сохраняются. Это не даёт raw
+                // fallback обычным сообщениям.
+                val sealed = if (DeliveryAckWire.isPacket(payload)) {
+                    sealOutgoing(recipientId, payload)
+                } else {
+                    val sealed = sealOutgoing(recipientId, payload) ?: return false
+                    sealed
+                }
+                val wire = sealed ?: payload
+                handle.sendDirectPayload(recipientId, wire)
             } else {
                 false
             }
@@ -862,8 +897,9 @@ object RustBridge {
                 //
                 // Прямой канал брокера не требует, поэтому сначала он.
                 val payload = "ack|$messageId"
-                // Обёртка sendDirectPayload сама запечатывает полезное (см. ниже):
-                // здесь только выбираем получателя.
+                // sendDirectPayload seals this ACK when the sender pin is known
+                // and falls back to the reserved raw form only when bootstrap
+                // is still missing; ordinary payloads never get that fallback.
                 val direct = runCatching { sendDirectPayload(recipientId, payload) }
                     .getOrDefault(false)
                 if (direct) {

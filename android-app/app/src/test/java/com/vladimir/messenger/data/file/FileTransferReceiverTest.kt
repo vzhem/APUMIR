@@ -112,6 +112,22 @@ class FileTransferReceiverTest {
             FakeFileCryptoGateway.fakeEncrypt(bytes),
         ).map(FileTransferWire::encodeEncodedPacket)
 
+    /** Сырой шифротекст куска пакетами (без повторного «шифрования» на стенде). */
+    private fun chunkCipherTexts(index: Int, ciphertext: ByteArray): List<String> =
+        FileTransferPacketCodec.fragment(
+            FileTransferPacketCodec.Type.CHUNK,
+            transferIdBytes,
+            index.toLong(),
+            ciphertext,
+        ).map(FileTransferWire::encodeEncodedPacket)
+
+    /** Подлинный на стенде шифротекст с одним перевёрнутым байтом: проверка подлинности обязана его отвергнуть. */
+    private fun corruptedCipher(index: Long): ByteArray {
+        val cipher = FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(index))
+        cipher[cipher.size - 1] = (cipher[cipher.size - 1].toInt() xor 1).toByte()
+        return cipher
+    }
+
     private fun ackText(contiguous: Int): String =
         FileTransferWire.encodeEncodedPacket(
             FileTransferPacketCodec.encode(
@@ -308,6 +324,131 @@ class FileTransferReceiverTest {
         assertEquals("FAILED", dao.getTransfer(transferIdHex)!!.state)
         assertNull(receivedStore.receivedFile(transferIdHex, "photo.png"))
         assertTrue(notifier.events.isEmpty())
+    }
+
+    /**
+     * Битый кусок (испорчен по дороге: у бинарных диапазонов и пересланных
+     * кусков проверки целостности фрагментов нет) не ложится на диск и не
+     * хоронит передачу: прогресс подтверждается как есть, отправитель
+     * присылает кусок заново, и голосовое собирается целиком.
+     */
+    @Test
+    fun unauthenticatedTextChunkIsDroppedAndResendCompletes() = runTest {
+        val receiver = receiver()
+        deliver(receiver, offerTexts())
+        deliver(receiver, chunkCipherTexts(0, corruptedCipher(0)))
+
+        val afterBad = dao.getTransfer(transferIdHex)!!
+        assertTrue(afterBad.state != "FAILED")
+        assertEquals(0L, afterBad.completedChunks)
+        assertTrue(chunkStore.storedChunkIndices(transferIdHex).isEmpty())
+        assertEquals(0L, sentAckContiguous().last())
+
+        val lengths = listOf(1024, 1024, 452)
+        lengths.forEachIndexed { index, length ->
+            val chunk = plaintext.copyOfRange(index * chunkSize, index * chunkSize + length)
+            deliver(receiver, chunkTexts(index, chunk))
+        }
+        assertEquals("COMPLETE", dao.getTransfer(transferIdHex)!!.state)
+        val receivedFile = receivedStore.receivedFile(transferIdHex, "photo.png")
+        assertNotNull(receivedFile)
+        receivedFile!!.inputStream().use { input ->
+            assertTrue(input.readBytes().contentEquals(plaintext))
+        }
+        assertEquals(1, notifier.events.size)
+    }
+
+    /** Тот же сценарий бинарным каналом (APUF): битый диапазон не отравляет сборку. */
+    @Test
+    fun unauthenticatedBinaryChunkIsDroppedAndResendCompletes() = runTest {
+        val receiver = receiver()
+        deliver(receiver, offerTexts())
+        binaryChunk(receiver, 0, 0, corruptedCipher(0))
+        assertTrue(chunkStore.storedChunkIndices(transferIdHex).isEmpty())
+        assertEquals(0L, dao.getTransfer(transferIdHex)!!.completedChunks)
+        assertTrue(dao.getTransfer(transferIdHex)!!.state != "FAILED")
+
+        for (index in 0L until 3L) {
+            binaryChunk(receiver, index, 0, FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(index)))
+        }
+        assertEquals("COMPLETE", dao.getTransfer(transferIdHex)!!.state)
+    }
+
+    /**
+     * Наследие версий без проверки при приёме: битый кусок уже лежит на
+     * диске. Подлинный повтор отправителя заменяет его, а не упирается в
+     * конфликт хранилища.
+     */
+    @Test
+    fun storedUnauthenticatedChunkIsReplacedByAuthenticResend() = runTest {
+        val receiver = receiver()
+        deliver(receiver, offerTexts())
+        val bad = corruptedCipher(0)
+        chunkStore.storeEncryptedChunk(transferIdHex, 0L, bad)
+        dao.insertChunkIgnore(
+            com.vladimir.messenger.data.local.entity.FileTransferChunkEntity(
+                transferId = transferIdHex,
+                chunkIndex = 0L,
+                state = "RECEIVED",
+                ciphertextBytes = bad.size.toLong(),
+                chunkSha256 = "00",
+                updatedAtMs = 1L,
+            ),
+        )
+
+        val good = FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(0))
+        deliver(receiver, chunkCipherTexts(0, good))
+        assertArrayEquals(good, chunkStore.readEncryptedChunk(transferIdHex, 0L))
+
+        for (index in 1L until 3L) {
+            binaryChunk(receiver, index, 0, FakeFileCryptoGateway.fakeEncrypt(chunkPlaintext(index)))
+        }
+        assertEquals("COMPLETE", dao.getTransfer(transferIdHex)!!.state)
+    }
+
+    /**
+     * Битый кусок успел записаться и посчитаться принятым (старая версия):
+     * сборка не хоронит файл в VERIFY_FAILED, а выбрасывает битый кусок,
+     * откатывает прогресс и дожидается повтора - передача завершается.
+     */
+    @Test
+    fun finalizeEvictsLegacyPoisonedChunkAndRecoversOnResend() = runTest {
+        val receiver = receiver()
+        deliver(receiver, offerTexts())
+        val bad = corruptedCipher(0)
+        chunkStore.storeEncryptedChunk(transferIdHex, 0L, bad)
+        dao.insertChunkIgnore(
+            com.vladimir.messenger.data.local.entity.FileTransferChunkEntity(
+                transferId = transferIdHex,
+                chunkIndex = 0L,
+                state = "RECEIVED",
+                ciphertextBytes = bad.size.toLong(),
+                chunkSha256 = "00",
+                updatedAtMs = 1L,
+            ),
+        )
+        dao.advanceProgress(transferIdHex, "TRANSFERRING", 1L, chunkSize.toLong(), 500_000L, null)
+
+        deliver(receiver, chunkTexts(1, plaintext.copyOfRange(chunkSize, 2 * chunkSize)))
+        deliver(receiver, chunkTexts(2, plaintext.copyOfRange(2 * chunkSize, plaintext.size)))
+
+        val repairing = dao.getTransfer(transferIdHex)!!
+        assertEquals("TRANSFERRING", repairing.state)
+        assertEquals(FileTransferReceiver.ERROR_CHUNK_REPAIR, repairing.errorCode)
+        assertEquals(2L, repairing.completedChunks)
+        assertFalse(chunkStore.hasEncryptedChunk(transferIdHex, 0L))
+        assertEquals(0L, sentAckContiguous().last())
+        assertTrue(notifier.events.isEmpty())
+        assertNull(receivedStore.receivedFile(transferIdHex, "photo.png"))
+
+        deliver(receiver, chunkTexts(0, plaintext.copyOfRange(0, chunkSize)))
+        assertEquals("COMPLETE", dao.getTransfer(transferIdHex)!!.state)
+        val receivedFile = receivedStore.receivedFile(transferIdHex, "photo.png")
+        assertNotNull(receivedFile)
+        receivedFile!!.inputStream().use { input ->
+            assertTrue(input.readBytes().contentEquals(plaintext))
+        }
+        assertEquals(1, notifier.events.size)
     }
 
     @Test

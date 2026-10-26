@@ -96,6 +96,7 @@ class CoreServerService : Service() {
     // Отклики на истории: значки и комментарии зрителей (см. docs/STORY_REACTIONS_AND_COMMENTS.md).
     @Inject lateinit var storyFeedback: com.vladimir.messenger.data.story.StoryFeedbackRepository
     @Inject lateinit var groupDao: com.vladimir.messenger.data.local.dao.GroupDao
+    @Inject lateinit var appDatabase: com.vladimir.messenger.data.local.AppDatabase
     @Inject lateinit var inboxPinDao: com.vladimir.messenger.data.local.dao.InboxPinDao
     @Inject lateinit var counters: com.vladimir.messenger.data.channel.PostCounterRepository
     @Inject lateinit var swarmBudget: com.vladimir.messenger.data.swarm.SwarmBudget
@@ -305,6 +306,25 @@ class CoreServerService : Service() {
     }
 
     /**
+     * A successfully opened sealed message proves the sender's signed file/message
+     * binding. Learn it before sending the ACK: otherwise a receiver that missed
+     * HELLO can display the message but cannot send a sealed reply. A changed
+     * binding is reported, never overwritten automatically.
+     */
+    private suspend fun rememberOpenedMessageBinding(senderId: String, wire: String) {
+        when (fileTransferRouter.rememberOpenedMessageBinding(senderId, wire)) {
+            com.vladimir.messenger.data.file.FileTransferRouter.OpenedMessageBindingResult.KEY_CHANGED -> {
+                TransferDiagnostics.notePeerKeyChanged()
+                Log.w(TAG, "opened message binding differs from pinned peer binding")
+            }
+            com.vladimir.messenger.data.file.FileTransferRouter.OpenedMessageBindingResult.PINNED_NEW -> {
+                Log.i(TAG, "learned sender binding from opened message")
+            }
+            else -> Unit
+        }
+    }
+
+    /**
      * Уведомить отправителя, что его приглашение отклонено настройками
      * приватности этого телефона. Самому получателю по-прежнему полная
      * тишина; отправитель получает служебный пакет и видит человеческое
@@ -356,16 +376,16 @@ class CoreServerService : Service() {
         text: String,
         authenticated: Boolean = false,
     ): Boolean {
-        if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, authenticated)) return true
-        // P3: пакеты подключения устройств разбираем и на запасном пути приёма.
-        // У устройств одного аккаунта общий nodeId, поэтому «отправитель = я»
-        // здесь не признак мусора: кто именно из устройств прислал пакет,
-        // ядро определяет по device_id и MAC внутри пакета.
-        if (com.vladimir.messenger.data.pairing.DevicePairingWire.isPacket(text)) {
+        // Pairing and large authenticated mirror frames must win over deferred
+        // delivery as well as over the normal chat parser. Devices of one
+        // account share a routing node id, so neither path may self-drop these
+        // control packets before the pairing/device MAC is checked.
+        if (com.vladimir.messenger.data.pairing.DevicePairingWire.isPairingText(text)) {
             com.vladimir.messenger.data.pairing.DevicePairingController
                 .routeIncoming(applicationContext, senderId, text)
             return true
         }
+        if (deferredDelivery.routeIncoming(senderId, chatId, messageId, text, authenticated)) return true
         // р243/р244: подтверждение доставки, пришедшее прямым каналом. Второй
         // путь приёма обязан разбирать его так же, как основной: иначе строка
         // «ack|…» вырастет в личный чат. Даже некорректный ACK с зарезервированным
@@ -696,6 +716,21 @@ class CoreServerService : Service() {
         Log.i(TAG, "CoreServerService started (action=" + (intent?.action ?: "null") + ")")
         startForeground(NOTIFICATION_ID, buildNotification("Подключение..."))
 
+        // Никогда не создаём native engine до завершения онбординга. Сервис
+        // может быть поднят будильником или старым APK, пока prefs ещё не
+        // содержат identity; такой Anonymous engine затем перехватывает
+        // CreateIdentityUseCase и оставляет launcher на пустом routing id.
+        val prefs = getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+        val identityReady = prefs.getBoolean("identity_created", false) &&
+            com.vladimir.messenger.data.security.DeviceIdentityMarker.isPresent(applicationContext)
+        if (!identityReady) {
+            Log.i(TAG, "CoreServerService deferred: local identity is not ready")
+            CoreStatus.report("Ожидание создания identity")
+            CoreStatus.markReady()
+            stopServiceSafely()
+            return START_NOT_STICKY
+        }
+
         // Раунд 141: аварийный каркас - каждый старт перевзводит системный
         // будильник «+5 минут». Если процесс убьют или усыпят, будильник
         // поднимет сервис сам и письмо доложится (см. EmergencyKeepAlive).
@@ -828,7 +863,6 @@ class CoreServerService : Service() {
             }
         }
 
-        val prefs = getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
         var displayName = prefs.getString("display_name", "Anonymous") ?: "Anonymous"
         // сли Anonymous но профиль уже создан - перечитать
         if (displayName == "Anonymous" && prefs.getBoolean("identity_created", false)) {
@@ -1178,6 +1212,13 @@ class CoreServerService : Service() {
                                         // копии в пути от настоящего рассинхрона.
                                         com.vladimir.messenger.data.security.KeyDesyncNotice
                                             .opened(applicationContext, senderId)
+                                        if (SealedWire.isSealed(parsed.content)) {
+                                            try {
+                                                rememberOpenedMessageBinding(senderId, parsed.content)
+                                            } catch (error: Exception) {
+                                                Log.w(TAG, "CF opened message binding learn failed: ${error.message}")
+                                            }
+                                        }
                                         // Раунд 140: служебные конверты разбираются ДО
                                         // сохранения - тем же стражем, что и основной
                                         // путь. У неизвестного отправителя чат ради
@@ -1350,8 +1391,8 @@ class CoreServerService : Service() {
             bridge = mirrorBridge(),
         )
         mirror = channel
-        com.vladimir.messenger.data.mirror.MirrorHub.channel = channel
         channel.start()
+        com.vladimir.messenger.data.mirror.MirrorHub.bind(channel)
     }
 
     private fun mirrorBridge() = object : com.vladimir.messenger.data.mirror.MirrorChannel.Bridge {
@@ -1372,6 +1413,17 @@ class CoreServerService : Service() {
             // приглашение): уведомления быть не должно.
             if (chatId.isBlank()) return
             if (notify) {
+                // SOS и на зеркальном устройстве - тревога, а не обычное
+                // уведомление: паузы звука её не касаются.
+                if (com.vladimir.messenger.util.SosMessage.isSos(row.content)) {
+                    runCatching {
+                        notificationHelper.showSosNotification(
+                            chatId, row.senderId, null,
+                            messageId = row.id,
+                        )
+                    }
+                    return
+                }
                 // р249: у чата на паузе не показываем сообщение в шторке.
                 if (runCatching { chatRepository.isChatMuted(chatId) }.getOrDefault(false)) {
                     Log.i(TAG, "notification suppressed: чат без звука (зеркало)")
@@ -1426,10 +1478,25 @@ class CoreServerService : Service() {
                 .onFailure { Log.w(TAG, "Mirror file meta failed: ${it.message}") }
                 .getOrDefault(false)
 
-        override suspend fun onFileChunk(transferId: String, seq: Int, last: Boolean, bytes: ByteArray) {
-            runCatching { fileTransferRouter.applyMirrorFileChunk(transferId, seq, last, bytes) }
+        override suspend fun onFileChunk(
+            transferId: String,
+            offset: Long,
+            seq: Int,
+            last: Boolean,
+            bytes: ByteArray,
+        ) {
+            runCatching { fileTransferRouter.applyMirrorFileChunk(transferId, offset, seq, last, bytes) }
                 .onFailure { Log.w(TAG, "Mirror file chunk failed: ${it.message}") }
         }
+
+        override suspend fun mirrorFileBytesPresent(
+            transferId: String,
+            displayName: String,
+            totalBytes: Long,
+        ): Boolean = fileTransferRouter.mirrorFileBytesPresent(transferId, displayName, totalBytes)
+
+        override suspend fun mirrorFileBytesReceived(transferId: String): Long =
+            fileTransferRouter.mirrorReceivedBytesDurable(transferId)
 
         override suspend fun fileBytesFor(
             transferId: String,
@@ -1535,6 +1602,18 @@ class CoreServerService : Service() {
                 else -> Unit
             }
         }
+
+        override suspend fun mirrorContactSnapshot(): List<org.json.JSONObject> =
+            contactRepository.mirrorContactSnapshot()
+
+        override suspend fun mirrorFileSnapshot(): List<org.json.JSONObject> =
+            fileTransferRouter.mirrorCompletedFileSnapshot()
+
+        override suspend fun mirrorAccountSnapshot(): List<org.json.JSONObject> =
+            com.vladimir.messenger.data.mirror.MirrorAccountSnapshot.exportRows(applicationContext, appDatabase)
+
+        override suspend fun applyAccountSnapshot(rows: List<org.json.JSONObject>): Int =
+            com.vladimir.messenger.data.mirror.MirrorAccountSnapshot.applyRows(applicationContext, appDatabase, rows)
 
         override suspend fun onOutgoingFromPartner(row: com.vladimir.messenger.data.mirror.MirrorRow) {
             // id чатов на устройствах разные - ищем чат по узлу получателя.
@@ -1677,7 +1756,7 @@ class CoreServerService : Service() {
             val last = mirrorFileAskedAt[row.transferId] ?: 0L
             if (now - last < MIRROR_FILE_RETRY_MS) continue
             mirrorFileAskedAt[row.transferId] = now
-            val offset = fileTransferRouter.mirrorReceivedBytesOf(row.transferId)
+            val offset = fileTransferRouter.mirrorReceivedBytesDurable(row.transferId)
             val big = row.totalBytes > com.vladimir.messenger.data.mirror.MirrorChannel.FILE_MIRROR_MAX_BYTES
             com.vladimir.messenger.data.mirror.MirrorHub.requestFileBytes(
                 row.transferId,
@@ -1685,6 +1764,7 @@ class CoreServerService : Service() {
                 row.totalBytes,
                 offset = offset,
                 big = big,
+                sha256 = row.fileSha256,
             )
             Log.i(TAG, "file bytes pump: прошу ${row.displayName} (${row.totalBytes} Б, с $offset)")
             break
@@ -2062,6 +2142,19 @@ class CoreServerService : Service() {
                     }
                     for (msg in recentIncoming) {
                         try {
+                            // SOS из группы: тревога не знает пауз звука -
+                            // активно оповещаем отдельным громким путём,
+                            // даже если группа у получателя без звука.
+                            if (com.vladimir.messenger.util.SosMessage.isSos(msg.content)) {
+                                runCatching {
+                                    notificationHelper.showSosNotification(
+                                        msg.chatId, msg.senderId,
+                                        msg.topicId?.takeIf { it.isNotBlank() },
+                                        messageId = msg.id,
+                                    )
+                                }.onFailure { Log.w(TAG, "SOS notification failed: ${it.message}") }
+                                continue
+                            }
                             // р249: «без звука» - ни уведомления, ни звука.
                             // Проверяем и личный чат, и группу: у сообщения
                             // один chatId, а чем он окажется - решаем по базе
@@ -2274,6 +2367,42 @@ class CoreServerService : Service() {
                     return
                 }
 
+                // Pairing packets are intentionally raw and use the account routing node. Two
+                // phones of one account therefore look like "from me" here. Route this before
+                // the self-node filter; otherwise the primary silently discards the join request
+                // and the joiner can only sit on the six-digit code screen forever. The controller
+                // still authenticates the packet and ignores an own-device echo by device_id.
+                if (!SealedWire.isSealed(rawText) &&
+                    com.vladimir.messenger.data.pairing.DevicePairingWire.isPairingText(rawText)
+                ) {
+                    com.vladimir.messenger.data.pairing.DevicePairingController
+                        .routeIncoming(applicationContext, senderId, rawText)
+                    return
+                }
+
+                // ACK is intentionally a raw control packet so a receiver that
+                // learned the sender binding from the just-opened message can
+                // return it even before HELLO. Handle it before the self-node
+                // filter: mirror devices may share the routing node id, and the
+                // old order turned an ACK into an ACK-of-ACK and dropped it.
+                if (!SealedWire.isSealed(rawText) && DeliveryAckWire.isPacket(rawText)) {
+                    val ackedId = DeliveryAckWire.messageId(rawText)
+                    if (ackedId != null) {
+                        mirror?.publishEnvelope(senderId, chatId, messageId, rawText)
+                        serviceScope.launch {
+                            try {
+                                val changed = markMessageDelivered(ackedId)
+                                Log.i(TAG, "📬 raw delivery ACK: msgId=$ackedId changed=$changed")
+                            } catch (error: Exception) {
+                                Log.w(TAG, "raw delivery ACK apply failed: ${error.message}")
+                            }
+                        }
+                    } else {
+                        Log.w(TAG, "malformed raw delivery ACK; dropped")
+                    }
+                    return
+                }
+
                 // р239: сообщение «от себя». Такое бывает, когда в контактах
                 // оказался собственный узел (в профиле есть «Мой QR» - его
                 // можно отсканировать самому). Показывать эхо входящим и
@@ -2348,6 +2477,11 @@ class CoreServerService : Service() {
                     // открывается» больше не нужна и не должна висеть сутками.
                     com.vladimir.messenger.data.security.KeyDesyncNotice
                         .opened(applicationContext, senderId)
+                    try {
+                        rememberOpenedMessageBinding(senderId, rawText)
+                    } catch (error: Exception) {
+                        Log.w(TAG, "opened message binding learn failed: ${error.message}")
+                    }
                     opened
                 } else {
                     rawText
@@ -2388,8 +2522,9 @@ class CoreServerService : Service() {
                 // его узнаём и помечаем своё сообщение доставленным. Строка
                 // служебная - в переписку не попадает.
                 //
-                // Место важно: разбор идёт ПОСЛЕ расшифровки - конверт до неё
-                // выглядит как «APUSL1|…», и префикс не угадать.
+                // Raw ACKs are handled before the self-node filter above. Keep
+                // this guard for legacy sealed ACKs from older senders: their
+                // prefix only becomes visible after MessageSealer.open().
                 if (DeliveryAckWire.isPacket(text)) {
                     val ackedId = DeliveryAckWire.messageId(text)
                     if (ackedId != null) {

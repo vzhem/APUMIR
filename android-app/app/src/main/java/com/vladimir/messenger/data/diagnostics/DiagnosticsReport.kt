@@ -395,6 +395,15 @@ object Counters {
     /** Подтверждения доставки наших сообщений — «вторая галочка». */
     const val MSG_ACK = "msg_ack"
 
+    /** ACK correlation: the local outgoing row was eligible for DELIVERED. */
+    const val MSG_ACK_TARGET_MATCHED = "msg_ack_target_matched"
+    /** ACK correlation: no local row with this transport message id. */
+    const val MSG_ACK_TARGET_UNKNOWN = "msg_ack_target_unknown"
+    /** ACK correlation: a row exists, but it is not owned by this phone. */
+    const val MSG_ACK_TARGET_NOT_MINE = "msg_ack_target_not_mine"
+    /** ACK correlation: a local row exists but is already terminal/unexpected. */
+    const val MSG_ACK_TARGET_TERMINAL = "msg_ack_target_terminal"
+
     /** Попытки открыть sealed-пакеты: не уникальные сообщения и не доказанная потеря. */
     const val MSG_IN_NOT_OPENED = "msg_in_not_opened"
 
@@ -932,6 +941,9 @@ object DiagnosticsReport {
         val localOpenFailures = c[Counters.MSG_IN_LOCAL_CRYPTO_UNAVAILABLE] ?: 0L
         val queued = c[Counters.MSG_QUEUED_OFFLINE] ?: 0L
         val failed = c[Counters.MSG_SEND_FAILED] ?: 0L
+        val ackUnknown = c[Counters.MSG_ACK_TARGET_UNKNOWN] ?: 0L
+        val ackNotMine = c[Counters.MSG_ACK_TARGET_NOT_MINE] ?: 0L
+        val ackTerminal = c[Counters.MSG_ACK_TARGET_TERMINAL] ?: 0L
         val ownEvictions = facts.relayQueueOwnEvictions
         // Оговорки к основной строке: «отложено» и «не ушло» нельзя прятать —
         // иначе «отправлено 0» читается как поломка, хотя сообщение просто ждёт
@@ -970,6 +982,9 @@ object DiagnosticsReport {
         val notes = buildString {
             if (queued > 0L) append(" · отложено до сети $queued (возможно, ждёт и ключей; это попытки)")
             if (failed > 0L) append(" · не ушло $failed")
+            if (ackUnknown > 0L) append(" · ACK без локальной строки $ackUnknown")
+            if (ackNotMine > 0L) append(" · ACK по чужой строке $ackNotMine")
+            if (ackTerminal > 0L) append(" · ACK по уже завершённой строке $ackTerminal")
             append(queueNotes)
         }
         return when {
@@ -1211,6 +1226,10 @@ object DiagnosticsReport {
         appendLine("входящих показано=${c[Counters.MSG_IN] ?: 0L}")
         appendLine("исходящих отправлено=${c[Counters.MSG_OUT] ?: 0L}")
         appendLine("подтверждений доставки=${c[Counters.MSG_ACK] ?: 0L}")
+        appendLine("ACK нашли ожидающую исходящую строку=${c[Counters.MSG_ACK_TARGET_MATCHED] ?: 0L}")
+        appendLine("ACK без локальной строки=${c[Counters.MSG_ACK_TARGET_UNKNOWN] ?: 0L}")
+        appendLine("ACK по строке не с этого телефона=${c[Counters.MSG_ACK_TARGET_NOT_MINE] ?: 0L}")
+        appendLine("ACK по уже завершённой/неподходящей строке=${c[Counters.MSG_ACK_TARGET_TERMINAL] ?: 0L}")
         appendLine("отложено (ожидает связь/ключи; число попыток)=${c[Counters.MSG_QUEUED_OFFLINE] ?: 0L}")
         appendLine("не ушло (узел отказал или нет сети)=${c[Counters.MSG_SEND_FAILED] ?: 0L}")
         appendLine("последнее входящее=${lastSeenText(facts, facts.lastIncomingAtMs)}")
@@ -1388,6 +1407,10 @@ object DiagnosticsReport {
             Counters.MSG_IN,
             Counters.MSG_OUT,
             Counters.MSG_ACK,
+            Counters.MSG_ACK_TARGET_MATCHED,
+            Counters.MSG_ACK_TARGET_UNKNOWN,
+            Counters.MSG_ACK_TARGET_NOT_MINE,
+            Counters.MSG_ACK_TARGET_TERMINAL,
             Counters.MSG_IN_NOT_OPENED,
             Counters.MSG_IN_LOCAL_CRYPTO_UNAVAILABLE,
             Counters.MSG_IN_NOT_OPENED_STALE,

@@ -370,6 +370,8 @@ pub struct MqttTransport {
     secondary_liveness: Arc<MqttLivenessProbe>,
     #[cfg(feature = "mqtt-dual-broker")]
     secondary_ready: Arc<AtomicBool>,
+    /// Ephemeral pairing sessions must not clear or publish the persistent presence topic.
+    ephemeral: bool,
     node_id: String,
     peers: Arc<Mutex<Vec<PeerInfo>>>,
     relay_nodes: Arc<Mutex<Vec<PeerInfo>>>,
@@ -611,11 +613,36 @@ impl MqttTransport {
 
     pub(crate) async fn connect_with_shared_state(
         node_id: &str,
-        _display_name: &str,
+        display_name: &str,
         shared_state: Arc<MqttSharedRuntimeState>,
         own_broker: Option<(String, u16)>,
     ) -> Result<Self, String> {
-        let client_id = format!("p2pm_{}", &node_id[..16.min(node_id.len())]);
+        Self::connect_with_shared_state_and_client_id(
+            node_id,
+            display_name,
+            shared_state,
+            own_broker,
+            None,
+            false,
+        )
+        .await
+    }
+
+    /// Pairing's short-lived publisher must not reuse the persistent session's MQTT client ID:
+    /// MQTT brokers disconnect the older connection when the same ID connects again. Pairing also
+    /// sets `prefer_wss`, because it must work before the long-lived session has detected a TCP
+    /// block and flipped the process-wide failover flag.
+    pub(crate) async fn connect_with_shared_state_and_client_id(
+        node_id: &str,
+        _display_name: &str,
+        shared_state: Arc<MqttSharedRuntimeState>,
+        own_broker: Option<(String, u16)>,
+        client_id_override: Option<String>,
+        prefer_wss: bool,
+    ) -> Result<Self, String> {
+        let ephemeral_client_id = client_id_override.is_some();
+        let client_id = client_id_override
+            .unwrap_or_else(|| format!("p2pm_{}", &node_id[..16.min(node_id.len())]));
         let brokers = MultiBroker::with_own(own_broker);
         // K4-3: перебираем кандидатов (свой брокер первым) и берём первого,
         // кто отвечает в пределах строгого таймаута. Если не ответил никто,
@@ -628,7 +655,7 @@ impl MqttTransport {
             .copied()
             .ok_or_else(|| "No MQTT brokers configured".to_string())?;
         let mut chosen: Option<(String, u16)> = None;
-        let forced_wss = MQTT_PREFER_WSS.load(Ordering::Relaxed);
+        let forced_wss = prefer_wss || MQTT_PREFER_WSS.load(Ordering::Relaxed);
         let failed_at = MQTT_OWN_FAILED_AT_MS.load(Ordering::Relaxed);
         let own_allowed = failed_at == 0
             || unix_ms().saturating_sub(failed_at) >= MQTT_OWN_RETRY_AFTER_MS;
@@ -728,12 +755,14 @@ impl MqttTransport {
         // без корректного отключения (закрыли приложение, сел аккумулятор,
         // упала сеть). Без этого каждая переустановка оставляла вечную запись
         // "я онлайн", и список пиров рос мёртвыми копиями одного телефона.
-        opts.set_last_will(LastWill::new(
-            format!("p2pm2/presence/{}", node_id),
-            Vec::new(),
-            QoS::AtLeastOnce,
-            true,
-        ));
+        if !ephemeral_client_id {
+            opts.set_last_will(LastWill::new(
+                format!("p2pm2/presence/{}", node_id),
+                Vec::new(),
+                QoS::AtLeastOnce,
+                true,
+            ));
+        }
 
         let (client, mut eventloop) = AsyncClient::new(opts, MQTT_CLIENT_REQUEST_BUFFER);
         if wss_bridge {
@@ -746,7 +775,11 @@ impl MqttTransport {
         #[cfg(feature = "mqtt-dual-broker")]
         let (secondary_client, secondary_eventloop, secondary_liveness, secondary_ready) = {
             let suffix = &node_id[..16.min(node_id.len())];
-            let secondary_client_id = format!("p2pm_emqx_{suffix}");
+            let secondary_client_id = if ephemeral_client_id {
+                client_id.clone()
+            } else {
+                format!("p2pm_emqx_{suffix}")
+            };
             let (secondary_host, secondary_port) = if wss_bridge {
                 (WSS_BRIDGE_URL.to_string(), WSS_BRIDGE_PORT)
             } else {
@@ -771,12 +804,14 @@ impl MqttTransport {
             secondary_options.set_keep_alive(Duration::from_secs(60));
             secondary_options.set_clean_session(true);
             secondary_options.set_max_packet_size(MAX_MQTT_PACKET_BYTES, MAX_MQTT_PACKET_BYTES);
-            secondary_options.set_last_will(LastWill::new(
-                format!("p2pm2/presence/{}", node_id),
-                Vec::new(),
-                QoS::AtLeastOnce,
-                true,
-            ));
+            if !ephemeral_client_id {
+                secondary_options.set_last_will(LastWill::new(
+                    format!("p2pm2/presence/{}", node_id),
+                    Vec::new(),
+                    QoS::AtLeastOnce,
+                    true,
+                ));
+            }
             let (secondary_client, mut secondary_eventloop) =
                 AsyncClient::new(secondary_options, MQTT_CLIENT_REQUEST_BUFFER);
             if wss_bridge {
@@ -818,6 +853,7 @@ impl MqttTransport {
             secondary_liveness,
             #[cfg(feature = "mqtt-dual-broker")]
             secondary_ready,
+            ephemeral: ephemeral_client_id,
             node_id: node_id.to_string(),
             peers: Arc::new(Mutex::new(Vec::new())),
             relay_nodes: Arc::new(Mutex::new(Vec::new())),
@@ -1566,19 +1602,22 @@ impl MqttTransport {
         );
 
         // Clear any old retained presence before run_mqtt_transport publishes the
-        // current presence. Both requests preserve their order in the client queue.
-        let topic = format!("p2pm2/presence/{}", self.node_id);
-        if let Err(error) = self
-            .enqueue_publish(
-                "retained presence clear",
-                &topic,
-                QoS::AtLeastOnce,
-                true,
-                Vec::new(),
-            )
-            .await
-        {
-            tracing::warn!("MQTT: retained presence clear request failed: {}", error);
+        // current presence. Ephemeral pairing sessions must not touch that topic: their
+        // temporary connection is not the device's persistent presence.
+        if !self.ephemeral {
+            let topic = format!("p2pm2/presence/{}", self.node_id);
+            if let Err(error) = self
+                .enqueue_publish(
+                    "retained presence clear",
+                    &topic,
+                    QoS::AtLeastOnce,
+                    true,
+                    Vec::new(),
+                )
+                .await
+            {
+                tracing::warn!("MQTT: retained presence clear request failed: {}", error);
+            }
         }
 
         Ok(())
@@ -1733,6 +1772,24 @@ impl MqttTransport {
             )
             .await
         }
+    }
+
+    /// Publish one bounded control topic through the WSS/SOCKS-aware session.
+    pub async fn publish_topic(
+        &self,
+        operation: &'static str,
+        topic: &str,
+        payload: &[u8],
+        retain: bool,
+    ) -> Result<(), String> {
+        self.enqueue_publish(
+            operation,
+            topic,
+            QoS::AtLeastOnce,
+            retain,
+            payload.to_vec(),
+        )
+        .await
     }
 
     /// M3(c.2-r3): relay, пересылаемый уже появившемуся recipient, должен быть live-only.

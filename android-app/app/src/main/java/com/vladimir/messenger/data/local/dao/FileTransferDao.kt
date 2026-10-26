@@ -105,6 +105,36 @@ interface FileTransferDao {
     @Query("SELECT COUNT(*) FROM file_transfer_chunks WHERE transferId = :transferId")
     suspend fun countChunks(transferId: String): Long
 
+    /** Убрать строку одного куска (приёмник выбросил кусок, не прошедший проверку подлинности). */
+    @Query("DELETE FROM file_transfer_chunks WHERE transferId = :transferId AND chunkIndex = :chunkIndex")
+    suspend fun deleteChunk(transferId: String, chunkIndex: Long): Int
+
+    /**
+     * Откат прогресса приёма после выбрасывания непроверенных кусков: в отличие
+     * от [advanceProgress], счётчики здесь законно УМЕНЬШАЮТСЯ (кусков на диске
+     * стало меньше), поэтому монотонный страж для этого вызова не применим.
+     */
+    @Query(
+        """
+        UPDATE file_transfers
+        SET state = :state,
+            completedChunks = :completedChunks,
+            transferredBytes = :transferredBytes,
+            updatedAtMs = :updatedAtMs,
+            errorCode = :errorCode
+        WHERE transferId = :transferId
+          AND state NOT IN ('COMPLETE', 'CANCELLED')
+        """
+    )
+    suspend fun resetProgress(
+        transferId: String,
+        state: String,
+        completedChunks: Long,
+        transferredBytes: Long,
+        updatedAtMs: Long,
+        errorCode: String?,
+    ): Int
+
     @Query(
         """
         SELECT COALESCE(SUM(ciphertextBytes - 16), 0)

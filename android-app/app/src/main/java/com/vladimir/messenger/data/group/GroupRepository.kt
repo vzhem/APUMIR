@@ -30,6 +30,7 @@ import com.vladimir.messenger.data.swarm.SwarmBuffer
 import com.vladimir.messenger.data.swarm.SwarmPolicy
 import com.vladimir.messenger.data.link.ShortLinks
 import com.vladimir.messenger.data.profile.Birthday
+import com.vladimir.messenger.data.textcolor.TextColorSettingsStore
 import com.vladimir.messenger.util.ChatPreviews
 import com.vladimir.messenger.util.GroupInviteRef
 import com.vladimir.messenger.util.InlineImage
@@ -95,6 +96,10 @@ class GroupRepository(
         { _, _, _, _ -> },
     /** Мой эмодзи-статус (пустая строка — статуса нет). */
     private val myEmojiStatus: () -> String = { "" },
+    /** Мой цвет имени; рассылается вместе с @именем и сообщениями. */
+    private val myNameColor: () -> String = { "" },
+    /** Присланный цвет имени участника/контакта. */
+    private val onPeerNameColor: (nodeId: String, colorId: String) -> Unit = { _, _ -> },
     /** Пришёл чужой эмодзи-статус (пустой значок — отзыв). */
     private val onPeerEmojiStatus: (nodeId: String, emoji: String, updatedAtMs: Long) -> Unit =
         { _, _, _ -> },
@@ -212,6 +217,8 @@ class GroupRepository(
      */
     private val pollDao: com.vladimir.messenger.data.local.dao.GroupPollDao? = null,
     private val isDeferredCancelled: (String, String) -> Boolean = { _, _ -> false },
+    /** Android context for local text/name colour preferences; null in JVM tests. */
+    private val appContext: android.content.Context? = null,
 ) {
 
     /** Раунд 137: что уже ретранслировали (и когда) - без повторного шторма. */
@@ -243,6 +250,21 @@ class GroupRepository(
      */
     private val rosterAsked: MutableSet<String> =
         java.util.Collections.synchronizedSet(mutableSetOf())
+
+    /**
+     * Пакет состава может обогнать карточку группы/решение о вступлении.
+     * Держим такой пакет до появления локальной строки группы и участника,
+     * вместо того чтобы безвозвратно выбросить его из обработчика.
+     */
+    private data class PendingRoster(
+        val senderId: String,
+        val packet: GroupWire.Packet.Roster,
+    )
+
+    private val pendingRosters = java.util.concurrent.ConcurrentHashMap<String, MutableList<PendingRoster>>()
+
+    /** Повторный запрос состава не чаще одного раза за интервал на группу. */
+    private val rosterRequestedAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     /**
      * Когда последний раз рассылали каталог, @имя и аватар.
@@ -433,14 +455,22 @@ class GroupRepository(
     suspend fun publishMyNickname(force: Boolean = false) {
         if (!force && !dueNow(lastNicknamePublishMs, GOSSIP_MIN_INTERVAL_MS)) return
         val me = myId() ?: return
-        val name = myUsername() ?: return
+        val nameColor = myNameColor()
+        val registeredName = myUsername()
+        // Без @имени цвет всё равно должен попасть в адресные книги. Для этой
+        // цели объявляем обычное отображаемое имя только когда цвет выбран;
+        // пустой профильный цвет сохраняет прежний путь.
+        val name = registeredName ?: myDisplayName().trim()
+            .takeIf { nameColor.isNotBlank() && it.isNotEmpty() && !it.startsWith("Contact ") }
+            ?: return
         val ids = contactIds()
         if (ids.isEmpty()) return
         val envelope = GroupWire.buildNick(
             ownerId = me,
             name = name,
-            registeredAtMs = myRegisteredAt(),
+            registeredAtMs = if (registeredName != null) myRegisteredAt() else 0L,
             hops = 0,
+            nameColor = nameColor,
         )
         runCatching { delivery.deliver("nicknames", envelope, ids) }
             .onFailure { Log.w(TAG, "nick publish failed: ${it.message}") }
@@ -601,6 +631,7 @@ class GroupRepository(
                 name = name,
                 registeredAtMs = myRegisteredAt(),
                 hops = 0,
+                nameColor = myNameColor(),
             )
             runCatching { delivery.deliver("nicknames", envelope, listOf(peerId)) }
                 .onFailure { Log.w(TAG, "whois nick reply failed: ${it.message}") }
@@ -717,17 +748,42 @@ class GroupRepository(
             .onFailure { Log.w(TAG, "group avatar publish failed: ${it.message}") }
     }
 
+    /** Room protects the current install; Keystore protects the next login after logout. */
+    private suspend fun isNicknameSuppressed(ownerId: String, normalizedName: String): Boolean =
+        nicknameDao.isSuppressed(ownerId, normalizedName) ||
+            appContext?.let {
+                com.vladimir.messenger.data.security.NicknameRevocationHistory
+                    .isRevoked(it, ownerId, normalizedName)
+            } == true
+
     private suspend fun handleNick(packet: GroupWire.Packet.Nick, senderId: String) {
+        // A local cleanup is a revocation, not just a database delete.  Check
+        // before touching contacts, colours, or the registry so a replayed gossip
+        // packet cannot resurrect the dead address through a side effect.
+        val normalizedName = packet.name.trim().trimStart('@').trim().lowercase()
+        if (packet.ownerId.isBlank() || normalizedName.isBlank() ||
+            isNicknameSuppressed(packet.ownerId, normalizedName)
+        ) {
+            return
+        }
+
         // @имя человека - самое надёжное, что о нём известно: оно приходит
         // роевой рассылкой и переживает переустановку. Записываем его в контакт
         // и подменяем им заглушку «Contact a1b2c3d4», из-за которой собеседник
         // так и висел набором букв и цифр, даже когда имя уже было известно.
         runCatching { onNicknameLearned(packet.ownerId, packet.name) }
             .onFailure { Log.w(TAG, "nick apply failed: ${it.message}") }
+        if (packet.nameColor.isNotBlank()) {
+            runCatching { onPeerNameColor(packet.ownerId, packet.nameColor) }
+                .onFailure { Log.w(TAG, "nick colour apply failed: ${it.message}") }
+        }
+        // Cleanup may have happened while contact/chat reconciliation was
+        // running.  Recheck immediately before persistence and gossip-forward.
+        if (isNicknameSuppressed(packet.ownerId, normalizedName)) return
         nicknameDao.upsert(
             NicknameEntity(
                 ownerId = packet.ownerId,
-                name = packet.name,
+                name = normalizedName,
                 registeredAtMs = packet.registeredAtMs,
             )
         )
@@ -735,7 +791,11 @@ class GroupRepository(
         // регистрация раньше (при равенстве времени - тот, у кого id меньше).
         val me = myId() ?: return
         val mine = myUsername() ?: return
-        if (packet.ownerId != me && packet.name.equals(mine, ignoreCase = true)) {
+        val oldProfileFromThisDevice = appContext?.let {
+            com.vladimir.messenger.data.security.DeviceIdentityHistory
+                .wasCreatedOnThisDevice(it, packet.ownerId)
+        } == true
+        if (packet.ownerId != me && !oldProfileFromThisDevice && normalizedName.equals(mine, ignoreCase = true)) {
             val myAt = myRegisteredAt()
             val iLost = packet.registeredAtMs < myAt ||
                 (packet.registeredAtMs == myAt && packet.ownerId < me)
@@ -744,15 +804,17 @@ class GroupRepository(
                 onUsernameConflict()
             }
         }
-        // Эпидемия дальше, кроме отправителя.
-        if (packet.hops < MAX_DIR_HOPS) {
+        // Эпидемия дальше, кроме отправителя.  Do not forward a packet that
+        // was revoked between the upsert and this point.
+        if (!isNicknameSuppressed(packet.ownerId, normalizedName) && packet.hops < MAX_DIR_HOPS) {
             val next = contactIds().filter { it != senderId }
             if (next.isNotEmpty()) {
                 val envelope = GroupWire.buildNick(
                     ownerId = packet.ownerId,
-                    name = packet.name,
+                    name = normalizedName,
                     registeredAtMs = packet.registeredAtMs,
                     hops = packet.hops + 1,
+                    nameColor = packet.nameColor,
                 )
                 runCatching { delivery.deliver("nicknames", envelope, next) }
             }
@@ -820,6 +882,11 @@ class GroupRepository(
             slowModeSeconds = g.slowModeSeconds,
             quietHours = g.quietHours,
             memberListVisible = g.memberListVisible,
+            // Кнопка SOS: видимость, число тревог и кто вправе нажимать.
+            sosEnabled = g.sosEnabled,
+            sosMessageCount = GroupSos.clampCount(g.sosMessageCount),
+            sosPressRole = GroupSos.normalizePressRole(g.sosPressRole),
+            sosText = g.sosText,
             wallpaper = g.wallpaper,
             wallpaperRevision = g.wallpaperRevision,
             mutedUntilMs = g.mutedUntilMs,
@@ -1043,6 +1110,17 @@ class GroupRepository(
          * над ним у тех, кто умеет её показывать.
          */
         poll: PollDraft? = null,
+        /**
+         * Тревожное сообщение SOS (см. [sendSos]): не подчиняется тихому
+         * времени, медленному режиму, закрытой теме и запрету обычных
+         * сообщений и уходит напрямую всем участникам, без роевой волны, -
+         * сигнал должен дойти как можно быстрее и до каждого.
+         */
+        sos: Boolean = false,
+        /** Optional explicit scope colour; null resolves the local group/topic setting. */
+        textColorOverride: String? = null,
+        /** Optional explicit profile/name colour; null resolves the local profile setting. */
+        senderNameColorOverride: String? = null,
     ): Result<String> {
         val attached = photos.filter { it.isNotBlank() }.take(InlineImage.MAX_PHOTOS)
         // Визитка файла (этап 9) - служебная строка: из слов её вынимаем и
@@ -1083,17 +1161,28 @@ class GroupRepository(
 
         val isAdmin = GroupRole.isAdminOrOwner(member.role)
         val schedule = GroupQuietSchedule.decode(group.quietHours)
-        if (!isAdmin && schedule?.blocks(clock()) == true) {
+        if (!sos && !isAdmin && schedule?.blocks(clock()) == true) {
             return Result.failure(SecurityException(schedule.notice()))
         }
         val memberMask = GroupPermissions.effectiveMemberPermissions(member.permissions, effectiveMemberMask(group))
-        if (!isAdmin && !GroupPermissions.has(memberMask, GroupPermissions.Member.SEND_MESSAGES)) {
+        if (!sos && !isAdmin && !GroupPermissions.has(memberMask, GroupPermissions.Member.SEND_MESSAGES)) {
             return Result.failure(SecurityException("Отправка сообщений в этой группе запрещена"))
         }
 
         val topic = resolveTopic(group, topicId)
             ?: return Result.failure(IllegalStateException("Тема не найдена"))
-        if (topic.isClosed && !isAdmin) {
+        val effectiveTextColor = TextColorSettingsStore.normalize(textColorOverride)
+            .takeIf { it.isNotBlank() }
+            ?: appContext?.let {
+                TextColorSettingsStore.textColor(
+                    context = it,
+                    scope = TextColorSettingsStore.groupScope(groupId, topic.id, group.isChannel),
+                )
+            }.orEmpty()
+        val effectiveNameColor = TextColorSettingsStore.normalize(senderNameColorOverride)
+            .takeIf { it.isNotBlank() }
+            ?: appContext?.let { TextColorSettingsStore.ownNameColor(it) }.orEmpty()
+        if (!sos && topic.isClosed && !isAdmin) {
             return Result.failure(SecurityException("Тема закрыта для новых сообщений"))
         }
 
@@ -1110,7 +1199,7 @@ class GroupRepository(
         // р250: медленный режим. Считаем от моего предыдущего сообщения: чужой
         // разговор не должен наказывать участника. Владелец и администраторы
         // пишут без паузы - им приходится гасить всплески сразу.
-        if (!isAdmin) {
+        if (!sos && !isAdmin) {
             val waitMs = slowModeWaitMs(group, me, now)
             if (waitMs > 0L) {
                 val seconds = (waitMs + 999L) / 1000L
@@ -1133,6 +1222,8 @@ class GroupRepository(
                 channel = "GROUP",
                 recipientId = "",
                 topicId = topic.id,
+                textColor = effectiveTextColor,
+                senderNameColor = effectiveNameColor,
                 // р250: цитата ответа пишется сразу - своя лента должна
                 // показывать ответ без ожидания второго конверта.
                 replyToId = reply?.messageId,
@@ -1165,6 +1256,8 @@ class GroupRepository(
                 channel = "GROUP",
                 recipientId = "",
                 topicId = topic.id,
+                textColor = effectiveTextColor,
+                senderNameColor = effectiveNameColor,
             )
             messageDao.insertMessage(row)
             partRows.add(row)
@@ -1177,7 +1270,9 @@ class GroupRepository(
         // ключ автора закреплён за ним самим). Маленькие группы и личные
         // сообщения роем не ходят.
         val groupSwarm = !group.isChannel && groupSwarm(group)
-        val manifest = if (isChannelPost || groupSwarm) {
+        // SOS роем не ходит: манифест и первая волна задержали бы сигнал у
+        // остальных участников, а тревоге нужен прямой веер всем и сразу.
+        val manifest = if (sos) null else if (isChannelPost || groupSwarm) {
             signManifest(
                 PostManifest.build(
                     groupId = groupId,
@@ -1222,6 +1317,8 @@ class GroupRepository(
                         text = body,
                         messageId = messageId,
                         senderName = member.displayName,
+                        textColor = effectiveTextColor,
+                        senderNameColor = effectiveNameColor,
                     ),
                     fullRecipients,
                 )
@@ -1246,6 +1343,8 @@ class GroupRepository(
                                 text = row.content,
                                 messageId = row.id,
                                 senderName = senderName,
+                                textColor = effectiveTextColor,
+                                senderNameColor = effectiveNameColor,
                             ),
                             fullRecipients,
                         )
@@ -1471,6 +1570,131 @@ class GroupRepository(
         }
         Log.i(TAG, "slow mode group=$groupId seconds=$safe by=$me")
         return Result.success(Unit)
+    }
+
+    /**
+     * Настройки красной кнопки SOS: показывать ли кнопку, сколько тревожных
+     * сообщений уходит за одно нажатие (3..5) и кто вправе нажимать.
+     * Менять вправе те же, кто меняет информацию о группе (как медленный
+     * режим): настройка одна на всех, поэтому уходит конвертом всей группе.
+     */
+    suspend fun setSosSettings(
+        groupId: String,
+        enabled: Boolean,
+        count: Int,
+        pressRole: String,
+    ): Result<Unit> {
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (!GroupPermissions.canChangeInfo(member.role, member.permissions, effectiveMemberMask(group))) {
+            return Result.failure(SecurityException("Менять настройки группы вправе администратор"))
+        }
+        val safeCount = GroupSos.clampCount(count)
+        val safeRole = GroupSos.normalizePressRole(pressRole)
+        if (enabled == group.sosEnabled && safeCount == group.sosMessageCount &&
+            safeRole == GroupSos.normalizePressRole(group.sosPressRole)
+        ) {
+            return Result.success(Unit)
+        }
+        groupDao.setSosSettings(groupId, enabled, safeCount, safeRole)
+        backgroundScope.launch {
+            runCatching {
+                delivery.deliver(
+                    groupId,
+                    GroupWire.buildSosSettings(groupId, enabled, safeCount, safeRole),
+                    allRecipients(groupId, me),
+                )
+            }.onFailure { Log.w(TAG, "sos settings fanout failed: ${it.message}") }
+        }
+        Log.i(TAG, "sos settings group=$groupId enabled=$enabled count=$safeCount role=$safeRole by=$me")
+        return Result.success(Unit)
+    }
+
+    /**
+     * Нажатие красной кнопки SOS: за один раз уходит [GroupEntity.sosMessageCount]
+     * тревожных сообщений подряд - их видят и слышат все участники, даже если
+     * телефон спит или группа у них без звука (см. показ уведомления).
+     *
+     * Защита от повторного нажатия - не меньше [GroupSos.COOLDOWN_MS]:
+     * отметка ставится ДО отправки, чтобы и неудавшаяся попытка, и закрытие
+     * приложения на середине не дали нажать снова сразу.
+     *
+     * Тревога не подчиняется тихому времени, медленному режиму, закрытой
+     * теме и запрету обычных сообщений: ситуация чрезвычайная, а кто вправе
+     * нажимать, решает отдельная настройка [GroupEntity.sosPressRole].
+     */
+    suspend fun sendSos(groupId: String, topicId: String): Result<Int> {
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        if (group.isChannel) {
+            return Result.failure(IllegalStateException("В канале кнопки SOS нет"))
+        }
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (member.isBanned) return Result.failure(SecurityException("Вы ограничены в этой группе"))
+        if (!group.sosEnabled) {
+            return Result.failure(IllegalStateException("Кнопка SOS скрыта настройками группы"))
+        }
+        if (!GroupSos.canPress(member.role, group.sosPressRole, member.isBanned)) {
+            return Result.failure(SecurityException("Нажимать SOS в этой группе вам не разрешено"))
+        }
+        val now = clock()
+        val waitMs = GroupSos.cooldownRemainingMs(group.sosLastSentAtMs, now)
+        if (waitMs > 0L) {
+            val seconds = (waitMs + 999L) / 1000L
+            return Result.failure(SecurityException("SOS уже отправлен: подождите $seconds с"))
+        }
+        groupDao.setSosLastSentAt(groupId, now)
+        val count = GroupSos.clampCount(group.sosMessageCount)
+        val text = com.vladimir.messenger.util.SosMessage.wrap(
+            GroupSos.effectiveText(group.sosText),
+        )
+        var sent = 0
+        repeat(count) {
+            sendMessage(groupId, topicId, text, sos = true)
+                .onSuccess { sent++ }
+                .onFailure { e ->
+                    return if (sent > 0) Result.success(sent) else Result.failure(e)
+                }
+        }
+        Log.i(TAG, "sos sent group=$groupId topic=$topicId count=$sent by=$me")
+        return Result.success(sent)
+    }
+
+    /**
+     * Свой текст тревожного сообщения: [text] из поля в настройках группы
+     * (пусто - вернуть текст по умолчанию). Менять вправе те же, кто меняет
+     * информацию о группе; текст общий на всех, поэтому уходит конвертом.
+     */
+    suspend fun setSosText(groupId: String, text: String): Result<Unit> {
+        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
+        val group = groupDao.getGroupById(groupId)
+            ?: return Result.failure(IllegalStateException("Группа не найдена"))
+        val member = groupDao.getMember(groupId, me)
+            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
+        if (!GroupPermissions.canChangeInfo(member.role, member.permissions, effectiveMemberMask(group))) {
+            return Result.failure(SecurityException("Менять настройки группы вправе администратор"))
+        }
+        val safe = text.trim().take(GroupSos.MAX_TEXT_CHARS)
+        if (safe == group.sosText) return Result.success(Unit)
+        groupDao.setSosText(groupId, safe)
+        backgroundScope.launch {
+            runCatching {
+                delivery.deliver(groupId, GroupWire.buildSosText(groupId, safe), allRecipients(groupId, me))
+            }.onFailure { Log.w(TAG, "sos text fanout failed: ${it.message}") }
+        }
+        Log.i(TAG, "sos text group=$groupId chars=${safe.length} by=$me")
+        return Result.success(Unit)
+    }
+
+    /** Сколько миллисекунд этому телефону ещё нельзя нажимать SOS в группе. */
+    suspend fun sosCooldownRemainingMs(groupId: String): Long {
+        val group = groupDao.getGroupById(groupId) ?: return 0L
+        return GroupSos.cooldownRemainingMs(group.sosLastSentAtMs, clock())
     }
 
     /** Проголосовать (или отозвать голос): [choices] - номера вариантов, пусто - отозвать. */
@@ -1716,6 +1940,49 @@ class GroupRepository(
         if (packet.seconds == group.slowModeSeconds) return
         groupDao.setSlowMode(packet.groupId, packet.seconds)
         Log.i(TAG, "slow mode applied group=${packet.groupId} seconds=${packet.seconds} from=$senderId")
+    }
+
+    private suspend fun handleSosSettings(senderId: String, packet: GroupWire.Packet.SosSettings) {
+        val me = myId().orEmpty()
+        if (me.isBlank()) return
+        val group = groupDao.getGroupById(packet.groupId) ?: return
+        if (groupDao.getMember(packet.groupId, me) == null) return
+        // Верим владельцу и администраторам с правом менять информацию -
+        // ровно тем, кто вправе кнопку настраивать.
+        if (senderId != group.ownerId) {
+            val sender = groupDao.getMember(packet.groupId, senderId) ?: return
+            if (!GroupRole.isAdminOrOwner(sender.role)) return
+            if (!GroupPermissions.canChangeInfo(sender.role, sender.permissions, effectiveMemberMask(group))) return
+        }
+        if (packet.enabled == group.sosEnabled &&
+            packet.count == GroupSos.clampCount(group.sosMessageCount) &&
+            packet.pressRole == GroupSos.normalizePressRole(group.sosPressRole)
+        ) {
+            return
+        }
+        groupDao.setSosSettings(packet.groupId, packet.enabled, packet.count, packet.pressRole)
+        Log.i(
+            TAG,
+            "sos settings applied group=${packet.groupId} enabled=${packet.enabled} " +
+                "count=${packet.count} role=${packet.pressRole} from=$senderId",
+        )
+    }
+
+    private suspend fun handleSosText(senderId: String, packet: GroupWire.Packet.SosText) {
+        val me = myId().orEmpty()
+        if (me.isBlank()) return
+        val group = groupDao.getGroupById(packet.groupId) ?: return
+        if (groupDao.getMember(packet.groupId, me) == null) return
+        // Верим владельцу и администраторам с правом менять информацию -
+        // ровно тем, кто вправе текст тревоги менять.
+        if (senderId != group.ownerId) {
+            val sender = groupDao.getMember(packet.groupId, senderId) ?: return
+            if (!GroupRole.isAdminOrOwner(sender.role)) return
+            if (!GroupPermissions.canChangeInfo(sender.role, sender.permissions, effectiveMemberMask(group))) return
+        }
+        if (packet.text == group.sosText) return
+        groupDao.setSosText(packet.groupId, packet.text)
+        Log.i(TAG, "sos text applied group=${packet.groupId} chars=${packet.text.length} from=$senderId")
     }
 
     // ── Сообщения обычных групп роем (этап 5) ────────────────────────────────
@@ -2020,6 +2287,8 @@ class GroupRepository(
                         senderName = authorName,
                         authorId = row.senderId,
                         sentAtMs = piece.timestamp,
+                        textColor = row.textColor,
+                        senderNameColor = row.senderNameColor,
                     ),
                     listOf(senderId),
                 )
@@ -2058,6 +2327,8 @@ class GroupRepository(
                 senderName = authorName,
                 authorId = authorId,
                 sentAtMs = sentAt,
+                textColor = packet.textColor,
+                senderNameColor = packet.senderNameColor,
             ),
             readers,
         )
@@ -2415,16 +2686,23 @@ class GroupRepository(
         }.onFailure { Log.w(TAG, "join history save failed: ${it.javaClass.simpleName}: ${it.message}") }
         touchMyJoin()
         // Свою копию храним на этом телефоне: видно, что заявка отправлена, и что с ней решили.
-        groupDao.insertJoinRequest(
-            GroupJoinRequestEntity(
-                groupId = groupId,
-                nodeId = me,
-                displayName = displayName,
-                note = note,
-                requestedAtMs = now,
-                status = "SENT",
+        // ВАЖНО: group_join_requests имеет FK на groups. Для чужой записи из
+        // сетевого каталога строки groups ещё нет, поэтому её нельзя писать в
+        // эту таблицу — именно это раньше роняло APU при «Вступить»/«Подписаться».
+        if (joinRequestStorage(groupDao.getGroupById(groupId) != null) == JoinRequestStorage.LOCAL_GROUP_REQUESTS) {
+            groupDao.insertJoinRequest(
+                GroupJoinRequestEntity(
+                    groupId = groupId,
+                    nodeId = me,
+                    displayName = displayName,
+                    note = note,
+                    requestedAtMs = now,
+                    status = "SENT",
+                )
             )
-        )
+        } else {
+            Log.i(TAG, "join request kept in history/outbox: group is not local yet, group=$groupId")
+        }
         joinOutbox?.put(GroupJoinOutbox.Entry(groupId, displayName, note, slug, targets, now, 0L, 0))
         val envelope = GroupWire.buildJoinRequest(
             groupId = groupId, displayName = displayName, note = note, slug = slug, requestedAtMs = now,
@@ -2748,6 +3026,8 @@ class GroupRepository(
                 channel = "GROUP",
                 recipientId = "",
                 topicId = topicIdValue,
+                textColor = message.textColor,
+                senderNameColor = message.senderNameColor,
             )
             messageDao.insertMessage(row)
             partRows.add(row)
@@ -2772,6 +3052,8 @@ class GroupRepository(
                                 text = row.content,
                                 messageId = row.id,
                                 senderName = senderName,
+                                textColor = row.textColor,
+                                senderNameColor = row.senderNameColor,
                             ),
                             excludeSelf = true,
                         )
@@ -2988,6 +3270,8 @@ class GroupRepository(
                         // всё равно поверит только ему, а у сида, получившего
                         // пост вживую, в строке стоит время приёма.
                         sentAtMs = if (row.id == post.id && manifest != null) manifest.sentAtMs else row.timestamp,
+                        textColor = row.textColor,
+                        senderNameColor = row.senderNameColor,
                     ),
                     listOf(nodeId),
                 )
@@ -3100,6 +3384,8 @@ class GroupRepository(
                         senderName = authorName,
                         authorId = manifest.authorId,
                         sentAtMs = if (msg.id == manifest.messageId) manifest.sentAtMs else msg.timestamp,
+                        textColor = msg.textColor,
+                        senderNameColor = msg.senderNameColor,
                     ),
                     listOf(senderId),
                 )
@@ -3490,6 +3776,8 @@ class GroupRepository(
                     senderName = authorName,
                     authorId = manifest.authorId,
                     sentAtMs = manifest.sentAtMs,
+                    textColor = head.textColor,
+                    senderNameColor = head.senderNameColor,
                 ),
                 targets,
             )
@@ -3555,6 +3843,8 @@ class GroupRepository(
                             senderName = authorName,
                             authorId = manifest.authorId,
                             sentAtMs = if (row.id == post.id) manifest.sentAtMs else row.timestamp,
+                            textColor = row.textColor,
+                            senderNameColor = row.senderNameColor,
                         ),
                         listOf(senderId),
                     )
@@ -3772,6 +4062,16 @@ class GroupRepository(
         val me = localNodeId ?: myId().orEmpty()
         when (packet) {
             is GroupWire.Packet.Message -> {
+                // New colour metadata is wrapped in the existing text field so
+                // old clients still accept and deliver the 5/7/9-field packet.
+                val styled = com.vladimir.messenger.data.textcolor.TextColorWire.decode(packet.text)
+                val packet = if (styled != null) {
+                    packet.copy(
+                        text = styled.text,
+                        textColor = styled.textColor,
+                        senderNameColor = styled.nameColor,
+                    )
+                } else packet
                 val group = groupDao.getGroupById(packet.groupId) ?: return
                 val member = groupDao.getMember(packet.groupId, me) ?: return
                 if (member.isBanned) return
@@ -3854,6 +4154,8 @@ class GroupRepository(
                         channel = "GROUP",
                         recipientId = if (isMine) "" else me,
                         topicId = packet.topicId,
+                        textColor = packet.textColor,
+                        senderNameColor = packet.senderNameColor,
                     )
                 )
                 if (inserted == -1L) return // fallback and offline reveal can arrive concurrently
@@ -3864,6 +4166,9 @@ class GroupRepository(
                 // р250: цитата ответа могла приехать раньше самого сообщения -
                 // забираем её из буфера (как куски поста ждут манифест).
                 pendingReplies.take { it.packet.messageId == localId }.forEach { applyReply(it.packet) }
+                if (packet.senderNameColor.isNotBlank()) {
+                    onPeerNameColor(authorId, packet.senderNameColor)
+                }
                 rememberSender(packet.groupId, authorId, packet.senderName, now)
                 // Файл, приложенный к сообщению (этап 9): сам файл не пришёл -
                 // только визитка; рой решает, просить ли его у автора сейчас.
@@ -4350,6 +4655,11 @@ class GroupRepository(
                         groupDao.bumpMemberCount(packet.groupId)
                         Log.i(TAG, "join approved into group=${group.id}")
                     }
+                    // The decision may arrive before the roster or the roster
+                    // may have been lost while this phone was offline. Ask the
+                    // owner/admins after durable membership is present.
+                    backgroundScope.launch { runCatching { requestRoster(packet.groupId) } }
+                    drainPendingRosters(packet.groupId, me)
                 } else {
                     groupDao.updateJoinRequestStatus(
                         packet.groupId, me, "REJECTED", clock(), senderId,
@@ -4399,7 +4709,10 @@ class GroupRepository(
                 // Обычный участник не отвечает, чтобы на один запрос не
                 // приходило десять одинаковых списков.
                 val member = groupDao.getMember(packet.groupId, me) ?: return
-                if (!GroupRole.isAdminOrOwner(member.role)) return
+                if (member.isBanned || !GroupRole.isAdminOrOwner(member.role)) return
+                // `publishRoster` веером обновляет известных участников, а
+                // если запросивший потерялся из локальной таблицы отправителя,
+                // отдельно доставляет ему тот же снимок напрямую.
                 publishRoster(packet.groupId, newcomer = senderId)
                 Log.i(TAG, "roster resent group=${packet.groupId} to=$senderId")
             }
@@ -4444,25 +4757,34 @@ class GroupRepository(
                         topicsEnabled = packet.topicsEnabled,
                     )
                 }
-                if (current == null && groupDao.getMember(packet.groupId, me) == null) {
+                // Карточка и roster могут прийти в любом порядке. Если info
+                // пришёл первым, сразу создаём собственную строку участника;
+                // если группа уже была в базе, но строка была потеряна,
+                // восстанавливаем её тем же безопасным UPDATE-путём.
+                if (groupDao.getMember(packet.groupId, me) == null) {
                     groupDao.insertMember(
                         GroupMemberEntity(
                             groupId = packet.groupId,
                             nodeId = me,
                             displayName = myDisplayName(),
-                            role = GroupRole.MEMBER,
+                            role = if (me == packet.ownerId) GroupRole.OWNER else GroupRole.MEMBER,
                             joinedAtMs = clock(),
                         )
                     )
                     groupDao.bumpMemberCount(packet.groupId)
                 }
+                // Применяем roster, который обогнал карточку, теперь когда
+                // локальная группа и членство уже известны.
+                drainPendingRosters(packet.groupId, me)
                 // Запрашиваем после применения info: отдельный пакет настройки
-                // мог обогнать карточку группы на другом транспорте.
+                // мог обогнать карточку группы на другом транспорте. Заодно
+                // забираем актуальный roster, если вступление было пропущено.
                 if (senderId == packet.ownerId && senderId != me) {
                     backgroundScope.launch {
                         runCatching { delivery.deliver(packet.groupId, GroupWire.buildQuietHoursRequest(packet.groupId), listOf(senderId)) }
                         runCatching { delivery.deliver(packet.groupId, GroupWire.buildMemberListVisibilityRequest(packet.groupId), listOf(senderId)) }
                         runCatching { requestWallpaper(packet.groupId) }
+                        runCatching { requestRoster(packet.groupId) }
                     }
                 }
                 Log.i(TAG, "group info applied group=${packet.groupId} title=${packet.title}")
@@ -4578,6 +4900,8 @@ class GroupRepository(
             }
 
             is GroupWire.Packet.SlowMode -> handleSlowMode(senderId, packet)
+            is GroupWire.Packet.SosSettings -> handleSosSettings(senderId, packet)
+            is GroupWire.Packet.SosText -> handleSosText(senderId, packet)
 
             is GroupWire.Packet.OwnerClaim -> handleOwnerClaim(senderId, packet)
 
@@ -4638,36 +4962,7 @@ class GroupRepository(
                 Log.i(TAG, "topics applied group=${packet.groupId} count=${packet.entries.size}")
             }
 
-            is GroupWire.Packet.Roster -> {
-                if (groupDao.getMember(packet.groupId, me) == null) return
-                val now = clock()
-                packet.entries.forEach { entry ->
-                    val current = groupDao.getMember(packet.groupId, entry.nodeId)
-                    if (current == null) {
-                        groupDao.insertMember(
-                            GroupMemberEntity(
-                                groupId = packet.groupId,
-                                nodeId = entry.nodeId,
-                                displayName = entry.displayName,
-                                role = entry.role,
-                                joinedAtMs = now,
-                            )
-                        )
-                    } else if (current.displayName != entry.displayName || current.role != entry.role) {
-                        groupDao.insertMember(
-                            current.copy(displayName = entry.displayName, role = entry.role)
-                        )
-                    }
-                }
-                // На большом канале список неполный (только администраторы), а
-                // число подписчиков пришло от владельца в `peers`: ниже него
-                // не опускаем.
-                groupDao.bumpMemberCount(packet.groupId)
-                // Состав обновился: манифесты, ждавшие автора-администратора,
-                // можно проверить ещё раз.
-                val ready = pendingManifests.take { (_, m) -> m.groupId == packet.groupId }
-                for ((from, manifest) in ready) handleManifest(from, manifest)
-            }
+            is GroupWire.Packet.Roster -> applyRoster(senderId, packet, me)
 
             is GroupWire.Packet.Typing -> {
                 // р249: «печатает…» в группе. Состояние мимолётное: в базу не
@@ -4926,6 +5221,38 @@ class GroupRepository(
                             listOf(nodeId),
                         )
                     }.onFailure { Log.w(TAG, "slow mode for newcomer failed: ${it.message}") }
+                }
+            }
+            // Настройки кнопки SOS новичок тоже пропустил: говорим сразу,
+            // если они отличаются от принятых по умолчанию, иначе его
+            // телефон показал бы кнопку не так, как видит вся группа.
+            if (!group.sosEnabled || GroupSos.clampCount(group.sosMessageCount) != GroupSos.DEFAULT_COUNT ||
+                GroupSos.normalizePressRole(group.sosPressRole) != GroupSos.PRESS_ALL
+            ) {
+                backgroundScope.launch {
+                    runCatching {
+                        delivery.deliver(
+                            groupId,
+                            GroupWire.buildSosSettings(
+                                groupId, group.sosEnabled,
+                                GroupSos.clampCount(group.sosMessageCount),
+                                GroupSos.normalizePressRole(group.sosPressRole),
+                            ),
+                            listOf(nodeId),
+                        )
+                    }.onFailure { Log.w(TAG, "sos settings for newcomer failed: ${it.message}") }
+                }
+            }
+            // Свой текст тревоги новичок тоже не слышал: говорим, если задан.
+            if (group.sosText.isNotBlank()) {
+                backgroundScope.launch {
+                    runCatching {
+                        delivery.deliver(
+                            groupId,
+                            GroupWire.buildSosText(groupId, group.sosText),
+                            listOf(nodeId),
+                        )
+                    }.onFailure { Log.w(TAG, "sos text for newcomer failed: ${it.message}") }
                 }
             }
         } else {
@@ -6025,6 +6352,34 @@ class GroupRepository(
     private val topicsRequested = HashSet<String>()
 
     /**
+     * Попросить у владельца или администратора актуальный состав.
+     *
+     * Это не только реакция на неизвестное имя: экран чата вызывает метод при
+     * открытии, поэтому телефон, который был офлайн во время вступления,
+     * самовосстанавливает roster. Адрес владельца берём из карточки группы,
+     * а локальные admin-строки добавляем как запасной путь, если владелец
+     * временно недоступен.
+     */
+    suspend fun requestRoster(groupId: String) {
+        val me = myId() ?: return
+        val group = groupDao.getGroupById(groupId) ?: return
+        val mine = groupDao.getMember(groupId, me) ?: return
+        if (mine.isBanned || group.ownerId == me) return
+        val now = clock()
+        val previous = rosterRequestedAtMs[groupId] ?: 0L
+        if (previous != 0L && now - previous < ROSTER_REQUEST_GAP_MS) return
+        val targets = (
+            listOf(group.ownerId) + groupDao.getAdmins(groupId).map { it.nodeId }
+        ).filter { it.isNotBlank() && it != me }.distinct()
+        if (targets.isEmpty()) return
+        rosterRequestedAtMs[groupId] = now
+        runCatching {
+            delivery.deliver(groupId, GroupWire.buildRosterRequest(groupId), targets)
+        }.onFailure { Log.w(TAG, "roster request failed group=$groupId: ${it.message}") }
+        Log.i(TAG, "roster requested group=$groupId from=${targets.size} source(s)")
+    }
+
+    /**
      * Попросить у владельца список тем.
      *
      * Вызывается при открытии чата группы: вступивший позже не застал пакеты
@@ -6204,16 +6559,149 @@ class GroupRepository(
                 groupDao.bumpMemberCount(groupId)
             } else if (rosterAsked.add(groupId + '|' + senderId)) {
                 // Отвечают только владелец и администраторы - им и шлём, а не
-                // всем: на большом канале «всем» - это тысячи пакетов.
-                val me = myId().orEmpty()
-                val admins = groupDao.getAdmins(groupId).map { it.nodeId }.filter { it != me }
-                if (admins.isNotEmpty()) delivery.deliver(groupId, GroupWire.buildRosterRequest(groupId), admins)
+                // всем: на большом канале «всем» - это тысячи пакетов. Если
+                // локальная таблица неполна, requestRoster всё равно знает
+                // ownerId из карточки и не теряет единственный адрес ответа.
+                requestRoster(groupId)
             }
             return
         }
         if (known.displayName.isBlank() && senderName.isNotBlank()) {
             groupDao.insertMember(known.copy(displayName = senderName))
         }
+    }
+
+    private fun queuePendingRoster(senderId: String, packet: GroupWire.Packet.Roster) {
+        synchronized(pendingRosters) {
+            val queue = pendingRosters.getOrPut(packet.groupId) { mutableListOf() }
+            // Keep the newest copy from one sender; a burst of duplicate
+            // packets must not grow without bound while the group card waits.
+            queue.removeAll { it.senderId == senderId }
+            queue.add(PendingRoster(senderId, packet))
+            if (queue.size > MAX_PENDING_ROSTERS) {
+                queue.subList(0, queue.size - MAX_PENDING_ROSTERS).clear()
+            }
+        }
+    }
+
+    private suspend fun drainPendingRosters(groupId: String, me: String) {
+        val queued = synchronized(pendingRosters) {
+            pendingRosters.remove(groupId)?.toList().orEmpty()
+        }
+        for (pending in queued) applyRoster(pending.senderId, pending.packet, me)
+    }
+
+    /**
+     * A roster may be relayed by a known non-banned member. The owner is also
+     * accepted before its row appears locally: this is the normal ordering for
+     * a newly admitted phone, whose `info` and `roster` packets race.
+     */
+    private suspend fun isRosterSourceAllowed(groupId: String, group: GroupEntity, senderId: String): Boolean {
+        if (senderId == group.ownerId) return true
+        val sender = groupDao.getMember(groupId, senderId) ?: return false
+        return !sender.isBanned
+    }
+
+    private suspend fun relayRoster(
+        groupId: String,
+        senderId: String,
+        me: String,
+        entries: List<GroupWire.RosterEntry>,
+        memberCount: Int,
+    ) {
+        val targets = groupDao.getMembers(groupId)
+            .asSequence()
+            .filter { !it.isBanned && it.nodeId != me && it.nodeId != senderId }
+            .map { it.nodeId }
+            .toList()
+        if (targets.isEmpty()) return
+        val envelope = GroupWire.buildRoster(groupId, entries, memberCount)
+        runCatching { delivery.deliver(groupId, envelope, targets) }
+            .onFailure { Log.w(TAG, "roster relay failed group=$groupId: ${it.message}") }
+    }
+
+    /**
+     * Apply roster as a monotonic union. A partial/repeated packet never
+     * deletes rows already present; a blank name also cannot erase a known
+     * name. The expected count is retained as a lower bound, so UI and the
+     * next repair request know that two local rows are not the whole group.
+     */
+    private suspend fun applyRoster(
+        senderId: String,
+        packet: GroupWire.Packet.Roster,
+        me: String,
+    ) {
+        val group = groupDao.getGroupById(packet.groupId)
+        if (group == null || groupDao.getMember(packet.groupId, me) == null) {
+            queuePendingRoster(senderId, packet)
+            return
+        }
+        if (!isRosterSourceAllowed(packet.groupId, group, senderId)) {
+            Log.w(TAG, "roster ignored from unknown source group=${packet.groupId} sender=$senderId")
+            return
+        }
+
+        val before = groupDao.getMembers(packet.groupId)
+        val beforeEntries = before.map { GroupWire.RosterEntry(it.nodeId, it.displayName, it.role) }
+        var changed = false
+        val now = clock()
+        for (entry in packet.entries) {
+            val current = groupDao.getMember(packet.groupId, entry.nodeId)
+            if (current == null) {
+                groupDao.insertMember(
+                    GroupMemberEntity(
+                        groupId = packet.groupId,
+                        nodeId = entry.nodeId,
+                        displayName = entry.displayName,
+                        role = entry.role,
+                        joinedAtMs = now,
+                    )
+                )
+                changed = true
+            } else {
+                val displayName = entry.displayName.ifBlank { current.displayName }
+                if (current.displayName != displayName || current.role != entry.role) {
+                    // `copy` preserves permissions, ban state and custom title;
+                    // a roster update must not reset local moderation metadata.
+                    groupDao.insertMember(current.copy(displayName = displayName, role = entry.role))
+                    changed = true
+                }
+            }
+        }
+
+        val mergedEntries = GroupWire.mergeRosterEntries(
+            beforeEntries,
+            packet.entries,
+        )
+        val expectedCount = maxOf(packet.memberCount, group.memberCount, mergedEntries.size)
+        if (packet.memberCount > 0) groupDao.updateMemberCount(packet.groupId, expectedCount)
+        groupDao.bumpMemberCount(packet.groupId)
+
+        // A newly received row is useful to peers that missed the original
+        // admission fanout. Relay the merged snapshot, not only the one-entry
+        // packet, so convergence proceeds through the existing group graph.
+        if (changed) {
+            relayRoster(
+                groupId = packet.groupId,
+                senderId = senderId,
+                me = me,
+                entries = mergedEntries,
+                memberCount = expectedCount,
+            )
+        }
+
+        val localCount = groupDao.countMembers(packet.groupId)
+        if (expectedCount > localCount) {
+            backgroundScope.launch {
+                runCatching { requestRoster(packet.groupId) }
+                    .onFailure { Log.w(TAG, "roster repair request failed: ${it.message}") }
+            }
+        }
+
+        // Состав обновился: манифесты, ждавшие автора-администратора,
+        // можно проверить ещё раз.
+        val ready = pendingManifests.take { (_, m) -> m.groupId == packet.groupId }
+        for ((from, manifest) in ready) handleManifest(from, manifest)
     }
 
     /**
@@ -6231,7 +6719,16 @@ class GroupRepository(
         val members = groupDao.getMembers(groupId)
         if (members.size <= ROSTER_LIMIT) {
             val entries = members.map { GroupWire.RosterEntry(it.nodeId, it.displayName, it.role) }
-            broadcast(groupId, GroupWire.buildRoster(groupId, entries), excludeSelf = true)
+            val envelope = GroupWire.buildRoster(groupId, entries, memberCount = members.size)
+            val knownRecipients = members.map { it.nodeId }.filter { it != myId().orEmpty() }.toSet()
+            broadcast(groupId, envelope, excludeSelf = true)
+            // The requester/newcomer may be absent from the sender's partial
+            // local table. A direct copy makes admission and repair reliable;
+            // existing members still receive the broadcast above.
+            if (!newcomer.isNullOrBlank() && newcomer != myId() && newcomer !in knownRecipients) {
+                runCatching { delivery.deliver(groupId, envelope, listOf(newcomer)) }
+                    .onFailure { Log.w(TAG, "direct roster delivery failed group=$groupId to=$newcomer: ${it.message}") }
+            }
             return
         }
         val me = myId().orEmpty()
@@ -6242,6 +6739,7 @@ class GroupRepository(
         val adminRoster = GroupWire.buildRoster(
             groupId,
             adminMembers.map { GroupWire.RosterEntry(it.nodeId, it.displayName, it.role) },
+            memberCount = members.size,
         )
         if (newcomer == null) {
             // Смена состава без новичка: рассылать нечего, кроме смены ролей -
@@ -6273,6 +6771,7 @@ class GroupRepository(
                 GroupWire.buildRoster(
                     groupId,
                     listOf(GroupWire.RosterEntry(newcomerRow.nodeId, newcomerRow.displayName, newcomerRow.role)),
+                    memberCount = members.size,
                 ),
                 sample,
             )
@@ -6392,6 +6891,8 @@ companion object {
         /** Рой: буфер кусков без манифеста - записей и срок жизни. */
         private const val PENDING_PIECES = 100
         private const val PENDING_MANIFESTS = 40
+        /** Сколько ожидающих roster-пакетов держим до прихода карточки группы. */
+        private const val MAX_PENDING_ROSTERS = 8
         /** р250: буфер цитат, приехавших раньше своего сообщения. */
         private const val PENDING_REPLIES = 40
         private const val PENDING_TTL_MS = 60_000L
@@ -6446,6 +6947,8 @@ companion object {
         private const val FRESH_POST_MS = 15L * 60 * 1000
         /** Рой, этап 2: с такого числа участников владелец шлёт новичку `peers` вместо полного списка. */
         const val ROSTER_LIMIT = 100
+        /** Телефон, пропустивший событие вступления, повторно просит состав не чаще этого. */
+        private const val ROSTER_REQUEST_GAP_MS = 30_000L
         /** Рой, этап 2: сколько соседей владелец даёт новичку в `peers`. */
         const val PEERS_SAMPLE = 30
         /** Рой, этап 2: на большом канале владельца спрашивают о недостающем лишь в одном случае из стольких. */

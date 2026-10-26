@@ -3,7 +3,9 @@ package com.vladimir.messenger.data.heartgame
 import android.content.Context
 import android.os.SystemClock
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.rank.RankProgressPolicy
 import com.vladimir.messenger.data.rank.RankWire
+import com.vladimir.messenger.data.referral.ReferralRankStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -16,13 +18,69 @@ object HeartGameStore {
     val revision = changes.asStateFlow()
     val policy = HeartGamePolicy()
     private val lock = Mutex()
+    private val scoreLock = Any()
+    private const val SCORE_KEY = "score"
+    private const val REFERRAL_BONUS_COUNT_KEY = "referral_bonus_count_v1"
+
     fun ownId(): String? = RankWire.canonicalNodeId(RustBridge.nodeId())
     suspend fun ownKeyId(context: Context): String? = withContext(Dispatchers.IO) {
         com.vladimir.messenger.data.security.IdentitySigningKeyStore.existingVerifiedBinding(context)?.let(HeartGameWire::keyId)
     }
-    private fun prefs(context: Context, id: String) = context.applicationContext.getSharedPreferences("heart-game-v1-$id", Context.MODE_PRIVATE)
+    private fun prefs(context: Context, id: String) =
+        context.applicationContext.getSharedPreferences("heart-game-v1-$id", Context.MODE_PRIVATE)
+
     fun enabled(context: Context, id: String) = prefs(context, id).getBoolean("enabled", false)
-    fun score(context: Context, id: String) = prefs(context, id).getLong("score", 0L).coerceIn(0, HeartGamePolicy.MAX_SCORE)
+
+    /**
+     * Общий счёт игры: пойманные сердечки плюс бонусы за подтверждённые
+     * приглашения. Старые аккаунты лениво получают по 1 000 за каждое уже
+     * подтверждённое приглашение; отдельная отметка делает это ровно один раз.
+     */
+    fun score(context: Context, id: String): Long = synchronized(scoreLock) {
+        val earnedInvites = ReferralRankStore.earnedDirectCount(context)
+        synchronizeReferralBonusesLocked(context, id, earnedInvites)
+        rawScore(context, id)
+    }
+
+    /**
+     * Досинхронизировать бонус приглашений сразу после его зачисления. Метод
+     * идемпотентен: повторный пакет или повторный запуск не добавит второй
+     * бонус. Если приложение упало между счётчиком приглашений и игрой,
+     * следующий вызов [score] исправит состояние автоматически.
+     */
+    fun synchronizeReferralBonuses(
+        context: Context,
+        id: String?,
+        earnedInvites: Int,
+    ): Boolean {
+        if (id.isNullOrBlank()) return false
+        return synchronized(scoreLock) {
+            synchronizeReferralBonusesLocked(context, id, earnedInvites)
+        }
+    }
+
+    private fun synchronizeReferralBonusesLocked(
+        context: Context,
+        id: String,
+        earnedInvites: Int,
+    ): Boolean {
+        val store = prefs(context, id)
+        val target = earnedInvites.coerceIn(0, ReferralRankStore.MAX_SUPPORTED_COUNT)
+        val credited = store.getInt(REFERRAL_BONUS_COUNT_KEY, 0).coerceAtLeast(0)
+        if (target <= credited) return false
+        val current = rawScore(context, id)
+        val added = RankProgressPolicy.referralBonusHearts(target - credited)
+        val next = (current + added).coerceAtMost(HeartGamePolicy.MAX_SCORE)
+        val saved = store.edit()
+            .putLong(SCORE_KEY, next)
+            .putInt(REFERRAL_BONUS_COUNT_KEY, target)
+            .commit()
+        if (saved) changes.value++
+        return saved
+    }
+
+    private fun rawScore(context: Context, id: String): Long =
+        prefs(context, id).getLong(SCORE_KEY, 0L).coerceIn(0, HeartGamePolicy.MAX_SCORE)
     suspend fun setEnabled(context: Context, id: String, enabled: Boolean): Boolean = withContext(Dispatchers.IO) {
         lock.withLock {
             policy.cancel()
@@ -34,7 +92,7 @@ object HeartGameStore {
             if (ownId() != id || !enabled(context, id) || !policy.claim(ticket, SystemClock.elapsedRealtime())) return@withLock false
             val current = score(context, id)
             if (current >= HeartGamePolicy.MAX_SCORE) return@withLock false
-            prefs(context, id).edit().putLong("score", current + 1).commit().also { if (it) changes.value++ }
+            prefs(context, id).edit().putLong(SCORE_KEY, current + 1).commit().also { if (it) changes.value++ }
         }
     }
     // Bounded to 500 signed rows, names are part of the signed self-report.

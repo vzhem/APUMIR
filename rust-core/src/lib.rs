@@ -144,6 +144,18 @@ impl P2PCoreHandle {
             .send_pairing_payload(recipient_node_id, bytes_to_hex(&id), payload)
     }
 
+    /// P3: publish a short-code pairing rendezvous offer. The core validates the code and
+    /// publishes the payload on a retained, time-bounded-by-the-application topic.
+    pub fn publish_pairing_code(&self, code: String, payload: String) -> bool {
+        self.inner.lock().unwrap().publish_pairing_code(code, payload)
+    }
+
+    /// P3: keep a bounded WSS listener alive while SwarmFirst has paused the normal MQTT
+    /// session, so entering a code still finds the retained offer.
+    pub fn listen_pairing_code(&self, code: String) -> bool {
+        self.inner.lock().unwrap().listen_pairing_code(code)
+    }
+
     /// K3: бинарный кусок файла по прямому QUIC-каналу (APUF-кадр).
     /// `true` = получатель подтвердил приём стрима; `false` = не удалось —
     /// вызывающий ждёт следующего цикла (передача не прерывается).

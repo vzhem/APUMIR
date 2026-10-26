@@ -38,6 +38,16 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE timestamp > :since ORDER BY timestamp ASC LIMIT :lim")
     suspend fun messagesSince(since: Long, lim: Int): List<MessageEntity>
 
+    /** Group/channel history is copied by the account snapshot; do not replay it
+     * through the personal MirrorRow route, which would create a fake DM chat. */
+    @Query(
+        "SELECT m.* FROM messages m " +
+            "WHERE m.timestamp > :since " +
+            "AND NOT EXISTS (SELECT 1 FROM groups g WHERE g.id = m.chatId) " +
+            "ORDER BY m.timestamp ASC LIMIT :lim",
+    )
+    suspend fun personalMessagesSince(since: Long, lim: Int): List<MessageEntity>
+
     /** р226: неотправленные исходящие тени - перевыслать активному партнёру. */
     @Query("SELECT * FROM messages WHERE isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE') ORDER BY timestamp ASC LIMIT :lim")
     suspend fun pendingMirrorOutgoing(lim: Int): List<MessageEntity>

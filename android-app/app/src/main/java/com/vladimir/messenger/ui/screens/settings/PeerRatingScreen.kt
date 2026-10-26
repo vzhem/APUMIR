@@ -72,6 +72,7 @@ import com.vladimir.messenger.ui.components.ApuHeaderButton
 import com.vladimir.messenger.ui.components.ApuPremiumChip
 import com.vladimir.messenger.ui.components.ApuPremiumDialog
 import com.vladimir.messenger.ui.components.ApuPremiumIconTile
+import com.vladimir.messenger.ui.components.ApuPremiumNoticeDialog
 import com.vladimir.messenger.ui.components.ApuSearchField
 import com.vladimir.messenger.ui.components.ApuSettingsHeader
 import com.vladimir.messenger.ui.components.ChatWallpaper
@@ -106,6 +107,7 @@ fun PeerRatingScreen(onBackClick: () -> Unit) {
     var filter by remember { mutableStateOf(PeerFilter.ALL) }
     var showHowScoreWorks by remember { mutableStateOf(false) }
     var showResetConfirmation by remember { mutableStateOf(false) }
+    var showResetDone by remember { mutableStateOf(false) }
     val peers = remember(reloadTick) { PeerRatingStore.ranked(context, now) }
     val visiblePeers = remember(peers, query, filter, now) {
         peers.filter { peer ->
@@ -244,6 +246,7 @@ fun PeerRatingScreen(onBackClick: () -> Unit) {
                 query = ""
                 filter = PeerFilter.ALL
                 showResetConfirmation = false
+                showResetDone = true
             },
             confirmStyle = DiagnosticsActionStyle.DANGER,
             dismissLabel = stringResource(R.string.action_cancel),
@@ -254,6 +257,14 @@ fun PeerRatingScreen(onBackClick: () -> Unit) {
                 color = Color(0xFF344252),
             )
         }
+    }
+    if (showResetDone) {
+        ApuPremiumNoticeDialog(
+            title = stringResource(R.string.peer_reset_done_title),
+            message = stringResource(R.string.peer_reset_done_body),
+            onDismiss = { showResetDone = false },
+            icon = androidx.compose.material.icons.Icons.Default.CheckCircle,
+        )
     }
 }
 

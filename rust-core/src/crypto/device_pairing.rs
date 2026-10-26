@@ -34,7 +34,9 @@ pub const PAIRING_FORMAT_V1: u8 = 1;
 pub const PAIRING_FORMAT_V2: u8 = 2;
 const MAX_CONTACT_HINTS: usize = 8;
 const MAX_CONTACT_HINT_CHARS: usize = 64;
-pub const PAIRING_OFFER_TTL_MS: i64 = 5 * 60 * 1000;
+/// Keep the offer alive long enough for a user to switch phones, type the short code,
+/// and compare the final SAS without racing a five-minute timeout.
+pub const PAIRING_OFFER_TTL_MS: i64 = 15 * 60 * 1000;
 const MAX_SESSIONS: usize = 4;
 const SECRET_BYTES: usize = 32;
 const NONCE_BYTES: usize = 32;
@@ -858,6 +860,27 @@ mod tests {
             verify_device_artifact(&cert, &account().public_key().0, None, 10_001, msg, &sig),
             Ok(())
         );
+        close_pairing_offer();
+    }
+
+    #[test]
+    fn grant_arriving_before_answer_can_be_retried_after_answer() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let joiner = device(52);
+        let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 3_000, &[]).unwrap();
+        let started = joiner_start(&offer, &[16u8; 16], &joiner.public_key().0, 3_000).unwrap();
+        let answer = primary_handle_request(&started.request, 3_000).unwrap();
+        let grant = primary_confirm(&answer.device_id, &account(), 3_000).unwrap();
+
+        // The Android state machine may receive the final grant before the answer when the v2
+        // QR already exposed the SAS. Rust must leave the joiner session intact so the buffered
+        // grant can be accepted after the authenticated answer arrives.
+        assert_eq!(
+            joiner_accept_grant(&grant.grant, 3_000).err(),
+            Some(PairingError::UnknownSession)
+        );
+        assert!(joiner_handle_answer(&answer.answer, 3_000).is_ok());
+        assert!(joiner_accept_grant(&grant.grant, 3_000).is_ok());
         close_pairing_offer();
     }
 

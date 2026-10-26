@@ -4,9 +4,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -20,6 +25,7 @@ fun VoiceEffectPickerDialog(
     onSelected: (VoiceEffect) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    var showDefaultDone by remember { mutableStateOf(false) }
     ApuSettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.voice_effect_title)) },
@@ -37,11 +43,17 @@ fun VoiceEffectPickerDialog(
                     ) {
                         rowEffects.forEach { effect ->
                             ApuPremiumChip(
-                                label = effect.symbol + " " + stringResource(effect.labelRes),
+                                label = effect.symbol + " " + stringResource(
+                                    if (effect == VoiceEffect.ORIGINAL) {
+                                        R.string.voice_effect_original_default
+                                    } else {
+                                        effect.labelRes
+                                    },
+                                ),
                                 selected = effect == selected,
                                 onClick = {
                                     onSelected(effect)
-                                    onDismiss()
+                                    if (effect == VoiceEffect.ORIGINAL) showDefaultDone = true else onDismiss()
                                 },
                                 modifier = Modifier.weight(1f),
                             )
@@ -60,4 +72,15 @@ fun VoiceEffectPickerDialog(
             )
         },
     )
+    if (showDefaultDone) {
+        ApuPremiumNoticeDialog(
+            title = stringResource(R.string.voice_effect_default_done_title),
+            message = stringResource(R.string.voice_effect_default_done_body),
+            onDismiss = {
+                showDefaultDone = false
+                onDismiss()
+            },
+            icon = androidx.compose.material.icons.Icons.Default.CheckCircle,
+        )
+    }
 }

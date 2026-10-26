@@ -12,6 +12,7 @@ import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.ui.components.ApuFormTextField
 import com.vladimir.messenger.ui.components.ApuPremiumButton
 import com.vladimir.messenger.ui.components.ApuPremiumChip
+import com.vladimir.messenger.ui.components.ApuPremiumNoticeDialog
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.ExpandLess
@@ -47,6 +48,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -82,6 +84,7 @@ import com.vladimir.messenger.ui.components.ApuBubble
 import com.vladimir.messenger.ui.components.ApuTabBar
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
+import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.AvatarPickerDialog
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -97,6 +100,8 @@ import com.vladimir.messenger.data.group.InviteSummary
 import com.vladimir.messenger.data.group.JoinRequestSummary
 import com.vladimir.messenger.data.group.MemberSummary
 import com.vladimir.messenger.data.group.TopicSummary
+import com.vladimir.messenger.data.textcolor.TextColorPalette
+import com.vladimir.messenger.data.textcolor.TextColorSettingsStore
 import com.vladimir.messenger.util.AppShare
 import com.vladimir.messenger.util.QrCodeGenerator
 import com.vladimir.messenger.ui.components.ApuPremiumCheckbox
@@ -237,6 +242,14 @@ fun GroupAdminScreen(
                     // р250: медленный режим - сколько секунд участник ждёт
                     // между сообщениями (0 - выключен).
                     slowModeSeconds = uiState.group?.slowModeSeconds ?: 0,
+                    // Кнопка SOS: показывать ли, сколько тревог за нажатие и
+                    // кто вправе нажимать. В каналах кнопки нет.
+                    sosEnabled = uiState.group?.sosEnabled != false,
+                    sosMessageCount = uiState.group?.sosMessageCount ?: 3,
+                    sosPressRole = uiState.group?.sosPressRole ?: "ALL",
+                    onSetSosSettings = viewModel::setSosSettings,
+                    sosText = uiState.group?.sosText.orEmpty(),
+                    onSetSosText = viewModel::setSosText,
                     onSetAvatar = viewModel::setGroupAvatar,
                     onSave = viewModel::updateProfile,
                     onTogglePublic = viewModel::setPublic,
@@ -321,6 +334,18 @@ private fun OverviewTab(
     topicsEnabled: Boolean,
     /** р250: медленный режим, секунд (0 - выключен). */
     slowModeSeconds: Int,
+    /** Кнопка SOS: показывать ли её в группе. */
+    sosEnabled: Boolean,
+    /** Сколько тревожных сообщений уходит за одно нажатие SOS (3..5). */
+    sosMessageCount: Int,
+    /** Кто вправе нажимать SOS: ALL / ADMINS / OWNER. */
+    sosPressRole: String,
+    /** Сохранить настройки SOS (видно, количество, кто нажимает). */
+    onSetSosSettings: (Boolean, Int, String) -> Unit,
+    /** Свой текст тревожного сообщения; пусто - текст по умолчанию. */
+    sosText: String,
+    /** Сохранить свой текст тревоги (пустым - вернуть умолчание). */
+    onSetSosText: (String) -> Unit,
     onSetAvatar: (android.net.Uri) -> Unit,
     onSave: (String, String) -> Unit,
     onTogglePublic: (Boolean) -> Unit,
@@ -339,6 +364,10 @@ private fun OverviewTab(
     // описанием появлялись только после переключения вкладок туда-сюда.
     var titleDraft by remember(title) { mutableStateOf(title) }
     var aboutDraft by remember(about) { mutableStateOf(about) }
+    // Черновик своего текста SOS: ключ - сохранённый текст, чтобы чужая
+    // правка с другого телефона не затирала набранное на полуслове.
+    var sosTextDraft by remember(sosText) { mutableStateOf(sosText) }
+    var showSosDefaultDone by remember { mutableStateOf(false) }
     var showLeaveConfirm by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     // Раунд 42: аватар группы/канала.
@@ -560,6 +589,131 @@ private fun OverviewTab(
             }
         }
 
+        // Красная кнопка SOS (только группы, не каналы): одно нажатие шлёт
+        // всей группе сразу несколько тревожных сообщений, которые звучат
+        // даже на телефонах без звука. Здесь кнопку можно скрыть, выбрать
+        // число сообщений (3-5) и кто вправе нажимать.
+        if (!isChannel) {
+            ApuBubble {
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.sos_settings_title), fontWeight = FontWeight.Medium)
+                            Text(
+                                stringResource(R.string.sos_settings_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = ApuBubbleMutedColor,
+                            )
+                        }
+                        ApuPremiumSwitch(
+                            checked = sosEnabled,
+                            enabled = canChangeInfo,
+                            onCheckedChange = { onSetSosSettings(it, sosMessageCount, sosPressRole) },
+                        )
+                    }
+                    if (sosEnabled) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            stringResource(R.string.sos_count_label),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            com.vladimir.messenger.data.group.GroupSos.COUNT_CHOICES.forEach { count ->
+                                ApuPremiumChip(
+                                    label = count.toString(),
+                                    selected = count == sosMessageCount,
+                                    enabled = canChangeInfo,
+                                    onClick = { onSetSosSettings(true, count, sosPressRole) },
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            stringResource(R.string.sos_who_label),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                        ) {
+                            ApuPremiumChip(
+                                label = stringResource(R.string.sos_who_all),
+                                selected = sosPressRole == "ALL",
+                                enabled = canChangeInfo,
+                                onClick = { onSetSosSettings(true, sosMessageCount, "ALL") },
+                            )
+                            ApuPremiumChip(
+                                label = stringResource(R.string.sos_who_admins),
+                                selected = sosPressRole == "ADMINS",
+                                enabled = canChangeInfo,
+                                onClick = { onSetSosSettings(true, sosMessageCount, "ADMINS") },
+                            )
+                            ApuPremiumChip(
+                                label = stringResource(R.string.sos_who_owner),
+                                selected = sosPressRole == "OWNER",
+                                enabled = canChangeInfo,
+                                onClick = { onSetSosSettings(true, sosMessageCount, "OWNER") },
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        stringResource(R.string.sos_text_label),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ApuBubbleMutedColor,
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    if (canChangeInfo) {
+                        // Поле и «Сохранить», как у названия и описания:
+                        // черновик не должен уезжать группе на каждый знак.
+                        ApuFormTextField(
+                            value = sosTextDraft,
+                            onValueChange = { sosTextDraft = it },
+                            label = stringResource(R.string.sos_text_label),
+                            singleLine = false,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            stringResource(R.string.sos_text_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        ApuPremiumButton(
+                            label = stringResource(R.string.admin_save),
+                            onClick = {
+                                onSetSosText(sosTextDraft)
+                                if (sosTextDraft.trim().isEmpty()) showSosDefaultDone = true
+                            },
+                            style = DiagnosticsActionStyle.PRIMARY,
+                            enabled = sosTextDraft.trim() != sosText,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    } else {
+                        // Без права менять информацию - только текущий текст.
+                        Text(
+                            com.vladimir.messenger.data.group.GroupSos.effectiveText(sosText),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                    if (!canChangeInfo) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            stringResource(R.string.admin_mode_hint),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                    }
+                }
+            }
+        }
+
         ApuBubble {
             ApuPremiumButton(
                 label = if (isChannel) stringResource(R.string.admin_unsubscribe_channel) else stringResource(R.string.admin_leave_group),
@@ -669,6 +823,14 @@ private fun OverviewTab(
             onDismiss = { groupAvatarToCrop = null },
         )
     }
+    if (showSosDefaultDone) {
+        ApuPremiumNoticeDialog(
+            title = stringResource(R.string.sos_text_default_done_title),
+            message = stringResource(R.string.sos_text_default_done_body),
+            onDismiss = { showSosDefaultDone = false },
+            icon = Icons.Default.CheckCircle,
+        )
+    }
 }
 
 /** р250: подпись выбранной паузы словами (для пояснения в настройках). */
@@ -760,6 +922,9 @@ private fun AdminsTab(
     var transferTarget by remember { mutableStateOf<MemberSummary?>(null) }
 
     val memberAvatars by com.vladimir.messenger.ui.theme.AvatarStore.avatars.collectAsState()
+    val textColorRevision by TextColorSettingsStore.revision.collectAsState()
+    val textColorContext = LocalContext.current
+    LaunchedEffect(Unit) { TextColorSettingsStore.initialize(textColorContext) }
     LazyColumn(contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // Наследование: владелец долго не выходил на связь - администратору
         // (а без администраторов и участнику) предлагаем забрать права.
@@ -803,6 +968,12 @@ private fun AdminsTab(
             item { ApuBubble { Text(stringResource(R.string.admin_no_admins)) } }
         }
         items(admins, key = { it.nodeId }) { admin ->
+            val adminNameColor = remember(admin.nodeId, textColorRevision) {
+                TextColorPalette.colorOr(
+                    TextColorSettingsStore.peerNameColor(textColorContext, admin.nodeId),
+                    ApuBubbleTextColor,
+                )
+            }
             ApuBubble {
                 Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -813,7 +984,11 @@ private fun AdminsTab(
                         )
                         Spacer(Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(admin.displayName.ifBlank { admin.nodeId }, fontWeight = FontWeight.Medium)
+                            Text(
+                                admin.displayName.ifBlank { admin.nodeId },
+                                fontWeight = FontWeight.Medium,
+                                color = adminNameColor,
+                            )
                             Text(
                                 if (admin.role == GroupRole.OWNER) stringResource(R.string.admin_owner_rights) else stringResource(R.string.admin_role_admin),
                                 style = MaterialTheme.typography.bodySmall,
@@ -972,6 +1147,16 @@ private fun MemberRow(
     onBlock: () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val textColorRevision by TextColorSettingsStore.revision.collectAsState()
+    val textColorContext = LocalContext.current
+    LaunchedEffect(Unit) { TextColorSettingsStore.initialize(textColorContext) }
+    val defaultMemberNameColor = if (vip) Color(0xFF8A5F00) else MaterialTheme.colorScheme.onSurface
+    val memberNameColor = remember(member.nodeId, textColorRevision, defaultMemberNameColor) {
+        TextColorPalette.colorOr(
+            TextColorSettingsStore.peerNameColor(textColorContext, member.nodeId),
+            defaultMemberNameColor,
+        )
+    }
 
     ApuBubble(modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
         Column {
@@ -994,8 +1179,7 @@ private fun MemberRow(
                                 MaterialTheme.typography.titleMedium, vip,
                             ),
                             fontWeight = FontWeight.Medium,
-                            color = if (vip) Color(0xFF8A5F00)
-                            else MaterialTheme.colorScheme.onSurface,
+                            color = memberNameColor,
                         )
                         if (vip) {
                             Spacer(Modifier.width(6.dp))

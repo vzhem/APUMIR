@@ -1,6 +1,7 @@
 package com.vladimir.messenger.ui.screens.feedback
 
 import com.vladimir.messenger.ui.components.ApuBubbleField
+import com.vladimir.messenger.ui.components.ApuSettingsCard
 import android.net.Uri
 import android.os.Build
 import android.widget.Toast
@@ -124,6 +125,8 @@ fun FeedbackScreen(onBackClick: () -> Unit) {
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                ApuSettingsCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
                 Text(
                     stringResource(R.string.feedback_intro),
                     style = MaterialTheme.typography.bodyMedium,
@@ -142,6 +145,10 @@ fun FeedbackScreen(onBackClick: () -> Unit) {
                     minLines = 6,
                 )
 
+                    }
+                }
+                ApuSettingsCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
                 Text(
                     stringResource(R.string.feedback_shots_title),
                     style = MaterialTheme.typography.titleSmall,
@@ -180,8 +187,10 @@ fun FeedbackScreen(onBackClick: () -> Unit) {
                 ) {
                     Text(stringResource(R.string.feedback_add_shots))
                 }
-
-                Spacer(Modifier.height(4.dp))
+                    }
+                }
+                ApuSettingsCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp)) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -242,6 +251,8 @@ fun FeedbackScreen(onBackClick: () -> Unit) {
                     Text(
                         stringResource(if (busy) R.string.feedback_collecting else R.string.feedback_send),
                     )
+                }
+                    }
                 }
             }
         }

@@ -20,4 +20,8 @@ data class Message(
     /** Кого и какой текст цитирует ответ (в личных чатах и группах). */
     val replyAuthor: String = "",
     val replyText: String = "",
+    /** Palette id used for the message body; empty means the normal theme ink. */
+    val textColor: String = "",
+    /** Palette id announced for the sender's display name. */
+    val senderNameColor: String = "",
 )

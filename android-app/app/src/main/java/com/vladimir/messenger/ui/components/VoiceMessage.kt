@@ -1,32 +1,38 @@
 package com.vladimir.messenger.ui.components
 
 import android.media.MediaPlayer
+import android.media.PlaybackParams
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Save
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Subtitles
-import androidx.compose.material.icons.filled.EmojiEmotions
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -40,19 +46,30 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.res.stringResource
-import com.vladimir.messenger.R
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.vladimir.messenger.R
+import com.vladimir.messenger.data.voice.VoicePlaybackSpeedStore
 import com.vladimir.messenger.data.voice.VoiceTranscriber
 import com.vladimir.messenger.util.VoiceNote
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
-import kotlinx.coroutines.delay
 
 /**
  * Голосовое сообщение: кнопка «играть», волна из 32 столбиков и время.
@@ -66,8 +83,12 @@ fun VoiceMessagePlayer(
     textColor: Color,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     var playing by remember(file.path) { mutableStateOf(false) }
     var progress by remember(file.path) { mutableFloatStateOf(0f) }
+    var speedMenu by remember(file.path) { mutableStateOf(false) }
+    var showSpeedDefaultDone by remember(file.path) { mutableStateOf(false) }
+    val playbackSpeed by VoicePlaybackSpeedStore.speed.collectAsStateWithLifecycle()
     val player = remember(file.path) {
         runCatching {
             MediaPlayer().apply {
@@ -80,6 +101,10 @@ fun VoiceMessagePlayer(
                 }
             }
         }.getOrNull()
+    }
+    LaunchedEffect(Unit) { VoicePlaybackSpeedStore.initialize(context) }
+    LaunchedEffect(player, playbackSpeed) {
+        player?.let { applyVoicePlaybackSpeed(it, playbackSpeed) }
     }
     DisposableEffect(player) {
         onDispose { runCatching { player?.release() } }
@@ -110,8 +135,11 @@ fun VoiceMessagePlayer(
                     runCatching { p.pause() }
                     playing = false
                 } else {
-                    runCatching { p.start() }
-                    playing = true
+                    runCatching {
+                        applyVoicePlaybackSpeed(p, playbackSpeed)
+                        p.start()
+                        playing = true
+                    }
                 }
             },
         )
@@ -139,12 +167,193 @@ fun VoiceMessagePlayer(
                     )
                 }
             }
-            Text(
-                formatVoiceTime(info.durationSec),
-                style = MaterialTheme.typography.labelSmall,
-                color = textColor.copy(alpha = 0.7f),
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    formatVoiceTime(info.durationSec),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = textColor.copy(alpha = 0.7f),
+                )
+                Spacer(Modifier.weight(1f))
+                Box {
+                    val speedButtonShape = RoundedCornerShape(50)
+                    Row(
+                        modifier = Modifier
+                            .clip(speedButtonShape)
+                            .background(
+                                if (speedMenu) {
+                                    ApuGold.copy(alpha = 0.25f)
+                                } else {
+                                    ApuBubbleAccentColor.copy(alpha = 0.08f)
+                                },
+                            )
+                            .border(
+                                1.dp,
+                                if (speedMenu) {
+                                    ApuGoldDeep.copy(alpha = 0.72f)
+                                } else {
+                                    ApuBubbleAccentColor.copy(alpha = 0.24f)
+                                },
+                                speedButtonShape,
+                            )
+                            .clickable(role = Role.Button) { speedMenu = true }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            Icons.Filled.Speed,
+                            contentDescription = stringResource(R.string.voice_speed_title),
+                            tint = if (speedMenu) ApuGoldInk else ApuBubbleAccentColor,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Text(
+                            stringResource(voiceSpeedLabelRes(playbackSpeed)),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (speedMenu) ApuGoldInk else ApuBubbleAccentColor,
+                        )
+                    }
+                    if (speedMenu) {
+                        Popup(
+                            alignment = Alignment.BottomEnd,
+                            offset = with(LocalDensity.current) {
+                                IntOffset(0, -8.dp.roundToPx())
+                            },
+                            onDismissRequest = { speedMenu = false },
+                            properties = PopupProperties(focusable = true),
+                        ) {
+                            VoiceSpeedPopup(
+                                playbackSpeed = playbackSpeed,
+                                onSelect = { option ->
+                                    val returningToDefault = VoicePlaybackSpeedStore.normalize(option) == 1f &&
+                                        VoicePlaybackSpeedStore.normalize(playbackSpeed) != 1f
+                                    VoicePlaybackSpeedStore.set(context, option)
+                                    speedMenu = false
+                                    if (returningToDefault) showSpeedDefaultDone = true
+                                },
+                            )
+                        }
+                    }
+                }
+            }
             VoiceTranscript(file = file, textColor = textColor)
+        }
+    }
+    if (showSpeedDefaultDone) {
+        ApuPremiumNoticeDialog(
+            title = stringResource(R.string.voice_speed_default_done_title),
+            message = stringResource(R.string.voice_speed_default_done_body),
+            onDismiss = { showSpeedDefaultDone = false },
+            icon = Icons.Default.CheckCircle,
+        )
+    }
+}
+
+/**
+ * Компактный выбор скорости в стиле современных мессенджеров: вместо длинного
+ * stock-списка — небольшое плавающее окно с заголовком и шестью крупными
+ * radio-чипами. Оно открывается вверх от кнопки и не закрывает весь голосовой
+ * пузырь, поэтому выбранную скорость легко увидеть и сменить одним тапом.
+ */
+@Composable
+private fun VoiceSpeedPopup(
+    playbackSpeed: Float,
+    onSelect: (Float) -> Unit,
+) {
+    val menuShape = RoundedCornerShape(24.dp)
+    val optionShape = RoundedCornerShape(14.dp)
+    Column(
+        modifier = Modifier
+            .width(224.dp)
+            .shadow(18.dp, menuShape, clip = false)
+            .clip(menuShape)
+            .background(ApuBubbleSurfaceColor)
+            .border(1.dp, ApuBubbleAccentColor.copy(alpha = 0.24f), menuShape)
+            .padding(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .clip(CircleShape)
+                    .background(apuGoldBrush()),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Filled.Speed,
+                    contentDescription = null,
+                    tint = ApuGoldInk,
+                    modifier = Modifier.size(17.dp),
+                )
+            }
+            Text(
+                stringResource(R.string.voice_speed_title),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = ApuBubbleTextColor,
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        VoicePlaybackSpeedStore.OPTIONS.chunked(3).forEachIndexed { rowIndex, row ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                row.forEach { option ->
+                    val selected = VoicePlaybackSpeedStore.normalize(option) ==
+                        VoicePlaybackSpeedStore.normalize(playbackSpeed)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp)
+                            .clip(optionShape)
+                            .background(
+                                if (selected) {
+                                    apuGoldBrush()
+                                } else {
+                                    Brush.linearGradient(
+                                        listOf(
+                                            ApuBubbleAccentColor.copy(alpha = 0.10f),
+                                            ApuBubbleAccentColor.copy(alpha = 0.04f),
+                                        ),
+                                    )
+                                },
+                            )
+                            .border(
+                                1.dp,
+                                if (selected) {
+                                    ApuGoldDeep.copy(alpha = 0.74f)
+                                } else {
+                                    ApuBubbleAccentColor.copy(alpha = 0.16f)
+                                },
+                                optionShape,
+                            )
+                            .selectable(
+                                selected = selected,
+                                role = Role.RadioButton,
+                                onClick = { onSelect(option) },
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            stringResource(voiceSpeedLabelRes(option)),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (selected) ApuGoldInk else ApuBubbleAccentColor,
+                        )
+                    }
+                }
+            }
+            if (rowIndex < VoicePlaybackSpeedStore.OPTIONS.chunked(3).lastIndex) {
+                Spacer(Modifier.height(6.dp))
+            }
         }
     }
 }
@@ -241,6 +450,27 @@ private fun VoiceTranscript(file: File, textColor: Color) {
 
 /** Время голоса «м:сс». */
 fun formatVoiceTime(total: Int): String = "%d:%02d".format(total / 60, total % 60)
+
+private fun applyVoicePlaybackSpeed(player: MediaPlayer, speed: Float) {
+    runCatching {
+        player.setPlaybackParams(
+            PlaybackParams()
+                .setSpeed(VoicePlaybackSpeedStore.normalize(speed))
+                // Keep the speaker's pitch natural while stretching the timing.
+                .setPitch(1f),
+        )
+    }
+}
+
+@androidx.annotation.StringRes
+private fun voiceSpeedLabelRes(speed: Float): Int = when (VoicePlaybackSpeedStore.normalize(speed)) {
+    0.5f -> R.string.voice_speed_half
+    0.75f -> R.string.voice_speed_three_quarters
+    1.25f -> R.string.voice_speed_one_quarter_up
+    1.5f -> R.string.voice_speed_one_half
+    2f -> R.string.voice_speed_double
+    else -> R.string.voice_speed_normal
+}
 
 /**
  * Голосовое в карточке файла (группы и каналы): проигрыватель и меню «⋯»

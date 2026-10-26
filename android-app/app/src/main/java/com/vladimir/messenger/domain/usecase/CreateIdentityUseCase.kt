@@ -3,6 +3,7 @@ package com.vladimir.messenger.domain.usecase
 import android.content.Context
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.security.DeviceIdentityHistory
 import com.vladimir.messenger.data.security.DeviceIdentityMarker
 import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import com.vladimir.messenger.data.security.RelayAtRestMasterKey
@@ -13,7 +14,12 @@ import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-data class IdentityResult(val inviteLink: String, val fingerprint: String)
+data class IdentityResult(
+    val inviteLink: String,
+    /** Full node id for ownership checks; [fingerprint] is the display form. */
+    val fingerprint: String,
+    val nodeId: String,
+)
 
 class CreateIdentityUseCase @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -24,6 +30,15 @@ class CreateIdentityUseCase @Inject constructor(
             // ключа = честный RAM-only degrade первого запуска.
             val atRestKeyOk = RelayAtRestMasterKey.installIntoCore(context)
             Log.i("CreateIdentityUseCase", "Relay at-rest key installed: $atRestKeyOk")
+            // A pre-v11.74.450 process may still have the old eager-start
+            // Anonymous engine alive while this screen is being completed.
+            // Stop it before generating the permanent identity; otherwise
+            // RustBridge.initialize() quite correctly returns the already
+            // running engine and the new profile inherits its temporary route.
+            val prefs = context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+            if (!prefs.getBoolean("identity_created", false)) {
+                RustBridge.shutdown()
+            }
             val relayDbPath = File(context.filesDir, "apu_relay.sqlite").absolutePath
             val isInitialized = RustBridge.initialize(name, relayDbPath = relayDbPath)
             if (!isInitialized) {
@@ -48,9 +63,12 @@ class CreateIdentityUseCase @Inject constructor(
             // Device-local marker не попадает в backup. Восстановленные prefs без
             // него не должны пропускать onboarding на новой установке.
             DeviceIdentityMarker.create(context)
+            // The marker tells us that this is an installation; the Keystore
+            // alias ledger additionally remembers the exact profile across a
+            // later clearApplicationUserData/logout on this same phone.
+            DeviceIdentityHistory.remember(context, nodeId)
 
             // Сохраняем все данные identity включая "секрет" для восстановления
-            val prefs = context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
             prefs.edit()
                 .putBoolean("identity_created", true)
                 .putString("display_name", name)
@@ -73,7 +91,13 @@ class CreateIdentityUseCase @Inject constructor(
             val inviteLink = OwnInvite.link(context) ?: "p2p://invite/$publicKey"
             val fingerprint = if (publicKey.length > 16) publicKey.take(16) + "..." else publicKey
 
-            Result.success(IdentityResult(inviteLink = inviteLink, fingerprint = fingerprint))
+            Result.success(
+                IdentityResult(
+                    inviteLink = inviteLink,
+                    fingerprint = fingerprint,
+                    nodeId = nodeId,
+                )
+            )
         } catch (e: Exception) {
             Result.failure(e)
         }

@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Cameraswitch
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
@@ -78,6 +79,7 @@ import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.vladimir.messenger.R
 import com.vladimir.messenger.data.story.StoryFaceBaker
 import com.vladimir.messenger.data.story.StoryFaceFilter
 import com.vladimir.messenger.data.story.StoryFaceFrame
@@ -145,6 +147,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
     var paused by remember { mutableStateOf(false) }
     var elapsed by remember { mutableStateOf(0L) }
     var error by remember { mutableStateOf<String?>(null) }
+    var defaultDoneMessage by remember { mutableStateOf<Int?>(null) }
     var faceFilter by remember { mutableStateOf(StoryFaceFilter.NONE) }
     // Эффект голоса выбирается ДО записи и применяется к звуку готовой истории.
     var voiceEffect by remember { mutableStateOf(com.vladimir.messenger.data.voice.VoiceEffectPreferences.load(context)) }
@@ -444,7 +447,14 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                             selected = storyBackground,
                             expanded = showBackgrounds,
                             onToggle = { showBackgrounds = !showBackgrounds },
-                            onSelect = { storyBackground = it },
+                            onSelect = {
+                                val returningToDefault = it == com.vladimir.messenger.data.background.VideoBackground.NONE &&
+                                    storyBackground != it
+                                storyBackground = it
+                                if (returningToDefault) {
+                                    defaultDoneMessage = R.string.story_background_default_done_body
+                                }
+                            },
                         )
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -466,7 +476,13 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                             filter = faceFilter,
                             part = filterPart,
                             onPart = { filterPart = it },
-                            onFilter = { faceFilter = it },
+                            onFilter = {
+                                val returningToDefault = it == StoryFaceFilter.NONE && faceFilter != it
+                                faceFilter = it
+                                if (returningToDefault) {
+                                    defaultDoneMessage = R.string.story_filter_default_done_body
+                                }
+                            },
                         )
                     }
                 }
@@ -542,6 +558,14 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                 }
             }
         }
+    }
+    defaultDoneMessage?.let { messageRes ->
+        ApuPremiumNoticeDialog(
+            title = stringResource(R.string.story_default_done_title),
+            message = stringResource(messageRes),
+            onDismiss = { defaultDoneMessage = null },
+            icon = Icons.Default.CheckCircle,
+        )
     }
 }
 

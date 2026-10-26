@@ -735,12 +735,18 @@ class FileTransferReceiver(
         }
 
         val contiguous = contiguousReceived(transferIdHex)
-        sendFileAck(transferIdHex, contiguous)
         val fresh = transferDao.getTransfer(transferIdHex) ?: return
         if (contiguous >= manifest.chunkCount.toLong()) {
+            // Итоговое подтверждение уйдёт из finalizeTransfer только после
+            // проверки целого файла: раньше ACK «всё принято» уходил до
+            // проверки, и при сбое сборки отправитель уже считал передачу
+            // завершённой и не присылал куски повторно.
             finalizeTransfer(fresh, manifest)
-        } else if (fresh.state == "OFFERED") {
-            advance(fresh, newState = "TRANSFERRING")
+        } else {
+            sendFileAck(transferIdHex, contiguous)
+            if (fresh.state == "OFFERED") {
+                advance(fresh, newState = "TRANSFERRING")
+            }
         }
     }
 
@@ -995,6 +1001,61 @@ class FileTransferReceiver(
             Log.w(TAG, "Chunk $chunkIndex geometry mismatch for $transferIdHex")
             return
         }
+        // Подлинность куска проверяется ДО записи на диск (так уже делает
+        // групповой путь в verifyGroupChunk). У бинарных APUF-диапазонов и у
+        // пересланных хранителями кусков целостной проверки на уровне
+        // фрагментов нет, и раньше битые байты ложились в хранилище: сборка
+        // падала в самом конце (VERIFY_FAILED), а хороший повтор отправителя
+        // хранилище отвергало - на диске уже лежал другой шифротекст этого
+        // куска. Теперь битый кусок просто не принимается: подтверждаем
+        // текущий непрерывный прогресс, и отправитель присылает кусок заново.
+        val authentic = chunkAuthenticates(transferIdHex, manifestBytes, chunkIndex, ciphertext)
+        if (authentic == false) {
+            val existing = chunkStore.readEncryptedChunk(transferIdHex, chunkIndex)
+            val existingAuthentic = existing?.let {
+                chunkAuthenticates(transferIdHex, manifestBytes, chunkIndex, it)
+            }
+            existing?.fill(0)
+            if (existingAuthentic == true) {
+                // На диске уже подлинный кусок, а это - битый дубликат.
+                sendFileAck(transferIdHex, contiguousReceived(transferIdHex))
+            } else {
+                Log.w(TAG, "Chunk $chunkIndex for $transferIdHex failed authentication; dropped, resend awaited")
+                TransferDiagnostics.recordWarning(
+                    "file",
+                    "кусок $chunkIndex не прошёл проверку подлинности и отброшен - отправитель пришлёт его заново",
+                )
+                sendFileAck(transferIdHex, contiguousReceived(transferIdHex))
+            }
+            return
+        }
+        if (authentic == true && chunkStore.hasEncryptedChunk(transferIdHex, chunkIndex)) {
+            // Наследие версий без проверки при приёме: на диске лежит кусок,
+            // который не расшифровывается, а сейчас пришёл подлинный.
+            // Заменяем, иначе хороший кусок навсегда упёрся бы в конфликт
+            // хранилища, а сборка - в VERIFY_FAILED.
+            val existing = chunkStore.readEncryptedChunk(transferIdHex, chunkIndex)
+            if (existing != null && !existing.contentEquals(ciphertext) &&
+                chunkAuthenticates(transferIdHex, manifestBytes, chunkIndex, existing) != true
+            ) {
+                chunkStore.deleteEncryptedChunk(transferIdHex, chunkIndex)
+                transferDao.deleteChunk(transferIdHex, chunkIndex)
+                contiguousPrefixes.remove(transferIdHex)
+                // Битый кусок мог уже считаться принятым в строке передачи:
+                // приводим счётчики к фактически оставшимся кускам, иначе
+                // прогресс убежит вперёд и сборка упрётся в «нет куска».
+                transferDao.resetProgress(
+                    transferId = transferIdHex,
+                    state = transfer.state,
+                    completedChunks = transferDao.countChunks(transferIdHex),
+                    transferredBytes = transferDao.receivedPlaintextBytes(transferIdHex),
+                    updatedAtMs = nowMs(),
+                    errorCode = transfer.errorCode,
+                )
+                Log.i(TAG, "Replaced unauthenticated stored chunk $chunkIndex for $transferIdHex")
+            }
+            existing?.fill(0)
+        }
         val stored = try {
             chunkStore.storeEncryptedChunk(
                 transferIdHex,
@@ -1068,9 +1129,12 @@ class FileTransferReceiver(
         )
         if (updated == 0) return
 
-        sendFileAck(transferIdHex, contiguous)
         if (completedChunks == chunkCount) {
+            // Итоговое подтверждение - только из finalizeTransfer и только
+            // после проверки целого файла (см. handleOffer).
             finalizeTransfer(transfer, manifest)
+        } else {
+            sendFileAck(transferIdHex, contiguous)
         }
     }
 
@@ -1367,8 +1431,17 @@ class FileTransferReceiver(
         // Re-fetch: the row may have advanced (e.g. VERIFYING) since the caller loaded it, and
         // the monotonic Room guard must never see regressed progress numbers.
         val fresh = transferDao.getTransfer(transferIdHex) ?: return
-        if (fresh.state == "COMPLETE") return
         val manifestBytes = chunkStore.readManifest(transferIdHex) ?: return
+        if (fresh.state == "COMPLETE") {
+            // Повторное предложение/кусок после потерянного итогового ACK:
+            // подтверждаем ещё раз, иначе отправитель будет слать до срока.
+            // Групповой копии подтверждение каждому сиду уже уходит из
+            // handleChunk, здесь не дублируем.
+            if (!GroupFileSeeder.isGroupManifest(manifestBytes)) {
+                sendFileAck(transferIdHex, manifest.chunkCount.toLong())
+            }
+            return
+        }
         val digest = MessageDigest.getInstance("SHA-256")
         val writer = receivedStore.openWriter(
             transferIdHex,
@@ -1440,6 +1513,13 @@ class FileTransferReceiver(
         } catch (error: Exception) {
             // abort() is a no-op after a successful commit (Writer guards its finished state).
             writer.abort()
+            // Кусок, не прошедший проверку подлинности (например, записанный
+            // версией без проверки при приёме), - не приговор файлу:
+            // выбрасываем битые куски, возвращаем передачу в TRANSFERRING и
+            // подтверждаем укороченный прогресс. Отправитель ещё не получал
+            // итогового ACK (он уходит только после успешной проверки),
+            // поэтому пришлёт недостающее обычным порядком.
+            if (repairUnauthenticatedChunks(fresh, manifestBytes, manifest)) return
             runCatching { receivedStore.deleteTransfer(transferIdHex) }
             advance(fresh, newState = "FAILED", errorCode = "VERIFY_FAILED")
             Log.w(TAG, "File verification failed for $transferIdHex: ${error.message}")
@@ -1502,6 +1582,74 @@ class FileTransferReceiver(
         contiguousPrefixes[transferIdHex] ?: discoverContiguousPrefix(transferIdHex).also {
             contiguousPrefixes[transferIdHex] = it
         }
+
+    /**
+     * Подлинность одного зашифрованного куска: true - расшифровывается ключом
+     * передачи под этим манифестом, false - битый или чужой, null - проверить
+     * нечем (ключа передачи нет или хранилище ключей недоступно: тогда кусок
+     * принимается как раньше, а последнее слово - за сборкой целого файла).
+     */
+    private fun chunkAuthenticates(
+        transferIdHex: String,
+        manifestBytes: ByteArray,
+        chunkIndex: Long,
+        ciphertext: ByteArray,
+    ): Boolean? {
+        if (keyVault.mode(transferIdHex) != FileTransferKeyVault.Mode.READY) return null
+        return runCatching {
+            keyVault.withExistingKey(transferIdHex) { fileKey ->
+                crypto.decryptChunk(manifestBytes, fileKey, chunkIndex, ciphertext).fill(0)
+            }
+            true
+        }.getOrDefault(false)
+    }
+
+    /**
+     * Самовосстановление сборки: выбросить куски, не прошедшие проверку
+     * подлинности (записаны версией без проверки при приёме или повреждены на
+     * диске), откатить прогресс к оставшимся и подтвердить укороченный
+     * непрерывный префикс. Отправитель итогового ACK ещё не получал, поэтому
+     * его насос пришлёт выброшенные куски повторно. true - передача вернулась
+     * в TRANSFERRING и ждёт куски; false - чинить нечего (все куски подлинные,
+     * а файл всё равно не сошёлся: это настоящая порча у отправителя).
+     */
+    private suspend fun repairUnauthenticatedChunks(
+        transfer: FileTransferEntity,
+        manifestBytes: ByteArray,
+        manifest: FileTransferManifestFfi,
+    ): Boolean {
+        val transferIdHex = transfer.transferId
+        if (keyVault.mode(transferIdHex) != FileTransferKeyVault.Mode.READY) return false
+        var evicted = 0L
+        for (chunkIndex in 0L until manifest.chunkCount.toLong()) {
+            val ciphertext = chunkStore.readEncryptedChunk(transferIdHex, chunkIndex) ?: continue
+            val authentic = chunkAuthenticates(transferIdHex, manifestBytes, chunkIndex, ciphertext)
+            ciphertext.fill(0)
+            if (authentic == false) {
+                chunkStore.deleteEncryptedChunk(transferIdHex, chunkIndex)
+                transferDao.deleteChunk(transferIdHex, chunkIndex)
+                evicted++
+            }
+        }
+        if (evicted == 0L) return false
+        val reset = transferDao.resetProgress(
+            transferId = transferIdHex,
+            state = "TRANSFERRING",
+            completedChunks = transferDao.countChunks(transferIdHex),
+            transferredBytes = transferDao.receivedPlaintextBytes(transferIdHex),
+            updatedAtMs = nowMs(),
+            errorCode = ERROR_CHUNK_REPAIR,
+        )
+        if (reset != 1) return false
+        contiguousPrefixes[transferIdHex] = discoverContiguousPrefix(transferIdHex)
+        Log.w(TAG, "File $transferIdHex: evicted $evicted unauthenticated chunk(s); awaiting resend")
+        TransferDiagnostics.recordWarning(
+            "file",
+            "при сборке выброшено битых кусков: $evicted - жду повтор от отправителя",
+        )
+        sendFileAck(transferIdHex, contiguousPrefixes.getValue(transferIdHex))
+        return true
+    }
 
     private fun plaintextLengthOf(manifest: FileTransferManifestFfi, chunkIndex: Long): Int {
         val chunkSize = manifest.chunkSize.toLong()
@@ -1825,12 +1973,18 @@ class FileTransferReceiver(
             }
         }
         val contiguous = contiguousReceived(transferIdHex)
-        sendFileAck(transferIdHex, contiguous)
         val fresh = transferDao.getTransfer(transferIdHex) ?: return
         if (contiguous >= manifest.chunkCount.toLong()) {
+            // Итоговое подтверждение уйдёт из finalizeTransfer только после
+            // проверки целого файла: раньше ACK «всё принято» уходил до
+            // проверки, и при сбое сборки отправитель уже считал передачу
+            // завершённой и не присылал куски повторно.
             finalizeTransfer(fresh, manifest)
-        } else if (fresh.state == "OFFERED") {
-            advance(fresh, newState = "TRANSFERRING")
+        } else {
+            sendFileAck(transferIdHex, contiguous)
+            if (fresh.state == "OFFERED") {
+                advance(fresh, newState = "TRANSFERRING")
+            }
         }
     }
 
@@ -2276,6 +2430,8 @@ class FileTransferReceiver(
         private const val TAG = "FileTransferReceiver"
         /** Маркер строки передачи, пока приём заблокирован из-за нехватки места в хранилище. */
         const val ERROR_NO_SPACE = "NO_SPACE"
+        /** Маркер строки передачи, пока она ждёт повтор кусков, выброшенных при сборке как битые. */
+        const val ERROR_CHUNK_REPAIR = "CHUNK_REPAIR"
         const val MAX_PENDING_ITEMS = 64
         const val MAX_PENDING_BYTES = 32L * 1024 * 1024
         /** Полезная нагрузка CANCEL «получателю файл уже не нужен» (этап 10); прочие CANCEL - лишь заметка в журнале. */
