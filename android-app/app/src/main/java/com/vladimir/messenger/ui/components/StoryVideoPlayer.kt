@@ -20,12 +20,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import com.vladimir.messenger.data.story.StoryStore
+import com.vladimir.messenger.R
 import com.vladimir.messenger.data.story.StoryVideoStorage
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -53,7 +55,7 @@ internal fun StoryVideoPlayer(story: StoryStore.Story, paused: Boolean,
     if (source == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             StoryContentCanvas(story.text, story.photoB64, androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Black, Color.Black)), photoCircle = story.videoCircle)
-            Text(unavailable ?: "Видео загружается. Можно перейти к следующей истории.", color = Color.White,
+            Text(unavailable ?: stringResource(R.string.story_video_loading_hint), color = Color.White,
                 modifier = Modifier.align(Alignment.TopCenter).padding(20.dp))
         }
         return
@@ -72,7 +74,7 @@ internal fun StoryVideoPlayer(story: StoryStore.Story, paused: Boolean,
         val listener = object : Player.Listener {
             override fun onRenderedFirstFrame() { if (!story.mine) StoryStore.markSeen(story.id) }
             override fun onPlaybackStateChanged(playbackState: Int) { state = playbackState }
-            override fun onPlayerError(failure: PlaybackException) { error = "Не удалось воспроизвести видео" }
+            override fun onPlayerError(failure: PlaybackException) { error = context.getString(R.string.story_video_play_failed) }
         }
         player.addListener(listener)
         player.setMediaItem(MediaItem.fromUri(Uri.fromFile(source)))
@@ -93,10 +95,10 @@ internal fun StoryVideoPlayer(story: StoryStore.Story, paused: Boolean,
     Box(Modifier.fillMaxSize()) {
         StoryVideoSurface(player, story.videoCircle, Modifier.fillMaxSize())
         Column(Modifier.align(Alignment.BottomCenter).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (state == Player.STATE_BUFFERING) Text("Буферизация…", color = Color.White)
+            if (state == Player.STATE_BUFFERING) Text(stringResource(R.string.story_video_buffering), color = Color.White)
             if (error != null) {
                 Text(error.orEmpty(), color = Color.White)
-                ApuPremiumButton(label = "Повторить", onClick = { error = null; player.prepare() })
+                ApuPremiumButton(label = stringResource(R.string.action_retry), onClick = { error = null; player.prepare() })
             }
             Text(story.text, color = Color.White)
         }

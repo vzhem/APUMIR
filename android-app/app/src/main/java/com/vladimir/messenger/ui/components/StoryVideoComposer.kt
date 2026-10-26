@@ -15,6 +15,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.vladimir.messenger.R
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.vladimir.messenger.data.story.StoryVideoDraft
@@ -49,7 +51,7 @@ internal fun StoryVideoComposer(onDismiss: () -> Unit, onPublish: (StoryVideoExp
                 draft = StoryVideoDraft.fromSource(imported.durationMs).copy(circle = circle)
             }
             catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { error = failure.message ?: "Не удалось открыть видео" }
+            catch (failure: Exception) { error = failure.message ?: context.getString(R.string.story_record_open_video_failed) }
             finally { busy = false }
         }
     }
@@ -71,7 +73,7 @@ internal fun StoryVideoComposer(onDismiss: () -> Unit, onPublish: (StoryVideoExp
         else -> Dialog(onDismissRequest = onDismiss) {
             ApuSettingsCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Видеоистория · до 60 секунд")
+                    Text(stringResource(R.string.story_record_title))
                     if (ready != null) {
                         Text(androidx.compose.ui.res.stringResource(com.vladimir.messenger.R.string.story_video_export_summary,
                             (ready.media.durationMs / 1000.0).toString(),
@@ -80,20 +82,20 @@ internal fun StoryVideoComposer(onDismiss: () -> Unit, onPublish: (StoryVideoExp
                         Text(androidx.compose.ui.res.stringResource(if (ready.draft.circle)
                             com.vladimir.messenger.R.string.story_photo_circle else com.vladimir.messenger.R.string.story_photo_rectangle))
                         Text(ready.draft.caption)
-                        Text("Доступна вашим контактам 24 часа. Доставка продолжится при подключении получателей.")
-                        ApuPremiumButton(label = "Опубликовать видео", onClick = {
+                        Text(stringResource(R.string.story_record_audience_hint))
+                        ApuPremiumButton(label = stringResource(R.string.story_record_publish), onClick = {
                             onPublish(ready)
                             exported = null
                         })
-                        ApuTextAction(label = "Вернуться к редактору", onClick = { ready.delete(); exported = null })
+                        ApuTextAction(label = stringResource(R.string.story_record_back_to_editor), onClick = { ready.delete(); exported = null })
                     } else {
                         StoryVideoShapeSelector(circle, enabled = !busy, onChange = { circle = it })
-                        ApuPremiumButton(label = "Выбрать видео", enabled = !busy, onClick = { gallery.launch("video/*") })
-                        ApuPremiumButton(label = "Записать видео", enabled = !busy, onClick = { camera = true })
+                        ApuPremiumButton(label = stringResource(R.string.story_record_pick_video), enabled = !busy, onClick = { gallery.launch("video/*") })
+                        ApuPremiumButton(label = stringResource(R.string.story_record_record_video), enabled = !busy, onClick = { camera = true })
                     }
-                    if (busy) Text("Открываем видео…")
+                    if (busy) Text(stringResource(R.string.story_record_opening))
                     error?.let { Text(it) }
-                    ApuTextAction(label = "Отменить", onClick = onDismiss)
+                    ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
                 }
             }
         }

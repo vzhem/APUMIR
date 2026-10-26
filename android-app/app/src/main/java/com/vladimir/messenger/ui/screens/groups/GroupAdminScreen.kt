@@ -274,7 +274,7 @@ fun GroupAdminScreen(
                 )
 
                 AdminTab.Members -> if (uiState.group?.memberListVisible == false && !uiState.isAdmin) {
-                    ApuBubble { Text("Просмотр списка участников закрыт администратором группы.") }
+                    ApuBubble { Text(stringResource(R.string.group_members_hidden_by_admin)) }
                 } else MembersTab(
                     isAdmin = uiState.isAdmin,
                     members = uiState.searchResults,
@@ -533,8 +533,8 @@ private fun OverviewTab(
         ApuBubble {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Показывать список участников")
-                    Text("Если выключено, список видят только владелец и администраторы.",
+                    Text(stringResource(R.string.group_show_members_title))
+                    Text(stringResource(R.string.group_show_members_hint),
                         style = MaterialTheme.typography.bodySmall, color = ApuBubbleMutedColor)
                 }
                 ApuPremiumSwitch(checked = memberListVisible,

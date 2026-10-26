@@ -840,7 +840,7 @@ class GroupChatViewModel @Inject constructor(
      */
     fun saveFileToFavorites(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity) {
         viewModelScope.launch {
-            val result = savedItems.saveFile(transfer, "Группа")
+            val result = savedItems.saveFile(transfer, appContext.getString(R.string.saved_title_group))
             _uiState.update {
                 it.copy(
                     swarmStatus = when (result) {
@@ -1034,7 +1034,7 @@ class GroupChatViewModel @Inject constructor(
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message ?: "Не удалось отправить сообщение") }
+                _uiState.update { it.copy(error = e.message ?: appContext.getString(R.string.vm_message_send_failed)) }
             } finally {
                 _uiState.update { it.copy(sending = false) }
             }
@@ -1134,7 +1134,7 @@ class GroupChatViewModel @Inject constructor(
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message ?: "Не удалось отправить SOS") }
+                _uiState.update { it.copy(error = e.message ?: appContext.getString(R.string.vm_sos_send_failed)) }
             } finally {
                 _uiState.update { it.copy(sosSending = false) }
             }
@@ -1157,7 +1157,7 @@ class GroupChatViewModel @Inject constructor(
         _uiState.value.members.firstOrNull { it.nodeId == senderId }
             ?.displayName
             ?.takeIf { it.isNotBlank() }
-            ?: ("Участник " + senderId.takeLast(4))
+            ?: appContext.getString(R.string.vm_member_fallback, senderId.takeLast(4))
 
     /**
      * Чем цитируем: словами из сообщения, без служебных строк - иначе в цитате
@@ -1168,7 +1168,7 @@ class GroupChatViewModel @Inject constructor(
             com.vladimir.messenger.util.ForwardMarker.stripHeader(
                 com.vladimir.messenger.util.InlineImage.stripImage(message.content)
             ),
-        ).orEmpty().ifBlank { "Вложение" }
+        ).orEmpty().ifBlank { appContext.getString(R.string.vm_attachment) }
 
     /**
      * Левая колонка значков: все свои группы и каналы с непрочитанными.
@@ -1592,7 +1592,7 @@ class GroupChatViewModel @Inject constructor(
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message ?: "Не удалось отправить сообщение") }
+                _uiState.update { it.copy(error = e.message ?: appContext.getString(R.string.vm_message_send_failed)) }
             } finally {
                 _uiState.update { it.copy(sending = false) }
             }
@@ -1648,7 +1648,7 @@ class GroupChatViewModel @Inject constructor(
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message ?: "Не удалось отправить сообщение") }
+                _uiState.update { it.copy(error = e.message ?: appContext.getString(R.string.vm_message_send_failed)) }
             } finally {
                 _uiState.update { it.copy(sending = false) }
             }
@@ -1902,7 +1902,7 @@ class GroupChatViewModel @Inject constructor(
             // записи, а не в её текст: иначе в избранном тянулись бы «буквы».
             savedItems.saveText(
                 com.vladimir.messenger.util.InlineImage.stripImage(text),
-                if (source.isBlank()) "" else "Группа " + source,
+                if (source.isBlank()) "" else appContext.getString(R.string.saved_title_group_named, source),
                 com.vladimir.messenger.data.repository.SavedOrigin(
                     kind = com.vladimir.messenger.data.repository.SavedOrigin.GROUP,
                     id = groupId,

@@ -722,7 +722,7 @@ class ChatDetailViewModel @Inject constructor(
     }
 
     private fun contactNameForReply(message: Message): String =
-        if (message.senderId == peerId) "Собеседник" else message.senderId.takeLast(6)
+        if (message.senderId == peerId) appContext.getString(R.string.vm_chat_peer) else message.senderId.takeLast(6)
 
     fun onInputTextChanged(text: String) {
         _uiState.update { it.copy(inputText = text) }
@@ -742,7 +742,7 @@ class ChatDetailViewModel @Inject constructor(
             val reply = _uiState.value.replyTo?.let { target ->
                 com.vladimir.messenger.data.reply.DirectReplyWire.Target(
                     messageId = target.id,
-                    author = if (target.isFromMe) "Вы" else contactNameForReply(target),
+                    author = if (target.isFromMe) appContext.getString(R.string.vm_you) else contactNameForReply(target),
                     text = target.content,
                 )
             }

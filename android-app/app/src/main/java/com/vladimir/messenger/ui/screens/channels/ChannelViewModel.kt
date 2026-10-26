@@ -575,7 +575,7 @@ class ChannelViewModel @Inject constructor(
             // Заголовок берём из ТЕКСТА, а не из служебных строк картинок.
             val title = words.lineSequence().firstOrNull().orEmpty().trim()
                 .take(GroupRepository.POST_TITLE_CHARS)
-                .ifBlank { staged?.displayName?.take(GroupRepository.POST_TITLE_CHARS) ?: "Пост" }
+                .ifBlank { staged?.displayName?.take(GroupRepository.POST_TITLE_CHARS) ?: appContext.getString(R.string.saved_title_post) }
             // Файл поста (рой, этап 10): визитка последней строкой, как в группе;
             // сам файл подписчики попросят у автора и друг у друга.
             val body = if (staged == null) words else com.vladimir.messenger.util.GroupFileMarker.compose(words, staged)
@@ -625,7 +625,7 @@ class ChannelViewModel @Inject constructor(
         viewModelScope.launch {
             savedItems.saveText(
                 body,
-                if (source.isBlank()) "" else "Канал " + source,
+                if (source.isBlank()) "" else appContext.getString(R.string.saved_title_channel_named, source),
                 com.vladimir.messenger.data.repository.SavedOrigin(
                     kind = com.vladimir.messenger.data.repository.SavedOrigin.CHANNEL,
                     id = channelId,
@@ -641,7 +641,7 @@ class ChannelViewModel @Inject constructor(
     fun saveFileToFavorites(transfer: com.vladimir.messenger.data.local.entity.FileTransferEntity) {
         viewModelScope.launch {
             val source = _uiState.value.channel?.title.orEmpty()
-            val result = savedItems.saveFile(transfer, if (source.isBlank()) "Канал" else "Канал " + source)
+            val result = savedItems.saveFile(transfer, if (source.isBlank()) appContext.getString(R.string.saved_title_channel) else appContext.getString(R.string.saved_title_channel_named, source))
             _uiState.update {
                 it.copy(
                     error = when (result) {
@@ -666,7 +666,7 @@ class ChannelViewModel @Inject constructor(
         viewModelScope.launch {
             val link = postLink(post.topicId)
             val text = com.vladimir.messenger.util.PhotoShare.buildText(
-                title = post.title.ifBlank { "Пост" },
+                title = post.title.ifBlank { appContext.getString(R.string.saved_title_post) },
                 body = post.text,
                 link = link,
             )

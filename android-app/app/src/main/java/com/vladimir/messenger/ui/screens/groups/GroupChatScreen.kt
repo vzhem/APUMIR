@@ -1285,9 +1285,9 @@ fun GroupChatScreen(
                             // Раунд 203: источник - группа; для чужих сообщений
                             // добавляем автора после названия.
                             val author = senderNames[message.senderId]?.takeIf { it.isNotBlank() }
-                            val base = uiState.group?.title ?: "группа"
+                            val base = uiState.group?.title ?: context.getString(R.string.group_default_title)
                             val label = if (!message.isFromMe && !author.isNullOrBlank()) {
-                                base + " · автор: " + author
+                                context.getString(R.string.group_forward_author, base, author)
                             } else {
                                 base
                             }
