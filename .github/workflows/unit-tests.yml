@@ -1,0 +1,193 @@
+name: Unit tests (JVM)
+
+# P0-3 из docs/AUDIT_2026-10-26.md: 107 из 154 тестовых классов не
+# запускались нигде, потому что в build-release.yml они перечислялись руками
+# через --tests. Здесь весь набор гоняется отдельным дешёвым workflow: без NDK,
+# без Rust и без сборки APK — только JDK и Android SDK, поэтому прогон
+# укладывается в минуты, а не в полчаса.
+#
+# Ручной запуск принимает фильтр, чтобы разобрать падения по одному классу:
+#   gh workflow run unit-tests.yml -f tests=com.vladimir.messenger.data.pairing.DevicePairingWireTest
+on:
+  push:
+    branches:
+      - 'arena/**'
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tests:
+        description: 'Фильтр Gradle --tests (пусто — весь набор)'
+        required: false
+        default: ''
+
+concurrency:
+  group: unit-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # Пакета «tools» в репозитории Google больше нет (2026-09-15).
+          packages: platform-tools
+
+      - name: Accept Android licenses
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      # Компиляция из чистого клона невозможна без перегенерации моста:
+      # закоммиченный p2p_core.kt отстал от lib.udl (после merge PR #57 в нём
+      # нет devicePublicKeyFromSeed, joinerCancelPairing и
+      # closePairingOffer, а Kotlin их вызывает). build-release.yml и
+      # scripts/ci/check-android-compile.sh делают этот шаг перед сборкой —
+      # здесь он тоже обязателен, иначе тесты не компилируются вообще.
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # Версия зафиксирована (rust-toolchain.toml): stable дважды
+          # менялся за проект, и .so собирался разным компилятором.
+          toolchain: 1.99.1
+
+      # Cargo.lock — часть исходников: без него cargo может подтянуть новую
+      # минорную версию quinn/rustls/rumqttc. Пока файл не закоммичен
+      # (первый lock создаётся workflow «Sync uniffi bindings from lib.udl»),
+      # это предупреждение; после коммита расхождение — ошибка.
+      - name: Cargo.lock is committed and current
+        working-directory: ./rust-core
+        run: |
+          set -euo pipefail
+          if ! git ls-files --error-unmatch Cargo.lock > /dev/null 2>&1; then
+            echo "::warning::rust-core/Cargo.lock не закоммичен — запустите workflow «Sync uniffi bindings from lib.udl», он создаст и закоммитит lock-файлы"
+            exit 0
+          fi
+          cargo generate-lockfile
+          if ! git diff --quiet -- Cargo.lock; then
+            echo "::error::Cargo.lock устарел: cargo generate-lockfile меняет файл. Закоммитьте результат."
+            git diff --stat -- Cargo.lock
+            exit 1
+          fi
+          echo "Cargo.lock совпадает с Cargo.toml"
+
+      - name: Regenerate uniffi Kotlin bindings from lib.udl
+        working-directory: ./rust-core
+        run: |
+          cargo run --manifest-path ../tools/uniffi-bindgen/Cargo.toml -- \
+            generate src/lib.udl --language kotlin --config uniffi.toml \
+            --out-dir ../android-app/app/src/main/java --no-format
+          grep -q "ffi_p2p_core_uniffi_contract_version" \
+            ../android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./android-app/gradlew
+
+      # Полный набор или один класс по фильтру. set +e: сводку печатаем
+      # всегда, даже когда Gradle упал на первом же классе.
+      - name: Run unit tests
+        working-directory: ./android-app
+        env:
+          FILTER: ${{ github.event.inputs.tests }}
+        run: |
+          set +e
+          if [ -n "$FILTER" ]; then
+            ./gradlew :app:testReleaseUnitTest --tests "$FILTER" --no-daemon \
+              > "$RUNNER_TEMP/gradle-unit.log" 2>&1
+          else
+            ./gradlew :app:testReleaseUnitTest --no-daemon \
+              > "$RUNNER_TEMP/gradle-unit.log" 2>&1
+          fi
+          status=$?
+          tail -40 "$RUNNER_TEMP/gradle-unit.log"
+          python3 - "$status" <<'PY'
+          from pathlib import Path
+          import os
+          import sys
+          import xml.etree.ElementTree as ET
+
+          results = Path("app/build/test-results/testReleaseUnitTest")
+          classes = total = failed = skipped = 0
+          details = []
+          for xml in sorted(results.glob("TEST-*.xml")):
+              suite = ET.parse(xml).getroot()
+              class_failed = int(suite.get("failures", 0)) + int(suite.get("errors", 0))
+              classes += 1
+              total += int(suite.get("tests", 0))
+              failed += class_failed
+              skipped += int(suite.get("skipped", 0))
+              for case in suite.iter("testcase"):
+                  for bad in list(case.findall("failure")) + list(case.findall("error")):
+                      text = (bad.get("message") or bad.text or "").strip()
+                      details.append((suite.get("name", xml.stem), case.get("name", "?"), text))
+
+          line = (f"unit tests: {classes} classes, {total} tests, "
+                  f"{failed} failed, {skipped} skipped")
+          print(f"::notice::Unit tests: {line}")
+          # Логи Actions из песочницы не скачиваются, поэтому причина падения
+          # уходит аннотацией: имя теста + первые строки сообщения.
+          for suite_name, case_name, text in details[:10]:
+              message = text[:3000].replace("%", "%25").replace("\r", "").replace("\n", "%0A")
+              print(f"::error title={suite_name}.{case_name}::{message}")
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as out:
+                  out.write(f"### JVM unit tests\n\n{line}\n\n")
+                  for suite_name, case_name, text in details:
+                      out.write(f"#### `{suite_name}.{case_name}`\n\n```text\n{text[:4000]}\n```\n\n")
+          print(f"gradle exit status: {sys.argv[1]}")
+          PY
+          exit "$status"
+
+      # Логи Actions из песочницы не скачиваются (EOF на blob-хранилище), а при
+      # ошибке конфигурации Gradle XML-отчётов нет вообще — тогда причина
+      # видна только в логе. Печатаем её аннотацией.
+      - name: Expose Gradle failure
+        if: failure()
+        run: |
+          test -f "$RUNNER_TEMP/gradle-unit.log" || exit 0
+          python3 - "$RUNNER_TEMP/gradle-unit.log" <<'PY'
+          from pathlib import Path
+          import sys
+
+          lines = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").splitlines()
+          lines = [line for line in lines if not line.startswith(("w: ", "warning:"))]
+
+          def annotate(title, text):
+              if len(text) > 3500:
+                  text = "...[truncated]\n" + text[-3480:]
+              escaped = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f"::error title={title}::{escaped}")
+
+          for i, line in enumerate(lines):
+              if line.startswith("FAILURE:"):
+                  annotate("Gradle failure", "\n".join(lines[i:i + 18]))
+                  break
+          annotate("Gradle log tail", "\n".join(lines[-60:]))
+          PY
+
+      - name: Upload unit test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: unit-tests
+          path: |
+            android-app/app/build/test-results/testReleaseUnitTest
+            android-app/app/build/reports/tests/testReleaseUnitTest
+          retention-days: 14

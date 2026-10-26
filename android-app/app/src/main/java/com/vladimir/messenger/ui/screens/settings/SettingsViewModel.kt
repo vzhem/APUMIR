@@ -343,6 +343,21 @@ class SettingsViewModel @Inject constructor(
 
     /** Установить скачанное обновление (системный диалог). Ошибка — тостом. */
     fun onInstallUpdate() {
+        // Android 8+: без разрешения «устанавливать неизвестные приложения»
+        // установщик открывается и сразу закрывается — человек видит пустоту.
+        // Ведём его прямо на нужный переключатель, а не просто сообщаем текст.
+        if (apkSeeder.installPermissionMissing()) {
+            runCatching {
+                context.startActivity(
+                    android.content.Intent(
+                        android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        android.net.Uri.parse("package:" + context.packageName),
+                    ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+            toastIf(com.vladimir.messenger.data.update.ApkSeeder.INSTALL_PERMISSION_HINT)
+            return
+        }
         viewModelScope.launch {
             val result = runCatching { apkSeeder.installReady() }
                 .getOrElse { context.getString(R.string.st_install_failed, it.message) }

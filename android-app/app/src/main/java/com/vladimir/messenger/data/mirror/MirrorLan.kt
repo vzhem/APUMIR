@@ -1,13 +1,12 @@
 package com.vladimir.messenger.data.mirror
 
 import android.util.Log
+import com.vladimir.messenger.data.net.LanHttpGet
 import java.io.IOException
-import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.SocketTimeoutException
-import java.net.URL
 import kotlin.concurrent.thread
 
 /**
@@ -145,36 +144,27 @@ object MirrorLan {
         expectBytes: Long,
         sink: suspend (seq: Int, last: Boolean, bytes: ByteArray) -> Unit,
     ): Boolean = runCatching {
-        val conn = (URL("http://$host:$port/$token").openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 5_000
-            readTimeout = 60_000
-        }
-        try {
-            val code = conn.responseCode
-            if (code != 200) {
-                Log.w(TAG, "lan pull got $code")
-                return@runCatching false
+        // Транспорт — [LanHttpGet]: с Android 9 HttpURLConnection не пропускает
+        // http:// (политика cleartext), и зеркало по Wi-Fi молча не работало
+        // (docs/AUDIT_2026-10-26.md, P1-1).
+        LanHttpGet.open(host, port, token, connectTimeoutMs = 5_000, readTimeoutMs = 60_000)
+            .use { response ->
+                val buffer = ByteArray(BLOCK_BYTES)
+                var seq = 0
+                var total = 0L
+                while (true) {
+                    val n = response.stream.read(buffer)
+                    if (n < 0) break
+                    total += n
+                    val last = expectBytes > 0 && total >= expectBytes
+                    sink(seq, last, if (n == buffer.size) buffer.copyOf() else buffer.copyOf(n))
+                    seq += 1
+                    if (last) break
+                }
+                val done = expectBytes <= 0 || total >= expectBytes
+                if (!done) Log.w(TAG, "lan pull short: $total из $expectBytes")
+                done
             }
-            val input = conn.inputStream
-            val buffer = ByteArray(BLOCK_BYTES)
-            var seq = 0
-            var total = 0L
-            while (true) {
-                val n = input.read(buffer)
-                if (n < 0) break
-                total += n
-                val last = expectBytes > 0 && total >= expectBytes
-                sink(seq, last, if (n == buffer.size) buffer.copyOf() else buffer.copyOf(n))
-                seq += 1
-                if (last) break
-            }
-            val done = expectBytes <= 0 || total >= expectBytes
-            if (!done) Log.w(TAG, "lan pull short: $total из $expectBytes")
-            done
-        } finally {
-            conn.disconnect()
-        }
     }.getOrElse { error ->
         if (error is IOException) Log.w(TAG, "lan pull failed: ${error.message}") else Log.w(TAG, "lan pull error: ${error.message}")
         false

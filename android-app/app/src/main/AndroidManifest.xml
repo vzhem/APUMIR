@@ -16,6 +16,12 @@
     <!-- Foreground Service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Android 14+: основной сервис держит постоянную доставку сообщений и
+         должен работать круглосуточно. Тип dataSync для этого не годится:
+         Android 15 ограничивает его 6 часами за сутки и запрещает запуск из
+         BOOT_COMPLETED (docs/AUDIT_2026-10-26.md, P0-1). dataSync остаётся
+         в манифесте для версий ниже 34, где specialUse ещё не существует. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <!-- WakeLock -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -180,12 +186,23 @@
 
         </activity>
 
-        <!-- Foreground Service -->
+        <!-- Foreground Service.
+             Тип объявлен двумя флагами осознанно: на Android 14+ сервис
+             входит в foreground с явным типом specialUse (постоянная
+             доставка сообщений), а на Android 10-13 — с dataSync, потому
+             что тип specialUse появился только в API 34. Явный тип при
+             каждом старте передаёт ServiceCompat.startForeground()
+             (см. CoreServerService.enterForeground), поэтому «лишний» флаг
+             манифеста не активируется и лимит dataSync не применяется. -->
         <service
             android:name=".service.CoreServerService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync|specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="persistent peer-to-peer message delivery" />
+        </service>
 
         <!-- Сервис идущего звонка: держатель типа microphone для микрофона в фоне -->
         <service

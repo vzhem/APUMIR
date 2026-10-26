@@ -129,7 +129,21 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
-            isMinifyEnabled = false
+            // P1-4 аудита: APK вырос с 96 до 229 МБ. R8 + вырезание ресурсов
+            // дают обычно 25–40 %, но включать их вслепую нельзя: ядро
+            // (uniffi → JNA), Vosk и ML Kit общаются через рефлексию, и
+            // пропущенное keep-правило выглядит как падение на старте уже у
+            // людей. Поэтому сокращение включается ЯВНО:
+            //   ./gradlew :app:assembleRelease -Papu.r8=true
+            // и только после проверки на телефоне (proguard-rules.pro,
+            // docs/AUDIT_2026-10-26.md P1-4).
+            val r8 = providers.gradleProperty("apu.r8").orNull?.toBoolean() == true
+            isMinifyEnabled = r8
+            isShrinkResources = r8
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
         debug {
             isMinifyEnabled = false
@@ -159,6 +173,13 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            // Служебные файлы зависимостей: в APK они нужны только для чтения
+            // человеком, а тянутся из каждой библиотеки.
+            excludes += "/META-INF/DEPENDENCIES"
+            excludes += "/META-INF/LICENSE*"
+            excludes += "/META-INF/NOTICE*"
+            excludes += "/META-INF/*.version"
+            excludes += "/META-INF/versions/9/OSGI-INF/MANIFEST.MF"
         }
     }
 }

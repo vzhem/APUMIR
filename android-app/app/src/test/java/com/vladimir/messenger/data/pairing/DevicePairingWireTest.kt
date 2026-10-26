@@ -20,10 +20,10 @@ class DevicePairingWireTest {
     @Test
     fun pastedQrTextMayContainClipboardWhitespace() {
         val offer = byteArrayOf(1, 2, 3, 4, 5, 6)
-        val encoded = android.util.Base64.encodeToString(
-            offer,
-            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING,
-        )
+        // android.util.Base64 в JVM-тестах — заглушка, возвращающая null;
+        // продовый DevicePairingWire использует java.util.Base64, и тест
+        // кодирует тем же способом.
+        val encoded = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(offer)
         val pasted = "apupair:${encoded.substring(0, 3)}\n ${encoded.substring(3)}"
         assertArrayEquals(offer, DevicePairingWire.parseQr(pasted))
     }
@@ -36,10 +36,10 @@ class DevicePairingWireTest {
     @Test
     fun shortPairingCodeFindsTheFullOfferWithoutReplacingSas() {
         val offer = byteArrayOf(2, 4, 6, 8, 10, 12, 14, 16)
-        val encoded = android.util.Base64.encodeToString(
-            offer,
-            android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING,
-        )
+        // android.util.Base64 в JVM-тестах — заглушка, возвращающая null;
+        // продовый DevicePairingWire использует java.util.Base64, и тест
+        // кодирует тем же способом.
+        val encoded = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(offer)
         val qr = "apupair:$encoded"
         val code = DevicePairingWire.pairingCode(qr)
         assertNotNull(code)

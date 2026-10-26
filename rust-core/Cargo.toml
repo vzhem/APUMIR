@@ -94,7 +94,14 @@ uniffi = { version = "0.28", features = ["build"] }
 opt-level = 3
 lto       = true
 strip     = true
-panic     = "abort"
+# panic = "unwind" (по умолчанию), а НЕ "abort".
+#
+# Сгенерированный uniffi-мост умеет превращать панику в исключение Kotlin:
+# в p2p_core.kt есть ветка CALL_PANIC → throw InternalException("Rust panic").
+# С abort эта ветка недостижима: паника в ядре — это SIGABRT всего процесса,
+# человек видит «Приложение остановлено» без текста, а диагностика теряет
+# причину. Цена unwind — единицы процентов размера .so.
+panic     = "unwind"
 
 [profile.dev]
 opt-level = 0

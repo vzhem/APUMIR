@@ -1,12 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Что FileProvider имеет право отдать другому приложению.
+
+     Правило: только тот каталог, куда APU сама кладёт файл ПЕРЕД передачей
+     (установщику APK, «Поделиться», письму обратной связи). До 2026-10-26
+     здесь стоял <root-path path="."/> — он открывал наружу всю файловую
+     систему, которую приложение может прочитать: любой файл, попавший в
+     getUriForFile, отдавался по content:// без вопроса о том, наш он или нет.
+     Тега <no-backup-path> в androidx нет (проверено по FileProvider.java:
+     известны только root/files/cache/external×5), поэтому раздача обновления
+     переехала в filesDir — см. data/update/UpdateFileRoots.kt.
+
+     Каждый <path> здесь обязан быть подкаталогом, а не корнем хранилища. -->
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Всё внутреннее хранилище приложения: принятые файлы лежат в
-         noBackupFilesDir/file_received (установка обновления из раздела
-         «Обновления»), а он НЕ под files/ и без root-path FileProvider
-         бросает "Failed to find configured root" — кнопка молчит. -->
-    <root-path name="root" path="." />
-    <external-path name="external_files" path="." />
-    <external-files-path name="external_app_files" path="." />
-    <cache-path name="cache" path="." />
-    <files-path name="files" path="." />
+
+    <!-- Аватар и обои: канонические копии для зеркала профиля
+         (data/mirror/ProfileMirror.kt, util/AvatarFiles.kt). -->
+    <files-path name="avatar" path="avatar/" />
+    <files-path name="wallpaper" path="wallpaper/" />
+
+    <!-- Копия раздачи APK, которую ставит установщик и раздают соседи
+         (data/update/ApkSeeder.kt → UpdateFileRoots.seed). -->
+    <files-path name="apk_seed" path="apk_seed/v1/" />
+
+    <!-- Копии «на передачу»: «Поделиться» файлом и картинкой, голосовая
+         заметка, снимок истории, патч обновления, APK для приглашения,
+         скриншоты и логи письма обратной связи. -->
+    <cache-path name="shared" path="shared/" />
+    <cache-path name="voice" path="voice/" />
+    <cache-path name="story_camera" path="story-camera/" />
+    <cache-path name="updates" path="updates/" />
+    <cache-path name="invite" path="invite/" />
+    <cache-path name="feedback" path="feedback/" />
+
+    <!-- APK, скачанный DownloadManager в общую папку «Загрузки»
+         (service/UpdateChecker.kt: setDestinationInExternalPublicDir).
+         Один подкаталог вместо всего внешнего хранилища. -->
+    <external-path name="downloads" path="Download/" />
 </paths>

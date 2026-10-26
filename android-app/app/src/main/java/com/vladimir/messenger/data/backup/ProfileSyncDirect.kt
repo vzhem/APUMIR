@@ -25,15 +25,14 @@ package com.vladimir.messenger.data.backup
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.vladimir.messenger.data.net.LanHttpGet
 import java.io.File
 import java.io.IOException
-import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
-import java.net.URL
 import java.security.SecureRandom
 import kotlin.concurrent.thread
 
@@ -190,48 +189,49 @@ object ProfileSyncDirect {
 
     // ── Приёмник: забрать копию напрямую ────────────────────────────────────
 
-    /** Скачать копию с [host]:[port]/[token] в [dest]. true - скачалось. */
+    /**
+     * Скачать копию с [host]:[port]/[token] в [dest]. true - скачалось.
+     *
+     * Транспорт — [LanHttpGet], а не `HttpURLConnection`: с Android 9 тот
+     * отказывает в `http://` (cleartext), и перенос профиля напрямую молча не
+     * работал (docs/AUDIT_2026-10-26.md, P1-1).
+     */
     fun pull(host: String, port: Int, token: String, dest: File): Boolean {
-        val conn = (URL("http://$host:$port/$token").openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 8_000
-            readTimeout = 120_000
-        }
-        try {
-            val code = conn.responseCode
-            if (code != 200) {
-                Log.w(TAG, "pull got $code")
-                return false
-            }
-            val input = conn.inputStream
-            dest.parentFile?.mkdirs()
-            val tmp = File(dest.parentFile, dest.name + ".part")
-            tmp.outputStream().use { out ->
-                val sink = ByteArray(32 * 1024)
-                var total = 0L
-                while (true) {
-                    val n = input.read(sink)
-                    if (n < 0) break
-                    total += n
-                    if (total > MAX_COPY_BYTES) {
+        return try {
+            LanHttpGet.open(host, port, token, connectTimeoutMs = 8_000, readTimeoutMs = 120_000)
+                .use { response ->
+                    dest.parentFile?.mkdirs()
+                    val tmp = File(dest.parentFile, dest.name + ".part")
+                    tmp.outputStream().use { out ->
+                        val sink = ByteArray(32 * 1024)
+                        var total = 0L
+                        while (true) {
+                            val n = response.stream.read(sink)
+                            if (n < 0) break
+                            total += n
+                            if (total > MAX_COPY_BYTES) {
+                                tmp.delete()
+                                Log.w(TAG, "pull too big")
+                                return false
+                            }
+                            out.write(sink, 0, n)
+                        }
+                    }
+                    if (response.contentLength >= 0 && tmp.length() != response.contentLength) {
+                        Log.w(TAG, "pull incomplete: ${tmp.length()} из ${response.contentLength}")
                         tmp.delete()
-                        Log.w(TAG, "pull too big")
                         return false
                     }
-                    out.write(sink, 0, n)
+                    if (!tmp.renameTo(dest)) {
+                        tmp.delete()
+                        return false
+                    }
+                    Log.i(TAG, "pulled copy: ${dest.length()} байт с $host:$port")
+                    true
                 }
-            }
-            if (!tmp.renameTo(dest)) {
-                tmp.delete()
-                return false
-            }
-            Log.i(TAG, "pulled copy: ${dest.length()} байт с $host:$port")
-            return true
         } catch (e: IOException) {
             Log.w(TAG, "pull failed: ${e.message}")
-            return false
-        } finally {
-            conn.disconnect()
+            false
         }
     }
 }

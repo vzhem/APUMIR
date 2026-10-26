@@ -1,7 +1,7 @@
 package com.vladimir.messenger.data.pairing
 
-import android.util.Base64
 import java.security.MessageDigest
+import java.util.Base64
 
 /**
  * Text form of pairing packets (P3 of docs/MULTI_DEVICE_IDENTITY.md) and of the QR payload.
@@ -22,8 +22,17 @@ object DevicePairingWire {
     const val KIND_GRANT = "grant"
     const val KIND_SYNC = "sync"
 
-    private const val FLAGS = Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
     private const val MAX_PACKET_CHARS = 4096
+
+    /**
+     * base64url без выравнивания — тот же алфавит (`-`/`_`), что давал прежний
+     * `android.util.Base64(URL_SAFE or NO_WRAP or NO_PADDING)`, но реализация
+     * из `java.util`: она работает и в JVM. Иначе юнит-тесты pairing не могут
+     * ничего проверить — `android.util.Base64` в JVM-тестах это заглушка,
+     * возвращающая null (docs/AUDIT_2026-10-26.md, P0-3).
+     */
+    private val ENCODER: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()
+    private val DECODER: Base64.Decoder = Base64.getUrlDecoder()
 
     data class Packet(val kind: String, val bytes: ByteArray)
 
@@ -37,7 +46,7 @@ object DevicePairingWire {
     fun isPairingText(text: String): Boolean = isPacket(text) || isRendezvousPacket(text)
 
     fun encode(kind: String, bytes: ByteArray): String =
-        PACKET_PREFIX + kind + ":" + Base64.encodeToString(bytes, FLAGS)
+        PACKET_PREFIX + kind + ":" + ENCODER.encodeToString(bytes)
 
     fun decode(text: String): Packet? {
         if (!isPacket(text) || text.length > MAX_PACKET_CHARS) return null
@@ -46,13 +55,15 @@ object DevicePairingWire {
         val kind = parts[1]
         if (kind != KIND_REQUEST && kind != KIND_ANSWER && kind != KIND_GRANT && kind != KIND_SYNC) return null
         return try {
-            Packet(kind, Base64.decode(parts[2], FLAGS))
+            // Пробелы внутри base64 прежний декодер Android пропускал;
+            // сохраняем это поведение, java.util.Base64 на них падает.
+            Packet(kind, DECODER.decode(parts[2].filterNot { it.isWhitespace() }))
         } catch (_: IllegalArgumentException) {
             null
         }
     }
 
-    fun qrPayload(offer: ByteArray): String = QR_PREFIX + Base64.encodeToString(offer, FLAGS)
+    fun qrPayload(offer: ByteArray): String = QR_PREFIX + ENCODER.encodeToString(offer)
 
     /**
      * Offer bytes from a scanned or pasted QR text, or null if it is not a pairing code.
@@ -66,7 +77,7 @@ object DevicePairingWire {
         val encoded = compact.removePrefix(QR_PREFIX)
         if (encoded.isEmpty()) return null
         return try {
-            Base64.decode(encoded, FLAGS).takeIf { it.isNotEmpty() }
+            DECODER.decode(encoded).takeIf { it.isNotEmpty() }
         } catch (_: IllegalArgumentException) {
             null
         }

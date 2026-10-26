@@ -259,13 +259,38 @@ def enum_entries(text, start):
     return set(ENTRY_RE.findall(''.join(body)))
 
 
-def declarations(text):
-    """Все имена, объявленные в файле (на любом уровне вложенности)."""
+def declarations(text, top_level_only=False):
+    """Все имена, объявленные в файле (на любом уровне вложенности).
+
+    top_level_only=True — только объявления верхнего уровня. Это нужно для
+    индекса «имя -> пакет» в [collect]: вложенный класс из ЧУЖОГО файла по
+    короткому имени недоступен (только `Outer.Inner` или импортом полного
+    пути). Без этого ограничения приватные `data class Row` из
+    `DownloadTrashCleanup.kt` и `data class Column` из
+    `MirrorAccountSnapshot.kt` «разрешали» одноимённые `Row`/`Column`
+    Compose во всех файлах с `import androidx.compose.foundation.layout.*`,
+    и проверка (а с ней весь ci-core-check) падала на 27 ложных именах
+    при каждом прогоне — см. docs/AUDIT_2026-10-26.md, P0-2.
+
+    Записи `enum class` (например `LIGHT`, `OFFER`) тоже доступны снаружи
+    только как `EnumName.ENTRY`, поэтому в индекс они не попадают.
+    """
     names = set()
     for line in text.split('\n'):
+        if top_level_only:
+            if line[:1].isspace():
+                continue
+            # `private` верхнего уровня видно только внутри своего файла
+            # (в Kotlin это приватность файла), поэтому в общепроектный
+            # индекс такая декларация попадать не должна: иначе одноимённое
+            # имя из чужого файла выглядит разрешённым.
+            if line.lstrip().startswith('private '):
+                continue
         m = DECL_RE.match(line)
         if m:
             names.add(m.group(1))
+    if top_level_only:
+        return names
     for m in ENUM_RE.finditer(text):
         names.add(m.group(1))
         names |= enum_entries(text, m.end())
@@ -354,7 +379,8 @@ def collect(root_dirs):
                 break
         if pkg is None:
             continue
-        packages.setdefault(pkg, set()).update(declarations(strip_noise(raw)))
+        packages.setdefault(pkg, set()).update(
+            declarations(strip_noise(raw), top_level_only=True))
     return files, packages
 
 
@@ -449,8 +475,41 @@ fun f() {
     # р251: голая константа и иконка без импорта ловятся; строка c - 9, ic - 10.
     assert got.get('MISSING_CONST') == 9, got
     assert got.get('MissingIcon') == 10, got
+
+    # Вложенный класс ЧУЖОГО файла не должен разрешать одноимённый вызов
+    # (docs/AUDIT_2026-10-26.md, P0-2: приватные Row/Column ломали весь CI).
+    nested_owner = '''package a.own
+
+class Litter {
+    private data class Row(val id: Long)
+    private data class Column(val name: String)
+}
+'''
+    compose_user = '''package a.ui
+
+import androidx.compose.foundation.layout.*
+
+fun Screen() {
+    Row { Column { Text("x") } }
+    StillUnknown()
+}
+'''
+    with tempfile.TemporaryDirectory() as d:
+        owner = os.path.join(d, 'Litter.kt')
+        user = os.path.join(d, 'Screen.kt')
+        open(owner, 'w', encoding='utf-8').write(nested_owner)
+        open(user, 'w', encoding='utf-8').write(compose_user)
+        files, packages = collect([owner, user])
+        universe = set().union(*packages.values()) if packages else set()
+        got = dict(check_file(user, packages, universe))
+    # Row/Column приходят из внешнего `layout.*` — молчим.
+    # (Изобретённое имя в файле с `*`-импортом чужая библиотека не отличит
+    # от настоящего: это цена эвристики, поэтому компиляция в CI обязательна.)
+    assert 'Row' not in got and 'Column' not in got, got
+
     print('самопроверка: OK (литералы/комментарии не считаются, импорты и '
-          'объявления разрешаются, константы и иконки без импорта ловятся)')
+          'объявления разрешаются, константы и иконки без импорта ловятся, '
+          'вложенные классы чужих файлов не разрешают одноимённые вызовы)')
     return 0
 
 

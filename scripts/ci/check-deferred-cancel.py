@@ -63,7 +63,12 @@ class DeferredCancelWiringTest(unittest.TestCase):
 
     def test_late_normal_fallback_and_mirrors_are_guarded(self):
         self.assertIn("DeferredInboxStore.isCancelled", source("data/repository/ChatRepository.kt"))
-        self.assertIn("ChatRepository(context, chatDao, messageDao, groupDao, storyVideos, referralAttribution)", source("di/AppModule.kt"))
+        # Проводка репозитория: от неё зависит, доедет ли отмена отложенного
+        # сообщения (contactDao добавлен позже — сверяем актуальный состав).
+        self.assertIn(
+            "ChatRepository(context, chatDao, messageDao, groupDao, storyVideos, referralAttribution, contactDao)",
+            source("di/AppModule.kt"),
+        )
         self.assertIn("isDeferredCancelled(authorId, localId)", source("data/group/GroupRepository.kt"))
         self.assertIn("DeferredInboxStore.isCancelled", source("di/GroupsModule.kt"))
         self.assertIn("DeferredInboxStore.isCancelled", source("service/NotificationHelper.kt"))

@@ -129,6 +129,9 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          # Версия зафиксирована (rust-toolchain.toml): stable дважды
+          # менялся за проект, и .so собирался разным компилятором.
+          toolchain: 1.99.1
           targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
 
       # Gate changes to online helper routing before cross-compilation/publication.
@@ -244,30 +247,100 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x ./android-app/gradlew
 
-      - name: Test story chunks and diagnostics report
+      # P0-3 (docs/AUDIT_2026-10-26.md): раньше в этом файле тесты
+      # перечислялись руками через --tests — 47 классов из 154, то есть 107
+      # классов не запускались ни в одном пайплайне, включая pairing и
+      # миграции. Список не поддерживался: новый тест появлялся, но в CI не
+      # попадал.
+      #
+      # Теперь запускается весь набор. Gradle выполняет ВСЕ тесты задачи даже
+      # при падении отдельных, поэтому после прогона печатается сводка по
+      # классам из XML-отчёта: по ней видно, что именно падает, без выкачки
+      # логов (они в песочнице недоступны). Отчёт уходит артефактом.
+      #
+      # Шаг блокирующий: 5 падений, которые нашёл первый полный прогон,
+      # разобраны (три устаревших ожидания в тестах и два теста pairing,
+      # полагавшихся на android.util.Base64 — в JVM он заглушка). Если
+      # появятся новые падения, чинить их или помечать
+      # @Ignore("причина, дата, тикет") — честный список известных падений
+      # вместо тишины.
+      - name: Run all JVM unit tests
+        id: unit_tests
+        timeout-minutes: 60
         working-directory: ./android-app
         run: |
           set +e
-          ./gradlew :app:testReleaseUnitTest \
-            --tests com.vladimir.messenger.data.swarm.ContentAddressedChunksTest \
-            --tests com.vladimir.messenger.data.story.StoryPhotoPartsTest \
-            --tests com.vladimir.messenger.data.story.StoryOutboxTest \
-            --tests com.vladimir.messenger.data.story.StoryStoreMergeTest \
-            --tests com.vladimir.messenger.ui.components.StoryCameraControlsTest \
-            --tests com.vladimir.messenger.data.diagnostics.DiagnosticsReportTest \
-            --tests com.vladimir.messenger.data.file.FileTransferSenderTest \
-            --tests com.vladimir.messenger.data.file.FileTransferReceiverTest \
-            --tests com.vladimir.messenger.data.story.StoryFaceFiltersTest \
-            --tests com.vladimir.messenger.data.story.StoryFaceMotionTest \
-            --tests com.vladimir.messenger.data.story.StoryFaceTimelineTest \
-            --tests com.vladimir.messenger.data.heartgame.HeartSyncPolicyTest \
-            --tests com.vladimir.messenger.data.group.JoinRequestStorageTest \
-            --tests com.vladimir.messenger.data.mirror.MirrorFrameCipherTest \
-            --tests com.vladimir.messenger.data.mirror.MirrorInitialSyncTrackerTest \
-            --no-daemon > "$RUNNER_TEMP/gradle-release.log" 2>&1
+          ./gradlew :app:testReleaseUnitTest --no-daemon > "$RUNNER_TEMP/gradle-unit-all.log" 2>&1
           status=$?
-          cat "$RUNNER_TEMP/gradle-release.log"
+          tail -40 "$RUNNER_TEMP/gradle-unit-all.log"
+          python3 - "$status" <<'PY'
+          from pathlib import Path
+          import os
+          import sys
+          import xml.etree.ElementTree as ET
+
+          results = Path("app/build/test-results/testReleaseUnitTest")
+          classes = total = failed = skipped = 0
+          broken = []
+          for xml in sorted(results.glob("TEST-*.xml")):
+              suite = ET.parse(xml).getroot()
+              class_failed = int(suite.get("failures", 0)) + int(suite.get("errors", 0))
+              classes += 1
+              total += int(suite.get("tests", 0))
+              failed += class_failed
+              skipped += int(suite.get("skipped", 0))
+              if class_failed:
+                  broken.append((suite.get("name", xml.stem), class_failed))
+
+          line = (f"unit tests: {classes} classes, {total} tests, "
+                  f"{failed} failed, {skipped} skipped")
+          print(f"::warning title=Unit tests::{line}")
+          for name, count in broken:
+              print(f"::warning title=Unit test failure::{name}: {count} failing")
+          print(f"gradle exit status: {sys.argv[1]}")
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as out:
+                  out.write(f"### JVM unit tests\n\n{line}\n\n")
+                  for name, count in broken:
+                      out.write(f"- `{name}`: {count} failing\n")
+          PY
           exit "$status"
+
+      - name: Upload unit test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        continue-on-error: true
+        with:
+          name: unit-tests
+          path: |
+            android-app/app/build/test-results/testReleaseUnitTest
+            android-app/app/build/reports/tests/testReleaseUnitTest
+          retention-days: 14
+
+      # Тег без секретов не должен доходить до 40-минутной сборки: APK,
+      # подписанный старым ключом, не установится поверх ротированного
+      # (телефоны Android 9+ уже доверяют только новому), а выяснится это
+      # на шаге подписи. Проверяем ДО сборки; на ветке секрета нет — это
+      # нормально, релиз с ветки не выпускается.
+      - name: Require rotated signing key for a release
+        if: github.ref_type == 'tag'
+        env:
+          APU_KS_B64: ${{ secrets.APU_RELEASE_KEYSTORE_B64 }}
+          APU_KS_PASS: ${{ secrets.APU_RELEASE_KEYSTORE_PASSWORD }}
+          APU_KS_ALIAS: ${{ secrets.APU_RELEASE_KEY_ALIAS }}
+        run: |
+          set -e
+          missing=""
+          [ -n "$APU_KS_B64" ] || missing="$missing APU_RELEASE_KEYSTORE_B64"
+          [ -n "$APU_KS_PASS" ] || missing="$missing APU_RELEASE_KEYSTORE_PASSWORD"
+          [ -n "$APU_KS_ALIAS" ] || missing="$missing APU_RELEASE_KEY_ALIAS"
+          if [ -n "$missing" ]; then
+            echo "::error::Релизный тег без секретов подписи:$missing. APK, подписанный старым ключом из репозитория, телефоны после ротации не примут. Секреты ставит scripts/rotate-signing-key.ps1 (docs/SIGNING_KEY_ROTATION.md)."
+            exit 1
+          fi
+          echo "rotated signing key secrets present"
 
       - name: Build Release APK
         working-directory: ./android-app
@@ -276,15 +349,6 @@ jobs:
           ./gradlew :app:assembleRelease --no-daemon > "$RUNNER_TEMP/gradle-release.log" 2>&1
           status=$?
           cat "$RUNNER_TEMP/gradle-release.log"
-          exit "$status"
-
-      - name: Verify story playback and community lists
-        working-directory: ./android-app
-        run: |
-          set +e
-          ./gradlew :app:testReleaseUnitTest --tests 'com.vladimir.messenger.ui.components.StoryPlaybackTest' --tests 'com.vladimir.messenger.ui.components.StoryPublishTest' --tests 'com.vladimir.messenger.ui.components.StoryCameraControlsTest' --tests 'com.vladimir.messenger.ui.screens.groups.CommunityListTest' --tests 'com.vladimir.messenger.data.story.StoryPhotoPartsTest' --tests 'com.vladimir.messenger.data.story.StoryStoreMergeTest' --tests 'com.vladimir.messenger.data.swarm.OnlineHelperPolicyTest' --tests 'com.vladimir.messenger.data.swarm.SwarmContributionStatsTest' --no-daemon >> "$RUNNER_TEMP/gradle-build.log" 2>&1
-          status=$?
-          tail -100 "$RUNNER_TEMP/gradle-build.log"
           exit "$status"
 
       # Сырые логи Actions иногда недоступны через API/сеть. Оставляем хвост

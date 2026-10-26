@@ -4,6 +4,9 @@
 # Uses the same Kotlin/coroutines/JUnit versions as the app. All downloads and
 # compiled output stay in ignored target/. Requires Java 17+, curl and Python 3.
 set -euo pipefail
+# Логи Actions из песочницы не выкачиваются: без этой строки при падении
+# видно только хвост вывода, а не команду, на которой всё встало.
+trap 'status=$?; echo "chat-history: FAILED at line $LINENO: $BASH_COMMAND (exit $status)" >&2' ERR
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 python3 "$ROOT/scripts/ci/check-deferred-cancel.py"
 python3 "$ROOT/scripts/ci/check-delete-read.py"
@@ -68,6 +71,14 @@ GROUP_PERMS_TEST="$BASE/test/java/com/vladimir/messenger/data/group/GroupPermiss
 # телефоны обязаны молча пропускать незнакомые виды и понимать старые `msg`/`info`.
 POST_MANIFEST="$BASE/main/java/com/vladimir/messenger/data/swarm/PostManifest.kt"
 GROUP_WIRE="$BASE/main/java/com/vladimir/messenger/data/group/GroupWire.kt"
+# GroupWire ссылается и на них: SOS-правила и разметку цвета текста.
+# Без них компиляция падала «unresolved reference: GroupSos / TextColorWire»,
+# и гейт был красным на каждом PR, затрагивающем rust-core или scripts/ci.
+GROUP_SOS="$BASE/main/java/com/vladimir/messenger/data/group/GroupSos.kt"
+TEXT_COLOR_WIRE="$BASE/main/java/com/vladimir/messenger/data/textcolor/TextColorWire.kt"
+TEXT_COLOR_PALETTE="$BASE/main/java/com/vladimir/messenger/data/textcolor/TextColorPalette.kt"
+# GroupSos берёт текст тревоги из чистого SosMessage (без Android).
+SOS_MESSAGE="$BASE/main/java/com/vladimir/messenger/util/SosMessage.kt"
 QUIET_HOURS="$BASE/main/java/com/vladimir/messenger/data/group/GroupQuietHours.kt"
 SLOW_MODE="$BASE/main/java/com/vladimir/messenger/data/group/GroupSlowMode.kt"
 SLOW_MODE_TEST="$BASE/test/java/com/vladimir/messenger/data/group/GroupSlowModeTest.kt"
@@ -138,11 +149,40 @@ IDENTITY_HEALTH="$BASE/main/java/com/vladimir/messenger/data/security/IdentityHe
 IDENTITY_HEALTH_TEST="$BASE/test/java/com/vladimir/messenger/data/security/IdentityHealthTest.kt"
 STORY_VIDEO_DRAFT="$BASE/main/java/com/vladimir/messenger/data/story/StoryVideoDraft.kt"
 STORY_VIDEO_DRAFT_TEST="$BASE/test/java/com/vladimir/messenger/data/story/StoryVideoDraftTest.kt"
+# TextColorPalette в этом окружении не компилируется: ему нужны Compose Color и
+# сгенерированный R.string. Поэтому TextColorWire (он здесь настоящий, его
+# формат и проверяем) собирается с заглушкой палитры, а список id берётся ИЗ
+# прод-файла - разойтись с продуктом заглушка не может.
+STUB_DIR="$OUT/stubs/com/vladimir/messenger/data/textcolor"
+mkdir -p "$STUB_DIR"
+python3 - "$TEXT_COLOR_PALETTE" "$STUB_DIR/TextColorPalette.kt" <<'PYGEN'
+import re
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1]).read_text()
+ids = re.findall(r'Choice\(\s*(DEFAULT_ID|"[^"]*")\s*,', source)
+if not ids:
+    raise SystemExit("не разобрать палитру цветов: " + sys.argv[1])
+values = ", ".join('""' if value == "DEFAULT_ID" else value for value in ids)
+Path(sys.argv[2]).write_text(
+    "package com.vladimir.messenger.data.textcolor\n"
+    "// Сгенерировано scripts/ci/check-chat-history.sh из прод-палитры: настоящий\n"
+    "// TextColorPalette требует Compose Color и R.string и здесь не компилируется.\n"
+    "object TextColorPalette {\n"
+    '    const val DEFAULT_ID = ""\n'
+    "    private val ids = setOf(" + values + ")\n"
+    "    fun normalize(id: String?): String = id.orEmpty().takeIf { it in ids } ?: DEFAULT_ID\n"
+    "}\n",
+    encoding="utf-8",
+)
+PYGEN
+
 "$JAVA" -cp "$OUT/compiler/*:$OUT/runtime/kotlin-stdlib-$KOTLIN.jar" \
     org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
     -no-stdlib -no-reflect -jvm-target 17 -classpath "$CP" -d "$OUT/classes" \
     "$STORY_VIDEO_DRAFT" "$STORY_VIDEO_DRAFT_TEST" "$MODEL/Message.kt" "$MODEL/MessageStatus.kt" "$MODEL/MessageChannel.kt" "$OBSERVER" "$TEST" "$PIN_POLICY" "$PIN_TEST" "$SPLASH_MATH" "$SPLASH_TEST" "$SETTINGS_LAYOUT" "$SETTINGS_TEST" "$HEART_WIRE" "$HEART_TEST" "$GROUP_PERMS" "$GROUP_PERMS_TEST" \
-    "$SLOW_MODE" "$SLOW_MODE_TEST" "$QUIET_HOURS" "$QUIET_HOURS_TEST" "$POST_MANIFEST" "$BASE/main/java/com/vladimir/messenger/data/group/GroupWallpaper.kt" "$BASE/test/java/com/vladimir/messenger/data/group/GroupWallpaperTest.kt" "$GROUP_WIRE" "$GROUP_WIRE_TEST" "$GROUP_WIRE_UPDATE_TEST" \
+    "$SLOW_MODE" "$SLOW_MODE_TEST" "$QUIET_HOURS" "$QUIET_HOURS_TEST" "$POST_MANIFEST" "$BASE/main/java/com/vladimir/messenger/data/group/GroupWallpaper.kt" "$BASE/test/java/com/vladimir/messenger/data/group/GroupWallpaperTest.kt" "$GROUP_WIRE" "$GROUP_SOS" "$SOS_MESSAGE" "$TEXT_COLOR_WIRE" "$STUB_DIR/TextColorPalette.kt" "$GROUP_WIRE_TEST" "$GROUP_WIRE_UPDATE_TEST" \
     "$OP_HEALTH" "$OP_BOUNDED_READ" "$OP_CLEANUP" "$OP_HEALTH_TEST" "$STORY_QUEUE" "$STORY_QUEUE_TEST" "$RUNTIME_HEALTH" "$RUNTIME_HEALTH_TEST" "$DIAG_REPORT" "$RELAY_STORAGE" "$RELAY_STORAGE_TEST" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
     "$STORY_FEEDBACK_WIRE" "$STORY_FEEDBACK_LEDGER" "$STORY_FEEDBACK_OUTBOX" \
     "$STORY_FEEDBACK_WIRE_TEST" "$STORY_FEEDBACK_LEDGER_TEST" "$STORY_FEEDBACK_OUTBOX_TEST" \

@@ -1,8 +1,11 @@
 # Rust build artifacts
 rust-core/target/
 tools/uniffi-bindgen/target/
+# Собранные .so ставятся Gradle'ом ТОЛЬКО в android-app/app/src/main/jniLibs;
+# копия в rust-core/ была устаревшей (390 КБ против 9,2 МБ) и путала, какой
+# бинарник у пользователя.
+rust-core/jniLibs/
 **/*.rs.bk
-Cargo.lock
 
 # Android build outputs
 android-app/.gradle/

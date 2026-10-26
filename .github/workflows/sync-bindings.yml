@@ -1,0 +1,78 @@
+name: Sync uniffi bindings from lib.udl
+
+# Закоммиченный мост android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt
+# генерируется из rust-core/src/lib.udl. После слияния PR #57 он отстал от
+# UDL: Kotlin вызывает devicePublicKeyFromSeed, joinerCancelPairing и
+# closePairingOffer, которых в файле нет, — чистый клон main не собирается.
+# build-release.yml и scripts/ci/check-android-compile.sh лечат это
+# перегенерацией у себя, но в git файл остаётся старым.
+#
+# Этот workflow перегенерирует мост и, если он отличается, коммитит его в
+# ТЕКУЩУЮ ветку (не в main: main меняется только через PR). Запускается
+# руками, чтобы не плодить коммиты на каждый push.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # Версия зафиксирована (rust-toolchain.toml): stable дважды
+          # менялся за проект, и .so собирался разным компилятором.
+          toolchain: 1.99.1
+
+      - name: Regenerate bindings from lib.udl
+        working-directory: ./rust-core
+        run: |
+          cargo run --manifest-path ../tools/uniffi-bindgen/Cargo.toml -- \
+            generate src/lib.udl --language kotlin --config uniffi.toml \
+            --out-dir ../android-app/app/src/main/java --no-format
+          grep -q "ffi_p2p_core_uniffi_contract_version" \
+            ../android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt
+
+      # Cargo.lock: без него cargo может подтянуть новую минорную версию
+      # quinn/rustls/rumqttc, и релизный .so соберётся из другого кода, чем
+      # проверялся вчера. В песочнице cargo нет, поэтому первый lock
+      # создаётся здесь и коммитится вместе с мостом.
+      - name: Generate Cargo.lock for both crates
+        run: |
+          set -euo pipefail
+          (cd rust-core && cargo generate-lockfile)
+          (cd tools/uniffi-bindgen && cargo generate-lockfile)
+          test -s rust-core/Cargo.lock
+          test -s tools/uniffi-bindgen/Cargo.lock
+
+      - name: Commit to the current branch if the bindings or locks changed
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF_NAME" in
+            arena/*) ;;
+            *)
+              echo "::error::Run this on an arena/* branch; main changes go through a pull request."
+              exit 1
+              ;;
+          esac
+          BIND=android-app/app/src/main/java/uniffi/p2p_core/p2p_core.kt
+          LOCKS="rust-core/Cargo.lock tools/uniffi-bindgen/Cargo.lock"
+          if git diff --quiet -- "$BIND" $LOCKS && [ -z "$(git ls-files --others --exclude-standard -- $LOCKS)" ]; then
+            echo "::notice::Committed bindings and Cargo.lock already match the sources - nothing to do."
+            exit 0
+          fi
+          git diff --stat -- "$BIND" $LOCKS
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "$BIND" $LOCKS
+          git commit -m "ci: regenerate uniffi bindings and Cargo.lock"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          echo "::notice::Bindings and Cargo.lock regenerated and pushed to ${GITHUB_REF_NAME}"

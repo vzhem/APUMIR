@@ -10,7 +10,9 @@ class HeartGameContracts(unittest.TestCase):
         main = (SRC / 'MainActivity.kt').read_text()
         self.assertEqual(main.count('HeartGameOverlay(heartNetwork)'), 1)
         core = (SRC / 'service/CoreServerService.kt').read_text()
-        self.assertEqual(core.count('heartGameNetwork.routeIncoming(text)'), 3)
+        # Приём идёт по всем путям доставки (direct, relay, mirror, ...), поэтому
+        # вызовов не меньше трёх: конверт не должен теряться на одном из путей.
+        self.assertGreaterEqual(core.count('heartGameNetwork.routeIncoming(senderId, text)'), 3)
 
     def test_foreground_only_and_single_click(self):
         ui = (SRC / 'ui/components/HeartGameOverlay.kt').read_text()
@@ -49,7 +51,11 @@ class HeartGameContracts(unittest.TestCase):
         self.assertIn('policy.claim(', store)
         self.assertIn('.commit()', store)
         self.assertNotIn('HeartRepository', store)
-        self.assertNotIn('ReferralRankStore', store)
+        # Приглашения теперь дают бонус к счёту, но счёт по-прежнему личный
+        # (префикс аккаунта) и бонус начисляется ровно один раз: отметка
+        # REFERRAL_BONUS_COUNT_KEY хранится рядом со счётом.
+        self.assertIn('REFERRAL_BONUS_COUNT_KEY', store)
+        self.assertIn('synchronizeReferralBonusesLocked', store)
 
     def test_bounded_signed_network_not_fake_global_table(self):
         network = (SRC / 'data/heartgame/HeartGameNetwork.kt').read_text()

@@ -42,6 +42,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /**
  * Раздача обновления APU (APK) роем (docs/UPDATE_SEEDING.md).
@@ -84,7 +85,7 @@ class ApkSeeder @Inject constructor(
     private val updateNotifier: com.vladimir.messenger.service.UpdateNotifier,
 ) {
     private val appContext: Context = context.applicationContext
-    private val seedRoot: File = File(appContext.noBackupFilesDir, ApkUpdate.DIR_NAME)
+    private val seedRoot: File = com.vladimir.messenger.data.update.UpdateFileRoots.seed(appContext)
     private val store = ApkUpdateStore(seedRoot)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
@@ -1069,6 +1070,15 @@ class ApkSeeder @Inject constructor(
     }
 
     /**
+     * Android 8+ требует отдельное разрешение «устанавливать неизвестные
+     * приложения». Без него установщик открывается и сразу закрывается, а
+     * человек видит только «Android не открыл установщик». Спрашиваем заранее —
+     * и даём экрану настроек увести его на нужный переключатель.
+     */
+    fun installPermissionMissing(): Boolean =
+        Build.VERSION.SDK_INT >= 26 && !appContext.packageManager.canRequestPackageInstalls()
+
+    /**
      * Установить скачанное обновление (FileProvider, как у UpdateChecker).
      * Возвращает текст ошибки для карточки: пусто — установщик запущен.
      * Ошибки НЕ молчат: молчаливый отказ выглядит как «кнопка не работает»
@@ -1078,6 +1088,7 @@ class ApkSeeder @Inject constructor(
      */
     suspend fun installReady(): String {
         val readyInfo = _ready.value ?: return "Обновление уже установлено — карточка устарела"
+        if (installPermissionMissing()) return INSTALL_PERMISSION_HINT
         // Файл обновления: принятая копия (строка INCOMING/COMPLETE) или
         // скачанный с сайта файл, взятый в раздел автоматически.
         val file: File? = readyInfo.transferId.takeIf { it.isNotBlank() }
@@ -1088,13 +1099,45 @@ class ApkSeeder @Inject constructor(
             Log.w(TAG, "install refused: update file not found (transfer=${readyInfo.transferId}, source=${readyInfo.sourcePath})")
             return "Файл обновления не найден на телефоне — скачайте заново"
         }
-        if (ApkUpdate.sha256OfFile(file) != readyInfo.sha256) {
+        // Сверка sha и копия читают сотни мегабайт: на главном потоке
+        // (кнопка «Установить» приходит из viewModelScope) это видимая
+        // заморозка интерфейса.
+        val shaMatches = withContext(Dispatchers.IO) {
+            ApkUpdate.sha256OfFile(file) == readyInfo.sha256
+        }
+        if (!shaMatches) {
             Log.w(TAG, "install refused: file sha changed")
             return "Файл изменился после скачивания — обновление не запущено"
         }
         return runCatching {
             val authority = "${appContext.packageName}.fileprovider"
-            val uri = FileProvider.getUriForFile(appContext, authority, file)
+            // Файл может лежать там, откуда FileProvider отдавать НЕ имеет
+            // права: принятая копия обновления живёт в
+            // noBackupFilesDir/file_received, а этот каталог нельзя объявить
+            // в file_paths.xml (тега no-backup-path в androidx нет). Поэтому
+            // кладём копию в объявленный cache/updates — рядом с патчем.
+            val underSeedRoot =
+                file.canonicalPath.startsWith(seedRoot.canonicalPath + File.separator)
+            val handOff = if (underSeedRoot) {
+                file
+            } else {
+                // Имя берём из sha, а не из displayName: в имени файла от
+                // собеседника бывает «/» и «..», а установщику имя не нужно.
+                val copy = File(
+                    com.vladimir.messenger.data.update.UpdateFileRoots.installHandoff(appContext),
+                    "install-${readyInfo.sha256.take(16).ifBlank { "update" }}.apk",
+                )
+                val copied = withContext(Dispatchers.IO) {
+                    runCatching { file.copyTo(copy, overwrite = true) }.isSuccess &&
+                        copy.length() == file.length()
+                }
+                if (!copied) {
+                    runCatching { copy.delete() }
+                    return "Файл обновления не скопировался целиком — скачайте заново"
+                }
+                copy
+            }
+            val uri = FileProvider.getUriForFile(appContext, authority, handOff)
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, "application/vnd.android.package-archive")
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -1161,6 +1204,10 @@ class ApkSeeder @Inject constructor(
     // ── Внутреннее ──────────────────────────────────────────────────────────
 
     private suspend fun initFromDisk() {
+        // Раздача переехала из noBackupFilesDir: без переноса уже скачанное
+        // обновление пропало бы из карточки «Установить» (и заняло бы диск
+        // невидимым каталогом).
+        com.vladimir.messenger.data.update.UpdateFileRoots.migrateLegacySeed(appContext)
         val now = System.currentTimeMillis()
         val offers = store.loadOffers()
             .filter { ApkUpdate.isNewer(it.version, currentAppVersion()) && now - it.atMs <= OFFER_TTL_MS }
@@ -1780,6 +1827,10 @@ class ApkSeeder @Inject constructor(
 
     companion object {
         private const val TAG = "ApkSeeder"
+
+        /** Текст подсказки, по которому UI открывает нужный экран настроек. */
+        const val INSTALL_PERMISSION_HINT =
+            "Разрешите APU устанавливать приложения: Настройки → Приложения → APU → «Установка неизвестных приложений»"
         private const val SELF_SEED_RETRY_PREFS = "apu_self_seed_retry"
         private const val SELF_SEED_RETRY_VERSION = "version"
         private const val SELF_SEED_RETRY_AT = "attempt_at_ms"
