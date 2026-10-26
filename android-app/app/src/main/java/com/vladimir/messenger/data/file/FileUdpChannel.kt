@@ -285,6 +285,7 @@ class FileUdpChannel internal constructor(
                 }
             }
         } catch (_: InterruptedException) {
+            // Поток прерван при закрытии канала: штатный выход из пробы.
         } catch (e: Exception) {
             Log.w(TAG, "udp prober ended for $shortId: ${e.message}")
         }

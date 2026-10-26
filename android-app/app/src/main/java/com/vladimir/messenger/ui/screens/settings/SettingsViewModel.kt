@@ -1,5 +1,6 @@
 package com.vladimir.messenger.ui.screens.settings
 
+import android.util.Log
 import com.vladimir.messenger.R
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -670,6 +671,8 @@ class SettingsViewModel @Inject constructor(
             val appVersion = try {
                 context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
             } catch (e: Exception) {
+                // Для отчёта о версии достаточно заглушки; сам сбой виден в логе.
+                Log.w("SettingsVM", "package info unavailable: ${e.message}")
                 "unknown"
             }
 

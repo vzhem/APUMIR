@@ -276,6 +276,8 @@ class CallUdpChannel(
                 }
             }
         } catch (_: InterruptedException) {
+            // Поток прерван при закрытии канала: это штатный выход из пробы,
+            // а не ошибка (docs/AUDIT_2026-10-26.md, п. 4.2).
         } catch (e: Exception) {
             Log.w(TAG, "udp prober ended: ${e.message}")
         }

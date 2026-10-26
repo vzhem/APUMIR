@@ -35,6 +35,8 @@ object PostSigner {
             val coreHex = try {
                 identitySigningPublicKeyHex()
             } catch (_: Exception) {
+                // Ядро ещё не подняло ключ подписи: пустая строка ниже
+                // трактуется как «ключ недоступен», вызывающий это обрабатывает.
                 ""
             }
             if (coreHex.length != 64) {
