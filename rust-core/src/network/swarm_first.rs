@@ -65,15 +65,14 @@ impl SwarmFirstPolicy {
         !self.live_peer_ids(now).is_empty()
     }
 
-    /// MQTT subscriptions, STUN, call/media broker, etc. The caller must
-    /// *never* infer health from contact count or a cached address. Only lack
-    /// of an authenticated route after the search window permits fallback.
+    /// MQTT subscriptions, WSS, STUN and other external services may start
+    /// after the bounded direct-search window. A live direct peer is an
+    /// optimization, not a proof that it can deliver every message or that it
+    /// represents the intended recipient. It must therefore never suppress the
+    /// fallback for the rest of the session.
     pub fn transport_fallback_allowed(&self, now: i64) -> bool {
         let s = self.state.lock().unwrap();
-        let live = !s.live_peer_ids.is_empty() && s.sampled_at_ms
-            .map(|sampled| now >= sampled && now.saturating_sub(sampled) <= DIRECT_SAMPLE_TTL_MS)
-            .unwrap_or(false);
-        !live && now >= s.search_since_ms.saturating_add(DIRECT_SEARCH_MS)
+        now >= s.search_since_ms.saturating_add(DIRECT_SEARCH_MS)
     }
 }
 
@@ -90,20 +89,21 @@ mod tests {
     }
 
     #[test]
-    fn direct_signed_live_session_closes_fallback_until_lost_or_stale() {
+    fn direct_signed_live_session_does_not_suppress_fallback_after_search() {
         let policy = SwarmFirstPolicy::new(1_000_000);
         policy.report(1_002_000, vec!["pk_a".into()]);
         assert_eq!(policy.live_peer_ids(1_017_000), vec!["pk_a".to_string()]);
         assert!(policy.has_live_peer(1_017_000));
         assert!(!policy.transport_fallback_allowed(1_017_000));
-        // A discovery task that stops reporting cannot hide total isolation.
-        assert!(!policy.has_live_peer(1_017_001));
-        assert!(policy.live_peer_ids(1_017_001).is_empty());
+        // A direct peer gets the bounded optimization window, but it cannot
+        // suppress MQTT/WSS: it may be a different contact or lack the needed
+        // message.
         assert!(policy.transport_fallback_allowed(1_020_000));
         policy.report(1_025_000, vec!["pk_a".into()]);
-        assert!(!policy.transport_fallback_allowed(1_035_000));
-        policy.report(1_030_000, Vec::new());
-        assert!(policy.transport_fallback_allowed(1_030_000));
+        assert!(policy.transport_fallback_allowed(1_035_000));
+        // A discovery task that stops reporting still cannot close fallback.
+        assert!(policy.live_peer_ids(1_040_001).is_empty());
+        assert!(policy.transport_fallback_allowed(1_040_001));
     }
 
     #[test]
@@ -116,8 +116,11 @@ mod tests {
         policy.report(1_016_000, Vec::new());
         assert!(policy.transport_fallback_allowed(1_035_000));
         policy.report(1_020_000, vec!["pk_a".into()]);
-        assert!(!policy.transport_fallback_allowed(1_035_000));
+        // A fresh direct result is useful for routing, but does not close the
+        // external fallback after the bounded search window.
+        assert!(policy.transport_fallback_allowed(1_035_000));
         policy.report(1_019_000, Vec::new()); // delayed/out-of-order probe
         assert!(policy.has_live_peer(1_020_000));
+        assert!(policy.transport_fallback_allowed(1_035_000));
     }
 }

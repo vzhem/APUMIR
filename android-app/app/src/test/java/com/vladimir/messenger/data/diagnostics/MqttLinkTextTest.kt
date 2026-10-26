@@ -21,7 +21,7 @@ class MqttLinkTextTest {
             ),
         )
 
-        assertEquals("напрямую", state.path)
+        assertEquals("через брокер по TCP", state.path)
         assertEquals(5, state.connAckAgoSec)
         assertEquals(12, state.errorAgoSec)
         // Ошибка была РАНЬШЕ подтверждения: текущая сессия жива.
@@ -52,11 +52,18 @@ class MqttLinkTextTest {
         val raw = "MQTT: wss bridge, ошибка 3 с назад: DNS lookup failed"
         val state = requireNotNull(MqttLinkText.parse(raw))
 
-        assertEquals("через обходной канал", state.path)
+        assertEquals("через relay по TLS-443", state.path)
         assertNull(state.connAckAgoSec)
         assertFalse(state.connected)
         assertEquals("не удалось найти адрес узла", MqttLinkText.humanError(state.errorText))
         assertTrue(MqttLinkText.humanize(raw).contains("соединение восстанавливается автоматически"))
+    }
+
+    @Test
+    fun initialRelayModeIsShownAsTls443() {
+        val raw = "MQTT: наш брокер на relay-домене (единый рой), ConnAck 2 с назад"
+        assertEquals("через relay по TLS-443", MqttLinkText.parse(raw)?.path)
+        assertTrue(MqttLinkText.humanize(raw).contains("TLS-443"))
     }
 
     @Test
