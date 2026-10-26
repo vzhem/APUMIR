@@ -2,7 +2,6 @@
 rust-core/target/
 tools/uniffi-bindgen/target/
 **/*.rs.bk
-Cargo.lock
 
 # Android build outputs
 android-app/.gradle/

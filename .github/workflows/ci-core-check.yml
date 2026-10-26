@@ -40,6 +40,10 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          # Версия зафиксирована (rust-toolchain.toml): stable дважды
+          # менялся за проект, и .so собирался разным компилятором.
+          toolchain: 1.99.1
 
       - name: Cache cargo registry and target
         uses: actions/cache@v4

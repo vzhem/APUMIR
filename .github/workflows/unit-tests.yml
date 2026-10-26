@@ -60,6 +60,30 @@ jobs:
       # здесь он тоже обязателен, иначе тесты не компилируются вообще.
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          # Версия зафиксирована (rust-toolchain.toml): stable дважды
+          # менялся за проект, и .so собирался разным компилятором.
+          toolchain: 1.99.1
+
+      # Cargo.lock — часть исходников: без него cargo может подтянуть новую
+      # минорную версию quinn/rustls/rumqttc. Пока файл не закоммичен
+      # (первый lock создаётся workflow «Sync uniffi bindings from lib.udl»),
+      # это предупреждение; после коммита расхождение — ошибка.
+      - name: Cargo.lock is committed and current
+        working-directory: ./rust-core
+        run: |
+          set -euo pipefail
+          if ! git ls-files --error-unmatch Cargo.lock > /dev/null 2>&1; then
+            echo "::warning::rust-core/Cargo.lock не закоммичен — запустите workflow «Sync uniffi bindings from lib.udl», он создаст и закоммитит lock-файлы"
+            exit 0
+          fi
+          cargo generate-lockfile
+          if ! git diff --quiet -- Cargo.lock; then
+            echo "::error::Cargo.lock устарел: cargo generate-lockfile меняет файл. Закоммитьте результат."
+            git diff --stat -- Cargo.lock
+            exit 1
+          fi
+          echo "Cargo.lock совпадает с Cargo.toml"
 
       - name: Regenerate uniffi Kotlin bindings from lib.udl
         working-directory: ./rust-core
