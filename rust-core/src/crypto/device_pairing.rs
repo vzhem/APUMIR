@@ -842,7 +842,7 @@ mod tests {
 
     #[test]
     fn full_pairing_issues_certificate_that_checks_against_account_key() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let joiner = device(40);
         let (primary_sas, joiner_sas, accepted) = run_pairing(&joiner, [7u8; 16], 10_000);
         assert_eq!(primary_sas, joiner_sas);
@@ -863,30 +863,60 @@ mod tests {
         close_pairing_offer();
     }
 
+    /// v1-QR (без эфемерного ключа первичного устройства): root появляется только
+    /// из answer, поэтому грант, приехавший раньше ответа, не может быть открыт и
+    /// отвергается как неизвестная сессия. Это защита от «грант вслепую».
     #[test]
-    fn grant_arriving_before_answer_can_be_retried_after_answer() {
-        let _guard = TEST_LOCK.lock().unwrap();
+    fn v1_grant_before_answer_is_unknown_session() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let joiner = device(52);
-        let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 3_000, &[]).unwrap();
-        let started = joiner_start(&offer, &[16u8; 16], &joiner.public_key().0, 3_000).unwrap();
-        let answer = primary_handle_request(&started.request, 3_000).unwrap();
-        let grant = primary_confirm(&answer.device_id, &account(), 3_000).unwrap();
+        // v1: format | legacy | account pk | device id | secret | expiry.
+        let mut offer = vec![PAIRING_FORMAT_V1];
+        offer.extend_from_slice(&(LEGACY.len() as u16).to_be_bytes());
+        offer.extend_from_slice(LEGACY.as_bytes());
+        offer.extend_from_slice(&account().public_key().0);
+        offer.extend_from_slice(&[1u8; 16]);
+        offer.extend_from_slice(&[9u8; SECRET_BYTES]);
+        offer.extend_from_slice(&60_000i64.to_be_bytes());
+        let started = joiner_start(&offer, &[16u8; 16], &joiner.public_key().0, 1_000).unwrap();
+        assert!(started.sas.is_none(), "v1-QR не несёт ключ: код считается из answer");
 
-        // The Android state machine may receive the final grant before the answer when the v2
-        // QR already exposed the SAS. Rust must leave the joiner session intact so the buffered
-        // grant can be accepted after the authenticated answer arrives.
+        // Грант для нашей же device id, но сессия ещё без root: раньше ответа не открыть.
+        let mut grant = vec![PAIRING_FORMAT_V1, MSG_GRANT];
+        grant.extend_from_slice(&[16u8; 16]);
+        grant.extend_from_slice(b"sealed-for-another-transcript");
         assert_eq!(
-            joiner_accept_grant(&grant.grant, 3_000).err(),
+            joiner_accept_grant(&grant, 1_000).err(),
             Some(PairingError::UnknownSession)
         );
-        assert!(joiner_handle_answer(&answer.answer, 3_000).is_ok());
-        assert!(joiner_accept_grant(&grant.grant, 3_000).is_ok());
+        joiner_cancel();
+    }
+
+    /// v2-QR (нынешний формат): эфемерный ключ первичного устройства идёт в QR,
+    /// поэтому root и SAS известны в момент сканирования, ещё до обмена пакетами.
+    /// Грант при этом приходит уже после того, как человек подтвердил код на
+    /// первичном устройстве, а сам грант запечатан на весь transcript, — ждать
+    /// answer ради расшифровки не нужно. Раньше тест ожидал UnknownSession и
+    /// краснел на каждом прогоне: `open_pairing_offer` давно выпускает v2.
+    #[test]
+    fn v2_grant_needs_no_answer_because_the_code_came_with_the_qr() {
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let joiner = device(53);
+        let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 4_000, &[]).unwrap();
+        let started = joiner_start(&offer, &[17u8; 16], &joiner.public_key().0, 4_000).unwrap();
+        assert!(started.sas.is_some(), "v2-QR несёт ключ: код известен на сканировании");
+        let answer = primary_handle_request(&started.request, 4_000).unwrap();
+        let grant = primary_confirm(&answer.device_id, &account(), 4_000).unwrap();
+        assert!(
+            joiner_accept_grant(&grant.grant, 4_000).is_ok(),
+            "грант, запечатанный на transcript, открывается без отдельного answer"
+        );
         close_pairing_offer();
     }
 
     #[test]
     fn request_without_offer_secret_is_rejected() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 0, &[]).unwrap();
         let mut forged = offer.clone();
         // Replace the secret with another value: the joiner now derives a different MAC key.
@@ -903,7 +933,7 @@ mod tests {
 
     #[test]
     fn tampered_answer_is_rejected_by_joiner() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let joiner = device(42);
         let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 0, &[]).unwrap();
         let request = joiner_start(&offer, &[2u8; 16], &joiner.public_key().0, 0).unwrap().request;
@@ -920,7 +950,7 @@ mod tests {
 
     #[test]
     fn swapped_ephemeral_key_is_rejected_by_joiner() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let joiner = device(43);
         let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 0, &[]).unwrap();
         let request = joiner_start(&offer, &[3u8; 16], &joiner.public_key().0, 0).unwrap().request;
@@ -941,7 +971,7 @@ mod tests {
 
     #[test]
     fn answer_addressed_to_another_device_is_ignored() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let joiner = device(48);
         let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 0, &[]).unwrap();
         let request = joiner_start(&offer, &[10u8; 16], &joiner.public_key().0, 0).unwrap().request;
@@ -955,7 +985,7 @@ mod tests {
 
     #[test]
     fn offer_names_primary_device_for_addressing() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[7u8; 16], 0, &[]).unwrap();
         assert_eq!(offer_primary_device_id(&offer), Ok([7u8; 16]));
         close_pairing_offer();
@@ -963,7 +993,7 @@ mod tests {
 
     #[test]
     fn expired_offer_is_rejected() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 0, &[]).unwrap();
         let later = PAIRING_OFFER_TTL_MS + 1;
         assert_eq!(
@@ -975,7 +1005,7 @@ mod tests {
 
     #[test]
     fn tampered_grant_is_rejected() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let joiner = device(45);
         let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 0, &[]).unwrap();
         let request = joiner_start(&offer, &[5u8; 16], &joiner.public_key().0, 0).unwrap().request;
@@ -991,7 +1021,7 @@ mod tests {
 
     #[test]
     fn grant_for_unknown_device_is_refused() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let joiner = device(46);
         let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 0, &[]).unwrap();
         let request = joiner_start(&offer, &[6u8; 16], &joiner.public_key().0, 0).unwrap().request;
@@ -1008,7 +1038,7 @@ mod tests {
 
     #[test]
     fn offer_bytes_round_trip_through_joiner() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let (primary_sas, joiner_sas, accepted) = run_pairing(&device(47), [8u8; 16], 5);
         assert_eq!(primary_sas, joiner_sas);
         assert!(accepted.is_ok());
@@ -1017,7 +1047,7 @@ mod tests {
 
     #[test]
     fn v2_offer_lets_joiner_derive_the_code_at_scan_time() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let joiner = device(49);
         let hints = vec!["192.168.1.20:7777".to_string(), "[2001:db8::5]:7777".to_string()];
         let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 1_000, &hints).unwrap();
@@ -1035,7 +1065,7 @@ mod tests {
 
     #[test]
     fn v1_offer_is_still_accepted_without_scan_time_code() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         // Build a v1 offer by hand: format | legacy | account pk | device id | secret | expiry.
         let secret = [9u8; SECRET_BYTES];
         let mut offer = vec![PAIRING_FORMAT_V1];
@@ -1054,7 +1084,7 @@ mod tests {
 
     #[test]
     fn sync_bootstrap_is_sealed_for_the_paired_device_only() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let joiner = device(51);
         let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 2_000, &[]).unwrap();
         let started = joiner_start(&offer, &[14u8; 16], &joiner.public_key().0, 2_000).unwrap();
@@ -1077,7 +1107,7 @@ mod tests {
 
     #[test]
     fn garbage_contact_hints_are_dropped_from_the_offer() {
-        let _guard = TEST_LOCK.lock().unwrap();
+        let _guard = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let hints = vec!["not-an-address".to_string(), "10.0.0.8:7777".to_string()];
         let offer = open_pairing_offer(LEGACY, &account().public_key().0, &[1u8; 16], 0, &hints).unwrap();
         assert_eq!(offer_contact_hints(&offer).unwrap(), vec!["10.0.0.8:7777".to_string()]);
