@@ -30,6 +30,6 @@ internal inline fun routePacket(tag: String, name: String, block: () -> Boolean)
         throw cancel
     } catch (e: Exception) {
         Log.w(tag, "router $name failed: ${e.javaClass.simpleName}: ${e.message}")
-        OperationalDiagnostics.count(OperationalCounter.ROUTER_FAILED)
+        OperationalDiagnostics.tracker.count(OperationalCounter.ROUTER_FAILED)
         false
     }

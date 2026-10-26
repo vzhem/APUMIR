@@ -90,7 +90,7 @@ class CallCaptioner(model: Model) {
                 } catch (e: Exception) {
                     // Один нераспознанный фрагмент не должен ронять ни звонок, ни
                     // остальные подписи — но причина должна быть видна.
-                    android.util.Log.w(TAG, "segment recognition failed: ${e.message}")
+                    android.util.Log.w("CallCaptioner", "segment recognition failed: ${e.message}")
                 }
                 runCatching { recognizer.close() }
             }
