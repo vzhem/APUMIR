@@ -213,6 +213,7 @@ if python3 scripts/ci/check-chat-startup.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-file-provider.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-signing.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-rust-pinning.py >>"$LOG" 2>&1 && \
+   python3 scripts/ci/check-emergency-keepalive.py >>"$LOG" 2>&1 && \
    bash scripts/ci/check-chat-history.sh >>"$LOG" 2>&1; then
     say "local-first chat history: OK"
 else

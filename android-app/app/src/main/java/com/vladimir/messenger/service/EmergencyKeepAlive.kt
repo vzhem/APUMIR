@@ -12,33 +12,31 @@ import com.vladimir.messenger.data.diagnostics.OperationalCounter
 import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
 
 /**
- * Раунд 141: аварийный каркас доставки уведомлений (просьба владельца:
- * «уведомления должны пробиваться в любом случае, хоть через спящее,
- * хоть через убитое приложение; если убили - приложение должно
- * запуститься через 5 минут в аварийном режиме хотя бы на самых
- * минималках и сразу сообщить»).
+ * Аварийный каркас доставки: если система убила процесс, уведомления всё равно
+ * должны пробиться (просьба владельца, раунд 141).
  *
- * Как работает: системный будильник звонит раз в 5 минут, приёмник
- * поднимает CoreServerService (это и есть «минимальный режим» - MQTT
- * связь и опрос событий). Письмо доложится, уведомление показывается
- * сразу; тап по нему открывает приложение полностью. Цепочка
- * самоподдерживающаяся: сервис при КАЖДОМ старте перевзводит будильник,
- * будильник стартует сервис - даже если процесс убили, через <=5 минут
- * он оживёт сам. Переживает перезагрузку телефона (BOOT_COMPLETED).
+ * Что изменилось 2026-10-26 (P1-6 аудита). Раньше сервис при КАЖДОМ старте
+ * перевзводил точный будильник «+5 минут» — 288 пробуждений в сутки, всегда,
+ * даже когда всё работает. `setExactAndAllowWhileIdle` в Doze — самый дорогой
+ * по батарее механизм Android. Теперь два разных сценария:
  *
- * Будильник - точный (setExactAndAllowWhileIdle), звенит даже в Doze;
- * без права на точный - неточный запасной (в окне обслуживания Doze).
+ *  - сервис жив ([onServiceStarted]) — одна страховка в час НЕТОЧНЫМ
+ *    будильником (`setAndAllowWhileIdle`): если процесс убьют без колбэка,
+ *    сервис вернётся в течение часа, а не через 288 лишних пробуждений;
+ *  - старт не удался ([onServiceRefused]) — вот здесь нужна настойчивость:
+ *    точные будильники по лестнице 5 → 15 → 30 → 60 минут, счётчик отказов
+ *    в SharedPreferences, чтобы после перезагрузки не начинать лестницу
+ *    заново с пяти минут.
+ *
+ * Приёмник объявлен `exported="true"` (BOOT_COMPLETED доходит не на всех
+ * прошивках), поэтому в `onReceive` принимаются только два своих действия —
+ * постороннее приложение не поднимет наш foreground-сервис.
  */
 class EmergencyKeepAliveReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        // Приёмник объявлен exported="true": BOOT_COMPLETED должен доходить на
-        // всех прошивках (docs/AUDIT_2026-10-26.md, P1-6). Поэтому принимаем
-        // только два своих действия, а остальное игнорируем — постороннее
-        // приложение не должно поднимать наш foreground-сервис произвольным
-        // intent'ом.
         val action = intent.action
-        if (action != ACTION_PUMP && action != Intent.ACTION_BOOT_COMPLETED) {
+        if (action != EmergencyKeepAlive.ACTION_PUMP && action != Intent.ACTION_BOOT_COMPLETED) {
             Log.w(TAG, "emergency receiver ignored unexpected action=" + (action ?: "null"))
             return
         }
@@ -67,46 +65,101 @@ class EmergencyKeepAliveReceiver : BroadcastReceiver() {
             false
         }
         if (!started) {
-            // Не терять цепочку: следующий будильник попробует снова, когда
-            // система будет к этому расположена.
-            scheduleNext(context)
+            // Не терять цепочку: следующая попытка по лестнице 5 → 15 → 30 → 60.
+            EmergencyKeepAlive.onServiceRefused(context)
         }
+        // Успешный старт сам перевзведёт страховку: сервис вызовет
+        // EmergencyKeepAlive.onServiceStarted() из onStartCommand.
     }
 
     companion object {
         private const val TAG = "EmergencyKeepAlive"
-        private const val ACTION_PUMP = "com.vladimir.messenger.EMERGENCY_PUMP"
-        private const val REQUEST_CODE = 1001
+    }
+}
 
-        /** Интервал аварийного пробуждения: 5 минут (просьба владельца). */
-        private const val PUMP_INTERVAL_MS = 5 * 60_000L
+/** Планирование аварийного будильника. Отдельно от приёмника — тестируется. */
+object EmergencyKeepAlive {
 
-        /**
-         * Взвести следующий аварийный будильник. Дёшево и идемпотентно
-         * (FLAG_UPDATE_CURRENT) - зовётся при каждом старте сервиса.
-         */
-        fun scheduleNext(context: Context) {
-            val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            val pi = PendingIntent.getBroadcast(
-                context,
-                REQUEST_CODE,
-                Intent(context, EmergencyKeepAliveReceiver::class.java).setAction(ACTION_PUMP),
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
-            val at = System.currentTimeMillis() + PUMP_INTERVAL_MS
-            val exactAllowed = Build.VERSION.SDK_INT < 31 ||
-                runCatching { am.canScheduleExactAlarms() }.getOrDefault(false)
-            try {
-                if (exactAllowed) {
-                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
-                } else {
-                    // Точный запрещён (настройка телефона): неточный в Doze
-                    // зазвонит в окне обслуживания - медленнее, но надёжно.
-                    am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
-                }
-            } catch (_: Exception) {
-                runCatching { am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi) }
+    private const val TAG = "EmergencyKeepAlive"
+    const val ACTION_PUMP = "com.vladimir.messenger.EMERGENCY_PUMP"
+    private const val REQUEST_CODE = 1001
+
+    private const val PREFS = "emergency_keep_alive"
+    private const val KEY_REFUSALS = "consecutive_refusals"
+
+    /** Страховка, пока сервис жив: раз в час. Неточная — батарея дороже. */
+    const val SAFETY_NET_MS = 60 * 60_000L
+
+    /** Лестница повторов, когда сервис не поднимается. */
+    val RETRY_LADDER_MS = longArrayOf(5 * 60_000L, 15 * 60_000L, 30 * 60_000L, 60 * 60_000L)
+
+    /**
+     * Сервис стартовал и работает: одна страховка в час и сброс лестницы.
+     * Зовётся из [CoreServerService.onStartCommand] после успешного
+     * `startForeground`.
+     */
+    fun onServiceStarted(context: Context) {
+        refusals(context, 0)
+        schedule(context, SAFETY_NET_MS, exact = false)
+    }
+
+    /**
+     * Сервис поднять не удалось (отказ `startForeground`, таймаут foreground,
+     * запрет старта из фона): следующая попытка по лестнице, точным
+     * будильником — здесь настойчивость оправдана, письма ждут.
+     */
+    fun onServiceRefused(context: Context) {
+        val misses = refusals(context, -1) + 1
+        refusals(context, misses)
+        val delay = RETRY_LADDER_MS[(misses - 1).coerceIn(0, RETRY_LADDER_MS.lastIndex)]
+        Log.i(TAG, "reschedule after refusal #$misses in ${delay / 60_000} min")
+        schedule(context, delay, exact = true)
+    }
+
+    /** Снять будильник (пользователь выключил сервис — не будить зря). */
+    fun cancel(context: Context) {
+        val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        am.cancel(pendingIntent(context))
+        refusals(context, 0)
+    }
+
+    private fun schedule(context: Context, delayMs: Long, exact: Boolean) {
+        val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val pi = pendingIntent(context)
+        val at = System.currentTimeMillis() + delayMs
+        val exactAllowed = !exact || Build.VERSION.SDK_INT < 31 ||
+            runCatching { am.canScheduleExactAlarms() }.getOrDefault(false)
+        try {
+            if (exact && exactAllowed) {
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
+            } else {
+                // Точный запрещён настройкой телефона (или он и не нужен —
+                // страховка): неточный в Doze зазвонит в окне обслуживания.
+                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
             }
+        } catch (e: Exception) {
+            Log.w(TAG, "exact alarm failed, falling back to inexact: ${e.message}")
+            runCatching { am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi) }
         }
+    }
+
+    private fun pendingIntent(context: Context): PendingIntent =
+        PendingIntent.getBroadcast(
+            context,
+            REQUEST_CODE,
+            Intent(context, EmergencyKeepAliveReceiver::class.java).setAction(ACTION_PUMP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+    /**
+     * Счётчик подряд идущих отказов. [delta] < 0 — «прочитать и ничего не
+     * менять», иначе записать новое значение и вернуть его.
+     */
+    private fun refusals(context: Context, delta: Int): Int {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val current = prefs.getInt(KEY_REFUSALS, 0)
+        if (delta < 0) return current
+        if (current != delta) prefs.edit().putInt(KEY_REFUSALS, delta).apply()
+        return delta
     }
 }

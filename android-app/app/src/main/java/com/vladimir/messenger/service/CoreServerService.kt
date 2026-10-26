@@ -748,7 +748,7 @@ class CoreServerService : Service() {
             // сервис молча не работал, и причина нигде не появлялась.
             OperationalDiagnostics.tracker.count(OperationalCounter.FOREGROUND_START_REFUSED)
             Log.w(TAG, "startForeground refused (sdk=" + Build.VERSION.SDK_INT + ")", e)
-            runCatching { EmergencyKeepAliveReceiver.scheduleNext(applicationContext) }
+            runCatching { EmergencyKeepAlive.onServiceRefused(applicationContext) }
             stopSelf()
             false
         }
@@ -764,7 +764,7 @@ class CoreServerService : Service() {
     override fun onTimeout(startId: Int, fgsType: Int) {
         OperationalDiagnostics.tracker.count(OperationalCounter.FOREGROUND_TIMEOUT)
         Log.w(TAG, "foreground timeout (type=" + fgsType + "); stopping and rescheduling")
-        runCatching { EmergencyKeepAliveReceiver.scheduleNext(applicationContext) }
+        runCatching { EmergencyKeepAlive.onServiceRefused(applicationContext) }
         stopSelf(startId)
     }
 
@@ -792,10 +792,12 @@ class CoreServerService : Service() {
             return START_NOT_STICKY
         }
 
-        // Раунд 141: аварийный каркас - каждый старт перевзводит системный
-        // будильник «+5 минут». Если процесс убьют или усыпят, будильник
-        // поднимет сервис сам и письмо доложится (см. EmergencyKeepAlive).
-        EmergencyKeepAliveReceiver.scheduleNext(applicationContext)
+        // Раунд 141 / P1-6: аварийная страховка. Раньше здесь взводился
+        // ТОЧНЫЙ будильник «+5 минут» на каждый старт — 288 пробуждений в
+        // сутки в Doze. Теперь сервис живёт и держит одну неточную страховку
+        // в час; настойчивая лестница 5→15→30→60 минут включается только
+        // когда сервис поднять не удалось (EmergencyKeepAlive.onServiceRefused).
+        EmergencyKeepAlive.onServiceStarted(applicationContext)
 
         // The keep-alive alarm (and network restarts) can deliver another start intent to the
         // same Service instance. Foreground notification/alarm maintenance above is safe to repeat;
