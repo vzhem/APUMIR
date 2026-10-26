@@ -3112,11 +3112,12 @@ impl P2PCore {
         loop {
             if outbound_rx.is_closed() { drop(transport); return; }
             if !policy.transport_fallback_allowed(crate::storage::models::now_ms()) {
-                // A bound signed direct neighbour answered while the external
-                // session was running. Dropping MqttTransport aborts both broker
-                // eventloops and closes the subscriptions, not just publishes.
+                // A network reset or the bounded direct-search window is active.
+                // Dropping MqttTransport aborts both broker eventloops and
+                // closes the subscriptions, not just publishes; it is resumed
+                // after the bounded window, regardless of live direct peers.
                 drop(transport);
-                tracing::info!("MQTT: direct swarm reached; external session paused");
+                tracing::info!("MQTT: direct-search window active; external session paused briefly");
                 session_generation = session_generation.saturating_add(1);
                 session_restart_backoff_secs = 1;
                 let mut attempt = 1u64;
@@ -4722,7 +4723,7 @@ impl P2PCore {
             .add_own(to_node_id, self.node_id_str.as_deref());
         if !self.external_transport_allowed() {
             self.peer_exchange.wake();
-            tracing::debug!("MQTT one-shot: refused while direct swarm is being searched or is live");
+            tracing::debug!("MQTT one-shot: deferred while the bounded direct-search window is active");
             return false;
         }
         if let Some(message_id) = payload.strip_prefix("ack|") {
@@ -5036,8 +5037,9 @@ impl P2PCore {
         self.swarm_first.live_peer_ids(crate::storage::models::now_ms())
     }
 
-    /// False during initial direct search and while a verified neighbour is
-    /// alive. Android's other automatic external transports use this signal.
+    /// False only during the bounded initial direct-search window. After it,
+    /// direct QUIC remains an optimization while Android's automatic external
+    /// transports and MQTT/WSS fallback stay available in parallel.
     pub fn external_transport_allowed(&self) -> bool {
         self.state.is_running() && self.swarm_first.transport_fallback_allowed(crate::storage::models::now_ms())
     }
@@ -5653,11 +5655,12 @@ impl P2PCore {
             }
 
             if !self.external_transport_allowed() {
-                // The ciphertext is retained in RelayQueue/RelayStore. A live
-                // neighbour may still find its owner; MQTT reoffers it only
-                // if all authenticated direct routes disappear later.
+                // The bounded direct-search window is still active. The
+                // ciphertext is retained in RelayQueue/RelayStore and the
+                // persistent MQTT/WSS session will receive the command as soon
+                // as that window ends, even if another direct peer is alive.
                 self.peer_exchange.wake();
-                tracing::info!("MESH origin: kept {} in swarm custody; external publish deferred", message_id);
+                tracing::info!("MESH origin: kept {} in local custody; external publish deferred during direct search", message_id);
             } else {
                 match self.mqtt_outbound_tx.as_ref() {
                     Some(sender) => match sender.try_send(MqttOutboundCommand::MeshRelay {
