@@ -1077,8 +1077,18 @@ class ApkSeeder @Inject constructor(
      * которого не было в file_paths.xml — getUriForFile бросал, корутина
      * умирала молча).
      */
+    /**
+     * Android 8+ требует отдельное разрешение «устанавливать неизвестные
+     * приложения». Без него установщик открывается и сразу закрывается, а
+     * человек видит только «Android не открыл установщик». Спрашиваем заранее —
+     * и даём экрану настроек увести его на нужный переключатель.
+     */
+    fun installPermissionMissing(): Boolean =
+        Build.VERSION.SDK_INT >= 26 && !appContext.packageManager.canRequestPackageInstalls()
+
     suspend fun installReady(): String {
         val readyInfo = _ready.value ?: return "Обновление уже установлено — карточка устарела"
+        if (installPermissionMissing()) return INSTALL_PERMISSION_HINT
         // Файл обновления: принятая копия (строка INCOMING/COMPLETE) или
         // скачанный с сайта файл, взятый в раздел автоматически.
         val file: File? = readyInfo.transferId.takeIf { it.isNotBlank() }
@@ -1817,6 +1827,10 @@ class ApkSeeder @Inject constructor(
 
     companion object {
         private const val TAG = "ApkSeeder"
+
+        /** Текст подсказки, по которому UI открывает нужный экран настроек. */
+        const val INSTALL_PERMISSION_HINT =
+            "Разрешите APU устанавливать приложения: Настройки → Приложения → APU → «Установка неизвестных приложений»"
         private const val SELF_SEED_RETRY_PREFS = "apu_self_seed_retry"
         private const val SELF_SEED_RETRY_VERSION = "version"
         private const val SELF_SEED_RETRY_AT = "attempt_at_ms"
