@@ -864,6 +864,46 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -915,6 +955,8 @@ internal interface UniffiLib : Library {
     ): Int
     fun uniffi_p2p_core_fn_method_p2pcorehandle_is_running(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_listen_pairing_code(`ptr`: Pointer,`code`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_live_swarm_peer_ids(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_method_p2pcorehandle_mark_message_read(`ptr`: Pointer,`messageId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -937,6 +979,8 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_method_p2pcorehandle_public_key(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_publish_pairing_code(`ptr`: Pointer,`code`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_receive_message(`ptr`: Pointer,`messageId`: RustBuffer.ByValue,`chatId`: RustBuffer.ByValue,`senderId`: RustBuffer.ByValue,`encryptedText`: RustBuffer.ByValue,`timestamp`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_p2p_core_fn_method_p2pcorehandle_relay_custody_mode(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
@@ -952,6 +996,8 @@ internal interface UniffiLib : Library {
     fun uniffi_p2p_core_fn_method_p2pcorehandle_send_message(`ptr`: Pointer,`messageId`: RustBuffer.ByValue,`chatId`: RustBuffer.ByValue,`recipientId`: RustBuffer.ByValue,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_send_message_mqtt(`ptr`: Pointer,`toNodeId`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_send_pairing_payload(`ptr`: Pointer,`recipientNodeId`: RustBuffer.ByValue,`targetDeviceId`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_set_custody_enabled(`ptr`: Pointer,`enabled`: Byte,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
@@ -973,7 +1019,11 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_p2p_core_fn_func_clear_relay_at_rest_key(uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_p2p_core_fn_func_close_pairing_offer(uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_p2p_core_fn_func_core_build_info(uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_create_device_certificate(`deviceId`: RustBuffer.ByValue,`devicePublicKey`: RustBuffer.ByValue,`createdAtMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_create_engine(`displayName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Pointer
@@ -991,9 +1041,13 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_create_identity_signing_binding(`createdAtMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_create_pairing_offer(`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_create_referral_invite_token(`identityBinding`: RustBuffer.ByValue,`createdAtMs`: Long,`expiresAtMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_decrypt_file_transfer_chunk(`manifestBytes`: RustBuffer.ByValue,`fileKey`: RustBuffer.ByValue,`chunkIndex`: Long,`ciphertext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_device_public_key_from_seed(`seed`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_encrypt_file_transfer_chunk(`manifestBytes`: RustBuffer.ByValue,`fileKey`: RustBuffer.ByValue,`chunkIndex`: Long,`plaintext`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1021,16 +1075,42 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_p2p_core_fn_func_install_relay_at_rest_key(`keyId`: Short,`keyMaterial`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
+    fun uniffi_p2p_core_fn_func_joiner_accept_pairing_grant(`grant`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_joiner_cancel_pairing(uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_p2p_core_fn_func_joiner_handle_pairing_answer(`answer`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_joiner_open_pairing_sync(`packet`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_joiner_start_pairing(`offer`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`devicePublicKey`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_open_file_key_envelope(`envelope`: RustBuffer.ByValue,`recipientExchangeBinding`: RustBuffer.ByValue,`recipientX25519Secret`: RustBuffer.ByValue,`manifest`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_pairing_offer_contact_hints(`offer`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_pairing_offer_primary_device_id(`offer`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_func_parse_file_transfer_manifest(`manifestBytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_primary_confirm_pairing(`deviceId`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_primary_handle_pairing_request(`request`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_primary_seal_pairing_sync(`deviceId`: RustBuffer.ByValue,`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_record_pairing_endpoint(`deviceId`: RustBuffer.ByValue,`address`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     fun uniffi_p2p_core_fn_func_relay_at_rest_key_id(uniffi_out_err: UniffiRustCallStatus, 
     ): Long
+    fun uniffi_p2p_core_fn_func_set_local_device_id(`deviceId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_p2p_core_fn_func_set_mqtt_socks5_proxy(`host`: RustBuffer.ByValue,`port`: Short,`username`: RustBuffer.ByValue,`password`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
     fun uniffi_p2p_core_fn_func_verified_referral_inviter_node_id(`token`: RustBuffer.ByValue,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_func_verify_device_certificate_bytes(`cert`: RustBuffer.ByValue,`pinnedAccountPublicKey`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     fun uniffi_p2p_core_fn_func_verify_file_exchange_binding(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     fun uniffi_p2p_core_fn_func_verify_identity_signing_binding(`binding`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1155,7 +1235,11 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_func_clear_relay_at_rest_key(
     ): Short
+    fun uniffi_p2p_core_checksum_func_close_pairing_offer(
+    ): Short
     fun uniffi_p2p_core_checksum_func_core_build_info(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_create_device_certificate(
     ): Short
     fun uniffi_p2p_core_checksum_func_create_engine(
     ): Short
@@ -1173,9 +1257,13 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_func_create_identity_signing_binding(
     ): Short
+    fun uniffi_p2p_core_checksum_func_create_pairing_offer(
+    ): Short
     fun uniffi_p2p_core_checksum_func_create_referral_invite_token(
     ): Short
     fun uniffi_p2p_core_checksum_func_decrypt_file_transfer_chunk(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_device_public_key_from_seed(
     ): Short
     fun uniffi_p2p_core_checksum_func_encrypt_file_transfer_chunk(
     ): Short
@@ -1203,15 +1291,41 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_func_install_relay_at_rest_key(
     ): Short
+    fun uniffi_p2p_core_checksum_func_joiner_accept_pairing_grant(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_joiner_cancel_pairing(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_joiner_handle_pairing_answer(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_joiner_open_pairing_sync(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_joiner_start_pairing(
+    ): Short
     fun uniffi_p2p_core_checksum_func_open_file_key_envelope(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_pairing_offer_contact_hints(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_pairing_offer_primary_device_id(
     ): Short
     fun uniffi_p2p_core_checksum_func_parse_file_transfer_manifest(
     ): Short
+    fun uniffi_p2p_core_checksum_func_primary_confirm_pairing(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_primary_handle_pairing_request(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_primary_seal_pairing_sync(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_record_pairing_endpoint(
+    ): Short
     fun uniffi_p2p_core_checksum_func_relay_at_rest_key_id(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_set_local_device_id(
     ): Short
     fun uniffi_p2p_core_checksum_func_set_mqtt_socks5_proxy(
     ): Short
     fun uniffi_p2p_core_checksum_func_verified_referral_inviter_node_id(
+    ): Short
+    fun uniffi_p2p_core_checksum_func_verify_device_certificate_bytes(
     ): Short
     fun uniffi_p2p_core_checksum_func_verify_file_exchange_binding(
     ): Short
@@ -1247,6 +1361,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_is_running(
     ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_listen_pairing_code(
+    ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_live_swarm_peer_ids(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_mark_message_read(
@@ -1269,6 +1385,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_public_key(
     ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_publish_pairing_code(
+    ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_receive_message(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_relay_custody_mode(
@@ -1284,6 +1402,8 @@ internal interface UniffiLib : Library {
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_send_message(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_send_message_mqtt(
+    ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_send_pairing_payload(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_set_custody_enabled(
     ): Short
@@ -1325,7 +1445,13 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_func_clear_relay_at_rest_key() != 53814.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_func_close_pairing_offer() != 46083.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_func_core_build_info() != 28854.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_create_device_certificate() != 16050.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_create_engine() != 15702.toShort()) {
@@ -1352,10 +1478,16 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_func_create_identity_signing_binding() != 23948.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_func_create_pairing_offer() != 50458.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_func_create_referral_invite_token() != 6220.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_decrypt_file_transfer_chunk() != 10425.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_device_public_key_from_seed() != 61870.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_encrypt_file_transfer_chunk() != 23899.toShort()) {
@@ -1397,19 +1529,58 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_func_install_relay_at_rest_key() != 24777.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_func_joiner_accept_pairing_grant() != 50572.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_joiner_cancel_pairing() != 50940.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_joiner_handle_pairing_answer() != 63318.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_joiner_open_pairing_sync() != 14464.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_joiner_start_pairing() != 37489.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_func_open_file_key_envelope() != 19849.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_pairing_offer_contact_hints() != 60247.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_pairing_offer_primary_device_id() != 52458.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_parse_file_transfer_manifest() != 39361.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_func_primary_confirm_pairing() != 40585.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_primary_handle_pairing_request() != 37994.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_primary_seal_pairing_sync() != 49163.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_record_pairing_endpoint() != 26061.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_func_relay_at_rest_key_id() != 38408.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_set_local_device_id() != 51811.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_set_mqtt_socks5_proxy() != 58761.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_verified_referral_inviter_node_id() != 59487.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_func_verify_device_certificate_bytes() != 33643.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_func_verify_file_exchange_binding() != 27377.toShort()) {
@@ -1463,6 +1634,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_is_running() != 57535.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_listen_pairing_code() != 52973.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_live_swarm_peer_ids() != 43689.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1496,6 +1670,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_public_key() != 16033.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_publish_pairing_code() != 40502.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_receive_message() != 60848.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1518,6 +1695,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_send_message_mqtt() != 54189.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_send_pairing_payload() != 1106.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_set_custody_enabled() != 44669.toShort()) {
@@ -2017,6 +2197,8 @@ public interface P2pCoreHandleInterface {
     
     fun `isRunning`(): kotlin.Boolean
     
+    fun `listenPairingCode`(`code`: kotlin.String): kotlin.Boolean
+    
     fun `liveSwarmPeerIds`(): List<kotlin.String>
     
     fun `markMessageRead`(`messageId`: kotlin.String): kotlin.Boolean
@@ -2039,6 +2221,8 @@ public interface P2pCoreHandleInterface {
     
     fun `publicKey`(): kotlin.String?
     
+    fun `publishPairingCode`(`code`: kotlin.String, `payload`: kotlin.String): kotlin.Boolean
+    
     fun `receiveMessage`(`messageId`: kotlin.String, `chatId`: kotlin.String, `senderId`: kotlin.String, `encryptedText`: kotlin.String, `timestamp`: kotlin.Long)
     
     fun `relayCustodyMode`(): kotlin.String
@@ -2054,6 +2238,8 @@ public interface P2pCoreHandleInterface {
     fun `sendMessage`(`messageId`: kotlin.String, `chatId`: kotlin.String, `recipientId`: kotlin.String, `text`: kotlin.String): kotlin.Boolean
     
     fun `sendMessageMqtt`(`toNodeId`: kotlin.String, `payload`: kotlin.String): kotlin.Boolean
+    
+    fun `sendPairingPayload`(`recipientNodeId`: kotlin.String, `targetDeviceId`: kotlin.ByteArray, `payload`: kotlin.String): kotlin.Boolean
     
     fun `setCustodyEnabled`(`enabled`: kotlin.Boolean): kotlin.Boolean
     
@@ -2321,6 +2507,18 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     
 
+    override fun `listenPairingCode`(`code`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_listen_pairing_code(
+        it, FfiConverterString.lower(`code`),_status)
+}
+    }
+    )
+    }
+    
+
     override fun `liveSwarmPeerIds`(): List<kotlin.String> {
             return FfiConverterSequenceString.lift(
     callWithPointer {
@@ -2451,6 +2649,18 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     
 
+    override fun `publishPairingCode`(`code`: kotlin.String, `payload`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_publish_pairing_code(
+        it, FfiConverterString.lower(`code`),FfiConverterString.lower(`payload`),_status)
+}
+    }
+    )
+    }
+    
+
     override fun `receiveMessage`(`messageId`: kotlin.String, `chatId`: kotlin.String, `senderId`: kotlin.String, `encryptedText`: kotlin.String, `timestamp`: kotlin.Long)
         = 
     callWithPointer {
@@ -2540,6 +2750,18 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_send_message_mqtt(
         it, FfiConverterString.lower(`toNodeId`),FfiConverterString.lower(`payload`),_status)
+}
+    }
+    )
+    }
+    
+
+    override fun `sendPairingPayload`(`recipientNodeId`: kotlin.String, `targetDeviceId`: kotlin.ByteArray, `payload`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_send_pairing_payload(
+        it, FfiConverterString.lower(`recipientNodeId`),FfiConverterByteArray.lower(`targetDeviceId`),FfiConverterString.lower(`payload`),_status)
 }
     }
     )
@@ -2871,6 +3093,38 @@ public object FfiConverterTypeFileTransferManifestFfi: FfiConverterRustBuffer<Fi
 
 
 
+data class JoinerPairingStart (
+    var `request`: kotlin.ByteArray, 
+    var `sas`: kotlin.String?
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeJoinerPairingStart: FfiConverterRustBuffer<JoinerPairingStart> {
+    override fun read(buf: ByteBuffer): JoinerPairingStart {
+        return JoinerPairingStart(
+            FfiConverterByteArray.read(buf),
+            FfiConverterOptionalString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: JoinerPairingStart) = (
+            FfiConverterByteArray.allocationSize(value.`request`) +
+            FfiConverterOptionalString.allocationSize(value.`sas`)
+    )
+
+    override fun write(value: JoinerPairingStart, buf: ByteBuffer) {
+            FfiConverterByteArray.write(value.`request`, buf)
+            FfiConverterOptionalString.write(value.`sas`, buf)
+    }
+}
+
+
+
 data class MessageFfi (
     var `id`: kotlin.String, 
     var `chatId`: kotlin.String, 
@@ -2918,6 +3172,74 @@ public object FfiConverterTypeMessageFfi: FfiConverterRustBuffer<MessageFfi> {
             FfiConverterString.write(value.`status`, buf)
             FfiConverterLong.write(value.`createdAt`, buf)
             FfiConverterBoolean.write(value.`isDeleted`, buf)
+    }
+}
+
+
+
+data class PrimaryPairingAnswer (
+    var `answer`: kotlin.ByteArray, 
+    var `sas`: kotlin.String, 
+    var `deviceId`: kotlin.ByteArray
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePrimaryPairingAnswer: FfiConverterRustBuffer<PrimaryPairingAnswer> {
+    override fun read(buf: ByteBuffer): PrimaryPairingAnswer {
+        return PrimaryPairingAnswer(
+            FfiConverterByteArray.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterByteArray.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PrimaryPairingAnswer) = (
+            FfiConverterByteArray.allocationSize(value.`answer`) +
+            FfiConverterString.allocationSize(value.`sas`) +
+            FfiConverterByteArray.allocationSize(value.`deviceId`)
+    )
+
+    override fun write(value: PrimaryPairingAnswer, buf: ByteBuffer) {
+            FfiConverterByteArray.write(value.`answer`, buf)
+            FfiConverterString.write(value.`sas`, buf)
+            FfiConverterByteArray.write(value.`deviceId`, buf)
+    }
+}
+
+
+
+data class PrimaryPairingGrant (
+    var `grant`: kotlin.ByteArray, 
+    var `certificate`: kotlin.ByteArray
+) {
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypePrimaryPairingGrant: FfiConverterRustBuffer<PrimaryPairingGrant> {
+    override fun read(buf: ByteBuffer): PrimaryPairingGrant {
+        return PrimaryPairingGrant(
+            FfiConverterByteArray.read(buf),
+            FfiConverterByteArray.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: PrimaryPairingGrant) = (
+            FfiConverterByteArray.allocationSize(value.`grant`) +
+            FfiConverterByteArray.allocationSize(value.`certificate`)
+    )
+
+    override fun write(value: PrimaryPairingGrant, buf: ByteBuffer) {
+            FfiConverterByteArray.write(value.`grant`, buf)
+            FfiConverterByteArray.write(value.`certificate`, buf)
     }
 }
 
@@ -3423,11 +3745,29 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     
     
+ fun `closePairingOffer`()
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_close_pairing_offer(
+        _status)
+}
+    
+    
  fun `coreBuildInfo`(): kotlin.String {
             return FfiConverterString.lift(
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_core_build_info(
         _status)
+}
+    )
+    }
+    
+
+    @Throws(CoreException::class) fun `createDeviceCertificate`(`deviceId`: kotlin.ByteArray, `devicePublicKey`: kotlin.ByteArray, `createdAtMs`: kotlin.Long): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_create_device_certificate(
+        FfiConverterByteArray.lower(`deviceId`),FfiConverterByteArray.lower(`devicePublicKey`),FfiConverterLong.lower(`createdAtMs`),_status)
 }
     )
     }
@@ -3510,6 +3850,16 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     }
     
 
+    @Throws(CoreException::class) fun `createPairingOffer`(`nowMs`: kotlin.Long): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_create_pairing_offer(
+        FfiConverterLong.lower(`nowMs`),_status)
+}
+    )
+    }
+    
+
     @Throws(CoreException::class) fun `createReferralInviteToken`(`identityBinding`: kotlin.ByteArray, `createdAtMs`: kotlin.Long, `expiresAtMs`: kotlin.Long): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
     uniffiRustCallWithError(CoreException) { _status ->
@@ -3525,6 +3875,16 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     uniffiRustCallWithError(CoreException) { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_decrypt_file_transfer_chunk(
         FfiConverterByteArray.lower(`manifestBytes`),FfiConverterByteArray.lower(`fileKey`),FfiConverterULong.lower(`chunkIndex`),FfiConverterByteArray.lower(`ciphertext`),_status)
+}
+    )
+    }
+    
+
+    @Throws(CoreException::class) fun `devicePublicKeyFromSeed`(`seed`: kotlin.ByteArray): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_device_public_key_from_seed(
+        FfiConverterByteArray.lower(`seed`),_status)
 }
     )
     }
@@ -3651,11 +4011,78 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     
     
 
+    @Throws(CoreException::class) fun `joinerAcceptPairingGrant`(`grant`: kotlin.ByteArray, `nowMs`: kotlin.Long): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_joiner_accept_pairing_grant(
+        FfiConverterByteArray.lower(`grant`),FfiConverterLong.lower(`nowMs`),_status)
+}
+    )
+    }
+    
+ fun `joinerCancelPairing`()
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_joiner_cancel_pairing(
+        _status)
+}
+    
+    
+
+    @Throws(CoreException::class) fun `joinerHandlePairingAnswer`(`answer`: kotlin.ByteArray, `nowMs`: kotlin.Long): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_joiner_handle_pairing_answer(
+        FfiConverterByteArray.lower(`answer`),FfiConverterLong.lower(`nowMs`),_status)
+}
+    )
+    }
+    
+ fun `joinerOpenPairingSync`(`packet`: kotlin.ByteArray): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_joiner_open_pairing_sync(
+        FfiConverterByteArray.lower(`packet`),_status)
+}
+    )
+    }
+    
+
+    @Throws(CoreException::class) fun `joinerStartPairing`(`offer`: kotlin.ByteArray, `deviceId`: kotlin.ByteArray, `devicePublicKey`: kotlin.ByteArray, `nowMs`: kotlin.Long): JoinerPairingStart {
+            return FfiConverterTypeJoinerPairingStart.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_joiner_start_pairing(
+        FfiConverterByteArray.lower(`offer`),FfiConverterByteArray.lower(`deviceId`),FfiConverterByteArray.lower(`devicePublicKey`),FfiConverterLong.lower(`nowMs`),_status)
+}
+    )
+    }
+    
+
     @Throws(CoreException::class) fun `openFileKeyEnvelope`(`envelope`: kotlin.ByteArray, `recipientExchangeBinding`: kotlin.ByteArray, `recipientX25519Secret`: kotlin.ByteArray, `manifest`: kotlin.ByteArray): kotlin.ByteArray {
             return FfiConverterByteArray.lift(
     uniffiRustCallWithError(CoreException) { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_open_file_key_envelope(
         FfiConverterByteArray.lower(`envelope`),FfiConverterByteArray.lower(`recipientExchangeBinding`),FfiConverterByteArray.lower(`recipientX25519Secret`),FfiConverterByteArray.lower(`manifest`),_status)
+}
+    )
+    }
+    
+
+    @Throws(CoreException::class) fun `pairingOfferContactHints`(`offer`: kotlin.ByteArray): List<kotlin.String> {
+            return FfiConverterSequenceString.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_pairing_offer_contact_hints(
+        FfiConverterByteArray.lower(`offer`),_status)
+}
+    )
+    }
+    
+
+    @Throws(CoreException::class) fun `pairingOfferPrimaryDeviceId`(`offer`: kotlin.ByteArray): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_pairing_offer_primary_device_id(
+        FfiConverterByteArray.lower(`offer`),_status)
 }
     )
     }
@@ -3670,6 +4097,44 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     )
     }
     
+
+    @Throws(CoreException::class) fun `primaryConfirmPairing`(`deviceId`: kotlin.ByteArray, `nowMs`: kotlin.Long): PrimaryPairingGrant {
+            return FfiConverterTypePrimaryPairingGrant.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_primary_confirm_pairing(
+        FfiConverterByteArray.lower(`deviceId`),FfiConverterLong.lower(`nowMs`),_status)
+}
+    )
+    }
+    
+
+    @Throws(CoreException::class) fun `primaryHandlePairingRequest`(`request`: kotlin.ByteArray, `nowMs`: kotlin.Long): PrimaryPairingAnswer {
+            return FfiConverterTypePrimaryPairingAnswer.lift(
+    uniffiRustCallWithError(CoreException) { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_primary_handle_pairing_request(
+        FfiConverterByteArray.lower(`request`),FfiConverterLong.lower(`nowMs`),_status)
+}
+    )
+    }
+    
+ fun `primarySealPairingSync`(`deviceId`: kotlin.ByteArray, `text`: kotlin.String): kotlin.ByteArray {
+            return FfiConverterByteArray.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_primary_seal_pairing_sync(
+        FfiConverterByteArray.lower(`deviceId`),FfiConverterString.lower(`text`),_status)
+}
+    )
+    }
+    
+ fun `recordPairingEndpoint`(`deviceId`: kotlin.ByteArray, `address`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_record_pairing_endpoint(
+        FfiConverterByteArray.lower(`deviceId`),FfiConverterString.lower(`address`),_status)
+}
+    )
+    }
+    
  fun `relayAtRestKeyId`(): kotlin.Long {
             return FfiConverterLong.lift(
     uniffiRustCall() { _status ->
@@ -3678,6 +4143,14 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
 }
     )
     }
+    
+ fun `setLocalDeviceId`(`deviceId`: kotlin.ByteArray)
+        = 
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_set_local_device_id(
+        FfiConverterByteArray.lower(`deviceId`),_status)
+}
+    
     
  fun `setMqttSocks5Proxy`(`host`: kotlin.String, `port`: kotlin.UShort, `username`: kotlin.String, `password`: kotlin.String)
         = 
@@ -3693,6 +4166,15 @@ public object FfiConverterSequenceTypeMessageFfi: FfiConverterRustBuffer<List<Me
     uniffiRustCallWithError(CoreException) { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_verified_referral_inviter_node_id(
         FfiConverterByteArray.lower(`token`),FfiConverterLong.lower(`nowMs`),_status)
+}
+    )
+    }
+    
+ fun `verifyDeviceCertificateBytes`(`cert`: kotlin.ByteArray, `pinnedAccountPublicKey`: kotlin.ByteArray): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_func_verify_device_certificate_bytes(
+        FfiConverterByteArray.lower(`cert`),FfiConverterByteArray.lower(`pinnedAccountPublicKey`),_status)
 }
     )
     }
