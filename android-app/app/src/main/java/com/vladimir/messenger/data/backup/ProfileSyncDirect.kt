@@ -164,19 +164,28 @@ object ProfileSyncDirect {
                     served = true
                     return
                 }
-                val bytes = file.readBytes()
+                // Отдаём файл потоком и не больше лимита приёма: копия — наш же
+                // снапшот, но читать его целиком в память незачем (аудит, п. 4.5).
+                val length = file.length()
+                if (length <= 0L || length > MAX_COPY_BYTES) {
+                    sock.getOutputStream().write(
+                        "HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray()
+                    )
+                    main.post { onDone(false, "копия не того размера") }
+                    served = true
+                    return
+                }
                 val head = ("HTTP/1.1 200 OK\r\n" +
                     "Content-Type: application/octet-stream\r\n" +
-                    "Content-Length: ${bytes.size}\r\n" +
+                    "Content-Length: $length\r\n" +
                     "Cache-Control: no-store\r\n" +
                     "Connection: close\r\n\r\n").toByteArray()
-                sock.getOutputStream().apply {
-                    write(head)
-                    write(bytes)
-                    flush()
-                }
+                val out = sock.getOutputStream()
+                out.write(head)
+                file.inputStream().use { input -> input.copyTo(out, 64 * 1024) }
+                out.flush()
                 served = true
-                Log.i(TAG, "copy served: ${bytes.size} байт")
+                Log.i(TAG, "copy served: $length байт")
                 main.post { onDone(true, null) }
             }
         }

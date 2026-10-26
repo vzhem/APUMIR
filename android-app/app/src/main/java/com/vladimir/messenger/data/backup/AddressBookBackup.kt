@@ -5,6 +5,8 @@ import android.util.Base64
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.service.BotApi
+import com.vladimir.messenger.util.readBytesAtMost
+import com.vladimir.messenger.util.sha256Hex
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.security.MessageDigest
@@ -38,6 +40,9 @@ class AddressBookBackup @Inject constructor(
     private val swarm: AddressBookSwarmBackup,
 ) {
     companion object {
+        /** Потолок для чтения файла азбуки целиком (см. docs/AUDIT_2026-10-26.md, п. 4.5). */
+        private const val MAX_BOOK_BYTES = 4L * 1024 * 1024
+
         private const val TAG = "AddressBookBackup"
         private const val PREFS = "p2p_prefs"
         private const val FILE_NAME = "apu_peer_addresses.json"
@@ -104,11 +109,8 @@ class AddressBookBackup @Inject constructor(
         cipher.doFinal(raw, 1 + ivLen, raw.size - 1 - ivLen)
     }.getOrNull()
 
-    private fun fileSha(file: File): String = runCatching {
-        val digest = MessageDigest.getInstance("SHA-256")
-        val hex = digest.digest(file.readBytes()).joinToString("") { "%02x".format(it) }
-        hex
-    }.getOrDefault("")
+    // Сумма считается потоком: файл целиком в память ради 32 байт не нужен.
+    private fun fileSha(file: File): String = runCatching { file.sha256Hex() }.getOrDefault("")
 
     /**
      * Скопировать азбуку на сервер. Возвращает понятный человеку итог.
@@ -327,7 +329,9 @@ class AddressBookBackup @Inject constructor(
         val privateKey = privateKey() ?: return null
         val file = bookFile(context)
         if (!file.isFile || file.length() < 4) return null
-        val plain = runCatching { file.readBytes() }.getOrNull() ?: return null
+        // Азбука — текстовый файл; 4 МБ заведомо больше любой реальной, а
+        // readBytes() без потолка на испорченном файле съел бы всю кучу.
+        val plain = runCatching { file.readBytesAtMost(MAX_BOOK_BYTES) }.getOrNull() ?: return null
         val envelope = encrypt(plain, privateKey) ?: return null
         val sha = MessageDigest.getInstance("SHA-256").digest(plain)
             .joinToString("") { "%02x".format(it) }

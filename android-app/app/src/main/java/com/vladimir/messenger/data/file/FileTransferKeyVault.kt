@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.AtomicFile
+import com.vladimir.messenger.util.readBytesAtMost
 import java.io.File
 import java.nio.file.Files
 import java.security.KeyStore
@@ -203,7 +204,9 @@ object FileTransferKeyVault {
         check(file.length() == FileTransferKeyEnvelope.ENVELOPE_BYTES.toLong()) {
             "Invalid wrapped key file length"
         }
-        val envelope = file.readBytes()
+        // Длину проверили строкой выше, но файл мог вырасти между проверкой
+        // и чтением: лимит держим и здесь (аудит 2026-10-26, п. 4.5).
+        val envelope = file.readBytesAtMost(FileTransferKeyEnvelope.ENVELOPE_BYTES.toLong())
         try {
             val decoded = FileTransferKeyEnvelope.decode(envelope)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -308,8 +311,9 @@ object FileTransferKeyVault {
         val file = File(dir, SOFTWARE_WRAP_FILE)
         return try {
             if (file.exists()) {
-                val bytes = file.readBytes()
-                if (bytes.size == SOFTWARE_KEY_BYTES) SecretKeySpec(bytes, "AES") else null
+                val bytes = runCatching { file.readBytesAtMost(SOFTWARE_KEY_BYTES.toLong()) }
+                    .getOrNull()
+                if (bytes != null && bytes.size == SOFTWARE_KEY_BYTES) SecretKeySpec(bytes, "AES") else null
             } else if (createIfMissing) {
                 if (!dir.isDirectory && !dir.mkdirs()) return null
                 val bytes = ByteArray(SOFTWARE_KEY_BYTES).also(SecureRandom()::nextBytes)
