@@ -109,8 +109,10 @@ class PeerRankContractTest(unittest.TestCase):
         self.assertIn('@Entity(tableName = "peer_ranks")', PEER_ENTITY)
         self.assertIn("val nodeId: String,", PEER_ENTITY)
         self.assertIn("observeVipNodeIds(vipThreshold: Int)", PEER_DAO)
-        self.assertRegex(PEER_DAO, re.compile(
-            r"WHERE nodeId = :nodeId AND updatedAtMs < :updatedAtMs"))
+        # Обновление только вперёд: и время, и подтверждённый ранг берутся
+        # максимумом, поэтому поздний старый пакет не откатывает VIP.
+        self.assertIn("MAX(qualified, :qualified)", PEER_DAO)
+        self.assertIn("updatedAtMs < :updatedAtMs OR qualified < :qualified", PEER_DAO)
         # Версия базы поднята вместе с миграцией; уже принятые ранги переезжают.
         self.assertGreaterEqual(int(re.search(r"APP_DATABASE_VERSION = (\d+)", DATABASE).group(1)), 28)
         self.assertIn("MIGRATION_27_28", DATABASE)
@@ -181,7 +183,10 @@ class PeerRankContractTest(unittest.TestCase):
         self.assertIn("vip = authorVip", CHANNEL_SCREEN)
         self.assertIn("vip = member.nodeId.lowercase() in vipNodeIds", ADMIN_SCREEN)
         # Порог берётся из политики, второй копии числа «10» у экранов нет.
-        self.assertIn("peerVip = item.chat.contactId.lowercase() in vipPeerIds", CHAT_LIST)
+        # Узел канонизируется перед сверкой: конверт приходит в любом регистре,
+        # а set VIP-узлов хранится в нижнем.
+        self.assertIn("canonicalNodeId(item.chat.contactId)", CHAT_LIST)
+        self.assertIn("it in vipPeerIds", CHAT_LIST)
         self.assertIn("vipPeerIds = uiState.vipPeerIds", CHAT_LIST)
 
     def test_rank_is_looked_at_before_typing_everywhere(self):

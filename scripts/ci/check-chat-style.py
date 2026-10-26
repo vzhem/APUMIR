@@ -161,10 +161,19 @@ class ChatStyleTest(unittest.TestCase):
     def test_ime_resize_and_column_pinned_layout_are_retained(self):
         for relative in ("screens/chat/ChatDetailScreen.kt", "screens/groups/GroupChatScreen.kt"):
             self.assertRegex(source(relative), r"Scaffold\(\s*modifier = Modifier\.imePadding\(\)")
+        # Заголовок плашки закрепа переехал в строковый ресурс pinned_count
+        # («Закреплённые (n/m)»): сами экраны несут только вызов. Проверяем
+        # плашку по вызову ресурса, а текст — по strings.xml, чтобы контракт
+        # не краснел от выноса строки в ресурсы.
+        pinned_label = (ROOT / "android-app/app/src/main/res/values/strings.xml").read_text()
+        self.assertIn('name="pinned_count"', pinned_label)
+        self.assertIn("Закреплённые", pinned_label)
         for relative in ("screens/chat/ChatDetailScreen.kt", "screens/channels/ChannelScreen.kt"):
             text = source(relative)
+            # Закреп и лента — в Column: лента с fillMaxSize не рисуется поверх
+            # плашки закрепа (скрин владельца 01.10: стикер наезжал на плашку).
             self.assertIn("Column(modifier = Modifier.fillMaxSize())", text)
-            self.assertIn("Закреплённые", text)
+            self.assertIn("R.string.pinned_count", text)
 
     def test_key_desync_notice_tells_the_person_what_to_do(self):
         """«От него не открывается» — плашка в переписке, а не только в «Логах».
@@ -213,7 +222,9 @@ class ChatStyleTest(unittest.TestCase):
         # Старая копия в пути не должна ни пугать человека, ни гонять сигнал
         # собеседнику: ключ доказанно рабочий.
         self.assertIn("staleKeyCopy = leftover", service)
-        self.assertIn("if (known && !leftover)", service)
+        # Плашку зажигаем, только если локальный ключ был готов на старте:
+        # провал разблокировки при загрузке — не смена ключа собеседника.
+        self.assertIn("if (known && !leftover && localCryptoReadyAtStartup)", service)
         self.assertIn("leftover=$leftover", service)
 
         view_model = source("screens/chat/ChatDetailViewModel.kt")
@@ -231,8 +242,14 @@ class ChatStyleTest(unittest.TestCase):
         self.assertTrue("apuPremiumThread(shape = noticeShape, inset = 18.dp)" in screen, "нет золотой нити")
         self.assertTrue("apuPremiumGloss(noticeShape, intensity = 0.8f" in screen, "нет блеска")
         self.assertTrue("color = ApuGoldInk," in screen, "текст плашки не тёмными чернилами")
-        self.assertTrue("Сообщения от собеседника не открываются" in screen, "нет объяснения словами")
-        self.assertTrue("Отправить мой ключ ещё раз" in screen, "нет кнопки действия")
+        # Текст плашки и подпись кнопки живут в строковых ресурсах: у
+        # конверта, который не открылся, причина может быть любой из трёх,
+        # и обещать «ключ собеседника сменился» больше нельзя.
+        self.assertTrue("stringResource(R.string.chat_peer_key_stale)" in screen, "нет объяснения словами")
+        self.assertTrue("stringResource(R.string.chat_resend_key)" in screen, "нет кнопки действия")
+        labels = (ROOT / "android-app/app/src/main/res/values/strings.xml").read_text()
+        self.assertIn('name="chat_peer_key_stale"', labels)
+        self.assertIn('name="chat_resend_key"', labels)
 
     def test_list_rows_and_search_use_the_premium_surface(self):
         """Владелец 2026-10-07: «в таком стиле нужно переделать всё приложение».
@@ -259,10 +276,20 @@ class ChatStyleTest(unittest.TestCase):
             "import com.vladimir.messenger.ui.components.apuPremiumGloss",
         ):
             self.assertIn(marker, chat_list, "импорт не подтянется сам: " + marker)
-        # Три поверхности этого экрана: избранное, строка группы и поиск.
+        # Три поверхности этого экрана: избранное и строка группы живут в
+        # ChatListScreen, а строка поиска вынесена в общий ApuSearchField —
+        # слой у всех трёх одинаковый, поэтому считаем вместе.
+        search_field = source("components/ApuSearchField.kt")
+        for marker in (
+            ".apuPremiumLift(",
+            ".apuBubbleSurface(",
+            ".apuPremiumThread(",
+            ".apuPremiumGloss(",
+        ):
+            self.assertIn(marker, search_field, "строка поиска без премиального слоя: " + marker)
         self.assertGreaterEqual(chat_list.count(".apuBubbleSurface()"), 2)
-        self.assertGreaterEqual(chat_list.count(".apuPremiumLift("), 3)
-        self.assertGreaterEqual(chat_list.count(".apuPremiumThread("), 3)
+        self.assertGreaterEqual(chat_list.count(".apuPremiumLift(") + search_field.count(".apuPremiumLift("), 3)
+        self.assertGreaterEqual(chat_list.count(".apuPremiumThread(") + search_field.count(".apuPremiumThread("), 3)
         # Приглушённый серый 8A93A2 давал контраст ниже 4.5 на подложке house
         # style — заменён на читаемый HintBubbleMutedColor (5A6472).
         self.assertNotIn("Color(0xFF8A93A2)", chat_list)

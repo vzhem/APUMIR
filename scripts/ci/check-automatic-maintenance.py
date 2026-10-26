@@ -76,9 +76,13 @@ class AutomaticMaintenanceContracts(unittest.TestCase):
 
     def test_download_cleanup_checks_ownership_and_installation_grace(self):
         cleanup = (APP / "data/update/DownloadTrashCleanup.kt").read_text()
-        self.assertEqual(cleanup.count("OWNER_PACKAGE_NAME"), 2)
+        # Чужие файлы из «Загрузок» не трогаем: в selection обязателен фильтр
+        # по владельцу, и это именно наш пакет.
+        self.assertIn("MediaStore.MediaColumns.OWNER_PACKAGE_NAME", cleanup)
+        self.assertIn("context.packageName", cleanup)
         self.assertIn("24L * 60 * 60 * 1000", cleanup)
-        self.assertIn("ids.size < 128", cleanup)
+        # Потолок обхода: за один запуск смотрим не больше 128 строк.
+        self.assertIn("rows.size < 128", cleanup)
 
     def test_compaction_reacts_to_a_grown_file_and_never_fakes_success(self):
         """2026-10-15: файл 1.15 ГБ, 954 МБ переиспользуемых, уплотнений ноль.

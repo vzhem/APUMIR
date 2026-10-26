@@ -73,7 +73,9 @@ class MqttLinkTextTest {
             "через наш сервер (прямой путь не прошёл)",
             MqttLinkText.parse("MQTT: наш брокер, переход на запасной, ConnAck 1 с назад")?.path,
         )
-        assertEquals("через мост", MqttLinkText.parse("MQTT: SOCKS5 мост, ConnAck 1 с назад")?.path)
+        // Продовый текст уточнили до «SOCKS5-мост»: человек должен видеть,
+        // каким путём идёт связь, а не гадать, что за «мост».
+        assertEquals("через SOCKS5-мост", MqttLinkText.parse("MQTT: SOCKS5 мост, ConnAck 1 с назад")?.path)
         assertNull(MqttLinkText.parse(""))
         assertNull(MqttLinkText.parse("MQTT: , ConnAck 1 с назад"))
         assertEquals("", MqttLinkText.humanize("не строка mqtt"))

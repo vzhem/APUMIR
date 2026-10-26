@@ -39,7 +39,10 @@ class GroupInviteCardSenderTest {
         )
         val card = requireNotNull(GroupInviteCardSender.parseCard(text))
         assertEquals("БВ", card.title)
-        assertEquals(about, card.about)
+        // Карточка разбирается построчно и обрезает пробелы по краям строк
+        // (описание в приглашении — многострочный текст). Сравниваем с
+        // канонической формой, а не с исходной строкой с хвостовым пробелом.
+        assertEquals(about.lines().joinToString("\n") { it.trim() }, card.about)
         assertEquals(false, card.isPublic)
         assertEquals(true, card.needsApproval)
         assertFalse(card.isChannel)

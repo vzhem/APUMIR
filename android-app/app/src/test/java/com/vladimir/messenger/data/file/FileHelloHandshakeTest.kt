@@ -90,8 +90,11 @@ class FileHelloHandshakeTest {
             receiver.onHelloText(senderId, FileTransferWire.encodeHelloBinding(binding)),
         )
         pinner.rejectNext = true
+        // Смена закреплённого ключа нарочно отделена от общего REJECTED:
+        // по ней отправителю показывают «ключ устройства сменился», а не
+        // безликое «отклонено» (см. комментарий у HelloResult).
         assertEquals(
-            FileTransferReceiver.HelloResult.REJECTED,
+            FileTransferReceiver.HelloResult.REJECTED_KEY_CHANGED,
             receiver.onHelloText(senderId, FileTransferWire.encodeHelloBinding(ByteArray(96) { 9 })),
         )
     }

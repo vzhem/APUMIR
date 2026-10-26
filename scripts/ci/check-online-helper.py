@@ -42,7 +42,11 @@ class OnlineHelperWiring(unittest.TestCase):
         workflow = (ROOT / '.github/workflows/build-release.yml').read_text()
         self.assertIn('refusing an APK with stale bindings', workflow)
         self.assertNotIn('git checkout -- "$BIND"', workflow)
-        self.assertIn('OnlineHelperPolicyTest', workflow)
+        # Политика хелпера проверяется полным прогоном JVM-тестов, а не
+        # адресным --tests: адресный шаг отключал 146 классов из 154, и
+        # OnlineHelperPolicyTest мог не попасть в прогон вовсе.
+        self.assertIn(':app:testReleaseUnitTest', workflow)
+        self.assertNotIn('testReleaseUnitTest --tests', workflow)
         self.assertIn('configure_online_helper(', (ROOT / 'rust-core/src/lib.udl').read_text())
 
 if __name__ == '__main__':

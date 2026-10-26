@@ -255,13 +255,14 @@ jobs:
       # классам из XML-отчёта: по ней видно, что именно падает, без выкачки
       # логов (они в песочнице недоступны). Отчёт уходит артефактом.
       #
-      # Падающие тесты, унаследованные от main, помечаются
-      # @Ignore("причина, дата") — честный список известных падений вместо
-      # тишины. Пока такой список не разобран, шаг снимает блокировку
-      # (continue-on-error), но печатает предупреждения.
+      # Шаг блокирующий: 5 падений, которые нашёл первый полный прогон,
+      # разобраны (три устаревших ожидания в тестах и два теста pairing,
+      # полагавшихся на android.util.Base64 — в JVM он заглушка). Если
+      # появятся новые падения, чинить их или помечать
+      # @Ignore("причина, дата, тикет") — честный список известных падений
+      # вместо тишины.
       - name: Run all JVM unit tests
         id: unit_tests
-        continue-on-error: true
         timeout-minutes: 60
         working-directory: ./android-app
         run: |
@@ -322,15 +323,6 @@ jobs:
           ./gradlew :app:assembleRelease --no-daemon > "$RUNNER_TEMP/gradle-release.log" 2>&1
           status=$?
           cat "$RUNNER_TEMP/gradle-release.log"
-          exit "$status"
-
-      - name: Verify story playback and community lists
-        working-directory: ./android-app
-        run: |
-          set +e
-          ./gradlew :app:testReleaseUnitTest --tests 'com.vladimir.messenger.ui.components.StoryPlaybackTest' --tests 'com.vladimir.messenger.ui.components.StoryPublishTest' --tests 'com.vladimir.messenger.ui.components.StoryCameraControlsTest' --tests 'com.vladimir.messenger.ui.screens.groups.CommunityListTest' --tests 'com.vladimir.messenger.data.story.StoryPhotoPartsTest' --tests 'com.vladimir.messenger.data.story.StoryStoreMergeTest' --tests 'com.vladimir.messenger.data.swarm.OnlineHelperPolicyTest' --tests 'com.vladimir.messenger.data.swarm.SwarmContributionStatsTest' --no-daemon >> "$RUNNER_TEMP/gradle-build.log" 2>&1
-          status=$?
-          tail -100 "$RUNNER_TEMP/gradle-build.log"
           exit "$status"
 
       # Сырые логи Actions иногда недоступны через API/сеть. Оставляем хвост

@@ -277,8 +277,15 @@ def declarations(text, top_level_only=False):
     """
     names = set()
     for line in text.split('\n'):
-        if top_level_only and line[:1].isspace():
-            continue
+        if top_level_only:
+            if line[:1].isspace():
+                continue
+            # `private` верхнего уровня видно только внутри своего файла
+            # (в Kotlin это приватность файла), поэтому в общепроектный
+            # индекс такая декларация попадать не должна: иначе одноимённое
+            # имя из чужого файла выглядит разрешённым.
+            if line.lstrip().startswith('private '):
+                continue
         m = DECL_RE.match(line)
         if m:
             names.add(m.group(1))

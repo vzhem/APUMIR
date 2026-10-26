@@ -248,8 +248,14 @@ class SettingsStyleTest(unittest.TestCase):
         for path in ("screens/groups/GroupChatScreen.kt", "screens/channels/ChannelScreen.kt"):
             screen = source(path)
             self.assertIn("ConversationWallpaperDialog(", screen)
-            self.assertIn("GroupRole.isAdminOrOwner", screen)
             self.assertIn("onSetShared = if", screen)
+            # У канала роль подписчика не описывает право менять общую обложку:
+            # там решение живёт в GroupWallpaper.canChange(...), у группы —
+            # по-прежнему через GroupRole.isAdminOrOwner.
+            self.assertTrue(
+                "GroupWallpaper.canChange(" in screen or "GroupRole.isAdminOrOwner" in screen,
+                "не видно проверки права на общую обложку: " + path,
+            )
         chat = source("screens/chat/ChatDetailScreen.kt")
         self.assertIn('scope = "direct:$chatId"', chat)
         self.assertIn("ConversationWallpaperDialog(", chat)
@@ -271,7 +277,9 @@ class SettingsStyleTest(unittest.TestCase):
     def test_preferences_and_account_actions_keep_the_original_handlers(self):
         text = source("screens/settings/SettingsScreen.kt")
         for event in (
-            "ThemeModeHolder.set(context, it)", "WallpaperHolder.set(context, uri.toString())",
+            # Тема выбирается по имени режима: сеттер принимает ThemeMode, а не
+            # сырое значение переключателя (иначе «Системная» уезжала в светлую).
+            "ThemeModeHolder.set(context, mode)", "WallpaperHolder.set(context, uri.toString())",
             "viewModel::onProxyTunnelToggle", "viewModel::onRestartEngine", "SwarmSettings.set(context, mode)",
             "StorageSettings", "showSyncDialog = true", "ProfileSyncDialog(onDismiss", "viewModel.logout()",
             "onIdentityBackupClick", "onProfileBackupClick", "onMtProxyClick", "onPeerRatingClick",
@@ -434,7 +442,10 @@ class SettingsStyleTest(unittest.TestCase):
         # звездой, а не текст «VIP» вразнобой по экранам.
         badge = source("components/ApuVipBadge.kt")
         self.assertIn("fun ApuVipBadge(", badge)
-        self.assertIn("Icons.Default.Star", badge)
+        # Владелец 2026-10-21 (скрин): «вместо звёздочки нужно чтобы было
+        # написано VIP» — знак остался плашкой с градиентом, но без иконки.
+        self.assertIn('label: String = "VIP"', badge)
+        self.assertNotIn("Icons.Default.Star", badge)
         self.assertIn("Brush.linearGradient(", badge)
 
         # Медаль VIP отличается от обычной, но остаётся той же наградой.
