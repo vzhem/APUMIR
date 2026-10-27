@@ -53,6 +53,31 @@ def release_block(text):
     return text[start:]
 
 
+def check_gradle_imports(problems):
+    """`java.util.X` в Kotlin DSL не резолвится: `java` — это расширение Gradle.
+
+    Прогон 2026-10-27 упал именно на этом (`Unresolved reference 'util'` в
+    build.gradle.kts), причём локально ошибку не видно — нужен Gradle. Классы
+    импортируются в шапке скрипта, поэтому в теле `java.util.` быть не должно.
+    """
+    if not GRADLE.is_file():
+        return
+    text = GRADLE.read_text(encoding="utf-8")
+    offenders = []
+    for number, line in enumerate(text.split("\n"), 1):
+        code = line.split("//", 1)[0]
+        if code.lstrip().startswith("import "):
+            continue
+        if "java.util." in code:
+            offenders.append(number)
+    if offenders:
+        problems.append(
+            "build.gradle.kts: `java.util.` в выражениях скрипта не резолвится "
+            "(`java` — расширение Gradle, а не пакет): строки "
+            + ", ".join(map(str, offenders)) + ". Нужен import в шапке файла."
+        )
+
+
 def check_gradle(problems):
     if not GRADLE.is_file():
         problems.append(f"{GRADLE}: файл не найден")
@@ -172,6 +197,7 @@ def check_workflow(problems, updater_names):
 
 def main():
     problems = []
+    check_gradle_imports(problems)
     check_gradle(problems)
     names = check_updater_names(problems)
     check_workflow(problems, names)

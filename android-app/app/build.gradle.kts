@@ -1,3 +1,6 @@
+import java.util.Locale
+import java.util.zip.ZipFile
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -309,7 +312,7 @@ tasks.matching { it.name == "assembleRelease" }.configureEach {
         runCatching {
             val perAbi = sortedMapOf<String, Long>()
             var other = 0L
-            java.util.zip.ZipFile(apk).use { zip ->
+            ZipFile(apk).use { zip ->
                 for (entry in zip.entries()) {
                     val abi = Regex("^lib/([^/]+)/").find(entry.name)?.groupValues?.get(1)
                     if (abi != null) {
@@ -319,7 +322,7 @@ tasks.matching { it.name == "assembleRelease" }.configureEach {
                     }
                 }
             }
-            val mb = { bytes: Long -> String.format(java.util.Locale.ROOT, "%.1f МБ", bytes / 1048576.0) }
+            val mb = { bytes: Long -> String.format(Locale.ROOT, "%.1f МБ", bytes / 1048576.0) }
             logger.lifecycle("[apu] APK ${apk.name}: ${mb(apk.length())}")
             perAbi.forEach { (abi, bytes) -> logger.lifecycle("[apu]   lib/$abi: ${mb(bytes)}") }
             logger.lifecycle("[apu]   остальное (dex, ресурсы, assets): ${mb(other)}")
