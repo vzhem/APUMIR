@@ -26,7 +26,7 @@
 | P1-1 | Перенос профиля и зеркало по Wi-Fi не работали с Android 9: `HttpURLConnection` на `http://` блокируется политикой cleartext. Сделан `data/net/LanHttpGet.kt` — HTTP/1.1 поверх сокета, только к локальным адресам; глобальный `usesCleartextTraffic` НЕ включался | код в ветке; нужен тест на двух телефонах |
 | P1-3 | `Cargo.lock` убран из `.gitignore`, версия Rust закреплена: `rust-toolchain.toml` = 1.99.1 и те же `toolchain:` во всех четырёх workflow. Первый lock создаёт `sync-bindings.yml`; `unit-tests.yml` проверяет, что lock не устарел | код в ветке; нужен прогон `sync-bindings` |
 | P1-2 | `rust-core/Cargo.toml`: релизный профиль переведён с `panic = "abort"` на `unwind` — паника в ядре теперь возвращается в Kotlin как `InternalException("Rust panic")`, а не убивает процесс | код в ветке; контракт `check-rust-pinning.py` |
-| P1-4 | Размер APK: добавлены `proguard-rules.pro` (keep для uniffi/JNA/Vosk/ML Kit/osmdroid) и флаг `-Papu.r8=true`; по умолчанию сокращение ВЫКЛЮЧЕНО, пока не проверено установкой на телефон. Из APK убраны служебные `META-INF/LICENSE*`/`NOTICE*`/`DEPENDENCIES` | код в ветке; включение ждёт проверки на устройстве |
+| P1-4 | Размер APK: `proguard-rules.pro` (keep для uniffi/JNA/Vosk/ML Kit/osmdroid) и флаг `-Papu.r8=true` (по умолчанию ВЫКЛЮЧЕНО, ждёт проверки на телефоне). Из APK убраны служебные `META-INF/LICENSE*`/`NOTICE*`/`DEPENDENCIES`. **Решение по раздаче принято: универсальный APK, без ABI-сплитов и AAB** — в пакете роя нет ABI, а установленные версии ищут `APU-<версия>.apk`/`app-release.apk`, то есть сплиты сломали бы автообновление. Эмуляторная `x86_64` убрана из релиза (флаг `-Papu.emulatorAbi=true`), `assembleRelease` печатает разбор размера по ABI, контракт `check-release-abi.py` | код в ветке; включение R8 ждёт проверки на устройстве |
 | P2 4.1 | God-файлы: `check-god-files.py` + `god-files-baseline.json` — потолок строк, который можно только опускать; правило в `AGENTS.md`, проверка в `ci-core-check`. Первый шов: модели раздачи вынесены из `ApkSeeder.kt` в `ApkSeederModels.kt` (1858 → 1786 строк) | влито в `main` (PR #59); храповик проверен на росте файла |
 | P2 4.4 | Локализация: `check-hardcoded-strings.py` с пофайловым храповиком. Переведены целиком экраны видеоистории (`StoryVideoCamera` 43 → 0, `StoryVideoComposer`, `StoryVideoEditor`, `StoryVideoPlayer`), `GroupAdminScreen`, `CallLocalPreview`, пользовательские сообщения `ChatListViewModel`/`GroupChatViewModel`/`ChannelViewModel`/`ChatDetailViewModel` и заголовки сохранённых файлов в `SavedViewModel` | влито в `main` (PR #61); осталось 338 литералов в 15 файлах, из них 299 — данные эмодзи-каталога. Английский перевод полный: `values-en` = 2221 ключ, `missing_en` = 0; набор подстановок в переводе проверяется контрактом |
 | P2 4.2 | `catch` не молчит: `check-silent-catch.py` (пустой `catch` без комментария — нарушение всегда; широкий `catch` без отчёта — храповик). 26 пустых `catch` разобраны, маршрутизация входящих переведена на `routePacket` — 34 места, отказ роутера идёт в лог и в счётчик `ROUTER_FAILED` (виден в диагностике, закреплён тестом). Заодно исправлено проглатывание `CancellationException` через `runCatching` | влито в `main` (PR #60), оба прогона CI зелёные; храповик 138 в 86 файлах |
@@ -56,9 +56,9 @@
 
 Текущий стабильный выпуск: `v11.74.453` — Latest, публичный и стабильный. Новый релиз/тег/PR создаётся только после отдельного разрешения владельца и предварительного показа точного публичного текста.
 
-Остаток P2 (потоковое чтение, карта `docs/`, храповики god-файлов и локализации) — в PR #59:
-все три проверки зелёные (`Core compile check`, `unit-tests`, `Build Release APK` ветки).
-Владелец решил пока не вливать: PR открыт и ждёт его решения. Тег не ставился.
+Закрытые волны P2 (god-файлы, локализация, `catch` не молчит, потоковое чтение,
+карта `docs/`) влиты в `main` 2026-10-26: PR #59, #60, #61, #62; Android Lint
+как шаг CI — PR #63 (воркфлоу ставит владелец: `scripts\install-ci-lint.ps1`).
 
 ## Задачи и статус (на 2026-10-24)
 
