@@ -10,12 +10,13 @@ param(
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-ci-lint.ps1
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-ci-lint.ps1 -DryRun
 #
-# Why a separate script: the GitHub App behind the Arena sandbox has no
-# `workflows` permission, so a file under .github/workflows cannot be pushed
-# by the agent (same story as build-release.yml, which the owner copied by
-# hand in 2026-09-09). Keeping the workflow in scripts\ci\ and installing it
-# from the clone avoids hand-copying YAML through the browser: indentation in
-# YAML is unforgiving.
+# Why a separate script even though the app CAN push workflows now (2026-10-27):
+# the source of truth stays in scripts\ci\, and the installer re-creates
+# .github/workflows/lint-ci.yml from it in one command. Editing YAML by hand
+# through the browser is what this avoids - indentation in YAML is unforgiving.
+# (Before 2026-10-27 the app had no `workflows` permission at all, and this was
+# the only way to install the file; that limitation is gone, the workflow is
+# installed.)
 #
 # The script never touches the working copy that is checked out. It fetches
 # the branch, opens a temporary git worktree for it (works even if the clone
