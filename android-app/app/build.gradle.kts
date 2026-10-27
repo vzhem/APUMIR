@@ -1,3 +1,6 @@
+import java.util.Locale
+import java.util.zip.ZipFile
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -111,10 +114,6 @@ android {
         versionName = releaseVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-
-        ndk {
-            abiFilters += listOf("x86_64", "arm64-v8a", "armeabi-v7a")
-        }
     }
 
     signingConfigs {
@@ -126,9 +125,28 @@ android {
         }
     }
 
+    // ---- какие ABI попадают в APK -------------------------------------------
+    // Аудит 2026-10-26, P1-4 (размер APK). Каждая нативная библиотека лежит в
+    // APK трижды — по копии на ABI, и именно это, а не dex, делает файл
+    // 232 МБ. x86_64 нужен ТОЛЬКО эмулятору: телефонов с x86 в обиходе нет, а
+    // эмулятор разработчика собирает debug. Поэтому в релиз идут две ARM-копии,
+    // а эмуляторная — по флагу:
+    //   ./gradlew :app:assembleRelease -Papu.emulatorAbi=true
+    //
+    // Почему не ABI-сплиты (отдельный APK на каждую ABI) и не AAB — см.
+    // docs/AUDIT_2026-10-26.md, P1-4 «Почему не сплиты»: приложение
+    // распространяется не через Google Play, а файлом с GitHub и роем
+    // APK-раздачи. В пакете роя нет поля ABI (`ApkSeederModels.kt`: версия,
+    // sha256, размер), поэтому сосед с другой ABI скачал бы неставимый APK.
+    val emulatorAbi = providers.gradleProperty("apu.emulatorAbi").orNull?.toBoolean() == true
+    val armAbis = listOf("arm64-v8a", "armeabi-v7a")
+
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("release")
+            ndk {
+                abiFilters += if (emulatorAbi) armAbis + "x86_64" else armAbis
+            }
             // P1-4 аудита: APK вырос с 96 до 229 МБ. R8 + вырезание ресурсов
             // дают обычно 25–40 %, но включать их вслепую нельзя: ядро
             // (uniffi → JNA), Vosk и ML Kit общаются через рефлексию, и
@@ -147,6 +165,10 @@ android {
         }
         debug {
             isMinifyEnabled = false
+            // Debug остаётся с эмулятором: там же гоняются UI-проверки на устройстве.
+            ndk {
+                abiFilters += armAbis + "x86_64"
+            }
         }
     }
 
@@ -270,3 +292,42 @@ dependencies {
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
 
+// ---- состав релизного APK по ABI -------------------------------------------
+// Аудит 2026-10-26, P1-4: размер APK — первое, что видит человек на странице
+// релиза, но узнать его состав можно было только скачав файл (232 МБ) и
+// распаковав. Здесь после сборки в лог печатается таблица: сколько занимает
+// каждая ABI и сколько — всё остальное. Так видно и результат правок
+// (`-Papu.emulatorAbi`), и то, какая библиотека раздувает архив.
+// Ошибка разбора не должна валить релиз: лог не важнее APK, но молчать о ней
+// нельзя (AGENTS.md, п. 10) — печатаем причину.
+tasks.matching { it.name == "assembleRelease" }.configureEach {
+    doLast {
+        val dir = layout.buildDirectory.dir("outputs/apk/release").get().asFile
+        val apk = dir.listFiles()?.filter { it.isFile && it.name.endsWith(".apk") }
+            ?.maxByOrNull { it.length() }
+        if (apk == null) {
+            logger.lifecycle("[apu] APK в ${dir.path} не найден — состав не печатаю")
+            return@doLast
+        }
+        runCatching {
+            val perAbi = sortedMapOf<String, Long>()
+            var other = 0L
+            ZipFile(apk).use { zip ->
+                for (entry in zip.entries()) {
+                    val abi = Regex("^lib/([^/]+)/").find(entry.name)?.groupValues?.get(1)
+                    if (abi != null) {
+                        perAbi[abi] = (perAbi[abi] ?: 0L) + entry.compressedSize
+                    } else {
+                        other += entry.compressedSize
+                    }
+                }
+            }
+            val mb = { bytes: Long -> String.format(Locale.ROOT, "%.1f МБ", bytes / 1048576.0) }
+            logger.lifecycle("[apu] APK ${apk.name}: ${mb(apk.length())}")
+            perAbi.forEach { (abi, bytes) -> logger.lifecycle("[apu]   lib/$abi: ${mb(bytes)}") }
+            logger.lifecycle("[apu]   остальное (dex, ресурсы, assets): ${mb(other)}")
+        }.onFailure { failure ->
+            logger.lifecycle("[apu] состав APK не разобран: ${failure.javaClass.simpleName}: ${failure.message}")
+        }
+    }
+}
