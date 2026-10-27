@@ -227,6 +227,21 @@ class GroupRepository(
      * Здесь только проводка: что читать/писать, кого звать и как рассылать.
      * Ленивая, потому что строится из методов этого класса.
      */
+    /** Медленный режим и SOS: те же правила, что были здесь, но в своём файле. */
+    private val modes: GroupModes by lazy {
+        GroupModes(
+            groupDao = groupDao,
+            messageDao = messageDao,
+            clock = clock,
+            nodeId = { myId() },
+            backgroundScope = backgroundScope,
+            deliver = { groupId, envelope, recipients -> delivery.deliver(groupId, envelope, recipients) },
+            recipients = { groupId, me -> allRecipients(groupId, me) },
+            memberMask = { effectiveMemberMask(it) },
+            sendMessage = { groupId, topicId, text -> sendMessage(groupId, topicId, text, sos = true) },
+        )
+    }
+
     private val polls: GroupPolls by lazy {
         GroupPolls(
             pollDao = pollDao,
@@ -1473,18 +1488,12 @@ class GroupRepository(
      * сообщением (0 - можно писать). Отсчёт от моего предыдущего сообщения в
      * группе: тема не важна, иначе режим обходили переходом в другую тему.
      */
-    suspend fun slowModeWaitMs(groupId: String, me: String): Long {
-        val group = groupDao.getGroupById(groupId) ?: return 0L
-        val member = groupDao.getMember(groupId, me) ?: return 0L
-        if (GroupRole.isAdminOrOwner(member.role)) return 0L
-        return slowModeWaitMs(group, me, clock())
-    }
+    // ── медленный режим и SOS: правила живут в GroupModes ──────────────────
 
-    private suspend fun slowModeWaitMs(group: GroupEntity, me: String, now: Long): Long {
-        if (group.slowModeSeconds <= 0) return 0L
-        val last = messageDao.lastOutgoingAt(group.id, me, now)
-        return GroupSlowMode.remainingMs(group.slowModeSeconds, last, now)
-    }
+    suspend fun slowModeWaitMs(groupId: String, me: String): Long = modes.remainingMs(groupId, me)
+
+    private suspend fun slowModeWaitMs(group: GroupEntity, me: String, now: Long): Long =
+        modes.remainingMs(group, me, now)
 
     /** Only authorized shared backgrounds enter this bounded fragment assembler. */
     private val wallpaperParts = GroupWallpaperParts()
@@ -1563,154 +1572,28 @@ class GroupRepository(
      * сообщениями участника, 0 - выключен. Менять вправе владелец и
      * администратор с правом «Изменять информацию» - как название и описание.
      */
-    suspend fun setSlowMode(groupId: String, seconds: Int): Result<Unit> {
-        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
-        val group = groupDao.getGroupById(groupId)
-            ?: return Result.failure(IllegalStateException("Группа не найдена"))
-        val member = groupDao.getMember(groupId, me)
-            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
-        if (!GroupPermissions.canChangeInfo(member.role, member.permissions, effectiveMemberMask(group))) {
-            return Result.failure(SecurityException("Менять настройки группы вправе администратор"))
-        }
-        val safe = seconds.coerceIn(0, GroupWire.SLOW_MODE_MAX_SECONDS)
-        if (safe == group.slowModeSeconds) return Result.success(Unit)
-        groupDao.setSlowMode(groupId, safe)
-        // Режим должен действовать на всех, поэтому уходит конвертом: у
-        // вступившего позже он появится с первым же изменением (или при
-        // одобрении заявки - см. decideJoinRequest).
-        backgroundScope.launch {
-            runCatching {
-                delivery.deliver(groupId, GroupWire.buildSlowMode(groupId, safe), allRecipients(groupId, me))
-            }.onFailure { Log.w(TAG, "slow mode fanout failed: ${it.message}") }
-        }
-        Log.i(TAG, "slow mode group=$groupId seconds=$safe by=$me")
-        return Result.success(Unit)
-    }
+    suspend fun setSlowMode(groupId: String, seconds: Int): Result<Unit> =
+        modes.setSlowMode(groupId, seconds)
 
     /**
      * Настройки красной кнопки SOS: показывать ли кнопку, сколько тревожных
      * сообщений уходит за одно нажатие (3..5) и кто вправе нажимать.
-     * Менять вправе те же, кто меняет информацию о группе (как медленный
-     * режим): настройка одна на всех, поэтому уходит конвертом всей группе.
      */
     suspend fun setSosSettings(
         groupId: String,
         enabled: Boolean,
         count: Int,
         pressRole: String,
-    ): Result<Unit> {
-        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
-        val group = groupDao.getGroupById(groupId)
-            ?: return Result.failure(IllegalStateException("Группа не найдена"))
-        val member = groupDao.getMember(groupId, me)
-            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
-        if (!GroupPermissions.canChangeInfo(member.role, member.permissions, effectiveMemberMask(group))) {
-            return Result.failure(SecurityException("Менять настройки группы вправе администратор"))
-        }
-        val safeCount = GroupSos.clampCount(count)
-        val safeRole = GroupSos.normalizePressRole(pressRole)
-        if (enabled == group.sosEnabled && safeCount == group.sosMessageCount &&
-            safeRole == GroupSos.normalizePressRole(group.sosPressRole)
-        ) {
-            return Result.success(Unit)
-        }
-        groupDao.setSosSettings(groupId, enabled, safeCount, safeRole)
-        backgroundScope.launch {
-            runCatching {
-                delivery.deliver(
-                    groupId,
-                    GroupWire.buildSosSettings(groupId, enabled, safeCount, safeRole),
-                    allRecipients(groupId, me),
-                )
-            }.onFailure { Log.w(TAG, "sos settings fanout failed: ${it.message}") }
-        }
-        Log.i(TAG, "sos settings group=$groupId enabled=$enabled count=$safeCount role=$safeRole by=$me")
-        return Result.success(Unit)
-    }
+    ): Result<Unit> = modes.setSosSettings(groupId, enabled, count, pressRole)
 
-    /**
-     * Нажатие красной кнопки SOS: за один раз уходит [GroupEntity.sosMessageCount]
-     * тревожных сообщений подряд - их видят и слышат все участники, даже если
-     * телефон спит или группа у них без звука (см. показ уведомления).
-     *
-     * Защита от повторного нажатия - не меньше [GroupSos.COOLDOWN_MS]:
-     * отметка ставится ДО отправки, чтобы и неудавшаяся попытка, и закрытие
-     * приложения на середине не дали нажать снова сразу.
-     *
-     * Тревога не подчиняется тихому времени, медленному режиму, закрытой
-     * теме и запрету обычных сообщений: ситуация чрезвычайная, а кто вправе
-     * нажимать, решает отдельная настройка [GroupEntity.sosPressRole].
-     */
-    suspend fun sendSos(groupId: String, topicId: String): Result<Int> {
-        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
-        val group = groupDao.getGroupById(groupId)
-            ?: return Result.failure(IllegalStateException("Группа не найдена"))
-        if (group.isChannel) {
-            return Result.failure(IllegalStateException("В канале кнопки SOS нет"))
-        }
-        val member = groupDao.getMember(groupId, me)
-            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
-        if (member.isBanned) return Result.failure(SecurityException("Вы ограничены в этой группе"))
-        if (!group.sosEnabled) {
-            return Result.failure(IllegalStateException("Кнопка SOS скрыта настройками группы"))
-        }
-        if (!GroupSos.canPress(member.role, group.sosPressRole, member.isBanned)) {
-            return Result.failure(SecurityException("Нажимать SOS в этой группе вам не разрешено"))
-        }
-        val now = clock()
-        val waitMs = GroupSos.cooldownRemainingMs(group.sosLastSentAtMs, now)
-        if (waitMs > 0L) {
-            val seconds = (waitMs + 999L) / 1000L
-            return Result.failure(SecurityException("SOS уже отправлен: подождите $seconds с"))
-        }
-        groupDao.setSosLastSentAt(groupId, now)
-        val count = GroupSos.clampCount(group.sosMessageCount)
-        val text = com.vladimir.messenger.util.SosMessage.wrap(
-            GroupSos.effectiveText(group.sosText),
-        )
-        var sent = 0
-        repeat(count) {
-            sendMessage(groupId, topicId, text, sos = true)
-                .onSuccess { sent++ }
-                .onFailure { e ->
-                    return if (sent > 0) Result.success(sent) else Result.failure(e)
-                }
-        }
-        Log.i(TAG, "sos sent group=$groupId topic=$topicId count=$sent by=$me")
-        return Result.success(sent)
-    }
+    /** Нажатие красной кнопки SOS: уходит [GroupEntity.sosMessageCount] тревог подряд. */
+    suspend fun sendSos(groupId: String, topicId: String): Result<Int> = modes.sendSos(groupId, topicId)
 
-    /**
-     * Свой текст тревожного сообщения: [text] из поля в настройках группы
-     * (пусто - вернуть текст по умолчанию). Менять вправе те же, кто меняет
-     * информацию о группе; текст общий на всех, поэтому уходит конвертом.
-     */
-    suspend fun setSosText(groupId: String, text: String): Result<Unit> {
-        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
-        val group = groupDao.getGroupById(groupId)
-            ?: return Result.failure(IllegalStateException("Группа не найдена"))
-        val member = groupDao.getMember(groupId, me)
-            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
-        if (!GroupPermissions.canChangeInfo(member.role, member.permissions, effectiveMemberMask(group))) {
-            return Result.failure(SecurityException("Менять настройки группы вправе администратор"))
-        }
-        val safe = text.trim().take(GroupSos.MAX_TEXT_CHARS)
-        if (safe == group.sosText) return Result.success(Unit)
-        groupDao.setSosText(groupId, safe)
-        backgroundScope.launch {
-            runCatching {
-                delivery.deliver(groupId, GroupWire.buildSosText(groupId, safe), allRecipients(groupId, me))
-            }.onFailure { Log.w(TAG, "sos text fanout failed: ${it.message}") }
-        }
-        Log.i(TAG, "sos text group=$groupId chars=${safe.length} by=$me")
-        return Result.success(Unit)
-    }
+    /** Свой текст тревожного сообщения; пусто - вернуть текст по умолчанию. */
+    suspend fun setSosText(groupId: String, text: String): Result<Unit> = modes.setSosText(groupId, text)
 
     /** Сколько миллисекунд этому телефону ещё нельзя нажимать SOS в группе. */
-    suspend fun sosCooldownRemainingMs(groupId: String): Long {
-        val group = groupDao.getGroupById(groupId) ?: return 0L
-        return GroupSos.cooldownRemainingMs(group.sosLastSentAtMs, clock())
-    }
+    suspend fun sosCooldownRemainingMs(groupId: String): Long = modes.sosCooldownRemainingMs(groupId)
 
     /** Проголосовать (или отозвать голос): [choices] - номера вариантов, пусто - отозвать. */
     suspend fun votePoll(groupId: String, pollId: String, choices: List<Int>): Result<Unit> =
@@ -1762,65 +1645,14 @@ class GroupRepository(
     private suspend fun handlePollClose(senderId: String, packet: GroupWire.Packet.PollClose) =
         polls.handlePollClose(senderId, packet)
 
-    private suspend fun handleSlowMode(senderId: String, packet: GroupWire.Packet.SlowMode) {
-        val me = myId().orEmpty()
-        if (me.isBlank()) return
-        val group = groupDao.getGroupById(packet.groupId) ?: return
-        if (groupDao.getMember(packet.groupId, me) == null) return
-        // Верим владельцу и администраторам с правом менять информацию -
-        // ровно тем, кто вправе режим включать.
-        if (senderId != group.ownerId) {
-            val sender = groupDao.getMember(packet.groupId, senderId) ?: return
-            if (!GroupRole.isAdminOrOwner(sender.role)) return
-            if (!GroupPermissions.canChangeInfo(sender.role, sender.permissions, effectiveMemberMask(group))) return
-        }
-        if (packet.seconds == group.slowModeSeconds) return
-        groupDao.setSlowMode(packet.groupId, packet.seconds)
-        Log.i(TAG, "slow mode applied group=${packet.groupId} seconds=${packet.seconds} from=$senderId")
-    }
+    private suspend fun handleSlowMode(senderId: String, packet: GroupWire.Packet.SlowMode) =
+        modes.handleSlowMode(senderId, packet)
 
-    private suspend fun handleSosSettings(senderId: String, packet: GroupWire.Packet.SosSettings) {
-        val me = myId().orEmpty()
-        if (me.isBlank()) return
-        val group = groupDao.getGroupById(packet.groupId) ?: return
-        if (groupDao.getMember(packet.groupId, me) == null) return
-        // Верим владельцу и администраторам с правом менять информацию -
-        // ровно тем, кто вправе кнопку настраивать.
-        if (senderId != group.ownerId) {
-            val sender = groupDao.getMember(packet.groupId, senderId) ?: return
-            if (!GroupRole.isAdminOrOwner(sender.role)) return
-            if (!GroupPermissions.canChangeInfo(sender.role, sender.permissions, effectiveMemberMask(group))) return
-        }
-        if (packet.enabled == group.sosEnabled &&
-            packet.count == GroupSos.clampCount(group.sosMessageCount) &&
-            packet.pressRole == GroupSos.normalizePressRole(group.sosPressRole)
-        ) {
-            return
-        }
-        groupDao.setSosSettings(packet.groupId, packet.enabled, packet.count, packet.pressRole)
-        Log.i(
-            TAG,
-            "sos settings applied group=${packet.groupId} enabled=${packet.enabled} " +
-                "count=${packet.count} role=${packet.pressRole} from=$senderId",
-        )
-    }
+    private suspend fun handleSosSettings(senderId: String, packet: GroupWire.Packet.SosSettings) =
+        modes.handleSosSettings(senderId, packet)
 
-    private suspend fun handleSosText(senderId: String, packet: GroupWire.Packet.SosText) {
-        val me = myId().orEmpty()
-        if (me.isBlank()) return
-        val group = groupDao.getGroupById(packet.groupId) ?: return
-        if (groupDao.getMember(packet.groupId, me) == null) return
-        // Верим владельцу и администраторам с правом менять информацию -
-        // ровно тем, кто вправе текст тревоги менять.
-        if (senderId != group.ownerId) {
-            val sender = groupDao.getMember(packet.groupId, senderId) ?: return
-            if (!GroupRole.isAdminOrOwner(sender.role)) return
-            if (!GroupPermissions.canChangeInfo(sender.role, sender.permissions, effectiveMemberMask(group))) return
-        }
-        if (packet.text == group.sosText) return
-        groupDao.setSosText(packet.groupId, packet.text)
-        Log.i(TAG, "sos text applied group=${packet.groupId} chars=${packet.text.length} from=$senderId")
-    }
+    private suspend fun handleSosText(senderId: String, packet: GroupWire.Packet.SosText) =
+        modes.handleSosText(senderId, packet)
 
     // ── Сообщения обычных групп роем (этап 5) ────────────────────────────────
     //
