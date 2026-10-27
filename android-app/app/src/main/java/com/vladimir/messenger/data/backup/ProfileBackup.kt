@@ -473,13 +473,13 @@ class ProfileBackup @Inject constructor(
             val fx = File(root, BackupLayout.SECRET_FILE_EXCHANGE)
             // Секреты — это десятки байт; лимит здесь только чтобы испорченный
             // или чужой файл не читался в память целиком (аудит, п. 4.5).
-            val secret = if (fx.isFile) {
-                runCatching { fx.readBytesAtMost(MAX_SECRET_BYTES) }.getOrNull()?.also {
-                    if (it.isEmpty()) Log.w(TAG, "restore: file exchange secret is empty, binding dropped")
-                }
-            } else {
-                null
-            }
+            //
+            // Ошибку чтения НЕ глотаем: копия с секретом, который не читается,
+            // испорчена, и применить её значит остаться без ключа личности -
+            // приложение потом честно скажет «ключ этого телефона не читается»,
+            // а данные уже заменены. Лучше отказать до замены и оставить как
+            // было (см. «ключ не читается» после такого восстановления).
+            val secret = if (fx.isFile) readSecret(fx, "file exchange") else null
             if (secret != null) {
                 val ok = FileExchangeKeyStore.importSecret(app, secret)
                 secret.fill(0)
@@ -492,13 +492,9 @@ class ProfileBackup @Inject constructor(
                 app.getSharedPreferences("apu_file_exchange", Context.MODE_PRIVATE).edit().clear().commit()
             }
             val seedFile = File(root, BackupLayout.SECRET_SIGNING_SEED)
-            val seed = if (seedFile.isFile) {
-                runCatching { seedFile.readBytesAtMost(MAX_SECRET_BYTES) }.getOrNull()?.also {
-                    if (it.isEmpty()) Log.w(TAG, "restore: signing seed is empty, binding dropped")
-                }
-            } else {
-                null
-            }
+            // Та же причина, что у секрета обмена: без seed личность не
+            // поднимется, и восстановление даст профиль без ключа.
+            val seed = if (seedFile.isFile) readSecret(seedFile, "signing seed") else null
             if (seed != null) {
                 val ok = IdentitySigningKeyStore.importSeed(app, seed)
                 seed.fill(0)
@@ -507,6 +503,10 @@ class ProfileBackup @Inject constructor(
                     Log.w(TAG, "restore: signing seed not imported, binding dropped")
                 }
             } else {
+                // Копия без seed: привязку не переносим (она от другого
+                // телефона), но причину пишем - иначе на экране останется
+                // только «ключ не читается», и виновника не найти.
+                Log.w(TAG, "restore: backup has no signing seed, identity binding cleared")
                 app.getSharedPreferences("apu_identity_signing", Context.MODE_PRIVATE).edit().clear().commit()
             }
 
@@ -534,6 +534,23 @@ class ProfileBackup @Inject constructor(
             //    подсунутым из чужого Auto Backup и стёрли на этом же запуске.
             DeviceIdentityMarker.create(app)
             Log.i(TAG, "restore applied: node=${manifest.nodeId.take(12)}… from app ${manifest.appVersionName}")
+        }
+
+        /**
+         * Прочитать файл секрета из подготовленной копии.
+         *
+         * Пустой файл и ошибка чтения - исключение, а не «секрета нет»: тогда
+         * восстановление прервётся до замены данных (см. вызов),
+         * [applyStagedIfAny] вернёт false, и телефон останется как был.
+         */
+        private fun readSecret(file: File, what: String): ByteArray {
+            val bytes = try {
+                file.readBytesAtMost(MAX_SECRET_BYTES)
+            } catch (e: Exception) {
+                throw IOException("restore: $what secret unreadable", e)
+            }
+            if (bytes.isEmpty()) throw IOException("restore: $what secret is empty")
+            return bytes
         }
 
         /**
