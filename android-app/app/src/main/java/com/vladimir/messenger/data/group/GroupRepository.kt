@@ -42,8 +42,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -223,6 +221,24 @@ class GroupRepository(
 
     /** Раунд 137: что уже ретранслировали (и когда) - без повторного шторма. */
     private val deletionRelayedAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    /**
+     * Опросы (р250): вынесены в [GroupPolls] — аудит 2026-10-26, п. 4.1.
+     * Здесь только проводка: что читать/писать, кого звать и как рассылать.
+     * Ленивая, потому что строится из методов этого класса.
+     */
+    private val polls: GroupPolls by lazy {
+        GroupPolls(
+            pollDao = pollDao,
+            groupDao = groupDao,
+            clock = clock,
+            nodeId = { myId() },
+            backgroundScope = backgroundScope,
+            deliver = { groupId, envelope, recipients -> delivery.deliver(groupId, envelope, recipients) },
+            recipients = { groupId, me -> allRecipients(groupId, me) },
+            memberMask = { effectiveMemberMask(it) },
+        )
+    }
 
     /**
      * Мой идентификатор, спрошенный у ядра ОДИН раз.
@@ -1443,15 +1459,14 @@ class GroupRepository(
         val text: String,
     )
 
+    // ── опросы: правила живут в GroupPolls, здесь только вход ───────────────
+
     /** Опрос всегда привязан к сообщению: id опроса выводится из id сообщения. */
-    private fun pollIdOf(messageId: String): String = "p:$messageId"
+    private fun pollIdOf(messageId: String): String = polls.pollIdOf(messageId)
 
     /** Записать опрос; повторная доставка того же опроса итоги не сбрасывает. */
-    private suspend fun storePoll(poll: com.vladimir.messenger.data.local.entity.GroupPollEntity) {
-        val dao = pollDao ?: return
-        if (dao.getPoll(poll.pollId) != null) return
-        dao.insertPoll(poll)
-    }
+    private suspend fun storePoll(poll: com.vladimir.messenger.data.local.entity.GroupPollEntity) =
+        polls.storePoll(poll)
 
     /**
      * Сколько миллисекунд ЭТОМУ участнику осталось ждать перед следующим
@@ -1698,119 +1713,15 @@ class GroupRepository(
     }
 
     /** Проголосовать (или отозвать голос): [choices] - номера вариантов, пусто - отозвать. */
-    suspend fun votePoll(groupId: String, pollId: String, choices: List<Int>): Result<Unit> {
-        val dao = pollDao ?: return Result.failure(IllegalStateException("Опросы недоступны"))
-        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
-        val group = groupDao.getGroupById(groupId)
-            ?: return Result.failure(IllegalStateException("Группа не найдена"))
-        val member = groupDao.getMember(groupId, me)
-            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
-        if (member.isBanned) return Result.failure(SecurityException("Вы ограничены в этой группе"))
-        val poll = dao.getPoll(pollId)
-            ?: return Result.failure(IllegalStateException("Опрос не найден"))
-        if (poll.groupId != groupId) return Result.failure(IllegalStateException("Опрос из другой группы"))
-        if (poll.closed) return Result.failure(SecurityException("Опрос закрыт"))
-        val variants = GroupWire.decodeOptions(poll.optionsCsv)
-        val clean = choices.filter { it in variants.indices }.distinct()
-        if (!poll.multiChoice && clean.size > 1) {
-            return Result.failure(IllegalArgumentException("В этом опросе можно выбрать только один вариант"))
-        }
-        dao.putVote(
-            com.vladimir.messenger.data.local.entity.GroupPollVoteEntity(
-                pollId = pollId,
-                voterId = me,
-                voterName = member.displayName,
-                choicesCsv = clean.joinToString(","),
-                atMs = clock(),
-            ),
-        )
-        backgroundScope.launch {
-            runCatching {
-                delivery.deliver(
-                    groupId,
-                    GroupWire.buildPollVote(groupId, pollId, me, member.displayName, clean),
-                    allRecipients(groupId, me),
-                )
-            }.onFailure { Log.w(TAG, "poll vote fanout failed: ${it.message}") }
-        }
-        return Result.success(Unit)
-    }
+    suspend fun votePoll(groupId: String, pollId: String, choices: List<Int>): Result<Unit> =
+        polls.votePoll(groupId, pollId, choices)
 
     /** Закрыть опрос: автор, владелец или администратор. */
-    suspend fun closePoll(groupId: String, pollId: String): Result<Unit> {
-        val dao = pollDao ?: return Result.failure(IllegalStateException("Опросы недоступны"))
-        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
-        val group = groupDao.getGroupById(groupId)
-            ?: return Result.failure(IllegalStateException("Группа не найдена"))
-        val member = groupDao.getMember(groupId, me)
-            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
-        val poll = dao.getPoll(pollId)
-            ?: return Result.failure(IllegalStateException("Опрос не найден"))
-        if (poll.groupId != groupId) return Result.failure(IllegalStateException("Опрос из другой группы"))
-        val isAdmin = GroupRole.isAdminOrOwner(member.role)
-        if (!isAdmin && poll.creatorId != me) {
-            return Result.failure(SecurityException("Закрыть опрос вправе его автор или администратор"))
-        }
-        if (poll.closed) return Result.success(Unit)
-        dao.closePoll(pollId)
-        backgroundScope.launch {
-            runCatching {
-                delivery.deliver(groupId, GroupWire.buildPollClose(groupId, pollId), allRecipients(groupId, me))
-            }.onFailure { Log.w(TAG, "poll close fanout failed: ${it.message}") }
-        }
-        return Result.success(Unit)
-    }
+    suspend fun closePoll(groupId: String, pollId: String): Result<Unit> =
+        polls.closePoll(groupId, pollId)
 
     /** Опросы группы (канала) в виде доменных моделей: ключ - id сообщения. */
-    fun observePolls(groupId: String): Flow<Map<String, PollSummary>> {
-        val dao = pollDao
-            ?: return kotlinx.coroutines.flow.flowOf<Map<String, PollSummary>>(emptyMap())
-        val me = myId().orEmpty()
-        return kotlinx.coroutines.flow.combine(
-            dao.observeGroupPolls(groupId),
-            dao.observeGroupVotes(groupId),
-        ) { polls, votes ->
-            val byPoll = votes.groupBy { it.pollId }
-            polls.associate { row -> row.messageId to toPollSummary(row, byPoll[row.pollId].orEmpty(), me) }
-        }.flowOn(Dispatchers.IO)
-    }
-
-    private fun toPollSummary(
-        row: com.vladimir.messenger.data.local.entity.GroupPollEntity,
-        votes: List<com.vladimir.messenger.data.local.entity.GroupPollVoteEntity>,
-        me: String,
-    ): PollSummary {
-        val options = GroupWire.decodeOptions(row.optionsCsv)
-        val counts = IntArray(options.size)
-        for (vote in votes) {
-            for (index in vote.choices()) {
-                if (index in counts.indices) counts[index]++
-            }
-        }
-        val mine = votes.firstOrNull { it.voterId == me }?.choices().orEmpty()
-        return PollSummary(
-            pollId = row.pollId,
-            groupId = row.groupId,
-            topicId = row.topicId,
-            messageId = row.messageId,
-            question = row.question,
-            options = options.mapIndexed { index, text -> PollOption(index, text, counts.getOrNull(index) ?: 0) },
-            anonymous = row.anonymous,
-            multiChoice = row.multiChoice,
-            creatorId = row.creatorId,
-            createdAtMs = row.createdAtMs,
-            closed = row.closed,
-            isMine = row.creatorId == me,
-            myChoices = mine,
-            // Анонимный опрос показывает только числа: имена хранятся, чтобы
-            // отличать свой голос от чужих, но наружу не отдаются.
-            voters = if (row.anonymous) {
-                emptyList()
-            } else {
-                votes.map { PollVoter(it.voterId, it.voterName, it.choices()) }
-            },
-        )
-    }
+    fun observePolls(groupId: String): Flow<Map<String, PollSummary>> = polls.observePolls(groupId)
 
     // ── р250: приём новых конвертов ─────────────────────────────────────────
 
@@ -1842,88 +1753,14 @@ class GroupRepository(
         )
     }
 
-    private suspend fun handlePoll(senderId: String, packet: GroupWire.Packet.Poll) {
-        val dao = pollDao ?: return
-        val me = myId().orEmpty()
-        if (me.isBlank()) return
-        val group = groupDao.getGroupById(packet.groupId) ?: return
-        if (groupDao.getMember(packet.groupId, me) == null) return
-        val author = groupDao.getMember(packet.groupId, senderId)
-        val authorIsAdmin = author?.let { GroupRole.isAdminOrOwner(it.role) } == true
-        // Право «Опросы» проверяем по автору: администраторы и владелец вне
-        // общих ограничений участников (как с закрепами).
-        if (!authorIsAdmin) {
-            val authorMask = GroupPermissions.effectiveMemberPermissions(
-                author?.permissions ?: 0L,
-                effectiveMemberMask(group),
-            )
-            if (!GroupPermissions.has(authorMask, GroupPermissions.Member.SEND_POLLS)) {
-                Log.w(TAG, "poll from member without right dropped poll=${packet.pollId}")
-                return
-            }
-        }
-        val known = dao.getPoll(packet.pollId)
-        // Повторная доставка (ретрансляция, досылка новичку) итоги не сбрасывает.
-        if (known != null) return
-        dao.insertPoll(
-            com.vladimir.messenger.data.local.entity.GroupPollEntity(
-                pollId = packet.pollId,
-                groupId = packet.groupId,
-                topicId = packet.topicId,
-                messageId = packet.messageId,
-                question = packet.question,
-                optionsCsv = GroupWire.encodeOptions(packet.options),
-                anonymous = packet.anonymous,
-                multiChoice = packet.multiChoice,
-                creatorId = senderId,
-                createdAtMs = clock(),
-            ),
-        )
-        Log.i(TAG, "poll in group=${packet.groupId} poll=${packet.pollId} options=${packet.options.size}")
-    }
+    private suspend fun handlePoll(senderId: String, packet: GroupWire.Packet.Poll) =
+        polls.handlePoll(senderId, packet)
 
-    private suspend fun handlePollVote(senderId: String, packet: GroupWire.Packet.PollVote) {
-        val dao = pollDao ?: return
-        val me = myId().orEmpty()
-        if (me.isBlank()) return
-        if (groupDao.getMember(packet.groupId, me) == null) return
-        val poll = dao.getPoll(packet.pollId) ?: return
-        if (poll.groupId != packet.groupId) return
-        if (poll.closed) return
-        // В анонимный опрос имена не показываем, но храним: иначе нельзя
-        // отличить переголосование от нового участника.
-        val name = if (poll.anonymous) "" else packet.voterName
-        val clean = if (poll.multiChoice) {
-            packet.choices.distinct().filter { it in 0 until GroupWire.decodeOptions(poll.optionsCsv).size }
-        } else {
-            packet.choices.take(1).filter { it in 0 until GroupWire.decodeOptions(poll.optionsCsv).size }
-        }
-        dao.putVote(
-            com.vladimir.messenger.data.local.entity.GroupPollVoteEntity(
-                pollId = packet.pollId,
-                voterId = packet.voterId,
-                voterName = name,
-                choicesCsv = clean.joinToString(","),
-                atMs = clock(),
-            ),
-        )
-    }
+    private suspend fun handlePollVote(senderId: String, packet: GroupWire.Packet.PollVote) =
+        polls.handlePollVote(senderId, packet)
 
-    private suspend fun handlePollClose(senderId: String, packet: GroupWire.Packet.PollClose) {
-        val dao = pollDao ?: return
-        val me = myId().orEmpty()
-        if (me.isBlank()) return
-        val group = groupDao.getGroupById(packet.groupId) ?: return
-        if (groupDao.getMember(packet.groupId, me) == null) return
-        val poll = dao.getPoll(packet.pollId) ?: return
-        if (poll.groupId != packet.groupId) return
-        // Закрыть вправе автор опроса, владелец группы и администратор.
-        if (senderId != poll.creatorId && senderId != group.ownerId) {
-            val sender = groupDao.getMember(packet.groupId, senderId)
-            if (sender == null || !GroupRole.isAdminOrOwner(sender.role)) return
-        }
-        dao.closePoll(packet.pollId)
-    }
+    private suspend fun handlePollClose(senderId: String, packet: GroupWire.Packet.PollClose) =
+        polls.handlePollClose(senderId, packet)
 
     private suspend fun handleSlowMode(senderId: String, packet: GroupWire.Packet.SlowMode) {
         val me = myId().orEmpty()
@@ -2497,9 +2334,8 @@ class GroupRepository(
             .filter { InlineImage.parseTextPart(it.content)?.headId == messageId }
         for (row in stale) messageDao.deleteById(row.id)
         messageDao.deleteById(messageId)
-        // р250: вместе с сообщением уходит и приклеенный к нему опрос (с
-        // голосами) - иначе карточка осталась бы висеть без своего сообщения.
-        pollDao?.deleteByMessage(messageId)
+        // р250: вместе с сообщением уходит и приклеенный к нему опрос (с голосами).
+        polls.deleteForMessage(messageId)
         refreshGroupLastPreview(groupId)
     }
 
@@ -6174,9 +6010,8 @@ class GroupRepository(
     private suspend fun deleteGroupLocally(groupId: String) {
         messageDao.deleteGroupMessages(groupId)
         manifestDao?.deleteForGroup(groupId)
-        // р250: опросы и голоса - вместе с группой; иначе карточки вернулись
-        // бы в ленту при повторном вступлении.
-        pollDao?.deleteGroupPolls(groupId)
+        // р250: опросы и голоса - вместе с группой.
+        polls.deleteForGroup(groupId)
         groupDao.deleteGroup(groupId)
         backgroundScope.launch {
             runCatching { onGroupGone(groupId) }.onFailure { Log.w(TAG, "group files cleanup failed: ${it.message}") }
