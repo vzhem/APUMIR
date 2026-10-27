@@ -24,7 +24,9 @@ import kotlinx.coroutines.launch
  *
  * [sendMessage] приходит функцией, потому что тревога отправляется обычными
  * сообщениями с пометкой `sos` — вызов большого `sendMessage` остался в
- * репозитории, а не переехал сюда.
+ * репозитории, а не переехал сюда. Возвращает он id сообщения (`Result<String>`),
+ * а не Unit: для счёта отправленных нужен только успех, но тип не меняем —
+ * иначе обёртка в репозитории перестанет совпадать.
  */
 internal class GroupModes(
     private val groupDao: GroupDao,
@@ -35,7 +37,7 @@ internal class GroupModes(
     private val deliver: suspend (groupId: String, envelope: String, recipients: List<String>) -> Unit,
     private val recipients: suspend (groupId: String, me: String) -> List<String>,
     private val memberMask: (GroupEntity) -> Long,
-    private val sendMessage: suspend (groupId: String, topicId: String, text: String) -> Result<Unit>,
+    private val sendMessage: suspend (groupId: String, topicId: String, text: String) -> Result<String>,
 ) {
 
     // ── медленный режим ─────────────────────────────────────────────────────
