@@ -62,14 +62,26 @@ object FileExchangeKeyStore {
             candidate
         } else {
             require(existingText.length <= MAX_ENCODED_BINDING)
-            val existing = Base64.decode(existingText, Base64.NO_WRAP)
-            check(verifyFileExchangeBinding(existing))
-            check(fileExchangeBindingNodeId(existing) == legacyNodeId)
-            check(fileExchangeBindingPublicKey(existing).contentEquals(candidatePublic)) {
-                "Persisted file exchange binding does not match device secret"
+            val existing = runCatching { Base64.decode(existingText, Base64.NO_WRAP) }
+                .getOrDefault(ByteArray(0))
+            val usable = existing.isNotEmpty() && runCatching {
+                verifyFileExchangeBinding(existing) &&
+                    fileExchangeBindingNodeId(existing) == legacyNodeId &&
+                    fileExchangeBindingPublicKey(existing).contentEquals(candidatePublic)
+            }.getOrDefault(false)
+            if (usable) {
+                candidate.fill(0)
+                existing
+            } else {
+                // Привязка осталась от прежнего секрета или профиля. Держать её
+                // значит молча остаться без обмена файлами: ядро сверяет ключ с
+                // привязкой и отказывает. Заменяем на свежую, выведенную из
+                // текущего секрета и личности - она проверена выше.
+                val encoded = Base64.encodeToString(candidate, Base64.NO_WRAP)
+                check(encoded.length <= MAX_ENCODED_BINDING)
+                check(prefs.edit().putString(PUBLIC_BINDING, encoded).commit())
+                candidate
             }
-            candidate.fill(0)
-            existing
         }
         val bindingPublic = fileExchangeBindingPublicKey(binding)
         Diagnostics(
@@ -107,12 +119,20 @@ object FileExchangeKeyStore {
     fun importSecret(context: Context, secret: ByteArray): Boolean = try {
         require(secret.size == FileTransferKeyEnvelope.KEY_BYTES)
         val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val encoded = wrap(secret, ensureWrapKey())
+        // Своя обёртка, а не прежняя: старая запись Keystore могла остаться
+        // непригодной (`unwrap_failed`), и заворачивать в неё новый секрет
+        // нельзя - иначе возврат ключей снова упрётся в ту же поломку.
+        val encoded = wrap(secret, freshWrapKey())
         check(encoded.length <= MAX_ENCODED_SECRET)
         prefs.edit().putString(WRAPPED_SECRET, encoded).commit()
-    } catch (_: Exception) {
+    } catch (error: Exception) {
+        lastImportError = describe(error)
         false
     }
+
+    /** Сообщение последнего неудачного импорта: человеку и в отчёт, без стека. */
+    @Volatile var lastImportError: String = ""
+        private set
 
     @Volatile var lastModeReason = KeyModeReason.NOT_PROBED
         private set
@@ -193,6 +213,21 @@ object FileExchangeKeyStore {
     private fun existingWrapKey(): SecretKey? {
         val store = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
         return (store.getEntry(WRAP_ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey
+    }
+
+    /** «Класс: сообщение <- причина» — одной строкой, без перевода строк. */
+    private fun describe(error: Throwable): String {
+        val cause = error.cause?.let { " <- " + it.javaClass.simpleName }
+        val message = error.message?.replace('\n', ' ')?.take(160)
+        return error.javaClass.simpleName + (if (message != null) ": " + message else "") + (cause ?: "")
+    }
+
+    /** Свежий ключ-обёртка вместо прежнего: этим ключом завёрнут только этот секрет. */
+    private fun freshWrapKey(): SecretKey {
+        runCatching {
+            KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }.deleteEntry(WRAP_ALIAS)
+        }
+        return ensureWrapKey()
     }
 
     private fun ensureWrapKey(): SecretKey {

@@ -92,6 +92,7 @@ object IdentitySigningKeyStore {
             check(publicKey.length == 64) { "unexpected signing public key length" }
             check(keyId.length == 64 && keyId == expectedKeyId) { "signing key ID mismatch" }
 
+            dropStaleBinding(context.applicationContext)
             val binding = loadOrCreateBinding(context.applicationContext)
             check(verifyIdentitySigningBinding(binding)) { "identity binding signature invalid" }
             check(identitySigningBindingMatchesInstalled(binding)) {
@@ -107,7 +108,14 @@ object IdentitySigningKeyStore {
             )
             InstallDiagnostics(mode, keyId, publicKey, bindingHash)
         } catch (error: Exception) {
-            Log.e(TAG, "Signing sidecar unavailable; signed features remain disabled", error)
+            // Причина одной строкой: отчёт из logcat хранит только строки
+            // выбранных тегов, а стек без заголовка не говорит ничего - именно
+            // так «ключ не читается» месяцами оставался без виновника.
+            Log.e(
+                TAG,
+                "Signing sidecar unavailable: " + describe(error) + " · reason=" + lastModeReason,
+                error,
+            )
             null
         }
     }
@@ -167,11 +175,22 @@ object IdentitySigningKeyStore {
     fun importSeed(context: Context, seed: ByteArray): Boolean = try {
         require(seed.size == IdentitySigningSeedEnvelope.SEED_BYTES)
         val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val encoded = wrap(seed, ensureWrapKey())
+        // Ключ-обёртка служит ТОЛЬКО этому семени. Если прежний блоб им уже не
+        // открывается (`reason=unwrap_failed`), значит запись в Keystore
+        // осталась от другого ключа - и заворачивать в неё новое семя нельзя:
+        // она может быть непригодна и на шифрование. Сносим старую запись и
+        // создаём свежую. Возврат ключей не должен зависеть от той поломки, из-за
+        // которой он понадобился.
+        val encoded = wrap(seed, freshWrapKey())
         prefs.edit().putString(PREF_WRAPPED_SEED, encoded).commit()
-    } catch (_: Exception) {
+    } catch (error: Exception) {
+        lastImportError = describe(error)
         false
     }
+
+    /** Сообщение последнего неудачного импорта: человеку и в отчёт, без стека. */
+    @Volatile var lastImportError: String = ""
+        private set
 
     @Volatile var lastModeReason = com.vladimir.messenger.data.diagnostics.KeyModeReason.NOT_PROBED
         private set
@@ -212,6 +231,30 @@ object IdentitySigningKeyStore {
             "identity binding does not match installed sidecar"
         }
         return binding
+    }
+
+    /**
+     * Убрать привязку, которая не подходит установленному сейчас семени.
+     *
+     * Привязка подписана семенем и содержит routing id. После возврата ключей
+     * из копии, смены профиля или пересоздания личности старая привязка
+     * перестаёт совпадать. Без этой проверки код ниже всё равно упал бы - но
+     * тогда телефон остался бы совсем без подписи, хотя ключ уже на месте.
+     * Нет привязки - [loadOrCreateBinding] честно подпишет новую тем же
+     * ключом.
+     */
+    private fun dropStaleBinding(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val encoded = prefs.getString(PREF_IDENTITY_BINDING, null) ?: return
+        val usable = runCatching {
+            require(encoded.length <= MAX_ENCODED_BINDING_CHARS)
+            val binding = Base64.decode(encoded, Base64.NO_WRAP)
+            verifyIdentitySigningBinding(binding) && identitySigningBindingMatchesInstalled(binding)
+        }.getOrDefault(false)
+        if (!usable) {
+            prefs.edit().remove(PREF_IDENTITY_BINDING).commit()
+            Log.w(TAG, "identity binding did not fit the installed seed; a new one will be signed")
+        }
     }
 
     private fun loadOrCreateBinding(context: Context): ByteArray {
@@ -318,6 +361,29 @@ object IdentitySigningKeyStore {
     private fun existingWrapKey(): SecretKey? {
         val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
         return (keyStore.getEntry(WRAP_ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey
+    }
+
+    /** «Класс: сообщение <- причина» — одной строкой, без перевода строк. */
+    private fun describe(error: Throwable): String {
+        val cause = error.cause?.let { " <- " + it.javaClass.simpleName }
+        val message = error.message?.replace('\n', ' ')?.take(160)
+        return error.javaClass.simpleName + (if (message != null) ": " + message else "") + (cause ?: "")
+    }
+
+    /**
+     * Свежий ключ-обёртка вместо прежнего.
+     *
+     * Запись в Keystore может остаться, но быть непригодной: старый блоб ею не
+     * открывается. Удаление и создание заново здесь ничего не теряет - этим
+     * ключом завёрнуто только семя подписи, и его мы как раз перезаписываем.
+     * Сбой удаления не отменяет попытку: если запись жива и рабочая, ниже она
+     * просто будет использована.
+     */
+    private fun freshWrapKey(): SecretKey {
+        runCatching {
+            KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }.deleteEntry(WRAP_ALIAS)
+        }.onFailure { Log.w(TAG, "wrap key delete failed: " + it.javaClass.simpleName) }
+        return ensureWrapKey()
     }
 
     private fun ensureWrapKey(): SecretKey {
