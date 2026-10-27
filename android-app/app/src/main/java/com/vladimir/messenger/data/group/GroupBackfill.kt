@@ -187,7 +187,7 @@ internal class GroupBackfill(
             // меня, даже если я не владелец. Не владелец без манифеста поста
             // этот пост пропускает; пост с недоехавшими кусками тоже (сид
             // раздаёт только то, что у него целиком).
-            val manifest = manifestDao?.get(post.id)?.let(::toManifest)
+            val manifest = manifestDao?.get(post.id)?.let { row -> toManifest(row) }
             if (!isOwner) {
                 if (manifest == null) continue
                 val partTexts = parts.map { it.content }
