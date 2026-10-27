@@ -163,12 +163,14 @@ def resource_problems():
 
 def load_baseline():
     if not BASELINE.is_file():
-        return {}, None
+        return {}, None, {}
     payload = json.loads(BASELINE.read_text(encoding="utf-8"))
-    return payload.get("allowed", {}), payload.get("missing_en")
+    return (payload.get("allowed", {}),
+            payload.get("missing_en"),
+            payload.get("data", {}))
 
 
-def write_baseline(allowed, missing_en=None):
+def write_baseline(allowed, missing_en=None, data_notes=None):
     payload = {
         "_comment": (
             "Разрешённое число русских строковых литералов в файлах ui/**. "
@@ -178,11 +180,13 @@ def write_baseline(allowed, missing_en=None):
     }
     if missing_en is not None:
         payload["missing_en"] = missing_en
+    if data_notes:
+        payload["data"] = data_notes
     BASELINE.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def check():
-    allowed, allowed_missing_en = load_baseline()
+    allowed, allowed_missing_en, data_notes = load_baseline()
     actual = counts()
     problems, missing_en = resource_problems()
     problems += placeholder_problems()
@@ -201,6 +205,12 @@ def check():
 
     for name in sorted(set(allowed) - set(actual)):
         improved.append(f"{name}: русских строк больше нет — запись можно убрать (--write)")
+
+    # Файлы-данные: объяснение живёт рядом с числом, иначе следующая сессия
+    # честно попытается «перевести» поисковый индекс и сломает поиск.
+    for name, why in sorted(data_notes.items()):
+        if name in actual:
+            improved.append(f"{name}: это данные, не текст интерфейса — {why}")
 
     if allowed_missing_en is not None and len(missing_en) > allowed_missing_en:
         problems.append(
@@ -227,8 +237,9 @@ def check():
 
 def main(argv):
     if "--write" in argv:
-        _, missing_en = resource_problems()
-        write_baseline(counts(), len(missing_en))
+        _, missing_en, data_notes = load_baseline()
+        _, missing_en_now = resource_problems()
+        write_baseline(counts(), len(missing_en_now), data_notes)
         print(f"baseline записан: {BASELINE.relative_to(ROOT)}")
         return 0
     if argv:

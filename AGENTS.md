@@ -23,7 +23,11 @@
     `APU-<версия>.apk`/`app-release.apk` в релизе — сплиты сломали бы
     автообновление. Эмуляторная `x86_64` в релиз не входит
     (`-Papu.emulatorAbi=true` для неё). Проверяется `scripts/ci/check-release-abi.py`.
-12. Текст интерфейса — только в `res/values/strings.xml`, новый ключ сразу и в
+12. Ключевые слова поиска эмодзи (`TopicEmojiPicker`) и `PresenceLabels.RUSSIAN`
+    — это ДАННЫЕ, а не подписи: в ресурсы не переносим (русское слово должно
+    находиться и в английской локали). Пометка — раздел `data` в
+    `hardcoded-strings-baseline.json`.
+13. Текст интерфейса — только в `res/values/strings.xml`, новый ключ сразу и в
     `values-en/strings.xml`: одинаковые имена в одном файле ломают сборку, а ключ
     только в `values` при английском языке остаётся русским. Проверяется
     `scripts/ci/check-hardcoded-strings.py` (храповик + `missing_en`).
