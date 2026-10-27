@@ -542,6 +542,36 @@ class ProfileBackup @Inject constructor(
                 ?: throw IOException("staged manifest unreadable")
             if (manifest.dbVersion > APP_DATABASE_VERSION) throw IOException("staged backup is newer than app")
 
+            // Секреты читаем ДО первой записи. Файл секрета в копии мог быть
+            // испорчен, и тогда копию применять нельзя: иначе база и настройки
+            // уже заменены, а ключ личности не вернулся - и человек видит
+            // «ключ этого телефона не читается» на пустом месте. Именно так
+            // могла выглядеть жалоба владельца 2026-10-27.
+            val fxFile = File(root, BackupLayout.SECRET_FILE_EXCHANGE)
+            val seedFile = File(root, BackupLayout.SECRET_SIGNING_SEED)
+            val exchangeSecret = if (fxFile.isFile) readSecretFile(fxFile, "file exchange") else null
+            val signingSeed = try {
+                if (seedFile.isFile) readSecretFile(seedFile, "signing seed") else null
+            } catch (e: Exception) {
+                exchangeSecret?.fill(0)
+                throw e
+            }
+            try {
+                applyStagedWithSecrets(app, root, manifest, exchangeSecret, signingSeed)
+            } finally {
+                exchangeSecret?.fill(0)
+                signingSeed?.fill(0)
+            }
+        }
+
+        /** Тело [applyStaged]: секреты уже прочитаны и проверены. */
+        private fun applyStagedWithSecrets(
+            app: Context,
+            root: File,
+            manifest: BackupManifest,
+            exchangeSecret: ByteArray?,
+            signingSeed: ByteArray?,
+        ) {
             // 1. База: старую убираем целиком (вместе с WAL/SHM), новую кладём.
             val dbFile = app.getDatabasePath("messenger_database")
             app.deleteDatabase("messenger_database")
@@ -586,19 +616,11 @@ class ProfileBackup @Inject constructor(
             ).forEach { File(app.filesDir, it).delete() }
 
             // 3. Секреты: заворачиваем ключом Keystore этого телефона.
-            val fx = File(root, BackupLayout.SECRET_FILE_EXCHANGE)
-            // Секреты — это десятки байт; лимит здесь только чтобы испорченный
-            // или чужой файл не читался в память целиком (аудит, п. 4.5).
-            //
-            // Ошибку чтения НЕ глотаем: копия с секретом, который не читается,
-            // испорчена, и применить её значит остаться без ключа личности -
-            // приложение потом честно скажет «ключ этого телефона не читается»,
-            // а данные уже заменены. Лучше отказать до замены и оставить как
-            // было (см. «ключ не читается» после такого восстановления).
-            val secret = if (fx.isFile) readSecretFile(fx, "file exchange") else null
+            //    Читать и проверять их уже не нужно - это сделано до замены
+            //    данных; здесь только запись (см. applyStaged).
+            val secret = exchangeSecret
             if (secret != null) {
                 val ok = FileExchangeKeyStore.importSecret(app, secret)
-                secret.fill(0)
                 if (!ok) {
                     // Без секрета подписанная привязка бесполезна и даже вредна (не совпадёт).
                     app.getSharedPreferences("apu_file_exchange", Context.MODE_PRIVATE).edit().clear().commit()
@@ -607,13 +629,9 @@ class ProfileBackup @Inject constructor(
             } else {
                 app.getSharedPreferences("apu_file_exchange", Context.MODE_PRIVATE).edit().clear().commit()
             }
-            val seedFile = File(root, BackupLayout.SECRET_SIGNING_SEED)
-            // Та же причина, что у секрета обмена: без seed личность не
-            // поднимется, и восстановление даст профиль без ключа.
-            val seed = if (seedFile.isFile) readSecretFile(seedFile, "signing seed") else null
+            val seed = signingSeed
             if (seed != null) {
                 val ok = IdentitySigningKeyStore.importSeed(app, seed)
-                seed.fill(0)
                 if (!ok) {
                     app.getSharedPreferences("apu_identity_signing", Context.MODE_PRIVATE).edit().clear().commit()
                     Log.w(TAG, "restore: signing seed not imported, binding dropped")
