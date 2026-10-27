@@ -985,6 +985,14 @@
     <string name="bk_truncated">The backup file is damaged or was not copied completely.</string>
     <string name="bk_save_first">First save a backup to a file — that is the file that will be updated.</string>
     <string name="bk_enabling">Turning on auto-update…</string>
+    <string name="backup_keys_only">Bring back keys only</string>
+    <string name="backup_keys_only_hint">If the app says this phone’s key cannot be read, and the backup was made from this same profile, bring back only the keys. Chats, files and settings stay exactly as they are.</string>
+    <string name="bk_keys_restoring">Bringing back the keys…</string>
+    <string name="bk_keys_restored">Keys restored. Open the app again.</string>
+    <string name="bk_keys_other_profile">This backup belongs to another profile: its keys do not fit this phone.</string>
+    <string name="bk_keys_unverifiable">The backup has no profile id, so there is no way to prove the keys belong to this phone. Pick a backup made by this app, or restore it in full.</string>
+    <string name="bk_keys_none">The backup has no keys — nothing to bring back.</string>
+    <string name="bk_keys_failed">Couldn’t restore the keys: %1$s</string>
     <string name="bk_staged_missing">The prepared backup was not found. Choose the file again.</string>
     <string name="bk_write_failed">Couldn’t write the backup: %1$s</string>
     <string name="bk_read_failed">Couldn’t read the backup: %1$s</string>
@@ -1829,9 +1837,11 @@ The file is not on this phone</string>
     <!-- «Phone is mute»: this device key cannot be read, so private content is
          never sent in cleartext and everything waits. -->
     <string name="identity_mute_title_unreadable">Private messages are not leaving or arriving</string>
-    <string name="identity_mute_body_unreadable">The key of this phone cannot be read. The app never sends private content in cleartext, so messages, stories and profile mirroring are waiting. Restore the profile from a backup file to bring the keys back.</string>
+    <string name="identity_mute_body_unreadable">This phone’s key cannot be read. The app never sends anything private in plain text, so messages, stories and the profile mirror are waiting. Open “Backup” and bring back only the keys from a backup of this same profile — your chats stay as they are. A full restore would bring the keys back, but it would roll the conversation history back to the backup date.</string>
     <string name="identity_mute_title_timeout">The key did not open at startup</string>
     <string name="identity_mute_body_timeout">Private messages and stories are waiting: this phone key did not open in time when the app started. Restart the app; if it happens again, restore the profile from a backup file.</string>
+    <string name="identity_mute_title_exchange">The file-exchange key cannot be read</string>
+    <string name="identity_mute_body_exchange">Your identity on this phone is intact, but the exchange key is not: private messages and files may fail to open. Open “Backup” and bring back only the keys from a backup of this same profile — your chats stay as they are.</string>
     <string name="identity_mute_action">Restore from file</string>
     <string name="identity_mute_hide">Hide until restart</string>
     <string name="story_photo_edit_failed">Couldn’t apply the crop. Try again.</string>

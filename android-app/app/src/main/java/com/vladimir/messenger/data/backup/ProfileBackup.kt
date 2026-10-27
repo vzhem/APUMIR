@@ -78,6 +78,124 @@ class ProfileBackup @Inject constructor(
     /** Есть ли подготовленная копия, ожидающая подтверждения и перезапуска. */
     fun hasStaged(): Boolean = File(stagingRoot(), STAGED_MARKER).isFile
 
+    /** Итог «вернуть только ключи»: чаты и настройки не трогаем. */
+    sealed interface KeysResult {
+        data object Ok : KeysResult
+        data object NoStaged : KeysResult
+
+        /** Копия от другого профиля: её ключи этому телефону не подходят. */
+        data object OtherProfile : KeysResult
+
+        /** В копии нет идентификатора профиля - доказать, что она «своя», нельзя. */
+        data object Unverifiable : KeysResult
+
+        /** В копии нет секретов: возвращать нечего. */
+        data object NoKeys : KeysResult
+
+        data class Failed(val reason: String) : KeysResult
+    }
+
+    /**
+     * Вернуть из подготовленной копии ТОЛЬКО ключи - без замены чатов,
+     * файлов и настроек.
+     *
+     * Зачем. Бывает, что данные на телефоне целы, а ключ не читается:
+     * Keystore потерял свой ключ (смена блокировки, «очистить учётные
+     * данные», переустановка), и приложение честно молчит. Полное
+     * восстановление из копии вернуло бы ключи, но откатило бы переписку на
+     * дату копии - а она может быть месячной давности.
+     *
+     * Здесь секреты из копии (семя подписи и ключ обмена) заворачиваются
+     * ключом Keystore ЭТОГО телефона и кладутся на место. База, файлы и
+     * настройки не трогаются вообще.
+     *
+     * Защита: копия принимается только от того же профиля. Чужие ключи на
+     * этом телефоне - это чужая личность, и молча подсунуть их нельзя.
+     * Ошибка чтения любого из секретов - отказ без единой записи: телефон
+     * остаётся как был (см. `readSecretFile`). Отказ самого импорта (например,
+     * Keystore не дал создать ключ) честно сообщается, уже записанное не
+     * откатывается - но это и есть ровно то, что нужно вернуть.
+     */
+    fun restoreKeysFromStaged(): KeysResult {
+        if (!hasStaged()) return KeysResult.NoStaged
+        val manifest = stagedManifest() ?: return KeysResult.Failed("staged manifest unreadable")
+        val prefs = appContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+        val mine = prefs.getString("node_id", null) ?: prefs.getString("existing_public_key", null)
+        if (mine.isNullOrBlank()) {
+            // Своего идентификатора нет - сверить копию не с чем. Угадывать
+            // личность по файлу нельзя: ошибка тут стоит чужих ключей.
+            Log.w(TAG, "keys-only restore refused: this device has no profile id")
+            return KeysResult.OtherProfile
+        }
+        if (manifest.nodeId.isBlank()) {
+            Log.w(TAG, "keys-only restore refused: backup has no profile id")
+            return KeysResult.Unverifiable
+        }
+        if (manifest.nodeId != mine) {
+            Log.w(TAG, "keys-only restore refused: backup belongs to another profile")
+            return KeysResult.OtherProfile
+        }
+        val root = stagingRoot()
+        val exchangeFile = File(root, BackupLayout.SECRET_FILE_EXCHANGE)
+        val seedFile = File(root, BackupLayout.SECRET_SIGNING_SEED)
+        if (!exchangeFile.isFile && !seedFile.isFile) return KeysResult.NoKeys
+        // Сначала читаем оба файла целиком: битый или нечитаемый секрет должен
+        // отбить попытку ДО первой записи, а не оставить телефон с половиной
+        // старых ключей. Прочитанное затирается в finally.
+        return try {
+            val exchangeSecret = if (exchangeFile.isFile) readSecretFile(exchangeFile, "file exchange") else null
+            val signingSeed = if (seedFile.isFile) readSecretFile(seedFile, "signing seed") else null
+            try {
+                if (exchangeSecret != null && !FileExchangeKeyStore.importSecret(appContext, exchangeSecret)) {
+                    throw IOException("file exchange secret not imported")
+                }
+                if (signingSeed != null) {
+                    if (!IdentitySigningKeyStore.importSeed(appContext, signingSeed)) {
+                        throw IOException("signing seed not imported")
+                    }
+                    // Привязка личности подписана ровно этим семенем. Если на
+                    // телефоне лежит привязка от прежнего (пересозданного)
+                    // семени, ядро её отвергнет - и ключ снова «не прочитается».
+                    // Поэтому после импорта проверяем текущую привязку: цела -
+                    // оставляем как есть (там могут быть свежие данные), битая -
+                    // берём из той же копии, а нет её - убираем, ядро подпишет
+                    // новую тем же ключом.
+                    if (IdentitySigningKeyStore.existingVerifiedBinding(appContext) == null) {
+                        val restored = stagedIdentityBinding()
+                        val editor = appContext.getSharedPreferences("apu_identity_signing", Context.MODE_PRIVATE).edit()
+                        if (restored != null) {
+                            editor.putString("identity_binding_v1", restored)
+                        } else {
+                            editor.remove("identity_binding_v1")
+                        }
+                        editor.commit()
+                    }
+                }
+                // Копия больше не нужна: полное восстановление человек повторит,
+                // выбрав файл заново. Держать её «заряженной» после успеха
+                // нельзя - случайное подтверждение откатило бы переписку.
+                discardStaged()
+                Log.i(TAG, "keys-only restore applied; chats and settings untouched")
+                KeysResult.Ok
+            } finally {
+                exchangeSecret?.fill(0)
+                signingSeed?.fill(0)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "keys-only restore failed", e)
+            KeysResult.Failed(e.message ?: e.javaClass.simpleName)
+        }
+    }
+
+    /** Привязка личности из подготовленной копии (та же, что подписана её семенем). */
+    private fun stagedIdentityBinding(): String? = runCatching {
+        val file = File(stagingRoot(), BackupLayout.prefsEntry("apu_identity_signing"))
+        if (!file.isFile) return@runCatching null
+        val entries = PrefsCodec.decode(file.readText()) ?: return@runCatching null
+        val binding = entries["identity_binding_v1"] as? String ?: return@runCatching null
+        if (binding.length > 512) null else binding
+    }.getOrNull()
+
     /**
      * Подтвердить: применить при следующем старте процесса. До подтверждения
      * подготовленная копия ни на что не влияет - случайный перезапуск
@@ -397,8 +515,6 @@ class ProfileBackup @Inject constructor(
         private const val RECEIVED_ROOT = "file_received/v1"
         private const val PREVIEW_ROOT = "file_preview/v1"
         private const val MAX_MANIFEST_BYTES = 16 * 1024
-        /** Потолок для файлов секретов при восстановлении (аудит 2026-10-26, п. 4.5). */
-        private const val MAX_SECRET_BYTES = 64L * 1024
 
         /**
          * Применить подготовленную копию, если она есть. Зовётся из
@@ -479,7 +595,7 @@ class ProfileBackup @Inject constructor(
             // приложение потом честно скажет «ключ этого телефона не читается»,
             // а данные уже заменены. Лучше отказать до замены и оставить как
             // было (см. «ключ не читается» после такого восстановления).
-            val secret = if (fx.isFile) readSecret(fx, "file exchange") else null
+            val secret = if (fx.isFile) readSecretFile(fx, "file exchange") else null
             if (secret != null) {
                 val ok = FileExchangeKeyStore.importSecret(app, secret)
                 secret.fill(0)
@@ -494,7 +610,7 @@ class ProfileBackup @Inject constructor(
             val seedFile = File(root, BackupLayout.SECRET_SIGNING_SEED)
             // Та же причина, что у секрета обмена: без seed личность не
             // поднимется, и восстановление даст профиль без ключа.
-            val seed = if (seedFile.isFile) readSecret(seedFile, "signing seed") else null
+            val seed = if (seedFile.isFile) readSecretFile(seedFile, "signing seed") else null
             if (seed != null) {
                 val ok = IdentitySigningKeyStore.importSeed(app, seed)
                 seed.fill(0)
@@ -534,23 +650,6 @@ class ProfileBackup @Inject constructor(
             //    подсунутым из чужого Auto Backup и стёрли на этом же запуске.
             DeviceIdentityMarker.create(app)
             Log.i(TAG, "restore applied: node=${manifest.nodeId.take(12)}… from app ${manifest.appVersionName}")
-        }
-
-        /**
-         * Прочитать файл секрета из подготовленной копии.
-         *
-         * Пустой файл и ошибка чтения - исключение, а не «секрета нет»: тогда
-         * восстановление прервётся до замены данных (см. вызов),
-         * [applyStagedIfAny] вернёт false, и телефон останется как был.
-         */
-        private fun readSecret(file: File, what: String): ByteArray {
-            val bytes = try {
-                file.readBytesAtMost(MAX_SECRET_BYTES)
-            } catch (e: Exception) {
-                throw IOException("restore: $what secret unreadable", e)
-            }
-            if (bytes.isEmpty()) throw IOException("restore: $what secret is empty")
-            return bytes
         }
 
         /**
@@ -642,4 +741,23 @@ class ProfileBackup @Inject constructor(
         override fun flush() = out.flush()
         override fun close() = out.close()
     }
+}
+
+/**
+ * Прочитать файл секрета из подготовленной копии.
+ *
+ * Пустой файл и ошибка чтения - исключение, а не «секрета нет»: и при полном
+ * восстановлении, и при возврате только ключей телефон в таком случае остаётся
+ * как был, а не остаётся без ключа личности.
+ */
+private const val MAX_SECRET_FILE_BYTES = 64L * 1024
+
+private fun readSecretFile(file: File, what: String): ByteArray {
+    val bytes = try {
+        file.readBytesAtMost(MAX_SECRET_FILE_BYTES)
+    } catch (e: Exception) {
+        throw java.io.IOException("restore: $what secret unreadable", e)
+    }
+    if (bytes.isEmpty()) throw java.io.IOException("restore: $what secret is empty")
+    return bytes
 }

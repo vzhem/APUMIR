@@ -42,6 +42,20 @@ class IdentityHealthTest {
     }
 
     @Test
+    fun exchangeKeyFailureIsNotBlamedOnThePersonKey() {
+        // Подпись готова, обмен - нет: ключ личности рабочий, и говорить
+        // «ключ этого телефона не читается» было бы неправдой.
+        assertEquals(
+            IdentityHealth.Reason.EXCHANGE_UNAVAILABLE,
+            IdentityHealth.classify("ready", "unavailable"),
+        )
+        assertEquals(
+            IdentityHealth.Reason.EXCHANGE_UNAVAILABLE,
+            IdentityHealth.notice(IdentityHealth.Snapshot(IdentityHealth.Reason.EXCHANGE_UNAVAILABLE)),
+        )
+    }
+
+    @Test
     fun timeoutIsReportedSeparatelyFromUnreadable() {
         // «Не успел» и «не читается» требуют разных действий: перезапуск и копия.
         assertEquals(IdentityHealth.Reason.TIMEOUT, IdentityHealth.classify("timeout", "skipped_no_signing"))
