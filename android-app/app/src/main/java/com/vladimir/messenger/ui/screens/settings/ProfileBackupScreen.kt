@@ -286,6 +286,21 @@ fun ProfileBackupScreen(
                                             enabled = !state.busy,
                                         )
                                     }
+                                    Spacer(Modifier.height(10.dp))
+                                    // Ключ не читается, а переписку терять нельзя:
+                                    // берём из копии только секреты, база и файлы
+                                    // остаются как есть.
+                                    ApuTextAction(
+                                        label = stringResource(R.string.backup_keys_only),
+                                        onClick = { viewModel.restoreKeysOnly(onRestart = closeApp) },
+                                        enabled = !state.busy,
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        stringResource(R.string.backup_keys_only_hint),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
                                 }
                             }
                         }

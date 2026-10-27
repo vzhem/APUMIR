@@ -58,15 +58,18 @@ fun IdentityMuteRow(
     // даёт «всплытие» на первом кадре, чего обычный `visible = true` не делает.
     // Крестик гасит её, переводя цель в false: плашка убирается до перезапуска.
     val shown = remember { MutableTransitionState(false).apply { targetState = true } }
-    val unreadable = reason == IdentityHealth.Reason.UNREADABLE
-    val title = stringResource(
-        if (unreadable) R.string.identity_mute_title_unreadable
-        else R.string.identity_mute_title_timeout,
-    )
-    val body = stringResource(
-        if (unreadable) R.string.identity_mute_body_unreadable
-        else R.string.identity_mute_body_timeout,
-    )
+    val titleRes = when (reason) {
+        IdentityHealth.Reason.UNREADABLE -> R.string.identity_mute_title_unreadable
+        IdentityHealth.Reason.EXCHANGE_UNAVAILABLE -> R.string.identity_mute_title_exchange
+        else -> R.string.identity_mute_title_timeout
+    }
+    val bodyRes = when (reason) {
+        IdentityHealth.Reason.UNREADABLE -> R.string.identity_mute_body_unreadable
+        IdentityHealth.Reason.EXCHANGE_UNAVAILABLE -> R.string.identity_mute_body_exchange
+        else -> R.string.identity_mute_body_timeout
+    }
+    val title = stringResource(titleRes)
+    val body = stringResource(bodyRes)
     AnimatedVisibility(
         visibleState = shown,
         enter = fadeIn() + scaleIn(initialScale = 0.92f),

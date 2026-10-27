@@ -329,6 +329,42 @@ class ProfileBackupViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Вернуть из подготовленной копии только ключи, не трогая чаты.
+     *
+     * Нужно, когда данные целы, а ключ этого телефона не читается: полное
+     * восстановление вернуло бы ключи, но откатило бы переписку на дату копии.
+     * После успеха приложение закрывается - ядро ставит ключ только при старте.
+     */
+    fun restoreKeysOnly(onRestart: () -> Unit) {
+        if (_uiState.value.busy) return
+        _uiState.update {
+            it.copy(
+                busy = true,
+                busyKind = BusyKind.OPENING,
+                busyText = context.getString(R.string.bk_keys_restoring),
+                message = null,
+                failed = false,
+            )
+        }
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) { backup.restoreKeysFromStaged() }
+            when (result) {
+                ProfileBackup.KeysResult.Ok -> {
+                    _uiState.update {
+                        it.copy(busy = false, message = context.getString(R.string.bk_keys_restored), failed = false)
+                    }
+                    restartApp(onRestart)
+                }
+                ProfileBackup.KeysResult.NoStaged -> fail(context.getString(R.string.bk_staged_missing))
+                ProfileBackup.KeysResult.OtherProfile -> fail(context.getString(R.string.bk_keys_other_profile))
+                ProfileBackup.KeysResult.Unverifiable -> fail(context.getString(R.string.bk_keys_unverifiable))
+                ProfileBackup.KeysResult.NoKeys -> fail(context.getString(R.string.bk_keys_none))
+                is ProfileBackup.KeysResult.Failed -> fail(context.getString(R.string.bk_keys_failed, result.reason))
+            }
+        }
+    }
+
     fun discardStaged() {
         viewModelScope.launch(Dispatchers.IO) {
             backup.discardStaged()
@@ -352,16 +388,25 @@ class ProfileBackupViewModel @Inject constructor(
                 fail(context.getString(R.string.bk_staged_missing))
                 return@launch
             }
-            _uiState.update { it.copy(restarting = true, message = null, failed = false) }
-            val app = context.applicationContext
-            runCatching {
-                app.stopService(android.content.Intent(app, com.vladimir.messenger.service.CoreServerService::class.java))
-            }
-            onExit()
-            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                android.os.Process.killProcess(android.os.Process.myPid())
-            }, 400)
+            restartApp(onExit)
         }
+    }
+
+    /**
+     * Закрыть приложение, чтобы новые ключи и восстановленный профиль встали
+     * при следующем старте: сервис останавливаем явно, иначе он переживёт
+     * процесс со старым состоянием.
+     */
+    private fun restartApp(onExit: () -> Unit) {
+        _uiState.update { it.copy(restarting = true, message = null, failed = false) }
+        val app = context.applicationContext
+        runCatching {
+            app.stopService(android.content.Intent(app, com.vladimir.messenger.service.CoreServerService::class.java))
+        }
+        onExit()
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            android.os.Process.killProcess(android.os.Process.myPid())
+        }, 400)
     }
 
     private fun fail(text: String) {

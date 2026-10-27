@@ -50,6 +50,13 @@ object IdentityHealth {
          * работает без него до перезапуска приложения.
          */
         TIMEOUT,
+
+        /**
+         * Подпись встала, а ключ обмена файлами - нет: личность на месте,
+         * поэтому «личное не уходит» здесь было бы неправдой. Другой совет
+         * человеку: личные конверты и файлы могут не открываться.
+         */
+        EXCHANGE_UNAVAILABLE,
     }
 
     data class Snapshot(
@@ -71,7 +78,7 @@ object IdentityHealth {
      * Чистая функция от снимка, поэтому её проверяет обычный JVM-тест.
      */
     fun notice(snapshot: Snapshot): Reason? = when (snapshot.reason) {
-        Reason.UNREADABLE, Reason.TIMEOUT -> snapshot.reason
+        Reason.UNREADABLE, Reason.TIMEOUT, Reason.EXCHANGE_UNAVAILABLE -> snapshot.reason
         else -> null
     }
 
@@ -94,6 +101,11 @@ object IdentityHealth {
         signingInstall == "skipped_no_identity" -> Reason.NO_IDENTITY
         signingInstall == "ready" && exchangeInstall == "ready" -> Reason.READY
         signingInstall == "timeout" || exchangeInstall == "timeout" -> Reason.TIMEOUT
+        // Подпись готова, обмен - нет. Раньше это попадало в UNREADABLE, и
+        // человек читал «ключ этого телефона не читается» про рабочий ключ
+        // личности: диагноз был не тот, а совет - восстанавливать профиль -
+        // дороже, чем нужно.
+        signingInstall == "ready" && exchangeInstall == "unavailable" -> Reason.EXCHANGE_UNAVAILABLE
         else -> Reason.UNREADABLE
     }
 
