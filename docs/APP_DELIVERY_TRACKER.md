@@ -5,7 +5,7 @@
 
 ## Где живёт работа
 
-- Линия приложения: `main`. Последний опубликованный стабильный релиз — `v11.74.453` (Latest, 2026-10-26).
+- Линия приложения: `main`. Последний опубликованный стабильный релиз — `v11.74.454` (Latest, 2026-10-27).
 - Рабочая ветка этой сессии: `arena/bbc2f9c9-apumir`, от коммита `c882295` (`main` на 2026-10-27).
 - Все текущие изменения должны попасть только в `arena/e5805f5b-apumir` и собираться вместе с `main`.
 - Другие ветки `arena/*` не удалять без явного разрешения владельца.
@@ -27,7 +27,7 @@
 | P1-3 | `Cargo.lock` убран из `.gitignore`, версия Rust закреплена: `rust-toolchain.toml` = 1.99.1 и те же `toolchain:` во всех четырёх workflow. Первый lock создаёт `sync-bindings.yml`; `unit-tests.yml` проверяет, что lock не устарел | код в ветке; нужен прогон `sync-bindings` |
 | P1-2 | `rust-core/Cargo.toml`: релизный профиль переведён с `panic = "abort"` на `unwind` — паника в ядре теперь возвращается в Kotlin как `InternalException("Rust panic")`, а не убивает процесс | код в ветке; контракт `check-rust-pinning.py` |
 | P1-4 | Размер APK: `proguard-rules.pro` (keep для uniffi/JNA/Vosk/ML Kit/osmdroid) и флаг `-Papu.r8=true` (по умолчанию ВЫКЛЮЧЕНО, ждёт проверки на телефоне). Из APK убраны служебные `META-INF/LICENSE*`/`NOTICE*`/`DEPENDENCIES`. **Решение по раздаче принято: универсальный APK, без ABI-сплитов и AAB** — в пакете роя нет ABI, а установленные версии ищут `APU-<версия>.apk`/`app-release.apk`, то есть сплиты сломали бы автообновление. Эмуляторная `x86_64` убрана из релиза (флаг `-Papu.emulatorAbi=true`), `assembleRelease` печатает разбор размера по ABI, контракт `check-release-abi.py` | код в ветке; включение R8 ждёт проверки на устройстве |
-| P2 4.1 | God-файлы: `check-god-files.py` + `god-files-baseline.json` — потолок строк, который можно только опускать; правило в `AGENTS.md`, проверка в `ci-core-check`. Швы: модели раздачи вынесены из `ApkSeeder.kt` в `ApkSeederModels.kt` (1858 → 1786), `routePacket` из `CoreServerService` (3329 → 3323), **опросы в `GroupPolls.kt` (6979 → 6816), медленный режим и SOS в `GroupModes.kt` (6816 → 6646), комментарии и хабы в `GroupComments.kt` (6646 → 6279), заявки на вступление в `GroupJoinRequests.kt` (6284 → 6027)** | влито в `main` (PR #59); храповик проверен на росте файла |
+| P2 4.1 | God-файлы: `check-god-files.py` + `god-files-baseline.json` — потолок строк, который можно только опускать; правило в `AGENTS.md`, проверка в `ci-core-check`. Швы: модели раздачи вынесены из `ApkSeeder.kt` в `ApkSeederModels.kt` (1858 → 1786), `routePacket` из `CoreServerService` (3329 → 3323), **опросы в `GroupPolls.kt` (6979 → 6816), медленный режим и SOS в `GroupModes.kt` (6816 → 6646), комментарии и хабы в `GroupComments.kt` (6646 → 6279), заявки на вступление в `GroupJoinRequests.kt` (6284 → 6027), досылка постов и сообщений в `GroupBackfill.kt` (6027 → 5801)** | влито в `main` (PR #59); храповик проверен на росте файла |
 | P2 4.4 | Локализация: `check-hardcoded-strings.py` с пофайловым храповиком. Переведены целиком экраны видеоистории (`StoryVideoCamera` 43 → 0, `StoryVideoComposer`, `StoryVideoEditor`, `StoryVideoPlayer`), `GroupAdminScreen`, `CallLocalPreview`, пользовательские сообщения `ChatListViewModel`/`GroupChatViewModel`/`ChannelViewModel`/`ChatDetailViewModel` и заголовки сохранённых файлов в `SavedViewModel` | влито в `main` (PR #61); осталось 338 литералов в 15 файлах. Из них 299 — ключевые слова поиска эмодзи (`TopicEmojiPicker`, оба языка сразу: это индекс поиска, а не подписи — **решено не переводить**, помечено в разделе `data` храповика), 7 — `PresenceLabels.RUSSIAN` для тестов. Английский перевод полный: `values-en` = 2221 ключ, `missing_en` = 0; набор подстановок в переводе проверяется контрактом |
 | P2 4.2 | `catch` не молчит: `check-silent-catch.py` (пустой `catch` без комментария — нарушение всегда; широкий `catch` без отчёта — храповик). 26 пустых `catch` разобраны, маршрутизация входящих переведена на `routePacket` — 34 места, отказ роутера идёт в лог и в счётчик `ROUTER_FAILED` (виден в диагностике, закреплён тестом). Заодно исправлено проглатывание `CancellationException` через `runCatching` | влито в `main` (PR #60), оба прогона CI зелёные; храповик 138 в 86 файлах |
 | P2 4.3 | Статический анализ: `scripts/ci/lint-release.sh` гоняет `:app:lintRelease` (Android Lint из AGP). **Шаг работает:** `.github/workflows/lint-ci.yml` установлен, первый прогон в PR #66 — 9m31s, зелёный (шаг пока только отчитывается, сводка замечаний по типам — в логе прогона и артефактом `lint-report`). Источник воркфлоу — `scripts/ci/lint-ci.yml`, переустановка — `scripts/install-ci-lint.ps1`. Общий bootstrap JDK/SDK с компиляцией — `scripts/ci/android-env.sh`. Блокировка включается файлом-маркером `scripts/ci/lint-blocking`, пока шаг только отчитывается (иначе сотни старых замечаний сразу закроют PR). detekt отложен: Lint покрывает те же классы ошибок и уже в AGP | воркфлоу `.github/workflows/lint-ci.yml` установлен 2026-10-27 (право `workflows` у приложения появилось; переустановка — `scripts\install-ci-lint.ps1`); первый прогон покажет накопленные замечания, блокировку включает файл-маркер `scripts/ci/lint-blocking` |
@@ -406,10 +406,12 @@
 - Проверено через GitHub API: `/releases/latest` возвращает `v11.74.441`; в релизе доступны оба ожидаемых asset, а стабильные ссылки ведут на https://github.com/vzhem/APUMIR/releases/download/v11.74.441/app-release.apk и https://github.com/vzhem/APUMIR/releases/download/v11.74.441/SHA256SUMS.txt.
 - Финальная UI-проверка остаётся владельцу на реальных телефонах.
 
-## Выпуск v11.74.454 (готовится)
+## Публичный релиз v11.74.454 (2026-10-27)
 
-- Владелец разрешил выпуск для всех («выпускай релиз для всех»); точный текст
-  показан из `docs/RELEASE_NOTES_v11.74.454.md` перед публикацией.
+- Владелец разрешил выпуск для всех («выпускай релиз для всех») и подтвердил
+  показанный точный текст из `docs/RELEASE_NOTES_v11.74.454.md`.
+- Создан и отправлен annotated tag `v11.74.454` на commit `8e8273736908d3fc38288026fd19d305c10f89f5`
+  (merge PR #72 в `main`). Заметки и статус трекера — PR #72.
 - Что вошло с `v11.74.453`: полный английский перевод интерфейса, потоковое
   чтение больших файлов (`util/BoundedFiles.kt`), релиз без эмуляторной ABI
   (`check-release-abi.py`), маршрутизация входящих без молчаливых `catch`
@@ -419,6 +421,20 @@
   `GroupJoinRequests`, `RateWindow`).
 - R8 по-прежнему выключен (`-Papu.r8=true` только вручную) — включение ждёт
   проверки установкой на телефон.
+- Tag release workflow `40484426132` зелёный: ancestry gate относительно
+  `v11.74.453`, source contracts, Rust/native build, UniFFI regeneration,
+  `testReleaseUnitTest`, `assembleRelease`, подпись ротированным ключом
+  (старый первым для Android 8, новый с `rotation-min-sdk-version 28`),
+  checksum.
+- Draft prerelease промотирован в стабильный Latest:
+  https://github.com/vzhem/APUMIR/releases/tag/v11.74.454, `draft=false`,
+  `prerelease=false`; `/releases/latest` возвращает `v11.74.454`.
+- В релиз загружены `app-release.apk` размером **161936408** bytes
+  (SHA-256 `63e0c6ba0d65e32e1ebf6cbff01c6eab3d1c4de8e163d38652975046c09bb080`)
+  и `SHA256SUMS.txt` размером `82` bytes. **APK стал на 70,5 МБ меньше**
+  предыдущего выпуска (`232388387` bytes у `v11.74.453`): из релиза ушла
+  эмуляторная `x86_64`, которая на телефоне не используется.
+- Финальная UI-проверка остаётся владельцу на реальных телефонах.
 
 ## Публичный релиз v11.74.453 (2026-10-26)
 
