@@ -132,7 +132,13 @@ class ProfileBackup @Inject constructor(
             return KeysResult.Unverifiable
         }
         if (manifest.nodeId != mine) {
-            Log.w(TAG, "keys-only restore refused: backup belongs to another profile")
+            // Префиксы обоих идентификаторов в лог: по ним видно, сменилась ли
+            // личность после даты копии, и не нужно гадать по скриншоту.
+            Log.w(
+                TAG,
+                "keys-only restore refused: backup profile=" + manifest.nodeId.take(10) +
+                    "… device profile=" + mine.take(10) + "…",
+            )
             return KeysResult.OtherProfile
         }
         val root = stagingRoot()
@@ -147,29 +153,28 @@ class ProfileBackup @Inject constructor(
             val signingSeed = if (seedFile.isFile) readSecretFile(seedFile, "signing seed") else null
             try {
                 if (exchangeSecret != null && !FileExchangeKeyStore.importSecret(appContext, exchangeSecret)) {
-                    throw IOException("file exchange secret not imported")
+                    throw IOException("file exchange secret not imported (" + FileExchangeKeyStore.lastImportError + ")")
                 }
+                if (signingSeed != null && !IdentitySigningKeyStore.importSeed(appContext, signingSeed)) {
+                    throw IOException("signing seed not imported (" + IdentitySigningKeyStore.lastImportError + ")")
+                }
+                // Привязки подписаны ровно тем семенем и тем секретом, которые
+                // лежат в этой же копии. Держать на телефоне привязку от
+                // прежнего ключа нельзя: ядро её отвергнет, и «ключ не
+                // читается» вернётся, хотя ключи уже на месте. Поэтому берём
+                // привязки из копии; нет их - убираем, и ядро подпишет новые
+                // тем же ключом (loadOrCreateBinding и initialize это умеют).
                 if (signingSeed != null) {
-                    if (!IdentitySigningKeyStore.importSeed(appContext, signingSeed)) {
-                        throw IOException("signing seed not imported")
-                    }
-                    // Привязка личности подписана ровно этим семенем. Если на
-                    // телефоне лежит привязка от прежнего (пересозданного)
-                    // семени, ядро её отвергнет - и ключ снова «не прочитается».
-                    // Поэтому после импорта проверяем текущую привязку: цела -
-                    // оставляем как есть (там могут быть свежие данные), битая -
-                    // берём из той же копии, а нет её - убираем, ядро подпишет
-                    // новую тем же ключом.
-                    if (IdentitySigningKeyStore.existingVerifiedBinding(appContext) == null) {
-                        val restored = stagedIdentityBinding()
-                        val editor = appContext.getSharedPreferences("apu_identity_signing", Context.MODE_PRIVATE).edit()
-                        if (restored != null) {
-                            editor.putString("identity_binding_v1", restored)
-                        } else {
-                            editor.remove("identity_binding_v1")
-                        }
-                        editor.commit()
-                    }
+                    writePortablePref(
+                        "apu_identity_signing", "identity_binding_v1",
+                        stagedPref("apu_identity_signing", "identity_binding_v1"),
+                    )
+                }
+                if (exchangeSecret != null) {
+                    writePortablePref(
+                        "apu_file_exchange", "signed_public_binding_v1",
+                        stagedPref("apu_file_exchange", "signed_public_binding_v1"),
+                    )
                 }
                 // Копия больше не нужна: полное восстановление человек повторит,
                 // выбрав файл заново. Держать её «заряженной» после успеха
@@ -187,14 +192,21 @@ class ProfileBackup @Inject constructor(
         }
     }
 
-    /** Привязка личности из подготовленной копии (та же, что подписана её семенем). */
-    private fun stagedIdentityBinding(): String? = runCatching {
-        val file = File(stagingRoot(), BackupLayout.prefsEntry("apu_identity_signing"))
+    /** Значение из подготовленной копии: prefs/<имя>.txt. null - нет такого. */
+    private fun stagedPref(prefsName: String, key: String): String? = runCatching {
+        val file = File(stagingRoot(), BackupLayout.prefsEntry(prefsName))
         if (!file.isFile) return@runCatching null
         val entries = PrefsCodec.decode(file.readText()) ?: return@runCatching null
-        val binding = entries["identity_binding_v1"] as? String ?: return@runCatching null
-        if (binding.length > 512) null else binding
+        val value = entries[key] as? String
+        if (value != null && value.length > 512) null else value
     }.getOrNull()
+
+    /** Поставить значение привязки или убрать её, если в копии её нет. */
+    private fun writePortablePref(prefsName: String, key: String, value: String?) {
+        val editor = appContext.getSharedPreferences(prefsName, Context.MODE_PRIVATE).edit()
+        if (value != null) editor.putString(key, value) else editor.remove(key)
+        editor.commit()
+    }
 
     /**
      * Подтвердить: применить при следующем старте процесса. До подтверждения
@@ -624,7 +636,8 @@ class ProfileBackup @Inject constructor(
                 if (!ok) {
                     // Без секрета подписанная привязка бесполезна и даже вредна (не совпадёт).
                     app.getSharedPreferences("apu_file_exchange", Context.MODE_PRIVATE).edit().clear().commit()
-                    Log.w(TAG, "restore: file exchange secret not imported, binding dropped")
+                    Log.w(TAG, "restore: file exchange secret not imported, binding dropped (" +
+                        FileExchangeKeyStore.lastImportError + ")")
                 }
             } else {
                 app.getSharedPreferences("apu_file_exchange", Context.MODE_PRIVATE).edit().clear().commit()
@@ -634,7 +647,8 @@ class ProfileBackup @Inject constructor(
                 val ok = IdentitySigningKeyStore.importSeed(app, seed)
                 if (!ok) {
                     app.getSharedPreferences("apu_identity_signing", Context.MODE_PRIVATE).edit().clear().commit()
-                    Log.w(TAG, "restore: signing seed not imported, binding dropped")
+                    Log.w(TAG, "restore: signing seed not imported, binding dropped (" +
+                        IdentitySigningKeyStore.lastImportError + ")")
                 }
             } else {
                 // Копия без seed: привязку не переносим (она от другого
