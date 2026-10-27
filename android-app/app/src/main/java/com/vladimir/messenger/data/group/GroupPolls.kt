@@ -132,7 +132,7 @@ internal class GroupPolls(
      * Вместе с сообщением уходит и приклеенный к нему опрос с голосами —
      * иначе карточка осталась бы висеть без своего сообщения.
      */
-    fun deleteForMessage(messageId: String) {
+    suspend fun deleteForMessage(messageId: String) {
         pollDao?.deleteByMessage(messageId)
     }
 
@@ -140,7 +140,7 @@ internal class GroupPolls(
      * Опросы и голоса уходят вместе с группой; иначе карточки вернулись бы
      * в ленту при повторном вступлении.
      */
-    fun deleteForGroup(groupId: String) {
+    suspend fun deleteForGroup(groupId: String) {
         pollDao?.deleteGroupPolls(groupId)
     }
 
