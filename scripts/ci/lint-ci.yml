@@ -1,0 +1,57 @@
+name: Android lint
+
+# Тонкая обёртка: вся логика в scripts/ci/lint-release.sh (как у
+# ci-core-check.yml). Файл воркфлоу агент пушить не может — у GitHub-приложения
+# Arena нет права `workflows`, поэтому его один раз ставит владелец:
+#
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-ci-lint.ps1
+#
+# Дальше скрипт в репозитории меняется обычными пушами, без новых установок.
+on:
+  pull_request:
+    paths:
+      - 'android-app/**'
+      - 'scripts/ci/**'
+      - '.github/workflows/lint-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: android lint (report first)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # Единственный шаг с логикой: скрипт поднимает SDK, гоняет
+      # :app:lintRelease, печатает сводку по типам замечаний и (пока шаг не
+      # блокирующий) не роняет проверку.
+      - name: Run Android lint
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bash scripts/ci/lint-release.sh
+
+      - name: Upload the lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: |
+            android-app/app/build/reports/lint-results-release.txt
+            android-app/app/build/reports/lint-results-release.html
+          if-no-files-found: warn
