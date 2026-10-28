@@ -18,7 +18,10 @@ import org.junit.Test
  */
 class DeliveryWakePolicyTest {
 
-    private fun minutes(value: Long?): Long? = value?.div(60_000L)
+    /** Минуты из миллисекунд; null (плана нет) читается как «не будим» — 0. */
+    private fun minutes(value: Long?): Long = (value ?: 0L) / 60_000L
+
+    private fun minutes(value: Long): Long = value / 60_000L
 
     private val ready = DeliveryWakePolicy.Conditions(
         enabled = true,
