@@ -14,7 +14,10 @@
 этого не заметит до релиза. Если переименовать публикуемый файл, приложение
 перестанет находить обновление — тоже только в бою. Поэтому:
 
-  1. релиз собирается только для ARM (x86_64 — лишь по флагу -Papu.emulatorAbi);
+  1. релиз УНИВЕРСАЛЬНЫЙ: arm64-v8a, armeabi-v7a и x86_64. Эмуляторную ABI
+     нельзя выкидывать ради размера — приложение ставят и на компьютер через
+     лаунчер (это эмулятор x86_64), а без неё APK там не устанавливается
+     (решение владельца 2026-10-28, отменяет рекомендацию аудита P1-4);
   2. ABI-сплиты и AAB не включаются: приложение раздаётся файлом и роем
      APK-раздачи, где в пакете нет ABI (см. docs/AUDIT_2026-10-26.md, P1-4);
   3. имя APK в воркфлоу релиза совпадает с тем, что ищет UpdateChecker.
@@ -34,7 +37,7 @@ WORKFLOWS = [
     ROOT / "scripts/ci/build-release.yml",
 ]
 
-ARM_ABIS = '"arm64-v8a", "armeabi-v7a"'
+RELEASE_ABIS = '"arm64-v8a", "armeabi-v7a", "x86_64"'
 
 
 def release_block(text):
@@ -83,16 +86,22 @@ def check_gradle(problems):
         problems.append(f"{GRADLE}: файл не найден")
         return
     text = GRADLE.read_text(encoding="utf-8")
-    if f"val armAbis = listOf({ARM_ABIS})" not in text:
+    if f"val releaseAbis = listOf({RELEASE_ABIS})" not in text:
         problems.append(
-            "build.gradle.kts: нет `val armAbis = listOf(\"arm64-v8a\", \"armeabi-v7a\")` — "
-            "релизный набор ABI должен быть ровно две ARM-копии."
+            "build.gradle.kts: нет `val releaseAbis = listOf(\"arm64-v8a\", "
+            "\"armeabi-v7a\", \"x86_64\")` — релиз должен быть универсальным: "
+            "без x86_64 приложение не ставится на компьютер через лаунчер."
         )
-    if 'abiFilters += if (emulatorAbi) armAbis + "x86_64" else armAbis' not in text:
+    if text.count("abiFilters += releaseAbis") < 2:
         problems.append(
-            "build.gradle.kts: релизные abiFilters должны быть "
-            "`if (emulatorAbi) armAbis + \"x86_64\" else armAbis` — "
-            "эмуляторная ABI входит в APK только по флагу -Papu.emulatorAbi."
+            "build.gradle.kts: и release, и debug должны брать один набор "
+            "`abiFilters += releaseAbis` — иначе проверенное в эмуляторе не "
+            "совпадает с тем, что уезжает людям."
+        )
+    if "emulatorAbi" in text:
+        problems.append(
+            "build.gradle.kts: флаг -Papu.emulatorAbi вернулся — эмуляторная ABI "
+            "обязана быть в релизе всегда (ПК-лаунчер), а не по флагу."
         )
     default_config = text[text.find("defaultConfig {"): text.find("buildTypes {")]
     if "abiFilters" in default_config:
@@ -206,7 +215,7 @@ def main():
         for problem in problems:
             print("  -", problem)
         return 1
-    print("в порядке: в релиз идут только ARM-ABI, сплитов и AAB нет, "
+    print("в порядке: релиз универсальный (arm64-v8a, armeabi-v7a, x86_64), сплитов и AAB нет, "
           "имя публикуемого APK совпадает с тем, что ищет приложение")
     return 0
 
