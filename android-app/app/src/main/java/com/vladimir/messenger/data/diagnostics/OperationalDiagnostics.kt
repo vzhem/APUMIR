@@ -15,6 +15,20 @@ enum class DiagnosticPhase { PROCESS_START, SERVICE_START, CORE_READY, SERVICE_S
 /** Only fixed phases/times and numeric storage baselines are persisted, never correlation IDs. */
 object OperationalDiagnostics {
     val tracker = OperationalHealthTracker { SystemClock.uptimeMillis() }
+
+    /**
+     * Человеку и в отчёт: приложение подняли будильником после того, как
+     * его закрыли. Без этой строки «письмо пришло с задержкой» никак не
+     * отличить от «доставка не работала» — а именно это владелец и просил
+     * сделать «как в Телеграмме» (2026-10-28).
+     */
+    fun recordWake(lastAliveMs: Long, nowMs: Long) {
+        val minutes = if (lastAliveMs > 0L) ((nowMs - lastAliveMs) / 60_000L).coerceAtLeast(0L) else 0L
+        runCatching {
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                .record("delivery", "служба поднята будильником после простоя ${minutes} мин")
+        }
+    }
     val wake = WakeHoldTracker()
     private val lock = Any()
     private var file: AtomicFile? = null

@@ -2095,6 +2095,10 @@ class CoreServerService : Service() {
     private var reconnectAttempt = 0
     private val maxBackoff = 60_000L
 
+    /** Службу остановили ради перезапуска: «быстрый подъём» не нужен, поднимемся сами. */
+    @Volatile
+    private var intentionalRestart = false
+
     private fun reconnectWithBackoff() {
         val delay = minOf(1000L * (1L shl reconnectAttempt.coerceAtMost(6)), maxBackoff)
         reconnectAttempt++
@@ -2103,9 +2107,11 @@ class CoreServerService : Service() {
             kotlinx.coroutines.delay(delay)
             try {
                 // Перезапуск сервиса (onDestroy + onStartCommand)
+                intentionalRestart = true
                 stopServiceSafely()
                 val restartIntent = android.content.Intent(applicationContext, CoreServerService::class.java)
                 applicationContext.startForegroundService(restartIntent)
+                intentionalRestart = false
                 reconnectAttempt = 0
                 Log.i(TAG, "Reconnect: service restarted")
             } catch (e: Exception) {
@@ -2144,7 +2150,15 @@ class CoreServerService : Service() {
         } catch (_: Exception) { /* освобождение блокировки в onDestroy: повторять нечего */ }
         OperationalDiagnostics.wake.release(SystemClock.elapsedRealtime())
         wakeLock?.release()
+        // «Убили» — быстрый подъём; осознанный перезапуск (reconnect) сюда не относится.
+        ServiceLifecycleHooks.onDestroyed(applicationContext, planned = intentionalRestart)
         super.onDestroy()
+    }
+
+    /** Человек смахнул приложение из задач: подъём через две минуты, как в Telegram. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        ServiceLifecycleHooks.onTaskRemoved(applicationContext)
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -2272,6 +2286,8 @@ class CoreServerService : Service() {
                 val statusNowMs = android.os.SystemClock.elapsedRealtime()
                 if (statusNowMs - lastStatusRefreshAtMs >= POLL_INTERVAL_MS) {
                     lastStatusRefreshAtMs = statusNowMs
+                    // Метка жизни: по ней сторож понимает, что нас убили без onDestroy.
+                    runCatching { DeliveryAssurance.markAlive(applicationContext) }
                     try {
                         val status = RustBridge.networkStatus()
                         val peers = RustBridge.connectedPeers()
@@ -2402,12 +2418,9 @@ class CoreServerService : Service() {
                 val rawText = event.text ?: return
                 val timestamp = ts
 
-                // Отправитель обязан быть узлом (pk_…). Ядро режет входящую
-                // строку на четыре поля, первое поле не проверяя: строка без
-                // конверта (например, голосовой пакет `APUCALL1|ab|…`, ушедший
-                // как есть) даёт отправителя «APUCALL1», а ниже из него вырос
-                // бы контакт-призрак «Contact APUCALL1» с обрывком пакета
-                // вместо переписки (владелец, скриншот 2026-09-13).
+                // Отправитель обязан быть узлом (pk_…): ядро не проверяет первое поле, и
+                // строка без конверта (`APUCALL1|ab|…`) дала бы контакт-призрак «Contact
+                // APUCALL1» с обрывком пакета вместо переписки (владелец, скрин 2026-09-13).
                 if (!NodeIds.isNodeId(senderId)) {
                     Log.w(
                         TAG,
@@ -2457,13 +2470,9 @@ class CoreServerService : Service() {
                     return
                 }
 
-                // р239: сообщение «от себя». Такое бывает, когда в контактах
-                // оказался собственный узел (в профиле есть «Мой QR» - его
-                // можно отсканировать самому). Показывать эхо входящим и
-                // звонить о нём в уведомлении нельзя: владелец, скрин 30.09
-                // 16:40 - «начинаешь печатать - приходит уведомление от меня
-                // же». Своя строка уже лежит в переписке как отправленная,
-                // терять нечего.
+                // р239: сообщение «от себя» (в контакты попал собственный узел, «Мой QR»
+                // можно отсканировать самому). Эхо входящим не показываем и не звоним:
+                // владелец, скрин 30.09 16:40. Своя строка уже есть как отправленная.
                 // р243: адрес из кэша зеркала (обновляется в цикле) - вызов в
                 // ядро на каждом входящем тормозил разбор очереди.
                 val myNodeId = com.vladimir.messenger.data.mirror.MirrorHub.nodeIdCached()
@@ -2489,12 +2498,9 @@ class CoreServerService : Service() {
                     val opened = MessageSealer.open(applicationContext, rawText)
                     if (opened == null) {
                         val known = MessageSealer.canSeal(applicationContext, senderId)
-                        // Владелец 2026-10-07: после обмена QR переписка
-                        // работает, но в сети ещё летят СТАРЫЕ копии, запечатанные
-                        // прежним ключом. Если от собеседника только что ЧТО-ТО
-                        // открылось — ключ рабочий, а этот конверт остаток в пути:
-                        // человека не тревожим и сигнал «отдай ключ ещё раз» ему
-                        // не шлём.
+                        // Владелец 2026-10-07: после обмена QR в сети летят СТАРЫЕ копии
+                        // со прежним ключом. Если от собеседника только что ЧТО-ТО открылось,
+                        // ключ рабочий, а этот конверт — остаток в пути: не тревожим.
                         val leftover = known &&
                             com.vladimir.messenger.data.security.KeyDesyncNotice
                                 .isWorkingRecently(applicationContext, senderId)
@@ -2567,18 +2573,13 @@ class CoreServerService : Service() {
                     return
                 }
 
-                // префикс также на последнем общем страже сохранения.
+                // Подтверждения ходили только через брокера (MQTT): если он недоступен,
+                // сообщение доходило, а вторая галочка не появлялась (жалоба 30.09).
+                // Теперь оно может прийти и напрямую (RustBridge.sendDeliveryAck), здесь его
+                // узнаём и помечаем своё сообщение доставленным. Строка служебная.
                 //
-                // Подтверждения ходили только через брокера (MQTT): если он
-                // недоступен, сообщение доходило, а вторая галочка не
-                // появлялась никогда - жалоба владельца 30.09. Теперь оно
-                // может прийти и напрямую (RustBridge.sendDeliveryAck), здесь
-                // его узнаём и помечаем своё сообщение доставленным. Строка
-                // служебная - в переписку не попадает.
-                //
-                // Raw ACKs are handled before the self-node filter above. Keep
-                // this guard for legacy sealed ACKs from older senders: their
-                // prefix only becomes visible after MessageSealer.open().
+                // Raw ACKs are handled before the self-node filter above; keep this guard
+                // for legacy sealed ACKs, whose prefix shows only after MessageSealer.open().
                 if (DeliveryAckWire.isPacket(text)) {
                     val ackedId = DeliveryAckWire.messageId(text)
                     if (ackedId != null) {
@@ -2600,20 +2601,13 @@ class CoreServerService : Service() {
                     return
                 }
 
-                // р239 (ВАЖНО): «печатает…» - мимолётный служебный сигнал, в
-                // переписке ему места нет. Разбирается ЗДЕСЬ, до зеркала,
-                // авто-создания контакта и сохранения.
-                //
-                // Ловушка, из-за которой это правило появилось: r235 поставил
-                // разбор только в routeIncomingEnvelope (резервный путь CF), а
-                // основной приём P2P живёт здесь - и пакет APUTYP1|1 лёг в чат
-                // сообщением с уведомлением (владелец, скрины 30.09). Поэтому
-                // рядом добавлен и страж в ChatRepository.saveIncomingMessage.
-                // Ранг и сердечки едут в ТОЙ ЖЕ обёртке APUTYP1, что и
-                // «печатает…». Разбирать их надо РАНЬШЕ индикатора набора:
-                // зеркальный и релейный пути так и делают, а основной путь
-                // читал конверт как «перестал печатать» и молча терял ранг -
-                // значок VIP не появлялся, хотя собеседник давно VIP.
+                // р239 (ВАЖНО): «печатает…» - мимолётный сигнал, в переписке места нет.
+                // Разбирается ЗДЕСЬ, до зеркала, авто-создания контакта и сохранения:
+                // r235 поставил разбор только в routeIncomingEnvelope (резервный путь CF),
+                // и пакет APUTYP1|1 лёг в чат с уведомлением (владелец, скрины 30.09);
+                // поэтому рядом есть страж и в ChatRepository.saveIncomingMessage.
+                // Ранг и сердечки едут в ТОЙ ЖЕ обёртке APUTYP1 - разбирать их надо РАНЬШЕ
+                // индикатора набора, иначе ранг терялся и VIP-значок не появлялся.
                 if (routeRankOrHeartPacket(heartGameNetwork, peerRankRouter, senderId, text)) {
                     runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
                     Log.i(TAG, "Rank/heart envelope handled before typing (main path)")
@@ -2655,15 +2649,12 @@ class CoreServerService : Service() {
                         return
                     }
 
-                    // Группы: APUGRP1-конверт разбирается здесь же, ДО авто-создания
-                    // контакта. Иначе каждое групповое событие превратилось бы в личный
-                    // чат с отправителем.
-                    // Раунд 129: ССЫЛКА на гифку - сам контент сообщения
-                    // («APUGIFREF1|<sha>»). Перехватывается здесь: в чат
-                    // ложится карточка от лица отправителя, байты каждый
-                    // телефон тихо тянет с хранителей. Даже если конверт
-                    // утечёт через запасной путь доставки и сохранится как
-                    // обычное сообщение - экран чата рисует по нему карточку.
+                    // Группы: APUGRP1 разбирается здесь же, ДО авто-создания контакта,
+                    // иначе групповое событие стало бы личным чатом с отправителем.
+                    // Раунд 129: ССЫЛКА на гифку - сам контент («APUGIFREF1|<sha>»): в чат
+                    // ложится карточка от лица отправителя, байты телефон тянет с хранителей.
+                    // Даже если конверт утечёт запасным путём и сохранится обычным
+                    // сообщением - экран чата рисует по нему карточку.
                     if (com.vladimir.messenger.data.gif.GifLibrary.isGifRef(text)) {
                         val refSha = com.vladimir.messenger.data.gif.GifLibrary.gifRefSha(text)
                         if (refSha != null) {

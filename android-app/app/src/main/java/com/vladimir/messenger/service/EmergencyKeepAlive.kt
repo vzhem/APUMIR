@@ -12,72 +12,113 @@ import com.vladimir.messenger.data.diagnostics.OperationalCounter
 import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
 
 /**
- * Аварийный каркас доставки: если система убила процесс, уведомления всё равно
- * должны пробиться (просьба владельца, раунд 141).
+ * Пробуждение доставки после того, как система или человек закрыли приложение.
  *
- * Что изменилось 2026-10-26 (P1-6 аудита). Раньше сервис при КАЖДОМ старте
- * перевзводил точный будильник «+5 минут» — 288 пробуждений в сутки, всегда,
- * даже когда всё работает. `setExactAndAllowWhileIdle` в Doze — самый дорогой
- * по батарее механизм Android. Теперь два разных сценария:
+ * Задача владельца (2026-10-28): «сделать как в Телеграмме — если убило
+ * приложение, оно понимает и просыпается». У Telegram письма будит сервер
+ * системным push-сообщением. Здесь сервера нет, поэтому «толчок» даёт наше
+ * собственное расписание, и оно знает о своём состоянии:
  *
- *  - сервис жив ([onServiceStarted]) — одна страховка в час НЕТОЧНЫМ
- *    будильником (`setAndAllowWhileIdle`): если процесс убьют без колбэка,
- *    сервис вернётся в течение часа, а не через 288 лишних пробуждений;
- *  - старт не удался ([onServiceRefused]) — вот здесь нужна настойчивость:
- *    точные будильники по лестнице 5 → 15 → 30 → 60 минут, счётчик отказов
- *    в SharedPreferences, чтобы после перезагрузки не начинать лестницу
- *    заново с пяти минут.
+ *  • служба жива — тихий сторож раз в [DeliveryWakePolicy.WATCHDOG_MS]
+ *    поднимает её, если её убили без `onDestroy` (без этого «убили» означало
+ *    «молчим, пока человек сам не откроет приложение»);
+ *  • служба уходит сама (`onDestroy`) или человек смахнул приложение из
+ *    списка задач (`onTaskRemoved`) — приложение ЗНАЕТ это и назначает
+ *    быстрый подъём через [DeliveryWakePolicy.FAST_WAKE_MS];
+ *  • подняться не удалось — лестница [DeliveryWakePolicy.RETRY_LADDER_MS].
  *
- * Приёмник объявлен `exported="true"` (BOOT_COMPLETED доходит не на всех
- * прошивках), поэтому в `onReceive` принимаются только два своих действия —
- * постороннее приложение не поднимет наш foreground-сервис.
+ * Решение (интервал, точность) считает [DeliveryWakePolicy]; здесь только
+ * AlarmManager и проверка «а жива ли служба на самом деле». Проверка важна:
+ * будильник может сработать в момент, когда служба уже поднялась сама, и
+ * второй экземпляр поверх живого не нужен.
+ *
+ * Отдельно про точность. `setExactAndAllowWhileIdle` — самый дорогой по
+ * батарее механизм Android, поэтому он включается только когда телефон
+ * действительно разрешает приложению работу в фоне (см. [DeliveryWakePolicy.canBeExact]).
+ * Если разрешений нет, будильник будет неточным, и экран «Уведомления
+ * приходят вовремя» честно скажет, чего не хватает.
  */
 class EmergencyKeepAliveReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
-        if (action != EmergencyKeepAlive.ACTION_PUMP && action != Intent.ACTION_BOOT_COMPLETED) {
+        if (!isOwnAction(action)) {
             Log.w(TAG, "emergency receiver ignored unexpected action=" + (action ?: "null"))
             return
         }
-        // Короткий карман бодрости (20 секунд): дать MQTT-связи и помпам
-        // докрутиться, пока система не усыпила процесс обратно.
+        OperationalDiagnostics.tracker.count(OperationalCounter.DELIVERY_WAKE_ALARM)
+        // Короткий карман бодрости: дать связи и помпам докрутиться, пока
+        // система не усыпила процесс обратно.
         runCatching {
             val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-            pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "APU:EmergencyPump")
-                .acquire(20_000L)
+            pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "APU:DeliveryWake").acquire(20_000L)
         }
-        val service = Intent(context, CoreServerService::class.java)
-        val started = try {
-            if (Build.VERSION.SDK_INT >= 26) {
-                context.startForegroundService(service)
-            } else {
-                context.startService(service)
-            }
-            true
-        } catch (e: Exception) {
-            // Android 12+ запрещает старт foreground-сервиса из фона, Android 15
-            // запрещает dataSync из BOOT_COMPLETED. Раньше отказ молча
-            // проглатывался: сервис не поднимался, и в логах не оставалось
-            // следа — «после перезагрузки ничего не приходит» без причины.
+        if (!DeliveryAssurance.isEnabled(context)) {
+            EmergencyKeepAlive.cancel(context)
+            return
+        }
+        val status = DeliveryAssurance.status(context)
+        val now = System.currentTimeMillis()
+        if (!DeliveryWakePolicy.shouldWakeNow(status.conditions, status.lastAliveMs, now)) {
+            // Служба жива (метка свежая) — поднимать второй экземпляр незачем.
+            // Но следующий сторож обязателен: будильник одноразовый.
+            Log.i(TAG, "wake skipped: service is alive, next watchdog scheduled")
+            EmergencyKeepAlive.scheduleWatchdog(context)
+            return
+        }
+        DeliveryAssurance.noteWake(context, now)
+        OperationalDiagnostics.tracker.count(OperationalCounter.DELIVERY_WAKE_START)
+        if (DeliveryAssurance.startService(context)) {
+            // Успешный старт сам перевзведёт сторож из onStartCommand.
+            Log.i(TAG, "service woken after " + describeDelay(status.lastAliveMs, now))
+            OperationalDiagnostics.recordWake(status.lastAliveMs, now)
+        } else {
+            // Android 12+ запрещает старт foreground-сервиса из фона без
+            // исключения из оптимизации батареи. Отказ виден человеку на
+            // экране «Уведомления приходят вовремя» и уходит в лестницу.
             OperationalDiagnostics.tracker.count(OperationalCounter.FOREGROUND_START_REFUSED)
-            Log.w(TAG, "emergency start refused (sdk=" + Build.VERSION.SDK_INT + ")", e)
-            false
-        }
-        if (!started) {
-            // Не терять цепочку: следующая попытка по лестнице 5 → 15 → 30 → 60.
             EmergencyKeepAlive.onServiceRefused(context)
         }
-        // Успешный старт сам перевзведёт страховку: сервис вызовет
-        // EmergencyKeepAlive.onServiceStarted() из onStartCommand.
+    }
+
+    private fun describeDelay(lastAliveMs: Long, nowMs: Long): String {
+        if (lastAliveMs <= 0L) return "first start"
+        val minutes = ((nowMs - lastAliveMs) / 60_000L).coerceAtLeast(0L)
+        return if (minutes >= 1) "after ${minutes} min without the service" else "within a minute"
     }
 
     companion object {
         private const val TAG = "EmergencyKeepAlive"
+
+        /**
+         * Какие действия принимает приёмник.
+         *
+         * Приёмник объявлен `exported="true"`: на части прошивок только так
+         * доходит BOOT_COMPLETED. Значит, постороннее приложение тоже может
+         * прислать Intent — поэтому allowlist, а не «любое действие».
+         * `MY_PACKAGE_REPLACED` нужен после обновления APK: служба не
+         * переживает замену пакета, и без этого письма не приходили бы до
+         * первого открытия приложения.
+         *
+         * `LOCKED_BOOT_COMPLETED` здесь нет намеренно (и его нет в манифесте):
+         * до первой разблокировки телефон закрывает личность и настройки —
+         * расшифровывать письма нечем, а чтение этих настроек до разблокировки
+         * упало бы. Доставка начинается с BOOT_COMPLETED.
+         */
+        // Имена действий записаны строками, а не через Intent.ACTION_*: так
+        // allowlist проверяется JVM-тестом без Android и не зависит от того,
+        // подставил ли компилятор значение системной константы.
+        private const val ACTION_BOOT = "android.intent.action.BOOT_COMPLETED"
+        private const val ACTION_PACKAGE_REPLACED = "android.intent.action.MY_PACKAGE_REPLACED"
+
+        fun isOwnAction(action: String?): Boolean =
+            action == EmergencyKeepAlive.ACTION_PUMP ||
+                action == ACTION_BOOT ||
+                action == ACTION_PACKAGE_REPLACED
     }
 }
 
-/** Планирование аварийного будильника. Отдельно от приёмника — тестируется. */
+/** Планирование пробуждений. Отдельно от приёмника — проверяется JVM-тестом. */
 object EmergencyKeepAlive {
 
     private const val TAG = "EmergencyKeepAlive"
@@ -87,60 +128,109 @@ object EmergencyKeepAlive {
     private const val PREFS = "emergency_keep_alive"
     private const val KEY_REFUSALS = "consecutive_refusals"
 
-    /** Страховка, пока сервис жив: раз в час. Неточная — батарея дороже. */
-    const val SAFETY_NET_MS = 60 * 60_000L
-
-    /** Лестница повторов, когда сервис не поднимается. */
-    val RETRY_LADDER_MS = longArrayOf(5 * 60_000L, 15 * 60_000L, 30 * 60_000L, 60 * 60_000L)
-
     /**
-     * Сервис стартовал и работает: одна страховка в час и сброс лестницы.
+     * Служба стартовала и работает: отметить жизнь и взвести тихий сторож.
      * Зовётся из [CoreServerService.onStartCommand] после успешного
-     * `startForeground`.
+     * `startForeground` — но только когда это ручной/системный запуск, а не
+     * пробуждение по будильнику (см. [scheduleWatchdog]).
      */
     fun onServiceStarted(context: Context) {
+        DeliveryAssurance.markAlive(context)
         refusals(context, 0)
-        schedule(context, SAFETY_NET_MS, exact = false)
+        scheduleWatchdog(context)
     }
 
     /**
-     * Сервис поднять не удалось (отказ `startForeground`, таймаут foreground,
-     * запрет старта из фона): следующая попытка по лестнице, точным
-     * будильником — здесь настойчивость оправдана, письма ждут.
+     * Служба уходит (onDestroy). Если это не осознанный перезапуск, приложение
+     * знает, что его «убили», и назначает быстрый подъём: именно этого не
+     * хватало — раньше следующая попытка была через час.
      */
-    fun onServiceRefused(context: Context) {
-        val misses = refusals(context, -1) + 1
-        refusals(context, misses)
-        val delay = RETRY_LADDER_MS[(misses - 1).coerceIn(0, RETRY_LADDER_MS.lastIndex)]
-        Log.i(TAG, "reschedule after refusal #$misses in ${delay / 60_000} min")
-        schedule(context, delay, exact = true)
+    fun onServiceStopped(context: Context, intentional: Boolean) {
+        if (!DeliveryAssurance.isEnabled(context)) {
+            cancel(context)
+            return
+        }
+        if (intentional) {
+            // Служба остановилась сама и знает причину. Частый подъём здесь
+            // вреден (причина не исчезнет за минуты, вышел бы цикл), но и
+            // совсем не будить нельзя: человек не должен остаться без писем
+            // до первого открытия приложения.
+            applyPlan(context, DeliveryWakePolicy.afterPlannedStop(DeliveryAssurance.conditions(context)))
+            return
+        }
+        applyPlan(context, DeliveryWakePolicy.serviceGone(DeliveryAssurance.conditions(context)))
     }
 
-    /** Снять будильник (пользователь выключил сервис — не будить зря). */
+    /** Человек смахнул приложение из списка задач: поднимаемся быстро. */
+    fun onTaskRemoved(context: Context) {
+        if (!DeliveryAssurance.isEnabled(context)) return
+        applyPlan(context, DeliveryWakePolicy.taskRemoved(DeliveryAssurance.conditions(context)))
+    }
+
+    /**
+     * Поднять службу не удалось (отказ `startForeground`, таймаут foreground,
+     * запрет старта из фона): следующая попытка по лестнице 1 → 5 → 15 → 30.
+     * Здесь настойчивость оправдана — письма ждут.
+     */
+    fun onServiceRefused(context: Context) {
+        if (!DeliveryAssurance.isEnabled(context)) {
+            cancel(context)
+            return
+        }
+        val misses = refusals(context, -1) + 1
+        refusals(context, misses)
+        val plan = DeliveryWakePolicy.afterRefusal(DeliveryAssurance.conditions(context), misses)
+        Log.i(TAG, "reschedule after refusal #$misses: " + describe(plan))
+        applyPlan(context, plan)
+    }
+
+    /**
+     * Взвести тихий сторож, пока служба жива. Публично, потому что приёмник
+     * перевзводит его после каждого срабатывания: будильник одноразовый.
+     */
+    fun scheduleWatchdog(context: Context) {
+        applyPlan(context, DeliveryWakePolicy.whileAlive(DeliveryAssurance.conditions(context)))
+    }
+
+    /** Снять будильник (человек выключил доставку — не будить зря). */
     fun cancel(context: Context) {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         am.cancel(pendingIntent(context))
         refusals(context, 0)
     }
 
-    private fun schedule(context: Context, delayMs: Long, exact: Boolean) {
+    private fun applyPlan(context: Context, plan: DeliveryWakePolicy.Plan) {
+        val delay = plan.delayMs
+        if (delay == null) {
+            // Политика сказала «не будить»: снимаем прежний будильник, иначе
+            // выключенная доставка продолжала бы поднимать службу.
+            cancel(context)
+            Log.i(TAG, "no wake scheduled: ${plan.reason}")
+            return
+        }
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val pi = pendingIntent(context)
-        val at = System.currentTimeMillis() + delayMs
-        val exactAllowed = !exact || Build.VERSION.SDK_INT < 31 ||
-            runCatching { am.canScheduleExactAlarms() }.getOrDefault(false)
+        val at = System.currentTimeMillis() + delay
         try {
-            if (exact && exactAllowed) {
+            if (plan.exact) {
                 am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
             } else {
-                // Точный запрещён настройкой телефона (или он и не нужен —
-                // страховка): неточный в Doze зазвонит в окне обслуживания.
                 am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
             }
         } catch (e: Exception) {
-            Log.w(TAG, "exact alarm failed, falling back to inexact: ${e.message}")
+            // Точный будильник могли отобрать в настройках уже после проверки.
+            // Неточный всё равно разбудит в окне обслуживания Doze — это
+            // честная деградация, а не отказ.
+            Log.w(TAG, "exact alarm failed, falling back to inexact: " + e.message)
             runCatching { am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi) }
         }
+        Log.i(TAG, "wake scheduled: " + describe(plan))
+    }
+
+    private fun describe(plan: DeliveryWakePolicy.Plan): String {
+        val minutes = (plan.delayMs ?: 0L) / 60_000L
+        val mode = if (plan.exact) "exact" else "inexact"
+        return "in $minutes min ($mode), reason=${plan.reason}"
     }
 
     private fun pendingIntent(context: Context): PendingIntent =
@@ -162,4 +252,11 @@ object EmergencyKeepAlive {
         if (current != delta) prefs.edit().putInt(KEY_REFUSALS, delta).apply()
         return delta
     }
+
+    /** Сколько подряд идущих отказов запомнено (для диагностики и тестов). */
+    fun refusalsForDiagnostics(context: Context): Int = refusals(context, -1)
+
+    /** Есть ли уже право на точные будильники — для диагностики. */
+    fun exactAlarmsUsable(context: Context): Boolean =
+        Build.VERSION.SDK_INT < 31 || DeliveryAssurance.exactAlarmsAllowed(context)
 }

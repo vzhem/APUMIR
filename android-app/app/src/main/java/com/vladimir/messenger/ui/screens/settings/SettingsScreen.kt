@@ -1384,12 +1384,12 @@ private fun SettingsTabContent(
                 }
             }
 
-            // ----------------------------------------------------------------
-            // Пауза новых сообщений: приложение целиком или нужный раздел.
-            // ----------------------------------------------------------------
             }
             if (section == SettingsSection.Notifications) {
             item { SettingsSectionTitle(stringResource(R.string.section_notifications)) }
+            // «Как в Telegram»: что мешает письму разбудить телефон (файл рядом).
+            item { DeliveryAssuranceCard() }
+            // Пауза новых сообщений: приложение целиком или нужный раздел.
             item {
                 SettingsCard {
                     val muteScopes = listOf(
