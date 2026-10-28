@@ -13,7 +13,8 @@ class HeartGameWireTest {
     private fun binding(): ByteArray = ByteBuffer.allocate(1 + 2 + id.length + 32 + 8 + 64)
         .put(1.toByte()).putShort(id.length.toShort()).put(id.toByteArray())
         .put(Ed25519.keyPairFromSeed(seed).publicKey).putLong(now - 1000).put(ByteArray(64)).array()
-    private fun record(score: Long = 7, time: Long = now) = HeartGameWire.sign(binding(), seed, score, time, "Игрок")
+    private fun record(score: Long = 7, time: Long = now, name: String = "Игрок") =
+        HeartGameWire.sign(binding(), seed, score, time, name)
     private fun verify(text: String) = HeartGameWire.verify(text, now) { true }
 
     @Test fun signedResultCanTravelThroughAnyRelayUnchanged() {
@@ -75,9 +76,10 @@ class HeartGameWireTest {
     }
 
     @Test fun placeCountsFromKnownRowsWithOwnEntry() {
-        val first = verify(record(score = 20))!!
-        val second = verify(record(score = 10))!!.copy(keyId = "11".repeat(32))
-        val own = first.copy(keyId = "22".repeat(32), score = 15)
+        // Имена разные: в таблице это разные участники, а не склейка одного.
+        val first = verify(record(score = 20, name = "Первый"))!!
+        val second = verify(record(score = 10, name = "Второй"))!!.copy(keyId = "11".repeat(32))
+        val own = first.copy(keyId = "22".repeat(32), score = 15, name = "Я")
         // 20 > 15 > 10: своё место - второе.
         assertEquals(2, HeartGameWire.placeOf(listOf(first, second), own.score, own))
     }
@@ -85,8 +87,8 @@ class HeartGameWireTest {
     @Test fun placeStillCountsWithoutSigningBinding() {
         // Подписи личности нет (own == null) - место обязано быть числом, а не
         // прочерком: сравниваем свой счёт с известными результатами.
-        val first = verify(record(score = 20))!!
-        val second = verify(record(score = 10))!!.copy(keyId = "11".repeat(32))
+        val first = verify(record(score = 20, name = "Первый"))!!
+        val second = verify(record(score = 10, name = "Второй"))!!.copy(keyId = "11".repeat(32))
         assertEquals(2, HeartGameWire.placeOf(listOf(first, second), 15, null))
         assertEquals(1, HeartGameWire.placeOf(listOf(first, second), 20, null))
         assertEquals(3, HeartGameWire.placeOf(listOf(first, second), 0, null))
@@ -98,5 +100,64 @@ class HeartGameWireTest {
         val same = own.copy(score = 7, updated = own.updated + 1)
         // Своя строка уже лежит в таблице - она не должна считаться дважды.
         assertEquals(1, HeartGameWire.placeOf(listOf(own, same), own.score, own))
+        assertEquals(1, HeartGameWire.table(listOf(own, same), own.keyId).size)
+    }
+
+    // ------------------------------------------------------------------
+    // Склейка одного участника: владелец, скриншот 28.10.2026 - «В таблице
+    // один и тот же участник задвоился» (server7 дважды подряд).
+    // ------------------------------------------------------------------
+
+    @Test fun oneNameWithTwoSigningKeysTakesASingleRowWithTheBestScore() {
+        val fresh = verify(record(score = 3282, name = "server7"))!!
+        val older = fresh.copy(keyId = "11".repeat(32), score = 3271, updated = now - 86_000)
+        val table = HeartGameWire.table(listOf(older, fresh), ownKey = null)
+        assertEquals(1, table.size)
+        assertEquals(3282L, table[0].entry.score)
+        assertEquals(2, table[0].merged)
+    }
+
+    @Test fun ownRowStaysOwnEvenWhenAnotherKeyUnderTheSameNameClaimsMore() {
+        val own = verify(record(score = 3246, name = "Проводник"))!!.copy(keyId = "22".repeat(32))
+        val stranger = own.copy(keyId = "33".repeat(32), score = 9999)
+        val table = HeartGameWire.table(listOf(own, stranger), own.keyId)
+        assertEquals(1, table.size)
+        // Своя строка не подменяется чужим счётом: в шапке и в таблице одно число.
+        assertEquals(3246L, table[0].entry.score)
+        assertEquals(own.keyId, table[0].entry.keyId)
+        assertEquals(1, HeartGameWire.placeOf(listOf(own, stranger), own.score, own))
+    }
+
+    @Test fun differentNamesStayDifferentRows() {
+        val first = verify(record(score = 20, name = "server7"))!!
+        val second = first.copy(keyId = "11".repeat(32), score = 10, name = "server3")
+        val table = HeartGameWire.table(listOf(first, second), ownKey = null)
+        assertEquals(listOf("server7", "server3"), table.map { it.entry.name })
+        assertEquals(listOf(1, 1), table.map { it.merged })
+    }
+
+    @Test fun placeholderNamesAreNeverMerged() {
+        // Под заглушкой «Участник» стоят разные люди: сводить их в одного нельзя.
+        val first = verify(record(score = 20, name = ""))!!
+        val second = first.copy(keyId = "11".repeat(32), score = 10)
+        assertEquals(2, HeartGameWire.table(listOf(first, second), ownKey = null).size)
+    }
+
+    @Test fun caseAndOuterSpacesDoNotSplitOneName() {
+        val first = verify(record(score = 20, name = "server7"))!!
+        val second = first.copy(keyId = "11".repeat(32), score = 10, name = "  Server7 ")
+        val table = HeartGameWire.table(listOf(first, second), ownKey = null)
+        assertEquals(1, table.size)
+        assertEquals(2, table[0].merged)
+    }
+
+    @Test fun mergedTableKeepsPlacesConsistentWithTheHeader() {
+        val a = verify(record(score = 20, name = "Первый"))!!
+        val aOld = a.copy(keyId = "11".repeat(32), score = 12)
+        val b = a.copy(keyId = "22".repeat(32), score = 15, name = "Второй")
+        val own = a.copy(keyId = "33".repeat(32), score = 7, name = "Я")
+        // 20 (склеено из двух записей), 15, 7: своё место - третье.
+        assertEquals(3, HeartGameWire.placeOf(listOf(a, aOld, b), own.score, own))
+        assertEquals(3, HeartGameWire.table(listOf(a, aOld, b, own), own.keyId).size)
     }
 }

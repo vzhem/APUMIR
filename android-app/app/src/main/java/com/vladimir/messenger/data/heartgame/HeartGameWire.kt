@@ -87,11 +87,63 @@ object HeartGameWire {
      */
     fun placeOf(rows: Collection<Entry>, ownScore: Long, own: Entry?): Int {
         if (own != null) {
-            val ranked = ranked(rows.filter { it.keyId != own.keyId } + own)
-            val index = ranked.indexOfFirst { it.keyId == own.keyId }
+            val table = table(rows.filter { it.keyId != own.keyId } + own, own.keyId)
+            val index = table.indexOfFirst { it.entry.keyId == own.keyId }
             if (index >= 0) return index + 1
         }
-        return 1 + rows.count { it.score > ownScore }
+        return 1 + table(rows, null).count { it.entry.score > ownScore }
     }
     fun ranked(entries: Collection<Entry>) = entries.sortedWith(compareByDescending<Entry> { it.score }.thenBy { it.keyId })
+
+    /** Строка таблицы: результат и сколько записей склеено под этим именем. */
+    data class Row(val entry: Entry, val merged: Int)
+
+    /**
+     * Таблица лидеров: одна строка на участника.
+     *
+     * У одного человека в сети бывает несколько ключей подписи. Ключ привязан к
+     * устройству (Android Keystore), поэтому телефон и компьютер дают разные
+     * keyId, а после переустановки появляется ещё один. Подписи при этом
+     * настоящие, и по ним не видно, что это один и тот же человек: общего у
+     * записей только имя, выбранное самим человеком. Без склейки человек
+     * занимал в таблице две строки подряд - владелец, скриншот 28.10.2026:
+     * «В таблице один и тот же участник задвоился».
+     *
+     * Поэтому строки с одинаковым именем (без учёта регистра и крайних
+     * пробелов) склеиваются в одну, и остаётся лучший результат. Своя строка
+     * всегда остаётся своей, даже если у другого ключа с тем же именем счёт
+     * выше: иначе в таблице было бы одно число, а в шапке другое.
+     *
+     * Имя без букв (пустое) ничего не склеивает: под заглушкой «Участник»
+     * стоят разные люди, и сводить их в одного нельзя.
+     *
+     * Чего эта функция НЕ делает: не подтверждает, что имя принадлежит
+     * одному человеку. Имя выбирает сам клиент, поэтому два разных человека
+     * с одинаковым именем попадут в одну строку, а чужое имя можно взять
+     * себе. Это плата за таблицу, собранную из самостоятельно подписанных
+     * отчётов, а не из серверной базы; текст подсказки в окне говорит об
+     * этом прямо.
+     *
+     * @param ownKey keyId своей строки, если подпись личности доступна.
+     */
+    fun table(entries: Collection<Entry>, ownKey: String?): List<Row> {
+        val groups = LinkedHashMap<String, MutableList<Entry>>()
+        for (entry in entries) groups.getOrPut(mergeKey(entry)) { mutableListOf() }.add(entry)
+        return groups.values
+            .map { group ->
+                // Лучший из ключей одного имени: больший счёт, при равенстве -
+                // более свежий, при полном равенстве - меньший keyId (чтобы
+                // порядок не «прыгал» между телефонами).
+                val best = group.firstOrNull { it.keyId == ownKey }
+                    ?: group.maxWith(compareBy<Entry> { it.score }.thenBy { it.updated }.thenByDescending { it.keyId })
+                Row(best, group.size)
+            }
+            .sortedWith(compareByDescending<Row> { it.entry.score }.thenBy { it.entry.keyId })
+    }
+
+    /** Ключ склейки: имя без регистра; пустое имя склеивает только с собой. */
+    private fun mergeKey(entry: Entry): String {
+        val name = entry.name.trim().lowercase(java.util.Locale.ROOT)
+        return if (name.isEmpty()) "key:" + entry.keyId else "name:" + name
+    }
 }

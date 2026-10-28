@@ -233,7 +233,7 @@ fun HeartGameSettings(onOpenRanks: (() -> Unit)? = null) {
 fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val revision by HeartGameStore.revision.collectAsStateWithLifecycle()
-    var entries by remember(id) { mutableStateOf<List<HeartGameWire.Entry>>(emptyList()) }
+    var entries by remember(id) { mutableStateOf<List<HeartGameWire.Row>>(emptyList()) }
     var ownKey by remember(id) { mutableStateOf("local:$id") }
     var loading by remember(id) { mutableStateOf(true) }
     var failed by remember(id) { mutableStateOf(false) }
@@ -243,15 +243,22 @@ fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
         try {
             ownKey = HeartGameStore.ownKeyId(context) ?: "local:$id"
             val own = HeartGameWire.Entry(id, you, HeartGameStore.score(context, id), System.currentTimeMillis(), "", ownKey)
-            entries = HeartGameWire.ranked(HeartGameStore.board(context, id).filter { it.keyId != ownKey } + own)
+            // Одна строка на участника: у одного человека может быть несколько
+            // ключей подписи (телефон, компьютер, переустановка), и таблица
+            // раньше показывала его дважды подряд (скриншот владельца 28.10).
+            entries = HeartGameWire.table(
+                HeartGameStore.board(context, id).filter { it.keyId != ownKey } + own,
+                ownKey,
+            )
             failed = false
         } catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (_: Exception) { failed = true }
         finally { loading = false }
     }
-    val ownIndex = entries.indexOfFirst { it.keyId == ownKey }
+    val ownIndex = entries.indexOfFirst { it.entry.keyId == ownKey }
     val ownPlace = ownIndex + 1
-    val rows: List<Pair<Int, HeartGameWire.Entry>> =
+    val mergedAny = entries.any { it.merged > 1 }
+    val rows: List<Pair<Int, HeartGameWire.Row>> =
         if (ownIndex < 100) entries.take(100).mapIndexed { i, e -> (i + 1) to e }
         else entries.take(99).mapIndexed { i, e -> (i + 1) to e } + (100 to entries[ownIndex])
     val listHeight = (LocalConfiguration.current.screenHeightDp * 0.45f).coerceIn(200f, 420f).dp
@@ -261,14 +268,20 @@ fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(stringResource(R.string.heart_game_board_hint), style = MaterialTheme.typography.bodySmall)
+                // Пояснение появляется только когда склейка действительно была:
+                // иначе строка вводила бы в заблуждение тех, у кого дублей нет.
+                if (mergedAny) {
+                    Text(stringResource(R.string.heart_game_board_merged), style = MaterialTheme.typography.labelSmall)
+                }
                 if (loading) ApuPremiumSpinner()
                 if (failed) Text(stringResource(R.string.heart_game_save_error))
-                if (!loading && entries.none { it.keyId != ownKey }) Text(stringResource(R.string.heart_game_empty))
+                if (!loading && entries.none { it.entry.keyId != ownKey }) Text(stringResource(R.string.heart_game_empty))
                 // Таблица на 100 мест. Если вы ниже 100-го, вы занимаете 100-ю строку
                 // с настоящим местом в подписи. Лента прокручивается внутри окна.
                 if (rows.isNotEmpty()) {
                     LazyColumn(Modifier.fillMaxWidth().height(listHeight), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(rows, key = { it.first }) { (place, entry) ->
+                        items(rows, key = { it.first }) { (place, row) ->
+                            val entry = row.entry
                             val isMe = entry.keyId == ownKey
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Text("$place", modifier = Modifier.width(36.dp), fontWeight = FontWeight.Bold,

@@ -50,6 +50,33 @@ class HeartGameContracts(unittest.TestCase):
                      'TextAlign.End', 'coerceIn(200f, 420f)'):
             self.assertIn(text, ui)
 
+    def test_one_participant_is_one_row_in_the_leaderboard(self):
+        # Владелец, скриншот 28.10.2026: «В таблице один и тот же участник
+        # задвоился». У одного человека бывает несколько ключей подписи
+        # (телефон, компьютер, переустановка), и keyId у них разные - значит,
+        # склейка обязана идти по имени, а не по ключу.
+        wire = (SRC / 'data/heartgame/HeartGameWire.kt').read_text()
+        self.assertIn('fun table(entries: Collection<Entry>, ownKey: String?)', wire)
+        self.assertIn('mergeKey(entry)', wire)
+        self.assertIn('lowercase(java.util.Locale.ROOT)', wire)
+        # Своя строка не подменяется чужим счётом под тем же именем.
+        self.assertIn('group.firstOrNull { it.keyId == ownKey }', wire)
+        # Пустое имя (заглушка «Участник») не склеивает разных людей.
+        self.assertIn('"key:" + entry.keyId', wire)
+        ui = (SRC / 'ui/components/HeartGameSettings.kt').read_text()
+        self.assertIn('HeartGameWire.table(', ui)
+        self.assertNotIn('HeartGameWire.ranked(HeartGameStore.board', ui)
+        for path in (ROOT / 'android-app/app/src/main/res/values/strings.xml',
+                     ROOT / 'android-app/app/src/main/res/values-en/strings.xml'):
+            self.assertIn('heart_game_board_merged', path.read_text(),
+                          'нет пояснения о склейке строк в ' + path.name)
+        test = (ROOT / 'android-app/app/src/test/java/com/vladimir/messenger/data/heartgame/'
+                'HeartGameWireTest.kt').read_text()
+        for case in ('oneNameWithTwoSigningKeysTakesASingleRowWithTheBestScore',
+                     'ownRowStaysOwnEvenWhenAnotherKeyUnderTheSameNameClaimsMore',
+                     'placeholderNamesAreNeverMerged', 'caseAndOuterSpacesDoNotSplitOneName'):
+            self.assertIn(case, test, 'нет теста склейки: ' + case)
+
     def test_private_account_scoped_score_and_opt_in(self):
         store = (SRC / 'data/heartgame/HeartGameStore.kt').read_text()
         self.assertIn('heart-game-v1-$id', store)
