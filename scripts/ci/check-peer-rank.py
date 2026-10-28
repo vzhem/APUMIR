@@ -40,6 +40,11 @@ BROADCASTER = (KOTLIN / "data/rank/PeerRankBroadcaster.kt").read_text()
 NODE_IDS = (KOTLIN / "util/NodeIds.kt").read_text()
 TYPING = (KOTLIN / "data/typing/TypingWire.kt").read_text()
 CORE_SERVICE = (KOTLIN / "service/CoreServerService.kt").read_text()
+# Разбор «сердечки/ранг» вынесен в отдельный файл (god-файл не растёт), поэтому
+# порядок проверяется по вызову-маркеру, а сам разбор - по файлу-помощнику.
+RANK_ROUTING = (KOTLIN / "service/RankPacketRouting.kt").read_text()
+RANK_CALL = "routeRankOrHeartPacket(heartGameNetwork, peerRankRouter, senderId, text)"
+
 PEER_ENTITY = (KOTLIN / "data/local/entity/PeerRankEntity.kt").read_text()
 PEER_DAO = (KOTLIN / "data/local/dao/PeerRankDao.kt").read_text()
 CONTACT_ENTITY = (KOTLIN / "data/local/entity/ContactEntity.kt").read_text()
@@ -97,11 +102,20 @@ class PeerRankContractTest(unittest.TestCase):
         # Ранг разбирается РАНЬШЕ «печатает…»: обёртку не должен съесть чужой
         # роутер - иначе ранг молча терялся бы.
         chain = CORE_SERVICE[
-            CORE_SERVICE.index("peerRankRouter.routeIncoming(senderId, text)"):
+            CORE_SERVICE.index(RANK_CALL):
             CORE_SERVICE.index("TypingRouter.routeIncoming(senderId, text)")
         ]
         self.assertNotIn("TypingRouter.routeIncoming", chain)
-        self.assertGreaterEqual(CORE_SERVICE.count("peerRankRouter.routeIncoming("), 2)
+        # Сам разбор ранга - в файле-помощнике, и он отделён от разбора
+        # сердечек: падение одного не должно съедать второй конверт.
+        self.assertIn("peerRankRouter.routeIncoming(senderId, text)", RANK_ROUTING)
+        self.assertIn("heartGameNetwork.routeIncoming(senderId, text)", RANK_ROUTING)
+        self.assertLess(
+            RANK_ROUTING.index("heartGameNetwork.routeIncoming(senderId, text)"),
+            RANK_ROUTING.index("peerRankRouter.routeIncoming(senderId, text)"),
+        )
+        self.assertIn('routePacket("CoreServerService", "rank")', RANK_ROUTING)
+        self.assertGreaterEqual(CORE_SERVICE.count(RANK_CALL), 2)
         self.assertIn("lateinit var peerRankRouter", CORE_SERVICE)
 
     def test_ranks_live_in_one_table_for_every_node(self):
@@ -208,7 +222,7 @@ class PeerRankContractTest(unittest.TestCase):
             CORE_SERVICE.index("private suspend fun mirrorApplyActionLocally(")
         ]
         self.assertLess(
-            envelope.index("peerRankRouter.routeIncoming(senderId, text)"),
+            envelope.index(RANK_CALL),
             envelope.index("TypingWire.parse(text)"),
         )
         action = CORE_SERVICE[

@@ -73,4 +73,30 @@ class HeartGameWireTest {
         assertNull(HeartGameWire.parseRequest("APUTYP1|APUGAMEREQ1|nodeA|abc", now))
         assertNull(HeartGameWire.parseRequest("APUTYP1|APUGAME1|nodeA|$now", now))
     }
+
+    @Test fun placeCountsFromKnownRowsWithOwnEntry() {
+        val first = verify(record(score = 20))!!
+        val second = verify(record(score = 10))!!.copy(keyId = "11".repeat(32))
+        val own = first.copy(keyId = "22".repeat(32), score = 15)
+        // 20 > 15 > 10: своё место - второе.
+        assertEquals(2, HeartGameWire.placeOf(listOf(first, second), own.score, own))
+    }
+
+    @Test fun placeStillCountsWithoutSigningBinding() {
+        // Подписи личности нет (own == null) - место обязано быть числом, а не
+        // прочерком: сравниваем свой счёт с известными результатами.
+        val first = verify(record(score = 20))!!
+        val second = verify(record(score = 10))!!.copy(keyId = "11".repeat(32))
+        assertEquals(2, HeartGameWire.placeOf(listOf(first, second), 15, null))
+        assertEquals(1, HeartGameWire.placeOf(listOf(first, second), 20, null))
+        assertEquals(3, HeartGameWire.placeOf(listOf(first, second), 0, null))
+        assertEquals(1, HeartGameWire.placeOf(emptyList(), 0, null))
+    }
+
+    @Test fun ownEntryIsIncludedExactlyOnce() {
+        val own = verify(record(score = 7))!!.copy(keyId = "33".repeat(32))
+        val same = own.copy(score = 7, updated = own.updated + 1)
+        // Своя строка уже лежит в таблице - она не должна считаться дважды.
+        assertEquals(1, HeartGameWire.placeOf(listOf(own, same), own.score, own))
+    }
 }

@@ -227,6 +227,7 @@ class ChatListViewModel @Inject constructor(
         observeInbox()
         observeNetworkStatus()
         observePeerVip()
+        askUnknownPeerRanks()
         refreshRankBadge()
     }
 
@@ -654,6 +655,48 @@ class ChatListViewModel @Inject constructor(
      * опрашивает базу — таблица `peer_ranks` сообщает об изменении, как только
      * придёт конверт APURANK1.
      */
+    /**
+     * Спросить ранг у собеседников, о которых ещё ничего не известно.
+     *
+     * Знак VIP раньше ждал двух событий: «абонент появился в сети» (в этот
+     * момент служба просит ранг) или недельной рассылки его телефона. Если
+     * телефон открыли, когда собеседник уже был в сети, запрос не уходил
+     * вообще, и знак не появлялся днями. Теперь запрос идёт с главного экрана
+     * по видимым личным чатам - в пределах бюджета, с отметкой на каждого
+     * собеседника (её же держит PeerRankBroadcaster: не чаще раза в сутки,
+     * а если пакет лёг в офлайн-очередь ядра - повтор через 10 минут).
+     */
+    private fun askUnknownPeerRanks() {
+        viewModelScope.launch {
+            val asked = HashSet<String>()
+            uiState
+                .map { state ->
+                    state.itemsBySection.values.asSequence()
+                        .flatten()
+                        .filterIsInstance<InboxItem.Personal>()
+                        .mapNotNull { com.vladimir.messenger.data.rank.RankWire.canonicalNodeId(it.chat.contactId) }
+                        .distinct()
+                        .toList()
+                }
+                .distinctUntilChanged()
+                .collect { nodes ->
+                    var budget = MAX_RANK_ASKS_PER_PASS
+                    for (node in nodes) {
+                        if (budget <= 0) break
+                        if (node in asked) continue
+                        val known = withContext(Dispatchers.IO) { peerRankStore.qualifiedFor(node) }
+                        if (known != null) continue
+                        budget--
+                        val started = runCatching { peerRankBroadcaster.requestRank(node) }
+                            .getOrDefault(false)
+                        // Отметку ставим только когда запрос действительно начат:
+                        // раннее «ядро не готово» не должно съедать попытку.
+                        if (started) asked += node
+                    }
+                }
+        }
+    }
+
     private fun observePeerVip() {
         viewModelScope.launch {
             peerRankStore.vipNodeIds.collect { ids ->
@@ -1008,6 +1051,14 @@ class ChatListViewModel @Inject constructor(
          * полсотни хватает и на первый экран, и на запас под быструю прокрутку.
          */
         const val PAGE_SIZE = 50
+
+        /**
+         * Сколько запросов ранга уходит за один проход по списку чатов.
+         * Ограничение нужно, чтобы открытие главного экрана не превращалось в
+         * веер пакетов на сотню собеседников: остальные дойдут на следующих
+         * изменениях списка.
+         */
+        private const val MAX_RANK_ASKS_PER_PASS = 8
 
         /**
          * Предел окна. Даже при десятках тысяч чатов в памяти не окажется

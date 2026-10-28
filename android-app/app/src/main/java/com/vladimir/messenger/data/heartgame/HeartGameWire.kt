@@ -74,5 +74,24 @@ object HeartGameWire {
     } catch (_: Exception) { null }
 
     fun newer(old: Entry?, next: Entry) = old == null || (old.keyId == next.keyId && next.updated > old.updated && next.score >= old.score)
+
+    /**
+     * Место в таблице лидеров, начиная с 1.
+     *
+     * [own] может быть null: подписанная привязка личности есть не на каждом
+     * телефоне (её установка идёт вместе с ядром), а место в таблице от подписи
+     * не зависит. Без своей строки место считается по счёту - [ownScore]
+     * сравнивается с уже известными результатами. При равенстве счёта место не
+     * приписывается: считаются только строго большие результаты, поэтому число
+     * получается не хуже настоящего, но и не выдуманным.
+     */
+    fun placeOf(rows: Collection<Entry>, ownScore: Long, own: Entry?): Int {
+        if (own != null) {
+            val ranked = ranked(rows.filter { it.keyId != own.keyId } + own)
+            val index = ranked.indexOfFirst { it.keyId == own.keyId }
+            if (index >= 0) return index + 1
+        }
+        return 1 + rows.count { it.score > ownScore }
+    }
     fun ranked(entries: Collection<Entry>) = entries.sortedWith(compareByDescending<Entry> { it.score }.thenBy { it.keyId })
 }

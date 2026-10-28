@@ -2837,7 +2837,7 @@ private fun ApkVersionDialog(
 @Composable
 private fun StatusDot(status: com.vladimir.messenger.data.repository.NetworkStatus) {
     val color = when (status) {
-        com.vladimir.messenger.data.repository.NetworkStatus.Connected    -> StatusOnline
+        com.vladimir.messenger.data.repository.NetworkStatus.Connected, com.vladimir.messenger.data.repository.NetworkStatus.Relayed -> StatusOnline
         com.vladimir.messenger.data.repository.NetworkStatus.Connecting   -> StatusConnecting
         com.vladimir.messenger.data.repository.NetworkStatus.Degraded     -> StatusDegraded
         com.vladimir.messenger.data.repository.NetworkStatus.Disconnected -> StatusOffline
@@ -2849,11 +2849,11 @@ private fun StatusDot(status: com.vladimir.messenger.data.repository.NetworkStat
     ) {}
 }
 
-// Расширение для отображения статуса
 @Composable
 private fun com.vladimir.messenger.data.repository.NetworkStatus.displayName(): String = stringResource(
     when (this) {
         com.vladimir.messenger.data.repository.NetworkStatus.Connected    -> R.string.net_status_connected
+        com.vladimir.messenger.data.repository.NetworkStatus.Relayed      -> R.string.nsb_relay
         com.vladimir.messenger.data.repository.NetworkStatus.Connecting   -> R.string.nsb_connecting
         com.vladimir.messenger.data.repository.NetworkStatus.Degraded     -> R.string.nsb_relay
         com.vladimir.messenger.data.repository.NetworkStatus.Disconnected -> R.string.nsb_disconnected

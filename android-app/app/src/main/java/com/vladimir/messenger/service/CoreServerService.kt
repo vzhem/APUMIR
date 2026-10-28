@@ -473,10 +473,9 @@ class CoreServerService : Service() {
         if (routePacket(TAG, "referral") { referralAttributionRouter.routeIncoming(senderId, text) }) return true
         // Ранг собеседника (APURANK1): знак VIP у имени. Поглощается здесь же,
         // чтобы служебная строка не стала текстом в переписке.
-        if (routePacket(TAG, "rank") {
-                heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text)
-            }
-        ) return true
+        // Счёт игры и ранг - раздельно (см. RankPacketRouting): сбой одного
+        // конверта не должен съедать второй, иначе знак VIP не появляется.
+        if (routeRankOrHeartPacket(heartGameNetwork, peerRankRouter, senderId, text)) return true
         if (routePacket(TAG, "call") { callManager.routeIncoming(senderId, chatId, messageId, text) }) {
             return true
         }
@@ -1856,11 +1855,8 @@ class CoreServerService : Service() {
         // Ранг собеседника едет в обёртке «печатает…» (см. RankWire.WRAPPER).
         // Разбираем его РАНЬШЕ индикатора набора: иначе конверт был бы прочитан
         // как «партнёр перестал печатать» и молча пропал бы вместе с рангом.
-        if (routePacket(TAG, "rank") {
-                heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text)
-            }
-        ) {
-            Log.i(TAG, "Mirror envelope: ранг собеседника применён")
+        if (routeRankOrHeartPacket(heartGameNetwork, peerRankRouter, senderId, text)) {
+            Log.i(TAG, "Mirror envelope: ранг или сердечки собеседника применены")
             return true
         }
         // р239: «печатает…» от партнёра - показать индикатор и не сохранять.
@@ -2618,7 +2614,7 @@ class CoreServerService : Service() {
                 // зеркальный и релейный пути так и делают, а основной путь
                 // читал конверт как «перестал печатать» и молча терял ранг -
                 // значок VIP не появлялся, хотя собеседник давно VIP.
-                if (heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text)) {
+                if (routeRankOrHeartPacket(heartGameNetwork, peerRankRouter, senderId, text)) {
                     runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
                     Log.i(TAG, "Rank/heart envelope handled before typing (main path)")
                     return
@@ -2839,12 +2835,8 @@ class CoreServerService : Service() {
                     // Разбирается ДО авто-создания контакта: иначе служебная
                     // строка создала бы чат с мусорным текстом у того, кто ещё
                     // не добавил этого человека.
-                    if (heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text)) {
-                        try {
-                            RustBridge.sendDeliveryAck(messageId, senderId)
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Rank packet ACK failed: " + e.message)
-                        }
+                    if (routeRankOrHeartPacket(heartGameNetwork, peerRankRouter, senderId, text)) {
+                        acknowledgeRankPacket(messageId, senderId, "Rank packet")
                         return
                     }
 

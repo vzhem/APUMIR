@@ -59,18 +59,13 @@ fun HeartGameCounter(onlyWhenEnabled: Boolean = false) {
     val enabled = remember(id, revision) { id?.let { HeartGameStore.enabled(context, it) } ?: false }
     var place by remember(id) { mutableStateOf<Int?>(null) }
     val you = stringResource(R.string.heart_game_you)
-    LaunchedEffect(id, revision, you) {
+    // `ready` в ключах: подпись личности встаёт вместе с ядром, и до этого
+    // места не посчитать. Раньше пересчёта после готовности ядра не было, и
+    // «место №—» оставалось на экране до перезапуска.
+    LaunchedEffect(id, revision, you, ready) {
         place = null
         val account = id ?: return@LaunchedEffect
-        try {
-            val ownKey = HeartGameStore.ownKeyId(context) ?: return@LaunchedEffect
-            val own = HeartGameWire.Entry(account, you, HeartGameStore.score(context, account),
-                System.currentTimeMillis(), "", ownKey)
-            val ranked = HeartGameWire.ranked(HeartGameStore.board(context, account)
-                .filter { it.keyId != ownKey } + own)
-            place = ranked.indexOfFirst { it.keyId == ownKey }.takeIf { it >= 0 }?.plus(1)
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-        catch (_: Exception) { place = null }
+        place = HeartGameStore.ownPlace(context, account, you)
     }
     val account = id ?: return
     if (onlyWhenEnabled && !enabled) return
@@ -98,18 +93,12 @@ fun HeartGameHeaderStatus(modifier: Modifier = Modifier, onClick: (() -> Unit)? 
     val score = remember(id, revision) { HeartGameStore.score(context, id) }
     var place by remember(id) { mutableStateOf<Int?>(null) }
     val you = stringResource(R.string.heart_game_you)
-    LaunchedEffect(id, revision, you, enabled) {
+    // `ready` в ключах: без подписи личности (она встаёт вместе с ядром) место
+    // не считалось вовсе, и в шапке навсегда оставалось «место №—».
+    LaunchedEffect(id, revision, you, enabled, ready) {
         place = null
         if (!enabled) return@LaunchedEffect
-        try {
-            val ownKey = HeartGameStore.ownKeyId(context) ?: return@LaunchedEffect
-            val own = HeartGameWire.Entry(id, you, HeartGameStore.score(context, id),
-                System.currentTimeMillis(), "", ownKey)
-            val ranked = HeartGameWire.ranked(HeartGameStore.board(context, id)
-                .filter { it.keyId != ownKey } + own)
-            place = ranked.indexOfFirst { it.keyId == ownKey }.takeIf { it >= 0 }?.plus(1)
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-        catch (_: Exception) { place = null }
+        place = HeartGameStore.ownPlace(context, id, you)
     }
     if (!enabled) return
     Row(

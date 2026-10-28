@@ -12,7 +12,13 @@ class HeartGameContracts(unittest.TestCase):
         core = (SRC / 'service/CoreServerService.kt').read_text()
         # Приём идёт по всем путям доставки (direct, relay, mirror, ...), поэтому
         # вызовов не меньше трёх: конверт не должен теряться на одном из путей.
-        self.assertGreaterEqual(core.count('heartGameNetwork.routeIncoming(senderId, text)'), 3)
+        # Сам разбор живёт в RankPacketRouting (god-файл не растёт) и идёт
+        # ОТДЕЛЬНО от ранга: сбой одного конверта не съедает второй.
+        routing = (SRC / 'service/RankPacketRouting.kt').read_text()
+        self.assertGreaterEqual(
+            core.count('routeRankOrHeartPacket(heartGameNetwork, peerRankRouter, senderId, text)'), 3)
+        self.assertIn('heartGameNetwork.routeIncoming(senderId, text)', routing)
+        self.assertIn('routePacket("CoreServerService", "heartGame")', routing)
 
     def test_foreground_only_and_single_click(self):
         ui = (SRC / 'ui/components/HeartGameOverlay.kt').read_text()

@@ -662,6 +662,7 @@ class SettingsViewModel @Inject constructor(
             val statusStr = core.third
             val networkStatus = when (statusStr.lowercase()) {
                 "connected"    -> NetworkStatus.Connected
+                "relayed"      -> NetworkStatus.Relayed
                 "connecting"   -> NetworkStatus.Connecting
                 "degraded"     -> NetworkStatus.Degraded
                 else           -> NetworkStatus.Disconnected

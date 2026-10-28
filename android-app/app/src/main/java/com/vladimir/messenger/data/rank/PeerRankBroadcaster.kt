@@ -146,15 +146,28 @@ class PeerRankBroadcaster @Inject constructor(
         val chatId = resolveChatId(peerId) ?: return@withContext false
         val envelope = RankWire.build(own, ReferralRankStore.qualifiedDirectCount(app), nowMs)
             ?: return@withContext false
-        val ok = runCatching {
+        // Как и в [requestRank]: false от ядра означает «уйдёт из офлайн-очереди»,
+        // а не «не дошло». Раньше ответ на запрос считался неудачным и
+        // повторялся на каждый запрос, но собеседник при этом ждал рассылку.
+        val sent = runCatching {
             RustBridge.sendMessage(UUID.randomUUID().toString(), chatId, peer, envelope)
-        }.getOrDefault(false)
-        if (ok) {
+        }
+        if (sent.getOrNull() == true) {
             prefs.edit().putLong(key, nowMs).apply()
             com.vladimir.messenger.data.diagnostics.TransferDiagnostics
                 .record("rank", "свой ранг отправлен собеседнику по его запросу")
+            return@withContext true
         }
-        ok
+        if (sent.isSuccess) {
+            prefs.edit().putLong(key, nowMs).apply()
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                .record("rank", "свой ранг поставлен в очередь ядра для собеседника")
+            return@withContext true
+        }
+        sent.exceptionOrNull()?.let { e ->
+            Log.w(TAG, "rank reply to $peer failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
+        false
     }
 
     /**
@@ -172,21 +185,41 @@ class PeerRankBroadcaster @Inject constructor(
         val nowMs = System.currentTimeMillis()
         if (nowMs - prefs.getLong(key, 0L) < REQUEST_MIN_INTERVAL_MS) return@withContext false
         val chatId = resolveChatId(peerId) ?: return@withContext false
-        val ok = runCatching {
+        // Три исхода, а не два. `RustBridge.sendMessage` сообщает только
+        // «доставлено напрямую сейчас»; письмо, положенное в офлайн-очередь
+        // ядра, тоже уйдёт - как только собеседник появится. Пока этот случай
+        // считался провалом, отметка «уже спрашивали» не ставилась, и запрос
+        // либо молча повторялся, либо (на спокойном экране) больше не
+        // отправлялся вовсе - знак VIP так и не появлялся. Теперь онемевшая
+        // доставка запоминается отдельно и повторяется через [REQUEST_RETRY_MS],
+        // а не через сутки.
+        val sent = runCatching {
             RustBridge.sendMessage(
                 UUID.randomUUID().toString(), chatId, peer, RankWire.buildRankRequest(),
             )
-        }.getOrDefault(false)
-        if (ok) prefs.edit().putLong(key, nowMs).apply()
-        Log.i(TAG, "rank requested from $peer: $ok")
+        }
+        val ok = sent.getOrDefault(false)
+        sent.exceptionOrNull()?.let { e ->
+            Log.w(TAG, "rank request to $peer failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
         if (ok) {
+            prefs.edit().putLong(key, nowMs).apply()
             com.vladimir.messenger.data.diagnostics.TransferDiagnostics
                 .record("rank", "запрос ранга отправлен собеседнику")
-        } else {
-            com.vladimir.messenger.data.diagnostics.TransferDiagnostics
-                .recordWarning("rank", "запрос ранга не ушёл: нет чата с собеседником или ядро отказало")
+            Log.i(TAG, "rank requested from $peer: direct")
+            return@withContext true
         }
-        ok
+        if (sent.isSuccess) {
+            // Ядро приняло пакет и держит его в офлайн-очереди - это не отказ.
+            prefs.edit().putLong(key, nowMs - REQUEST_MIN_INTERVAL_MS + REQUEST_RETRY_MS).apply()
+            com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+                .record("rank", "запрос ранга поставлен в очередь ядра: собеседник сейчас не в прямой связи")
+            Log.i(TAG, "rank requested from $peer: queued for delivery")
+            return@withContext true
+        }
+        com.vladimir.messenger.data.diagnostics.TransferDiagnostics
+            .recordWarning("rank", "запрос ранга не ушёл: нет чата с собеседником или ядро отказало")
+        false
     }
 
     /**
@@ -209,6 +242,14 @@ class PeerRankBroadcaster @Inject constructor(
         const val REPLY_PREFS = "apu_peer_rank_requests"
         const val REPLY_MIN_INTERVAL_MS = 3_600_000L
         const val REQUEST_MIN_INTERVAL_MS = 24L * 3_600_000L
+
+        /**
+         * Повтор запроса, который лёг в офлайн-очередь ядра: через 10 минут он
+         * попробует прямую связь ещё раз. Раньше такой запрос считался
+         * неудачным и повторялся на каждой перерисовке экрана, а на спокойном
+         * экране не повторялся вовсе.
+         */
+        const val REQUEST_RETRY_MS = 10L * 60_000L
     }
 }
 

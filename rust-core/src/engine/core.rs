@@ -2969,9 +2969,34 @@ impl P2PCore {
                         session_generation,
                         session_start_attempt
                     );
+                    // Честное состояние связи для интерфейса. До этой правки
+                    // «подключено» ставил только прямой подписанный сосед или
+                    // чужой presence - и телефон, который прекрасно принимал
+                    // письма через relay, сутками показывал «Подключение…»
+                    // (жалоба владельца 2026-10-28). Сессия брокера с ConnAck -
+                    // это рабочая связь; когда появится прямой сосед, статус
+                    // поднимется до Connected сам.
+                    // Прямой сосед - по-прежнему лучший из известных путей:
+                    // его статус не понижаем, пока он держится.
+                    if network.status_str() != "connected" {
+                        network.set_status(NetworkStatus::Relayed);
+                        events.emit(CoreEvent::NetworkStatusChanged {
+                            status: "relayed".into(),
+                        });
+                    }
                     break transport;
                 }
                 Err(error) => {
+                    // Сессия не поднялась: «связи нет» - честнее, чем оставить
+                    // на экране «через ретранслятор» от прежней сессии.
+                    if network.status_str() != "connecting"
+                        && network.status_str() != "connected"
+                    {
+                        network.set_status(NetworkStatus::Connecting);
+                        events.emit(CoreEvent::NetworkStatusChanged {
+                            status: "connecting".into(),
+                        });
+                    }
                     tracing::warn!(
                         "MQTT SESSION START FAILED: generation={} attempt={} error={}; retrying_in={}s",
                         session_generation,
@@ -4964,10 +4989,17 @@ impl P2PCore {
         self.swarm_first.reset(crate::storage::models::now_ms());
         self.peer_exchange.reset_session();
         *self.public_addr.lock().unwrap() = None;
-        self.network.set_status(NetworkStatus::Connecting);
-        self.events.emit(CoreEvent::NetworkStatusChanged {
-            status: "connecting".into(),
-        });
+        // Не понижаем рабочую связь до «подключаемся»: сеть может «появиться»
+        // повторно (переключение Wi-Fi/мобильной), пока сессия брокера или
+        // прямой сосед живы. Раньше здесь статус ставился безусловно, и после
+        // такого события телефон до следующего переподключения показывал
+        // бесконечное «Подключение…», хотя письма ходили.
+        if !self.network.status().is_online() {
+            self.network.set_status(NetworkStatus::Connecting);
+            self.events.emit(CoreEvent::NetworkStatusChanged {
+                status: "connecting".into(),
+            });
+        }
     }
 
     pub fn on_network_lost(&self) {

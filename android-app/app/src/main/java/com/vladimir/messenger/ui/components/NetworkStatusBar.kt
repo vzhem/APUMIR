@@ -38,8 +38,10 @@ fun NetworkStatusBar(
     status: NetworkStatus,
     modifier: Modifier = Modifier,
 ) {
-    // Показываем полоску только при проблемах
-    val isVisible = status != NetworkStatus.Connected
+    // Полоска — только про проблемы. Связь через relay рабочая: письма и
+    // файлы доходят, поэтому «Подключение…» на ней не висит (раньше висело
+    // постоянно именно из-за отсутствия этого состояния).
+    val isVisible = status != NetworkStatus.Connected && status != NetworkStatus.Relayed
 
     AnimatedVisibility(
         visible = isVisible,
@@ -59,6 +61,11 @@ fun NetworkStatusBar(
                 stringResource(R.string.nsb_connecting)
             )
             NetworkStatus.Degraded -> Triple(
+                StatusDegraded,
+                Icons.Default.SyncProblem,
+                stringResource(R.string.nsb_relay)
+            )
+            NetworkStatus.Relayed -> Triple(
                 StatusDegraded,
                 Icons.Default.SyncProblem,
                 stringResource(R.string.nsb_relay)

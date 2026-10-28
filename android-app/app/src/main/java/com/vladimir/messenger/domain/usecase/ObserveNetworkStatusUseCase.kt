@@ -25,8 +25,12 @@ class ObserveNetworkStatusUseCase @Inject constructor() {
     operator fun invoke(): Flow<NetworkStatus> = flow {
         while (true) {
             val statusStr = RustBridge.networkStatus()
+            // "relayed" - рабочая связь через брокер. Раньше строка не была
+            // известна и падала в Disconnected: телефон с доставкой через relay
+            // показывал «Нет соединения».
             val status = when (statusStr.lowercase()) {
                 "connected"  -> NetworkStatus.Connected
+                "relayed"    -> NetworkStatus.Relayed
                 "connecting" -> NetworkStatus.Connecting
                 "degraded"   -> NetworkStatus.Degraded
                 else         -> NetworkStatus.Disconnected

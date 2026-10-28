@@ -12,7 +12,7 @@
     "android-app/app/src/main/java/com/vladimir/messenger/data/mirror/MirrorSync.kt": 3810,
     "android-app/app/src/main/java/com/vladimir/messenger/data/repository/ChatRepository.kt": 1626,
     "android-app/app/src/main/java/com/vladimir/messenger/data/update/ApkSeeder.kt": 1786,
-    "android-app/app/src/main/java/com/vladimir/messenger/service/CoreServerService.kt": 3323,
+    "android-app/app/src/main/java/com/vladimir/messenger/service/CoreServerService.kt": 3315,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/components/AnimatedTopicIcon.kt": 1575,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/components/ApuDiagnosticsUi.kt": 1241,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/channels/ChannelScreen.kt": 1631,
