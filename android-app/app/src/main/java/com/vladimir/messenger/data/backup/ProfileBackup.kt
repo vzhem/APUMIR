@@ -10,6 +10,7 @@ import com.vladimir.messenger.BuildConfig
 import com.vladimir.messenger.data.file.FileExchangeKeyStore
 import com.vladimir.messenger.data.local.APP_DATABASE_VERSION
 import com.vladimir.messenger.data.local.AppDatabase
+import com.vladimir.messenger.data.diagnostics.TransferDiagnostics
 import com.vladimir.messenger.data.security.DeviceIdentityMarker
 import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -51,6 +52,19 @@ import javax.inject.Singleton
  *  2. Приложение просит перезапуск. При следующем старте, до Room и сервисов,
  *     [applyStagedIfAny] кладёт файлы на места, заворачивает секреты ключом
  *     Keystore этого телефона, ставит метку устройства и удаляет служебную папку.
+ *
+ * Применение бывает двух видов ([RestoreMode]):
+ *  - [RestoreMode.MERGE] (по умолчанию) - **дополнить**: база копии вливается в
+ *    живую, живое главнее, из копии добавляется только то, чего на телефоне нет
+ *    (см. [BackupRestoreMerge]). Чаты, пришедшие после даты копии, остаются;
+ *  - [RestoreMode.REPLACE] - **заменить целиком**: прежняя база откладывается
+ *    в `noBackupFilesDir/restore_safety`, на её место ложится копия. Это
+ *    осознанный откат на дату копии, и он никогда не выбирается сам.
+ *
+ * Ключи телефона при восстановлении не стираются: если на телефоне рабочий
+ * ключ, копия без секретов его не трогает. Раньше она чистила настройки
+ * секретов целиком, и телефон с исправным ключом замолкал после возврата
+ * старой копии.
  */
 @Singleton
 class ProfileBackup @Inject constructor(
@@ -75,8 +89,40 @@ class ProfileBackup @Inject constructor(
         data class Failed(val reason: String) : StageResult
     }
 
+    /** Как применять подготовленную копию. */
+    enum class RestoreMode {
+        /**
+         * Дополнить: живая база главнее, из копии добавляется только то, чего
+         * на телефоне нет. Чаты и настройки не удаляются.
+         */
+        MERGE,
+
+        /**
+         * Заменить целиком: осознанный откат к дате копии. Прежняя база
+         * откладывается рядом, но приложение её больше не использует.
+         */
+        REPLACE,
+    }
+
     /** Есть ли подготовленная копия, ожидающая подтверждения и перезапуска. */
     fun hasStaged(): Boolean = File(stagingRoot(), STAGED_MARKER).isFile
+
+    /**
+     * Совпадает ли профиль подготовленной копии с профилем этого телефона.
+     *
+     * `null` - подготовленной копии нет или манифест не читается; `true` -
+     * профиль тот же (или на телефоне профиля ещё нет: тогда копия и есть
+     * профиль). `false` - копия от чужого профиля: дополнять ею эту личность
+     * нельзя, годится только полная замена.
+     */
+    fun stagedMatchesLocalProfile(): Boolean? {
+        if (!hasStaged()) return null
+        val manifest = stagedManifest() ?: return null
+        val prefs = appContext.getSharedPreferences(MAIN_PREFS, Context.MODE_PRIVATE)
+        val mine = prefs.getString("node_id", null) ?: prefs.getString("existing_public_key", null)
+        if (mine.isNullOrBlank() || manifest.nodeId.isBlank()) return true
+        return manifest.nodeId == mine
+    }
 
     /** Итог «вернуть только ключи»: чаты и настройки не трогаем. */
     sealed interface KeysResult {
@@ -102,8 +148,9 @@ class ProfileBackup @Inject constructor(
      * Зачем. Бывает, что данные на телефоне целы, а ключ не читается:
      * Keystore потерял свой ключ (смена блокировки, «очистить учётные
      * данные», переустановка), и приложение честно молчит. Полное
-     * восстановление из копии вернуло бы ключи, но откатило бы переписку на
-     * дату копии - а она может быть месячной давности.
+     * восстановление теперь тоже безопасно ([RestoreMode.MERGE] дополняет
+     * базу, а не заменяет), но здесь не трогается вообще ничего, кроме
+     * секретов: это самый узкий и предсказуемый путь.
      *
      * Здесь секреты из копии (семя подписи и ключ обмена) заворачиваются
      * ключом Keystore ЭТОГО телефона и кладутся на место. База, файлы и
@@ -212,10 +259,14 @@ class ProfileBackup @Inject constructor(
      * Подтвердить: применить при следующем старте процесса. До подтверждения
      * подготовленная копия ни на что не влияет - случайный перезапуск
      * приложения не подменит профиль без спроса.
+     *
+     * Режим записывается в метку: он выбран человеком сейчас, а применяется
+     * позже и в другом процессе.
      */
-    fun confirmStaged(): Boolean {
+    fun confirmStaged(mode: RestoreMode = RestoreMode.MERGE): Boolean {
         if (!hasStaged()) return false
-        return runCatching { File(stagingRoot(), READY_MARKER).writeText("v1"); true }.getOrDefault(false)
+        val marker = if (mode == RestoreMode.REPLACE) MARKER_REPLACE else MARKER_MERGE
+        return runCatching { File(stagingRoot(), READY_MARKER).writeText(marker); true }.getOrDefault(false)
     }
 
     fun stagedManifest(): BackupManifest? =
@@ -524,22 +575,25 @@ class ProfileBackup @Inject constructor(
         private const val SNAPSHOT_DIR = "backup_snapshot"
         private const val STAGED_MARKER = ".staged"
         private const val READY_MARKER = ".ready"
+        private const val MARKER_MERGE = "v2-merge"
+        private const val MARKER_REPLACE = "v2-replace"
         private const val RECEIVED_ROOT = "file_received/v1"
         private const val PREVIEW_ROOT = "file_preview/v1"
+        private const val SAFETY_DIR = "restore_safety"
         private const val MAX_MANIFEST_BYTES = 16 * 1024
 
         /**
          * Применить подготовленную копию, если она есть. Зовётся из
          * `MessengerApplication.onCreate` ДО всего остального: Room ещё не
          * открыт, сервисы не запущены, поэтому файлы можно класть на места.
-         * Возвращает true, если состояние заменено.
+         * Возвращает true, если состояние изменено.
          */
         fun applyStagedIfAny(context: Context): Boolean {
             val app = context.applicationContext
             val root = File(app.noBackupFilesDir, STAGING_DIR)
             if (!File(root, READY_MARKER).isFile) return false
             return try {
-                applyStaged(app, root)
+                applyStaged(app, root, readRestoreMode(root))
                 true
             } catch (e: Exception) {
                 Log.e(TAG, "restore apply failed", e)
@@ -549,7 +603,21 @@ class ProfileBackup @Inject constructor(
             }
         }
 
-        private fun applyStaged(app: Context, root: File) {
+        /**
+         * Что человек подтвердил: дополнить или заменить.
+         *
+         * Незнакомая метка (её могла записать прежняя версия приложения)
+         * читается как [RestoreMode.MERGE]: «дополнить» ничего не удаляет,
+         * и ошибиться в эту сторону безопасно.
+         */
+        fun readRestoreMode(root: File): RestoreMode =
+            if (runCatching { File(root, READY_MARKER).readText().trim() }.getOrDefault("") == MARKER_REPLACE) {
+                RestoreMode.REPLACE
+            } else {
+                RestoreMode.MERGE
+            }
+
+        private fun applyStaged(app: Context, root: File, mode: RestoreMode) {
             val manifest = BackupManifest.decode(File(root, BackupLayout.MANIFEST).readText())
                 ?: throw IOException("staged manifest unreadable")
             if (manifest.dbVersion > APP_DATABASE_VERSION) throw IOException("staged backup is newer than app")
@@ -569,7 +637,7 @@ class ProfileBackup @Inject constructor(
                 throw e
             }
             try {
-                applyStagedWithSecrets(app, root, manifest, exchangeSecret, signingSeed)
+                applyStagedWithSecrets(app, root, manifest, exchangeSecret, signingSeed, mode)
             } finally {
                 exchangeSecret?.fill(0)
                 signingSeed?.fill(0)
@@ -583,17 +651,73 @@ class ProfileBackup @Inject constructor(
             manifest: BackupManifest,
             exchangeSecret: ByteArray?,
             signingSeed: ByteArray?,
+            mode: RestoreMode,
         ) {
-            // 1. База: старую убираем целиком (вместе с WAL/SHM), новую кладём.
-            val dbFile = app.getDatabasePath("messenger_database")
-            app.deleteDatabase("messenger_database")
-            moveFile(File(root, BackupLayout.DB), dbFile)
-            val wal = File(root, BackupLayout.DB_WAL)
-            if (wal.isFile) moveFile(wal, File(dbFile.path + "-wal"))
-            failInFlightTransfers(dbFile)
+            // 0. Метка устройства - ДО первой записи. Без неё применённое
+            //    наполовину состояние на следующем старте сочли бы подсунутым
+            //    из чужого Auto Backup и стёрли бы вместе с чатами
+            //    (DeviceIdentityMarker.discardRestoredState).
+            DeviceIdentityMarker.create(app)
 
-            // 2. Настройки: каждый файл целиком заменяем содержимым копии;
-            //    непереносимые (завёрнутые Keystore) ключи чистим - их перепишут секреты.
+            val prefs = app.getSharedPreferences(MAIN_PREFS, Context.MODE_PRIVATE)
+            val localNodeId = prefs.getString("node_id", null)
+                ?: prefs.getString("existing_public_key", null)
+            val sameProfile = manifest.nodeId.isBlank() ||
+                localNodeId.isNullOrBlank() ||
+                manifest.nodeId == localNodeId
+            if (mode == RestoreMode.MERGE && !sameProfile) {
+                // Копия от другого профиля: её чаты и ключи этому телефону не
+                // подходят, а смешать две личности хуже, чем не восстановиться.
+                val detail = "копия от другого профиля (" + manifest.nodeId.take(10) + "… вместо " +
+                    localNodeId.orEmpty().take(10) + "…): дополнение не применялось"
+                Log.w(TAG, "restore merge refused: " + detail)
+                TransferDiagnostics.recordWarning("backup", detail)
+                return
+            }
+            // Профиль заменяется только по просьбе человека или когда копия
+            // заведомо от другой личности.
+            val replaceProfile = mode == RestoreMode.REPLACE || !sameProfile
+            // Настроек это касается шире: если своего профиля на телефоне нет,
+            // адрес и имя должны прийти из копии целиком.
+            val replacePrefs = replaceProfile || localNodeId.isNullOrBlank()
+
+            // 1. База. «Дополнить» - слияние: живое главнее, из копии
+            //    добавляется только то, чего на телефоне нет (BackupRestoreMerge).
+            //    Пустая база на свежем телефоне слиянием и заполняется: строк
+            //    в ней нет, поэтому копия ложится как есть.
+            //    «Заменить» - копия целиком, а прежняя база откладывается рядом.
+            val dbFile = app.getDatabasePath("messenger_database")
+            val stagedDb = File(root, BackupLayout.DB)
+            val outcome = if (replaceProfile) {
+                replaceDatabase(app, root, dbFile, stagedDb)
+            } else {
+                BackupRestoreMerge.merge(dbFile, stagedDb)
+            }
+            // Копия со старого Android (без VACUUM INTO) несёт хвост WAL.
+            // Он нужен только тогда, когда база взята целиком: при слиянии
+            // WAL живой базы трогать нельзя.
+            if (outcome.placedCopyAsDatabase) {
+                val stagedWal = File(root, BackupLayout.DB_WAL)
+                if (stagedWal.isFile && stagedWal.length() > 0L) {
+                    runCatching { stagedWal.copyTo(File(dbFile.path + "-wal"), overwrite = true) }
+                        .onFailure { Log.w(TAG, "restore: WAL из копии не перенесён: " + it.javaClass.simpleName) }
+                }
+            }
+            outcome.perTable.take(12).forEach { (table, rows) ->
+                Log.i(TAG, "restore merge: " + table + " +" + rows)
+            }
+            if (!outcome.changed && outcome.reason.isNotBlank()) {
+                // Слияние не удалось - данные на телефоне не тронуты, но человек
+                // должен видеть, что восстановление не применилось.
+                TransferDiagnostics.recordWarning("backup", "восстановление из копии: " + outcome.summary())
+            } else {
+                TransferDiagnostics.record("backup", "восстановление из копии: " + outcome.summary())
+            }
+
+            // 2. Настройки. При дополнении ничего не чистим: имя, тему и обои
+            //    могли поменять уже после даты копии, и откат этих значений
+            //    человек воспринял бы как поломку. Дописываем только то, чего
+            //    в настройках нет.
             for (name in BackupLayout.PREFS_NAMES) {
                 val file = File(root, BackupLayout.prefsEntry(name))
                 if (!file.isFile) continue
@@ -602,10 +726,14 @@ class ProfileBackup @Inject constructor(
                     Log.w(TAG, "restore: prefs $name damaged, skipped")
                     continue
                 }
-                val editor = app.getSharedPreferences(name, Context.MODE_PRIVATE).edit().clear()
+                val target = app.getSharedPreferences(name, Context.MODE_PRIVATE)
+                val editor = target.edit()
+                if (replacePrefs) editor.clear()
                 val skip = BackupLayout.PREFS_KEYS_NOT_PORTABLE[name].orEmpty()
                 for ((key, value) in entries) {
                     if (key in skip) continue
+                    // Живое значение главнее: копия только заполняет пропуски.
+                    if (!replacePrefs && target.contains(key)) continue
                     when (value) {
                         is String -> editor.putString(key, value)
                         is Boolean -> editor.putBoolean(key, value)
@@ -617,71 +745,185 @@ class ProfileBackup @Inject constructor(
                 }
                 editor.commit()
             }
-            // Ключ ретрансляционного хранилища принадлежал старому телефону.
-            app.getSharedPreferences("apu_relay_at_rest", Context.MODE_PRIVATE).edit().clear().commit()
-            // Автообновление копии смотрело в файл ПРЕЖНЕГО профиля этого
-            // телефона: другой профиль туда писать нельзя - выключаем с пояснением.
-            runCatching { BackupSchedule.resetAfterRestore(app) }
-            listOf(
-                "apu_relay.sqlite", "apu_relay.sqlite-wal", "apu_relay.sqlite-shm",
-                "apu_relay.sqlite.relay.sqlite", "apu_relay.sqlite.relay.sqlite-wal", "apu_relay.sqlite.relay.sqlite-shm",
-            ).forEach { File(app.filesDir, it).delete() }
+            if (replaceProfile) {
+                // Ключ ретрансляционного хранилища принадлежал прежнему профилю
+                // или другому телефону: записи им всё равно не открыть.
+                app.getSharedPreferences("apu_relay_at_rest", Context.MODE_PRIVATE).edit().clear().commit()
+                // Автообновление копии смотрело в файл ПРЕЖНЕГО профиля этого
+                // телефона: другой профиль туда писать нельзя - выключаем.
+                runCatching { BackupSchedule.resetAfterRestore(app) }
+                listOf(
+                    "apu_relay.sqlite", "apu_relay.sqlite-wal", "apu_relay.sqlite-shm",
+                    "apu_relay.sqlite.relay.sqlite", "apu_relay.sqlite.relay.sqlite-wal", "apu_relay.sqlite.relay.sqlite-shm",
+                ).forEach { File(app.filesDir, it).delete() }
+            }
+            // При дополнении того же профиля ключ ретрансляции и её база
+            // остаются: они принадлежат этому телефону, и записи, ждущие
+            // получателя, не превращаются в карантин на ровном месте.
 
             // 3. Секреты: заворачиваем ключом Keystore этого телефона.
-            //    Читать и проверять их уже не нужно - это сделано до замены
-            //    данных; здесь только запись (см. applyStaged).
-            val secret = exchangeSecret
-            if (secret != null) {
-                val ok = FileExchangeKeyStore.importSecret(app, secret)
-                if (!ok) {
-                    // Без секрета подписанная привязка бесполезна и даже вредна (не совпадёт).
-                    app.getSharedPreferences("apu_file_exchange", Context.MODE_PRIVATE).edit().clear().commit()
-                    Log.w(TAG, "restore: file exchange secret not imported, binding dropped (" +
-                        FileExchangeKeyStore.lastImportError + ")")
-                }
-            } else {
-                app.getSharedPreferences("apu_file_exchange", Context.MODE_PRIVATE).edit().clear().commit()
-            }
-            val seed = signingSeed
-            if (seed != null) {
-                val ok = IdentitySigningKeyStore.importSeed(app, seed)
-                if (!ok) {
-                    app.getSharedPreferences("apu_identity_signing", Context.MODE_PRIVATE).edit().clear().commit()
-                    Log.w(TAG, "restore: signing seed not imported, binding dropped (" +
-                        IdentitySigningKeyStore.lastImportError + ")")
-                }
-            } else {
-                // Копия без seed: привязку не переносим (она от другого
-                // телефона), но причину пишем - иначе на экране останется
-                // только «ключ не читается», и виновника не найти.
-                Log.w(TAG, "restore: backup has no signing seed, identity binding cleared")
-                app.getSharedPreferences("apu_identity_signing", Context.MODE_PRIVATE).edit().clear().commit()
-            }
+            //    Рабочий локальный ключ не стирается никогда (см. [applySecrets]).
+            applySecrets(app, exchangeSecret, signingSeed, replacePrefs)
 
-            // 4. Файлы: аватары, превью, полученные.
+            // 4. Файлы: аватары, превью, полученные. При дополнении уже
+            //    лежащий файл главнее: он может быть новее копии.
             val avatar = File(root, BackupLayout.AVATAR_DIR)
             if (avatar.isDirectory) {
                 val dst = File(app.filesDir, "avatar")
-                avatar.listFiles()?.filter { it.isFile }?.forEach { moveFile(it, File(dst, it.name)) }
+                avatar.listFiles()?.filter { it.isFile }?.forEach { file ->
+                    val target = File(dst, file.name)
+                    if (!replaceProfile && target.isFile && target.length() > 0L) return@forEach
+                    moveFile(file, target)
+                }
             }
             val preview = File(root, BackupLayout.PREVIEW_DIR)
             if (preview.isDirectory) {
                 val dst = File(app.noBackupFilesDir, PREVIEW_ROOT)
-                preview.listFiles()?.filter { it.isFile }?.forEach { moveFile(it, File(dst, it.name)) }
+                preview.listFiles()?.filter { it.isFile }?.forEach { file ->
+                    val target = File(dst, file.name)
+                    if (!replaceProfile && target.isFile && target.length() > 0L) return@forEach
+                    moveFile(file, target)
+                }
             }
             val received = File(root, BackupLayout.RECEIVED_DIR)
             if (received.isDirectory) {
                 val dst = File(app.noBackupFilesDir, RECEIVED_ROOT)
                 received.listFiles()?.filter { it.isDirectory }?.forEach { dir ->
                     val target = File(dst, dir.name)
-                    dir.listFiles()?.filter { it.isFile }?.forEach { moveFile(it, File(target, it.name)) }
+                    dir.listFiles()?.filter { it.isFile }?.forEach { file ->
+                        val copy = File(target, file.name)
+                        if (!replaceProfile && copy.isFile && copy.length() > 0L) return@forEach
+                        moveFile(file, copy)
+                    }
                 }
             }
 
-            // 5. Метка устройства: без неё восстановленное состояние сочли бы
-            //    подсунутым из чужого Auto Backup и стёрли на этом же запуске.
-            DeviceIdentityMarker.create(app)
-            Log.i(TAG, "restore applied: node=${manifest.nodeId.take(12)}… from app ${manifest.appVersionName}")
+            Log.i(
+                TAG,
+                "restore applied: node=" + manifest.nodeId.take(12) + "… mode=" +
+                    (if (replaceProfile) "replace" else "merge") +
+                    " db=" + outcome.summary() + " from app " + manifest.appVersionName,
+            )
+        }
+
+        /**
+         * Секреты копии на место, не отнимая у телефона работающий ключ.
+         *
+         * Правило: секрет из копии нужен только тогда, когда своего рабочего
+         * нет (сброшенный Keystore, чужая установка) или профиль намеренно
+         * заменяется. Копия без секрета **не чистит** локальные настройки
+         * секретов: именно так телефон с исправным ключом терял личность после
+         * возврата старой копии.
+         */
+        private fun applySecrets(
+            app: Context,
+            exchangeSecret: ByteArray?,
+            signingSeed: ByteArray?,
+            replacing: Boolean,
+        ) {
+            val seedReady = IdentitySigningKeyStore.mode(app) == IdentitySigningKeyStore.Mode.READY
+            val exchangeReady = FileExchangeKeyStore.mode(app) == FileExchangeKeyStore.Mode.READY
+            val signingPrefs = app.getSharedPreferences("apu_identity_signing", Context.MODE_PRIVATE)
+            val exchangePrefs = app.getSharedPreferences("apu_file_exchange", Context.MODE_PRIVATE)
+
+            when {
+                signingSeed == null && seedReady ->
+                    Log.i(TAG, "restore: в копии нет семени подписи - локальный ключ оставлен как есть")
+                signingSeed == null -> {
+                    if (replacing) {
+                        // Своего ключа нет, и привязка к прежнему (нечитаемому)
+                        // ключу только помешает: ядро подпишет новую.
+                        signingPrefs.edit().clear().commit()
+                    }
+                    Log.w(TAG, "restore: в копии нет семени подписи, локальный ключ не читается")
+                }
+                !seedReady || replacing -> {
+                    if (IdentitySigningKeyStore.importSeed(app, signingSeed)) {
+                        Log.i(TAG, "restore: семя подписи возвращено из копии")
+                    } else {
+                        // importSeed не перезаписал прежний блоб, поэтому просто
+                        // снимаем привязку: она подписана другим ключом.
+                        signingPrefs.edit().remove("identity_binding_v1").commit()
+                        val detail = "семя подписи из копии не вернулось (" +
+                            IdentitySigningKeyStore.lastImportError + ")"
+                        Log.w(TAG, "restore: " + detail)
+                        TransferDiagnostics.recordWarning("backup", detail)
+                    }
+                }
+                else ->
+                    Log.i(TAG, "restore: локальный ключ подписи читается - семя из копии не понадобилось")
+            }
+
+            when {
+                exchangeSecret == null && exchangeReady ->
+                    Log.i(TAG, "restore: в копии нет ключа обмена - локальный ключ оставлен как есть")
+                exchangeSecret == null -> {
+                    if (replacing) exchangePrefs.edit().clear().commit()
+                    Log.w(TAG, "restore: в копии нет ключа обмена, локальный не читается")
+                }
+                !exchangeReady || replacing -> {
+                    if (FileExchangeKeyStore.importSecret(app, exchangeSecret)) {
+                        Log.i(TAG, "restore: ключ обмена возвращён из копии")
+                    } else {
+                        exchangePrefs.edit().remove("signed_public_binding_v1").commit()
+                        val detail = "ключ обмена из копии не вернулся (" +
+                            FileExchangeKeyStore.lastImportError + ")"
+                        Log.w(TAG, "restore: " + detail)
+                        TransferDiagnostics.recordWarning("backup", detail)
+                    }
+                }
+                else ->
+                    Log.i(TAG, "restore: локальный ключ обмена читается - ключ из копии не понадобился")
+            }
+        }
+
+        /**
+         * Заменить базу копией, но прежнюю не выбрасывать: она переезжает в
+         * служебную папку `restore_safety`. Если файл выбрали по ошибке, чаты
+         * остаются на телефоне, а не только в переписке с собеседниками.
+         */
+        private fun replaceDatabase(
+            app: Context,
+            root: File,
+            dbFile: File,
+            stagedDb: File,
+        ): BackupRestoreMerge.Outcome {
+            if (dbFile.isFile && dbFile.length() > 0L) {
+                val safety = File(File(app.noBackupFilesDir, SAFETY_DIR), "db-" + System.currentTimeMillis())
+                try {
+                    safety.mkdirs()
+                    listOf("", "-wal", "-shm").forEach { suffix ->
+                        val part = File(dbFile.path + suffix)
+                        if (part.isFile && part.length() > 0L) {
+                            part.copyTo(File(safety, part.name), overwrite = true)
+                        }
+                    }
+                    Log.i(TAG, "restore: прежняя база отложена в " + safety.name)
+                } catch (error: Exception) {
+                    // Не отменяем восстановление из-за страховочной копии, но
+                    // честно пишем, что её нет.
+                    Log.w(TAG, "restore: safety copy failed: " + error.javaClass.simpleName)
+                }
+                pruneSafety(app, keep = 2)
+            }
+            app.deleteDatabase("messenger_database")
+            return try {
+                moveFile(stagedDb, dbFile)
+                val wal = File(root, BackupLayout.DB_WAL)
+                if (wal.isFile) moveFile(wal, File(dbFile.path + "-wal"))
+                failInFlightTransfers(dbFile)
+                BackupRestoreMerge.Outcome(placedCopyAsDatabase = true, reason = "профиль заменён копией")
+            } catch (error: Exception) {
+                Log.e(TAG, "restore: cannot place backup database", error)
+                BackupRestoreMerge.Outcome(reason = "копию базы положить не удалось")
+            }
+        }
+
+        /** Держим только свежие страховочные копии: диск на телефоне не бесконечен. */
+        private fun pruneSafety(app: Context, keep: Int) {
+            val root = File(app.noBackupFilesDir, SAFETY_DIR)
+            val dirs = root.listFiles()?.filter { it.isDirectory }?.sortedByDescending { it.name } ?: return
+            dirs.drop(keep).forEach { dir -> runCatching { dir.deleteRecursively() } }
         }
 
         /**

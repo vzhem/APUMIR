@@ -39,6 +39,13 @@ data class ProfileBackupUiState(
     val receivedBytes: Long = 0L,
     /** Подготовленная копия ждёт перезапуска. */
     val stagedManifest: BackupManifest? = null,
+    /**
+     * Профиль копии тот же, что на телефоне (`null` - сверить нельзя).
+     *
+     * `false` значит: дополнить этой копией нельзя (это другая личность),
+     * остаётся только полная замена.
+     */
+    val stagedSameProfile: Boolean? = null,
     /** Профиль на этом телефоне есть (иначе экран открыт с первого экрана - только восстановление). */
     val hasIdentity: Boolean = true,
     /** Подтверждено: приложение закрывается, копия применится при следующем запуске. */
@@ -77,11 +84,18 @@ class ProfileBackupViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             val received = runCatching { StorageSettings.usage(context).receivedBytes }.getOrDefault(0L)
             val staged = if (backup.hasStaged()) backup.stagedManifest() else null
+            val stagedSame = if (staged != null) backup.stagedMatchesLocalProfile() else null
             val hasIdentity = context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
                 .getBoolean("identity_created", false)
             val schedule = BackupSchedule.state(context)
             _uiState.update {
-                it.copy(receivedBytes = received, stagedManifest = staged, hasIdentity = hasIdentity, schedule = schedule)
+                it.copy(
+                    receivedBytes = received,
+                    stagedManifest = staged,
+                    stagedSameProfile = stagedSame,
+                    hasIdentity = hasIdentity,
+                    schedule = schedule,
+                )
             }
             // Раунд 250: сразу ищем сохранённые копии - восстановление начнёт с них.
             _uiState.update { it.copy(foundBackups = scanFoundBackups()) }
@@ -215,6 +229,7 @@ class ProfileBackupViewModel @Inject constructor(
                     it.copy(
                         busy = false,
                         stagedManifest = result.manifest,
+                        stagedSameProfile = backup.stagedMatchesLocalProfile(),
                         message = null,
                         failed = false,
                     )
@@ -332,8 +347,9 @@ class ProfileBackupViewModel @Inject constructor(
     /**
      * Вернуть из подготовленной копии только ключи, не трогая чаты.
      *
-     * Нужно, когда данные целы, а ключ этого телефона не читается: полное
-     * восстановление вернуло бы ключи, но откатило бы переписку на дату копии.
+     * Нужно, когда данные целы, а ключ этого телефона не читается: тогда из
+     * копии берутся только секреты, а база, файлы и настройки остаются как
+     * есть (полное восстановление тоже больше не удаляет чаты - оно дополняет).
      * После успеха приложение закрывается - ядро ставит ключ только при старте.
      */
     fun restoreKeysOnly(onRestart: () -> Unit) {
@@ -368,7 +384,9 @@ class ProfileBackupViewModel @Inject constructor(
     fun discardStaged() {
         viewModelScope.launch(Dispatchers.IO) {
             backup.discardStaged()
-            _uiState.update { it.copy(stagedManifest = null, message = null, failed = false) }
+            _uiState.update {
+                it.copy(stagedManifest = null, stagedSameProfile = null, message = null, failed = false)
+            }
         }
     }
 
@@ -379,11 +397,14 @@ class ProfileBackupViewModel @Inject constructor(
      * пережил процесс и не был перезапущен системой со старым состоянием.
      * Автоматически перезапустить себя приложение на новых Android не может
      * (запуск из фона запрещён), поэтому честно просим открыть его снова.
+     *
+     * [mode] выбирает человек: по умолчанию копия только дополняет данные
+     * (чаты остаются), а полная замена - осознанный откат к дате копии.
      */
-    fun confirmAndExit(onExit: () -> Unit) {
+    fun confirmAndExit(mode: ProfileBackup.RestoreMode = ProfileBackup.RestoreMode.MERGE, onExit: () -> Unit) {
         if (_uiState.value.busy) return
         viewModelScope.launch {
-            val ok = withContext(Dispatchers.IO) { backup.confirmStaged() }
+            val ok = withContext(Dispatchers.IO) { backup.confirmStaged(mode) }
             if (!ok) {
                 fail(context.getString(R.string.bk_staged_missing))
                 return@launch

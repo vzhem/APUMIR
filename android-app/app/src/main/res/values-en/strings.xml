@@ -727,8 +727,14 @@
     <string name="settings_relay_off">Off — subscriber mode: NEW files from others are not accepted for storage, and heavy ones (pictures, videos, GIFs, large files) are not relayed to others. Light and essential traffic is carried by everyone: small documents and stickers, text and backups, update APKs.</string>
     <string name="settings_relay_on">The phone stores other people’s files for contacts who are offline, shares files of communities and updates with others. The more phone-servers there are, the faster the network is.</string>
     <!-- Резервная копия профиля (вынесено из ProfileBackupScreen) -->
-    <string name="backup_restart_replace">The app will close; reopen it and the profile will be replaced with this one. Current chats on this phone will be lost.</string>
+    <string name="backup_restart_replace">Full replacement: the app will close, and after reopening the profile and history will be exactly as they were on the backup date. The previous database is not deleted; it is set aside in the app’s private folder.</string>
     <string name="backup_restart_new">The app will close; reopen it and you will sign in to the restored profile.</string>
+    <string name="backup_restart_merge">The app will close; reopen it and it will fill in the profile from the backup. Current chats stay, and whatever is missing is added from the backup.</string>
+    <string name="backup_restore_merge_button">Fill in and close</string>
+    <string name="backup_restore_replace_button">Replace the whole profile</string>
+    <string name="backup_replace_all">Replace everything with the backup</string>
+    <string name="backup_replace_all_hint">Full replacement is only needed when the data on this phone is damaged or the backup was taken from another profile. It makes history and settings exactly as they were on the backup date; the previous database is set aside in the app’s private folder.</string>
+    <string name="backup_staged_other_profile">This backup was taken from another profile: it cannot fill in this one. Only full replacement is available.</string>
     <string name="backup_restarting">Closing… Open APU again.</string>
     <string name="backup_pw_more">%1$d more character(s)</string>
     <string name="backup_pw_min">At least %1$d characters</string>
@@ -1837,7 +1843,7 @@ The file is not on this phone</string>
     <!-- «Phone is mute»: this device key cannot be read, so private content is
          never sent in cleartext and everything waits. -->
     <string name="identity_mute_title_unreadable">Private messages are not leaving or arriving</string>
-    <string name="identity_mute_body_unreadable">This phone’s key cannot be read. The app never sends anything private in plain text, so messages, stories and the profile mirror are waiting. Open “Backup” and bring back only the keys from a backup of this same profile — your chats stay as they are. A full restore would bring the keys back, but it would roll the conversation history back to the backup date.</string>
+    <string name="identity_mute_body_unreadable">This phone’s key cannot be read. The app never sends anything private in plain text, so messages, stories and the profile mirror are waiting. Open “Backup” and bring back only the keys from a backup of this same profile — your chats stay as they are. A full restore is safe too: it fills in what is missing from the backup instead of replacing your history.</string>
     <string name="identity_mute_title_timeout">The key did not open at startup</string>
     <string name="identity_mute_body_timeout">Private messages and stories are waiting: this phone key did not open in time when the app started. Restart the app; if it happens again, restore the profile from a backup file.</string>
     <string name="identity_mute_title_exchange">The file-exchange key cannot be read</string>
