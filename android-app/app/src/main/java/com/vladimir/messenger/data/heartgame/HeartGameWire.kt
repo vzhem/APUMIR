@@ -159,6 +159,36 @@ object HeartGameWire {
             .sortedWith(compareByDescending<Row> { it.entry.score }.thenBy { it.entry.keyId })
     }
 
+    /**
+     * Имя участника для показа: подписанное имя, иначе имя из адресной книги,
+     * иначе короткое обозначение узла.
+     *
+     * Почему третья ступень обязательна. У записи с результатом всегда есть
+     * узел и подпись; имени может не быть, если человек его не задавал (старая
+     * установка, сброс профиля). Решение владельца 29.10.2026: «если есть
+     * количество сердечек, то и ник должен быть с этими данными. Без имени
+     * вообще такого не должно быть». Поэтому вместо пустоты показывается
+     * короткое обозначение узла («pk_1a2b3c…9f0e») - это настоящий
+     * идентификатор участника, а не выдуманный ник, и по нему видно, что
+     * человек просто не назвался.
+     *
+     * @param contactName имя из адресной книги этого телефона, если известно.
+     */
+    fun displayName(entry: Entry, contactName: String?): String {
+        val signed = entry.name.trim()
+        if (signed.isNotEmpty()) return signed
+        val known = contactName?.trim().orEmpty()
+        if (known.isNotEmpty()) return known
+        return shortNodeName(entry.nodeId, entry.keyId)
+    }
+
+    /** Короткое обозначение узла: «pk_1a2b3c…9f0e». Пустым не бывает. */
+    fun shortNodeName(nodeId: String, keyId: String = ""): String {
+        val body = nodeId.trim().removePrefix("pk_").ifEmpty { keyId.trim() }
+        if (body.isEmpty()) return "pk_"
+        return if (body.length <= 12) "pk_" + body else "pk_" + body.take(6) + "…" + body.takeLast(4)
+    }
+
     /** Ключ склейки: имя без регистра; без имени - свой узел, ни с кем не вместе. */
     private fun mergeKey(group: List<Entry>): String {
         val name = group.firstNotNullOfOrNull { entry ->

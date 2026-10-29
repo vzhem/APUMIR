@@ -228,9 +228,14 @@ class HeartGameNetwork @Inject constructor(
 
     private suspend fun buildEnvelope(id: String, nowMs: Long): String? {
         val binding = IdentitySigningKeyStore.existingVerifiedBinding(context) ?: return null
+        // Имя уходит подписанным, и пустым оно быть не должно: получатель видит
+        // результат с сердечками и не понимает, чей он (жалоба владельца
+        // 29.10.2026). Профиль без имени - короткое обозначение узла.
+        val name = UsernameHolder.name.value?.trim()?.takeIf { it.isNotEmpty() }
+            ?.take(48)
+            ?: HeartGameWire.shortNodeName(id)
         val own = IdentitySigningKeyStore.withSeed(context) { seed ->
-            HeartGameWire.sign(binding, seed, HeartGameStore.score(context, id), nowMs,
-                UsernameHolder.name.value.orEmpty().take(48))
+            HeartGameWire.sign(binding, seed, HeartGameStore.score(context, id), nowMs, name)
         }
         // Do not advertise under a stale signing identity after account switching.
         if (HeartGameWire.verify(own, nowMs) { uniffi.p2p_core.verifyIdentitySigningBinding(it) }?.nodeId != id) return null

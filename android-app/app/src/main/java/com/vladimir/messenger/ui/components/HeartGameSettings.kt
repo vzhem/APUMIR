@@ -239,7 +239,9 @@ fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
     var failed by remember(id) { mutableStateOf(false) }
     val you = stringResource(R.string.heart_game_you)
     val contactNames = rememberBoardContactNames(context)
-    LaunchedEffect(id, revision, you) {
+    // contactNames в ключах: адресная книга приходит асинхронно, и без неё
+    // первая сборка таблицы показала бы короткие обозначения узлов вместо имён.
+    LaunchedEffect(id, revision, you, contactNames) {
         if (id == null) { loading = false; return@LaunchedEffect }
         try {
             ownKey = HeartGameStore.ownKeyId(context) ?: "local:$id"
@@ -247,8 +249,19 @@ fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
             // Одна строка на участника: у одного человека может быть несколько
             // ключей подписи (телефон, компьютер, переустановка), и таблица
             // раньше показывала его дважды подряд (скриншот владельца 28.10).
+            //
+            // Имя подставляется ДО склейки: у результата с сердечками всегда
+            // есть имя - подписанное, из адресной книги или короткое
+            // обозначение узла. Строки без имени в таблице нет (владелец,
+            // 29.10: «Без имени вообще такого не должно быть»).
             entries = HeartGameWire.table(
-                HeartGameStore.board(context, id).filter { it.keyId != ownKey } + own,
+                (HeartGameStore.board(context, id).filter { it.keyId != ownKey } + own)
+                    .map { entry ->
+                        entry.copy(
+                            name = if (entry.keyId == ownKey) you
+                            else HeartGameWire.displayName(entry, contactNames[entry.nodeId.trim().lowercase()]),
+                        )
+                    },
                 ownKey,
             )
             failed = false
@@ -259,12 +272,6 @@ fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
     val ownIndex = entries.indexOfFirst { it.entry.keyId == ownKey }
     val ownPlace = ownIndex + 1
     val mergedAny = entries.any { it.merged > 1 }
-    // Пустое имя в подписанной записи - это не ник, а «профиль без имени».
-    // Слово-заглушка вместо него читается как несуществующий участник
-    // (жалоба владельца 29.10.2026). Берём имя из адресной книги по узлу;
-    // если человека там нет - честное «Без имени».
-    fun title(entry: HeartGameWire.Entry): String =
-        entry.name.ifBlank { contactNames[entry.nodeId.trim().lowercase()] ?: "" }
     val rows: List<Pair<Int, HeartGameWire.Row>> =
         if (ownIndex < 100) entries.take(100).mapIndexed { i, e -> (i + 1) to e }
         else entries.take(99).mapIndexed { i, e -> (i + 1) to e } + (100 to entries[ownIndex])
@@ -279,9 +286,6 @@ fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
                 // иначе строка вводила бы в заблуждение тех, у кого дублей нет.
                 if (mergedAny) {
                     Text(stringResource(R.string.heart_game_board_merged), style = MaterialTheme.typography.labelSmall)
-                }
-                if (entries.any { it.entry.name.isBlank() && title(it.entry).isEmpty() }) {
-                    Text(stringResource(R.string.heart_game_board_no_name), style = MaterialTheme.typography.labelSmall)
                 }
                 if (loading) ApuPremiumSpinner()
                 if (failed) Text(stringResource(R.string.heart_game_save_error))
@@ -301,7 +305,7 @@ fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
                                     modifier = Modifier.size(22.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(
-                                        title(entry).ifEmpty { stringResource(R.string.chat_no_name) },
+                                        entry.name,
                                         fontWeight = FontWeight.SemiBold,
                                     )
                                     if (isMe) {

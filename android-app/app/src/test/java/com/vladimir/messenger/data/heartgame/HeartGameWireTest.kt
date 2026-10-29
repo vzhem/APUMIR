@@ -176,6 +176,30 @@ class HeartGameWireTest {
         assertEquals(listOf(1, 1), table.map { it.merged })
     }
 
+    @Test fun everyResultHasANameEvenWithoutAProfileName() {
+        // Владелец 29.10.2026: «если данные есть количество сердечек то и ник
+        // должен быть с этими данными. Без имени вообще такого не должно быть».
+        val nameless = verify(record(score = 1192, name = ""))!!
+        assertEquals(HeartGameWire.shortNodeName(nameless.nodeId), HeartGameWire.displayName(nameless, null))
+        // Имя из адресной книги лучше короткого обозначения узла.
+        assertEquals("Проводник", HeartGameWire.displayName(nameless, "Проводник"))
+        // Подписанное имя сильнее справочника: оно пришло от самого человека.
+        val named = nameless.copy(name = "server7")
+        assertEquals("server7", HeartGameWire.displayName(named, "Проводник"))
+        // Короткое обозначение узла читаемо и не бывает пустым.
+        assertEquals("pk_abcdef…cdef", HeartGameWire.shortNodeName("pk_abcdefabcdefcdef"))
+        // Никакого «Участника» и «Без имени»: только настоящее обозначение.
+        for (entry in listOf(nameless, named)) {
+            assertFalse(HeartGameWire.displayName(entry, null).isBlank())
+        }
+    }
+
+    @Test fun shortNodeNameFallsBackToKeyWhenTheNodeIsMissing() {
+        assertEquals("pk_", HeartGameWire.shortNodeName("", ""))
+        val key = "ab".repeat(32)
+        assertEquals("pk_ababab…abab", HeartGameWire.shortNodeName("", key))
+    }
+
     @Test fun namelessParticipantsOfDifferentNodesAreNeverMerged() {
         // Без имени стоят разные люди: сводить их в одного нельзя. Один узел -
         // один человек, поэтому ключ склейки здесь именно узел.
