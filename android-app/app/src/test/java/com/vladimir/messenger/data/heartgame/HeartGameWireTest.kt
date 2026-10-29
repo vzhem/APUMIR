@@ -157,7 +157,8 @@ class HeartGameWireTest {
 
     @Test fun ownRowStaysOwnEvenWhenAnotherKeyUnderTheSameNameClaimsMore() {
         val own = verify(record(score = 3246, name = "Проводник"))!!.copy(keyId = "22".repeat(32))
-        val stranger = own.copy(keyId = "33".repeat(32), score = 9999)
+        // Другой человек (другой узел), который назвался тем же именем.
+        val stranger = otherNode(own, "pk_" + "cd".repeat(32)).copy(keyId = "33".repeat(32), score = 9999)
         val table = HeartGameWire.table(listOf(own, stranger), own.keyId)
         assertEquals(1, table.size)
         // Своя строка не подменяется чужим счётом: в шапке и в таблице одно число.
@@ -168,7 +169,8 @@ class HeartGameWireTest {
 
     @Test fun differentNamesStayDifferentRows() {
         val first = verify(record(score = 20, name = "server7"))!!
-        val second = first.copy(keyId = "11".repeat(32), score = 10, name = "server3")
+        val second = otherNode(first, "pk_" + "cd".repeat(32))
+            .copy(keyId = "11".repeat(32), score = 10, name = "server3")
         val table = HeartGameWire.table(listOf(first, second), ownKey = null)
         assertEquals(listOf("server7", "server3"), table.map { it.entry.name })
         assertEquals(listOf(1, 1), table.map { it.merged })
