@@ -8,53 +8,33 @@ package com.vladimir.messenger.ui.components
  * постоянно (сторож, WorkManager, быстрый подъём), поэтому обложку перестали
  * видеть вовсе - не потому, что файл пропал, а потому, что экран не рисовался.
  *
- * Теперь обложка показывается при каждом открытии приложения, а при возврате из
- * фона - только если приложение отсутствовало дольше
- * [REPLAY_AFTER_BACKGROUND_MILLIS]: короткое переключение мессенджеров не даёт
- * вспышки на весь экран.
+ * Теперь обложка показывается при запуске приложения - как в Telegram: первый
+ * экран процесса всегда с ней, возврат из фона ведёт сразу в переписку, а
+ * пересоздание активности (поворот, смена темы, размера шрифта) обложку не
+ * повторяет, иначе она мигала бы на каждом повороте телефона.
  *
- * Android-зависимостей нет: время передаётся снаружи, поэтому правила
- * проверяются обычными JVM-тестами.
+ * Android-зависимостей нет, время передаётся снаружи: правило проверяется
+ * обычными JVM-тестами.
  */
-class SplashGate(
-    private val replayAfterBackgroundMillis: Long = REPLAY_AFTER_BACKGROUND_MILLIS,
-) {
-    /** Момент ухода в фон; `null` - приложение на экране. */
-    private var backgroundedAtMillis: Long? = null
+class SplashGate {
     private var screenCreated = false
 
     /**
-     * Создан экран приложения.
+     * Создан экран приложения: `true` - показать обложку.
      *
-     * Первый экран процесса - всегда с обложкой. Пересоздание активности
-     * (поворот, смена темы, размера шрифта) обложку не повторяет.
+     * Первый экран процесса - с обложкой даже при тёплом ядре; повторные
+     * создания активности - без неё.
      */
     fun onScreenCreated(nowMillis: Long): Boolean {
-        if (!screenCreated) {
-            screenCreated = true
-            backgroundedAtMillis = null
-            return true
-        }
-        return replayAfterBackground(nowMillis)
+        if (screenCreated) return false
+        screenCreated = true
+        lastScreenCreatedAtMillis = nowMillis
+        return true
     }
 
-    fun onBackground(nowMillis: Long) {
-        backgroundedAtMillis = nowMillis
-    }
-
-    /** Возврат на экран: `true` - показать обложку. */
-    fun onForeground(nowMillis: Long): Boolean = replayAfterBackground(nowMillis)
-
-    private fun replayAfterBackground(nowMillis: Long): Boolean {
-        val hiddenAt = backgroundedAtMillis ?: return false
-        backgroundedAtMillis = null
-        return nowMillis - hiddenAt >= replayAfterBackgroundMillis
-    }
-
-    companion object {
-        /** Сколько приложение должно пробыть в фоне, чтобы обложка вернулась. */
-        const val REPLAY_AFTER_BACKGROUND_MILLIS = 60_000L
-    }
+    /** Для диагностики и тестов: когда первый экран процесса был создан. */
+    var lastScreenCreatedAtMillis: Long? = null
+        private set
 }
 
 /**

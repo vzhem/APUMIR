@@ -448,26 +448,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        // Обложка перед входом: показывается при каждом открытии приложения,
-        // а не только при холодном старте. Раньше тёплое ядро отменяло её
-        // полностью, и на телефонах, где ядро живёт в фоне, обложку не видели.
+        // Обложка перед входом: показывается при запуске приложения, как в
+        // Telegram. Раньше тёплое ядро отменяло её полностью, и на телефонах,
+        // где ядро живёт в фоне, обложку не видели вовсе. Поворот экрана её не
+        // повторяет - решение принимает SplashGate.
         splashWanted.value =
             com.vladimir.messenger.ui.components.SplashSchedule.gate.onScreenCreated(
                 android.os.SystemClock.elapsedRealtime(),
             )
-        lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
-            override fun onStart(owner: androidx.lifecycle.LifecycleOwner) {
-                val gate = com.vladimir.messenger.ui.components.SplashSchedule.gate
-                if (gate.onForeground(android.os.SystemClock.elapsedRealtime())) {
-                    splashWanted.value = true
-                }
-            }
-
-            override fun onStop(owner: androidx.lifecycle.LifecycleOwner) {
-                com.vladimir.messenger.ui.components.SplashSchedule.gate
-                    .onBackground(android.os.SystemClock.elapsedRealtime())
-            }
-        })
         applyIncomingCallWake(intent)
 
         requestNotificationPermission()
