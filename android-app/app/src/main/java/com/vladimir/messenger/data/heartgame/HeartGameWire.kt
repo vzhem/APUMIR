@@ -109,13 +109,16 @@ object HeartGameWire {
      * занимал в таблице две строки подряд - владелец, скриншот 28.10.2026:
      * «В таблице один и тот же участник задвоился».
      *
-     * Поэтому строки с одинаковым именем (без учёта регистра и крайних
-     * пробелов) склеиваются в одну, и остаётся лучший результат. Своя строка
+     * Склейка идёт в два шага. Сначала по узлу (`nodeId`): у одного человека с
+     * телефоном и компьютером узел общий, а ключи подписи разные - это точное
+     * совпадение, и именно оно убирает вторую строку «я со старого ключа».
+     * Затем по имени (без учёта регистра и крайних пробелов): новый узел при
+     * переустановке с прежним именем. Остаётся лучший результат. Своя строка
      * всегда остаётся своей, даже если у другого ключа с тем же именем счёт
      * выше: иначе в таблице было бы одно число, а в шапке другое.
      *
-     * Имя без букв (пустое) ничего не склеивает: под заглушкой «Участник»
-     * стоят разные люди, и сводить их в одного нельзя.
+     * Пустое имя ничего не склеивает между разными узлами: под ним стоят
+     * разные люди, которые просто не назвались.
      *
      * Чего эта функция НЕ делает: не подтверждает, что имя принадлежит
      * одному человеку. Имя выбирает сам клиент, поэтому два разных человека
@@ -127,13 +130,28 @@ object HeartGameWire {
      * @param ownKey keyId своей строки, если подпись личности доступна.
      */
     fun table(entries: Collection<Entry>, ownKey: String?): List<Row> {
+        // Шаг 1: одна личность - один узел. У человека с двумя устройствами
+        // (телефон и компьютер) узел общий, а ключи подписи разные: ключ
+        // привязан к устройству. Поэтому склейка по узлу - точная, её и делаем
+        // первой.
+        val byNode = LinkedHashMap<String, MutableList<Entry>>()
+        for (entry in entries) {
+            byNode.getOrPut("node:" + entry.nodeId.trim().lowercase(java.util.Locale.ROOT)) {
+                mutableListOf()
+            }.add(entry)
+        }
+        // Шаг 2: разные узлы, но одно имя - тот же человек после переустановки
+        // или после смены личности (новый узел, прежнее имя). Пустое имя ничего
+        // не склеивает: под ним стоят разные люди.
         val groups = LinkedHashMap<String, MutableList<Entry>>()
-        for (entry in entries) groups.getOrPut(mergeKey(entry)) { mutableListOf() }.add(entry)
+        for (group in byNode.values) {
+            groups.getOrPut(mergeKey(group)) { mutableListOf() }.addAll(group)
+        }
         return groups.values
             .map { group ->
-                // Лучший из ключей одного имени: больший счёт, при равенстве -
-                // более свежий, при полном равенстве - меньший keyId (чтобы
-                // порядок не «прыгал» между телефонами).
+                // Лучший результат группы: больший счёт, при равенстве - более
+                // свежий, при полном равенстве - меньший keyId (чтобы порядок не
+                // «прыгал» между телефонами). Своя строка всегда своя.
                 val best = group.firstOrNull { it.keyId == ownKey }
                     ?: group.maxWith(compareBy<Entry> { it.score }.thenBy { it.updated }.thenByDescending { it.keyId })
                 Row(best, group.size)
@@ -141,9 +159,13 @@ object HeartGameWire {
             .sortedWith(compareByDescending<Row> { it.entry.score }.thenBy { it.entry.keyId })
     }
 
-    /** Ключ склейки: имя без регистра; пустое имя склеивает только с собой. */
-    private fun mergeKey(entry: Entry): String {
-        val name = entry.name.trim().lowercase(java.util.Locale.ROOT)
-        return if (name.isEmpty()) "key:" + entry.keyId else "name:" + name
+    /** Ключ склейки: имя без регистра; без имени - свой узел, ни с кем не вместе. */
+    private fun mergeKey(group: List<Entry>): String {
+        val name = group.firstNotNullOfOrNull { entry ->
+            entry.name.trim().lowercase(java.util.Locale.ROOT).takeIf { it.isNotEmpty() }
+        }
+        if (name != null) return "name:" + name
+        val node = group.first().nodeId.trim().lowercase(java.util.Locale.ROOT)
+        return if (node.isEmpty()) "key:" + group.first().keyId else "node:" + node
     }
 }

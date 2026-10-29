@@ -238,6 +238,7 @@ fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
     var loading by remember(id) { mutableStateOf(true) }
     var failed by remember(id) { mutableStateOf(false) }
     val you = stringResource(R.string.heart_game_you)
+    val contactNames = rememberBoardContactNames(context)
     LaunchedEffect(id, revision, you) {
         if (id == null) { loading = false; return@LaunchedEffect }
         try {
@@ -258,6 +259,12 @@ fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
     val ownIndex = entries.indexOfFirst { it.entry.keyId == ownKey }
     val ownPlace = ownIndex + 1
     val mergedAny = entries.any { it.merged > 1 }
+    // Пустое имя в подписанной записи - это не ник, а «профиль без имени».
+    // Слово-заглушка вместо него читается как несуществующий участник
+    // (жалоба владельца 29.10.2026). Берём имя из адресной книги по узлу;
+    // если человека там нет - честное «Без имени».
+    fun title(entry: HeartGameWire.Entry): String =
+        entry.name.ifBlank { contactNames[entry.nodeId.trim().lowercase()] ?: "" }
     val rows: List<Pair<Int, HeartGameWire.Row>> =
         if (ownIndex < 100) entries.take(100).mapIndexed { i, e -> (i + 1) to e }
         else entries.take(99).mapIndexed { i, e -> (i + 1) to e } + (100 to entries[ownIndex])
@@ -272,6 +279,9 @@ fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
                 // иначе строка вводила бы в заблуждение тех, у кого дублей нет.
                 if (mergedAny) {
                     Text(stringResource(R.string.heart_game_board_merged), style = MaterialTheme.typography.labelSmall)
+                }
+                if (entries.any { it.entry.name.isBlank() && title(it.entry).isEmpty() }) {
+                    Text(stringResource(R.string.heart_game_board_no_name), style = MaterialTheme.typography.labelSmall)
                 }
                 if (loading) ApuPremiumSpinner()
                 if (failed) Text(stringResource(R.string.heart_game_save_error))
@@ -291,7 +301,7 @@ fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
                                     modifier = Modifier.size(22.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(
-                                        entry.name.ifBlank { stringResource(R.string.heart_game_unknown_player) },
+                                        title(entry).ifEmpty { stringResource(R.string.chat_no_name) },
                                         fontWeight = FontWeight.SemiBold,
                                     )
                                     if (isMe) {
@@ -313,4 +323,48 @@ fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
                 }
             }
         })
+}
+
+/**
+ * Имена участников из адресной книги: узел -> имя.
+ *
+ * В подписанной записи счёта имя приходит от клиента и может быть пустым
+ * (профиль без имени, старая версия, сброс профиля). Показывать вместо него
+ * слово-заглушку нельзя: это читается как ник несуществующего человека
+ * (жалоба владельца 29.10.2026). Адресная книга знает настоящее имя по узлу,
+ * поэтому пустое имя подменяем им, а записи-заглушки («Contact a1b2…») не
+ * используем - они не лучше пустоты.
+ *
+ * Сеть и ядро не нужны: читаются только контакты этого телефона.
+ */
+@Composable
+private fun rememberBoardContactNames(context: android.content.Context): Map<String, String> {
+    val repository = remember(context) {
+        runCatching {
+            dagger.hilt.android.EntryPointAccessors.fromApplication(
+                context.applicationContext,
+                com.vladimir.messenger.MainActivityEntryPoint::class.java,
+            ).contactRepository()
+        }.getOrNull()
+    }
+    val flow = remember(context, repository) { repository?.observeContacts() }
+    // Без репозитория (теоретически возможно в тестовой сборке) остаётся
+    // пустой список: таблица тогда честно показывает «Без имени».
+    val fallback = remember { mutableStateOf(emptyList<com.vladimir.messenger.domain.model.Contact>()) }
+    val contacts by if (flow != null) {
+        flow.collectAsStateWithLifecycle(initialValue = emptyList())
+    } else {
+        fallback
+    }
+    return remember(contacts, repository) {
+        val names = mutableMapOf<String, String>()
+        if (repository != null) {
+            for (contact in contacts) {
+                if (!repository.isRealName(contact.displayName)) continue
+                val node = com.vladimir.messenger.data.rank.RankWire.canonicalNodeId(contact.id) ?: continue
+                names[node] = contact.displayName.trim()
+            }
+        }
+        names
+    }
 }

@@ -15,6 +15,10 @@ class HeartGameWireTest {
         .put(Ed25519.keyPairFromSeed(seed).publicKey).putLong(now - 1000).put(ByteArray(64)).array()
     private fun record(score: Long = 7, time: Long = now, name: String = "Игрок") =
         HeartGameWire.sign(binding(), seed, score, time, name)
+
+    /** Запись от другого узла: переустановка приложения или другая личность. */
+    private fun otherNode(entry: HeartGameWire.Entry, node: String): HeartGameWire.Entry =
+        entry.copy(nodeId = node)
     private fun verify(text: String) = HeartGameWire.verify(text, now) { true }
 
     @Test fun signedResultCanTravelThroughAnyRelayUnchanged() {
@@ -78,8 +82,9 @@ class HeartGameWireTest {
     @Test fun placeCountsFromKnownRowsWithOwnEntry() {
         // Имена разные: в таблице это разные участники, а не склейка одного.
         val first = verify(record(score = 20, name = "Первый"))!!
-        val second = verify(record(score = 10, name = "Второй"))!!.copy(keyId = "11".repeat(32))
-        val own = first.copy(keyId = "22".repeat(32), score = 15, name = "Я")
+        val second = otherNode(first, "pk_" + "cd".repeat(32))
+            .copy(keyId = "11".repeat(32), score = 10, name = "Второй")
+        val own = otherNode(first, "pk_" + "ef".repeat(32)).copy(keyId = "22".repeat(32), score = 15, name = "Я")
         // 20 > 15 > 10: своё место - второе.
         assertEquals(2, HeartGameWire.placeOf(listOf(first, second), own.score, own))
     }
@@ -88,7 +93,8 @@ class HeartGameWireTest {
         // Подписи личности нет (own == null) - место обязано быть числом, а не
         // прочерком: сравниваем свой счёт с известными результатами.
         val first = verify(record(score = 20, name = "Первый"))!!
-        val second = verify(record(score = 10, name = "Второй"))!!.copy(keyId = "11".repeat(32))
+        val second = otherNode(first, "pk_" + "cd".repeat(32))
+            .copy(keyId = "11".repeat(32), score = 10, name = "Второй")
         assertEquals(2, HeartGameWire.placeOf(listOf(first, second), 15, null))
         assertEquals(1, HeartGameWire.placeOf(listOf(first, second), 20, null))
         assertEquals(3, HeartGameWire.placeOf(listOf(first, second), 0, null))
@@ -117,6 +123,38 @@ class HeartGameWireTest {
         assertEquals(2, table[0].merged)
     }
 
+    @Test fun twoDevicesOfOneIdentityAreOneRowEvenWithoutAName() {
+        // Телефон и компьютер одного человека: узел общий, ключи подписи разные,
+        // имя в записи может быть пустым. Владелец, 29.10.2026: в таблице
+        // появился «Участник» - это была его же старая строка без имени.
+        val deviceA = verify(record(score = 3255, name = ""))!!
+        val deviceB = deviceA.copy(keyId = "11".repeat(32), score = 1192, updated = now - 86_000)
+        val table = HeartGameWire.table(listOf(deviceA, deviceB), ownKey = null)
+        assertEquals(1, table.size)
+        assertEquals(3255L, table[0].entry.score)
+        assertEquals(2, table[0].merged)
+    }
+
+    @Test fun ownOldKeyIsFoldedIntoTheOwnRow() {
+        // Своя строка берётся по ключу, а старая запись того же узла (прежний
+        // ключ подписи) не должна висеть отдельной безымянной строкой.
+        val own = verify(record(score = 3255, name = "Проводник"))!!.copy(keyId = "22".repeat(32))
+        val oldKey = own.copy(keyId = "33".repeat(32), score = 1192, name = "")
+        val table = HeartGameWire.table(listOf(own, oldKey), own.keyId)
+        assertEquals(1, table.size)
+        assertEquals(own.keyId, table[0].entry.keyId)
+        assertEquals(3255L, table[0].entry.score)
+        assertEquals(1, HeartGameWire.placeOf(listOf(own, oldKey), own.score, own))
+    }
+
+    @Test fun twoDifferentNodesWithDifferentNamesStayApart() {
+        val a = verify(record(score = 20, name = "Первый"))!!
+        val b = otherNode(a, "pk_" + "cd".repeat(32)).copy(keyId = "11".repeat(32), score = 10, name = "Второй")
+        val table = HeartGameWire.table(listOf(a, b), ownKey = null)
+        assertEquals(2, table.size)
+        assertEquals(listOf("Первый", "Второй"), table.map { it.entry.name })
+    }
+
     @Test fun ownRowStaysOwnEvenWhenAnotherKeyUnderTheSameNameClaimsMore() {
         val own = verify(record(score = 3246, name = "Проводник"))!!.copy(keyId = "22".repeat(32))
         val stranger = own.copy(keyId = "33".repeat(32), score = 9999)
@@ -136,16 +174,19 @@ class HeartGameWireTest {
         assertEquals(listOf(1, 1), table.map { it.merged })
     }
 
-    @Test fun placeholderNamesAreNeverMerged() {
-        // Под заглушкой «Участник» стоят разные люди: сводить их в одного нельзя.
+    @Test fun namelessParticipantsOfDifferentNodesAreNeverMerged() {
+        // Без имени стоят разные люди: сводить их в одного нельзя. Один узел -
+        // один человек, поэтому ключ склейки здесь именно узел.
         val first = verify(record(score = 20, name = ""))!!
-        val second = first.copy(keyId = "11".repeat(32), score = 10)
-        assertEquals(2, HeartGameWire.table(listOf(first, second), ownKey = null).size)
+        val other = otherNode(first, "pk_" + "cd".repeat(32)).copy(keyId = "11".repeat(32), score = 10)
+        assertEquals(2, HeartGameWire.table(listOf(first, other), ownKey = null).size)
     }
 
     @Test fun caseAndOuterSpacesDoNotSplitOneName() {
+        // Разные узлы (переустановка), одно имя с разным регистром и пробелами.
         val first = verify(record(score = 20, name = "server7"))!!
-        val second = first.copy(keyId = "11".repeat(32), score = 10, name = "  Server7 ")
+        val second = otherNode(first, "pk_" + "cd".repeat(32))
+            .copy(keyId = "11".repeat(32), score = 10, name = "  Server7 ")
         val table = HeartGameWire.table(listOf(first, second), ownKey = null)
         assertEquals(1, table.size)
         assertEquals(2, table[0].merged)
@@ -154,8 +195,8 @@ class HeartGameWireTest {
     @Test fun mergedTableKeepsPlacesConsistentWithTheHeader() {
         val a = verify(record(score = 20, name = "Первый"))!!
         val aOld = a.copy(keyId = "11".repeat(32), score = 12)
-        val b = a.copy(keyId = "22".repeat(32), score = 15, name = "Второй")
-        val own = a.copy(keyId = "33".repeat(32), score = 7, name = "Я")
+        val b = otherNode(a, "pk_" + "cd".repeat(32)).copy(keyId = "22".repeat(32), score = 15, name = "Второй")
+        val own = otherNode(a, "pk_" + "ef".repeat(32)).copy(keyId = "33".repeat(32), score = 7, name = "Я")
         // 20 (склеено из двух записей), 15, 7: своё место - третье.
         assertEquals(3, HeartGameWire.placeOf(listOf(a, aOld, b), own.score, own))
         assertEquals(3, HeartGameWire.table(listOf(a, aOld, b, own), own.keyId).size)

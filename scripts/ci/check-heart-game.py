@@ -57,12 +57,17 @@ class HeartGameContracts(unittest.TestCase):
         # склейка обязана идти по имени, а не по ключу.
         wire = (SRC / 'data/heartgame/HeartGameWire.kt').read_text()
         self.assertIn('fun table(entries: Collection<Entry>, ownKey: String?)', wire)
-        self.assertIn('mergeKey(entry)', wire)
+        self.assertIn('mergeKey(group)', wire)
         self.assertIn('lowercase(java.util.Locale.ROOT)', wire)
         # Своя строка не подменяется чужим счётом под тем же именем.
         self.assertIn('group.firstOrNull { it.keyId == ownKey }', wire)
-        # Пустое имя (заглушка «Участник») не склеивает разных людей.
-        self.assertIn('"key:" + entry.keyId', wire)
+        # Первый шаг склейки - узел: телефон и компьютер одного человека дают
+        # разные ключи подписи, но общий nodeId.
+        self.assertIn('byNode.getOrPut("node:" + entry.nodeId', wire)
+        # Пустое имя не склеивает разных людей: остаётся склейка по узлу.
+        self.assertIn('"node:" + node', wire)
+        self.assertNotIn('heart_game_unknown_player', (SRC / 'ui/components/HeartGameSettings.kt').read_text(),
+                         'выдуманный ник «Участник» вернулся в таблицу')
         ui = (SRC / 'ui/components/HeartGameSettings.kt').read_text()
         self.assertIn('HeartGameWire.table(', ui)
         self.assertNotIn('HeartGameWire.ranked(HeartGameStore.board', ui)
@@ -74,8 +79,29 @@ class HeartGameContracts(unittest.TestCase):
                 'HeartGameWireTest.kt').read_text()
         for case in ('oneNameWithTwoSigningKeysTakesASingleRowWithTheBestScore',
                      'ownRowStaysOwnEvenWhenAnotherKeyUnderTheSameNameClaimsMore',
-                     'placeholderNamesAreNeverMerged', 'caseAndOuterSpacesDoNotSplitOneName'):
+                     'twoDevicesOfOneIdentityAreOneRowEvenWithoutAName',
+                     'ownOldKeyIsFoldedIntoTheOwnRow',
+                     'namelessParticipantsOfDifferentNodesAreNeverMerged',
+                     'caseAndOuterSpacesDoNotSplitOneName'):
             self.assertIn(case, test, 'нет теста склейки: ' + case)
+
+    def test_nameless_result_is_never_shown_as_a_made_up_nickname(self):
+        # Владелец, 29.10.2026: «В таблице почему-то написан участник. Хотя
+        # таких ников вообще нет». Пустое имя в подписанной записи означает
+        # «профиль без имени», а не человека по имени «Участник».
+        ui = (SRC / 'ui/components/HeartGameSettings.kt').read_text()
+        self.assertIn('rememberBoardContactNames(', ui)
+        self.assertIn('isRealName(contact.displayName)', ui)
+        self.assertIn('canonicalNodeId(contact.id)', ui)
+        self.assertIn('R.string.chat_no_name', ui)
+        self.assertIn('R.string.heart_game_board_no_name', ui)
+        for path in (ROOT / 'android-app/app/src/main/res/values/strings.xml',
+                     ROOT / 'android-app/app/src/main/res/values-en/strings.xml'):
+            text = path.read_text()
+            self.assertIn('heart_game_board_no_name', text,
+                          'нет пояснения «Без имени» в ' + path.name)
+            self.assertNotIn('heart_game_unknown_player', text,
+                             'строка-выдумка «Участник» осталась в ' + path.name)
 
     def test_private_account_scoped_score_and_opt_in(self):
         store = (SRC / 'data/heartgame/HeartGameStore.kt').read_text()
