@@ -70,7 +70,7 @@ class SplashSceneTest(unittest.TestCase):
         self.assertIn("rememberInfiniteTransition", scene)
         self.assertNotIn("withFrameNanos", scene)
 
-    def test_readiness_limits_and_warm_start_bypass_are_preserved(self):
+    def test_readiness_limits_are_preserved(self):
         splash = source("AppSplash.kt")
         self.assertIn("SPLASH_MAX_MILLIS = 10_000L", splash)
         self.assertIn("SPLASH_MIN_MILLIS = 900L", splash)
@@ -78,9 +78,30 @@ class SplashSceneTest(unittest.TestCase):
         self.assertIn("CoreStatus.ready.first { it }", splash)
         self.assertIn("SystemClock.elapsedRealtime()", splash)
         self.assertIn("fun CoreWarmBar()", splash)
-        main = (ROOT / "android-app/app/src/main/java/com/vladimir/messenger/MainActivity.kt").read_text()
-        self.assertIn("mutableStateOf(!com.vladimir.messenger.service.CoreStatus.ready.value)", main)
         self.assertNotIn("art != null", splash)
+
+    def test_cover_is_shown_on_every_app_open_not_only_on_cold_start(self):
+        # Раунд 263 отменял обложку при тёплом ядре; на телефонах, где ядро
+        # живёт в фоне, её перестали видеть. Правило вернулось и проверяется.
+        main = (ROOT / "android-app/app/src/main/java/com/vladimir/messenger/MainActivity.kt").read_text()
+        self.assertNotIn(
+            "mutableStateOf(!com.vladimir.messenger.service.CoreStatus.ready.value)",
+            main,
+        )
+        self.assertIn("SplashSchedule.gate.onScreenCreated(", main)
+        self.assertIn("gate.onForeground(android.os.SystemClock.elapsedRealtime())", main)
+        self.assertIn(".onBackground(android.os.SystemClock.elapsedRealtime())", main)
+        self.assertIn("val showSplash by splashWanted", main)
+        gate = source("SplashSchedule.kt")
+        self.assertIn("REPLAY_AFTER_BACKGROUND_MILLIS = 60_000L", gate)
+        self.assertIn("fun onScreenCreated(", gate)
+        self.assertIn("fun onBackground(", gate)
+        self.assertIn("fun onForeground(", gate)
+        for android_import in ("import android.", "import androidx."):
+            self.assertNotIn(android_import, gate)
+        tests = (ROOT / "android-app/app/src/test/java/com/vladimir/messenger/ui/components/SplashGateTest.kt").read_text()
+        self.assertIn("long absence brings the cover back", tests)
+        self.assertIn("does not replay the cover", tests)
 
     def test_platform_launch_background_matches_the_native_scene(self):
         res = ROOT / "android-app/app/src/main/res"

@@ -152,6 +152,13 @@ class MainActivity : ComponentActivity() {
     private var lastHandledInviteUri: String? = null
     private val viewModel: MainViewModel by viewModels()
 
+    /**
+     * Нужна ли обложка прямо сейчас. Правило живёт в [SplashSchedule]: первый
+     * экран процесса - всегда с обложкой, возврат из фона после долгой паузы -
+     * снова с обложкой, поворот экрана - без.
+     */
+    private val splashWanted = mutableStateOf(false)
+
     override fun onResume() {
         super.onResume()
         applyIncomingCallWake(intent)
@@ -441,6 +448,26 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Обложка перед входом: показывается при каждом открытии приложения,
+        // а не только при холодном старте. Раньше тёплое ядро отменяло её
+        // полностью, и на телефонах, где ядро живёт в фоне, обложку не видели.
+        splashWanted.value =
+            com.vladimir.messenger.ui.components.SplashSchedule.gate.onScreenCreated(
+                android.os.SystemClock.elapsedRealtime(),
+            )
+        lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
+            override fun onStart(owner: androidx.lifecycle.LifecycleOwner) {
+                val gate = com.vladimir.messenger.ui.components.SplashSchedule.gate
+                if (gate.onForeground(android.os.SystemClock.elapsedRealtime())) {
+                    splashWanted.value = true
+                }
+            }
+
+            override fun onStop(owner: androidx.lifecycle.LifecycleOwner) {
+                com.vladimir.messenger.ui.components.SplashSchedule.gate
+                    .onBackground(android.os.SystemClock.elapsedRealtime())
+            }
+        })
         applyIncomingCallWake(intent)
 
         requestNotificationPermission()
@@ -490,12 +517,10 @@ class MainActivity : ComponentActivity() {
         com.vladimir.messenger.data.profile.InvitePrivacyStore.init(this)
         setContent {
             val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
-            // Сплэш показывается при запуске приложения (нажатии на иконку).
-            // Раунд 263: при тёплом старте (ядро уже поднято) заставка не
-            // нужна вовсе - человек сразу в готовом приложении.
-            var showSplash by remember {
-                mutableStateOf(!com.vladimir.messenger.service.CoreStatus.ready.value)
-            }
+            // Обложка перед входом. Правило - в SplashGate: первый экран
+            // процесса и возврат из фона после долгой паузы показывают её,
+            // тёплое ядро больше её не отменяет.
+            val showSplash by splashWanted
             // Роевой спор за @имя: система сняла наше имя - просим новое.
             val usernameConflict by UsernameHolder.conflict.collectAsStateWithLifecycle()
             P2PMessengerTheme(themeMode = themeMode) {
@@ -505,7 +530,7 @@ class MainActivity : ComponentActivity() {
                 // Слой полёта реакций рисуется в самом конце (см. ниже), чтобы
                 // значок летел ПОВЕРХ списка и пузырей, а не обрезался ими.
                 if (showSplash) {
-                    AppSplash(onFinished = { showSplash = false })
+                    AppSplash(onFinished = { splashWanted.value = false })
                 } else {
                 val pendingContact = pendingContactInfo
                 Log.d("MainActivity", "Checking dialog: pendingContact=${pendingContact != null}")
