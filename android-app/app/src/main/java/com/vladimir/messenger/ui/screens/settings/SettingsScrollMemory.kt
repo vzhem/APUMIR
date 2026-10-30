@@ -61,8 +61,12 @@ class SettingsScrollMemory {
             val memory = SettingsScrollMemory()
             var position = 0
             while (position + 2 < flat.size) {
-                val menu = menuName(flat[position])
-                memory.remember(menu, Anchor(flat[position + 1], flat[position + 2]))
+                // Незнакомый код (раздел переименовали или убрали) пропускаем:
+                // мусор не должен лечь на корневой список.
+                if (MENU_KEYS.indices.contains(flat[position])) {
+                    val menu = menuName(flat[position])
+                    memory.remember(menu, Anchor(flat[position + 1], flat[position + 2]))
+                }
                 position += 3
             }
             return memory

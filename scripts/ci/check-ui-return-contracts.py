@@ -34,7 +34,8 @@ class SettingsReturnPositionTest(unittest.TestCase):
     def test_returning_to_a_menu_no_longer_jumps_to_the_top(self):
         self.assertNotIn("scrollToItem(0)", self.screen)
         self.assertNotIn("LaunchedEffect(section) { settingsScrollState.scrollToItem(0) }", self.screen)
-        self.assertIn("rememberSettingsScrollState(section)", self.screen)
+        self.assertIn("rememberSettingsScrollState(", self.screen)
+        self.assertIn("section?.name ?: SettingsScrollMemory.ROOT", self.screen)
 
     def test_each_menu_has_its_own_remembered_position(self):
         self.assertIn("class SettingsScrollMemory", self.memory)

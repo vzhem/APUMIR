@@ -56,9 +56,10 @@ class SettingsScrollMemoryTest {
     }
 
     @Test
-    fun `unknown menu codes fall back to the root list instead of crashing`() {
+    fun `unknown menu codes are skipped so they cannot corrupt the root list`() {
         val memory = SettingsScrollMemory.fromFlatten(listOf(999, 5, 5))
         assertTrue(memory.anchorFor(SettingsScrollMemory.ROOT).isTop)
+        assertEquals(0, memory.rememberedMenus)
         assertEquals(SettingsScrollMemory.ROOT, SettingsScrollMemory.menuName(999))
     }
 
