@@ -713,7 +713,7 @@ fn generate_self_signed_cert() -> QuicResult<(CertificateDer<'static>, PrivatePk
 /// телефон без IPv6 продолжает работать как раньше.
 fn endpoint_socket(bind_addr: SocketAddr) -> QuicResult<std::net::UdpSocket> {
     let socket = if bind_addr.ip().is_unspecified() && bind_addr.is_ipv4() {
-        super::dual_stack::bind_udp_dual(bind_addr.port())
+        crate::network::dual_stack::bind_udp_dual(bind_addr.port())
     } else {
         std::net::UdpSocket::bind(bind_addr)
     };

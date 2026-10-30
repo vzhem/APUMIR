@@ -61,7 +61,7 @@ pub fn is_public_endpoint(addr: SocketAddr) -> bool {
     // `::ffff:a.b.c.d`. Без нормализации он попадал в ветку IPv6 и не проходил
     // проверку глобального unicast — то есть нормальный IPv4-адрес молча
     // отбрасывался. Нормализуем до разбора семьи.
-    let addr = super::dual_stack::canonical(addr);
+    let addr = crate::network::dual_stack::canonical(addr);
     if addr.port() == 0 { return false; }
     match addr.ip() {
         IpAddr::V4(ip) => {
@@ -87,11 +87,11 @@ pub fn is_public_endpoint(addr: SocketAddr) -> bool {
 pub fn usable_local_endpoint(addr: SocketAddr) -> bool {
     // Та же нормализация, что и в `is_public_endpoint`: локальный адрес из
     // dual-stack сокета приходит v4-mapped.
-    let addr = super::dual_stack::canonical(addr);
+    let addr = crate::network::dual_stack::canonical(addr);
     addr.port() != 0 && !addr.ip().is_unspecified() && !addr.ip().is_multicast()
         && !addr.ip().is_loopback()
         // link-local без zone id недостижим — не годится и как локальный путь.
-        && !super::dual_stack::is_link_local(addr.ip())
+        && !crate::network::dual_stack::is_link_local(addr.ip())
 }
 
 fn canonical<T: Serialize>(domain: &[u8], value: &T) -> Option<Vec<u8>> {
@@ -125,7 +125,7 @@ impl AddressLease {
         // Подписываем нормализованный адрес: иначе один и тот же IPv4 мог быть
         // подписан в двух видах (`1.1.1.1` и `::ffff:1.1.1.1`), и записи
         // считались бы разными.
-        let endpoint = super::dual_stack::canonical(endpoint);
+        let endpoint = crate::network::dual_stack::canonical(endpoint);
         let claims = AddressClaims {
             node_id: identity.legacy_routing_node_id().to_string(), endpoint,
             issued_at_ms: now, expires_at_ms: now.checked_add(ADDRESS_LIFETIME_MS)?,

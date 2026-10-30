@@ -138,7 +138,7 @@ need(DUAL_STACK, dual, "UdpSocket::bind(any_v4(port))", "нет отката UDP
 need(DUAL_STACK, dual, "bind_tcp_dual", "нет dual-stack TCP-listener")
 need(DUAL_STACK, dual, "TcpListener::bind(any_v4(port))", "нет отката TCP на IPv4")
 need(QUIC, quic, "fn endpoint_socket(", "QUIC-endpoint должен создаваться через общий сокет")
-need(QUIC, quic, "super::dual_stack::bind_udp_dual(", "QUIC-сокет не dual-stack")
+need(QUIC, quic, "dual_stack::bind_udp_dual(", "QUIC-сокет не dual-stack")
 need(CORE, core, "crate::network::dual_stack::any_v6(port)", "endpoint движка снова на 0.0.0.0")
 need(CORE, core, "crate::network::dual_stack::bind_tcp_dual(port)", "TCP-listener движка снова на 0.0.0.0")
 need(MDNS, mdns, "dual_stack::pick(addresses.iter())", "mDNS не предпочитает IPv6")

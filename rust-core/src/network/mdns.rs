@@ -256,7 +256,7 @@ impl MdnsService {
                     // link-local не берём: он достижим только с zone id,
                     // которого в `SocketAddr` нет.
                     let addresses = info.get_addresses();
-                    let Some(ip) = super::dual_stack::pick(addresses.iter()) else {
+                    let Some(ip) = crate::network::dual_stack::pick(addresses.iter()) else {
                         continue;
                     };
                     let socket_addr = SocketAddr::new(ip, info.get_port());
@@ -348,7 +348,7 @@ pub fn find_device_endpoint<'a>(
 }
 
 fn local_addresses() -> MdnsResult<Vec<IpAddr>> {
-    let addrs = super::dual_stack::local_shareable_ips();
+    let addrs = crate::network::dual_stack::local_shareable_ips();
     if addrs.is_empty() {
         return Err(MdnsError::NoLocalIp);
     }
@@ -401,7 +401,7 @@ mod tests {
                 println!("✅ Локальные адреса: {:?}", list);
                 for ip in list {
                     assert!(!ip.is_loopback());
-                    assert!(!super::dual_stack::is_link_local(ip));
+                    assert!(!crate::network::dual_stack::is_link_local(ip));
                 }
             }
             Err(_) => {

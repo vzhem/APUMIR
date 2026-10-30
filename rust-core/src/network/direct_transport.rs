@@ -222,7 +222,7 @@ impl Shared {
             Ok(()) => {
                 // dual-stack: IPv4-пир приходит сюда как ::ffff:a.b.c.d —
                 // в азбуку адресов он должен попасть обычным IPv4.
-                let remote = super::dual_stack::canonical(conn.remote_address());
+                let remote = crate::network::dual_stack::canonical(conn.remote_address());
                 tracing::info!(
                     "DIRECT: adopted inbound connection from {} at {}",
                     sender,
@@ -533,7 +533,7 @@ async fn read_loop(conn: QuicConnection, shared: Arc<Shared>, inbound: bool) {
             let result = handler(
                 &payload,
                 binding,
-                super::dual_stack::canonical(conn.remote_address()),
+                crate::network::dual_stack::canonical(conn.remote_address()),
             );
             (result.sender, result.response)
         } else {
@@ -727,7 +727,7 @@ async fn send_one(
             FramePayload::Plain(bytes) => Cow::Borrowed(bytes.as_slice()),
             FramePayload::Bound(factory) => {
                 let Ok(binding) = conn.peer_exchange_channel_binding() else { return SendOutcome::StreamFailed; };
-                let peer_addr = super::dual_stack::canonical(conn.remote_address());
+                let peer_addr = crate::network::dual_stack::canonical(conn.remote_address());
                 let Some(bytes) = factory(binding, peer_addr) else { return SendOutcome::StreamFailed; };
                 if bytes.len() > super::peer_assistance::MAX_ASSIST_BYTES { return SendOutcome::StreamFailed; }
                 Cow::Owned(bytes)
@@ -823,7 +823,7 @@ async fn acquire(
     };
     // Адрес пришёл из адресной книги, mDNS или QR: v4-mapped сводим к IPv4,
     // чтобы ключи пула и проверки «публичный/локальный» видели один и тот же адрес.
-    let addr = super::dual_stack::canonical(addr);
+    let addr = crate::network::dual_stack::canonical(addr);
 
     let conn = match tokio::time::timeout(
         CONNECT_TIMEOUT,
@@ -901,7 +901,7 @@ pub async fn stun_via_side_channel(
         let server_owned = server.to_string();
         // DNS-резолв блокирующий - выносим из реактора.
         let targets = tokio::task::spawn_blocking(move || {
-            super::dual_stack::resolve_ordered(&server_owned)
+            crate::network::dual_stack::resolve_ordered(&server_owned)
         })
         .await
         .unwrap_or_default();
@@ -926,15 +926,15 @@ pub async fn stun_via_side_channel(
                     Ok(Some((from, bytes))) => {
                         // Сравниваем нормализованно: ответ на IPv4-запрос
                         // приходит с v4-mapped источником.
-                        if super::dual_stack::canonical(from)
-                            != super::dual_stack::canonical(target)
+                        if crate::network::dual_stack::canonical(from)
+                            != crate::network::dual_stack::canonical(target)
                         {
                             // Чужая/запоздалая датаграмма - не наш ответ.
                             continue;
                         }
                         match decode_binding_response(&bytes) {
                             Ok(addr) => {
-                                let addr = super::dual_stack::canonical(addr);
+                                let addr = crate::network::dual_stack::canonical(addr);
                                 tracing::info!("STUN(7777): {} sees us as {}", target, addr);
                                 return Some(addr);
                             }

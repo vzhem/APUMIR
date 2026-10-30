@@ -113,7 +113,7 @@ impl StunClient {
 
         // Сокет dual-stack: один и тот же годится и для IPv6, и для IPv4.
         // Телефон без IPv6 получает обычный IPv4-сокет (откат внутри).
-        let socket = super::dual_stack::bind_udp_dual(0)?;
+        let socket = crate::network::dual_stack::bind_udp_dual(0)?;
         socket.set_read_timeout(Some(STUN_TIMEOUT))?;
         socket.set_write_timeout(Some(STUN_TIMEOUT))?;
 
@@ -134,10 +134,10 @@ impl StunClient {
                 // Отражение приходит с того же адреса, но для IPv4 — в виде
                 // v4-mapped: сравниваем и отдаём нормализованно.
                 Ok((n, from))
-                    if super::dual_stack::canonical(from) == super::dual_stack::canonical(target) =>
+                    if crate::network::dual_stack::canonical(from) == crate::network::dual_stack::canonical(target) =>
                 {
                     return decode_binding_response(&buf[..n])
-                        .map(super::dual_stack::canonical);
+                        .map(crate::network::dual_stack::canonical);
                 }
                 Ok(_) => {
                     last_error = IceError::Timeout;
@@ -240,7 +240,7 @@ pub fn looks_like_stun(datagram: &[u8]) -> bool {
 /// мог быть AAAA при сокете, привязанном к `0.0.0.0`, то есть заведомо
 /// нерабочая попытка. Теперь адреса отсортированы и пробуются по очереди.
 fn resolve_targets(server_addr: &str) -> Vec<SocketAddr> {
-    super::dual_stack::resolve_ordered(server_addr)
+    crate::network::dual_stack::resolve_ordered(server_addr)
 }
 
 /// Выбросить всё, что уже лежит в буфере сокета, не блокируясь надолго.
