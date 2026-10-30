@@ -22,6 +22,21 @@
     <string name="section_my_profile">My profile</string>
     <string name="section_appearance">Appearance</string>
     <string name="section_notifications">Notifications</string>
+    <string name="delivery_switch_title">Wake the app up</string>
+    <string name="delivery_switch_hint">If the system closes the app, the phone brings it back within a couple of minutes — like Telegram. Messages are not lost.</string>
+    <string name="delivery_state_ready">All set: a message wakes the phone without delay.</string>
+    <string name="delivery_state_needs">Permissions missing: %1$d. Messages may arrive late.</string>
+    <string name="delivery_item_notifications">App notifications</string>
+    <string name="delivery_item_battery">Unrestricted battery use</string>
+    <string name="delivery_item_exact_alarms">Exact alarms</string>
+    <string name="delivery_item_background">Autostart and background work</string>
+    <string name="delivery_item_granted">Allowed</string>
+    <string name="delivery_item_denied">Not allowed — messages will wait</string>
+    <string name="delivery_item_unknown">Cannot be checked: depends on the phone</string>
+    <string name="delivery_action_allow">Allow</string>
+    <string name="delivery_action_open">Open</string>
+    <string name="delivery_wake_count">Wakes after being closed: %1$d</string>
+    <string name="delivery_footer">These permissions belong to the phone. Without them the system may hold a message until you open the app again — that is an Android limit, not an app limit.</string>
     <string name="section_security">Security</string>
     <string name="section_network">Network</string>
     <string name="section_file_transfer">File transfer</string>
@@ -727,8 +742,14 @@
     <string name="settings_relay_off">Off — subscriber mode: NEW files from others are not accepted for storage, and heavy ones (pictures, videos, GIFs, large files) are not relayed to others. Light and essential traffic is carried by everyone: small documents and stickers, text and backups, update APKs.</string>
     <string name="settings_relay_on">The phone stores other people’s files for contacts who are offline, shares files of communities and updates with others. The more phone-servers there are, the faster the network is.</string>
     <!-- Резервная копия профиля (вынесено из ProfileBackupScreen) -->
-    <string name="backup_restart_replace">The app will close; reopen it and the profile will be replaced with this one. Current chats on this phone will be lost.</string>
+    <string name="backup_restart_replace">Full replacement: the app will close, and after reopening the profile and history will be exactly as they were on the backup date. The previous database is not deleted; it is set aside in the app’s private folder.</string>
     <string name="backup_restart_new">The app will close; reopen it and you will sign in to the restored profile.</string>
+    <string name="backup_restart_merge">The app will close; reopen it and it will fill in the profile from the backup. Current chats stay, and whatever is missing is added from the backup.</string>
+    <string name="backup_restore_merge_button">Fill in and close</string>
+    <string name="backup_restore_replace_button">Replace the whole profile</string>
+    <string name="backup_replace_all">Replace everything with the backup</string>
+    <string name="backup_replace_all_hint">Full replacement is only needed when the data on this phone is damaged or the backup was taken from another profile. It makes history and settings exactly as they were on the backup date; the previous database is set aside in the app’s private folder.</string>
+    <string name="backup_staged_other_profile">This backup was taken from another profile: it cannot fill in this one. Only full replacement is available.</string>
     <string name="backup_restarting">Closing… Open APU again.</string>
     <string name="backup_pw_more">%1$d more character(s)</string>
     <string name="backup_pw_min">At least %1$d characters</string>
@@ -1272,6 +1293,11 @@
     <string name="upd_whats_new">What’s new:</string>
     <string name="upd_downloading">Downloading the update…</string>
     <string name="upd_later">Later</string>
+    <string name="upd_download_unknown_error">unknown reason</string>
+    <string name="upd_patch_installed">The patch is built — the installer is opening.</string>
+    <string name="upd_download_started">Download started. Please wait for it to finish — no second tap is needed. The finished file will appear under “Settings → Updates”.</string>
+    <string name="upd_download_already_running">The update is already downloading — a second file is not needed. The finished one will appear under “Settings → Updates”.</string>
+    <string name="upd_download_wait_tpl">The download has already started. You can tap again in %1$d s.</string>
     <string name="upd_downloading_short">Downloading…</string>
     <string name="ucd_title">Name is taken</string>
     <string name="ucd_rules">Latin letters, digits and underscores.</string>
@@ -1837,7 +1863,7 @@ The file is not on this phone</string>
     <!-- «Phone is mute»: this device key cannot be read, so private content is
          never sent in cleartext and everything waits. -->
     <string name="identity_mute_title_unreadable">Private messages are not leaving or arriving</string>
-    <string name="identity_mute_body_unreadable">This phone’s key cannot be read. The app never sends anything private in plain text, so messages, stories and the profile mirror are waiting. Open “Backup” and bring back only the keys from a backup of this same profile — your chats stay as they are. A full restore would bring the keys back, but it would roll the conversation history back to the backup date.</string>
+    <string name="identity_mute_body_unreadable">This phone’s key cannot be read. The app never sends anything private in plain text, so messages, stories and the profile mirror are waiting. Open “Backup” and bring back only the keys from a backup of this same profile — your chats stay as they are. A full restore is safe too: it fills in what is missing from the backup instead of replacing your history.</string>
     <string name="identity_mute_title_timeout">The key did not open at startup</string>
     <string name="identity_mute_body_timeout">Private messages and stories are waiting: this phone key did not open in time when the app started. Restart the app; if it happens again, restore the profile from a backup file.</string>
     <string name="identity_mute_title_exchange">The file-exchange key cannot be read</string>
@@ -1945,9 +1971,9 @@ The file is not on this phone</string>
     <string name="heart_game_refresh_none_online">Nobody appears to be online right now. Your score will go out with the regular sync when peers show up.</string>
     <string name="heart_game_refresh_not_ready">The network is not ready yet. Wait a few seconds and tap Refresh again.</string>
     <string name="heart_game_you">You</string>
-    <string name="heart_game_unknown_player">Player</string>
     <string name="heart_game_close">Close</string>
     <string name="heart_game_board_hint">Top 100 known network results, not just contacts. Updates may be delayed and incomplete. Signatures identify the reporter but cannot prevent modified clients from claiming scores.</string>
+    <string name="heart_game_board_merged">One name, one row: results from several devices under the same name are collected together, the best one is shown.</string>
     <string name="heart_game_empty">No results from other players received yet.</string>
     <string name="heart_game_you_place">You — place %1$d</string>
     <string name="heart_game_place">Place %1$d</string>

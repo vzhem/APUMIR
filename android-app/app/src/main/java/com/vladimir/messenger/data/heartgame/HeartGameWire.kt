@@ -74,5 +74,128 @@ object HeartGameWire {
     } catch (_: Exception) { null }
 
     fun newer(old: Entry?, next: Entry) = old == null || (old.keyId == next.keyId && next.updated > old.updated && next.score >= old.score)
+
+    /**
+     * Место в таблице лидеров, начиная с 1.
+     *
+     * [own] может быть null: подписанная привязка личности есть не на каждом
+     * телефоне (её установка идёт вместе с ядром), а место в таблице от подписи
+     * не зависит. Без своей строки место считается по счёту - [ownScore]
+     * сравнивается с уже известными результатами. При равенстве счёта место не
+     * приписывается: считаются только строго большие результаты, поэтому число
+     * получается не хуже настоящего, но и не выдуманным.
+     */
+    fun placeOf(rows: Collection<Entry>, ownScore: Long, own: Entry?): Int {
+        if (own != null) {
+            val table = table(rows.filter { it.keyId != own.keyId } + own, own.keyId)
+            val index = table.indexOfFirst { it.entry.keyId == own.keyId }
+            if (index >= 0) return index + 1
+        }
+        return 1 + table(rows, null).count { it.entry.score > ownScore }
+    }
     fun ranked(entries: Collection<Entry>) = entries.sortedWith(compareByDescending<Entry> { it.score }.thenBy { it.keyId })
+
+    /** Строка таблицы: результат и сколько записей склеено под этим именем. */
+    data class Row(val entry: Entry, val merged: Int)
+
+    /**
+     * Таблица лидеров: одна строка на участника.
+     *
+     * У одного человека в сети бывает несколько ключей подписи. Ключ привязан к
+     * устройству (Android Keystore), поэтому телефон и компьютер дают разные
+     * keyId, а после переустановки появляется ещё один. Подписи при этом
+     * настоящие, и по ним не видно, что это один и тот же человек: общего у
+     * записей только имя, выбранное самим человеком. Без склейки человек
+     * занимал в таблице две строки подряд - владелец, скриншот 28.10.2026:
+     * «В таблице один и тот же участник задвоился».
+     *
+     * Склейка идёт в два шага. Сначала по узлу (`nodeId`): у одного человека с
+     * телефоном и компьютером узел общий, а ключи подписи разные - это точное
+     * совпадение, и именно оно убирает вторую строку «я со старого ключа».
+     * Затем по имени (без учёта регистра и крайних пробелов): новый узел при
+     * переустановке с прежним именем. Остаётся лучший результат. Своя строка
+     * всегда остаётся своей, даже если у другого ключа с тем же именем счёт
+     * выше: иначе в таблице было бы одно число, а в шапке другое.
+     *
+     * Пустое имя ничего не склеивает между разными узлами: под ним стоят
+     * разные люди, которые просто не назвались.
+     *
+     * Чего эта функция НЕ делает: не подтверждает, что имя принадлежит
+     * одному человеку. Имя выбирает сам клиент, поэтому два разных человека
+     * с одинаковым именем попадут в одну строку, а чужое имя можно взять
+     * себе. Это плата за таблицу, собранную из самостоятельно подписанных
+     * отчётов, а не из серверной базы; текст подсказки в окне говорит об
+     * этом прямо.
+     *
+     * @param ownKey keyId своей строки, если подпись личности доступна.
+     */
+    fun table(entries: Collection<Entry>, ownKey: String?): List<Row> {
+        // Шаг 1: одна личность - один узел. У человека с двумя устройствами
+        // (телефон и компьютер) узел общий, а ключи подписи разные: ключ
+        // привязан к устройству. Поэтому склейка по узлу - точная, её и делаем
+        // первой.
+        val byNode = LinkedHashMap<String, MutableList<Entry>>()
+        for (entry in entries) {
+            byNode.getOrPut("node:" + entry.nodeId.trim().lowercase(java.util.Locale.ROOT)) {
+                mutableListOf()
+            }.add(entry)
+        }
+        // Шаг 2: разные узлы, но одно имя - тот же человек после переустановки
+        // или после смены личности (новый узел, прежнее имя). Пустое имя ничего
+        // не склеивает: под ним стоят разные люди.
+        val groups = LinkedHashMap<String, MutableList<Entry>>()
+        for (group in byNode.values) {
+            groups.getOrPut(mergeKey(group)) { mutableListOf() }.addAll(group)
+        }
+        return groups.values
+            .map { group ->
+                // Лучший результат группы: больший счёт, при равенстве - более
+                // свежий, при полном равенстве - меньший keyId (чтобы порядок не
+                // «прыгал» между телефонами). Своя строка всегда своя.
+                val best = group.firstOrNull { it.keyId == ownKey }
+                    ?: group.maxWith(compareBy<Entry> { it.score }.thenBy { it.updated }.thenByDescending { it.keyId })
+                Row(best, group.size)
+            }
+            .sortedWith(compareByDescending<Row> { it.entry.score }.thenBy { it.entry.keyId })
+    }
+
+    /**
+     * Имя участника для показа: подписанное имя, иначе имя из адресной книги,
+     * иначе короткое обозначение узла.
+     *
+     * Почему третья ступень обязательна. У записи с результатом всегда есть
+     * узел и подпись; имени может не быть, если человек его не задавал (старая
+     * установка, сброс профиля). Решение владельца 29.10.2026: «если есть
+     * количество сердечек, то и ник должен быть с этими данными. Без имени
+     * вообще такого не должно быть». Поэтому вместо пустоты показывается
+     * короткое обозначение узла («pk_1a2b3c…9f0e») - это настоящий
+     * идентификатор участника, а не выдуманный ник, и по нему видно, что
+     * человек просто не назвался.
+     *
+     * @param contactName имя из адресной книги этого телефона, если известно.
+     */
+    fun displayName(entry: Entry, contactName: String?): String {
+        val signed = entry.name.trim()
+        if (signed.isNotEmpty()) return signed
+        val known = contactName?.trim().orEmpty()
+        if (known.isNotEmpty()) return known
+        return shortNodeName(entry.nodeId, entry.keyId)
+    }
+
+    /** Короткое обозначение узла: «pk_1a2b3c…9f0e». Пустым не бывает. */
+    fun shortNodeName(nodeId: String, keyId: String = ""): String {
+        val body = nodeId.trim().removePrefix("pk_").ifEmpty { keyId.trim() }
+        if (body.isEmpty()) return "pk_"
+        return if (body.length <= 12) "pk_" + body else "pk_" + body.take(6) + "…" + body.takeLast(4)
+    }
+
+    /** Ключ склейки: имя без регистра; без имени - свой узел, ни с кем не вместе. */
+    private fun mergeKey(group: List<Entry>): String {
+        val name = group.firstNotNullOfOrNull { entry ->
+            entry.name.trim().lowercase(java.util.Locale.ROOT).takeIf { it.isNotEmpty() }
+        }
+        if (name != null) return "name:" + name
+        val node = group.first().nodeId.trim().lowercase(java.util.Locale.ROOT)
+        return if (node.isEmpty()) "key:" + group.first().keyId else "node:" + node
+    }
 }

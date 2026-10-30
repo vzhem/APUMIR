@@ -92,7 +92,8 @@ object ContactCardSender {
 
         val text = try {
             val link = ContactShareLink.build(sharedNodeId, sharedName, sharedUsername)
-            "Контакт «$sharedName» в APU. Открой ссылку, чтобы добавить:\n$link"
+            // Владелец 2026-10-30: без инструкций — заголовок и ссылка строкой.
+            "Контакт «$sharedName» в APU.\n$link"
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {

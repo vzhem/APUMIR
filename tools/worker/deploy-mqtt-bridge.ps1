@@ -26,7 +26,7 @@
 #   powershell -ExecutionPolicy Bypass -File .\deploy-mqtt-bridge.ps1 -Ref arena/62ecd7b4-apumir
 # ============================================================================
 
-param([string]$Token = "", [string]$Ref = "v11.74.186")
+param([string]$Token = "", [string]$Ref = "v11.74.469")
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -36,8 +36,9 @@ $Script    = "p2p-relay"
 # 2026-10-06: воркер с ИСПРАВЛЕННЫМ разбором MQTT-потока (length пакета -
 # varint; из-за прежнего "1 + len" мост молча не отвечал CONNACK, и телефоны
 # уходили на публичные брокеры). Плюс /mqtt/health со счётчиками.
-# $Ref по умолчанию - тег выпуска v11.74.186 (в нём эта правка воркера). Если
-# правите воркер в ветке - передайте -Ref <ветка>, иначе скачается релизный файл.
+# $Ref по умолчанию - последний выпуск с правками воркера (v11.74.469: адрес APK
+# от текущего домена, версия не застревает из-за лимита GitHub). Если правите
+# воркер в ветке - передайте -Ref <ветка>, иначе скачается релизный файл.
 $WorkerUrl = "https://raw.githubusercontent.com/vzhem/APUMIR/$Ref/tools/worker/p2p_relay_worker.js"
 
 Write-Host "=== 1/5 Token ===" -ForegroundColor Cyan
@@ -45,6 +46,16 @@ if ([string]::IsNullOrWhiteSpace($Token)) {
     $Token = Read-Host "Paste your Cloudflare API token (Edit Cloudflare Workers template) and press Enter"
 }
 $Token = $Token.Trim()
+# Пустой ввод (просто Enter) раньше уходил проверяться на сервер и возвращал
+# невнятное "(400) Недопустимый запрос" - владелец 2026-10-30 искал причину.
+# Говорим прямо, что не так, и напоминаем путь без токена.
+if ([string]::IsNullOrWhiteSpace($Token)) {
+    Write-Host "ERROR: token is empty." -ForegroundColor Red
+    Write-Host "  1) Cloudflare -> My Profile -> API Tokens -> Create Token -> template 'Edit Cloudflare Workers';" -ForegroundColor Yellow
+    Write-Host "  2) copy the token, run the script again and paste it at the prompt (paste is invisible - that is normal)." -ForegroundColor Yellow
+    Write-Host "  Or deploy without a token: paste tools/worker/p2p_relay_worker.js into the dashboard (Edit code -> Ctrl+A -> Ctrl+V -> Deploy)." -ForegroundColor Yellow
+    exit 1
+}
 $H = @{ "Authorization" = "Bearer $Token" }
 
 Write-Host "=== 2/5 Verifying token ===" -ForegroundColor Cyan
@@ -131,6 +142,30 @@ if (Test-Path "giphy-key.txt") {
     Write-Host "  GIF catalog: GIPHY_KEY loaded from giphy-key.txt" -ForegroundColor Green
   }
 }
+
+# Ключи каталога GIF могли быть заданы раньше и лежать ТОЛЬКО на сервере
+# (файлов рядом со скриптом нет - например, скрипт запущен из другой папки).
+# Деплой заменяет список привязок целиком, поэтому без этой проверки каталог
+# GIF молча ломался бы: "не настроен" вместо поиска. Читаем текущие привязки
+# и переносим недостающие как есть.
+if (-not $tenorBindings -or -not $giphyBindings) {
+    try {
+        $live = Invoke-RestMethod -Uri "https://api.cloudflare.com/client/v4/accounts/$Account/workers/scripts/$Script/settings" -Headers $H
+        foreach ($b in $live.result.bindings) {
+            if ($b.name -eq "TENOR_KEY" -and -not $tenorBindings -and $b.text) {
+                $tenorBindings = @(@{ type = "plain_text"; name = "TENOR_KEY"; text = $b.text })
+                Write-Host "  GIF catalog: TENOR_KEY kept from the live worker" -ForegroundColor Green
+            }
+            if ($b.name -eq "GIPHY_KEY" -and -not $giphyBindings -and $b.text) {
+                $giphyBindings = @(@{ type = "plain_text"; name = "GIPHY_KEY"; text = $b.text })
+                Write-Host "  GIF catalog: GIPHY_KEY kept from the live worker" -ForegroundColor Green
+            }
+        }
+    } catch {
+        Write-Host "  WARNING: could not read live bindings - if the GIF catalog was configured, it may reset (put tenor-key.txt next to this script)." -ForegroundColor Yellow
+    }
+}
+
 if ($lines -lt 700) {
     Write-Host "ERROR: file looks truncated, download failed." -ForegroundColor Red
     exit 1
@@ -185,11 +220,11 @@ if ($resp.success) {
     Write-Host ""
     Write-Host "SUCCESS: deployed. Class MqttBridge and binding MQTT_BRIDGE are live." -ForegroundColor Green
     Write-Host "Test 1 - open this address in the phone browser (no console needed):" -ForegroundColor Green
-    Write-Host "  https://p2p-relay.1985vzhem.workers.dev/mqtt/health"
+    Write-Host "  https://p2p-relay.apuchat.workers.dev/mqtt/health"
     Write-Host '  Expected: {"ok":true,"broker":"apu-mqtt-bridge","bridge_version":2,...}'
     Write-Host "  bridge_version=2 means the fixed bridge is deployed; 501 / ok:false means the MQTT_BRIDGE binding is missing."
     Write-Host "Test 2 - browser console (F12) on any page, paste and press Enter:"
-    Write-Host '  const w = new WebSocket("wss://p2p-relay.1985vzhem.workers.dev/mqtt","mqtt"); w.onopen=()=>console.log("OPEN",w.protocol); w.onclose=e=>console.log("CLOSE",e.code,e.reason);'
+    Write-Host '  const w = new WebSocket("wss://p2p-relay.apuchat.workers.dev/mqtt","mqtt"); w.onopen=()=>console.log("OPEN",w.protocol); w.onclose=e=>console.log("CLOSE",e.code,e.reason);'
     Write-Host "Expected in 1-2 seconds: OPEN mqtt"
 } else {
     Write-Host "DEPLOY ERROR (send a screenshot):" -ForegroundColor Red

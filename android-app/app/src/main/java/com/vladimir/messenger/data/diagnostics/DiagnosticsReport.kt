@@ -1478,7 +1478,6 @@ object DiagnosticsReport {
     // ------------------------------------------------------------------
     // Служебное форматирование
     // ------------------------------------------------------------------
-
     private fun marker(level: DiagnosticsLevel): String = when (level) {
         DiagnosticsLevel.OK -> "✔"
         DiagnosticsLevel.INFO -> "•"
@@ -1489,8 +1488,9 @@ object DiagnosticsReport {
     /** Состояние сети ядра по-русски; незнакомое значение остаётся как есть. */
     private fun networkText(status: String): String = when (status) {
         "connected" -> "на связи"
+        "relayed" -> "на связи через ретранслятор"  // через брокер: путь рабочий
         "connecting" -> "подключается"
-        "disconnected" -> "нет связи"
+        "offline" -> "нет связи"
         else -> status
     }
 

@@ -39,6 +39,9 @@ object IdentitySigningKeyStore {
     private const val PREFS_NAME = "apu_identity_signing"
     private const val PREF_WRAPPED_SEED = "wrapped_seed_v1"
     private const val PREF_IDENTITY_BINDING = "identity_binding_v1"
+
+    /** Домен программного ключа-обёртки: фолбэк, когда Keystore не даёт ключ. */
+    private const val SOFTWARE_DOMAIN = "identity-signing"
     private const val GCM_TAG_BITS = 128
     private const val MAX_ENCODED_ENVELOPE_CHARS = 128
     private const val MAX_ENCODED_BINDING_CHARS = 512
@@ -181,7 +184,7 @@ object IdentitySigningKeyStore {
         // она может быть непригодна и на шифрование. Сносим старую запись и
         // создаём свежую. Возврат ключей не должен зависеть от той поломки, из-за
         // которой он понадобился.
-        val encoded = wrap(seed, freshWrapKey())
+        val encoded = wrap(seed, resolveWrapKey(context.applicationContext))
         prefs.edit().putString(PREF_WRAPPED_SEED, encoded).commit()
     } catch (error: Exception) {
         lastImportError = describe(error)
@@ -204,11 +207,8 @@ object IdentitySigningKeyStore {
             .getString(PREF_WRAPPED_SEED, null)
         if (encoded == null) { lastModeReason = KeyModeReason.ABSENT; return Mode.ABSENT }
         val seed = try {
-            lastModeReason = KeyModeReason.LOOKUP_KEY
-            val wrapKey = existingWrapKey()
-            if (wrapKey == null) { lastModeReason = KeyModeReason.MISSING_WRAP_KEY; return Mode.UNAVAILABLE }
             lastModeReason = KeyModeReason.UNWRAP
-            unwrap(encoded, wrapKey)
+            unwrapWithCandidates(app, encoded)
         } catch (_: Exception) {
             lastModeReason = if (lastModeReason == KeyModeReason.LOOKUP_KEY) KeyModeReason.KEYSTORE_ERROR else KeyModeReason.UNWRAP_FAILED
             return Mode.UNAVAILABLE
@@ -283,28 +283,16 @@ object IdentitySigningKeyStore {
     }
 
     private fun loadOrCreate(context: Context): ByteArray {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val app = context.applicationContext
+        val prefs = app.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val existing = prefs.getString(PREF_WRAPPED_SEED, null)
-        if (existing != null) {
-            val wrapKey = existingWrapKey()
-                ?: throw SigningSeedUnavailableException(
-                    "wrapped identity signing seed exists without its device Keystore key"
-                )
-            return try {
-                unwrap(existing, wrapKey)
-            } catch (error: Exception) {
-                throw SigningSeedUnavailableException(
-                    "cannot unwrap existing identity signing seed",
-                    error,
-                )
-            }
-        }
+        if (existing != null) return unwrapWithCandidates(app, existing)
 
         val seed = ByteArray(IdentitySigningSeedEnvelope.SEED_BYTES).also {
             SecureRandom().nextBytes(it)
         }
         try {
-            val encoded = wrap(seed, ensureWrapKey())
+            val encoded = wrap(seed, resolveWrapKey(app))
             val persisted = prefs.edit().putString(PREF_WRAPPED_SEED, encoded).commit()
             if (!persisted) {
                 throw SigningSeedUnavailableException("cannot persist wrapped identity signing seed")
@@ -371,20 +359,65 @@ object IdentitySigningKeyStore {
     }
 
     /**
-     * Свежий ключ-обёртка вместо прежнего.
+     * Развернуть семя любым годным ключом-обёрткой.
      *
-     * Запись в Keystore может остаться, но быть непригодной: старый блоб ею не
-     * открывается. Удаление и создание заново здесь ничего не теряет - этим
-     * ключом завёрнуто только семя подписи, и его мы как раз перезаписываем.
-     * Сбой удаления не отменяет попытку: если запись жива и рабочая, ниже она
-     * просто будет использована.
+     * Сначала ключ Keystore этого телефона, затем программный (фолбэк для
+     * прошивок, где KeyMint отказывает в генерации, см. [SoftwareWrapKey]).
+     * Существующий блоб при этом не перезаписывается: если не подошёл ни один
+     * ключ, это честный отказ, а не молчаливая смена личности.
      */
-    private fun freshWrapKey(): SecretKey {
-        runCatching {
-            KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }.deleteEntry(WRAP_ALIAS)
-        }.onFailure { Log.w(TAG, "wrap key delete failed: " + it.javaClass.simpleName) }
-        return ensureWrapKey()
+    private fun unwrapWithCandidates(context: Context, encoded: String): ByteArray {
+        var last: Exception? = null
+        val keystoreKey = runCatching { existingWrapKey() }.getOrNull()
+        if (keystoreKey != null) {
+            try {
+                return unwrap(encoded, keystoreKey)
+            } catch (error: Exception) {
+                Log.w(TAG, "Keystore wrap key did not fit: " + describe(error))
+                last = error
+            }
+        }
+        val softwareKey = SoftwareWrapKey.existing(context, SOFTWARE_DOMAIN)
+        if (softwareKey != null) {
+            try {
+                return unwrap(encoded, softwareKey)
+            } catch (error: Exception) {
+                Log.w(TAG, "Software wrap key did not fit: " + describe(error))
+                last = error
+            }
+        }
+        throw SigningSeedUnavailableException(
+            if (keystoreKey == null && softwareKey == null) {
+                "wrapped identity signing seed exists without any wrap key"
+            } else {
+                "cannot unwrap existing identity signing seed"
+            },
+            last,
+        )
     }
+
+    /**
+     * Ключ для нового блоба: Keystore, а если он не создаётся или не умеет
+     * шифровать - программный. Без него телефон с поломанным KeyMint молчит
+     * совсем: ключа подписи нет, личные сообщения не отправляются.
+     */
+    private fun resolveWrapKey(context: Context): SecretKey {
+        val keystoreKey = runCatching { ensureWrapKey() }.getOrNull()
+        if (keystoreKey != null && canEncrypt(keystoreKey)) return keystoreKey
+        return SoftwareWrapKey.create(context, SOFTWARE_DOMAIN)
+            ?: throw SigningSeedUnavailableException(
+                "no usable wrap key: neither Keystore nor software",
+            )
+    }
+
+    /** Проверка, что ключом вообще можно зашифровать: Keystore умеет «есть, но не работает». */
+    private fun canEncrypt(key: SecretKey): Boolean = runCatching {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, key)
+        cipher.updateAAD(AAD)
+        cipher.doFinal(ByteArray(8)).fill(0)
+        true
+    }.getOrDefault(false)
 
     private fun ensureWrapKey(): SecretKey {
         existingWrapKey()?.let { return it }

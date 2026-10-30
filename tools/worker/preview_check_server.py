@@ -21,7 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WORKER = os.path.join(HERE, "p2p_relay_worker.js")
-DEFAULT_BASE = "https://p2p-relay.1985vzhem.workers.dev"
+DEFAULT_BASE = "https://p2p-relay.apuchat.workers.dev"
 
 LANDING = """<!doctype html><html lang="ru"><meta charset="utf-8">
 <title>APU — файл воркера</title>

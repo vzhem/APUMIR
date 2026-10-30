@@ -31,7 +31,7 @@ class BotApi @Inject constructor(
 ) {
     companion object {
         private const val TAG = "BotApi"
-        private const val REGISTRY_URL = "https://p2p-relay.1985vzhem.workers.dev"
+        private const val REGISTRY_URL = com.vladimir.messenger.data.link.ServiceHost.BASE
         private const val HTTP_TIMEOUT = 15000
         /** Короткие ссылки ждут человека у кнопки «Поделиться»: ждём меньше. */
         private const val SHORT_LINK_TIMEOUT = 5000

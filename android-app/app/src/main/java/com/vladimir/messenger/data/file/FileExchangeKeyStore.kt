@@ -1,11 +1,12 @@
 package com.vladimir.messenger.data.file
 
-import com.vladimir.messenger.data.diagnostics.KeyModeReason
-
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
+import com.vladimir.messenger.data.diagnostics.KeyModeReason
+import com.vladimir.messenger.data.security.SoftwareWrapKey
 import java.security.KeyStore
 import java.security.SecureRandom
 import javax.crypto.Cipher
@@ -19,11 +20,15 @@ import uniffi.p2p_core.verifyFileExchangeBinding
 
 /** Device-bound static X25519 file-exchange secret and its Ed25519-signed public binding. */
 object FileExchangeKeyStore {
+    private const val TAG = "FileExchangeKeyStore"
     private const val KEYSTORE_PROVIDER = "AndroidKeyStore"
     private const val WRAP_ALIAS = "apu_file_exchange_wrap_v1"
     private const val PREFS = "apu_file_exchange"
     private const val WRAPPED_SECRET = "wrapped_x25519_secret_v1"
     private const val PUBLIC_BINDING = "signed_public_binding_v1"
+
+    /** Домен программного ключа-обёртки: фолбэк, когда Keystore не даёт ключ. */
+    private const val SOFTWARE_DOMAIN = "file-exchange"
     private const val GCM_TAG_BITS = 128
     private const val MAX_ENCODED_SECRET = 128
     private const val MAX_ENCODED_BINDING = 512
@@ -122,7 +127,7 @@ object FileExchangeKeyStore {
         // Своя обёртка, а не прежняя: старая запись Keystore могла остаться
         // непригодной (`unwrap_failed`), и заворачивать в неё новый секрет
         // нельзя - иначе возврат ключей снова упрётся в ту же поломку.
-        val encoded = wrap(secret, freshWrapKey())
+        val encoded = wrap(secret, resolveWrapKey(context.applicationContext))
         check(encoded.length <= MAX_ENCODED_SECRET)
         prefs.edit().putString(WRAPPED_SECRET, encoded).commit()
     } catch (error: Exception) {
@@ -147,11 +152,8 @@ object FileExchangeKeyStore {
         if (wrapped == null && binding == null) { lastModeReason = KeyModeReason.ABSENT; return Mode.ABSENT }
         if (wrapped == null || binding == null) { lastModeReason = KeyModeReason.INCOMPLETE_RECORD; return Mode.UNAVAILABLE }
         return try {
-            lastModeReason = KeyModeReason.LOOKUP_KEY
-            val key = existingWrapKey()
-            if (key == null) { lastModeReason = KeyModeReason.MISSING_WRAP_KEY; return Mode.UNAVAILABLE }
             lastModeReason = KeyModeReason.UNWRAP
-            val secret = loadExisting(app, key)
+            val secret = loadExistingWithCandidates(app)
             secret.fill(0)
             lastModeReason = KeyModeReason.CHECK_BINDING
             val decoded = Base64.decode(binding, Base64.NO_WRAP)
@@ -172,11 +174,11 @@ object FileExchangeKeyStore {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val existing = prefs.getString(WRAPPED_SECRET, null)
         val secret = if (existing != null) {
-            loadExisting(context)
+            loadExistingWithCandidates(context)
         } else {
             ByteArray(FileTransferKeyEnvelope.KEY_BYTES).also(SecureRandom()::nextBytes).also { key ->
                 try {
-                    val encoded = wrap(key, ensureWrapKey())
+                    val encoded = wrap(key, resolveWrapKey(context))
                     check(encoded.length <= MAX_ENCODED_SECRET)
                     check(prefs.edit().putString(WRAPPED_SECRET, encoded).commit())
                 } catch (error: Exception) {
@@ -188,11 +190,63 @@ object FileExchangeKeyStore {
         return try { operation(secret) } finally { secret.fill(0) }
     }
 
+    /**
+     * Развернуть секрет любым годным ключом-обёрткой: сначала Keystore этого
+     * телефона, затем программный (фолбэк для прошивок, где KeyMint отказывает
+     * в генерации, см. [SoftwareWrapKey]). Существующий блоб не перезаписывается.
+     */
+    private fun loadExistingWithCandidates(context: Context): ByteArray {
+        var last: Exception? = null
+        val keystoreKey = runCatching { existingWrapKey() }.getOrNull()
+        if (keystoreKey != null) {
+            try {
+                return loadExisting(context, keystoreKey)
+            } catch (error: Exception) {
+                Log.w(TAG, "Keystore wrap key did not fit: " + describe(error))
+                last = error
+            }
+        }
+        val softwareKey = SoftwareWrapKey.existing(context, SOFTWARE_DOMAIN)
+        if (softwareKey != null) {
+            try {
+                return loadExisting(context, softwareKey)
+            } catch (error: Exception) {
+                Log.w(TAG, "Software wrap key did not fit: " + describe(error))
+                last = error
+            }
+        }
+        throw IllegalStateException("file exchange secret cannot be unwrapped", last)
+    }
+
+    /**
+     * Ключ для нового блоба: Keystore, а если он не создаётся или не умеет
+     * шифровать - программный. Без него телефон молчит: ключа обмена нет,
+     * личные конверты и файлы не открываются.
+     */
+    private fun resolveWrapKey(context: Context): SecretKey {
+        val keystoreKey = runCatching { ensureWrapKey() }.getOrNull()
+        if (keystoreKey != null && canEncrypt(keystoreKey)) return keystoreKey
+        return SoftwareWrapKey.create(context, SOFTWARE_DOMAIN)
+            ?: throw IllegalStateException("no usable wrap key: neither Keystore nor software")
+    }
+
+    /** Проверка, что ключом вообще можно зашифровать: Keystore умеет «есть, но не работает». */
+    private fun canEncrypt(key: SecretKey): Boolean = runCatching {
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, key)
+        cipher.updateAAD(AAD)
+        cipher.doFinal(ByteArray(8)).fill(0)
+        true
+    }.getOrDefault(false)
+
     private fun loadExisting(context: Context, knownWrapKey: SecretKey? = null): ByteArray {
         val encoded = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(WRAPPED_SECRET, null) ?: error("File exchange secret absent")
         require(encoded.length <= MAX_ENCODED_SECRET)
-        val wrapKey = knownWrapKey ?: existingWrapKey() ?: error("File exchange Keystore alias absent")
+        val wrapKey = knownWrapKey
+            ?: existingWrapKey()
+            ?: SoftwareWrapKey.existing(context, SOFTWARE_DOMAIN)
+            ?: error("File exchange wrap key absent")
         val envelope = FileTransferKeyEnvelope.decode(Base64.decode(encoded, Base64.NO_WRAP))
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, wrapKey, GCMParameterSpec(GCM_TAG_BITS, envelope.iv))
@@ -220,14 +274,6 @@ object FileExchangeKeyStore {
         val cause = error.cause?.let { " <- " + it.javaClass.simpleName }
         val message = error.message?.replace('\n', ' ')?.take(160)
         return error.javaClass.simpleName + (if (message != null) ": " + message else "") + (cause ?: "")
-    }
-
-    /** Свежий ключ-обёртка вместо прежнего: этим ключом завёрнут только этот секрет. */
-    private fun freshWrapKey(): SecretKey {
-        runCatching {
-            KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }.deleteEntry(WRAP_ALIAS)
-        }
-        return ensureWrapKey()
     }
 
     private fun ensureWrapKey(): SecretKey {

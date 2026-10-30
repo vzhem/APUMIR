@@ -1294,6 +1294,20 @@ class GroupChatViewModel @Inject constructor(
         _feedJump.value = null
     }
 
+    /** Что человек видит: открытую тему и передний ли это план (см. TopicReadingPolicy). */
+    private val feedVisibility = TopicFeedVisibility()
+
+    /** Экран сообщает, что видно человеку: открытую тему (`null` — список тем). */
+    fun setFeedVisible(topicId: String?, resumed: Boolean = true) {
+        if (feedVisibility.update(topicId, resumed) && topicId != null) {
+            // Перезапускаем ленту: захват «первого непрочитанного» обязан
+            // пройти ДО сброса счётчика, иначе лента откроется на последнем
+            // сообщении. Заодно снимается непрочитанное, если человек вернулся
+            // в уже открытую тему (например, из фона) и новых событий нет.
+            observeMessages(topicId)
+        }
+    }
+
     private fun observeMessages(topicId: String) {
         messagesJob?.cancel()
         followComments(topicId)
@@ -1301,34 +1315,19 @@ class GroupChatViewModel @Inject constructor(
         jumpCaptured = false
         messagesJob = viewModelScope.launch {
             groupRepository.observeTopicMessages(groupId, topicId).collect { all ->
-                // Куски фотографий и длинного текста - служебные строки, а не
-                // сообщения: в ленте их не показываем (галерея собирает фото
-                // в ленте канала, а куски текста подклеиваются к своему
-                // сообщению здесь же).
-                val inline = com.vladimir.messenger.util.InlineImage
-                val parts = all.filter { inline.isPart(it.content) }
-                val list = all.filter { !inline.isPart(it.content) }.map { m ->
-                    val expanded = if (inline.textTail(m.content) == null) {
-                        m
-                    } else {
-                        val own = parts.filter { it.senderId == m.senderId }.map { it.content }
-                        m.copy(content = inline.expandContent(m.id, m.content, own))
-                    }
-                    // В обсуждении показываем общие GroupWire-закрепы;
-                    // личный закреп публикации канала остаётся только в ленте.
-                    expanded.copy(isPinned = expanded.isPinned && expanded.pinnedBy != null)
-                }
+                val list = TopicFeedMessages.visible(all)
                 _uiState.update { it.copy(messages = list, moreComments = moreComments(topicId, list.size)) }
+                // Только открытая лента на переднем плане считается чтением:
+                // из списка тем тревога SOS раньше гасла незамеченной.
+                if (!feedVisibility.canMarkRead(topicId)) return@collect
                 // Раунд 144: первый выпуск ленты - захватить непрочитанные
                 // ДО их сброса и указать ленте первое непрочитанное.
                 if (jumpTopicId == topicId && !jumpCaptured) {
                     jumpCaptured = true
                     val unread = runCatching { groupRepository.peekTopicUnread(topicId) }.getOrDefault(0)
-                    val index = if (unread in 1..list.size) list.size - unread else list.size - 1
-                    _feedJump.value = FeedJump(topicId, index, unread)
+                    _feedJump.value = FeedJump(topicId, TopicFeedMessages.unreadIndex(unread, list.size), unread)
                 }
-                // Экран открыт - значит тема прочитана. Вызываем на каждом
-                // обновлении, чтобы счётчик гас и на новых сообщениях.
+                // Экран открыт - значит тема прочитана (и на новых сообщениях).
                 groupRepository.markRead(groupId, topicId)
             }
         }

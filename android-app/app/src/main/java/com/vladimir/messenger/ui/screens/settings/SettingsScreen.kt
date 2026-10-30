@@ -969,10 +969,8 @@ private fun SettingsTabContent(
     val muteRevision by viewModel.notificationMuteRevision.collectAsStateWithLifecycle()
     val notificationMuteNowMs = remember(muteRevision) { System.currentTimeMillis() }
     val mqttClipboard = LocalClipboardManager.current
-    // Бегунок справа: видно, где мы в длинном списке.
-    val settingsScrollState = rememberLazyListState()
-    // Смена раздела - всегда с начала списка.
-    LaunchedEffect(section) { settingsScrollState.scrollToItem(0) }
+    // Бегунок справа; каждый раздел помнит свою позицию (см. SettingsScrollMemory).
+    val settingsScrollState = rememberSettingsScrollState(section?.name ?: SettingsScrollMemory.ROOT)
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = settingsScrollState,
@@ -1384,12 +1382,12 @@ private fun SettingsTabContent(
                 }
             }
 
-            // ----------------------------------------------------------------
-            // Пауза новых сообщений: приложение целиком или нужный раздел.
-            // ----------------------------------------------------------------
             }
             if (section == SettingsSection.Notifications) {
             item { SettingsSectionTitle(stringResource(R.string.section_notifications)) }
+            // «Как в Telegram»: что мешает письму разбудить телефон (файл рядом).
+            item { DeliveryAssuranceCard() }
+            // Пауза новых сообщений: приложение целиком или нужный раздел.
             item {
                 SettingsCard {
                     val muteScopes = listOf(
@@ -2837,7 +2835,7 @@ private fun ApkVersionDialog(
 @Composable
 private fun StatusDot(status: com.vladimir.messenger.data.repository.NetworkStatus) {
     val color = when (status) {
-        com.vladimir.messenger.data.repository.NetworkStatus.Connected    -> StatusOnline
+        com.vladimir.messenger.data.repository.NetworkStatus.Connected, com.vladimir.messenger.data.repository.NetworkStatus.Relayed -> StatusOnline
         com.vladimir.messenger.data.repository.NetworkStatus.Connecting   -> StatusConnecting
         com.vladimir.messenger.data.repository.NetworkStatus.Degraded     -> StatusDegraded
         com.vladimir.messenger.data.repository.NetworkStatus.Disconnected -> StatusOffline
@@ -2849,11 +2847,11 @@ private fun StatusDot(status: com.vladimir.messenger.data.repository.NetworkStat
     ) {}
 }
 
-// Расширение для отображения статуса
 @Composable
 private fun com.vladimir.messenger.data.repository.NetworkStatus.displayName(): String = stringResource(
     when (this) {
         com.vladimir.messenger.data.repository.NetworkStatus.Connected    -> R.string.net_status_connected
+        com.vladimir.messenger.data.repository.NetworkStatus.Relayed      -> R.string.nsb_relay
         com.vladimir.messenger.data.repository.NetworkStatus.Connecting   -> R.string.nsb_connecting
         com.vladimir.messenger.data.repository.NetworkStatus.Degraded     -> R.string.nsb_relay
         com.vladimir.messenger.data.repository.NetworkStatus.Disconnected -> R.string.nsb_disconnected

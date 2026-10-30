@@ -127,7 +127,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https"
-                      android:host="p2p-relay.1985vzhem.workers.dev"
+                      android:host="p2p-relay.apuchat.workers.dev"
                       android:pathPrefix="/i" />
                 <!-- Короткая ссылка /s/<код>: путь нарочно другой, чем /i,
                      чтобы старые версии APU (они знают только /i) отдавали её
@@ -225,16 +225,24 @@
             </intent-filter>
         </receiver>
 
-        <!-- Раунд 141: аварийный каркас уведомлений - системный будильник
-             раз в 5 минут поднимает сервис, если его убили; после
-             перезагрузки телефона стартует по BOOT_COMPLETED. Действие
-             BOOT_COMPLETED - защищённое, слать его может только система. -->
+        <!-- Каркас доставки «как в Telegram»: будильник поднимает службу, если
+             её убили, а приёмник возвращает цепочку после перезагрузки и
+             обновления приложения. exported=true обязателен: системные
+             широковещательные сообщения приходят снаружи приложения; сам
+             приёмник сверяет действие с allowlist (EmergencyKeepAliveReceiver.isOwnAction)
+             и больше ничего не делает, поэтому чужой вызов безвреден.
+             LOCKED_BOOT_COMPLETED намеренно не слушаем: до первой
+             разблокировки телефон закрывает личность и настройки, и службе
+             нечего расшифровывать — доставка начинается с BOOT_COMPLETED. -->
         <receiver
             android:name=".service.EmergencyKeepAliveReceiver"
             android:enabled="true"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <!-- После обновления приложения будильники сбрасываются: без
+                     этого действия доставка молчала бы до первого открытия. -->
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 

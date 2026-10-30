@@ -463,7 +463,9 @@ class SettingsViewModel @Inject constructor(
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                toastIf(context.getString(R.string.toast_download_failed, e.message))
+                // «Уже качается» - не поломка: у замка свой текст, см.
+                // UpdateDownloadMessages.
+                toastIf(com.vladimir.messenger.ui.update.UpdateDownloadMessages.forError(context, e))
             } finally {
                 _updatesChecking.value = false
             }
@@ -662,6 +664,7 @@ class SettingsViewModel @Inject constructor(
             val statusStr = core.third
             val networkStatus = when (statusStr.lowercase()) {
                 "connected"    -> NetworkStatus.Connected
+                "relayed"      -> NetworkStatus.Relayed
                 "connecting"   -> NetworkStatus.Connecting
                 "degraded"     -> NetworkStatus.Degraded
                 else           -> NetworkStatus.Disconnected

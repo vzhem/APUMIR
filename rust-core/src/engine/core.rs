@@ -2969,9 +2969,34 @@ impl P2PCore {
                         session_generation,
                         session_start_attempt
                     );
+                    // Честное состояние связи для интерфейса. До этой правки
+                    // «подключено» ставил только прямой подписанный сосед или
+                    // чужой presence - и телефон, который прекрасно принимал
+                    // письма через relay, сутками показывал «Подключение…»
+                    // (жалоба владельца 2026-10-28). Сессия брокера с ConnAck -
+                    // это рабочая связь; когда появится прямой сосед, статус
+                    // поднимется до Connected сам.
+                    // Прямой сосед - по-прежнему лучший из известных путей:
+                    // его статус не понижаем, пока он держится.
+                    if network.status_str() != "connected" {
+                        network.set_status(NetworkStatus::Relayed);
+                        events.emit(CoreEvent::NetworkStatusChanged {
+                            status: "relayed".into(),
+                        });
+                    }
                     break transport;
                 }
                 Err(error) => {
+                    // Сессия не поднялась: «связи нет» - честнее, чем оставить
+                    // на экране «через ретранслятор» от прежней сессии.
+                    if network.status_str() != "connecting"
+                        && network.status_str() != "connected"
+                    {
+                        network.set_status(NetworkStatus::Connecting);
+                        events.emit(CoreEvent::NetworkStatusChanged {
+                            status: "connecting".into(),
+                        });
+                    }
                     tracing::warn!(
                         "MQTT SESSION START FAILED: generation={} attempt={} error={}; retrying_in={}s",
                         session_generation,
@@ -3243,7 +3268,14 @@ impl P2PCore {
                 }
             }
 
-            if last_own_reoffer_at.elapsed() >= std::time::Duration::from_secs(60) {
+            // Владелец 2026-10-29: раньше пере-предложение шло раз в минуту и
+            // только для сообщений, ещё НИ РАЗУ не опубликованных в этой сессии.
+            // Отсюда «отправил, а у друга нет»: публикация случилась, пока
+            // получатель был офлайн без постоянной сессии, и повторить её было
+            // некому. Теперь своё недоставленное (оно лежит в очереди до
+            // получения квитанции) предлагается снова каждые полминуты —
+            // так же настойчиво, как рой пересылает смену аватарки.
+            if last_own_reoffer_at.elapsed() >= std::time::Duration::from_secs(30) {
                 last_own_reoffer_at = std::time::Instant::now();
                 if let Some(q) = relay_queue.as_ref() {
                     let (owned, next) = Self::pending_own_fallback(
@@ -3252,7 +3284,10 @@ impl P2PCore {
                     own_reoffer_cursor = next;
                     for (message_id, recipient, envelope) in owned {
                         if !policy.transport_fallback_allowed(crate::storage::models::now_ms()) { break; }
-                        if published_own_in_generation.contains(&message_id) || !q.contains(&message_id) { continue; }
+                        // Без проверки `published_own_in_generation`: «уже
+                        // публиковали» не значит «дошло». Живёт в очереди -
+                        // предлагаем снова, пока не придёт квитанция.
+                        if !q.contains(&message_id) { continue; }
                         if transport.send_mesh_relay(&recipient, &envelope).await.is_ok() {
                             if published_own_in_generation.len() >= 4_096 { published_own_in_generation.clear(); }
                             published_own_in_generation.insert(message_id);
@@ -4964,10 +4999,17 @@ impl P2PCore {
         self.swarm_first.reset(crate::storage::models::now_ms());
         self.peer_exchange.reset_session();
         *self.public_addr.lock().unwrap() = None;
-        self.network.set_status(NetworkStatus::Connecting);
-        self.events.emit(CoreEvent::NetworkStatusChanged {
-            status: "connecting".into(),
-        });
+        // Не понижаем рабочую связь до «подключаемся»: сеть может «появиться»
+        // повторно (переключение Wi-Fi/мобильной), пока сессия брокера или
+        // прямой сосед живы. Раньше здесь статус ставился безусловно, и после
+        // такого события телефон до следующего переподключения показывал
+        // бесконечное «Подключение…», хотя письма ходили.
+        if !self.network.status().is_online() {
+            self.network.set_status(NetworkStatus::Connecting);
+            self.events.emit(CoreEvent::NetworkStatusChanged {
+                status: "connecting".into(),
+            });
+        }
     }
 
     pub fn on_network_lost(&self) {
@@ -5485,6 +5527,13 @@ impl P2PCore {
             text.as_bytes(),
         );
 
+        // Владелец 2026-10-29: повтор уже удержанного сообщения был пустой
+        // операцией (duplicate -> relay_inserted=false -> ни брокеру, ни соседям
+        // ничего не предлагалось). Автоматическая досылка звала send_message и
+        // получала false, не делая ничего, а доставку двигал только собственный
+        // медленный круг ядра. Смена аватарки такого не знала: она уходит новой
+        // публикацией на каждый чих и потому видна сразу.
+        let mut already_retained = false;
         let relay_inserted = match self.relay_queue.as_ref() {
             Some(queue) if refresh_retention && !queue.can_refresh_own(&prepared.message) => {
                 tracing::warn!(
@@ -5495,10 +5544,11 @@ impl P2PCore {
             }
             Some(queue) if queue.contains(&message_id) && !refresh_retention => {
                 tracing::info!(
-                    "MESH origin: offline relay {} already retained for {}",
+                    "MESH origin: offline relay {} already retained for {} — offering again",
                     message_id,
                     recipient_id
                 );
+                already_retained = true;
                 false
             }
             Some(queue) => {
@@ -5665,7 +5715,8 @@ impl P2PCore {
                 match self.mqtt_outbound_tx.as_ref() {
                     Some(sender) => match sender.try_send(MqttOutboundCommand::MeshRelay {
                         recipient: recipient_id.clone(),
-                        envelope: prepared.envelope,
+                        // clone: конверт нужен и повторной досылке ниже.
+                        envelope: prepared.envelope.clone(),
                         message_id: message_id.clone(),
                     }) {
                         Ok(()) => tracing::info!(
@@ -5683,6 +5734,37 @@ impl P2PCore {
                     },
                     None => tracing::warn!(
                         "MESH origin: MQTT outbound channel unavailable for {}; retained locally",
+                        message_id
+                    ),
+                }
+            }
+        }
+
+        if already_retained {
+            // Своё сообщение, которое уже лежит в очереди, обязано быть
+            // предложено снова: иначе повтор ничего не делает. Досылка
+            // идемпотентна по message_id (на приёме durable tombstone), поэтому
+            // повторная публикация не даёт дублей в переписке.
+            self.peer_exchange.wake();
+            if self.external_transport_allowed() {
+                match self.mqtt_outbound_tx.as_ref() {
+                    Some(sender) => {
+                        let offered = sender
+                            .try_send(MqttOutboundCommand::MeshRelay {
+                                recipient: recipient_id.clone(),
+                                envelope: prepared.envelope.clone(),
+                                message_id: message_id.clone(),
+                            })
+                            .is_ok();
+                        tracing::info!(
+                            "MESH origin: re-offered retained {} for {} queued={}",
+                            message_id,
+                            recipient_id,
+                            offered
+                        );
+                    }
+                    None => tracing::warn!(
+                        "MESH origin: re-offer skipped for {}: outbound channel unavailable",
                         message_id
                     ),
                 }

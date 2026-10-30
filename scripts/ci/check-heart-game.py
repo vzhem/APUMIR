@@ -12,7 +12,13 @@ class HeartGameContracts(unittest.TestCase):
         core = (SRC / 'service/CoreServerService.kt').read_text()
         # Приём идёт по всем путям доставки (direct, relay, mirror, ...), поэтому
         # вызовов не меньше трёх: конверт не должен теряться на одном из путей.
-        self.assertGreaterEqual(core.count('heartGameNetwork.routeIncoming(senderId, text)'), 3)
+        # Сам разбор живёт в RankPacketRouting (god-файл не растёт) и идёт
+        # ОТДЕЛЬНО от ранга: сбой одного конверта не съедает второй.
+        routing = (SRC / 'service/RankPacketRouting.kt').read_text()
+        self.assertGreaterEqual(
+            core.count('routeRankOrHeartPacket(heartGameNetwork, peerRankRouter, senderId, text)'), 3)
+        self.assertIn('heartGameNetwork.routeIncoming(senderId, text)', routing)
+        self.assertIn('routePacket("CoreServerService", "heartGame")', routing)
 
     def test_foreground_only_and_single_click(self):
         ui = (SRC / 'ui/components/HeartGameOverlay.kt').read_text()
@@ -43,6 +49,66 @@ class HeartGameContracts(unittest.TestCase):
         for text in ('take(100)', 'take(99)', '(100 to entries[ownIndex])', 'LazyColumn(', 'heart_game_you_place',
                      'TextAlign.End', 'coerceIn(200f, 420f)'):
             self.assertIn(text, ui)
+
+    def test_one_participant_is_one_row_in_the_leaderboard(self):
+        # Владелец, скриншот 28.10.2026: «В таблице один и тот же участник
+        # задвоился». У одного человека бывает несколько ключей подписи
+        # (телефон, компьютер, переустановка), и keyId у них разные - значит,
+        # склейка обязана идти по имени, а не по ключу.
+        wire = (SRC / 'data/heartgame/HeartGameWire.kt').read_text()
+        self.assertIn('fun table(entries: Collection<Entry>, ownKey: String?)', wire)
+        self.assertIn('mergeKey(group)', wire)
+        self.assertIn('lowercase(java.util.Locale.ROOT)', wire)
+        # Своя строка не подменяется чужим счётом под тем же именем.
+        self.assertIn('group.firstOrNull { it.keyId == ownKey }', wire)
+        # Первый шаг склейки - узел: телефон и компьютер одного человека дают
+        # разные ключи подписи, но общий nodeId.
+        self.assertIn('byNode.getOrPut("node:" + entry.nodeId', wire)
+        # Пустое имя не склеивает разных людей: остаётся склейка по узлу.
+        self.assertIn('"node:" + node', wire)
+        self.assertNotIn('heart_game_unknown_player', (SRC / 'ui/components/HeartGameSettings.kt').read_text(),
+                         'выдуманный ник «Участник» вернулся в таблицу')
+        ui = (SRC / 'ui/components/HeartGameSettings.kt').read_text()
+        self.assertIn('HeartGameWire.table(', ui)
+        self.assertNotIn('HeartGameWire.ranked(HeartGameStore.board', ui)
+        for path in (ROOT / 'android-app/app/src/main/res/values/strings.xml',
+                     ROOT / 'android-app/app/src/main/res/values-en/strings.xml'):
+            self.assertIn('heart_game_board_merged', path.read_text(),
+                          'нет пояснения о склейке строк в ' + path.name)
+        test = (ROOT / 'android-app/app/src/test/java/com/vladimir/messenger/data/heartgame/'
+                'HeartGameWireTest.kt').read_text()
+        for case in ('oneNameWithTwoSigningKeysTakesASingleRowWithTheBestScore',
+                     'ownRowStaysOwnEvenWhenAnotherKeyUnderTheSameNameClaimsMore',
+                     'twoDevicesOfOneIdentityAreOneRowEvenWithoutAName',
+                     'ownOldKeyIsFoldedIntoTheOwnRow',
+                     'namelessParticipantsOfDifferentNodesAreNeverMerged',
+                     'caseAndOuterSpacesDoNotSplitOneName'):
+            self.assertIn(case, test, 'нет теста склейки: ' + case)
+
+    def test_every_result_always_has_a_name(self):
+        # Владелец, 29.10.2026: «если данные есть количество сердечек то и ник
+        # должен быть с этими данными. Без имени вообще такого не должно быть».
+        # Значит: ни заглушки «Участник», ни строки «Без имени» - у результата
+        # имя есть всегда.
+        wire = (SRC / 'data/heartgame/HeartGameWire.kt').read_text()
+        self.assertIn('fun displayName(entry: Entry, contactName: String?)', wire)
+        self.assertIn('fun shortNodeName(nodeId: String, keyId: String = "")', wire)
+        ui = (SRC / 'ui/components/HeartGameSettings.kt').read_text()
+        self.assertIn('HeartGameWire.displayName(', ui)
+        self.assertIn('rememberBoardContactNames(', ui)
+        self.assertIn('isRealName(contact.displayName)', ui)
+        self.assertIn('canonicalNodeId(contact.id)', ui)
+        self.assertNotIn('R.string.chat_no_name', ui, 'строка «Без имени» вернулась в таблицу')
+        for path in (ROOT / 'android-app/app/src/main/res/values/strings.xml',
+                     ROOT / 'android-app/app/src/main/res/values-en/strings.xml'):
+            text = path.read_text()
+            for gone in ('heart_game_unknown_player', 'heart_game_board_no_name'):
+                self.assertNotIn(gone, text, 'заглушка ' + gone + ' осталась в ' + path.name)
+        # Отправитель обязан подписывать результат именем: пустое имя в сети -
+        # это и есть источник строк без ника.
+        network = (SRC / 'data/heartgame/HeartGameNetwork.kt').read_text()
+        self.assertIn('HeartGameWire.shortNodeName(id)', network)
+        self.assertNotIn('UsernameHolder.name.value.orEmpty()', network)
 
     def test_private_account_scoped_score_and_opt_in(self):
         store = (SRC / 'data/heartgame/HeartGameStore.kt').read_text()

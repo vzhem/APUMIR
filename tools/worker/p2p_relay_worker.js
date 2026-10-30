@@ -531,7 +531,9 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
-  "Content-Type": "application/json",
+  // charset обязателен: в ответах есть русский текст, и без пометки клиент
+  // показывает его нечитаемым (владелец, 2026-10-30: ответ health).
+  "Content-Type": "application/json; charset=utf-8",
 };
 
 /** Полка — ровно 64 шестнадцатеричных знака (отпечаток никнейма). */
@@ -834,7 +836,7 @@ async function handlePsyncGet(slot, url, request, env) {
     if (!entry) return json({ error: "not found" }, 404);
     return new Response(
       JSON.stringify({ exists: true, time: entry.time, size: entry.size, dev: entry.dev }),
-      { headers: { "Content-Type": "application/json" } },
+      { headers: { "Content-Type": "application/json; charset=utf-8" } },
     );
   }
   const code = (request.headers.get("X-Apu-Code") || "").trim();
@@ -1296,7 +1298,7 @@ function handleAssetLinks() {
   return new Response(JSON.stringify(statements), {
     headers: {
       // Ровно application/json: с другим типом Android файл не принимает.
-      "Content-Type": "application/json",
+      "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "public, max-age=3600",
     },
   });
@@ -1357,48 +1359,138 @@ async function handleVersion(env) {
 const RELEASE_REPO = "vzhem/APUMIR";
 const RELEASE_ASSET = "app-release.apk";
 
+/** Ответ сервиса для телефона: адрес APK всегда от текущего домена. */
+function latestResponse(payload, extraHeaders = {}) {
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { ...CORS_HEADERS, "Cache-Control": "public, max-age=300", ...extraHeaders },
+  });
+}
+
+/** Последний известный релиз из KV (может быть устаревшим или отсутствовать). */
+async function readLatestCache(env) {
+  try {
+    if (!env || !env.APU_VAULT) return null;
+    const raw = await env.APU_VAULT.get("upd:latest");
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Запомнить релиз в KV. Адрес APK НЕ храним: он собирается из домена запроса,
+ * а домен уже менялся (1985vzhem -> apuchat). Ранее сохранённый apk_url потом
+ * отдавался как есть, и телефон шёл качать APK по мёртвому адресу (владелец,
+ * 2026-10-30: ответ сервиса с apk_url прежнего домена).
+ */
+async function writeLatestCache(env, payload) {
+  try {
+    if (!env || !env.APU_VAULT || !payload || !payload.tag_name) return;
+    const stored = { ...payload };
+    delete stored.apk_url;
+    await env.APU_VAULT.put("upd:latest", JSON.stringify(stored));
+  } catch (e) { /* кэш не критичен */ }
+}
+
+/**
+ * Тег последнего релиза без GitHub API.
+ *
+ * Владелец 2026-10-30: сервис отдавал телефону версию недельной давности.
+ * Причина — лимит GitHub API на общие адреса Cloudflare (403); до этой правки
+ * такой отказ означал «отдать что лежит в кэше», и кэш мог держать старый тег
+ * сколько угодно. Страница /releases/latest отвечает редиректом на настоящий
+ * тег и под лимит API не попадает — ею и обновляем кэш.
+ */
+async function latestTagFromRedirect() {
+  try {
+    const res = await fetch("https://github.com/" + RELEASE_REPO + "/releases/latest", {
+      redirect: "manual",
+      headers: { "User-Agent": "APU-Relay-Worker" },
+    });
+    const location = res.headers.get("location") || "";
+    const match = location.match(/\/releases\/tag\/([^\/?#]+)/);
+    return match ? decodeURIComponent(match[1]) : "";
+  } catch (e) {
+    return "";
+  }
+}
+
 async function handleUpdateLatest(request, env) {
-  let upstream;
+  const apkUrl = new URL("/update/apk", request.url).toString();
+  let upstream = null;
+  let apiError = "";
   try {
     upstream = await fetch("https://api.github.com/repos/" + RELEASE_REPO + "/releases/latest", {
       headers: { "Accept": "application/vnd.github.v3+json", "User-Agent": "APU-Relay-Worker" },
     });
   } catch (e) {
-    return await serveLatestCache(env, "github unreachable: " + e.message);
+    apiError = "github unreachable: " + e.message;
   }
-  if (!upstream.ok) {
-    return await serveLatestCache(env, "github " + upstream.status);
+  if (upstream && upstream.ok) {
+    const data = await upstream.json();
+    const payload = {
+      tag_name: typeof data.tag_name === "string" ? data.tag_name : "",
+      notes: typeof data.body === "string" ? data.body.slice(0, 4096) : "",
+      published_at: typeof data.published_at === "string" ? data.published_at : "",
+      // APK телефон тоже берёт здесь же: /update/apk отдаёт файл последнего
+      // релиза с этого домена (в жёсткой сети другой путь всё равно не пройдёт).
+      apk_url: apkUrl,
+    };
+    // р225: успешный ответ складываем в KV без срока - когда GitHub начнёт
+    // лимитить запросы с адресов Cloudflare (403), телефоны всё равно увидят
+    // последний известный релиз, а не ошибку.
+    await writeLatestCache(env, payload);
+    return latestResponse(payload);
   }
-  const data = await upstream.json();
-  const payload = {
-    tag_name: typeof data.tag_name === "string" ? data.tag_name : "",
-    notes: typeof data.body === "string" ? data.body.slice(0, 4096) : "",
-    published_at: typeof data.published_at === "string" ? data.published_at : "",
-    // APK телефон тоже берёт здесь же: /update/apk отдаёт файл последнего
-    // релиза с этого домена (в жёсткой сети другой путь всё равно не пройдёт).
-    apk_url: new URL("/update/apk", request.url).toString(),
-  };
-  // р225: успешный ответ складываем в KV без срока - когда GitHub начнёт
-  // лимитить запросы с адресов Cloudflare (403), телефоны всё равно увидят
-  // последний известный релиз, а не ошибку.
+  if (!apiError) apiError = "github " + (upstream ? upstream.status : "error");
+
+  // API не ответил (лимит или сбой): настоящий тег берём редиректом страницы
+  // релизов и кэш обновляем, чтобы версия не «застревала» на прежней.
+  const tag = await latestTagFromRedirect();
+  if (tag) {
+    const cached = await readLatestCache(env);
+    const same = cached && cached.tag_name === tag;
+    const payload = {
+      tag_name: tag,
+      notes: same && typeof cached.notes === "string" ? cached.notes : "",
+      published_at: same && typeof cached.published_at === "string" ? cached.published_at : "",
+      apk_url: apkUrl,
+    };
+    await writeLatestCache(env, payload);
+    return latestResponse(payload, { "X-Apu-Cache": "redirect" });
+  }
+  return await serveLatestCache(request, env, apiError);
+}
+
+/**
+ * Адрес APK всегда собирается от домена текущего запроса.
+ *
+ * В кэше его может не быть вовсе, а в старых записях лежит адрес прежнего
+ * домена. Телефон качает APK по этому полю, поэтому мёртвый адрес в ответе =
+ * «обновление не скачивается» без единой ошибки на экране.
+ */
+function withCurrentApkUrl(cached, request) {
+  let payload;
   try {
-    if (env && env.APU_VAULT && payload.tag_name) {
-      await env.APU_VAULT.put("upd:latest", JSON.stringify(payload));
-    }
-  } catch (e) { /* кэш не критичен */ }
-  return new Response(JSON.stringify(payload), {
-    status: 200,
-    headers: { ...CORS_HEADERS, "Cache-Control": "public, max-age=300" },
-  });
+    payload = JSON.parse(cached);
+  } catch (e) {
+    return cached;
+  }
+  if (!payload || typeof payload !== "object") return cached;
+  payload.apk_url = new URL("/update/apk", request.url).toString();
+  return JSON.stringify(payload);
 }
 
 /** GitHub лимитит/недоступен: отдать последний известный релиз из KV. */
-async function serveLatestCache(env, reason) {
+async function serveLatestCache(request, env, reason) {
   try {
     if (env && env.APU_VAULT) {
       const cached = await env.APU_VAULT.get("upd:latest");
       if (cached) {
-        return new Response(cached, {
+        return new Response(withCurrentApkUrl(cached, request), {
           status: 200,
           headers: { ...CORS_HEADERS, "Cache-Control": "public, max-age=60", "X-Apu-Cache": "stale" },
         });
@@ -1407,6 +1499,8 @@ async function serveLatestCache(env, reason) {
   } catch (e) { /* нет кэша - честная ошибка */ }
   return json({ error: reason }, 502);
 }
+
+
 
 async function handleUpdateApk() {
   let upstream;

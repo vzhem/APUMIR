@@ -35,6 +35,9 @@ import javax.crypto.spec.GCMParameterSpec
  *    об этом видно в логах и diagnostics).
  *  - Любая ошибка → возвращаем false: движок честно работает в RAM-only
  *    режиме и НЕ заявляет durable custody.
+ *  - Keystore не даёт создать ключ вовсе (KeyMint на части прошивок отвечает
+ *    ошибкой) → обёртка кладётся программным ключом ([SoftwareWrapKey]), и
+ *    durable custody продолжает работать, а не отключается навсегда.
  */
 object RelayAtRestMasterKey {
 
@@ -45,6 +48,9 @@ object RelayAtRestMasterKey {
 
     private const val PREFS_NAME = "apu_relay_at_rest"
     private const val PREF_WRAPPED_BLOB = "wrapped_master_v1"
+
+    /** Домен программного ключа-обёртки: фолбэк, когда Keystore не даёт ключ. */
+    private const val SOFTWARE_DOMAIN = "relay-at-rest"
 
     private const val MASTER_SECRET_BYTES = 32
     private const val GCM_IV_BYTES = 12
@@ -92,10 +98,7 @@ object RelayAtRestMasterKey {
             .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getString(PREF_WRAPPED_BLOB, null) ?: return false
         return try {
-            val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
-            val wrapKey = (keyStore.getEntry(WRAP_ALIAS, null) as? KeyStore.SecretKeyEntry)
-                ?.secretKey ?: return false
-            val material = unwrap(encoded, wrapKey)
+            val material = unwrapWithCandidates(context.applicationContext, encoded)
             material.secret.fill(0)
             true
         } catch (error: Exception) {
@@ -132,7 +135,7 @@ object RelayAtRestMasterKey {
         val encoded = prefs.getString(PREF_WRAPPED_BLOB, null)
         if (encoded != null) {
             try {
-                return unwrap(encoded)
+                return unwrapWithCandidates(context, encoded)
             } catch (e: Exception) {
                 // Data clear / смена Keystore: unwrap невозможен. Честно
                 // генерируем новый master secret с НОВЫМ keyId — старые записи
@@ -145,12 +148,23 @@ object RelayAtRestMasterKey {
                 )
             }
         }
-        val freshBlob = createFresh()
+        val freshBlob = createFresh(context)
         prefs.edit().putString(PREF_WRAPPED_BLOB, freshBlob).apply()
-        return unwrap(freshBlob)
+        return unwrapWithCandidates(context, freshBlob)
     }
 
-    private fun ensureWrapKey(): SecretKey {
+    /**
+     * Ключ-обёртка для нового блоба: ключ Keystore, а если прошивка не даёт его
+     * создать - программный. Раньше отказ Keystore сразу означал RAM-only:
+     * очередь ретрансляции не переживала перезапуск.
+     */
+    private fun ensureWrapKey(context: Context): SecretKey {
+        ensureKeystoreWrapKey()?.let { return it }
+        return SoftwareWrapKey.create(context, SOFTWARE_DOMAIN)
+            ?: throw IllegalStateException("relay at-rest wrap key unavailable")
+    }
+
+    private fun ensureKeystoreWrapKey(): SecretKey? = runCatching {
         val keyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
         (keyStore.getEntry(WRAP_ALIAS, null) as? KeyStore.SecretKeyEntry)?.let {
             return it.secretKey
@@ -169,18 +183,18 @@ object RelayAtRestMasterKey {
                 .setKeySize(256)
                 .build()
         )
-        return generator.generateKey()
-    }
+        generator.generateKey()
+    }.onFailure { Log.w(TAG, "Keystore wrap key unavailable: " + it.javaClass.simpleName) }.getOrNull()
 
     /** Создать master secret, wrap-нуть и вернуть Base64(blob). */
-    private fun createFresh(): String {
+    private fun createFresh(context: Context): String {
         val secret = ByteArray(MASTER_SECRET_BYTES).also { SecureRandom().nextBytes(it) }
         try {
             // keyId 1..65534 (0 = эфемерный RAM-only маркер на Rust-стороне).
             val keyId = SecureRandom().nextInt(0xFFFE - 1) + 1
             check(keyId != MAX_EPHEMERAL_KEY_ID) { "keyId 0 is reserved" }
 
-            val wrapKey = ensureWrapKey()
+            val wrapKey = ensureWrapKey(context)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.ENCRYPT_MODE, wrapKey)
             val wrapped = cipher.doFinal(secret)
@@ -198,7 +212,33 @@ object RelayAtRestMasterKey {
         }
     }
 
-    private fun unwrap(encoded: String): UnwrappedMaster = unwrap(encoded, ensureWrapKey())
+    /**
+     * Развернуть master secret любым годным ключом-обёрткой: сначала Keystore,
+     * затем программный. Блоб при отказе не перезаписывается здесь - решение
+     * о новом master secret принимает [loadOrCreate].
+     */
+    private fun unwrapWithCandidates(context: Context, encoded: String): UnwrappedMaster {
+        var last: Exception? = null
+        val keystoreKey = runCatching { ensureKeystoreWrapKey() }.getOrNull()
+        if (keystoreKey != null) {
+            try {
+                return unwrap(encoded, keystoreKey)
+            } catch (error: Exception) {
+                Log.w(TAG, "Keystore wrap key did not fit: " + error.javaClass.simpleName)
+                last = error
+            }
+        }
+        val softwareKey = SoftwareWrapKey.existing(context, SOFTWARE_DOMAIN)
+        if (softwareKey != null) {
+            try {
+                return unwrap(encoded, softwareKey)
+            } catch (error: Exception) {
+                Log.w(TAG, "Software wrap key did not fit: " + error.javaClass.simpleName)
+                last = error
+            }
+        }
+        throw IllegalStateException("relay at-rest master cannot be unwrapped", last)
+    }
 
     private fun unwrap(encoded: String, wrapKey: SecretKey): UnwrappedMaster {
         val blob = Base64.decode(encoded, Base64.NO_WRAP)

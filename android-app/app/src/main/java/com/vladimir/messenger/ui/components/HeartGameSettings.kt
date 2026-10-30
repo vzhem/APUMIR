@@ -59,18 +59,13 @@ fun HeartGameCounter(onlyWhenEnabled: Boolean = false) {
     val enabled = remember(id, revision) { id?.let { HeartGameStore.enabled(context, it) } ?: false }
     var place by remember(id) { mutableStateOf<Int?>(null) }
     val you = stringResource(R.string.heart_game_you)
-    LaunchedEffect(id, revision, you) {
+    // `ready` в ключах: подпись личности встаёт вместе с ядром, и до этого
+    // места не посчитать. Раньше пересчёта после готовности ядра не было, и
+    // «место №—» оставалось на экране до перезапуска.
+    LaunchedEffect(id, revision, you, ready) {
         place = null
         val account = id ?: return@LaunchedEffect
-        try {
-            val ownKey = HeartGameStore.ownKeyId(context) ?: return@LaunchedEffect
-            val own = HeartGameWire.Entry(account, you, HeartGameStore.score(context, account),
-                System.currentTimeMillis(), "", ownKey)
-            val ranked = HeartGameWire.ranked(HeartGameStore.board(context, account)
-                .filter { it.keyId != ownKey } + own)
-            place = ranked.indexOfFirst { it.keyId == ownKey }.takeIf { it >= 0 }?.plus(1)
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-        catch (_: Exception) { place = null }
+        place = HeartGameStore.ownPlace(context, account, you)
     }
     val account = id ?: return
     if (onlyWhenEnabled && !enabled) return
@@ -98,18 +93,12 @@ fun HeartGameHeaderStatus(modifier: Modifier = Modifier, onClick: (() -> Unit)? 
     val score = remember(id, revision) { HeartGameStore.score(context, id) }
     var place by remember(id) { mutableStateOf<Int?>(null) }
     val you = stringResource(R.string.heart_game_you)
-    LaunchedEffect(id, revision, you, enabled) {
+    // `ready` в ключах: без подписи личности (она встаёт вместе с ядром) место
+    // не считалось вовсе, и в шапке навсегда оставалось «место №—».
+    LaunchedEffect(id, revision, you, enabled, ready) {
         place = null
         if (!enabled) return@LaunchedEffect
-        try {
-            val ownKey = HeartGameStore.ownKeyId(context) ?: return@LaunchedEffect
-            val own = HeartGameWire.Entry(id, you, HeartGameStore.score(context, id),
-                System.currentTimeMillis(), "", ownKey)
-            val ranked = HeartGameWire.ranked(HeartGameStore.board(context, id)
-                .filter { it.keyId != ownKey } + own)
-            place = ranked.indexOfFirst { it.keyId == ownKey }.takeIf { it >= 0 }?.plus(1)
-        } catch (e: kotlinx.coroutines.CancellationException) { throw e }
-        catch (_: Exception) { place = null }
+        place = HeartGameStore.ownPlace(context, id, you)
     }
     if (!enabled) return
     Row(
@@ -244,25 +233,46 @@ fun HeartGameSettings(onOpenRanks: (() -> Unit)? = null) {
 fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val revision by HeartGameStore.revision.collectAsStateWithLifecycle()
-    var entries by remember(id) { mutableStateOf<List<HeartGameWire.Entry>>(emptyList()) }
+    var entries by remember(id) { mutableStateOf<List<HeartGameWire.Row>>(emptyList()) }
     var ownKey by remember(id) { mutableStateOf("local:$id") }
     var loading by remember(id) { mutableStateOf(true) }
     var failed by remember(id) { mutableStateOf(false) }
     val you = stringResource(R.string.heart_game_you)
-    LaunchedEffect(id, revision, you) {
+    val contactNames = rememberBoardContactNames(context)
+    // contactNames в ключах: адресная книга приходит асинхронно, и без неё
+    // первая сборка таблицы показала бы короткие обозначения узлов вместо имён.
+    LaunchedEffect(id, revision, you, contactNames) {
         if (id == null) { loading = false; return@LaunchedEffect }
         try {
             ownKey = HeartGameStore.ownKeyId(context) ?: "local:$id"
             val own = HeartGameWire.Entry(id, you, HeartGameStore.score(context, id), System.currentTimeMillis(), "", ownKey)
-            entries = HeartGameWire.ranked(HeartGameStore.board(context, id).filter { it.keyId != ownKey } + own)
+            // Одна строка на участника: у одного человека может быть несколько
+            // ключей подписи (телефон, компьютер, переустановка), и таблица
+            // раньше показывала его дважды подряд (скриншот владельца 28.10).
+            //
+            // Имя подставляется ДО склейки: у результата с сердечками всегда
+            // есть имя - подписанное, из адресной книги или короткое
+            // обозначение узла. Строки без имени в таблице нет (владелец,
+            // 29.10: «Без имени вообще такого не должно быть»).
+            entries = HeartGameWire.table(
+                (HeartGameStore.board(context, id).filter { it.keyId != ownKey } + own)
+                    .map { entry ->
+                        entry.copy(
+                            name = if (entry.keyId == ownKey) you
+                            else HeartGameWire.displayName(entry, contactNames[entry.nodeId.trim().lowercase()]),
+                        )
+                    },
+                ownKey,
+            )
             failed = false
         } catch (e: kotlinx.coroutines.CancellationException) { throw e }
         catch (_: Exception) { failed = true }
         finally { loading = false }
     }
-    val ownIndex = entries.indexOfFirst { it.keyId == ownKey }
+    val ownIndex = entries.indexOfFirst { it.entry.keyId == ownKey }
     val ownPlace = ownIndex + 1
-    val rows: List<Pair<Int, HeartGameWire.Entry>> =
+    val mergedAny = entries.any { it.merged > 1 }
+    val rows: List<Pair<Int, HeartGameWire.Row>> =
         if (ownIndex < 100) entries.take(100).mapIndexed { i, e -> (i + 1) to e }
         else entries.take(99).mapIndexed { i, e -> (i + 1) to e } + (100 to entries[ownIndex])
     val listHeight = (LocalConfiguration.current.screenHeightDp * 0.45f).coerceIn(200f, 420f).dp
@@ -272,14 +282,20 @@ fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(stringResource(R.string.heart_game_board_hint), style = MaterialTheme.typography.bodySmall)
+                // Пояснение появляется только когда склейка действительно была:
+                // иначе строка вводила бы в заблуждение тех, у кого дублей нет.
+                if (mergedAny) {
+                    Text(stringResource(R.string.heart_game_board_merged), style = MaterialTheme.typography.labelSmall)
+                }
                 if (loading) ApuPremiumSpinner()
                 if (failed) Text(stringResource(R.string.heart_game_save_error))
-                if (!loading && entries.none { it.keyId != ownKey }) Text(stringResource(R.string.heart_game_empty))
+                if (!loading && entries.none { it.entry.keyId != ownKey }) Text(stringResource(R.string.heart_game_empty))
                 // Таблица на 100 мест. Если вы ниже 100-го, вы занимаете 100-ю строку
                 // с настоящим местом в подписи. Лента прокручивается внутри окна.
                 if (rows.isNotEmpty()) {
                     LazyColumn(Modifier.fillMaxWidth().height(listHeight), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        items(rows, key = { it.first }) { (place, entry) ->
+                        items(rows, key = { it.first }) { (place, row) ->
+                            val entry = row.entry
                             val isMe = entry.keyId == ownKey
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Text("$place", modifier = Modifier.width(36.dp), fontWeight = FontWeight.Bold,
@@ -289,7 +305,7 @@ fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
                                     modifier = Modifier.size(22.dp))
                                 Column(Modifier.weight(1f)) {
                                     Text(
-                                        entry.name.ifBlank { stringResource(R.string.heart_game_unknown_player) },
+                                        entry.name,
                                         fontWeight = FontWeight.SemiBold,
                                     )
                                     if (isMe) {
@@ -311,4 +327,48 @@ fun HeartGameLeaderboardDialog(id: String?, onDismiss: () -> Unit) {
                 }
             }
         })
+}
+
+/**
+ * Имена участников из адресной книги: узел -> имя.
+ *
+ * В подписанной записи счёта имя приходит от клиента и может быть пустым
+ * (профиль без имени, старая версия, сброс профиля). Показывать вместо него
+ * слово-заглушку нельзя: это читается как ник несуществующего человека
+ * (жалоба владельца 29.10.2026). Адресная книга знает настоящее имя по узлу,
+ * поэтому пустое имя подменяем им, а записи-заглушки («Contact a1b2…») не
+ * используем - они не лучше пустоты.
+ *
+ * Сеть и ядро не нужны: читаются только контакты этого телефона.
+ */
+@Composable
+private fun rememberBoardContactNames(context: android.content.Context): Map<String, String> {
+    val repository = remember(context) {
+        runCatching {
+            dagger.hilt.android.EntryPointAccessors.fromApplication(
+                context.applicationContext,
+                com.vladimir.messenger.MainActivityEntryPoint::class.java,
+            ).contactRepository()
+        }.getOrNull()
+    }
+    val flow = remember(context, repository) { repository?.observeContacts() }
+    // Без репозитория (теоретически возможно в тестовой сборке) остаётся
+    // пустой список: таблица тогда честно показывает «Без имени».
+    val fallback = remember { mutableStateOf(emptyList<com.vladimir.messenger.domain.model.Contact>()) }
+    val contacts by if (flow != null) {
+        flow.collectAsStateWithLifecycle(initialValue = emptyList())
+    } else {
+        fallback
+    }
+    return remember(contacts, repository) {
+        val names = mutableMapOf<String, String>()
+        if (repository != null) {
+            for (contact in contacts) {
+                if (!repository.isRealName(contact.displayName)) continue
+                val node = com.vladimir.messenger.data.rank.RankWire.canonicalNodeId(contact.id) ?: continue
+                names[node] = contact.displayName.trim()
+            }
+        }
+        names
+    }
 }

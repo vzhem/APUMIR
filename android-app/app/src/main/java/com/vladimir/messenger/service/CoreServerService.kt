@@ -1,5 +1,6 @@
 package com.vladimir.messenger.service
 
+import com.vladimir.messenger.data.link.ServiceHost
 import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
 import com.vladimir.messenger.data.diagnostics.OperationalCounter
 import com.vladimir.messenger.data.diagnostics.DiagnosticPhase
@@ -67,6 +68,11 @@ class CoreServerService : Service() {
     private val NOTIFICATION_ID = 1001
 
     @Inject lateinit var chatRepository: ChatRepository
+
+    /** Досылка офлайн-очереди своим ритмом: коротким шагом, пока есть что слать. */
+    private val chatOutboxPump: ChatOutboxPump by lazy {
+        ChatOutboxPump(appDatabase.messageDao(), chatRepository)
+    }
     @Inject lateinit var contactRepository: ContactRepository
     @Inject lateinit var mtProxyRepository: MtProxyRepository
     @Inject lateinit var notificationHelper: NotificationHelper
@@ -128,9 +134,8 @@ class CoreServerService : Service() {
      * = «живая метка свежее TTL»: который peers мы зажгли, тех сами и гасятся.
      */
     private val onlineMarked = java.util.Collections.synchronizedSet(mutableSetOf<String>())
-    // Ядро объявляет о себе раз в минуту (было раз в 30 секунд), поэтому
-    // «пропал» = три пропуска подряд = 200 секунд. Уборка тоже реже: она
-    // будит процесс, а быстрее гасить «в сети» смысла нет.
+    // Ядро объявляет о себе раз в минуту (было раз в 30 секунд): «пропал» = три
+    // пропуска подряд = 200 секунд. Уборка реже: она будит процесс, спешить некуда.
     private val PRESENCE_TTL_MS = 200_000L    // ~3 пропущенных MQTT-пульса
     private val PRESENCE_SWEEP_MS = 60_000L
     private val FILE_PUMP_INTERVAL_MS = 20000L
@@ -473,10 +478,9 @@ class CoreServerService : Service() {
         if (routePacket(TAG, "referral") { referralAttributionRouter.routeIncoming(senderId, text) }) return true
         // Ранг собеседника (APURANK1): знак VIP у имени. Поглощается здесь же,
         // чтобы служебная строка не стала текстом в переписке.
-        if (routePacket(TAG, "rank") {
-                heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text)
-            }
-        ) return true
+        // Счёт игры и ранг - раздельно (см. RankPacketRouting): сбой одного
+        // конверта не должен съедать второй, иначе знак VIP не появляется.
+        if (routeRankOrHeartPacket(heartGameNetwork, peerRankRouter, senderId, text)) return true
         if (routePacket(TAG, "call") { callManager.routeIncoming(senderId, chatId, messageId, text) }) {
             return true
         }
@@ -1195,7 +1199,7 @@ class CoreServerService : Service() {
             }
 
             // Cloudflare Workers relay (основной запасной канал)
-            val cfUrl = prefs.getString("cloudflare_relay_url", "https://p2p-relay.1985vzhem.workers.dev") ?: "https://p2p-relay.1985vzhem.workers.dev"
+            val cfUrl = prefs.getString("cloudflare_relay_url", ServiceHost.BASE) ?: ServiceHost.BASE
             cloudflareRelay = CloudflareRelay(cfUrl, nodeId ?: "", serviceScope)
             cloudflareRelay?.onMessageReceived = { senderId: String, payload: String ->
                 Log.i(TAG, "CF relay payload from $senderId: ${payload.take(50)}")
@@ -1856,11 +1860,8 @@ class CoreServerService : Service() {
         // Ранг собеседника едет в обёртке «печатает…» (см. RankWire.WRAPPER).
         // Разбираем его РАНЬШЕ индикатора набора: иначе конверт был бы прочитан
         // как «партнёр перестал печатать» и молча пропал бы вместе с рангом.
-        if (routePacket(TAG, "rank") {
-                heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text)
-            }
-        ) {
-            Log.i(TAG, "Mirror envelope: ранг собеседника применён")
+        if (routeRankOrHeartPacket(heartGameNetwork, peerRankRouter, senderId, text)) {
+            Log.i(TAG, "Mirror envelope: ранг или сердечки собеседника применены")
             return true
         }
         // р239: «печатает…» от партнёра - показать индикатор и не сохранять.
@@ -2099,6 +2100,10 @@ class CoreServerService : Service() {
     private var reconnectAttempt = 0
     private val maxBackoff = 60_000L
 
+    /** Службу остановили ради перезапуска: «быстрый подъём» не нужен, поднимемся сами. */
+    @Volatile
+    private var intentionalRestart = false
+
     private fun reconnectWithBackoff() {
         val delay = minOf(1000L * (1L shl reconnectAttempt.coerceAtMost(6)), maxBackoff)
         reconnectAttempt++
@@ -2107,9 +2112,11 @@ class CoreServerService : Service() {
             kotlinx.coroutines.delay(delay)
             try {
                 // Перезапуск сервиса (onDestroy + onStartCommand)
+                intentionalRestart = true
                 stopServiceSafely()
                 val restartIntent = android.content.Intent(applicationContext, CoreServerService::class.java)
                 applicationContext.startForegroundService(restartIntent)
+                intentionalRestart = false
                 reconnectAttempt = 0
                 Log.i(TAG, "Reconnect: service restarted")
             } catch (e: Exception) {
@@ -2148,7 +2155,15 @@ class CoreServerService : Service() {
         } catch (_: Exception) { /* освобождение блокировки в onDestroy: повторять нечего */ }
         OperationalDiagnostics.wake.release(SystemClock.elapsedRealtime())
         wakeLock?.release()
+        // «Убили» — быстрый подъём; осознанный перезапуск (reconnect) сюда не относится.
+        ServiceLifecycleHooks.onDestroyed(applicationContext, planned = intentionalRestart)
         super.onDestroy()
+    }
+
+    /** Человек смахнул приложение из задач: подъём через две минуты, как в Telegram. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        ServiceLifecycleHooks.onTaskRemoved(applicationContext)
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -2266,6 +2281,7 @@ class CoreServerService : Service() {
                 val busy = try {
                     RuntimeDiagnostics.measure(DiagnosticOperation.CORE_EVENTS) {
                         val events = RustBridge.drainEvents()
+                        if (events.isNotEmpty()) DeliveryCadence.touch()
                         events.forEach { event -> handleEvent(event) }
                         RustBridge.pendingEvents() > 0L || events.size >= BUSY_BATCH
                     }
@@ -2276,6 +2292,8 @@ class CoreServerService : Service() {
                 val statusNowMs = android.os.SystemClock.elapsedRealtime()
                 if (statusNowMs - lastStatusRefreshAtMs >= POLL_INTERVAL_MS) {
                     lastStatusRefreshAtMs = statusNowMs
+                    // Метка жизни: по ней сторож понимает, что нас убили без onDestroy.
+                    runCatching { DeliveryAssurance.markAlive(applicationContext) }
                     try {
                         val status = RustBridge.networkStatus()
                         val peers = RustBridge.connectedPeers()
@@ -2284,7 +2302,8 @@ class CoreServerService : Service() {
                         Log.e(TAG, "Status polling error", ex)
                     }
                 }
-                delay(if (busy) BUSY_POLL_INTERVAL_MS else POLL_INTERVAL_MS)
+                // Пока экран смотрят - четверть секунды, иначе прежние пять.
+                delay(DeliveryCadence.pollDelayMs(busy))
             }
         }
 
@@ -2293,9 +2312,7 @@ class CoreServerService : Service() {
         // immediately; this cadence must not throttle an active transfer.
         filePumpJob = serviceScope.launch {
             kotlinx.coroutines.delay(INITIAL_FILE_PUMP_DELAY_MS)
-            // Раунд 179: счётчик циклов - очередь сообщений сливаем раз в
-            // минуту (3 цикла по 20 с), независимо от presence-пульсов.
-            var chatQueueCycle = 0
+            chatOutboxPump.start(serviceScope)
             while (isActive) {
                 try {
                     RuntimeDiagnostics.measure(DiagnosticOperation.FILE_PUMP) { fileTransferRouter.pumpOutgoing() }
@@ -2348,16 +2365,9 @@ class CoreServerService : Service() {
                     Log.w(TAG, "Join request pump error: ${ex.message}")
                 }
                 // Раунд 179: недоставленные сообщения (гифки-ссылки и текст
-                // QUEUED_OFFLINE) - сами доехут, когда адресат появится;
-                // пустая очередь стоит один дешёвый запрос.
-                chatQueueCycle++
-                if (chatQueueCycle % 3 == 0) {
-                    try {
-                        RuntimeDiagnostics.measure(DiagnosticOperation.CHAT_RETRY_PUMP) { chatRepository.pumpQueuedOffline() }
-                    } catch (ex: Exception) {
-                        Log.w(TAG, "Chat queue pump error: ${ex.message}")
-                    }
-                }
+                // QUEUED_OFFLINE) досылает свой насос - коротким шагом, пока
+                // есть что досылать (см. ChatOutboxPump; раньше это был один
+                // круг из трёх по двадцать секунд, то есть раз в минуту).
                 delay(FILE_PUMP_INTERVAL_MS)
             }
         }
@@ -2406,12 +2416,9 @@ class CoreServerService : Service() {
                 val rawText = event.text ?: return
                 val timestamp = ts
 
-                // Отправитель обязан быть узлом (pk_…). Ядро режет входящую
-                // строку на четыре поля, первое поле не проверяя: строка без
-                // конверта (например, голосовой пакет `APUCALL1|ab|…`, ушедший
-                // как есть) даёт отправителя «APUCALL1», а ниже из него вырос
-                // бы контакт-призрак «Contact APUCALL1» с обрывком пакета
-                // вместо переписки (владелец, скриншот 2026-09-13).
+                // Отправитель обязан быть узлом (pk_…): ядро не проверяет первое поле, и
+                // строка без конверта (`APUCALL1|ab|…`) дала бы контакт-призрак «Contact
+                // APUCALL1» с обрывком пакета вместо переписки (владелец, скрин 2026-09-13).
                 if (!NodeIds.isNodeId(senderId)) {
                     Log.w(
                         TAG,
@@ -2461,13 +2468,9 @@ class CoreServerService : Service() {
                     return
                 }
 
-                // р239: сообщение «от себя». Такое бывает, когда в контактах
-                // оказался собственный узел (в профиле есть «Мой QR» - его
-                // можно отсканировать самому). Показывать эхо входящим и
-                // звонить о нём в уведомлении нельзя: владелец, скрин 30.09
-                // 16:40 - «начинаешь печатать - приходит уведомление от меня
-                // же». Своя строка уже лежит в переписке как отправленная,
-                // терять нечего.
+                // р239: сообщение «от себя» (в контакты попал собственный узел, «Мой QR»
+                // можно отсканировать самому). Эхо входящим не показываем и не звоним:
+                // владелец, скрин 30.09 16:40. Своя строка уже есть как отправленная.
                 // р243: адрес из кэша зеркала (обновляется в цикле) - вызов в
                 // ядро на каждом входящем тормозил разбор очереди.
                 val myNodeId = com.vladimir.messenger.data.mirror.MirrorHub.nodeIdCached()
@@ -2493,12 +2496,9 @@ class CoreServerService : Service() {
                     val opened = MessageSealer.open(applicationContext, rawText)
                     if (opened == null) {
                         val known = MessageSealer.canSeal(applicationContext, senderId)
-                        // Владелец 2026-10-07: после обмена QR переписка
-                        // работает, но в сети ещё летят СТАРЫЕ копии, запечатанные
-                        // прежним ключом. Если от собеседника только что ЧТО-ТО
-                        // открылось — ключ рабочий, а этот конверт остаток в пути:
-                        // человека не тревожим и сигнал «отдай ключ ещё раз» ему
-                        // не шлём.
+                        // Владелец 2026-10-07: после обмена QR в сети летят СТАРЫЕ копии
+                        // со прежним ключом. Если от собеседника только что ЧТО-ТО открылось,
+                        // ключ рабочий, а этот конверт — остаток в пути: не тревожим.
                         val leftover = known &&
                             com.vladimir.messenger.data.security.KeyDesyncNotice
                                 .isWorkingRecently(applicationContext, senderId)
@@ -2571,18 +2571,13 @@ class CoreServerService : Service() {
                     return
                 }
 
-                // префикс также на последнем общем страже сохранения.
+                // Подтверждения ходили только через брокера (MQTT): если он недоступен,
+                // сообщение доходило, а вторая галочка не появлялась (жалоба 30.09).
+                // Теперь оно может прийти и напрямую (RustBridge.sendDeliveryAck), здесь его
+                // узнаём и помечаем своё сообщение доставленным. Строка служебная.
                 //
-                // Подтверждения ходили только через брокера (MQTT): если он
-                // недоступен, сообщение доходило, а вторая галочка не
-                // появлялась никогда - жалоба владельца 30.09. Теперь оно
-                // может прийти и напрямую (RustBridge.sendDeliveryAck), здесь
-                // его узнаём и помечаем своё сообщение доставленным. Строка
-                // служебная - в переписку не попадает.
-                //
-                // Raw ACKs are handled before the self-node filter above. Keep
-                // this guard for legacy sealed ACKs from older senders: their
-                // prefix only becomes visible after MessageSealer.open().
+                // Raw ACKs are handled before the self-node filter above; keep this guard
+                // for legacy sealed ACKs, whose prefix shows only after MessageSealer.open().
                 if (DeliveryAckWire.isPacket(text)) {
                     val ackedId = DeliveryAckWire.messageId(text)
                     if (ackedId != null) {
@@ -2604,21 +2599,14 @@ class CoreServerService : Service() {
                     return
                 }
 
-                // р239 (ВАЖНО): «печатает…» - мимолётный служебный сигнал, в
-                // переписке ему места нет. Разбирается ЗДЕСЬ, до зеркала,
-                // авто-создания контакта и сохранения.
-                //
-                // Ловушка, из-за которой это правило появилось: r235 поставил
-                // разбор только в routeIncomingEnvelope (резервный путь CF), а
-                // основной приём P2P живёт здесь - и пакет APUTYP1|1 лёг в чат
-                // сообщением с уведомлением (владелец, скрины 30.09). Поэтому
-                // рядом добавлен и страж в ChatRepository.saveIncomingMessage.
-                // Ранг и сердечки едут в ТОЙ ЖЕ обёртке APUTYP1, что и
-                // «печатает…». Разбирать их надо РАНЬШЕ индикатора набора:
-                // зеркальный и релейный пути так и делают, а основной путь
-                // читал конверт как «перестал печатать» и молча терял ранг -
-                // значок VIP не появлялся, хотя собеседник давно VIP.
-                if (heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text)) {
+                // р239 (ВАЖНО): «печатает…» - мимолётный сигнал, в переписке места нет.
+                // Разбирается ЗДЕСЬ, до зеркала, авто-создания контакта и сохранения:
+                // r235 поставил разбор только в routeIncomingEnvelope (резервный путь CF),
+                // и пакет APUTYP1|1 лёг в чат с уведомлением (владелец, скрины 30.09);
+                // поэтому рядом есть страж и в ChatRepository.saveIncomingMessage.
+                // Ранг и сердечки едут в ТОЙ ЖЕ обёртке APUTYP1 - разбирать их надо РАНЬШЕ
+                // индикатора набора, иначе ранг терялся и VIP-значок не появлялся.
+                if (routeRankOrHeartPacket(heartGameNetwork, peerRankRouter, senderId, text)) {
                     runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
                     Log.i(TAG, "Rank/heart envelope handled before typing (main path)")
                     return
@@ -2659,15 +2647,12 @@ class CoreServerService : Service() {
                         return
                     }
 
-                    // Группы: APUGRP1-конверт разбирается здесь же, ДО авто-создания
-                    // контакта. Иначе каждое групповое событие превратилось бы в личный
-                    // чат с отправителем.
-                    // Раунд 129: ССЫЛКА на гифку - сам контент сообщения
-                    // («APUGIFREF1|<sha>»). Перехватывается здесь: в чат
-                    // ложится карточка от лица отправителя, байты каждый
-                    // телефон тихо тянет с хранителей. Даже если конверт
-                    // утечёт через запасной путь доставки и сохранится как
-                    // обычное сообщение - экран чата рисует по нему карточку.
+                    // Группы: APUGRP1 разбирается здесь же, ДО авто-создания контакта,
+                    // иначе групповое событие стало бы личным чатом с отправителем.
+                    // Раунд 129: ССЫЛКА на гифку - сам контент («APUGIFREF1|<sha>»): в чат
+                    // ложится карточка от лица отправителя, байты телефон тянет с хранителей.
+                    // Даже если конверт утечёт запасным путём и сохранится обычным
+                    // сообщением - экран чата рисует по нему карточку.
                     if (com.vladimir.messenger.data.gif.GifLibrary.isGifRef(text)) {
                         val refSha = com.vladimir.messenger.data.gif.GifLibrary.gifRefSha(text)
                         if (refSha != null) {
@@ -2839,12 +2824,8 @@ class CoreServerService : Service() {
                     // Разбирается ДО авто-создания контакта: иначе служебная
                     // строка создала бы чат с мусорным текстом у того, кто ещё
                     // не добавил этого человека.
-                    if (heartGameNetwork.routeIncoming(senderId, text) || peerRankRouter.routeIncoming(senderId, text)) {
-                        try {
-                            RustBridge.sendDeliveryAck(messageId, senderId)
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Rank packet ACK failed: " + e.message)
-                        }
+                    if (routeRankOrHeartPacket(heartGameNetwork, peerRankRouter, senderId, text)) {
+                        acknowledgeRankPacket(messageId, senderId, "Rank packet")
                         return
                     }
 
@@ -3173,13 +3154,17 @@ class CoreServerService : Service() {
                 updateNotification(notificationText(status, RustBridge.connectedPeers()))
 
                 if (status == "connected") {
-                    try {
-                        val retried = chatRepository.retryAllPendingMessages()
-                        if (retried > 0) {
-                            Log.i(TAG, "Retried $retried pending messages after connected")
+                    // Вне обработчика: вызов ядра блокирующий (до 10 с), и пока
+                    // он ждал, входящие сообщения стояли в очереди событий.
+                    serviceScope.launch {
+                        try {
+                            val retried = chatRepository.retryAllPendingMessages()
+                            if (retried > 0) {
+                                Log.i(TAG, "Retried $retried pending messages after connected")
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Retry all pending failed", e)
                         }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Retry all pending failed", e)
                     }
                     serviceScope.launch {
                         try {
@@ -3309,9 +3294,6 @@ class CoreServerService : Service() {
 
         const val EXTRA_DISPLAY_NAME = "display_name"
         const val POLL_INTERVAL_MS = 5000L
-        // K3: шаг опроса, пока события приходят пучком (идёт файл): кусок
-        // не ждёт следующего полного цикла, ACK-окно отправителя движется.
-        private const val BUSY_POLL_INTERVAL_MS = 100L
         private const val BUSY_BATCH = 8
         /** Под каким именем нас уже записал справочник. */
         private const val REGISTRY_NAME_KEY = "registry_registered_name"

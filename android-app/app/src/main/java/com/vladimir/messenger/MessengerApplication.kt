@@ -121,6 +121,7 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
         com.vladimir.messenger.service.UpdateNotifier(applicationContext).ensureChannel()
         scheduleUpdateChecks()
         scheduleBoundedRelayWake()
+        scheduleServiceWatchdog()
         runCatching { com.vladimir.messenger.data.maintenance.AutomaticMaintenance.schedule(this) }
             .onFailure { Log.w("MessengerApp", "Maintenance scheduling deferred", it) }
         // Restore work after a crash between committing a hidden letter and enqueueing its timer.
@@ -250,6 +251,39 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
             )
         } catch (error: Exception) {
             Log.e("MessengerApp", "Failed to schedule M8 bounded relay wake", error)
+        }
+    }
+
+    /**
+     * Сторож доставки: раз в пятнадцать минут проверить, жива ли служба, и
+     * поднять её, если приложение убили. Это то, что у Telegram делает push:
+     * системный механизм, который работает без открытого приложения и
+     * переживает перезапуск телефона (решение владельца 2026-10-28).
+     */
+    private fun scheduleServiceWatchdog() {
+        try {
+            val request = PeriodicWorkRequestBuilder<com.vladimir.messenger.worker.ServiceWatchdogWorker>(
+                com.vladimir.messenger.worker.ServiceWatchdogWorker.REPEAT_MINUTES,
+                TimeUnit.MINUTES,
+            )
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiresBatteryNotLow(true)
+                        .build(),
+                )
+                .build()
+            WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+                com.vladimir.messenger.worker.ServiceWatchdogWorker.WORK_NAME,
+                // UPDATE, а не KEEP: интервал сторожа — часть поведения
+                // доставки, и после обновления приложения он должен
+                // применяться сразу, а не через старый период.
+                ExistingPeriodicWorkPolicy.UPDATE,
+                request,
+            )
+            Log.i("MessengerApp", "delivery watchdog scheduled every " +
+                com.vladimir.messenger.worker.ServiceWatchdogWorker.REPEAT_MINUTES + " min")
+        } catch (error: Exception) {
+            Log.e("MessengerApp", "Failed to schedule delivery watchdog", error)
         }
     }
 

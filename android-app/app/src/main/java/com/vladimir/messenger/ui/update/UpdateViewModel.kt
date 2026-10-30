@@ -66,13 +66,21 @@ class UpdateViewModel @Inject constructor(
 
     fun downloadUpdate() {
         val release = _uiState.value.updateAvailable ?: return
+        // Второй тап по кнопке, пока идёт первый запрос, ничего не добавляет:
+        // раньше каждый тап ставил в DownloadManager свой файл.
+        if (_uiState.value.isDownloading) return
         _uiState.update { it.copy(isDownloading = true, error = null) }
         viewModelScope.launch {
             try {
                 downloadId = withContext(Dispatchers.IO) { updateChecker.downloadApk(release) }
                 if (downloadId == -1L) _uiState.update { it.copy(isDownloading = false) }
             } catch (e: Exception) {
-                _uiState.update { it.copy(isDownloading = false, error = e.message) }
+                _uiState.update {
+                    it.copy(
+                        isDownloading = false,
+                        error = UpdateDownloadMessages.forError(getApplication<Application>(), e),
+                    )
+                }
             }
         }
     }

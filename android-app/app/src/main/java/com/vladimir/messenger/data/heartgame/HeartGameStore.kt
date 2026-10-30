@@ -107,6 +107,34 @@ object HeartGameStore {
             HeartGameWire.verify(it, System.currentTimeMillis(), { bytes -> uniffi.p2p_core.verifyIdentitySigningBinding(bytes) })
         }.toList()
     }
+    /**
+     * Своё место в таблице лидеров.
+     *
+     * Раньше место считалось только при наличии подписанной привязки личности
+     * ([ownKeyId]): без неё оба счётчика на экране печатали «место №—», хотя
+     * игра включена и сердечки на месте. Привязка - про подпись чужих
+     * достижений, а не про порядок в таблице, поэтому место теперь считается и
+     * без неё: свой результат сравнивается по счёту с уже известными строками.
+     *
+     * При равенстве счёта мы не приписываем себе более высокое место: считаем
+     * только тех, у кого счёта строго больше. Ошибка возможна лишь на «ничьей»
+     * и только в одну строку - зато число правдивое, а не прочерк.
+     *
+     * @return место, начиная с 1, или null, если строку нельзя посчитать вовсе.
+     */
+    suspend fun ownPlace(
+        context: Context,
+        id: String,
+        name: String,
+        nowMs: Long = System.currentTimeMillis(),
+    ): Int? = withContext(Dispatchers.IO) {
+        val rows = runCatching { board(context, id) }.getOrElse { return@withContext null }
+        val ownKey = runCatching { ownKeyId(context) }.getOrNull()
+        val ownScore = runCatching { score(context, id) }.getOrElse { return@withContext null }
+        val own = ownKey?.let { HeartGameWire.Entry(id, name, ownScore, nowMs, "", it) }
+        HeartGameWire.placeOf(rows, ownScore, own)
+    }
+
     suspend fun merge(context: Context, id: String, incoming: List<HeartGameWire.Entry>) = withContext(Dispatchers.IO) {
         lock.withLock {
             val now = System.currentTimeMillis()

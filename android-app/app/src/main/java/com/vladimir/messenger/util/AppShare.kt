@@ -16,52 +16,20 @@ import java.io.File
 object AppShare {
 
     /**
-     * Куда ставить приложение.
-     *
-     * Раунд 218 (владелец: «убери личную информацию»; ещё раунд 157): видимых
-     * ссылок на GitHub больше нет - установочный файл отдаёт наш сервис,
-     * /update/apk всегда раздаёт последний релиз. В чате эта ссылка и вовсе
-     * не видна: приглашение рисуется карточкой с кнопкой «Скачать APU».
+     * Текст приглашения — один в один как у топовых мессенджеров
+     * (`util.InviteText`, владелец 2026-10-30): «Привет! Это Иван. Я в APU —
+     * давай общаться.» и ссылка добавления отдельной строкой. Никаких советов
+     * «вставь ссылку», никакой второй технической ссылки: установочный файл
+     * прикладывается к сообщению ниже.
      */
-    const val INSTALL_LINK =
-        "https://p2p-relay.1985vzhem.workers.dev/update/apk"
+    fun inviteText(displayName: String, contactLink: String): String =
+        InviteText.personal(displayName, contactLink)
 
-    /**
-     * Текст приглашения.
-     *
-     * Ссылки всегда стоят ОТДЕЛЬНОЙ строкой и ничего к себе не приклеивают:
-     * мессенджеры распознают ссылку целиком только тогда, когда она начинается
-     * с начала строки и заканчивается переводом строки. Внутри длинной фразы
-     * ссылка переносится по словам и кликабельной становится только её часть.
-     */
-    fun inviteText(displayName: String, contactLink: String): String {
-        val who = displayName.trim().ifBlank { "APU" }
-        return "Привет! Это $who в APU — мессенджере без серверов: " +
-            "сообщения и файлы идут напрямую между телефонами.\n\n" +
-            "Добавь меня в контакты — открой ссылку или вставь её в APU " +
-            "(можно вставить всё сообщение целиком):\n" +
-            contactLink + "\n\n" +
-            "Скачать APU:\n" +
-            INSTALL_LINK
-    }
-
-    /** Текст приглашения в группу/канал: коротко и сразу со ссылкой
-     *  отдельной строкой. Раунд 162: для канала пишем «канал» (владелец:
-     *  «приглашение в канал пишет что в группу»). */
-    fun groupInviteText(groupTitle: String, link: String, isChannel: Boolean = false): String {
-        val title = groupTitle.trim()
-        val head = when {
-            title.isBlank() && isChannel -> "Присоединяйся к моему каналу в APU."
-            title.isBlank() -> "Присоединяйся к моей группе в APU."
-            isChannel -> "Присоединяйся к каналу «$title» в APU."
-            else -> "Присоединяйся к группе «$title» в APU."
-        }
-        return head + "\n\n" +
-            "Открой ссылку или вставь её в APU (можно вставить всё сообщение целиком):\n" +
-            link + "\n\n" +
-            "Скачать APU:\n" +
-            INSTALL_LINK
-    }
+    /** Текст приглашения в группу/канал: одно предложение и ссылка отдельной
+     *  строкой (`util.InviteText`). Раунд 162: для канала пишем «канал»
+     *  (владелец: «приглашение в канал пишет что в группу»). */
+    fun groupInviteText(groupTitle: String, link: String, isChannel: Boolean = false): String =
+        InviteText.community(groupTitle, link, isChannel)
 
     /**
      * Текст приглашения сразу в несколько групп или каналов: по строке на
@@ -70,20 +38,10 @@ object AppShare {
      * получатель видит кнопку «Подписаться», а не «Вступить»; в APU такой
      * текст рисуется карточкой со списком сообществ.
      */
-    fun groupsInviteText(invites: List<GroupInviteRef>): String {
-        if (invites.size == 1) {
-            val single = invites[0]
-            return groupInviteText(single.title, single.link, single.isChannel)
-        }
-        val sb = StringBuilder("Присоединяйся к моим сообществам в APU.\n")
-        for (item in invites) {
-            val title = item.title.trim().ifBlank { if (item.isChannel) "Канал" else "Группа" }
-            sb.append("\n").append(if (item.isChannel) "Канал «" else "Группа «")
-                .append(title).append("»:\n").append(item.link).append("\n")
-        }
-        sb.append("\nСкачать APU:\n").append(INSTALL_LINK)
-        return sb.toString()
-    }
+    fun groupsInviteText(invites: List<GroupInviteRef>): String =
+        InviteText.communities(
+            invites.map { InviteText.Community(it.title, it.link, it.isChannel) },
+        )
 
     /**
      * Поделиться приглашениями сразу в несколько групп или каналов.

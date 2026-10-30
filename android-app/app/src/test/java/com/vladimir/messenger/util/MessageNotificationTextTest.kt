@@ -9,7 +9,7 @@ class MessageNotificationTextTest {
     @Test
     fun legacyInvitationFromNotificationShowsGroupNotTransportLink() {
         val text = "Группа «БВ» в APU.\n" +
-            "https://p2p-relay.1985vzhem.workers.dev/i?slug=Abcdefghijkmnopq&g=group-id&o=pk_owner&a=1"
+            "https://p2p-relay.apuchat.workers.dev/i?slug=Abcdefghijkmnopq&g=group-id&o=pk_owner&a=1"
         val preview = MessageNotificationText.format(text)
         assertTrue(preview.contains("Приглашение в группу «БВ»"))
         assertTrue(preview.contains("Описание не указано"))

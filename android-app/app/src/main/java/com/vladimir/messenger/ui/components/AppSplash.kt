@@ -55,7 +55,13 @@ private const val SPLASH_MAX_MILLIS = 10_000L
 private const val SPLASH_MIN_MILLIS = 900L
 private const val SPLASH_FADE_MILLIS = 420
 
-/** Sharp digital-core scene. Readiness, warm-start bypass and timeout are unchanged. */
+/**
+ * Обложка перед входом: чёткая сцена ядра и роя.
+ *
+ * Когда её показывать, решает [SplashGate]; сам экран держит только время:
+ * ждёт готовности ядра не дольше [SPLASH_MAX_MILLIS], показывает сцену не
+ * меньше [SPLASH_MIN_MILLIS] и уходит за [SPLASH_FADE_MILLIS].
+ */
 @Composable
 fun AppSplash(onFinished: () -> Unit) {
     val coreStage by CoreStatus.stage.collectAsState()

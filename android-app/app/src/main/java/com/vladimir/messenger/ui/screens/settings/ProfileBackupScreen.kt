@@ -71,6 +71,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.vladimir.messenger.data.backup.BackupCipher
 import com.vladimir.messenger.data.backup.BackupSchedule
+import com.vladimir.messenger.data.backup.ProfileBackup
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.ChatWallpaper
 import com.vladimir.messenger.ui.components.HintBubble
@@ -255,14 +256,21 @@ fun ProfileBackupScreen(
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                                 Spacer(Modifier.height(8.dp))
+                                // Копия от другого профиля дополнять не может:
+                                // смешать две личности хуже, чем не восстановиться.
+                                val otherProfile = state.stagedSameProfile == false
                                 Text(
-                                    if (state.hasIdentity) {
-                                        stringResource(R.string.backup_restart_replace)
-                                    } else {
-                                        stringResource(R.string.backup_restart_new)
+                                    when {
+                                        otherProfile -> stringResource(R.string.backup_staged_other_profile)
+                                        state.hasIdentity -> stringResource(R.string.backup_restart_merge)
+                                        else -> stringResource(R.string.backup_restart_new)
                                     },
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    color = if (otherProfile) {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
                                 )
                                 Spacer(Modifier.height(12.dp))
                                 if (state.restarting) {
@@ -274,11 +282,32 @@ fun ProfileBackupScreen(
                                 } else {
                                     Row {
                                         ApuPremiumContentButton(
-                                            onClick = { viewModel.confirmAndExit(onExit = closeApp) },
+                                            onClick = {
+                                                viewModel.confirmAndExit(
+                                                    mode = if (otherProfile) {
+                                                        ProfileBackup.RestoreMode.REPLACE
+                                                    } else {
+                                                        ProfileBackup.RestoreMode.MERGE
+                                                    },
+                                                    onExit = closeApp,
+                                                )
+                                            },
                                             style = DiagnosticsActionStyle.PRIMARY,
                                             enabled = !state.busy,
                                             modifier = Modifier.weight(1f),
-                                        ) { Text(stringResource(R.string.backup_restore_close)) }
+                                        ) {
+                                            Text(
+                                                stringResource(
+                                                    if (otherProfile) {
+                                                        R.string.backup_restore_replace_button
+                                                    } else if (state.hasIdentity) {
+                                                        R.string.backup_restore_merge_button
+                                                    } else {
+                                                        R.string.backup_restore_close
+                                                    },
+                                                )
+                                            )
+                                        }
                                         Spacer(Modifier.width(8.dp))
                                         ApuTextAction(
                                             label = stringResource(R.string.action_cancel),
@@ -287,6 +316,28 @@ fun ProfileBackupScreen(
                                         )
                                     }
                                     Spacer(Modifier.height(10.dp))
+                                    if (state.hasIdentity && !otherProfile) {
+                                        // Осознанный откат к дате копии. Прячем
+                                        // под обычную ссылку: по умолчанию
+                                        // восстановление ничего не удаляет.
+                                        ApuTextAction(
+                                            label = stringResource(R.string.backup_replace_all),
+                                            onClick = {
+                                                viewModel.confirmAndExit(
+                                                    mode = ProfileBackup.RestoreMode.REPLACE,
+                                                    onExit = closeApp,
+                                                )
+                                            },
+                                            enabled = !state.busy,
+                                        )
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(
+                                            stringResource(R.string.backup_replace_all_hint),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        Spacer(Modifier.height(10.dp))
+                                    }
                                     // Ключ не читается, а переписку терять нельзя:
                                     // берём из копии только секреты, база и файлы
                                     // остаются как есть.

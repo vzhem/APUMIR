@@ -35,6 +35,7 @@ import com.vladimir.messenger.service.UpdateNotifier
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.update.UpdateDialog
+import com.vladimir.messenger.ui.update.UpdateDownloadMessages
 import com.vladimir.messenger.MainViewModel
 import com.vladimir.messenger.ui.navigation.Screen
 import com.vladimir.messenger.ui.navigation.MessengerNavGraph
@@ -143,6 +144,17 @@ class MainActivity : ComponentActivity() {
     /** Версия, закрытая «Позже»: в этой сессии не показываем, более новую — покажем. */
     private var dismissedUpdateVersion: String? = null
 
+    /**
+     * Кнопка «Скачать» в окне обновления уже нажата и ждёт ответа.
+     *
+     * Раньше в окно всегда передавалось `isDownloading = false`, поэтому
+     * кнопка оставалась живой, и каждое нажатие ставило в DownloadManager
+     * новую загрузку — у людей качалось по два-три обновления (владелец,
+     * 2026-10-29). Теперь окно блокирует кнопку до ответа, а от повторного
+     * нажатия через полминуты защищает UpdateDownloadGate.
+     */
+    private var updateDownloadPending by mutableStateOf(false)
+
     /** Момент последней проверки обновления (повтор при возврате — не чаще 5 минут). */
     private var lastUpdateCheckAtMs = 0L
 
@@ -151,6 +163,13 @@ class MainActivity : ComponentActivity() {
 
     private var lastHandledInviteUri: String? = null
     private val viewModel: MainViewModel by viewModels()
+
+    /**
+     * Нужна ли обложка прямо сейчас. Правило живёт в [SplashSchedule]: первый
+     * экран процесса - всегда с обложкой, возврат из фона после долгой паузы -
+     * снова с обложкой, поворот экрана - без.
+     */
+    private val splashWanted = mutableStateOf(false)
 
     override fun onResume() {
         super.onResume()
@@ -438,9 +457,33 @@ class MainActivity : ComponentActivity() {
         super.attachBaseContext(com.vladimir.messenger.ui.i18n.AppLanguageHolder.wrap(newBase))
     }
 
+    /**
+     * Пока экран перед человеком, шина событий опрашивается четверть секунды:
+     * входящее сообщение и любое действие друга видны сразу, как смена
+     * аватарки (см. DeliveryCadence). В фоне ритм прежний, чтобы не жечь
+     * батарею.
+     */
+    override fun onStart() {
+        super.onStart()
+        com.vladimir.messenger.service.DeliveryCadence.setForeground(true)
+    }
+
+    override fun onStop() {
+        com.vladimir.messenger.service.DeliveryCadence.setForeground(false)
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // Обложка перед входом: показывается при запуске приложения, как в
+        // Telegram. Раньше тёплое ядро отменяло её полностью, и на телефонах,
+        // где ядро живёт в фоне, обложку не видели вовсе. Поворот экрана её не
+        // повторяет - решение принимает SplashGate.
+        splashWanted.value =
+            com.vladimir.messenger.ui.components.SplashSchedule.gate.onScreenCreated(
+                android.os.SystemClock.elapsedRealtime(),
+            )
         applyIncomingCallWake(intent)
 
         requestNotificationPermission()
@@ -490,12 +533,10 @@ class MainActivity : ComponentActivity() {
         com.vladimir.messenger.data.profile.InvitePrivacyStore.init(this)
         setContent {
             val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
-            // Сплэш показывается при запуске приложения (нажатии на иконку).
-            // Раунд 263: при тёплом старте (ядро уже поднято) заставка не
-            // нужна вовсе - человек сразу в готовом приложении.
-            var showSplash by remember {
-                mutableStateOf(!com.vladimir.messenger.service.CoreStatus.ready.value)
-            }
+            // Обложка перед входом. Правило - в SplashGate: первый экран
+            // процесса и возврат из фона после долгой паузы показывают её,
+            // тёплое ядро больше её не отменяет.
+            val showSplash by splashWanted
             // Роевой спор за @имя: система сняла наше имя - просим новое.
             val usernameConflict by UsernameHolder.conflict.collectAsStateWithLifecycle()
             P2PMessengerTheme(themeMode = themeMode) {
@@ -505,7 +546,7 @@ class MainActivity : ComponentActivity() {
                 // Слой полёта реакций рисуется в самом конце (см. ниже), чтобы
                 // значок летел ПОВЕРХ списка и пузырей, а не обрезался ими.
                 if (showSplash) {
-                    AppSplash(onFinished = { showSplash = false })
+                    AppSplash(onFinished = { splashWanted.value = false })
                 } else {
                 val pendingContact = pendingContactInfo
                 Log.d("MainActivity", "Checking dialog: pendingContact=${pendingContact != null}")
@@ -584,28 +625,36 @@ class MainActivity : ComponentActivity() {
                 if (currentUpdate != null) {
                     UpdateDialog(
                         releaseInfo = currentUpdate,
-                        isDownloading = false,
+                        isDownloading = updateDownloadPending,
                         onDownloadClick = {
-                            val entryPoint = EntryPointAccessors.fromApplication(
-                                applicationContext,
-                                MainActivityEntryPoint::class.java
-                            )
-                            val checker = entryPoint.updateChecker()
-                            lifecycleScope.launch {
-                                val attempt = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                    runCatching { checker.downloadApk(currentUpdate) }
-                                }
-                                attempt.onSuccess { id ->
-                                    updateRelease = null
-                                    val message = if (id == -1L) "Патч собран — открылся установщик"
-                                        else "Скачивание началось. Готовый файл появится в «Настройки → Обновления»."
-                                    android.widget.Toast.makeText(applicationContext, message, android.widget.Toast.LENGTH_LONG).show()
-                                }.onFailure { error ->
-                                    android.widget.Toast.makeText(
-                                        applicationContext,
-                                        error.message ?: "Рой доступен: внешнюю загрузку отложили",
-                                        android.widget.Toast.LENGTH_LONG,
-                                    ).show()
+                            // Второй тап в том же кадре: окно ещё не успело
+                            // перерисоваться, и кнопка визуально жива.
+                            if (!updateDownloadPending) {
+                                updateDownloadPending = true
+                                val entryPoint = EntryPointAccessors.fromApplication(
+                                    applicationContext,
+                                    MainActivityEntryPoint::class.java
+                                )
+                                val checker = entryPoint.updateChecker()
+                                lifecycleScope.launch {
+                                    val attempt = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        runCatching { checker.downloadApk(currentUpdate) }
+                                    }
+                                    attempt.onSuccess { id ->
+                                        updateRelease = null
+                                        android.widget.Toast.makeText(
+                                            applicationContext,
+                                            UpdateDownloadMessages.forStarted(applicationContext, id),
+                                            android.widget.Toast.LENGTH_LONG,
+                                        ).show()
+                                    }.onFailure { error ->
+                                        android.widget.Toast.makeText(
+                                            applicationContext,
+                                            UpdateDownloadMessages.forError(applicationContext, error),
+                                            android.widget.Toast.LENGTH_LONG,
+                                        ).show()
+                                    }
+                                    updateDownloadPending = false
                                 }
                             }
                         },

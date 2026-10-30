@@ -47,7 +47,7 @@ class UpdateChecker @Inject constructor(
          * GitHub и отдаёт сведения (`/update/latest`) и APK (`/update/apk`)
          * со своего домена. Исходник — tools/worker/p2p_relay_worker.js.
          */
-        private const val RELAY_BASE = "https://p2p-relay.1985vzhem.workers.dev"
+        private const val RELAY_BASE = com.vladimir.messenger.data.link.ServiceHost.BASE
 
         /**
          * Раунд 195 (план разгрузки, шаг 4): авто-проверка версии через наш
@@ -501,7 +501,9 @@ class UpdateChecker @Inject constructor(
                 UpdateDiagnosticsStore.markSource(trace, "relay", "up_to_date", latestVersion)
                 return@withContext null
             }
-            val apkUrl = json.optString("apk_url", "").ifBlank { "$RELAY_BASE/update/apk" }
+            // Адрес из ответа принимаем только на нашем домене: в кэше сервиса
+            // мог остаться прежний адрес, и загрузка уходила в никуда.
+            val apkUrl = UpdateLinks.apkDownloadUrl(json.optString("apk_url", ""), RELAY_BASE)
             Log.i(TAG, "New version available via relay: $latestVersion")
             UpdateDiagnosticsStore.markSource(trace, "relay", "update_available", latestVersion)
             ReleaseInfo(
@@ -526,6 +528,62 @@ class UpdateChecker @Inject constructor(
      * @return ID загрузки
      */
     fun downloadApk(releaseInfo: ReleaseInfo, preferOfficial: Boolean = false): Long {
+        // Одна загрузка на версию: окно обновления, «Настройки → Обновления» и
+        // любой другой вход спрашивают разрешение у одного замка. Раньше сторож
+        // жил только внутри одного экрана, и повторные нажатия ставили в
+        // DownloadManager два-три файла (владелец, 2026-10-29).
+        when (
+            val decision = UpdateDownloadGate.request(
+                version = releaseInfo.version,
+                nowMs = System.currentTimeMillis(),
+                hasActiveDownload = hasActiveUpdateDownload(),
+            )
+        ) {
+            UpdateDownloadGate.Decision.Start -> Unit
+            is UpdateDownloadGate.Decision.InFlight ->
+                throw UpdateDownloadBlockedException(inFlight = true, remainingMs = 0L)
+            is UpdateDownloadGate.Decision.Cooldown ->
+                throw UpdateDownloadBlockedException(
+                    inFlight = false,
+                    remainingMs = decision.remainingMs,
+                )
+        }
+        try {
+            return enqueueApk(releaseInfo, preferOfficial)
+        } catch (error: Throwable) {
+            // Задача не встала — замок не должен держать кнопку пятнадцать минут.
+            UpdateDownloadGate.lost(releaseInfo.version)
+            throw error
+        }
+    }
+
+    /**
+     * Есть ли в системе уже начатая загрузка обновления APU.
+     *
+     * `DownloadManager` живёт вне процесса: после перезапуска приложения наш
+     * собственный таймер пуст, а файл всё ещё качается. Заголовки наших
+     * загрузок начинаются с «APU v» (см. ниже), по ним и узнаём свои.
+     */
+    fun hasActiveUpdateDownload(): Boolean = runCatching {
+        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+            ?: return@runCatching false
+        val active = DownloadManager.STATUS_PENDING or DownloadManager.STATUS_RUNNING or
+            DownloadManager.STATUS_PAUSED
+        manager.query(DownloadManager.Query().setFilterByStatus(active))?.use { cursor ->
+            val titleColumn = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
+            while (cursor.moveToNext()) {
+                val title = if (titleColumn >= 0) cursor.getString(titleColumn).orEmpty() else ""
+                if (title.startsWith("APU v")) return@use true
+            }
+            false
+        } ?: false
+    }.getOrDefault(false)
+
+    /**
+     * Поставить загрузку в `DownloadManager`. Вызывать только через
+     * [downloadApk]: замок и проверки роя живут там.
+     */
+    private fun enqueueApk(releaseInfo: ReleaseInfo, preferOfficial: Boolean): Long {
         // An explicit source selection must not silently switch back to peers.
         if (preferOfficial) extendManualWindow(MANUAL_DOWNLOAD_WINDOW_MS)
         if ((!preferOfficial && directSwarmHasNewer(currentAppVersion())) || !externalReleaseAllowedNow()) {
@@ -551,6 +609,9 @@ class UpdateChecker @Inject constructor(
             val patched = runCatching { downloadViaPatch(releaseInfo) }.getOrDefault(false)
             if (patched) {
                 Log.i(TAG, "Delta update applied: v${releaseInfo.version.removePrefix("v")}")
+                // Патч уже собран и установщик открыт: версия не «в полёте»,
+                // но пауза нажатия остаётся — повторный тап не нужен.
+                UpdateDownloadGate.finished(releaseInfo.version)
                 return -1L
             }
             Log.w(TAG, "Delta update failed - falling back to full APK")
@@ -581,6 +642,18 @@ class UpdateChecker @Inject constructor(
         Log.i(TAG, "Download started: ID=$downloadId")
         return downloadId
     }
+
+    /**
+     * Обновление уже качается или только что начато. Отдельный тип, чтобы
+     * интерфейс сказал человеку словами, что происходит, а не показывал
+     * техническую строку из журнала.
+     */
+    class UpdateDownloadBlockedException(
+        val inFlight: Boolean,
+        val remainingMs: Long,
+    ) : IllegalStateException(
+        "update download blocked: inFlight=$inFlight remainingMs=$remainingMs",
+    )
 
         /**
      * Установить скачанный APK через FileProvider.
