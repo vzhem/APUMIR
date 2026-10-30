@@ -120,6 +120,21 @@ class InviteTextContractTest(unittest.TestCase):
                       links)
         self.assertIn("if (!parsed.scheme.equals(\"https\", ignoreCase = true)) return fallback", links)
 
+    def test_the_worker_serves_readable_russian(self):
+        # 2026-10-30: воркер задеплоили, вставив файл через буфер обмена Windows
+        # PowerShell 5.1. Get-Content без -Encoding прочитал UTF-8 как ANSI, и
+        # страницы приглашений показывали «РћС‚РєСЂС‹С‚СЊ РІ APU». Файл в
+        # репозитории обязан оставаться чистым UTF-8, а JSON - с charset.
+        worker_path = ROOT / "tools/worker/p2p_relay_worker.js"
+        raw = worker_path.read_bytes()
+        self.assertFalse(raw.startswith(b"\xef\xbb\xbf"), "BOM ломает вставку в дашборд")
+        text = raw.decode("utf-8")  # иначе исключение: файл перекодирован
+        for marker in ("Открыть в APU", "счётчики сбрасываются при спячке объекта"):
+            self.assertIn(marker, text)
+        self.assertNotIn("\ufffd", text, "в воркере битые символы")
+        self.assertNotIn("РЎ", text, "в воркере мойибаке вместо русского текста")
+        self.assertIn('"Content-Type": "application/json; charset=utf-8"', text)
+
     def test_the_rule_has_a_unit_test(self):
         test = read(
             ROOT / "android-app/app/src/test/java/com/vladimir/messenger/util/InviteTextTest.kt"

@@ -531,7 +531,9 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
-  "Content-Type": "application/json",
+  // charset обязателен: в ответах есть русский текст, и без пометки клиент
+  // показывает его нечитаемым (владелец, 2026-10-30: ответ health).
+  "Content-Type": "application/json; charset=utf-8",
 };
 
 /** Полка — ровно 64 шестнадцатеричных знака (отпечаток никнейма). */
@@ -834,7 +836,7 @@ async function handlePsyncGet(slot, url, request, env) {
     if (!entry) return json({ error: "not found" }, 404);
     return new Response(
       JSON.stringify({ exists: true, time: entry.time, size: entry.size, dev: entry.dev }),
-      { headers: { "Content-Type": "application/json" } },
+      { headers: { "Content-Type": "application/json; charset=utf-8" } },
     );
   }
   const code = (request.headers.get("X-Apu-Code") || "").trim();
@@ -1296,7 +1298,7 @@ function handleAssetLinks() {
   return new Response(JSON.stringify(statements), {
     headers: {
       // Ровно application/json: с другим типом Android файл не принимает.
-      "Content-Type": "application/json",
+      "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "public, max-age=3600",
     },
   });
