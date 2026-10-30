@@ -185,11 +185,11 @@ if ($resp.success) {
     Write-Host ""
     Write-Host "SUCCESS: deployed. Class MqttBridge and binding MQTT_BRIDGE are live." -ForegroundColor Green
     Write-Host "Test 1 - open this address in the phone browser (no console needed):" -ForegroundColor Green
-    Write-Host "  https://p2p-relay.1985vzhem.workers.dev/mqtt/health"
+    Write-Host "  https://p2p-relay.apu.workers.dev/mqtt/health"
     Write-Host '  Expected: {"ok":true,"broker":"apu-mqtt-bridge","bridge_version":2,...}'
     Write-Host "  bridge_version=2 means the fixed bridge is deployed; 501 / ok:false means the MQTT_BRIDGE binding is missing."
     Write-Host "Test 2 - browser console (F12) on any page, paste and press Enter:"
-    Write-Host '  const w = new WebSocket("wss://p2p-relay.1985vzhem.workers.dev/mqtt","mqtt"); w.onopen=()=>console.log("OPEN",w.protocol); w.onclose=e=>console.log("CLOSE",e.code,e.reason);'
+    Write-Host '  const w = new WebSocket("wss://p2p-relay.apu.workers.dev/mqtt","mqtt"); w.onopen=()=>console.log("OPEN",w.protocol); w.onclose=e=>console.log("CLOSE",e.code,e.reason);'
     Write-Host "Expected in 1-2 seconds: OPEN mqtt"
 } else {
     Write-Host "DEPLOY ERROR (send a screenshot):" -ForegroundColor Red

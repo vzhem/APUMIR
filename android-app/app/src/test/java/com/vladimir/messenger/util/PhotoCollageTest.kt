@@ -66,7 +66,7 @@ class PhotoCollageTest {
 
     @Test
     fun captionKeepsLinkWhenTrimmed() {
-        val link = "https://p2p-relay.1985vzhem.workers.dev/i/abc"
+        val link = "https://p2p-relay.apu.workers.dev/i/abc"
         val body = "слово ".repeat(400)
         val text = PhotoShare.buildText("Заголовок", body, link)
         assertTrue(text.length > PhotoShare.MAX_CAPTION_CHARS)

@@ -47,7 +47,7 @@ class UpdateChecker @Inject constructor(
          * GitHub и отдаёт сведения (`/update/latest`) и APK (`/update/apk`)
          * со своего домена. Исходник — tools/worker/p2p_relay_worker.js.
          */
-        private const val RELAY_BASE = "https://p2p-relay.1985vzhem.workers.dev"
+        private const val RELAY_BASE = com.vladimir.messenger.data.link.ServiceHost.BASE
 
         /**
          * Раунд 195 (план разгрузки, шаг 4): авто-проверка версии через наш

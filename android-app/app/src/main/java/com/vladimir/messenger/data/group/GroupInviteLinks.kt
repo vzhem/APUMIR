@@ -13,7 +13,7 @@ import java.util.regex.Pattern
  * Поддерживаемые формы (по образцу util.InviteLinkParser для личных контактов):
  *  - p2pmessenger://group?slug=<slug>
  *  - p2p://group/<slug>
- *  - https://p2p-relay.1985vzhem.workers.dev/i?slug=<slug> (длинная веб-ссылка)
+ *  - https://<наш хост>/i?slug=<slug> (длинная веб-ссылка, хост — data.link.ServiceHost)
  *  - https://t.me/p2p_messenger_relay_bot?start=grp_<slug>
  *
  * Для пересылки наружу с версии 11.70.9 используется КОРОТКАЯ ссылка
@@ -32,7 +32,7 @@ object GroupInviteLinks {
      * убеждается, что ссылки этого хоста можно отдавать APU без вопросов.
      * Тот же хост стоит в intent-filter манифеста - менять только вместе.
      */
-    const val WEB_HOST = "p2p-relay.1985vzhem.workers.dev"
+    const val WEB_HOST = com.vladimir.messenger.data.link.ServiceHost.HOST
 
     /** Официальный домен подписанных приглашений (util.ReferralInviteLink). */
     const val OFFICIAL_HOST = "apumir.app"

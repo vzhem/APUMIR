@@ -223,7 +223,7 @@ const SECONDARY_BROKER_PORT: u16 = 1883;
 /// На обычной сети ветка не выполняется: кто-то из TCP отвечает раньше.
 // Адрес для MqttOptions при WSS-транспорте - ПОЛНЫЙ URL: rumqttc сам
 // достаёт из него домен и порт (split_url), путь остаётся на мосту.
-const WSS_BRIDGE_URL: &str = "wss://p2p-relay.1985vzhem.workers.dev/mqtt";
+const WSS_BRIDGE_URL: &str = "wss://p2p-relay.apu.workers.dev/mqtt";
 const WSS_BRIDGE_PORT: u16 = 443;
 /// Таймаут рукопожатия с WSS-мостом для rumqttc (`NetworkOptions::
 /// connection_timeout`). По умолчанию там 5 с - это TCP+TLS+WebSocket+CONNECT

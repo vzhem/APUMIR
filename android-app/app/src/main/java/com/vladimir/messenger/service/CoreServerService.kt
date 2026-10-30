@@ -1,5 +1,6 @@
 package com.vladimir.messenger.service
 
+import com.vladimir.messenger.data.link.ServiceHost
 import com.vladimir.messenger.data.diagnostics.OperationalDiagnostics
 import com.vladimir.messenger.data.diagnostics.OperationalCounter
 import com.vladimir.messenger.data.diagnostics.DiagnosticPhase
@@ -133,9 +134,8 @@ class CoreServerService : Service() {
      * = «живая метка свежее TTL»: который peers мы зажгли, тех сами и гасятся.
      */
     private val onlineMarked = java.util.Collections.synchronizedSet(mutableSetOf<String>())
-    // Ядро объявляет о себе раз в минуту (было раз в 30 секунд), поэтому
-    // «пропал» = три пропуска подряд = 200 секунд. Уборка тоже реже: она
-    // будит процесс, а быстрее гасить «в сети» смысла нет.
+    // Ядро объявляет о себе раз в минуту (было раз в 30 секунд): «пропал» = три
+    // пропуска подряд = 200 секунд. Уборка реже: она будит процесс, спешить некуда.
     private val PRESENCE_TTL_MS = 200_000L    // ~3 пропущенных MQTT-пульса
     private val PRESENCE_SWEEP_MS = 60_000L
     private val FILE_PUMP_INTERVAL_MS = 20000L
@@ -1199,7 +1199,7 @@ class CoreServerService : Service() {
             }
 
             // Cloudflare Workers relay (основной запасной канал)
-            val cfUrl = prefs.getString("cloudflare_relay_url", "https://p2p-relay.1985vzhem.workers.dev") ?: "https://p2p-relay.1985vzhem.workers.dev"
+            val cfUrl = prefs.getString("cloudflare_relay_url", ServiceHost.BASE) ?: ServiceHost.BASE
             cloudflareRelay = CloudflareRelay(cfUrl, nodeId ?: "", serviceScope)
             cloudflareRelay?.onMessageReceived = { senderId: String, payload: String ->
                 Log.i(TAG, "CF relay payload from $senderId: ${payload.take(50)}")
