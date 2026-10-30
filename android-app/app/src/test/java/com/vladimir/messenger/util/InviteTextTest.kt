@@ -11,7 +11,7 @@ import org.junit.Test
  */
 class InviteTextTest {
 
-    private val link = "https://p2p-relay.apu.workers.dev/s/SDrZhxj8XM"
+    private val link = "https://p2p-relay.apuchat.workers.dev/s/SDrZhxj8XM"
 
     @Test
     fun `the personal invite is one sentence and one link`() {

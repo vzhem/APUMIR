@@ -66,7 +66,7 @@ object ShortLinks {
      *  Раунд 157: apumir.app НЕ принадлежит владельцу - ссылки только
      *  через рабочий хост воркера. Владелец 2026-10-30: в адресе не должно
      *  быть личного, поэтому поддомен аккаунта переименован и хост берётся
-     *  из data.link.ServiceHost («p2p-relay.apu.workers.dev»). */
+     *  из data.link.ServiceHost («p2p-relay.apuchat.workers.dev»). */
     fun build(code: String): String = "https://" + GroupInviteLinks.WEB_HOST + PATH + code
 
     /**

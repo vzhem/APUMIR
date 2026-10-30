@@ -5,10 +5,10 @@ package com.vladimir.messenger.data.link
  *
  * Владелец 2026-10-30: «Сделай проще приглашение, как у топовых мессенджеров» и
  * «`vzhem` и `1985` — личная информация, в видимой ссылке их быть не должно».
- * Поддомен аккаунта Cloudflare переименован (`1985vzhem` → `apu`), поэтому
+ * Поддомен аккаунта Cloudflare переименован (`1985vzhem` → `apuchat`), поэтому
  * ссылка приглашения больше ничего личного не показывает:
  *
- *   https://p2p-relay.apu.workers.dev/s/<код>
+ *   https://p2p-relay.apuchat.workers.dev/s/<код>
  *
  * Раньше этот адрес был скопирован строкой в пяти файлах, и любая смена домена
  * означала пять правок с риском забыть одну. Теперь он здесь, а остальные места
@@ -22,7 +22,7 @@ package com.vladimir.messenger.data.link
 object ServiceHost {
 
     /** Хост без схемы. */
-    const val HOST = "p2p-relay.apu.workers.dev"
+    const val HOST = "p2p-relay.apuchat.workers.dev"
 
     /** Полный адрес сервиса со схемой. */
     const val BASE = "https://$HOST"

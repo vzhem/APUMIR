@@ -127,7 +127,7 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="https"
-                      android:host="p2p-relay.apu.workers.dev"
+                      android:host="p2p-relay.apuchat.workers.dev"
                       android:pathPrefix="/i" />
                 <!-- Короткая ссылка /s/<код>: путь нарочно другой, чем /i,
                      чтобы старые версии APU (они знают только /i) отдавали её

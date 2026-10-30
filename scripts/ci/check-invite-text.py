@@ -11,7 +11,7 @@
    одно предложение плюс ссылка отдельной строкой: без «вставь ссылку»,
    без «Скачать APU», без установочной ссылки в тексте (файл приложен ниже).
 2. В адресе сервиса нет личных данных: хост берётся из `data.link.ServiceHost`
-   и равен `p2p-relay.apu.workers.dev`.
+   и равен `p2p-relay.apuchat.workers.dev`.
 3. Хост совпадает везде, где Android и Rust не умеют ссылаться на Kotlin:
    `AndroidManifest.xml` (intent-filter) и `rust-core` (мост MQTT).
 4. Старого поддомена (`1985vzhem.workers.dev`) не осталось ни в одном месте.
@@ -24,7 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 MAIN = ROOT / "android-app/app/src/main/java/com/vladimir/messenger"
-NEW_HOST = "p2p-relay.apu.workers.dev"
+NEW_HOST = "p2p-relay.apuchat.workers.dev"
 OLD_HOST_PATTERN = re.compile(r"1985vzhem\.workers\.dev")
 
 
