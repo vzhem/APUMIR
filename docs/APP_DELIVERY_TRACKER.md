@@ -72,6 +72,10 @@
 - `UpdateDownloadGateTest` — 9 тестов; `scripts/ci/check-ui-return-contracts.py` —
   13 проверок, подключён шагом в `.github/workflows/build-release.yml`.
 
+Сборка (коммит `5a3aa1f`): `Unit tests (JVM)` 41016978601 — зелёный (164 класса,
+1368 тестов, 0 падений), `Build Release APK` 41016978576 — зелёный.
+Потолки god-файлов опущены (`SettingsScreen` 2911, `CoreServerService` 3305).
+
 ## Скорость доставки: как у аватарки (2026-10-29, после v11.74.463)
 
 Владелец: «смена аватарки у друга видна сразу, а смс идут с задержками или
