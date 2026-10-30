@@ -67,6 +67,11 @@ class CoreServerService : Service() {
     private val NOTIFICATION_ID = 1001
 
     @Inject lateinit var chatRepository: ChatRepository
+
+    /** Досылка офлайн-очереди своим ритмом: коротким шагом, пока есть что слать. */
+    private val chatOutboxPump: ChatOutboxPump by lazy {
+        ChatOutboxPump(appDatabase.messageDao(), chatRepository)
+    }
     @Inject lateinit var contactRepository: ContactRepository
     @Inject lateinit var mtProxyRepository: MtProxyRepository
     @Inject lateinit var notificationHelper: NotificationHelper
@@ -2276,6 +2281,7 @@ class CoreServerService : Service() {
                 val busy = try {
                     RuntimeDiagnostics.measure(DiagnosticOperation.CORE_EVENTS) {
                         val events = RustBridge.drainEvents()
+                        if (events.isNotEmpty()) DeliveryCadence.touch()
                         events.forEach { event -> handleEvent(event) }
                         RustBridge.pendingEvents() > 0L || events.size >= BUSY_BATCH
                     }
@@ -2296,7 +2302,8 @@ class CoreServerService : Service() {
                         Log.e(TAG, "Status polling error", ex)
                     }
                 }
-                delay(if (busy) BUSY_POLL_INTERVAL_MS else POLL_INTERVAL_MS)
+                // Пока экран смотрят - четверть секунды, иначе прежние пять.
+                delay(DeliveryCadence.pollDelayMs(busy))
             }
         }
 
@@ -2305,9 +2312,7 @@ class CoreServerService : Service() {
         // immediately; this cadence must not throttle an active transfer.
         filePumpJob = serviceScope.launch {
             kotlinx.coroutines.delay(INITIAL_FILE_PUMP_DELAY_MS)
-            // Раунд 179: счётчик циклов - очередь сообщений сливаем раз в
-            // минуту (3 цикла по 20 с), независимо от presence-пульсов.
-            var chatQueueCycle = 0
+            chatOutboxPump.start(serviceScope)
             while (isActive) {
                 try {
                     RuntimeDiagnostics.measure(DiagnosticOperation.FILE_PUMP) { fileTransferRouter.pumpOutgoing() }
@@ -2360,16 +2365,9 @@ class CoreServerService : Service() {
                     Log.w(TAG, "Join request pump error: ${ex.message}")
                 }
                 // Раунд 179: недоставленные сообщения (гифки-ссылки и текст
-                // QUEUED_OFFLINE) - сами доехут, когда адресат появится;
-                // пустая очередь стоит один дешёвый запрос.
-                chatQueueCycle++
-                if (chatQueueCycle % 3 == 0) {
-                    try {
-                        RuntimeDiagnostics.measure(DiagnosticOperation.CHAT_RETRY_PUMP) { chatRepository.pumpQueuedOffline() }
-                    } catch (ex: Exception) {
-                        Log.w(TAG, "Chat queue pump error: ${ex.message}")
-                    }
-                }
+                // QUEUED_OFFLINE) досылает свой насос - коротким шагом, пока
+                // есть что досылать (см. ChatOutboxPump; раньше это был один
+                // круг из трёх по двадцать секунд, то есть раз в минуту).
                 delay(FILE_PUMP_INTERVAL_MS)
             }
         }
@@ -3156,13 +3154,17 @@ class CoreServerService : Service() {
                 updateNotification(notificationText(status, RustBridge.connectedPeers()))
 
                 if (status == "connected") {
-                    try {
-                        val retried = chatRepository.retryAllPendingMessages()
-                        if (retried > 0) {
-                            Log.i(TAG, "Retried $retried pending messages after connected")
+                    // Вне обработчика: вызов ядра блокирующий (до 10 с), и пока
+                    // он ждал, входящие сообщения стояли в очереди событий.
+                    serviceScope.launch {
+                        try {
+                            val retried = chatRepository.retryAllPendingMessages()
+                            if (retried > 0) {
+                                Log.i(TAG, "Retried $retried pending messages after connected")
+                            }
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Retry all pending failed", e)
                         }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Retry all pending failed", e)
                     }
                     serviceScope.launch {
                         try {
@@ -3292,9 +3294,6 @@ class CoreServerService : Service() {
 
         const val EXTRA_DISPLAY_NAME = "display_name"
         const val POLL_INTERVAL_MS = 5000L
-        // K3: шаг опроса, пока события приходят пучком (идёт файл): кусок
-        // не ждёт следующего полного цикла, ACK-окно отправителя движется.
-        private const val BUSY_POLL_INTERVAL_MS = 100L
         private const val BUSY_BATCH = 8
         /** Под каким именем нас уже записал справочник. */
         private const val REGISTRY_NAME_KEY = "registry_registered_name"

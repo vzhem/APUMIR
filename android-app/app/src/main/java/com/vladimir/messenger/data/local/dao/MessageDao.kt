@@ -493,4 +493,12 @@ interface MessageDao {
     /** Стереть все сообщения конкретной темы (например, при удалении поста канала). */
     @Query("DELETE FROM messages WHERE chatId = :chatId AND topicId = :topicId")
     suspend fun deleteTopicMessages(chatId: String, topicId: String): Int
+
+    /**
+     * Сколько стоит в офлайн-очереди. Считается вместо выгрузки строк: насосу
+     * досылки нужен только сам факт «есть что досылать», а строки он читает
+     * уже в момент попытки.
+     */
+    @Query("SELECT COUNT(*) FROM messages WHERE isFromMe = 1 AND status = 'QUEUED_OFFLINE'")
+    suspend fun queuedOfflineCount(): Int
 }

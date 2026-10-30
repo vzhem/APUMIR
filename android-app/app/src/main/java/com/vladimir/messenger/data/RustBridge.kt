@@ -550,6 +550,9 @@ object RustBridge {
         // Native send may wait several seconds while holding the engine mutex. Refuse it on
         // main as a final safety net; all production callers must dispatch through IO first.
         if (rejectMainThreadCall("sendMessage(chat=$chatId)")) return false
+        // Отправка - это активность: ближайшие секунды шина событий опрашивается
+        // коротким шагом, и ответ собеседника не ждёт полного цикла.
+        com.vladimir.messenger.service.DeliveryCadence.touch()
         return try {
             // Rust owns the persistent direct/offline mesh send path. A false result means the
             // message remains phone-owned QUEUED_OFFLINE; do not create a transient MQTT session

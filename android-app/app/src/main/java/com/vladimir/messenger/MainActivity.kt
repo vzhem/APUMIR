@@ -445,6 +445,22 @@ class MainActivity : ComponentActivity() {
         super.attachBaseContext(com.vladimir.messenger.ui.i18n.AppLanguageHolder.wrap(newBase))
     }
 
+    /**
+     * Пока экран перед человеком, шина событий опрашивается четверть секунды:
+     * входящее сообщение и любое действие друга видны сразу, как смена
+     * аватарки (см. DeliveryCadence). В фоне ритм прежний, чтобы не жечь
+     * батарею.
+     */
+    override fun onStart() {
+        super.onStart()
+        com.vladimir.messenger.service.DeliveryCadence.setForeground(true)
+    }
+
+    override fun onStop() {
+        com.vladimir.messenger.service.DeliveryCadence.setForeground(false)
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
