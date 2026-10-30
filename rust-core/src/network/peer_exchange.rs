@@ -57,6 +57,11 @@ pub fn valid_node_id(value: &str) -> bool {
 /// addresses must not be distributed as Internet bootstrap endpoints. A global IP can still be
 /// behind NAT/firewall; only a successful exchange proves reachability from this device.
 pub fn is_public_endpoint(addr: SocketAddr) -> bool {
+    // Dual-stack: IPv4-пир, пришедший на сокет `[::]`, выглядит как
+    // `::ffff:a.b.c.d`. Без нормализации он попадал в ветку IPv6 и не проходил
+    // проверку глобального unicast — то есть нормальный IPv4-адрес молча
+    // отбрасывался. Нормализуем до разбора семьи.
+    let addr = super::dual_stack::canonical(addr);
     if addr.port() == 0 { return false; }
     match addr.ip() {
         IpAddr::V4(ip) => {
@@ -80,8 +85,13 @@ pub fn is_public_endpoint(addr: SocketAddr) -> bool {
 }
 
 pub fn usable_local_endpoint(addr: SocketAddr) -> bool {
+    // Та же нормализация, что и в `is_public_endpoint`: локальный адрес из
+    // dual-stack сокета приходит v4-mapped.
+    let addr = super::dual_stack::canonical(addr);
     addr.port() != 0 && !addr.ip().is_unspecified() && !addr.ip().is_multicast()
         && !addr.ip().is_loopback()
+        // link-local без zone id недостижим — не годится и как локальный путь.
+        && !super::dual_stack::is_link_local(addr.ip())
 }
 
 fn canonical<T: Serialize>(domain: &[u8], value: &T) -> Option<Vec<u8>> {
@@ -112,6 +122,10 @@ pub struct AddressLease {
 impl AddressLease {
     pub fn create(identity: &InstalledSigningIdentity, endpoint: SocketAddr, now: i64) -> Option<Self> {
         if !is_public_endpoint(endpoint) || now <= 0 { return None; }
+        // Подписываем нормализованный адрес: иначе один и тот же IPv4 мог быть
+        // подписан в двух видах (`1.1.1.1` и `::ffff:1.1.1.1`), и записи
+        // считались бы разными.
+        let endpoint = super::dual_stack::canonical(endpoint);
         let claims = AddressClaims {
             node_id: identity.legacy_routing_node_id().to_string(), endpoint,
             issued_at_ms: now, expires_at_ms: now.checked_add(ADDRESS_LIFETIME_MS)?,
@@ -836,10 +850,19 @@ mod tests {
             "192.168.1.1:7", "127.0.0.1:7777", "169.254.1.2:7", "0.0.0.0:8", "224.0.0.1:8",
             "192.0.2.1:7777", "198.51.100.1:7777", "203.0.113.1:7777", "8.8.8.8:0",
             "[::1]:7777", "[fe80::1]:7777", "[fc00::1]:7777", "[ff02::1]:7777",
-            "[::ffff:10.0.0.1]:7777", "[2001:db8::1]:7777"] {
+            "[::ffff:10.0.0.1]:7777", "[::ffff:192.168.1.1]:7777",
+            "[2001:db8::1]:7777"] {
             assert!(!is_public_endpoint(bad.parse().unwrap()), "{bad}");
         }
-        for good in ["1.1.1.1:7777", "8.8.8.8:34567", "[2606:4700:4700::1111]:7777"] {
+        for good in [
+            "1.1.1.1:7777",
+            "8.8.8.8:34567",
+            "[2606:4700:4700::1111]:7777",
+            // v4-mapped глобальный IPv4 (приходит с dual-stack сокета) — это
+            // обычный публичный IPv4, а не «непонятный IPv6».
+            "[::ffff:1.1.1.1]:7777",
+            "[::ffff:8.8.8.8]:34567",
+        ] {
             assert!(is_public_endpoint(good.parse().unwrap()), "{good}");
         }
         assert!(!valid_node_id("pk_ab_public"));

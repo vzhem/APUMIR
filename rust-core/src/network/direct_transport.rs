@@ -220,7 +220,9 @@ impl Shared {
         }
         match self.pool.insert(key, conn.clone()).await {
             Ok(()) => {
-                let remote = conn.remote_address();
+                // dual-stack: IPv4-пир приходит сюда как ::ffff:a.b.c.d —
+                // в азбуку адресов он должен попасть обычным IPv4.
+                let remote = super::dual_stack::canonical(conn.remote_address());
                 tracing::info!(
                     "DIRECT: adopted inbound connection from {} at {}",
                     sender,
@@ -528,7 +530,11 @@ async fn read_loop(conn: QuicConnection, shared: Arc<Shared>, inbound: bool) {
             || payload.starts_with(super::peer_assistance::ASSIST_MAGIC) {
             let Some(handler) = &shared.on_bound_frame else { continue; };
             let Ok(binding) = conn.peer_exchange_channel_binding() else { continue; };
-            let result = handler(&payload, binding, conn.remote_address());
+            let result = handler(
+                &payload,
+                binding,
+                super::dual_stack::canonical(conn.remote_address()),
+            );
             (result.sender, result.response)
         } else {
             ((shared.on_frame)(payload), None)
@@ -721,7 +727,8 @@ async fn send_one(
             FramePayload::Plain(bytes) => Cow::Borrowed(bytes.as_slice()),
             FramePayload::Bound(factory) => {
                 let Ok(binding) = conn.peer_exchange_channel_binding() else { return SendOutcome::StreamFailed; };
-                let Some(bytes) = factory(binding, conn.remote_address()) else { return SendOutcome::StreamFailed; };
+                let peer_addr = super::dual_stack::canonical(conn.remote_address());
+                let Some(bytes) = factory(binding, peer_addr) else { return SendOutcome::StreamFailed; };
                 if bytes.len() > super::peer_assistance::MAX_ASSIST_BYTES { return SendOutcome::StreamFailed; }
                 Cow::Owned(bytes)
             }
@@ -814,6 +821,9 @@ async fn acquire(
         );
         return None;
     };
+    // Адрес пришёл из адресной книги, mDNS или QR: v4-mapped сводим к IPv4,
+    // чтобы ключи пула и проверки «публичный/локальный» видели один и тот же адрес.
+    let addr = super::dual_stack::canonical(addr);
 
     let conn = match tokio::time::timeout(
         CONNECT_TIMEOUT,
@@ -862,70 +872,83 @@ async fn acquire(
 /// Серверы пробуются по очереди, каждый с таймаутом `per_server`. Ответы
 /// приходят через боковой канал (обёртка сокета отводит всё, что похоже на
 /// STUN, см. `SharedUdpSocket`).
+///
+/// Резолв теперь dual-stack: раньше из ответа DNS брался только IPv4
+/// (`find(|a| a.is_ipv4())`), то есть в сети с IPv6 мы заведомо ходили по
+/// IPv4 и получали внешний адрес чужого стека. Теперь адреса сервера идут в
+/// порядке предпочтения (IPv6 → IPv4), и при неудаче на одном адресе
+/// пробуется следующий: у `stun.l.google.com` AAAA нет вовсе, у
+/// `stun.cloudflare.com` есть оба.
+///
+/// Возвращается нормализованный адрес: на dual-stack сокете отражение IPv4
+/// приходит как `::ffff:a.b.c.d`, а публиковать его как IPv6 нельзя.
 pub async fn stun_via_side_channel(
     side: &mut UdpSideChannel,
     servers: &[&str],
     per_server: Duration,
 ) -> Option<SocketAddr> {
     use super::ice::{decode_binding_response, encode_binding_request};
-    use std::net::ToSocketAddrs;
+
+    let request = match encode_binding_request() {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("STUN(7777): encode failed: {}", e);
+            return None;
+        }
+    };
 
     for server in servers {
         let server_owned = server.to_string();
         // DNS-резолв блокирующий - выносим из реактора.
-        let resolved = tokio::task::spawn_blocking(move || {
-            server_owned
-                .to_socket_addrs()
-                .ok()
-                .and_then(|mut it| it.find(|a| a.is_ipv4()))
+        let targets = tokio::task::spawn_blocking(move || {
+            super::dual_stack::resolve_ordered(&server_owned)
         })
         .await
-        .ok()
-        .flatten();
-        let Some(target) = resolved else {
+        .unwrap_or_default();
+        if targets.is_empty() {
             tracing::warn!("STUN(7777): cannot resolve {}", server);
             continue;
-        };
-        let request = match encode_binding_request() {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!("STUN(7777): encode failed: {}", e);
-                return None;
-            }
-        };
-        side.drain();
-        if let Err(e) = side.send_to(target, &request).await {
-            tracing::warn!("STUN(7777): send to {} failed: {}", server, e);
-            continue;
         }
-        let deadline = tokio::time::Instant::now() + per_server;
-        loop {
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-            if remaining.is_zero() {
-                tracing::warn!("STUN(7777): {} timed out", server);
-                break;
+        for target in targets {
+            side.drain();
+            if let Err(e) = side.send_to(target, &request).await {
+                tracing::warn!("STUN(7777): send to {} failed: {}", target, e);
+                continue;
             }
-            match tokio::time::timeout(remaining, side.recv()).await {
-                Ok(Some((from, bytes))) => {
-                    if from != target {
-                        // Чужая/запоздалая датаграмма - не наш ответ.
-                        continue;
-                    }
-                    match decode_binding_response(&bytes) {
-                        Ok(addr) => {
-                            tracing::info!("STUN(7777): {} sees us as {}", server, addr);
-                            return Some(addr);
-                        }
-                        Err(e) => {
-                            tracing::warn!("STUN(7777): bad response from {}: {}", server, e);
-                            break;
-                        }
-                    }
-                }
-                Ok(None) => return None, // сокет закрыт
-                Err(_) => {
-                    tracing::warn!("STUN(7777): {} timed out", server);
+            let deadline = tokio::time::Instant::now() + per_server;
+            loop {
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining.is_zero() {
+                    tracing::warn!("STUN(7777): {} timed out", target);
                     break;
+                }
+                match tokio::time::timeout(remaining, side.recv()).await {
+                    Ok(Some((from, bytes))) => {
+                        // Сравниваем нормализованно: ответ на IPv4-запрос
+                        // приходит с v4-mapped источником.
+                        if super::dual_stack::canonical(from)
+                            != super::dual_stack::canonical(target)
+                        {
+                            // Чужая/запоздалая датаграмма - не наш ответ.
+                            continue;
+                        }
+                        match decode_binding_response(&bytes) {
+                            Ok(addr) => {
+                                let addr = super::dual_stack::canonical(addr);
+                                tracing::info!("STUN(7777): {} sees us as {}", target, addr);
+                                return Some(addr);
+                            }
+                            Err(e) => {
+                                tracing::warn!("STUN(7777): bad response from {}: {}", target, e);
+                                break;
+                            }
+                        }
+                    }
+                    Ok(None) => return None, // сокет закрыт
+                    Err(_) => {
+                        tracing::warn!("STUN(7777): {} timed out", target);
+                        break;
+                    }
                 }
             }
         }

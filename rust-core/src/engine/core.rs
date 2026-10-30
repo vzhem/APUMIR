@@ -1249,12 +1249,15 @@ impl P2PCore {
         on_exchange: Option<BoundFrameHandler>,
         on_file_session: Option<FileSessionHandler>,
     ) -> Option<(DirectTransport, crate::network::quic_client::UdpSideChannel)> {
-        let any = std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED);
+        // Dual-stack: привязка к `[::]` (внутри `QuicClient` сокет получает
+        // `only_v6 = false`, то есть принимает и IPv4). Если IPv6 на устройстве
+        // нет, `dual_stack::bind_udp_dual` откатывается на `0.0.0.0` — прежнее
+        // поведение для IPv4-only телефонов сохраняется.
         let mut last_error = String::new();
         for attempt in 0..6u32 {
             let port = if attempt < 5 { quic_port } else { 0 };
             match DirectTransport::start_with_handlers(
-                SocketAddr::new(any, port),
+                crate::network::dual_stack::any_v6(port),
                 Arc::clone(&on_frame),
                 on_inbound.clone(),
                 on_exchange.clone(),
@@ -1970,16 +1973,11 @@ impl P2PCore {
             // QR-подсказки: свои адреса (LAN + публичный) для офферов пэйринга,
             // чтобы сканирующий телефон шёл сразу к нам, а не ждал обнаружения.
             {
-                let mut hints: Vec<String> = if_addrs::get_if_addrs()
-                    .map(|ifaces| {
-                        ifaces
-                            .iter()
-                            .map(|iface| iface.ip())
-                            .filter(|ip| ip.is_ipv4() && !ip.is_loopback())
-                            .map(|ip| format!("{}:{}", ip, port))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                // Свои адреса (LAN + публичный) в формате `SocketAddr`: IPv6
+                // впереди IPv4, без link-local. Раньше фильтр `is_ipv4()`
+                // выбрасывал IPv6 из QR, и в сети только-v6 сканирующий телефон
+                // не получал ни одного рабочего адреса.
+                let mut hints = crate::network::dual_stack::contact_hints(port, 4);
                 if let Some(public) = public_addr.lock().unwrap().map(|a| a.to_string()) {
                     if !hints.contains(&public) {
                         hints.push(public);
@@ -2105,13 +2103,11 @@ impl P2PCore {
         _network: Arc<NetworkManagerFfi>,
         port: u16,
     ) {
-        use tokio::net::TcpListener;
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-        let bind_addr = std::net::SocketAddr::new(
-            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), port
-        );
-        let listener = match TcpListener::bind(bind_addr).await {
+        // Dual-stack с откатом на IPv4: в сети только-v6 слушатель истории на
+        // `0.0.0.0` был недостижим для соседей.
+        let listener = match crate::network::dual_stack::bind_tcp_dual(port).await {
             Ok(l) => {
                 tracing::info!("TCP listener started on {:?}", l.local_addr());
                 l

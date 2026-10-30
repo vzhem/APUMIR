@@ -156,8 +156,15 @@ impl MdnsService {
         public_addr: Option<&str>,
         device_id_hex: Option<&str>,
     ) -> MdnsResult<()> {
-        // Определяем локальный IP
-        let local_ip = get_local_ip()?;
+        // Публикуем ВСЕ пригодные локальные адреса, IPv6 впереди: раньше уходил
+        // один IPv4 (`get_local_ip`), и в сети только-v6 объявление было пустым
+        // по адресу — сосед не мог к нам прийти, хотя mDNS работал.
+        let local_ips = local_addresses()?;
+        let ips_text = local_ips
+            .iter()
+            .map(|ip| ip.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
 
         // TXT-записи с метаданными
         let mut properties: HashMap<String, String> = HashMap::new();
@@ -179,7 +186,7 @@ impl MdnsService {
             SERVICE_TYPE,
             instance_name,
             &hostname,
-            local_ip,
+            ips_text.as_str(),
             port,
             Some(properties),
         )
@@ -243,15 +250,13 @@ impl MdnsService {
                         }
                     }
 
-                    // Извлекаем адрес (берём первый IPv4)
+                    // Извлекаем адрес: предпочитаем глобальный IPv6, откат на
+                    // IPv4. Раньше брался первый IPv4 — в сети только-v6 сосед
+                    // оставался невидимым, хотя его AAAA был в объявлении.
+                    // link-local не берём: он достижим только с zone id,
+                    // которого в `SocketAddr` нет.
                     let addresses = info.get_addresses();
-                    let ip = addresses
-                        .iter()
-                        .find(|a| a.is_ipv4())
-                        .copied()
-                        .or_else(|| addresses.iter().next().copied());
-
-                    let Some(ip) = ip else {
+                    let Some(ip) = super::dual_stack::pick(addresses.iter()) else {
                         continue;
                     };
                     let socket_addr = SocketAddr::new(ip, info.get_port());
@@ -342,26 +347,12 @@ pub fn find_device_endpoint<'a>(
     })
 }
 
-fn get_local_ip() -> MdnsResult<IpAddr> {
-    let addrs = if_addrs::get_if_addrs().map_err(|e| MdnsError::Daemon(e.to_string()))?;
-
-    // Ищем первый non-loopback IPv4
-    for iface in &addrs {
-        let ip = iface.ip();
-        if !ip.is_loopback() && ip.is_ipv4() {
-            return Ok(ip);
-        }
+fn local_addresses() -> MdnsResult<Vec<IpAddr>> {
+    let addrs = super::dual_stack::local_shareable_ips();
+    if addrs.is_empty() {
+        return Err(MdnsError::NoLocalIp);
     }
-
-    // Fallback — любой non-loopback
-    for iface in &addrs {
-        let ip = iface.ip();
-        if !ip.is_loopback() {
-            return Ok(ip);
-        }
-    }
-
-    Err(MdnsError::NoLocalIp)
+    Ok(addrs)
 }
 
 /// Очистить имя от запрещённых mDNS-символов.
@@ -402,13 +393,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_local_ip() {
+    async fn test_local_addresses_are_shareable() {
         // На большинстве систем должен быть хотя бы один non-loopback интерфейс
-        let ip = get_local_ip();
-        match ip {
-            Ok(ip) => {
-                assert!(!ip.is_loopback());
-                println!("✅ Локальный IP определён: {}", ip);
+        match local_addresses() {
+            Ok(list) => {
+                assert!(!list.is_empty());
+                println!("✅ Локальные адреса: {:?}", list);
+                for ip in list {
+                    assert!(!ip.is_loopback());
+                    assert!(!super::dual_stack::is_link_local(ip));
+                }
             }
             Err(_) => {
                 println!("⚠️  Не удалось определить локальный IP (нет сети?) — это нормально в изолированной среде");

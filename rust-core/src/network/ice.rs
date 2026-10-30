@@ -43,6 +43,11 @@ pub const STUN_TIMEOUT: Duration = Duration::from_secs(5);
 pub const STUN_MAGIC_COOKIE: [u8; 4] = [0x21, 0x12, 0xA4, 0x42];
 
 /// Список публичных STUN-серверов (пробуются по очереди).
+///
+/// Резолвятся обе семьи (см. `dual_stack::resolve_ordered`): у
+/// `stun.cloudflare.com` есть AAAA, у `stun.l.google.com` — только A. Отдельный
+/// «IPv6-STUN сервер» не нужен: в сети только-v6 первый же dual-stack хост
+/// ответит по IPv6, а в сети без IPv6 тот же список работает как раньше.
 pub const DEFAULT_STUN_SERVERS: &[&str] = &[
     "stun.cloudflare.com:3478",
     "stun.nextcloud.com:443",
@@ -97,25 +102,53 @@ impl StunClient {
     /// # Возвращает
     /// - Наш публичный `SocketAddr` как его видит STUN-сервер
     pub fn get_external_address(server_addr: &str) -> IceResult<SocketAddr> {
-        // Резолвим hostname в IP
-        let server_socket: SocketAddr = server_addr
-            .to_socket_addrs_first()
-            .map_err(|e| IceError::ResolveError(format!("{}: {}", server_addr, e)))?;
+        // Резолвим hostname: сначала IPv6, затем IPv4 (порядок предпочтения).
+        let targets = resolve_targets(server_addr);
+        if targets.is_empty() {
+            return Err(IceError::ResolveError(format!(
+                "{}: no addresses resolved",
+                server_addr
+            )));
+        }
 
-        // Создаём UDP-сокет
-        let socket = UdpSocket::bind("0.0.0.0:0")?;
+        // Сокет dual-stack: один и тот же годится и для IPv6, и для IPv4.
+        // Телефон без IPv6 получает обычный IPv4-сокет (откат внутри).
+        let socket = super::dual_stack::bind_udp_dual(0)?;
         socket.set_read_timeout(Some(STUN_TIMEOUT))?;
         socket.set_write_timeout(Some(STUN_TIMEOUT))?;
 
-        // Отправляем запрос
         let request_bytes = encode_binding_request()?;
-        socket.send_to(&request_bytes, server_socket)?;
-
-        // Читаем ответ
         let mut buf = [0u8; 2048];
-        let (n, _from) = socket.recv_from(&mut buf).map_err(|_| IceError::Timeout)?;
+        let mut last_error = IceError::AllServersFailed;
 
-        decode_binding_response(&buf[..n])
+        for target in targets {
+            // Ответ на предыдущую попытку мог остаться в буфере: иначе он
+            // будет принят за ответ этого адреса.
+            drain_socket(&socket, &mut buf);
+
+            if let Err(e) = socket.send_to(&request_bytes, target) {
+                last_error = IceError::Io(e);
+                continue;
+            }
+            match socket.recv_from(&mut buf) {
+                // Отражение приходит с того же адреса, но для IPv4 — в виде
+                // v4-mapped: сравниваем и отдаём нормализованно.
+                Ok((n, from))
+                    if super::dual_stack::canonical(from) == super::dual_stack::canonical(target) =>
+                {
+                    return decode_binding_response(&buf[..n])
+                        .map(super::dual_stack::canonical);
+                }
+                Ok(_) => {
+                    last_error = IceError::Timeout;
+                }
+                Err(_) => {
+                    last_error = IceError::Timeout;
+                }
+            }
+        }
+
+        Err(last_error)
     }
 
     /// Попробовать все STUN-серверы по очереди, вернуть первый успешный.
@@ -201,21 +234,33 @@ pub fn looks_like_stun(datagram: &[u8]) -> bool {
 // ВСПОМОГАТЕЛЬНОЕ
 // ═══════════════════════════════════════════════════════════════════
 
-/// Trait для удобного резолва адреса — первый успешный результат.
-trait ResolveFirst {
-    fn to_socket_addrs_first(&self) -> std::io::Result<SocketAddr>;
+/// Порядок попыток по одному серверу: IPv6 впереди, IPv4 следом.
+///
+/// Раньше здесь брался `to_socket_addrs()?.next()` — на dual-stack системе это
+/// мог быть AAAA при сокете, привязанном к `0.0.0.0`, то есть заведомо
+/// нерабочая попытка. Теперь адреса отсортированы и пробуются по очереди.
+fn resolve_targets(server_addr: &str) -> Vec<SocketAddr> {
+    super::dual_stack::resolve_ordered(server_addr)
 }
 
-impl ResolveFirst for &str {
-    fn to_socket_addrs_first(&self) -> std::io::Result<SocketAddr> {
-        use std::net::ToSocketAddrs;
-        self.to_socket_addrs()?.next().ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::AddrNotAvailable,
-                "no addresses resolved",
-            )
-        })
+/// Выбросить всё, что уже лежит в буфере сокета, не блокируясь надолго.
+///
+/// Перед новой попыткой в буфере может быть ответ (или мусор) от предыдущего
+/// адреса; без сброса он был бы принят за ответ текущего.
+fn drain_socket(socket: &UdpSocket, buf: &mut [u8]) {
+    let previous = socket.read_timeout().ok().flatten();
+    if socket
+        .set_read_timeout(Some(Duration::from_millis(10)))
+        .is_err()
+    {
+        return;
     }
+    for _ in 0..4 {
+        if socket.recv_from(buf).is_err() {
+            break;
+        }
+    }
+    let _ = socket.set_read_timeout(previous);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -296,17 +341,28 @@ mod tests {
 
     #[test]
     fn test_resolve_localhost() {
-        let addr = "127.0.0.1:80".to_socket_addrs_first();
-        assert!(addr.is_ok());
-        assert_eq!(addr.unwrap().port(), 80);
+        let addrs = resolve_targets("127.0.0.1:80");
+        assert_eq!(addrs.len(), 1);
+        assert_eq!(addrs[0].port(), 80);
         println!("✅ Резолв localhost работает");
     }
 
     #[test]
     fn test_resolve_bad_address() {
-        let addr = "not-a-real-host.invalid:1234".to_socket_addrs_first();
-        assert!(addr.is_err());
+        // Невалидное имя: пустой список, и `get_external_address` вернёт
+        // ResolveError, а не запаникует.
+        assert!(resolve_targets("not-a-real-host.invalid:1234").is_empty());
+        assert!(StunClient::get_external_address("not-a-real-host.invalid:1234").is_err());
         println!("✅ Резолв невалидного адреса возвращает ошибку");
+    }
+
+    #[test]
+    fn test_v4_mapped_resolution_is_normalized() {
+        // Резолв никогда не отдаёт наружу `::ffff:`: такой адрес дальше
+        // сравнивается с адресом пира и попал бы в каталог как IPv6.
+        for addr in resolve_targets("[::ffff:127.0.0.1]:7777") {
+            assert!(addr.is_ipv4(), "resolve_targets вернул {addr}");
+        }
     }
 
     /// Тест реального обращения к Google STUN.
