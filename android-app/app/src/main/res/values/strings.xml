@@ -1378,6 +1378,11 @@
     <string name="upd_whats_new">Что нового:</string>
     <string name="upd_downloading">Скачивание обновления…</string>
     <string name="upd_later">Позже</string>
+    <string name="upd_download_unknown_error">неизвестная причина</string>
+    <string name="upd_patch_installed">Патч собран — открылся установщик.</string>
+    <string name="upd_download_started">Скачивание началось. Дождитесь окончания — второе нажатие не нужно. Готовый файл появится в «Настройки → Обновления».</string>
+    <string name="upd_download_already_running">Обновление уже скачивается — второй файл не нужен. Готовое появится в «Настройки → Обновления».</string>
+    <string name="upd_download_wait_tpl">Скачивание уже началось. Повторно нажать можно через %1$d с.</string>
     <string name="upd_downloading_short">Скачивается…</string>
     <string name="ucd_title">Имя занято</string>
     <string name="ucd_rules">Латинские буквы, цифры и подчёркивание.</string>

@@ -1293,6 +1293,11 @@
     <string name="upd_whats_new">What’s new:</string>
     <string name="upd_downloading">Downloading the update…</string>
     <string name="upd_later">Later</string>
+    <string name="upd_download_unknown_error">unknown reason</string>
+    <string name="upd_patch_installed">The patch is built — the installer is opening.</string>
+    <string name="upd_download_started">Download started. Please wait for it to finish — no second tap is needed. The finished file will appear under “Settings → Updates”.</string>
+    <string name="upd_download_already_running">The update is already downloading — a second file is not needed. The finished one will appear under “Settings → Updates”.</string>
+    <string name="upd_download_wait_tpl">The download has already started. You can tap again in %1$d s.</string>
     <string name="upd_downloading_short">Downloading…</string>
     <string name="ucd_title">Name is taken</string>
     <string name="ucd_rules">Latin letters, digits and underscores.</string>

@@ -97,13 +97,14 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Check helper, diagnostics, initial-sync, icon and delivery contracts
+      - name: Check helper, diagnostics, initial-sync, icon, delivery and UI-return contracts
         run: |
           python3 scripts/ci/check-online-helper.py
           python3 scripts/ci/check-diagnostics-report.py
           python3 scripts/ci/check-initial-sync-contract.py
           python3 scripts/ci/check-launcher-icon.py
           python3 scripts/ci/check-delivery-cadence.py
+          python3 scripts/ci/check-ui-return-contracts.py
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4

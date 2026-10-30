@@ -969,10 +969,11 @@ private fun SettingsTabContent(
     val muteRevision by viewModel.notificationMuteRevision.collectAsStateWithLifecycle()
     val notificationMuteNowMs = remember(muteRevision) { System.currentTimeMillis() }
     val mqttClipboard = LocalClipboardManager.current
-    // Бегунок справа: видно, где мы в длинном списке.
-    val settingsScrollState = rememberLazyListState()
-    // Смена раздела - всегда с начала списка.
-    LaunchedEffect(section) { settingsScrollState.scrollToItem(0) }
+    // Бегунок справа: видно, где мы в длинном списке. Каждый раздел помнит
+    // свою позицию — возврат в меню на том же месте (см. SettingsScrollMemory).
+    val settingsScrollState = rememberSettingsScrollState(
+        section?.name ?: SettingsScrollMemory.ROOT,
+    )
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
             state = settingsScrollState,

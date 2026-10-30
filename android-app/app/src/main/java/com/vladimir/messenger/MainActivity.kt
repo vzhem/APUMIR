@@ -35,6 +35,7 @@ import com.vladimir.messenger.service.UpdateNotifier
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.update.UpdateDialog
+import com.vladimir.messenger.ui.update.UpdateDownloadMessages
 import com.vladimir.messenger.MainViewModel
 import com.vladimir.messenger.ui.navigation.Screen
 import com.vladimir.messenger.ui.navigation.MessengerNavGraph
@@ -142,6 +143,17 @@ class MainActivity : ComponentActivity() {
 
     /** Версия, закрытая «Позже»: в этой сессии не показываем, более новую — покажем. */
     private var dismissedUpdateVersion: String? = null
+
+    /**
+     * Кнопка «Скачать» в окне обновления уже нажата и ждёт ответа.
+     *
+     * Раньше в окно всегда передавалось `isDownloading = false`, поэтому
+     * кнопка оставалась живой, и каждое нажатие ставило в DownloadManager
+     * новую загрузку — у людей качалось по два-три обновления (владелец,
+     * 2026-10-29). Теперь окно блокирует кнопку до ответа, а от повторного
+     * нажатия через полминуты защищает UpdateDownloadGate.
+     */
+    private var updateDownloadPending by mutableStateOf(false)
 
     /** Момент последней проверки обновления (повтор при возврате — не чаще 5 минут). */
     private var lastUpdateCheckAtMs = 0L
@@ -613,28 +625,36 @@ class MainActivity : ComponentActivity() {
                 if (currentUpdate != null) {
                     UpdateDialog(
                         releaseInfo = currentUpdate,
-                        isDownloading = false,
+                        isDownloading = updateDownloadPending,
                         onDownloadClick = {
-                            val entryPoint = EntryPointAccessors.fromApplication(
-                                applicationContext,
-                                MainActivityEntryPoint::class.java
-                            )
-                            val checker = entryPoint.updateChecker()
-                            lifecycleScope.launch {
-                                val attempt = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                    runCatching { checker.downloadApk(currentUpdate) }
-                                }
-                                attempt.onSuccess { id ->
-                                    updateRelease = null
-                                    val message = if (id == -1L) "Патч собран — открылся установщик"
-                                        else "Скачивание началось. Готовый файл появится в «Настройки → Обновления»."
-                                    android.widget.Toast.makeText(applicationContext, message, android.widget.Toast.LENGTH_LONG).show()
-                                }.onFailure { error ->
-                                    android.widget.Toast.makeText(
-                                        applicationContext,
-                                        error.message ?: "Рой доступен: внешнюю загрузку отложили",
-                                        android.widget.Toast.LENGTH_LONG,
-                                    ).show()
+                            // Второй тап в том же кадре: окно ещё не успело
+                            // перерисоваться, и кнопка визуально жива.
+                            if (!updateDownloadPending) {
+                                updateDownloadPending = true
+                                val entryPoint = EntryPointAccessors.fromApplication(
+                                    applicationContext,
+                                    MainActivityEntryPoint::class.java
+                                )
+                                val checker = entryPoint.updateChecker()
+                                lifecycleScope.launch {
+                                    val attempt = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                        runCatching { checker.downloadApk(currentUpdate) }
+                                    }
+                                    attempt.onSuccess { id ->
+                                        updateRelease = null
+                                        android.widget.Toast.makeText(
+                                            applicationContext,
+                                            UpdateDownloadMessages.forStarted(applicationContext, id),
+                                            android.widget.Toast.LENGTH_LONG,
+                                        ).show()
+                                    }.onFailure { error ->
+                                        android.widget.Toast.makeText(
+                                            applicationContext,
+                                            UpdateDownloadMessages.forError(applicationContext, error),
+                                            android.widget.Toast.LENGTH_LONG,
+                                        ).show()
+                                    }
+                                    updateDownloadPending = false
                                 }
                             }
                         },
