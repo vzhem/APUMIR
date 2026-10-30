@@ -46,6 +46,16 @@ if ([string]::IsNullOrWhiteSpace($Token)) {
     $Token = Read-Host "Paste your Cloudflare API token (Edit Cloudflare Workers template) and press Enter"
 }
 $Token = $Token.Trim()
+# Пустой ввод (просто Enter) раньше уходил проверяться на сервер и возвращал
+# невнятное "(400) Недопустимый запрос" - владелец 2026-10-30 искал причину.
+# Говорим прямо, что не так, и напоминаем путь без токена.
+if ([string]::IsNullOrWhiteSpace($Token)) {
+    Write-Host "ERROR: token is empty." -ForegroundColor Red
+    Write-Host "  1) Cloudflare -> My Profile -> API Tokens -> Create Token -> template 'Edit Cloudflare Workers';" -ForegroundColor Yellow
+    Write-Host "  2) copy the token, run the script again and paste it at the prompt (paste is invisible - that is normal)." -ForegroundColor Yellow
+    Write-Host "  Or deploy without a token: paste tools/worker/p2p_relay_worker.js into the dashboard (Edit code -> Ctrl+A -> Ctrl+V -> Deploy)." -ForegroundColor Yellow
+    exit 1
+}
 $H = @{ "Authorization" = "Bearer $Token" }
 
 Write-Host "=== 2/5 Verifying token ===" -ForegroundColor Cyan
