@@ -37,19 +37,31 @@ API настоящий тег берётся редиректом `https://githu
 больше не доверяет полю как есть. `UpdateLinksTest` — 5 тестов.
 
 **Требуется от владельца: передеплой воркера.** Правки серверные, в установленном APK их нет.
-Деплой дашбордом теряет namespace Durable Object, поэтому — скриптом с тега выпуска:
+Порядок — по канону из `AI_COLLABORATION_NOTES.md` §2 и разбора 2026-10-06: сначала путь без токена
+(файл из тега → дашборд), скрипт держим запасным.
+
+1. Путь без токена (сработал 2026-10-06, привязка `MQTT_BRIDGE` при этом сохраняется):
 
 ```
-powershell -ExecutionPolicy Bypass -File .\deploy-mqtt-bridge.ps1 -Ref v11.74.469
+Set-Location C:\APU-M8
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/vzhem/APUMIR/v11.74.469/tools/worker/p2p_relay_worker.js" -OutFile "$env:USERPROFILE\Desktop\p2p_relay_worker.js"
+Select-String -Path "$env:USERPROFILE\Desktop\p2p_relay_worker.js" -Pattern "latestTagFromRedirect","withCurrentApkUrl"
 ```
 
-(файл `tools/worker/deploy-mqtt-bridge.ps1`, нужен токен «Edit Cloudflare Workers»; скрипт сам
-скачивает `tools/worker/p2p_relay_worker.js` из указанного тега).
+   Две найденные строки = файл из нужного тега (1529 строк). Дальше Cloudflare → Workers & Pages →
+   `p2p-relay` → Edit code → Ctrl+A → вставить содержимое файла → Deploy.
 
-**Выпуск.** Тег `v11.74.469` на `12f27e1`; сборка по тегу 41075633080 зелёная; релиз 429178532
-опубликован как **Latest** (`draft=false`, `prerelease=false`), `app-release.apk` **232946511** байт
-и `SHA256SUMS.txt` (82 байта), `/releases/latest` возвращает `v11.74.469`.
-Текст — `docs/RELEASE_NOTES_v11.74.469.md`. Открытый пункт: передеплой воркера владельцем (команда выше).
+2. Запасной путь — скриптом с токеном «Edit Cloudflare Workers». Запускать **из папки скрипта**,
+   иначе `-File .\deploy-mqtt-bridge.ps1` не найдётся (ошибка `The argument ... does not exist`):
+
+```
+Set-Location C:\APU-M8\tools\worker
+powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy-mqtt-bridge.ps1 -Ref v11.74.469
+```
+
+   Скрипт деплоит из указанного тега; ключи каталога GIF (`tenor-key.txt`/`giphy-key.txt`) он
+   переносит и с живого воркера, если файлов рядом нет (иначе привязки `TENOR_KEY`/`GIPHY_KEY`
+   молча терялись бы вместе со списком привязок).
 
 **Проверка.** `Unit tests (JVM)` 41070416202 и `Build Release APK` 41070416155 — зелёные на `0f9ed29`:
 168 классов, 1393 теста, 0 падений (+1 класс, +5 тестов к v11.74.468). `check-invite-text.py` — 11 проверок.

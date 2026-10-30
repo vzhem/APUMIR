@@ -26,7 +26,7 @@
 #   powershell -ExecutionPolicy Bypass -File .\deploy-mqtt-bridge.ps1 -Ref arena/62ecd7b4-apumir
 # ============================================================================
 
-param([string]$Token = "", [string]$Ref = "v11.74.186")
+param([string]$Token = "", [string]$Ref = "v11.74.469")
 
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -36,8 +36,9 @@ $Script    = "p2p-relay"
 # 2026-10-06: воркер с ИСПРАВЛЕННЫМ разбором MQTT-потока (length пакета -
 # varint; из-за прежнего "1 + len" мост молча не отвечал CONNACK, и телефоны
 # уходили на публичные брокеры). Плюс /mqtt/health со счётчиками.
-# $Ref по умолчанию - тег выпуска v11.74.186 (в нём эта правка воркера). Если
-# правите воркер в ветке - передайте -Ref <ветка>, иначе скачается релизный файл.
+# $Ref по умолчанию - последний выпуск с правками воркера (v11.74.469: адрес APK
+# от текущего домена, версия не застревает из-за лимита GitHub). Если правите
+# воркер в ветке - передайте -Ref <ветка>, иначе скачается релизный файл.
 $WorkerUrl = "https://raw.githubusercontent.com/vzhem/APUMIR/$Ref/tools/worker/p2p_relay_worker.js"
 
 Write-Host "=== 1/5 Token ===" -ForegroundColor Cyan
@@ -131,6 +132,30 @@ if (Test-Path "giphy-key.txt") {
     Write-Host "  GIF catalog: GIPHY_KEY loaded from giphy-key.txt" -ForegroundColor Green
   }
 }
+
+# Ключи каталога GIF могли быть заданы раньше и лежать ТОЛЬКО на сервере
+# (файлов рядом со скриптом нет - например, скрипт запущен из другой папки).
+# Деплой заменяет список привязок целиком, поэтому без этой проверки каталог
+# GIF молча ломался бы: "не настроен" вместо поиска. Читаем текущие привязки
+# и переносим недостающие как есть.
+if (-not $tenorBindings -or -not $giphyBindings) {
+    try {
+        $live = Invoke-RestMethod -Uri "https://api.cloudflare.com/client/v4/accounts/$Account/workers/scripts/$Script/settings" -Headers $H
+        foreach ($b in $live.result.bindings) {
+            if ($b.name -eq "TENOR_KEY" -and -not $tenorBindings -and $b.text) {
+                $tenorBindings = @(@{ type = "plain_text"; name = "TENOR_KEY"; text = $b.text })
+                Write-Host "  GIF catalog: TENOR_KEY kept from the live worker" -ForegroundColor Green
+            }
+            if ($b.name -eq "GIPHY_KEY" -and -not $giphyBindings -and $b.text) {
+                $giphyBindings = @(@{ type = "plain_text"; name = "GIPHY_KEY"; text = $b.text })
+                Write-Host "  GIF catalog: GIPHY_KEY kept from the live worker" -ForegroundColor Green
+            }
+        }
+    } catch {
+        Write-Host "  WARNING: could not read live bindings - if the GIF catalog was configured, it may reset (put tenor-key.txt next to this script)." -ForegroundColor Yellow
+    }
+}
+
 if ($lines -lt 700) {
     Write-Host "ERROR: file looks truncated, download failed." -ForegroundColor Red
     exit 1
