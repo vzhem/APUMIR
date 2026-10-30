@@ -33,9 +33,21 @@
   откат нельзя удалить молча.
 
 **Проверено:** локально — `check-dual-stack.py`, `check-docs-index.py`,
-`check-god-files.py` (зелёные). Сборка Rust/Kotlin из ветки — **не подтверждена
-локально** (в песочнице нет `cargo`), проверяется прогоном `build-release.yml`
-из ветки; до зелёного прогона статус — «в работе».
+`check-god-files.py` (зелёные). Сборка из ветки — **зелёная**:
+`Build Release APK` → run 41122273486 (2026-10-30): Rust собрался под все ABI,
+наборы тестов `helper_policy`, `helper_quality`, `helper_delivery`,
+`peer_assistance`, `peer_exchange`, `direct_transport`, `mqtt_fanout` прошли,
+JVM-тесты прошли, APK подписан. Релиз не создавался (`Create Release` —
+skipped: сборка из ветки не публикует, AGENTS.md п. 4).
+
+Первый прогон той же ветки (41121150518) упал на компиляции тестов mDNS:
+внутри `mod tests` путь `super::dual_stack` вёл в сам `mdns`, а не в
+`network`. Исправлено (`crate::network::dual_stack`), прогон перезапущен.
+
+Новые тесты (`dual_stack::tests`, `ice::tests`, `mdns::tests`) исполняются в
+`ci-core-check` (`cargo test --lib`, маркер `scripts/ci/tests-blocking` есть),
+а не в сборке ветки: список наборов в `build-release.yml` задан в YAML, а его
+агент не пушит (нет права `workflows`).
 
 **Не сделано (следующие шаги, в этом же порядке):**
 
