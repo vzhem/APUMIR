@@ -46,6 +46,11 @@ powershell -ExecutionPolicy Bypass -File .\deploy-mqtt-bridge.ps1 -Ref v11.74.46
 (файл `tools/worker/deploy-mqtt-bridge.ps1`, нужен токен «Edit Cloudflare Workers»; скрипт сам
 скачивает `tools/worker/p2p_relay_worker.js` из указанного тега).
 
+**Выпуск.** Тег `v11.74.469` на `12f27e1`; сборка по тегу 41075633080 зелёная; релиз 429178532
+опубликован как **Latest** (`draft=false`, `prerelease=false`), `app-release.apk` **232946511** байт
+и `SHA256SUMS.txt` (82 байта), `/releases/latest` возвращает `v11.74.469`.
+Текст — `docs/RELEASE_NOTES_v11.74.469.md`. Открытый пункт: передеплой воркера владельцем (команда выше).
+
 **Проверка.** `Unit tests (JVM)` 41070416202 и `Build Release APK` 41070416155 — зелёные на `0f9ed29`:
 168 классов, 1393 теста, 0 падений (+1 класс, +5 тестов к v11.74.468). `check-invite-text.py` — 11 проверок.
 
