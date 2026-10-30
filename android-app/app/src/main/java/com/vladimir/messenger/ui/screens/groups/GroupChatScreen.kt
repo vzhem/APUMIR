@@ -22,7 +22,6 @@ import com.vladimir.messenger.ui.components.PeerAvatar
 import com.vladimir.messenger.ui.components.ApuCircleCheckIndicator
 import com.vladimir.messenger.ui.components.ApuMessageModerationDialog
 import com.vladimir.messenger.ui.components.ApuPollCard
-import com.vladimir.messenger.ui.components.CreatePollDialog
 import com.vladimir.messenger.ui.components.ApuSettingsDangerColor
 import com.vladimir.messenger.ui.components.PeerProfileSheet
 import com.vladimir.messenger.ui.components.apuBubbleSurface
@@ -44,7 +43,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -60,7 +58,6 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import coil.compose.AsyncImage
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
@@ -90,7 +87,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Place
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.LaunchedEffect
 import com.vladimir.messenger.util.GroupFileMarker
 import androidx.compose.material.icons.filled.Lock
@@ -659,6 +655,7 @@ fun GroupChatScreen(
     val displayedError = MessagePinPolicy.visibleError(
         uiState.error, uiState.pinned.size, inMessageFeed = !showTopicsList,
     )
+    TopicFeedVisibilityReporter(viewModel, showTopicsList, uiState.selectedTopicId)
     val selectedTopic = uiState.topics.firstOrNull { it.id == uiState.selectedTopicId }
     val selectedTopicName = selectedTopic?.name
     // Внутри темы группы наверху крупно - сама тема (значок и имя), а
