@@ -5,10 +5,48 @@
 
 ## Где живёт работа
 
-- Линия приложения: `main`. Последний опубликованный стабильный релиз — `v11.74.456` (Latest, 2026-10-27).
+- Линия приложения: `main`. Последний опубликованный стабильный релиз — `v11.74.466` (Latest, 2026-10-30).
 - Рабочая ветка этой сессии: `arena/914e2c4e-apumir`, от коммита `0db65e1` (`main` на 2026-10-27).
 - Все текущие изменения должны попасть только в `arena/914e2c4e-apumir` и собираться вместе с `main`.
 - Другие ветки `arena/*` не удалять без явного разрешения владельца.
+
+## SOS: тема читается только когда её открыли (2026-10-30, после v11.74.465)
+
+Жалоба владельца: «Когда пришли сообщения от кнопки SOS, то когда ещё только начал смотреть темы —
+сообщения сразу отмечаются, что прочитались, хотя внутрь темы ещё не заходил».
+
+**Причина.** При показе списка тем `observeTopics` сам выбирал первую тему (`General`), модель
+запускала её ленту (`observeMessages`) и на каждом обновлении безусловно звала
+`groupRepository.markRead` → `markTopicRead` + `sumTopicUnread`/`setGroupUnread`. Список тем и лента
+живут в одной таблице `group_topics`, поэтому бейджи тем и счётчик группы гасли, даже если внутрь
+никто не заходил. SOS шлёт 3–5 сообщений подряд (`GroupSos.MIN_COUNT/MAX_COUNT`), поэтому тревога
+исчезала за секунды.
+
+**Правило.** Считать прочитанным можно только тогда, когда лента именно этой темы открыта на экране
+И приложение на переднем плане. Список тем, автовыбор темы, свёрнутое приложение и уход с экрана —
+не читают. Вход в тему гасит только её.
+
+- `ui/screens/groups/TopicReadingPolicy.kt` — чистое правило `shouldMarkRead`/`canCaptureUnreadJump`,
+  без Android-зависимостей (7 JVM-тестов в `TopicReadingPolicyTest`, `TopicFeedVisibilityTest`).
+- `ui/screens/groups/TopicFeedVisibility.kt` — хранит `visibleTopicId`/`appResumed`,
+  `canMarkRead(topicId)`; `update(...)` возвращает `true`, когда тема только что стала видимой.
+- `ui/screens/groups/TopicFeedVisibilityReporter.kt` — Compose-репортёр без UI: следит за
+  `currentStateFlow` (`RESUMED`), докладывает `setFeedVisible(topicId, resumed)`, на `onDispose`
+  сбрасывает в `null`.
+- `ui/screens/groups/TopicFeedMessages.kt` — разметка ленты (`visible`) и индекс непрочитанного
+  (`unreadIndex`) вынесены из god-файла модели.
+- `GroupChatViewModel`: `feedVisibility` + `setFeedVisible`; в `observeMessages` после публикации
+  списка стоит `if (!feedVisibility.canMarkRead(topicId)) return@collect` — до `FeedJump` и
+  `markRead`. При открытии темы лента перезапускается, чтобы «первое непрочитанное» захватилось до
+  сброса счётчика.
+- `GroupChatScreen.kt`: одна строка `TopicFeedVisibilityReporter(viewModel, showTopicsList,
+  uiState.selectedTopicId)`; файл остался под потолком god-файлов (2973 ≤ 2975, попутно убраны 4
+  неиспользуемых импорта).
+- `scripts/ci/check-topic-read-contract.py` (8 проверок) — в шаге контрактов `build-release.yml`.
+
+**Проверка.** `Unit tests (JVM)` 41035007716 и `Build Release APK` 41035007629 — зелёные на `07027ab`:
+166 классов, 1381 тест, 0 падений (+2 класса, +13 тестов к v11.74.465). Все `scripts/ci/check-*.py`
+проходят локально.
 
 ## Выпуск v11.74.457 (2026-10-28)
 
