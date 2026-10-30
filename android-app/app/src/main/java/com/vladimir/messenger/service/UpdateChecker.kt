@@ -501,7 +501,9 @@ class UpdateChecker @Inject constructor(
                 UpdateDiagnosticsStore.markSource(trace, "relay", "up_to_date", latestVersion)
                 return@withContext null
             }
-            val apkUrl = json.optString("apk_url", "").ifBlank { "$RELAY_BASE/update/apk" }
+            // Адрес из ответа принимаем только на нашем домене: в кэше сервиса
+            // мог остаться прежний адрес, и загрузка уходила в никуда.
+            val apkUrl = UpdateLinks.apkDownloadUrl(json.optString("apk_url", ""), RELAY_BASE)
             Log.i(TAG, "New version available via relay: $latestVersion")
             UpdateDiagnosticsStore.markSource(trace, "relay", "update_available", latestVersion)
             ReleaseInfo(

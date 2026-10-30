@@ -83,9 +83,42 @@ class InviteTextContractTest(unittest.TestCase):
             for path in base.rglob("*"):
                 if path.suffix not in {".kt", ".xml", ".rs", ".py", ".ps1", ".js", ".mjs"}:
                     continue
+                # UpdateLinksTest держит адрес прежнего домена нарочно: это
+                # пример ответа, который приложение обязано отвергнуть.
+                if path.name == "UpdateLinksTest.kt":
+                    continue
                 if OLD_HOST_PATTERN.search(read(path)):
                     offenders.append(str(path.relative_to(ROOT)))
         self.assertEqual([], offenders, "старый личный поддомен остался в коде")
+
+    def test_the_service_never_hands_out_a_link_on_a_previous_domain(self):
+        # Владелец 2026-10-30: ответ сервиса принёс apk_url прежнего домена —
+        # адрес лежал в кэше вместе с версией. Теперь адрес собирается от
+        # домена текущего запроса, а в кэш не попадает вовсе.
+        worker = read(ROOT / "tools/worker/p2p_relay_worker.js")
+        self.assertIn("function withCurrentApkUrl(cached, request)", worker)
+        self.assertIn('payload.apk_url = new URL("/update/apk", request.url).toString();', worker)
+        self.assertIn("delete stored.apk_url;", worker)
+        # Один вход в кэш — последняя надежда после двух сетевых попыток.
+        self.assertEqual(1, len(re.findall(r"await serveLatestCache\(request, env, ", worker)))
+
+    def test_a_stale_version_cannot_stick_because_of_github_limits(self):
+        # Владелец 2026-10-30: сервис отдавал версию недельной давности, хотя
+        # релизы выходили каждый день. Лимит GitHub API не должен замораживать
+        # номер версии: настоящий тег берём редиректом /releases/latest.
+        worker = read(ROOT / "tools/worker/p2p_relay_worker.js")
+        self.assertIn("async function latestTagFromRedirect()", worker)
+        self.assertIn('redirect: "manual"', worker)
+        self.assertIn("const tag = await latestTagFromRedirect();", worker)
+        self.assertIn('"X-Apu-Cache": "redirect"', worker)
+
+    def test_the_app_downloads_only_from_our_host(self):
+        checker = read(MAIN / "service/UpdateChecker.kt")
+        self.assertIn("UpdateLinks.apkDownloadUrl(", checker)
+        links = read(MAIN / "service/UpdateLinks.kt")
+        self.assertIn("if (!parsed.host.equals(ServiceHost.HOST, ignoreCase = true)) return fallback",
+                      links)
+        self.assertIn("if (!parsed.scheme.equals(\"https\", ignoreCase = true)) return fallback", links)
 
     def test_the_rule_has_a_unit_test(self):
         test = read(
@@ -93,6 +126,10 @@ class InviteTextContractTest(unittest.TestCase):
         )
         self.assertIn("`the invite carries no instructions and no install line`", test)
         self.assertIn("`the invite shows no personal data in the visible text`", test)
+        links_test = read(
+            ROOT / "android-app/app/src/test/java/com/vladimir/messenger/service/UpdateLinksTest.kt"
+        )
+        self.assertIn("`a link from the previous domain is replaced`", links_test)
 
     def test_contract_is_wired_into_release_build(self):
         workflow = read(ROOT / ".github/workflows/build-release.yml")
