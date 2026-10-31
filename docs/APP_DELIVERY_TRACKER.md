@@ -31,11 +31,15 @@
 - Тексты — только `values/strings.xml` + `values-en/strings.xml`
   (`settings_network_broker_*`); контракт — §9 в `scripts/ci/check-dual-stack.py`.
 - Тесты: `OwnBrokerAddressTest` (5 проверок `normalize`, чистый JVM).
-- **Сборка из ветки зелёная:** `Unit tests (JVM)` → run 41183573338 (171 класс,
-  1407 тестов, 0 падений), `Build Release APK` → run 41183573346. До этого упали
-  и исправлены: 41182702941/41182703027 — `Missing return statement` в
+- **Сборка из ветки зелёная:** `Unit tests (JVM)` → run 41183573338 и run
+  41184673830 (171 класс, 1407 тестов, 0 падений), `Build Release APK` → run
+  41183573346 и run 41184673874. До этого упали и исправлены:
+  41182702941/41182703027 — `Missing return statement` в
   `RustBridge.setOwnBroker` и `toIntOrNull` на `Int` в `BrokerSettings`
   (порт по умолчанию приводится к строке).
+- Публичный текст выпуска — `docs/RELEASE_NOTES_v11.74.472.md`; выпуск идёт
+  через PR #82 и тег `v11.74.472` (разрешение владельца: «выпускай релиз для
+  всех, текст не нужно утверждать»).
 
 ## Публичный релиз v11.74.471 (2026-10-31)
 
