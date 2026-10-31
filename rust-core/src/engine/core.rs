@@ -570,6 +570,13 @@ pub struct P2PCore {
     /// K1: один QUIC-endpoint на движок (пул соединений, keep-alive, STUN
     /// с порта 7777). `None` до `start()` и после `stop()`.
     direct: Arc<Mutex<Option<DirectTransport>>>,
+    /// Свой MQTT-брокер в виде, который читает живая сессия.
+    ///
+    /// Список брокеров читается при создании сессии, поэтому одной строки в
+    /// конфиге мало: чтобы новый адрес подействовал без перезапуска
+    /// приложения, сессия должна увидеть его из общего места. `set_own_broker`
+    /// пишет и в конфиг (для следующего старта), и сюда (для текущей сессии).
+    own_broker_shared: Arc<Mutex<Option<(String, u16)>>>,
     /// Настройка «только через relay» с учётом экономии трафика на мобильной
     /// (`set_network_path_policy`). `true` — прямой канал не используется.
     network_path_relay_only: Arc<std::sync::atomic::AtomicBool>,
@@ -648,6 +655,7 @@ impl P2PCore {
             events: Arc::new(EventBus::with_defaults()),
             runtime: None,
             peer_addrs: Arc::new(Mutex::new(HashMap::new())),
+            own_broker_shared: Arc::new(Mutex::new(None)),
             network_path_relay_only: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             public_addr: Arc::new(Mutex::new(None)),
             public_addr_alt: Arc::new(Mutex::new(None)),
@@ -1230,7 +1238,15 @@ impl P2PCore {
                 // Азбука адресов: публичный адрес из брокер-presence — тоже наш.
                 let address_book_mqtt = Arc::clone(&self.address_book);
                 // K4-3: свой брокер из настроек (если задан) - первым.
-                let own_broker_mqtt = self.own_broker_endpoint();
+                // Своё значение — если оно задано (и из конфига на старте, и
+                // из настроек уже во время работы): сессия читает общий слот.
+                {
+                    let mut slot = self.own_broker_shared.lock().unwrap();
+                    if slot.is_none() {
+                        *slot = self.own_broker_endpoint();
+                    }
+                }
+                let own_broker_mqtt = Arc::clone(&self.own_broker_shared);
                 let policy_mqtt = Arc::clone(&self.swarm_first);
                 std::thread::spawn(move || {
                     let rt = tokio::runtime::Builder::new_current_thread()
@@ -2986,7 +3002,7 @@ impl P2PCore {
         relay_queue: Option<Arc<RelayQueue>>,
         relay_custody: Option<Arc<RelayCustody>>,
         presence_scope: Arc<PresenceScope>,
-        own_broker: Option<(String, u16)>,
+        own_broker: Arc<Mutex<Option<(String, u16)>>>,
         address_book: Arc<AddressBook>,
         mut outbound_rx: tokio::sync::mpsc::Receiver<MqttOutboundCommand>,
         policy: Arc<SwarmFirstPolicy>,
@@ -3035,7 +3051,7 @@ impl P2PCore {
                 &node_id,
                 &display_name,
                 Arc::clone(&mqtt_shared_state),
-                own_broker.clone(),
+                own_broker.lock().unwrap().clone(),
             )
             .await {
                 Ok(transport) => {
@@ -3224,7 +3240,7 @@ impl P2PCore {
                 transport = loop {
                     if !Self::await_transport_fallback(&policy, &outbound_rx).await { return; }
                     match Self::connect_ready_mqtt_session(
-                        &node_id, &display_name, Arc::clone(&mqtt_shared_state), own_broker.clone(),
+                        &node_id, &display_name, Arc::clone(&mqtt_shared_state), own_broker.lock().unwrap().clone(),
                     ).await {
                         Ok(session) => break session,
                         Err(error) => {
@@ -3404,7 +3420,7 @@ impl P2PCore {
                             &node_id,
                             &display_name,
                             Arc::clone(&mqtt_shared_state),
-                            own_broker.clone(),
+                            own_broker.lock().unwrap().clone(),
                         )
                         .await {
                             Ok(recovered_transport) => break recovered_transport,
@@ -6533,14 +6549,24 @@ impl P2PCore {
         match parsed {
             Some((host, port)) => {
                 self.config.own_broker = Some(format!("{}:{}", host, port));
+                if let Ok(mut slot) = self.own_broker_shared.lock() {
+                    *slot = Some((host.clone(), port));
+                }
                 tracing::info!("MQTT OWN BROKER: задан {}:{}", host, port);
+                // Живая сессия создана со старым адресом: пусть пересоздастся
+                // сама, без перезапуска приложения (см. `restart_reason`).
+                crate::network::mqtt_transport::note_broker_settings_changed();
                 true
             }
             None => {
                 // Пустая строка - это «выключить свой брокер», а не ошибка.
                 if text.trim().is_empty() {
                     self.config.own_broker = None;
+                    if let Ok(mut slot) = self.own_broker_shared.lock() {
+                        *slot = None;
+                    }
                     tracing::info!("MQTT OWN BROKER: выключен, только публичные");
+                    crate::network::mqtt_transport::note_broker_settings_changed();
                     return true;
                 }
                 tracing::warn!(
@@ -6550,6 +6576,34 @@ impl P2PCore {
                 false
             }
         }
+    }
+
+    /// Проверить, отвечает ли брокер по этому адресу СЕЙЧАС.
+    ///
+    /// Нужно кнопке «Проверить» в настройках: человек вписывает свой сервер и
+    /// до сохранения видит, что там действительно MQTT (а не опечатка или
+    /// закрытый порт). Проверка идёт тем же кодом, что и выбор брокера при
+    /// старте (`multi_broker::probe_broker`), поэтому «проверка прошла» и
+    /// «брокер будет выбран» — одно и то же условие.
+    ///
+    /// Блокирующая: вызывать из фоновой нитки (в приложении это IO-диспетчер).
+    pub fn probe_broker_address(&self, text: String) -> bool {
+        let Some((host, port)) =
+            crate::network::multi_broker::parse_broker_endpoint(&text)
+        else {
+            return false;
+        };
+        let runtime = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                tracing::warn!("MQTT OWN BROKER: probe runtime failed: {}", error);
+                return false;
+            }
+        };
+        runtime.block_on(crate::network::multi_broker::probe_broker(&host, port))
     }
 
     /// Свой брокер, разобранный в `(host, port)`.

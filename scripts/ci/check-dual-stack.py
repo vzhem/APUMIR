@@ -323,6 +323,18 @@ APP = ROOT / "android-app/app/src/main/java/com/vladimir/messenger/MessengerAppl
 need(APP, read(APP), "NetworkPathSettings.applyToCore(this)",
      "политика пути доставки не применяется при запуске приложения")
 
+# ── 9. Свой брокер из настроек (пункт «если публичные недоступны») ──────────
+BROKER_SETTINGS = ROOT / "android-app/app/src/main/java/com/vladimir/messenger/data/swarm/BrokerSettings.kt"
+need(BROKER_SETTINGS, read(BROKER_SETTINGS), "fun normalize(", "пропал разбор адреса своего брокера")
+need(BROKER_SETTINGS, read(BROKER_SETTINGS), "RustBridge.probeOwnBroker(", "пропала проверка доступности брокера")
+need(NETWORK_DIALOG, network_dialog, "BrokerSettings.set(", "поле своего брокера пропало из интерфейса")
+need(APP, read(APP), "BrokerSettings.applyToCore(this)",
+     "свой брокер не применяется при запуске приложения")
+need(ROOT / "rust-core/src/lib.udl", read(ROOT / "rust-core/src/lib.udl"),
+     "boolean probe_own_broker(string host_port);", "проверка брокера не доходит до приложения")
+need(ROOT / "rust-core/src/network/mqtt_transport.rs", read(NETWORK / "mqtt_transport.rs"),
+     "BrokerChanged", "смена брокера не пересоздаёт MQTT-сессию без перезапуска")
+
 if problems:
     for problem in problems:
         print(f"✗ {problem}")

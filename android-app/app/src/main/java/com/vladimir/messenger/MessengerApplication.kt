@@ -74,6 +74,10 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
         // колбэка сети. Иначе выключенный IPv6 успевал подняться на `[::]`
         // до того, как `NetworkMonitor` узнает о сети.
         com.vladimir.messenger.data.swarm.NetworkPathSettings.applyToCore(this)
+        // Свой брокер — тоже до старта службы: список брокеров читается, когда
+        // поднимается MQTT-сессия, и опоздавшее значение не применилось бы до
+        // перезапуска приложения.
+        com.vladimir.messenger.data.swarm.BrokerSettings.applyToCore(this)
         com.vladimir.messenger.data.pairing.DevicePairingController.attach(this)
         com.vladimir.messenger.data.story.StoryStore.attach(this)
         // Отклики на истории (значки и комментарии) живут своим снимком и

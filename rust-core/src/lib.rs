@@ -255,6 +255,13 @@ impl P2PCoreHandle {
         self.inner.lock().unwrap().set_own_broker(host_port)
     }
 
+    /// Отвечает ли брокер по этому адресу прямо сейчас (кнопка «Проверить»).
+    /// `false` — адрес не разобран, порт закрыт или это не MQTT-брокер.
+    /// Блокирующая: в приложении вызывается из фоновой нитки.
+    pub fn probe_own_broker(&self, host_port: String) -> bool {
+        self.inner.lock().unwrap().probe_broker_address(host_port)
+    }
+
     /// K4-1: «свои» для presence (контакты и участники моих групп).
     /// Их ядро обслуживает лично, а в общий топик пишет редкий маяк.
     pub fn set_presence_audience(&self, ids: Vec<String>) -> u32 {

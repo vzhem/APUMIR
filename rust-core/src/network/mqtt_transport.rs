@@ -214,6 +214,28 @@ pub fn mqtt_link_summary() -> String {
 /// [`wait_before_reconnect`].
 static RECONNECT_NOW: AtomicBool = AtomicBool::new(false);
 
+/// Поколение настроек брокера. Меняется, когда человек вписал (или убрал)
+/// СВОЙ брокер в настройках: список брокеров читается при создании сессии, и
+/// без этого сигнала новый адрес подействовал бы только после перезапуска
+/// приложения. Сессия сравнивает поколение со своим и просит пересоздание
+/// через тот же путь, что и «зависшая» сессия (`restart_reason`).
+static BROKER_SETTINGS_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+/// Текущее поколение настроек брокера.
+pub fn broker_settings_generation() -> u64 {
+    BROKER_SETTINGS_GENERATION.load(Ordering::Acquire)
+}
+
+/// Отметить, что настройки брокера изменились.
+///
+/// Следующая итерация сессии увидит расхождение поколений, закроет текущую
+/// сессию и поднимется заново — уже по новому адресу, без перезапуска службы
+/// и без потери очереди (очередь живёт выше транспорта).
+pub fn note_broker_settings_changed() {
+    BROKER_SETTINGS_GENERATION.fetch_add(1, Ordering::AcqRel);
+    wake_reconnect();
+}
+
 /// Разбудить цикл переподключения: сеть могла появиться раньше, чем кончилась
 /// пауза. Безопасно звать сколько угодно раз.
 pub fn wake_reconnect() {
@@ -422,6 +444,9 @@ pub struct MqttTransport {
     secondary_liveness: Arc<MqttLivenessProbe>,
     #[cfg(feature = "mqtt-dual-broker")]
     secondary_ready: Arc<AtomicBool>,
+    /// Поколение настроек брокера, с которым эта сессия создана (см.
+    /// `BROKER_SETTINGS_GENERATION`).
+    broker_generation: u64,
     /// Ephemeral pairing sessions must not clear or publish the persistent presence topic.
     ephemeral: bool,
     node_id: String,
@@ -890,6 +915,7 @@ impl MqttTransport {
             eventloop_task: None,
             eventloop_watchdog_task: None,
             liveness,
+            broker_generation: broker_settings_generation(),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             notification_channel_closed: false,
             has_connected_once: false,
@@ -1893,6 +1919,12 @@ impl MqttTransport {
     pub fn restart_reason(&self) -> Option<MqttRestartReason> {
         if self.shutdown_requested.load(Ordering::Acquire) {
             return None;
+        }
+        // Свой брокер поменяли в настройках: сессия создана со старым адресом,
+        // её надо поднять заново. Это не сбой — причина отдельная, чтобы в
+        // журнале было видно, почему сессия пересоздалась.
+        if self.broker_generation != broker_settings_generation() {
+            return Some(MqttRestartReason::BrokerChanged);
         }
 
         let eventloop_task_finished = self

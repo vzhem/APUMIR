@@ -486,6 +486,51 @@ object RustBridge {
         this.engine?.let { applyPathPolicy(it) }
     }
 
+    /**
+     * Свой MQTT-брокер в том виде, в каком его ждёт ядро.
+     *
+     * `null` — «не трогали»: тогда ядро остаётся с тем, что записано в его
+     * конфиге (переменная сборки `APU_MQTT_BROKER`). Пустая строка — это
+     * осознанное «только публичные брокеры».
+     */
+    @Volatile
+    private var ownBroker: String? = null
+
+    /**
+     * Задать свой брокер. `false` — ядро не разобрало адрес; в этом случае
+     * значение не запоминается, чтобы опечатка не выключила рабочую настройку.
+     */
+    fun setOwnBroker(text: String): Boolean {
+        val core = this.engine
+        if (core == null) {
+            // Ядра ещё нет (старт приложения): запомним и применим при старте.
+            ownBroker = text
+            return true
+        }
+        val accepted = try {
+            core.setOwnBroker(text)
+        } catch (e: Throwable) {
+            Log.w(TAG, "setOwnBroker failed: ${e.message}")
+            false
+        }
+        if (accepted) ownBroker = text
+        accepted
+    }
+
+    /**
+     * Отвечает ли брокер по адресу прямо сейчас. Блокирующая (до 6 с) —
+     * вызывать из фоновой нитки; в приложении это IO-диспетчер.
+     */
+    fun probeOwnBroker(text: String): Boolean {
+        val core = this.engine ?: return false
+        return try {
+            core.probeOwnBroker(text)
+        } catch (e: Throwable) {
+            Log.w(TAG, "probeOwnBroker failed: ${e.message}")
+            false
+        }
+    }
+
     /** Настройки пути доставки, которые надо применить к новому движку. */
     private data class PathPolicy(
         val relayOnly: Boolean = false,
@@ -505,6 +550,12 @@ object RustBridge {
         // Kill-switch IPv6 — до `start()`: он влияет на привязку сокетов.
         runCatching { core.setIpv6Enabled(policy.ipv6) }
             .onFailure { Log.w(TAG, "setIpv6Enabled failed: ${it.message}") }
+        // Свой брокер — тоже до `start()`: список брокеров читается, когда
+        // поднимается MQTT-сессия.
+        ownBroker?.let { saved ->
+            runCatching { core.setOwnBroker(saved) }
+                .onFailure { Log.w(TAG, "setOwnBroker failed: ${it.message}") }
+        }
         runCatching {
             core.setNetworkPathPolicy(
                 relayOnly = policy.relayOnly,
