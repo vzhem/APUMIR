@@ -28,6 +28,10 @@ object RustBridge {
     @Volatile
     private var engine: P2pCoreHandle? = null
 
+    /** Запомненная политика пути доставки (см. `setNetworkPathPolicy`). */
+    @Volatile
+    private var pathPolicy: PathPolicy? = null
+
     @Volatile
     private var engineRunning: Boolean = false
 
@@ -259,6 +263,10 @@ object RustBridge {
 
             // Apply saved consent before the first inbound packet, including worker wakeups.
             applyOnlineHelperPolicy(e)
+            // Настройки пути доставки и kill-switch IPv6 — до `start()`: сокеты
+            // привязываются там, и выключенный IPv6 обязан быть выключен уже к
+            // этому моменту.
+            applyPathPolicy(e)
             val ok = e.start()
             if (ok) {
                 engine = e
@@ -457,9 +465,8 @@ object RustBridge {
      * поэтому одного вызова при старте службы и при переключении достаточно.
      */
     fun setIpv6Enabled(enabled: Boolean) {
-        val core = this.engine ?: return
-        runCatching { core.setIpv6Enabled(enabled) }
-            .onFailure { Log.w(TAG, "setIpv6Enabled failed: ${it.message}") }
+        pathPolicy = currentPathPolicy().copy(ipv6 = enabled)
+        this.engine?.let { applyPathPolicy(it) }
     }
 
     /**
@@ -469,14 +476,40 @@ object RustBridge {
      * подействует после его старта.
      */
     fun setNetworkPathPolicy(relayOnly: Boolean, saveTraffic: Boolean, metered: Boolean) {
-        // Полное имя поля: локальная переменная с тем же именем дала бы
-        // «unresolved reference» внутри собственного инициализатора.
-        val core = this.engine ?: return
+        // Значение запоминаем даже без ядра: `NetworkMonitor` узнаёт о сети
+        // раньше, чем служба поднимает движок, и настройка не должна потеряться.
+        pathPolicy = currentPathPolicy().copy(
+            relayOnly = relayOnly,
+            saveTraffic = saveTraffic,
+            metered = metered,
+        )
+        this.engine?.let { applyPathPolicy(it) }
+    }
+
+    /** Настройки пути доставки, которые надо применить к новому движку. */
+    private data class PathPolicy(
+        val relayOnly: Boolean = false,
+        val saveTraffic: Boolean = false,
+        val metered: Boolean = false,
+        val ipv6: Boolean = true,
+    )
+
+    private fun currentPathPolicy(): PathPolicy = pathPolicy ?: PathPolicy()
+
+    /**
+     * Применить запомненную политику к живому движку. Ошибки только в лог:
+     * настройка пути не должна мешать старту ядра.
+     */
+    private fun applyPathPolicy(core: P2pCoreHandle) {
+        val policy = currentPathPolicy()
+        // Kill-switch IPv6 — до `start()`: он влияет на привязку сокетов.
+        runCatching { core.setIpv6Enabled(policy.ipv6) }
+            .onFailure { Log.w(TAG, "setIpv6Enabled failed: ${it.message}") }
         runCatching {
             core.setNetworkPathPolicy(
-                relayOnly = relayOnly,
-                saveTraffic = saveTraffic,
-                metered = metered,
+                relayOnly = policy.relayOnly,
+                saveTraffic = policy.saveTraffic,
+                metered = policy.metered,
             )
         }.onFailure { Log.w(TAG, "setNetworkPathPolicy failed: ${it.message}") }
     }
