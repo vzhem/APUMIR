@@ -69,6 +69,11 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
 
     override fun onCreate() {
         super.onCreate()
+        // Политика пути доставки и kill-switch IPv6 — ДО старта службы: ядро
+        // применяет запомненное в момент привязки сокетов, а не после первого
+        // колбэка сети. Иначе выключенный IPv6 успевал подняться на `[::]`
+        // до того, как `NetworkMonitor` узнает о сети.
+        com.vladimir.messenger.data.swarm.NetworkPathSettings.applyToCore(this)
         com.vladimir.messenger.data.pairing.DevicePairingController.attach(this)
         com.vladimir.messenger.data.story.StoryStore.attach(this)
         // Отклики на истории (значки и комментарии) живут своим снимком и

@@ -317,6 +317,11 @@ direct_text = read(DIRECT_TEXT)
 need(CORE, core, "ipv6={}", "ядро не сообщает, включён ли IPv6 в настройках")
 need(DIRECT_TEXT, direct_text, "ipv6Enabled", "приложение не разбирает kill-switch из строки ядра")
 need(DIRECT_TEXT, direct_text, "IPv6 выключен в настройках", "приложение не объясняет выключенный IPv6")
+# Политика пути обязана быть известна ДО старта службы: иначе выключенный
+# IPv6 успевает поднять `[::]`, пока `NetworkMonitor` ещё не позвонил.
+APP = ROOT / "android-app/app/src/main/java/com/vladimir/messenger/MessengerApplication.kt"
+need(APP, read(APP), "NetworkPathSettings.applyToCore(this)",
+     "политика пути доставки не применяется при запуске приложения")
 
 if problems:
     for problem in problems:
