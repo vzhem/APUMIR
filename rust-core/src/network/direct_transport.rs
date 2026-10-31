@@ -563,8 +563,10 @@ async fn run_accept_loop(shared: Arc<Shared>) {
                     if shared.relay_only.load(std::sync::atomic::Ordering::Acquire) {
                         // Настройка запрещает прямой канал: не принимаем и не
                         // усыновляем, чтобы путь был ровно один - relay.
+                        // `return`, а не `continue`: это тело задачи
+                        // (`tokio::spawn`), цикла вокруг нет.
                         conn.close(b"relay only");
-                        continue;
+                        return;
                     }
                     tracing::info!("QUIC: incoming connection from {}", conn.remote_address());
                     read_loop(conn, shared, true).await;
