@@ -452,6 +452,17 @@ object RustBridge {
     }
 
     /**
+     * Kill-switch IPv6: `false` — приложение ходит только по IPv4. Ядро
+     * хранит флаг на процесс (выбор адресов, публикация, привязка сокетов),
+     * поэтому одного вызова при старте службы и при переключении достаточно.
+     */
+    fun setIpv6Enabled(enabled: Boolean) {
+        val core = this.engine ?: return
+        runCatching { core.setIpv6Enabled(enabled) }
+            .onFailure { Log.w(TAG, "setIpv6Enabled failed: ${it.message}") }
+    }
+
+    /**
      * Политика пути доставки: «только через relay» и «экономия трафика на
      * мобильной». Применяется сразу (`set_network_path_policy` в ядре), без
      * перезапуска службы. Ошибку глотаем с логом: без ядра настройка просто

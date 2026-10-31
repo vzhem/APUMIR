@@ -246,6 +246,8 @@
     <string name="settings_network_relay_only_sub">Прямой канал не используется. Включайте там, где прямой обмен запрещён: чужой Wi-Fi, строгий firewall.</string>
     <string name="settings_network_save_traffic_title">Экономия трафика</string>
     <string name="settings_network_save_traffic_sub">В мобильной сети не открывать прямой канал без нужды — сообщения идут через брокер. На Wi-Fi всё как обычно.</string>
+    <string name="settings_network_ipv6_title">Использовать IPv6</string>
+    <string name="settings_network_ipv6_sub">Выключите, если в вашей сети IPv6 объявлен, но не работает: приложение будет ходить только по IPv4. Прямой канал продолжит работать там, где есть IPv4.</string>
     <string name="settings_network_path_note">Действует сразу. Сеть сменилась — соединения поднимаются заново сами, очередь сообщений не теряется.</string>
     <string name="action_copy">Скопировать</string>
     <string name="action_send">Отправить</string>

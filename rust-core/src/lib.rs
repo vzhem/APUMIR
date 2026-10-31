@@ -304,6 +304,15 @@ impl P2PCoreHandle {
         self.inner.lock().unwrap().network_path_suppresses_direct()
     }
 
+    /// Kill-switch IPv6 из настроек: `false` — только IPv4. Флаг общий для
+    /// процесса (см. `network::dual_stack::set_ipv6_enabled`), поэтому
+    /// достаточно выставить его один раз при старте службы и при
+    /// переключении; он действует на следующие привязки сокетов и на выбор
+    /// адресов.
+    pub fn set_ipv6_enabled(&self, enabled: bool) {
+        crate::network::dual_stack::set_ipv6_enabled(enabled)
+    }
+
     pub fn connected_peers(&self) -> u64 {
         self.inner.lock().unwrap().connected_peers() as u64
     }

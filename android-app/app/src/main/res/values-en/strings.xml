@@ -198,6 +198,8 @@
     <string name="settings_network_relay_only_sub">The direct channel is not used. Turn on where direct exchange is banned: public Wi-Fi, strict firewall.</string>
     <string name="settings_network_save_traffic_title">Save traffic</string>
     <string name="settings_network_save_traffic_sub">On mobile data, do not open the direct channel unless needed — messages go through the broker. On Wi-Fi nothing changes.</string>
+    <string name="settings_network_ipv6_title">Use IPv6</string>
+    <string name="settings_network_ipv6_sub">Turn off if your network advertises IPv6 but it does not work: the app will use IPv4 only. The direct channel keeps working wherever IPv4 is available.</string>
     <string name="settings_network_path_note">Applies immediately. When the network changes, connections come back on their own and the message queue is kept.</string>
     <string name="action_copy">Copy</string>
     <string name="action_send">Send</string>

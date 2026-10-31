@@ -28,6 +28,32 @@
 
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, UdpSocket};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Kill-switch IPv6 (настройка «Использовать IPv6», по умолчанию включено).
+///
+/// Зачем. Бывают сети и телефоны, где IPv6 формально есть, но не работает:
+/// оператор отдаёт адрес, а маршрута нет; VPN держит половину стека; роутер
+/// объявляет RA и молчит. Приложение в такой сети пробует IPv6, ждёт таймаут
+/// и только потом берёт IPv4 — для человека это выглядит как «сообщения
+/// доходят с задержкой». Выключенный переключатель убирает v6 из выбора
+/// адресов, из публикации (mDNS, QR) и из привязки сокетов: приложение
+/// работает ровно как до появления IPv6-поддержки.
+static IPV6_ENABLED: AtomicBool = AtomicBool::new(true);
+
+/// Включён ли IPv6 в приложении (kill-switch).
+pub fn ipv6_enabled() -> bool {
+    IPV6_ENABLED.load(Ordering::Relaxed)
+}
+
+/// Переключить IPv6. Действует на следующие привязки сокетов и на выбор
+/// адресов; уже открытые соединения не рвутся (их закроет смена сети или
+/// перезапуск службы).
+pub fn set_ipv6_enabled(enabled: bool) {
+    if IPV6_ENABLED.swap(enabled, Ordering::Relaxed) != enabled {
+        tracing::info!(ipv6_enabled = enabled, "dual-stack: IPv6 switch changed");
+    }
+}
 
 /// `[::]` — «любой» адрес для dual-stack сокета.
 pub fn any_v6(port: u16) -> SocketAddr {
@@ -94,7 +120,16 @@ fn is_special(ip: IpAddr) -> bool {
 /// Отбрасываются: unspecified, loopback, multicast, link-local (нужна зона) и
 /// адреса из `2001:db8::/32` (документация: они не маршрутизируются).
 pub fn reachable(ip: IpAddr) -> bool {
+    reachable_with(ip, ipv6_enabled())
+}
+
+/// `reachable` с явным состоянием kill-switch: чистая функция, чтобы тест не
+/// трогал глобальный флаг (тесты идут параллельно в одном процессе).
+fn reachable_with(ip: IpAddr, ipv6: bool) -> bool {
     let ip = canonical_ip(ip);
+    if !ipv6 && ip.is_ipv6() {
+        return false;
+    }
     if is_special(ip) || is_link_local(ip) {
         return false;
     }
@@ -114,7 +149,15 @@ pub fn reachable(ip: IpAddr) -> bool {
 /// хуже глобального v4 только потому, что глобальный адрес с большей
 /// вероятностью достижим из чужой сети.
 pub fn rank(ip: IpAddr) -> Option<u8> {
+    rank_with(ip, ipv6_enabled())
+}
+
+/// `rank` с явным состоянием kill-switch (см. `reachable_with`).
+fn rank_with(ip: IpAddr, ipv6: bool) -> Option<u8> {
     let ip = canonical_ip(ip);
+    if !ipv6 && ip.is_ipv6() {
+        return None;
+    }
     if is_special(ip) || is_link_local(ip) {
         return None;
     }
@@ -207,6 +250,9 @@ pub fn contact_hints(port: u16, limit: usize) -> Vec<String> {
 /// Если IPv6 на устройстве нет (или адрес занят только под IPv4), — откат на
 /// `0.0.0.0:port`, то есть прежнее поведение.
 pub fn bind_udp_dual(port: u16) -> io::Result<UdpSocket> {
+    if !ipv6_enabled() {
+        return UdpSocket::bind(any_v4(port));
+    }
     match bind_udp_any_v6(port) {
         Ok(socket) => Ok(socket),
         Err(error) => {
@@ -235,6 +281,11 @@ fn bind_udp_any_v6(port: u16) -> io::Result<UdpSocket> {
 /// `0.0.0.0`; на dual-stack он должен принимать и IPv6, иначе в сети только-v6
 /// он бесполезен.
 pub async fn bind_tcp_dual(port: u16) -> io::Result<tokio::net::TcpListener> {
+    if !ipv6_enabled() {
+        let listener = std::net::TcpListener::bind(any_v4(port))?;
+        listener.set_nonblocking(true)?;
+        return tokio::net::TcpListener::from_std(listener);
+    }
     let to_listener = |socket: socket2::Socket| -> io::Result<tokio::net::TcpListener> {
         socket.set_nonblocking(true)?;
         let listener: std::net::TcpListener = socket.into();
@@ -278,6 +329,11 @@ pub fn resolve_ordered(host: &str) -> Vec<SocketAddr> {
         Ok(iter) => iter.map(canonical).collect(),
         Err(_) => return Vec::new(),
     };
+    // Kill-switch: с выключенным IPv6 не пробуем v6 даже как «второй адрес» —
+    // иначе STUN снова начнёт ждать таймаут на неработающем стеке.
+    if !ipv6_enabled() {
+        addrs.retain(|addr| addr.is_ipv4());
+    }
     // Второй ключ — сам адрес: одинаковые адреса обязаны оказаться рядом,
     // иначе `dedup` их не увидит.
     addrs.sort_by_key(|addr| (rank(addr.ip()).unwrap_or(u8::MAX), *addr));
@@ -376,6 +432,25 @@ mod tests {
         let text = SocketAddr::new(ip("2001:db8::1"), 7777).to_string();
         assert_eq!(text, "[2001:db8::1]:7777");
         assert_eq!(text.parse::<SocketAddr>().unwrap(), addr("[2001:db8::1]:7777"));
+    }
+
+    #[test]
+    fn ipv6_kill_switch_leaves_ipv4_path_intact() {
+        // Выключенный IPv6 убирает v6 из выбора и из публикации, но IPv4
+        // остаётся полностью рабочим — иначе «выключить IPv6» сломало бы
+        // сеть на телефоне без v6 вовсе.
+        let v6 = ip("2a00:1450:4001::1");
+        let v4 = ip("91.77.1.2");
+        assert_eq!(rank_with(v6, false), None);
+        assert_eq!(rank_with(v4, false), Some(1));
+        assert!(!reachable_with(v6, false));
+        assert!(reachable_with(v4, false));
+        // Включённый — прежнее поведение (v6 впереди v4).
+        assert_eq!(rank_with(v6, true), Some(0));
+        assert_eq!(rank_with(v4, true), Some(1));
+        // v4-mapped при выключенном v6 — это IPv4, а не «IPv6»: нормализация
+        // идёт раньше проверки стека.
+        assert_eq!(rank_with(addr("[::ffff:91.77.1.2]:7777").ip(), false), Some(1));
     }
 
     #[test]

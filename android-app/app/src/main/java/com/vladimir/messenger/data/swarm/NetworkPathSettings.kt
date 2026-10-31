@@ -28,6 +28,7 @@ object NetworkPathSettings {
     private const val PREFS = "p2p_prefs"
     private const val KEY_RELAY_ONLY = "network_relay_only"
     private const val KEY_SAVE_TRAFFIC = "network_save_traffic"
+    private const val KEY_IPV6 = "network_ipv6_enabled"
 
     /** «Только через relay» сейчас включено? */
     fun relayOnly(context: Context): Boolean =
@@ -36,6 +37,20 @@ object NetworkPathSettings {
     /** «Экономия трафика» сейчас включена? */
     fun saveTraffic(context: Context): Boolean =
         prefs(context).getBoolean(KEY_SAVE_TRAFFIC, false)
+
+    /**
+     * «Использовать IPv6» — kill-switch на случай, когда сеть объявляет IPv6,
+     * но маршрута нет (типичная беда мобильных операторов и VPN). По
+     * умолчанию включено: выключение — осознанный выбор человека.
+     */
+    fun ipv6Enabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_IPV6, true)
+
+    /** Из настроек: пишет в prefs и сразу применяет к ядру. */
+    fun setIpv6Enabled(context: Context, value: Boolean) {
+        prefs(context).edit().putBoolean(KEY_IPV6, value).apply()
+        applyToCore(context)
+    }
 
     /** Из настроек: пишет в prefs и сразу применяет к ядру. */
     fun setRelayOnly(context: Context, value: Boolean) {
@@ -64,6 +79,9 @@ object NetworkPathSettings {
             saveTraffic = saveTraffic(app),
             metered = SwarmSettings.isMetered(app),
         )
+        // Kill-switch IPv6 живёт в том же месте: обе настройки описывают
+        // «каким путём доставлять», и применяются вместе.
+        RustBridge.setIpv6Enabled(ipv6Enabled(app))
     }
 
     private fun prefs(context: Context) =

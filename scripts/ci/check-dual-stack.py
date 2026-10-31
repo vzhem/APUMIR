@@ -248,6 +248,48 @@ need(
     "диалог «Сеть сообщений» должен оставаться вынесенным (потолок god-файла)",
 )
 
+# ── 7. Часть 3: kill-switch IPv6 (не откатить молча) ────────────────────────
+# Сеть бывает с IPv6 «на бумаге»: адрес объявлен, маршрута нет. Переключатель
+# обязан убирать v6 из выбора адресов, из публикации и из привязки сокетов, а
+# IPv4-путь при этом оставаться полностью рабочим.
+need(DUAL_STACK, dual, "pub fn set_ipv6_enabled(", "пропал kill-switch IPv6 в ядре")
+need(DUAL_STACK, dual, "pub fn ipv6_enabled(", "пропало чтение kill-switch IPv6")
+if dual.count("if !ipv6_enabled()") < 3:
+    problems.append(
+        "dual_stack.rs: kill-switch не учитывается в bind_udp_dual/bind_tcp_dual/resolve_ordered"
+    )
+need(
+    DUAL_STACK,
+    dual,
+    "if !ipv6 && ip.is_ipv6()",
+    "kill-switch не влияет на выбор адресов (rank/reachable)",
+)
+need(DUAL_STACK, dual, "fn ipv6_kill_switch_leaves_ipv4_path_intact", "пропал тест kill-switch")
+need(
+    ROOT / "rust-core/src/lib.udl",
+    read(ROOT / "rust-core/src/lib.udl"),
+    "void set_ipv6_enabled(boolean enabled);",
+    "kill-switch IPv6 не доходит до приложения (нет в lib.udl)",
+)
+need(
+    NETWORK_PATH,
+    network_path,
+    "setIpv6Enabled(",
+    "настройка «Использовать IPv6» пропала из приложения",
+)
+need(
+    NETWORK_PATH,
+    network_path,
+    "getBoolean(KEY_IPV6, true)",
+    "kill-switch IPv6 должен быть включён по умолчанию",
+)
+need(
+    NETWORK_DIALOG,
+    network_dialog,
+    "NetworkPathSettings.setIpv6Enabled",
+    "переключатель «Использовать IPv6» пропал из интерфейса",
+)
+
 if problems:
     for problem in problems:
         print(f"✗ {problem}")
@@ -255,3 +297,4 @@ if problems:
 
 print("✓ dual-stack: IPv6 используется, IPv4-путь и откат на месте")
 print("✓ устойчивость сети: смена сети, MTU, паузы, настройки пути на месте")
+print("✓ kill-switch IPv6: выключение убирает v6, IPv4-путь не меняется")

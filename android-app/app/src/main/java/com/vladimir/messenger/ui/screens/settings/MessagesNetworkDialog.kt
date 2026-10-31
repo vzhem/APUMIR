@@ -50,6 +50,7 @@ fun MessagesNetworkDialog(
     // по нажатию, поэтому поток состояния здесь не нужен.
     var relayOnly by remember { mutableStateOf(NetworkPathSettings.relayOnly(context)) }
     var saveTraffic by remember { mutableStateOf(NetworkPathSettings.saveTraffic(context)) }
+    var ipv6 by remember { mutableStateOf(NetworkPathSettings.ipv6Enabled(context)) }
 
     // Раунд 190: в «Скопировать» идёт и сырая строка ядра — по ней видно
     // режим, ConnAck и точный текст ошибки.
@@ -96,6 +97,15 @@ fun MessagesNetworkDialog(
                     onCheckedChange = {
                         saveTraffic = it
                         NetworkPathSettings.setSaveTraffic(context, it)
+                    },
+                )
+                PathSwitchRow(
+                    title = stringResource(R.string.settings_network_ipv6_title),
+                    subtitle = stringResource(R.string.settings_network_ipv6_sub),
+                    checked = ipv6,
+                    onCheckedChange = {
+                        ipv6 = it
+                        NetworkPathSettings.setIpv6Enabled(context, it)
                     },
                 )
                 Text(
