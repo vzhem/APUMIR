@@ -443,7 +443,9 @@ object RustBridge {
      * Пусто/`недоступно` — ядро ещё не поднято: карточка тогда просто молчит.
      */
     fun directChannelStatus(): String = try {
-        uniffi.p2p_core.directChannelStatus()
+        // Метод живёт на ручке ядра (`direct_channel_status` в lib.udl), а не
+        // в namespace: у namespace только функции модуля вроде coreBuildInfo().
+        engine?.directChannelStatus() ?: ""
     } catch (e: Throwable) {
         Log.w(TAG, "directChannelStatus failed: ${e.message}")
         ""
