@@ -41,6 +41,21 @@
 JVM-тесты прошли, APK подписан. Релиз не создавался (`Create Release` —
 skipped: сборка из ветки не публикует, AGENTS.md п. 4).
 
+**Сборка частей 1–3 из ветки** (`Политика пути доставки запоминается и
+применяется при старте ядра`): `Unit tests (JVM)` → run 41163316647 и
+`Build Release APK` → run 41163316625 — **зелёные** (Rust под все ABI,
+Kotlin-компиляция, JVM-тесты, подписанный APK; `Create Release` skipped —
+сборка из ветки не публикует). Перед этим по пути исправлено три красных
+прогона, и это стоит помнить:
+
+- 41158001379 — `Unresolved reference 'directChannelStatus'`: новый метод
+  ядра вызывался как функция namespace (`uniffi.p2p_core.directChannelStatus`),
+  а он объявлен на ручке `P2PCoreHandle`. Правильно — `engine?.directChannelStatus()`;
+- 41159362264 — `error[E0267]: continue inside async block` в
+  `direct_transport.rs`: внутри `tokio::spawn` цикла нет, нужен `return`;
+- 41159392144 — тот же unresolved reference в коммите с документацией
+  (код уже был в ветке).
+
 Первый прогон той же ветки (41121150518) упал на компиляции тестов mDNS:
 внутри `mod tests` путь `super::dual_stack` вёл в сам `mdns`, а не в
 `network`. Исправлено (`crate::network::dual_stack`), прогон перезапущен.
