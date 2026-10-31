@@ -290,6 +290,34 @@ need(
     "переключатель «Использовать IPv6» пропал из интерфейса",
 )
 
+# ── 8. Часть 4: оба стека в каталоге адресов и в DHT ────────────────────────
+# Формат `AddressClaims` не менялся: два стека — это две обычные подписанные
+# аренды одного узла. Проверяем, что вторая аренда не потерялась и что
+# DHT-ответ умеет нести второй адрес: первое поле прежнее, новый адрес — в
+# начале кольца, поэтому старый телефон просто не пробует его, а не ломается.
+lookup_src = read(NETWORK / "address_lookup.rs")
+need(NETWORK / "address_lookup.rs", lookup_src, "pub fn reply_payload_multi(", "DHT-ответ снова умеет только один адрес")
+need(NETWORK / "address_lookup.rs", lookup_src, "pub const MAX_ADDRS_PER_NODE", "пропал предел адресов на узел")
+need(NETWORK / "address_lookup.rs", lookup_src, "pub fn merge_addrs(", "пропало слияние адресов двух стеков")
+need(NETWORK / "address_lookup.rs", lookup_src,
+     "fn reply_carries_both_stacks_and_stays_readable_by_the_old_shape",
+     "пропал тест: DHT-ответ с двумя стеками читается старым разбором")
+need(PEER_EXCHANGE, peer, "self_leases: Vec<AddressLease>", "свои аренды снова только по одному стеку")
+need(PEER_EXCHANGE, peer, "pub fn plan_multi(", "движок не может объявить оба стека")
+need(PEER_EXCHANGE, peer, "fn both_own_stacks_are_published_as_separate_leases",
+     "пропал тест: оба стека уезжают в каталог двумя арендами")
+need(CORE, core, "public_addr_alt", "движок не помнит внешний адрес второго стека")
+need(CORE, core, "directory.plan_multi(", "оба стека не передаются в каталог")
+need(CORE, core, "stun_via_side_channel_family(", "нет запроса отражения второго стека")
+need(DIRECT, direct, "pub async fn stun_via_side_channel_family(", "пропал STUN по выбранному стеку")
+# Карточка «Сеть сообщений» обязана отличать «в сети нет IPv6» от «IPv6
+# выключен в настройках» — иначе совет человеку неверный.
+DIRECT_TEXT = ROOT / "android-app/app/src/main/java/com/vladimir/messenger/data/diagnostics/DirectChannelText.kt"
+direct_text = read(DIRECT_TEXT)
+need(CORE, core, "ipv6={}", "ядро не сообщает, включён ли IPv6 в настройках")
+need(DIRECT_TEXT, direct_text, "ipv6Enabled", "приложение не разбирает kill-switch из строки ядра")
+need(DIRECT_TEXT, direct_text, "IPv6 выключен в настройках", "приложение не объясняет выключенный IPv6")
+
 if problems:
     for problem in problems:
         print(f"✗ {problem}")
@@ -298,3 +326,4 @@ if problems:
 print("✓ dual-stack: IPv6 используется, IPv4-путь и откат на месте")
 print("✓ устойчивость сети: смена сети, MTU, паузы, настройки пути на месте")
 print("✓ kill-switch IPv6: выключение убирает v6, IPv4-путь не меняется")
+print("✓ оба стека в каталоге адресов: две подписанные аренды и DHT-ответ с двумя адресами")

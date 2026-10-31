@@ -67,7 +67,7 @@ pub use custody_relay::{
     CUSTODY_DROP_PREFIX, CUSTODY_OFFER_PREFIX,
 };
 pub use address_lookup::{
-    parse_query, parse_reply, query_payload, reply_payload, AddressLookup,
+    parse_query, parse_reply, query_payload, reply_payload, reply_payload_multi, AddressLookup,
 };
 pub use dht::{bucket_index, xor_distance, Bucket, DhtNodeInfo, RoutingTable};
 pub use ice::{IceError, StunClient, DEFAULT_STUN_SERVERS};

@@ -109,19 +109,46 @@ pub fn reply_payload(
     addr: Option<SocketAddr>,
     closer: &[(String, SocketAddr)],
 ) -> String {
-    let closer_text = closer
+    reply_payload_multi(from_id, target_id, addr.into_iter().collect(), closer)
+}
+
+/// То же, но адресов цели может быть два — по одному на стек.
+///
+/// Первый адрес уходит в своё прежнее поле, второй — добавочным элементом
+/// списка «ближайших» с идентификатором самой цели. Старый разборщик
+/// (`parse_reply`) видит в этом списке запись `id@addr`, проверяет
+/// `id.starts_with("pk_")` и кладёт её в `closer`; движок берёт из `closer`
+/// адреса только для узлов, которых ещё нет в памяти, поэтому старый телефон
+/// просто не станет пробовать второй адрес. Новое поле ничего не ломает —
+/// ровно та совместимость, которой не даёт новое обязательное поле в
+/// `AddressClaims` (`deny_unknown_fields`).
+pub fn reply_payload_multi(
+    from_id: &str,
+    target_id: &str,
+    addrs: Vec<SocketAddr>,
+    closer: &[(String, SocketAddr)],
+) -> String {
+    let addrs = merge_addrs(addrs);
+    let mut closer_text = closer
         .iter()
         .take(MAX_CLOSER_NODES)
         .map(|(id, node_addr)| format!("{}@{}", id, node_addr))
-        .collect::<Vec<String>>()
-        .join("|");
+        .collect::<Vec<String>>();
+    // Второй адрес цели — в конце списка: если соседей уже три, он не влезет.
+    // Второй стек тогда потеряется, но кадр останется прежнего размера, а
+    // первый адрес всё равно едет в своём поле.
+    if let Some(second) = addrs.get(1) {
+        // Именно в начало: `parse_reply` держит только три записи кольца, и
+        // второй адрес самой цели полезнее третьего соседа.
+        closer_text.insert(0, format!("{}@{}", target_id, second));
+    }
     format!(
         "{}|{}|{}|{}|{}",
         LOOKUP_REPLY_TAG,
         from_id,
         target_id,
-        addr.map(|a| a.to_string()).unwrap_or_default(),
-        closer_text
+        addrs.first().map(|a| a.to_string()).unwrap_or_default(),
+        closer_text.join("|")
     )
 }
 
@@ -201,6 +228,65 @@ pub fn sort_closer(target_id: &str, candidates: Vec<(String, SocketAddr)>) -> Ve
         xor_distance(&left.0, &target).cmp(&xor_distance(&right.0, &target))
     });
     with_distance.into_iter().map(|(_, node)| node).collect()
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ОБА СТЕКА В ОДНОМ ОТВЕТЕ
+// ═══════════════════════════════════════════════════════════════════
+
+/// Сколько адресов одного узла влезает в кадр.
+///
+/// Два — это ровно «IPv6 и IPv4». Больше не нужно: у узла не так много
+/// публичных адресов, а каждый лишний — попытка подключения, которая может
+/// закончиться таймаутом.
+pub const MAX_ADDRS_PER_NODE: usize = 2;
+
+/// Слить известные адреса узла в один список: лучший (IPv6) и запасной (IPv4).
+///
+/// Порядок задаёт [`crate::network::dual_stack::rank`] — тот же порядок, что и
+/// везде в приложении. Дубликаты (в том числе v4-mapped) убираются: один и тот
+/// же адрес дважды только съест бюджет попытки.
+pub fn merge_addrs(mut addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
+    addrs = addrs
+        .into_iter()
+        .map(crate::network::dual_stack::canonical)
+        .filter(|addr| crate::network::dual_stack::rank(addr.ip()).is_some())
+        .collect();
+    addrs.sort_by_key(|addr| {
+        (
+            crate::network::dual_stack::rank(addr.ip()).unwrap_or(u8::MAX),
+            *addr,
+        )
+    });
+    addrs.dedup();
+    addrs.truncate(MAX_ADDRS_PER_NODE);
+    addrs
+}
+
+/// Какие из кандидатов пробовать **после** подтверждённого пути.
+///
+/// Совет «оба стека» легко превратить в лишние таймауты: если узел за NAT,
+/// его IPv4 из подсказок — приватный адрес чужой сети, и каждая отправка
+/// сначала ждала бы его. Правило: подтверждённый адрес идёт первым, кандидаты
+/// запоминаются только как запасной путь, и пробуются, лишь когда основной не
+/// ответил (это делает
+/// [`crate::network::direct_transport::DirectTransport::set_alternatives`]).
+pub fn fallback_addrs(confirmed: Option<SocketAddr>, candidates: Vec<SocketAddr>) -> Vec<SocketAddr> {
+    let merged = merge_addrs(candidates);
+    match confirmed {
+        None => merged,
+        Some(confirmed) => {
+            let confirmed = crate::network::dual_stack::canonical(confirmed);
+            let mut out = vec![confirmed];
+            for addr in merged {
+                if addr != confirmed && !out.contains(&addr) {
+                    out.push(addr);
+                }
+            }
+            out.truncate(MAX_ADDRS_PER_NODE);
+            out
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -352,6 +438,74 @@ mod tests {
         assert_eq!(parsed.addr, None);
         assert!(parsed.closer.is_empty());
         assert!(parse_reply("dhtr|не_узел|не_узел|x|").is_none());
+    }
+
+    #[test]
+    fn reply_carries_both_stacks_and_stays_readable_by_the_old_shape() {
+        // Часть 4: у цели два адреса — IPv6 и IPv4. Первый едет в своё поле,
+        // второй — записью `target@адрес` в начале кольца, потому что
+        // `parse_reply` держит только три записи.
+        let payload = reply_payload_multi(
+            &node(1),
+            &node(2),
+            vec![addr("[2a00:1450:4001::1]:7777"), addr("198.51.100.5:7777")],
+            &[],
+        );
+        let parsed = parse_reply(&payload).expect("ответ должен разбираться");
+        assert_eq!(parsed.addr, Some(addr("[2a00:1450:4001::1]:7777")), "IPv6 первым");
+        assert_eq!(
+            parsed.closer,
+            vec![(node(2), addr("198.51.100.5:7777"))],
+            "второй стек цели виден в кольце с её же идентификатором"
+        );
+        // Три настоящих соседа не вытесняют второй адрес цели.
+        let closer = vec![
+            (node(7), addr("203.0.113.7:7777")),
+            (node(8), addr("203.0.113.8:7777")),
+            (node(9), addr("203.0.113.9:7777")),
+        ];
+        let payload = reply_payload_multi(
+            &node(1),
+            &node(2),
+            vec![addr("198.51.100.5:7777"), addr("[2a00:1450:4001::1]:7777")],
+            &closer,
+        );
+        let parsed = parse_reply(&payload).expect("ответ должен разбираться");
+        assert_eq!(parsed.addr, Some(addr("[2a00:1450:4001::1]:7777")), "IPv6 всё равно первым");
+        assert_eq!(parsed.closer.first(), Some(&(node(2), addr("198.51.100.5:7777"))));
+        // Один адрес — прежний формат, без добавочной записи.
+        let single = reply_payload_multi(&node(1), &node(2), vec![addr("198.51.100.5:7777")], &[]);
+        assert_eq!(parse_reply(&single).unwrap().closer, Vec::new());
+    }
+
+    #[test]
+    fn merge_addrs_prefers_ipv6_drops_duplicates_and_mapped() {
+        let merged = merge_addrs(vec![
+            addr("198.51.100.5:7777"),
+            addr("[::ffff:198.51.100.5]:7777"),
+            addr("[2a00:1450:4001::1]:7777"),
+            addr("127.0.0.1:7777"),
+        ]);
+        assert_eq!(
+            merged,
+            vec![addr("[2a00:1450:4001::1]:7777"), addr("198.51.100.5:7777")],
+            "v6 первым, v4-mapped слит с IPv4, случайные адреса выброшены"
+        );
+        assert_eq!(merged.len(), MAX_ADDRS_PER_NODE);
+    }
+
+    #[test]
+    fn fallback_addrs_keep_the_confirmed_path_first() {
+        // Подтверждённый IPv4-путь не должен прятаться за чужим IPv6.
+        let out = fallback_addrs(
+            Some(addr("198.51.100.5:7777")),
+            vec![addr("[2a00:1450:4001::1]:7777"), addr("198.51.100.5:7777")],
+        );
+        assert_eq!(out.first(), Some(&addr("198.51.100.5:7777")));
+        assert_eq!(out.len(), 2);
+        // Ничего не подтверждено — обычный порядок предпочтения.
+        let out = fallback_addrs(None, vec![addr("198.51.100.5:7777"), addr("[2a00:1450:4001::1]:7777")]);
+        assert_eq!(out.first(), Some(&addr("[2a00:1450:4001::1]:7777")));
     }
 
     #[test]

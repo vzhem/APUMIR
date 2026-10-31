@@ -15,7 +15,9 @@ package com.vladimir.messenger.data.diagnostics
 //            сокет `[::]` принимает и IPv6, и IPv4 (`only_v6=false`);
 //   public — какой внешний адрес мы знаем (STUN или отражение от соседа);
 //   lan_v6 — есть ли у телефона свой IPv6 (нет — сеть IPv4-only);
-//   relay  — нужен ли обходной путь: `not-needed` при живом прямом соседе.
+//   relay  — нужен ли обходной путь: `not-needed` при живом прямом соседе;
+//   ipv6   — kill-switch из настроек: `off` = IPv6 выключен человеком,
+//            и тогда «в сети нет IPv6» — не диагноз, а следствие настройки.
 // =============================================================================
 
 /** Человекочитаемый разбор строки прямого канала. */
@@ -27,12 +29,13 @@ object DirectChannelText {
         val public: String,
         val lanV6: Boolean,
         val relay: String,
+        val ipv6Enabled: Boolean = true,
     ) {
         val up: Boolean get() = bind != "down"
         val relayNeeded: Boolean get() = relay == "fallback"
     }
 
-    private val fieldRegex = Regex("(bind|public|lan_v6|relay)=([a-z0-9_-]+)")
+    private val fieldRegex = Regex("(bind|public|lan_v6|relay|ipv6)=([a-z0-9_-]+)")
 
     /** Разбор; null — если строка не начинается с `DIRECT: ` или в ней нет `bind`. */
     fun parse(raw: String): State? {
@@ -45,6 +48,8 @@ object DirectChannelText {
             public = fields["public"] ?: "none",
             lanV6 = fields["lan_v6"] == "yes",
             relay = fields["relay"] ?: "fallback",
+            // Старые строки ядра поля не знают — считаем IPv6 включённым.
+            ipv6Enabled = fields["ipv6"] != "off",
         )
     }
 
@@ -66,7 +71,10 @@ object DirectChannelText {
                 parts += "внешний адрес уже IPv6"
             else -> Unit
         }
-        if (!state.lanV6) parts += "в этой сети IPv6 нет — работаем по IPv4"
+        // Порядок важен: если IPv6 выключен человеком, «в сети IPv6 нет» —
+        // неверный совет. Говорим причину, а не следствие.
+        if (!state.ipv6Enabled) parts += "IPv6 выключен в настройках — работаем по IPv4"
+        else if (!state.lanV6) parts += "в этой сети IPv6 нет — работаем по IPv4"
         parts += when {
             state.relayNeeded -> "сейчас доставка идёт обходным путём (relay)"
             !state.up -> "обходной путь тоже запирается в ожидании"

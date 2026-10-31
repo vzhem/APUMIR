@@ -48,7 +48,8 @@ use crate::network::file_custody_relay::{
     MAX_FILE_CUSTODY_HELD_BYTES, MAX_FILE_CUSTODY_HELD_UNITS,
 };
 use crate::network::address_lookup::{
-    parse_query, parse_reply, query_payload, reply_payload, sort_closer, AddressLookup,
+    parse_query, parse_reply, query_payload, reply_payload, reply_payload_multi, sort_closer,
+    AddressLookup,
     LOOKUP_QUERY_PREFIX, LOOKUP_REPLY_PREFIX, MAX_ASK_PEERS, MAX_CLOSER_NODES,
 };
 use crate::network::message_queue::MessageQueue;
@@ -557,6 +558,15 @@ pub struct P2PCore {
     runtime: Option<tokio::runtime::Runtime>,
     peer_addrs: Arc<Mutex<HashMap<String, SocketAddr>>>,
     public_addr: Arc<Mutex<Option<SocketAddr>>>,
+    /// Внешний адрес ВТОРОГО стека (часть 4: «оба стека в каталоге адресов»).
+    ///
+    /// `public_addr` держит лучший известный адрес (IPv6, если он работает),
+    /// а здесь лежит другой стек — обычно IPv4. Две подписанные аренды одного
+    /// узла каталог уже умеет хранить (`MAX_PER_NODE_ADDRESSES`), поэтому
+    /// формат `AddressClaims` менять не пришлось; presence по-прежнему несёт
+    /// один адрес (у брокера один топик и один адрес в строке), второй уезжает
+    /// в подписанный каталог и в DHT-ответ.
+    public_addr_alt: Arc<Mutex<Option<SocketAddr>>>,
     /// K1: один QUIC-endpoint на движок (пул соединений, keep-alive, STUN
     /// с порта 7777). `None` до `start()` и после `stop()`.
     direct: Arc<Mutex<Option<DirectTransport>>>,
@@ -640,6 +650,7 @@ impl P2PCore {
             peer_addrs: Arc::new(Mutex::new(HashMap::new())),
             network_path_relay_only: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             public_addr: Arc::new(Mutex::new(None)),
+            public_addr_alt: Arc::new(Mutex::new(None)),
             direct: Arc::new(Mutex::new(None)),
             file_session_owner: None,
             file_session_ingress: None,
@@ -807,6 +818,7 @@ impl P2PCore {
         let network_arc = Arc::clone(&self.network);
         let peer_addrs_arc = Arc::clone(&self.peer_addrs);
         let public_addr_arc = Arc::clone(&self.public_addr);
+        let public_addr_alt_arc = Arc::clone(&self.public_addr_alt);
         let dht2 = self.dht.clone();
         let queue2 = self.message_queue.clone();
         let relay_queue2 = self.relay_queue.clone();
@@ -852,6 +864,7 @@ impl P2PCore {
                 let network_quic = Arc::clone(&network_arc);
                 let direct_slot = Arc::clone(&self.direct);
                 let public_addr_stun = Arc::clone(&public_addr_arc);
+                let public_addr_alt_stun = Arc::clone(&public_addr_alt_arc);
                 let own_addr_changed_stun = Arc::clone(&self.own_addr_changed);
                 // K4-2: приёмнику кадров нужны таблица адресов, расписание
                 // поиска и свой публичный адрес (ответ «это я»).
@@ -1062,6 +1075,21 @@ impl P2PCore {
                                 }
                                 book.record_observed_at(&id, addr, observed_at);
                                 book.record_observed_at(&format!("{}_public", id), addr, observed_at);
+                            } else if let Some(current) = current {
+                                // Часть 4: у узла в каталоге две подписанные
+                                // аренды — по одной на стек. Второй адрес не
+                                // заменяет работающий (это правило каталога), а
+                                // становится запасным путём `_public`: его
+                                // пробует PEX, если основной адрес не ответил.
+                                if current.is_ipv6() != addr.is_ipv6() {
+                                    let key = format!("{}_public", id);
+                                    let mut addresses = addrs.lock().unwrap();
+                                    if !addresses.contains_key(&key) {
+                                        addresses.insert(key.clone(), addr);
+                                        drop(addresses);
+                                        book.record_observed_at(&key, addr, observed_at);
+                                    }
+                                }
                             }
                         }
                         // The directly signed session, unlike the forwarded hints, is live now.
@@ -1142,6 +1170,7 @@ impl P2PCore {
                                 identity, transport, Arc::clone(&self.peer_exchange),
                                 Arc::clone(&self.presence_scope), Arc::clone(&self.address_book), Arc::clone(&self.peer_assistance),
                                 Arc::clone(&peer_addrs_arc), Arc::clone(&public_addr_arc),
+                                Arc::clone(&public_addr_alt_arc),
                                 Arc::clone(&self.address_lookup), node_id.clone(),
                                 Arc::clone(&self.swarm_first),
                             ));
@@ -1154,6 +1183,7 @@ impl P2PCore {
                         runtime.spawn(async move {
                             Self::run_stun_discovery(
                                 public_addr_stun,
+                                Arc::clone(&public_addr_alt_stun),
                                 own_addr_changed_stun,
                                 Some(side),
                                 own_address_gossip,
@@ -1170,6 +1200,7 @@ impl P2PCore {
                         runtime.spawn(async move {
                             Self::run_stun_discovery(
                                 public_addr_stun,
+                                public_addr_alt_stun,
                                 own_addr_changed_stun,
                                 None,
                                 None,
@@ -1625,9 +1656,19 @@ impl P2PCore {
                 }
                 return Some(query.from_id);
             }
-            let answer = {
+            // Часть 4: у цели может быть два известных адреса — по одному на
+            // стек (основной ключ и `_public`, куда попадает второй стек из
+            // каталога, mDNS и presence). Отдаём оба в одном ответе.
+            let answer: Vec<SocketAddr> = {
                 let addrs = peer_addrs.lock().unwrap();
-                addrs.get(&query.target_id).copied()
+                let mut found: Vec<SocketAddr> = Vec::new();
+                if let Some(addr) = addrs.get(&query.target_id) {
+                    found.push(*addr);
+                }
+                if let Some(addr) = addrs.get(&format!("{}_public", query.target_id)) {
+                    found.push(*addr);
+                }
+                found
             };
             // Кандидатов собираем обычным циклом: с цепочками итераторов тут
             // легко промахнуться типом (`&&String` против `String`), а собрать
@@ -1650,15 +1691,15 @@ impl P2PCore {
                 .take(MAX_CLOSER_NODES)
                 .collect();
             tracing::info!(
-                "DHT K4: query from {} about {} - {} address, {} closer node(s)",
+                "DHT K4: query from {} about {} - {} address(es), {} closer node(s)",
                 query.from_id,
                 query.target_id,
-                if answer.is_some() { "known" } else { "unknown" },
+                answer.len(),
                 closer.len()
             );
             lookup.queue_reply(
                 &query.from_id,
-                reply_payload(&our_id, &query.target_id, answer, &closer),
+                reply_payload_multi(&our_id, &query.target_id, answer, &closer),
             );
             // Отправителя возвращаем: транспорт усыновит входящее соединение,
             // и ответ уйдёт по нему даже за строгим NAT.
@@ -1687,15 +1728,24 @@ impl P2PCore {
                     }
                 }
                 for (node_id, node_addr) in reply.closer.iter() {
-                    if node_id == &reply.from_id || node_id == &reply.target_id {
+                    if node_id == &reply.from_id {
                         continue;
                     }
-                    if addrs.contains_key(node_id) {
+                    // Часть 4: адрес самой цели во второй раз — это её второй
+                    // стек. Храним под ключом `_public` (так же, как public
+                    // адрес из presence): основной путь не перетираем, а
+                    // каталог/PEX пробуют запасной, если первый не ответил.
+                    let key = if node_id == &reply.target_id {
+                        format!("{}_public", node_id)
+                    } else {
+                        node_id.clone()
+                    };
+                    if addrs.contains_key(&key) {
                         continue;
                     }
-                    addrs.insert(node_id.clone(), *node_addr);
+                    addrs.insert(key.clone(), *node_addr);
                     recorded += 1;
-                    address_book.record(node_id, *node_addr);
+                    address_book.record(&key, *node_addr);
                 }
             }
             if recorded > 0 { lookup.forget(&reply.target_id); }
@@ -2318,7 +2368,8 @@ impl P2PCore {
         identity: Arc<crate::crypto::signing_identity::InstalledSigningIdentity>,
         transport: DirectTransport, directory: Arc<PeerExchange>, scope: Arc<PresenceScope>,
         book: Arc<AddressBook>, assistance: Arc<PeerAssistance>, addrs: Arc<Mutex<HashMap<String, SocketAddr>>>,
-        public_addr: Arc<Mutex<Option<SocketAddr>>>, lookup: Arc<AddressLookup>, our_id: String,
+        public_addr: Arc<Mutex<Option<SocketAddr>>>, public_addr_alt: Arc<Mutex<Option<SocketAddr>>>,
+        lookup: Arc<AddressLookup>, our_id: String,
         swarm_first: Arc<SwarmFirstPolicy>,
     ) {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(5));
@@ -2361,8 +2412,15 @@ impl P2PCore {
                 for candidate in candidates.iter_mut().take(32) {
                     candidate.live_connection = transport.has_connection(&candidate.node_id).await;
                 }
-                let own = *public_addr.lock().unwrap();
-                for request in directory.plan(&identity, own, candidates, &wanted, now) {
+                // Часть 4: в каталог уезжают ОБА своих адреса — по одному на
+                // стек. Пир пробует тот, что у него достижим; старый телефон
+                // просто видит вторую обычную аренду и ничего не ломает.
+                let own_addrs: Vec<SocketAddr> = {
+                    let primary = *public_addr.lock().unwrap();
+                    let alt = *public_addr_alt.lock().unwrap();
+                    primary.into_iter().chain(alt).collect()
+                };
+                for request in directory.plan_multi(&identity, own_addrs, candidates, &wanted, now) {
                     Self::spawn_exchange_send(transport.clone(), Arc::clone(&identity), Arc::clone(&directory), Arc::clone(&book), request);
                 }
             }
@@ -4650,14 +4708,35 @@ impl P2PCore {
     fn note_own_public_endpoint(
         addr: SocketAddr, source: &str,
         public_addr: &Arc<Mutex<Option<SocketAddr>>>,
+        public_addr_alt: &Arc<Mutex<Option<SocketAddr>>>,
         addr_changed_flag: &Arc<std::sync::atomic::AtomicBool>,
         gossip: Option<&OwnAddressGossip>,
     ) {
         if !is_public_endpoint(addr) { return; }
+        let addr = crate::network::dual_stack::canonical(addr);
         let changed = {
-            let mut guard = public_addr.lock().unwrap();
-            let changed = *guard != Some(addr);
-            *guard = Some(addr);
+            let mut primary = public_addr.lock().unwrap();
+            let mut alt = public_addr_alt.lock().unwrap();
+            let previous = *primary;
+            let mut changed = false;
+            if addr.is_ipv6() {
+                if previous.map(|p| p.is_ipv6()).unwrap_or(false) {
+                    // IPv6-путь уже главный: обновляем его.
+                    if previous != Some(addr) { *primary = Some(addr); changed = true; }
+                } else {
+                    // Раньше главным был IPv4 (или адреса не было): IPv4
+                    // переезжает в запасной слот, IPv6 становится главным.
+                    if let Some(previous) = previous.filter(|p| p.is_ipv4() && *p != addr) {
+                        *alt = Some(previous);
+                    }
+                    if previous != Some(addr) { *primary = Some(addr); changed = true; }
+                }
+            } else if previous.map(|p| p.is_ipv4()).unwrap_or(true) {
+                if previous != Some(addr) { *primary = Some(addr); changed = true; }
+            } else if *alt != Some(addr) {
+                // Главный адрес — IPv6: IPv4-отражение живёт в запасном слоте.
+                *alt = Some(addr); changed = true;
+            }
             changed
         };
         if !changed { return; }
@@ -4688,6 +4767,7 @@ impl P2PCore {
 
     async fn run_stun_discovery(
         public_addr: Arc<Mutex<Option<SocketAddr>>>,
+        public_addr_alt: Arc<Mutex<Option<SocketAddr>>>,
         addr_changed_flag: Arc<std::sync::atomic::AtomicBool>,
         mut side: Option<crate::network::quic_client::UdpSideChannel>,
         gossip: Option<OwnAddressGossip>,
@@ -4718,7 +4798,7 @@ impl P2PCore {
                     if let Some(gossip) = gossip.as_ref() {
                         if let Some(addr) = gossip.directory.observed_own_addr(now) {
                             Self::note_own_public_endpoint(addr, "PEX reflector", &public_addr,
-                                &addr_changed_flag, Some(gossip));
+                                &public_addr_alt, &addr_changed_flag, Some(gossip));
                         }
                     }
                 }
@@ -4745,7 +4825,21 @@ impl P2PCore {
                     // do not promote this late external reply over its reflection.
                     if policy.transport_fallback_allowed(crate::storage::models::now_ms()) {
                         Self::note_own_public_endpoint(addr, "STUN", &public_addr,
-                            &addr_changed_flag, gossip.as_ref());
+                            &public_addr_alt, &addr_changed_flag, gossip.as_ref());
+                    }
+                    // Второй стек: если отражение пришло по IPv6, спрашиваем
+                    // ещё и IPv4-отражение — иначе в каталоге у нас будет один
+                    // стек, и IPv4-only пир нас за NAT не найдёт. Стоит одного
+                    // лишнего запроса и только в сети, где IPv6 работает.
+                    if addr.is_ipv6() {
+                        if let Some(channel) = side.as_mut() {
+                            if let Some(v4) = crate::network::direct_transport::stun_via_side_channel_family(
+                                channel, DEFAULT_STUN_SERVERS, STUN_TIMEOUT, Some(false),
+                            ).await {
+                                Self::note_own_public_endpoint(v4, "STUN(IPv4)", &public_addr,
+                                    &public_addr_alt, &addr_changed_flag, gossip.as_ref());
+                            }
+                        }
                     }
                     // Раз в минуту, а не в две: отображение на NAT у
                     // мобильных операторов живёт 30-60 с, и этот же запрос
@@ -5155,12 +5249,16 @@ impl P2PCore {
         } else {
             "fallback"
         };
+        // Kill-switch IPv6: без этого поля карточка не отличит «в сети нет
+        // IPv6» от «IPv6 выключен в настройках» — а это разные советы человеку.
+        let ipv6_switch = if crate::network::dual_stack::ipv6_enabled() { "on" } else { "off" };
         format!(
-            "DIRECT: bind={} public={} lan_v6={} relay={}",
+            "DIRECT: bind={} public={} lan_v6={} relay={} ipv6={}",
             bind_stack,
             public_stack,
             if local_has_ipv6 { "yes" } else { "no" },
-            relay
+            relay,
+            ipv6_switch
         )
     }
 

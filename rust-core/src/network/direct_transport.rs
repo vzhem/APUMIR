@@ -1004,6 +1004,22 @@ pub async fn stun_via_side_channel(
     servers: &[&str],
     per_server: Duration,
 ) -> Option<SocketAddr> {
+    stun_via_side_channel_family(side, servers, per_server, None).await
+}
+
+/// То же, но можно ограничить семейство адресов сервера.
+///
+/// `Some(true)` — спрашивать только IPv6-адреса серверов, `Some(false)` —
+/// только IPv4. Нужно затем, чтобы узнать отражение **второго** стека: двойной
+/// путь (IPv6 + IPv4) — это два разных отражения с одного и того же сокета, и
+/// одно из них бесполезно для пира в другом стеке (часть 4: «оба стека в
+/// каталоге адресов»).
+pub async fn stun_via_side_channel_family(
+    side: &mut UdpSideChannel,
+    servers: &[&str],
+    per_server: Duration,
+    only_ipv6: Option<bool>,
+) -> Option<SocketAddr> {
     use super::ice::{decode_binding_response, encode_binding_request};
 
     let request = match encode_binding_request() {
@@ -1022,8 +1038,12 @@ pub async fn stun_via_side_channel(
         })
         .await
         .unwrap_or_default();
+        let targets: Vec<SocketAddr> = targets
+            .into_iter()
+            .filter(|target| only_ipv6.map(|v6| target.is_ipv6() == v6).unwrap_or(true))
+            .collect();
         if targets.is_empty() {
-            tracing::warn!("STUN(7777): cannot resolve {}", server);
+            tracing::warn!("STUN(7777): cannot resolve {} for the requested stack", server);
             continue;
         }
         for target in targets {

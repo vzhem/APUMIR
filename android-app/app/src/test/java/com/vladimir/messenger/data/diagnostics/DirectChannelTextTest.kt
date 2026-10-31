@@ -58,6 +58,22 @@ class DirectChannelTextTest {
     }
 
     @Test
+    fun disabledIpv6IsSaidAsASettingNotAsAMissingNetwork() {
+        // «В сети нет IPv6» и «IPv6 выключен человеком» — разные вещи: во
+        // втором случае совет «возьмите сеть с IPv6» бессмысленный, потому
+        // что дело в настройке. Ядро говорит это полем `ipv6=off`.
+        val human = DirectChannelText.humanize(
+            "DIRECT: bind=ipv6 public=ipv4 lan_v6=yes relay=not-needed ipv6=off",
+        )
+        assertTrue(human.contains("IPv6 выключен в настройках"))
+        assertFalse(human.contains("в этой сети IPv6 нет"))
+        val state = requireNotNull(DirectChannelText.parse("DIRECT: bind=ipv4 lan_v6=no ipv6=off"))
+        assertFalse(state.ipv6Enabled)
+        // Строка прежнего ядра (без поля) — IPv6 считается включённым.
+        assertTrue(requireNotNull(DirectChannelText.parse("DIRECT: bind=ipv6 lan_v6=no")).ipv6Enabled)
+    }
+
+    @Test
     fun unknownFieldsDoNotBreakParsing() {
         // Ядро может добавить поле: старые строки обязаны читаться.
         val state = requireNotNull(
