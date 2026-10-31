@@ -560,6 +560,9 @@ pub struct P2PCore {
     /// K1: один QUIC-endpoint на движок (пул соединений, keep-alive, STUN
     /// с порта 7777). `None` до `start()` и после `stop()`.
     direct: Arc<Mutex<Option<DirectTransport>>>,
+    /// Настройка «только через relay» с учётом экономии трафика на мобильной
+    /// (`set_network_path_policy`). `true` — прямой канал не используется.
+    network_path_relay_only: Arc<std::sync::atomic::AtomicBool>,
     /// F4 sender owns a separate reusable endpoint so legacy direct transport keeps its exact
     /// listener/pool semantics. It is present only with a real signing sidecar and durable ingress.
     file_session_owner: Option<Arc<FileSessionOwner>>,
@@ -635,6 +638,7 @@ impl P2PCore {
             events: Arc::new(EventBus::with_defaults()),
             runtime: None,
             peer_addrs: Arc::new(Mutex::new(HashMap::new())),
+            network_path_relay_only: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             public_addr: Arc::new(Mutex::new(None)),
             direct: Arc::new(Mutex::new(None)),
             file_session_owner: None,
@@ -1119,6 +1123,13 @@ impl P2PCore {
 
                 match transport {
                     Some((transport, side)) => {
+                        // Настройка «только через relay» должна действовать и
+                        // на только что поднятый endpoint: иначе после
+                        // перезапуска службы прямой канал молча вернулся бы.
+                        transport.set_relay_only(
+                            self.network_path_relay_only
+                                .load(std::sync::atomic::Ordering::Acquire),
+                        );
                         *direct_slot.lock().unwrap() = Some(transport.clone());
                         let own_address_gossip = discovery_identity.as_ref().map(|identity| OwnAddressGossip {
                             identity: Arc::clone(identity),
@@ -5063,6 +5074,43 @@ impl P2PCore {
 
     pub fn network_status(&self) -> String {
         self.network.status_str()
+    }
+
+    /// Настройки пути доставки (часть 2 задачи IPv6).
+    ///
+    /// `relay_only` — «только через relay»: прямой канал не используется ни на
+    /// отправку, ни на приём. Нужен в сетях, где прямой UDP запрещён или
+    /// нежелателен (корпоративный Wi-Fi, строгий firewall, чужой роутер).
+    ///
+    /// `save_traffic` — «экономия трафика»: на мобильной сети (`metered`)
+    /// прямой канал не поднимается, пока он не нужен: сообщения идут через
+    /// брокер, а канал открывается только если брокер недоступен. Это не
+    /// «выключить прямой канал вообще» — на Wi-Fi поведение прежнее.
+    ///
+    /// Применяется сразу и к уже поднятому endpoint'у: сокет остаётся, но
+    /// кадры в него не уходят, а входящие соединения закрываются.
+    pub fn set_network_path_policy(&self, relay_only: bool, save_traffic: bool, metered: bool) {
+        let suppress = relay_only || (save_traffic && metered);
+        self.network_path_relay_only
+            .store(suppress, std::sync::atomic::Ordering::Release);
+        if let Ok(slot) = self.direct.lock() {
+            if let Some(transport) = slot.as_ref() {
+                transport.set_relay_only(suppress);
+            }
+        }
+        tracing::info!(
+            relay_only,
+            save_traffic,
+            metered,
+            suppress_direct = suppress,
+            "NETWORK PATH: policy applied"
+        );
+    }
+
+    /// Действует ли сейчас «только через relay» (с учётом экономии трафика).
+    pub fn network_path_suppresses_direct(&self) -> bool {
+        self.network_path_relay_only
+            .load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Диагностика прямого канала для карточки «Сеть сообщений».

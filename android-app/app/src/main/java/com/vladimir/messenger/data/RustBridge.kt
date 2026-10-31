@@ -449,6 +449,33 @@ object RustBridge {
         ""
     }
 
+    /**
+     * Политика пути доставки: «только через relay» и «экономия трафика на
+     * мобильной». Применяется сразу (`set_network_path_policy` в ядре), без
+     * перезапуска службы. Ошибку глотаем с логом: без ядра настройка просто
+     * подействует после его старта.
+     */
+    fun setNetworkPathPolicy(relayOnly: Boolean, saveTraffic: Boolean, metered: Boolean) {
+        // Полное имя поля: локальная переменная с тем же именем дала бы
+        // «unresolved reference» внутри собственного инициализатора.
+        val core = this.engine ?: return
+        runCatching {
+            core.setNetworkPathPolicy(
+                relayOnly = relayOnly,
+                saveTraffic = saveTraffic,
+                metered = metered,
+            )
+        }.onFailure { Log.w(TAG, "setNetworkPathPolicy failed: ${it.message}") }
+    }
+
+    /** Прямой канал сейчас запрещён настройкой (для диагностики). */
+    fun directChannelBlocked(): Boolean = try {
+        engine?.directChannelBlocked() ?: false
+    } catch (e: Throwable) {
+        Log.w(TAG, "directChannelBlocked failed: ${e.message}")
+        false
+    }
+
     fun nodeId(): String? {
         // Identity is stable for an engine lifetime and is cached at start; avoid taking the
         // native mutex on every keystroke, message, file packet, or Room invalidation.

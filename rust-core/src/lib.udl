@@ -246,6 +246,10 @@ interface P2PCoreHandle {
     // Диагностика прямого канала: машинная строка `DIRECT: …`, слова
     // для человека собирает приложение (DirectChannelText.kt).
     string direct_channel_status();
+    // Часть 2 (устойчивость сети): «только через relay» и «экономия трафика»
+    // на мобильной. `metered` присылает приложение: ядро не видит тариф.
+    void set_network_path_policy(boolean relay_only, boolean save_traffic, boolean metered);
+    boolean direct_channel_blocked();
     u64 connected_peers();
     // Not MQTT presence or a saved address: recently sampled signed QUIC neighbour.
     boolean has_live_swarm_peer();

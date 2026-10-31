@@ -288,6 +288,22 @@ impl P2PCoreHandle {
         self.inner.lock().unwrap().direct_channel_status()
     }
 
+    /// Настройки пути доставки: «только через relay» и «экономия трафика на
+    /// мобильной». Применяются сразу, без перезапуска службы. `metered`
+    /// присылает приложение (оно знает про мобильную сеть и «Экономию
+    /// трафика» системы), потому что ядро этого не видит.
+    pub fn set_network_path_policy(&self, relay_only: bool, save_traffic: bool, metered: bool) {
+        self.inner
+            .lock()
+            .unwrap()
+            .set_network_path_policy(relay_only, save_traffic, metered)
+    }
+
+    /// Действует ли сейчас запрет прямого канала (для диагностики).
+    pub fn direct_channel_blocked(&self) -> bool {
+        self.inner.lock().unwrap().network_path_suppresses_direct()
+    }
+
     pub fn connected_peers(&self) -> u64 {
         self.inner.lock().unwrap().connected_peers() as u64
     }

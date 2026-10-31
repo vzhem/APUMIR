@@ -12,7 +12,7 @@
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupAdminViewModel.kt": 1,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupChatViewModel.kt": 2,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/saved/SavedViewModel.kt": 7,
-    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsScreen.kt": 1,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/MessagesNetworkDialog.kt": 1,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsViewModel.kt": 2,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/share/ShareProfileScreen.kt": 1,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/update/UpdateViewModel.kt": 1
@@ -20,6 +20,7 @@
   "missing_en": 0,
   "data": {
     "android-app/app/src/main/java/com/vladimir/messenger/ui/components/TopicEmojiPicker.kt": "Ключевые слова поиска эмодзи, по-русски и по-английски у каждого эмодзи. Это не текст интерфейса, а индекс поиска: перенос в values*/strings.xml сломал бы поиск при смене языка (русское слово должно находиться и в английской локали). Переводить не нужно — нужно оставить как данные.",
-    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/contacts/ContactPresence.kt": "PresenceLabels.RUSSIAN — русский набор по умолчанию для не-компонуемых тестов; в UI всегда приходит presenceLabels() из ресурсов."
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/contacts/ContactPresence.kt": "PresenceLabels.RUSSIAN — русский набор по умолчанию для не-компонуемых тестов; в UI всегда приходит presenceLabels() из ресурсов.",
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/MessagesNetworkDialog.kt": "MQTT_ERROR_MARKER — это ДАННЫЕ разбора строки, которую присылает ядро («, ошибка N с назад: …»): тот же литерал разбирает MqttLinkText. Перенос в res/values*/strings.xml сломал бы распознавание ошибки при смене языка, потому что приходит она всегда по-русски из ядра."
   }
 }

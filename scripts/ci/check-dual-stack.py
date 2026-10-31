@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Контракт dual-stack: IPv6 работает, а IPv4-путь не удалён (часть 1 задачи IPv6).
+"""Контракт dual-stack и устойчивости сети (части 1–2 задачи IPv6).
 
 Почему это проверка, а не комментарий в документации. Переход на `[::]` — это
 правка, которую легко «доделать» обратно по частям, не заметив:
@@ -44,6 +44,17 @@ ICE = NETWORK / "ice.rs"
 MDNS = NETWORK / "mdns.rs"
 PEER_EXCHANGE = NETWORK / "peer_exchange.rs"
 CORE = ROOT / "rust-core/src/engine/core.rs"
+
+TIMING = NETWORK / "timing.rs"
+NETWORK_PATH = (
+    ROOT / "android-app/app/src/main/java/com/vladimir/messenger/data/swarm/NetworkPathSettings.kt"
+)
+NETWORK_DIALOG = (
+    ROOT / "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/MessagesNetworkDialog.kt"
+)
+SETTINGS_SCREEN = (
+    ROOT / "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsScreen.kt"
+)
 
 problems = []
 
@@ -160,9 +171,87 @@ need(
     "пропал тест: v4-mapped глобальный IPv4 считается публичным",
 )
 
+# ── 6. Часть 2: устойчивость сети (не откатить молча) ───────────────────────
+timing = read(TIMING)
+network_path = read(NETWORK_PATH)
+network_dialog = read(NETWORK_DIALOG)
+settings_screen = read(SETTINGS_SCREEN)
+
+if problems:
+    for problem in problems:
+        print(f"✗ {problem}")
+    sys.exit(2)
+
+need(
+    TIMING,
+    timing,
+    "pub struct BackoffPolicy",
+    "пропала единая политика пауз (network/timing.rs)",
+)
+need(
+    TIMING,
+    timing,
+    "pub const RECONNECT",
+    "нет политики переподключения брокера",
+)
+need(
+    QUIC,
+    quic,
+    "pub const QUIC_INITIAL_MTU: u16 = 1200",
+    "QUIC снова может уйти выше 1200 байт и развалиться на IPv6-туннеле",
+)
+need(QUIC, quic, "transport.min_mtu(QUIC_MIN_MTU)", "нет пола MTU")
+need(
+    DIRECT,
+    direct,
+    "pub fn network_changed(",
+    "смена сети больше не сбрасывает пул прямых соединений",
+)
+need(
+    CORE,
+    core,
+    "crate::network::mqtt_transport::wake_reconnect()",
+    "смена сети больше не будит переподключение брокера",
+)
+need(
+    DIRECT,
+    direct,
+    "pub fn set_relay_only(",
+    "пропала настройка «только через relay»",
+)
+if direct.count("if self.is_relay_only()") < 4:
+    problems.append(
+        "direct_transport.rs: «только через relay» проверяется не во всех путях отправки"
+    )
+need(
+    NETWORK_PATH,
+    network_path,
+    'getBoolean(KEY_RELAY_ONLY, false)',
+    "«только через relay» должно быть выключено по умолчанию",
+)
+need(
+    NETWORK_PATH,
+    network_path,
+    'getBoolean(KEY_SAVE_TRAFFIC, false)',
+    "«экономия трафика» должна быть выключена по умолчанию",
+)
+need(
+    NETWORK_DIALOG,
+    network_dialog,
+    "NetworkPathSettings.setRelayOnly",
+    "переключатель «только через relay» пропал из интерфейса",
+)
+need(
+    SETTINGS_SCREEN,
+    settings_screen,
+    "MessagesNetworkDialog(",
+    "диалог «Сеть сообщений» должен оставаться вынесенным (потолок god-файла)",
+)
+
 if problems:
     for problem in problems:
         print(f"✗ {problem}")
     sys.exit(1)
 
 print("✓ dual-stack: IPv6 используется, IPv4-путь и откат на месте")
+print("✓ устойчивость сети: смена сети, MTU, паузы, настройки пути на месте")

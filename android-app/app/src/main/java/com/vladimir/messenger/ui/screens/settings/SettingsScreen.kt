@@ -2006,41 +2006,13 @@ private fun SettingsTabContent(
     }
 
     if (showMqttDialog) {
-        // Раунд 190: диалог по-человечески. В «Скопировать» идёт и сырая
-        // строка ядра - по ней в чате разработки видно режим, ConnAck и
-        // точный текст ошибки.
-        val mqttHumanText = buildString {
-            if (uiState.mqttHuman.isNotBlank()) {
-                append(uiState.mqttHuman)
-                append("\n\n")
-                append(stringResource(R.string.mqtt_path_auto))
-                if (uiState.mqttLink.contains(", ошибка ")) {
-                    append("\n\n")
-                    append(stringResource(R.string.mqtt_broker_note))
-                }
-            } else {
-                append(uiState.mqttLink)
-            }
-        }
-        ApuSettingsDialog(
-            onDismissRequest = { showMqttDialog = false },
-            title = { Text(stringResource(R.string.settings_network_dialog_title)) },
-            text = { Text(mqttHumanText) },
-            confirmButton = {
-                ApuTextAction(
-                    label = stringResource(R.string.action_copy),
-                    onClick = {
-                    val forDiagnostics = listOf(uiState.mqttHuman, uiState.mqttLink)
-                        .filter { it.isNotBlank() }
-                        .joinToString("\n\n")
-                    mqttClipboard.setText(androidx.compose.ui.text.AnnotatedString(forDiagnostics))
-                    showMqttDialog = false
-                },
-                )
-            },
-            dismissButton = {
-                ApuTextAction(label = stringResource(R.string.action_close), onClick = { showMqttDialog = false })
-            },
+        // Диалог вынесен отдельным файлом (AGENTS.md п. 8: этот файл на
+        // потолке god-файлов). Там же — переключатели пути доставки.
+        MessagesNetworkDialog(
+            mqttHuman = uiState.mqttHuman,
+            mqttLink = uiState.mqttLink,
+            clipboard = mqttClipboard,
+            onDismiss = { showMqttDialog = false },
         )
     }
 

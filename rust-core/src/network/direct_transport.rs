@@ -213,6 +213,12 @@ struct Shared {
     on_inbound: Option<InboundHandler>,
     on_bound_frame: Option<BoundFrameHandler>,
     on_file_session: Option<FileSessionHandler>,
+    /// «Только через relay» / «экономия трафика на мобильной»: прямой канал
+    /// не используется ни на отправку, ни на приём. Сокет остаётся открытым
+    /// (закрывать и поднимать заново дороже и рискованнее), но кадры в него
+    /// не уходят, а входящие соединения закрываются сразу. Ставится из
+    /// настроек: `P2PCore::set_network_path_policy`.
+    relay_only: Arc<std::sync::atomic::AtomicBool>,
     /// Второй стек узла: адреса, которые пробуются, если основной не ответил.
     /// Заполняется движком, когда mDNS/QR принёс больше одного адреса
     /// (см. `mdns::DiscoveredNode::alt_addresses`). Ключ — peer_id в байтах,
@@ -296,6 +302,7 @@ impl DirectTransport {
             QuicClient::new_with_side_channel(bind_addr).map_err(|e| e.to_string())?;
         let shared = Arc::new(Shared {
             alternatives: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            relay_only: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             client: Arc::new(client),
             pool: Arc::new(ConnectionPool::with_idle_timeout(
                 POOL_CAPACITY,
@@ -350,6 +357,12 @@ impl DirectTransport {
         payload: Vec<u8>,
         kind: JobKind,
     ) -> bool {
+        // Настройка «только через relay» / «экономия трафика на мобильной»:
+        // прямой канал не используем вовсе. Возвращаем `false` сразу -
+        // вызывающий уходит на запасной путь без ожидания таймаутов.
+        if self.is_relay_only() {
+            return false;
+        }
         let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(1);
         let command = Command::Send {
             peer_id: peer_id.to_string(),
@@ -393,6 +406,9 @@ impl DirectTransport {
         payload: Vec<u8>,
         kind: JobKind,
     ) -> bool {
+        if self.is_relay_only() {
+            return false;
+        }
         let (reply_tx, reply_rx) = oneshot::channel();
         let command = Command::Send {
             peer_id: peer_id.to_string(),
@@ -418,6 +434,9 @@ impl DirectTransport {
     pub async fn send_bound(
         &self, peer_id: &str, addr: Option<SocketAddr>, factory: BoundFrameFactory,
     ) -> bool {
+        if self.is_relay_only() {
+            return false;
+        }
         let (reply_tx, reply_rx) = oneshot::channel();
         let command = Command::Send {
             peer_id: peer_id.to_string(),
@@ -430,6 +449,9 @@ impl DirectTransport {
     }
 
     pub fn send_bound_blocking(&self, peer_id: &str, addr: Option<SocketAddr>, factory: BoundFrameFactory) -> bool {
+        if self.is_relay_only() {
+            return false;
+        }
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let command = Command::Send { peer_id: peer_id.into(), job: SendJob {
             addr, payload: FramePayload::Bound(factory), kind: JobKind::Interactive,
@@ -459,6 +481,18 @@ impl DirectTransport {
     /// to defer idle history probes, regardless of whether it is a contact.
     pub async fn has_any_connection(&self) -> bool {
         self.shared.pool.len().await > 0
+    }
+
+    /// Включить/выключить «только через relay» (см. `Shared::relay_only`).
+    pub fn set_relay_only(&self, value: bool) {
+        self.shared
+            .relay_only
+            .store(value, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Прямой канал сейчас запрещён настройкой?
+    pub fn is_relay_only(&self) -> bool {
+        self.shared.relay_only.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// Запомнить второй стек узла (см. `Shared::alternatives`).
@@ -526,6 +560,12 @@ async fn run_accept_loop(shared: Arc<Shared>) {
             match tokio::time::timeout(INBOUND_HANDSHAKE_TIMEOUT, connecting).await {
                 Ok(Ok(connection)) => {
                     let conn = QuicConnection::new(connection);
+                    if shared.relay_only.load(std::sync::atomic::Ordering::Acquire) {
+                        // Настройка запрещает прямой канал: не принимаем и не
+                        // усыновляем, чтобы путь был ровно один - relay.
+                        conn.close(b"relay only");
+                        continue;
+                    }
                     tracing::info!("QUIC: incoming connection from {}", conn.remote_address());
                     read_loop(conn, shared, true).await;
                 }
