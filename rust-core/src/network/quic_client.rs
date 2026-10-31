@@ -49,6 +49,19 @@ pub const MAX_IDLE_TIMEOUT_SECS: u64 = 60;
 /// 30 с и больше) и позволяет пулу переиспользовать соединение.
 pub const KEEP_ALIVE_INTERVAL_SECS: u64 = 20;
 
+/// Начальный размер QUIC-датаграммы (байт).
+///
+/// 1200 — минимум, который обязан пропускать любой путь (RFC 9000 §14).
+/// Именно это важно для IPv6: минимальный MTU IPv6 равен 1280, а туннели
+/// (VPN, 6to4, часть мобильных APN) часто ровно 1280, то есть больше 1200
+/// байт полезной нагрузки там просто не пройдёт. Раньше значение было
+/// умолчанием quinn; фиксируем его явно, чтобы «ускорение» настройкой не
+/// вернуло фрагментацию на IPv6-туннелях.
+pub const QUIC_INITIAL_MTU: u16 = 1200;
+
+/// Пол по MTU для PMTU-обнаружения quinn: ниже 1200 не опускаемся никогда.
+pub const QUIC_MIN_MTU: u16 = 1200;
+
 // ═══════════════════════════════════════════════════════════════════
 // ОШИБКИ
 // ═══════════════════════════════════════════════════════════════════
@@ -749,6 +762,9 @@ fn make_server_config(
     let mut transport = quinn::TransportConfig::default();
     transport.max_concurrent_uni_streams(256_u32.into());
     transport.max_concurrent_bidi_streams(256_u32.into());
+    // См. `QUIC_INITIAL_MTU`: путь IPv6-туннеля не пропустит больше 1200 байт.
+    transport.initial_mtu(QUIC_INITIAL_MTU);
+    transport.min_mtu(QUIC_MIN_MTU);
     transport.max_idle_timeout(Some(
         Duration::from_secs(MAX_IDLE_TIMEOUT_SECS).try_into().unwrap(),
     ));
@@ -779,6 +795,8 @@ fn make_client_config() -> QuicResult<ClientConfig> {
 
     // Настройки транспорта
     let mut transport = quinn::TransportConfig::default();
+    transport.initial_mtu(QUIC_INITIAL_MTU);
+    transport.min_mtu(QUIC_MIN_MTU);
     transport.max_idle_timeout(Some(
         Duration::from_secs(MAX_IDLE_TIMEOUT_SECS).try_into().unwrap(),
     ));

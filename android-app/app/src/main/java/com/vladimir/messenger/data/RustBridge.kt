@@ -437,6 +437,18 @@ object RustBridge {
         "недоступно"
     }
 
+    /**
+     * Машинная строка о прямом канале: `DIRECT: bind=… public=… lan_v6=…
+     * relay=…`. Слова собирает [com.vladimir.messenger.data.diagnostics.DirectChannelText].
+     * Пусто/`недоступно` — ядро ещё не поднято: карточка тогда просто молчит.
+     */
+    fun directChannelStatus(): String = try {
+        uniffi.p2p_core.directChannelStatus()
+    } catch (e: Throwable) {
+        Log.w(TAG, "directChannelStatus failed: ${e.message}")
+        ""
+    }
+
     fun nodeId(): String? {
         // Identity is stable for an engine lifetime and is cached at start; avoid taking the
         // native mutex on every keystroke, message, file packet, or Room invalidation.

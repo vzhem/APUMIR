@@ -88,8 +88,16 @@ pub struct DiscoveredNode {
     /// Короткое имя (обычно имя устройства)
     pub name: String,
 
-    /// Адрес и порт для подключения
+    /// Адрес и порт для подключения (лучший из объявленных: IPv6 впереди)
     pub address: SocketAddr,
+
+    /// Остальные объявленные адреса того же узла — второй стек.
+    ///
+    /// Узел публикует и AAAA, и A (см. `publish_self_device`). Раньше брался
+    /// один адрес, и если он оказывался недостижим (например, IPv6 в чужой
+    /// сети), сосед считался пропавшим, хотя второй стек работал. Транспорт
+    /// пробует эти адреса, когда первый не отвечает.
+    pub alt_addresses: Vec<SocketAddr>,
 
     /// NodeID если удалось прочитать из TXT-записи (hex-строка)
     pub node_id_hex: Option<String>,
@@ -260,6 +268,21 @@ impl MdnsService {
                         continue;
                     };
                     let socket_addr = SocketAddr::new(ip, info.get_port());
+                    // Второй стек: то, что объявлено сверх выбранного адреса.
+                    let alt_addresses: Vec<SocketAddr> = {
+                        let mut rest: Vec<SocketAddr> = addresses
+                            .iter()
+                            .filter(|candidate| **candidate != ip)
+                            .filter(|candidate| crate::network::dual_stack::reachable(**candidate))
+                            .map(|candidate| SocketAddr::new(*candidate, info.get_port()))
+                            .collect();
+                        rest.sort_by_key(|addr| {
+                            crate::network::dual_stack::rank(addr.ip()).unwrap_or(u8::MAX)
+                        });
+                        rest.dedup();
+                        rest.truncate(3);
+                        rest
+                    };
 
                     // TXT-записи
                     let properties = info.get_properties();
@@ -289,6 +312,7 @@ impl MdnsService {
                         protocol_version,
                         public_addr,
                         device_id_hex,
+                        alt_addresses,
                     };
 
                     discovered.lock().await.insert(full_name, node);
@@ -451,7 +475,27 @@ mod tests {
             protocol_version: Some(1),
             public_addr: None,
             device_id_hex: device.map(str::to_string),
+            alt_addresses: Vec::new(),
         }
+    }
+
+    /// Второй стек объявления: оба адреса сохраняются, лучший — первым.
+    #[test]
+    fn alt_addresses_keep_both_stacks() {
+        use std::net::IpAddr;
+        let addresses = [
+            IpAddr::V6("2606:4700:4700::1111".parse().unwrap()),
+            IpAddr::V4("192.168.1.10".parse().unwrap()),
+        ];
+        let best = crate::network::dual_stack::pick(addresses.iter()).unwrap();
+        assert!(best.is_ipv6());
+        let rest: Vec<_> = addresses
+            .iter()
+            .filter(|candidate| **candidate != best)
+            .filter(|candidate| crate::network::dual_stack::reachable(**candidate))
+            .map(|candidate| SocketAddr::new(*candidate, 7777))
+            .collect();
+        assert_eq!(rest, vec!["192.168.1.10:7777".parse::<SocketAddr>().unwrap()]);
     }
 
     #[test]

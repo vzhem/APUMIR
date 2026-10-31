@@ -281,6 +281,13 @@ impl P2PCoreHandle {
         self.inner.lock().unwrap().network_status()
     }
 
+    /// Диагностика прямого канала (стек, внешний адрес, нужен ли обходной
+    /// путь). Машинная строка `DIRECT: …`; слова для человека собирает
+    /// приложение, см. `DirectChannelText.kt`.
+    pub fn direct_channel_status(&self) -> String {
+        self.inner.lock().unwrap().direct_channel_status()
+    }
+
     pub fn connected_peers(&self) -> u64 {
         self.inner.lock().unwrap().connected_peers() as u64
     }

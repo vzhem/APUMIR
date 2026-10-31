@@ -55,6 +55,7 @@ pub mod relay_queue;
 pub mod router;
 pub mod socks5;
 pub mod swarm_first;
+pub mod timing;
 pub mod wire;
 
 // Реэкспорты для удобства

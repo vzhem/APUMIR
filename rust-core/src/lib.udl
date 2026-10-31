@@ -243,6 +243,9 @@ interface P2PCoreHandle {
     string? observed_public_ip();
 
     string network_status();
+    // Диагностика прямого канала: машинная строка `DIRECT: …`, слова
+    // для человека собирает приложение (DirectChannelText.kt).
+    string direct_channel_status();
     u64 connected_peers();
     // Not MQTT presence or a saved address: recently sampled signed QUIC neighbour.
     boolean has_live_swarm_peer();

@@ -2010,6 +2010,16 @@ impl P2PCore {
 
                         peer_addrs.lock().unwrap().insert(peer_id.clone(), peer_addr);
                         address_book.record(&peer_id, peer_addr);
+                        // Второй стек узла: mDNS принёс больше одного адреса
+                        // (AAAA и A). Транспорт пробует их, если основной не
+                        // ответил, — см. `DirectTransport::set_alternatives`.
+                        if !node.alt_addresses.is_empty() {
+                            if let Ok(slot) = direct.lock() {
+                                if let Some(transport) = slot.as_ref() {
+                                    transport.set_alternatives(&peer_id, node.alt_addresses.clone());
+                                }
+                            }
+                        }
 
                         // Update DHT routing table
                         if let Some(ref dht_table) = dht {
@@ -4995,6 +5005,22 @@ impl P2PCore {
         self.swarm_first.reset(crate::storage::models::now_ms());
         self.peer_exchange.reset_session();
         *self.public_addr.lock().unwrap() = None;
+        // Часть 2 задачи IPv6: смена сети (Wi-Fi → LTE, VPN, авиарежим).
+        // Старые прямые соединения открыты с прежнего адреса источника и по
+        // прежнему маршруту — закрываем пул, иначе каждая отправка упирается
+        // в таймаут мёртвого соединения. Очередь сообщений живёт выше
+        // транспорта и не теряется: недосланное повторится (Room + relay).
+        if let Ok(slot) = self.direct.lock() {
+            if let Some(transport) = slot.as_ref() {
+                transport.network_changed();
+            }
+        }
+        // Брокер сам переподключается с паузой до 30 с; при смене сети ждать
+        // нечего — будим сразу.
+        crate::network::mqtt_transport::wake_reconnect();
+        // Свой внешний адрес мог измениться: presence должен разослать новый.
+        self.own_addr_changed
+            .store(true, std::sync::atomic::Ordering::Release);
         // Не понижаем рабочую связь до «подключаемся»: сеть может «появиться»
         // повторно (переключение Wi-Fi/мобильной), пока сессия брокера или
         // прямой сосед живы. Раньше здесь статус ставился безусловно, и после
@@ -5037,6 +5063,57 @@ impl P2PCore {
 
     pub fn network_status(&self) -> String {
         self.network.status_str()
+    }
+
+    /// Диагностика прямого канала для карточки «Сеть сообщений».
+    ///
+    /// Формат машинный и короткий (`DIRECT: bind=… public=… relay=…`), слова
+    /// для человека собирает приложение (`DirectChannelText.kt`): так текст
+    /// интерфейса остаётся в ресурсах и проверяется JVM-тестом, а не живёт
+    /// строкой в ядре. Секретов и адресов пиров здесь нет.
+    ///
+    /// `bind` — на каком стеке поднят общий QUIC-сокет: на dual-stack это
+    /// `ipv6` (`[::]`, принимает и IPv4), на телефоне без IPv6 — `ipv4`.
+    /// `public` — внешний адрес, который мы знаем (STUN или отражение от
+    /// соседа), тоже по стеку. `relay` — нужен ли сейчас обходной путь:
+    /// `not-needed`, если есть живой подписанный прямой сосед, иначе
+    /// `fallback`.
+    pub fn direct_channel_status(&self) -> String {
+        let bind = self
+            .direct
+            .lock()
+            .ok()
+            .and_then(|slot| slot.as_ref().map(|transport| transport.local_addr()));
+        let bind_stack = match bind {
+            Some(addr) if addr.is_ipv6() => "ipv6",
+            Some(addr) => "ipv4",
+            None => "down",
+        };
+        let now = crate::storage::models::now_ms();
+        let public = self
+            .peer_exchange
+            .observed_own_addr(now)
+            .or(*self.public_addr.lock().unwrap());
+        let public_stack = match public {
+            Some(addr) if addr.is_ipv6() => "ipv6",
+            Some(_) => "ipv4",
+            None => "none",
+        };
+        let local_has_ipv6 = crate::network::dual_stack::local_shareable_ips()
+            .iter()
+            .any(|ip| ip.is_ipv6());
+        let relay = if self.state.is_running() && self.swarm_first.has_live_peer(now) {
+            "not-needed"
+        } else {
+            "fallback"
+        };
+        format!(
+            "DIRECT: bind={} public={} lan_v6={} relay={}",
+            bind_stack,
+            public_stack,
+            if local_has_ipv6 { "yes" } else { "no" },
+            relay
+        )
     }
 
     /// M8-C: честный режим relay custody для диагностики/acceptance.

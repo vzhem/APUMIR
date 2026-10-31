@@ -205,6 +205,58 @@ pub fn mqtt_link_summary() -> String {
     out
 }
 
+/// «Сеть сменилась: переподключайся сейчас».
+///
+/// Цикл MQTT сам переподключается с паузой до
+/// [`MQTT_RECONNECT_BACKOFF_MAX_SECS`] секунд. Без этого флага переход
+/// Wi-Fi → мобильная сеть означал бы до 30 секунд молчания даже при живом
+/// интернете. Флаг ставит ядро (`on_network_available`), читает и снимает
+/// [`wait_before_reconnect`].
+static RECONNECT_NOW: AtomicBool = AtomicBool::new(false);
+
+/// Разбудить цикл переподключения: сеть могла появиться раньше, чем кончилась
+/// пауза. Безопасно звать сколько угодно раз.
+pub fn wake_reconnect() {
+    RECONNECT_NOW.store(true, Ordering::Release);
+}
+
+/// Пауза перед переподключением, которую можно прервать сменой сети.
+///
+/// Разбита на короткие шаги намеренно: `select!` с каналом потребовал бы
+/// держать вторую половину канала во всех четырёх циклах (основной брокер,
+/// вторичный, WSS-мост, арендатор), а флаг читается из любого места.
+/// Следующая пауза переподключения по единой политике (`network::timing`).
+fn next_reconnect_backoff(current_secs: u64) -> u64 {
+    use crate::network::timing::BackoffPolicy;
+    // `current_secs` — уже действующая пауза (1, 2, 4, …). Политика берёт
+    // номер попытки, поэтому переводим секунды обратно в номер степени.
+    let attempt = match current_secs {
+        0 | 1 => 0,
+        value => (u64::BITS - value.leading_zeros()).saturating_sub(1),
+    };
+    BackoffPolicy::RECONNECT
+        .delay(attempt.saturating_add(1))
+        .as_secs()
+        .clamp(1, MQTT_RECONNECT_BACKOFF_MAX_SECS)
+}
+
+async fn wait_before_reconnect(seconds: u64) {
+    let step = Duration::from_millis(250);
+    let mut waited = Duration::ZERO;
+    let total = Duration::from_secs(seconds);
+    while waited < total {
+        if RECONNECT_NOW.swap(false, Ordering::AcqRel) {
+            tracing::info!("MQTT: network changed, reconnecting without waiting for backoff");
+            return;
+        }
+        tokio::time::sleep(step).await;
+        waited += step;
+    }
+    // Пауза кончилась сама: старый сигнал больше не нужен, иначе следующая
+    // пауза закончится мгновенно без причины.
+    RECONNECT_NOW.store(false, Ordering::Release);
+}
+
 const PRESENCE_INTERVAL: Duration = Duration::from_secs(120);
 const MQTT_EVENT_BUFFER: usize = 256;
 const MQTT_CLIENT_REQUEST_BUFFER: usize = 100;
@@ -1225,10 +1277,8 @@ impl MqttTransport {
                                 reconnect_backoff_secs,
                                 error
                             );
-                            tokio::time::sleep(Duration::from_secs(reconnect_backoff_secs)).await;
-                            reconnect_backoff_secs = reconnect_backoff_secs
-                                .saturating_mul(2)
-                                .min(MQTT_RECONNECT_BACKOFF_MAX_SECS);
+                            wait_before_reconnect(reconnect_backoff_secs).await;
+                            reconnect_backoff_secs = next_reconnect_backoff(reconnect_backoff_secs);
                         }
                     }
                 }
@@ -1426,10 +1476,8 @@ impl MqttTransport {
                             reconnect_backoff_secs,
                             streak
                         );
-                        tokio::time::sleep(Duration::from_secs(reconnect_backoff_secs)).await;
-                        reconnect_backoff_secs = reconnect_backoff_secs
-                            .saturating_mul(2)
-                            .min(MQTT_RECONNECT_BACKOFF_MAX_SECS);
+                        wait_before_reconnect(reconnect_backoff_secs).await;
+                        reconnect_backoff_secs = next_reconnect_backoff(reconnect_backoff_secs);
                     }
                 }
             };
@@ -1969,6 +2017,21 @@ pub struct MqttEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reconnect_backoff_grows_then_holds_at_the_cap() {
+        // Тот же ряд, что был до правки (1, 2, 4, 8, 16, 30, 30…): правка
+        // только собрала число в `network::timing`, поведение не изменилось.
+        let mut secs = 1u64;
+        let mut seen = vec![secs];
+        for _ in 0..8 {
+            secs = next_reconnect_backoff(secs);
+            seen.push(secs);
+        }
+        assert_eq!(seen, vec![1, 2, 4, 8, 16, 30, 30, 30, 30]);
+        // И ни одна пауза не выходит за потолок.
+        assert!(seen.iter().all(|value| *value <= MQTT_RECONNECT_BACKOFF_MAX_SECS));
+    }
 
     /// Наш предел обязан покрывать то, что очередь пересылки пообещала
     /// хранить: иначе запись лежит в очереди и «ждёт получателя» вечно, потому

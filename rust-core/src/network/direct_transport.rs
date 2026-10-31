@@ -192,6 +192,11 @@ enum Command {
     Forget {
         peer_id: String,
     },
+    /// Сменить сеть (Wi-Fi → мобильная, VPN, авиарежим): все соединения
+    /// открыты со старым адресом источника и маршрутом, поэтому пул
+    /// закрывается целиком. Очередь сообщений это не трогает: она живёт
+    /// выше транспорта (`relay_queue`/Room), а недосланное повторится.
+    ForgetAll,
 }
 
 /// Общее состояние транспорта.
@@ -208,6 +213,11 @@ struct Shared {
     on_inbound: Option<InboundHandler>,
     on_bound_frame: Option<BoundFrameHandler>,
     on_file_session: Option<FileSessionHandler>,
+    /// Второй стек узла: адреса, которые пробуются, если основной не ответил.
+    /// Заполняется движком, когда mDNS/QR принёс больше одного адреса
+    /// (см. `mdns::DiscoveredNode::alt_addresses`). Ключ — peer_id в байтах,
+    /// как в пуле.
+    alternatives: Arc<std::sync::Mutex<HashMap<Vec<u8>, Vec<SocketAddr>>>>,
 }
 
 impl Shared {
@@ -285,6 +295,7 @@ impl DirectTransport {
         let (client, side) =
             QuicClient::new_with_side_channel(bind_addr).map_err(|e| e.to_string())?;
         let shared = Arc::new(Shared {
+            alternatives: Arc::new(std::sync::Mutex::new(HashMap::new())),
             client: Arc::new(client),
             pool: Arc::new(ConnectionPool::with_idle_timeout(
                 POOL_CAPACITY,
@@ -448,6 +459,40 @@ impl DirectTransport {
     /// to defer idle history probes, regardless of whether it is a contact.
     pub async fn has_any_connection(&self) -> bool {
         self.shared.pool.len().await > 0
+    }
+
+    /// Запомнить второй стек узла (см. `Shared::alternatives`).
+    ///
+    /// Отдельный адрес нужен там, где первый недостижим: телефон в чужой
+    /// сети, IPv6 за туннелем, закрытый UDP в одном из стеков. Список
+    /// ограничен тремя адресами: это подсказка, а не таблица маршрутов.
+    pub fn set_alternatives(&self, peer_id: &str, mut addrs: Vec<SocketAddr>) {
+        use crate::network::dual_stack;
+        addrs = addrs
+            .into_iter()
+            .map(dual_stack::canonical)
+            .filter(|addr| dual_stack::rank(addr.ip()).is_some())
+            .collect();
+        addrs.sort_by_key(|addr| dual_stack::rank(addr.ip()).unwrap_or(u8::MAX));
+        addrs.dedup();
+        addrs.truncate(3);
+        if let Ok(mut guard) = self.shared.alternatives.lock() {
+            if addrs.is_empty() {
+                guard.remove(peer_id.as_bytes());
+            } else {
+                guard.insert(peer_id.as_bytes().to_vec(), addrs);
+            }
+        }
+    }
+
+    /// Сменить сеть: закрыть все соединения пула и забыть подсказки адресов.
+    ///
+    /// Сокет `[::]` остаётся тем же — он слушает на всех интерфейсах, поэтому
+    /// при смене Wi-Fi/LTE пересоздавать endpoint не нужно (и нельзя: старый
+    /// порт 7777 мог бы остаться занятым). Устаревают именно соединения:
+    /// их адрес источника и маршрут уже не существуют.
+    pub fn network_changed(&self) {
+        let _ = self.tx.try_send(Command::ForgetAll);
     }
 
     /// Забыть соединение с узлом: следующая отправка откроет новое.
@@ -617,6 +662,14 @@ async fn run_command_loop(mut rx: mpsc::Receiver<Command>, shared: Arc<Shared>) 
                             }
                         }
                         lanes.insert(peer_id, lane);
+                    }
+                    Command::ForgetAll => {
+                        lanes.clear();
+                        shared.pool.shutdown().await;
+                        if let Ok(mut guard) = shared.alternatives.lock() {
+                            guard.clear();
+                        }
+                        tracing::info!("DIRECT: network changed, pooled connections closed");
                     }
                     Command::Forget { peer_id } => {
                         lanes.remove(&peer_id);
@@ -825,21 +878,43 @@ async fn acquire(
     // чтобы ключи пула и проверки «публичный/локальный» видели один и тот же адрес.
     let addr = crate::network::dual_stack::canonical(addr);
 
-    let conn = match tokio::time::timeout(
-        CONNECT_TIMEOUT,
-        shared.client.connect(addr, "p2p-messenger"),
-    )
-    .await
-    {
-        Ok(Ok(conn)) => conn,
-        Ok(Err(e)) => {
-            tracing::warn!("DIRECT: connect to {} failed: {}", addr, e);
-            return None;
+    // Основной адрес и второй стек узла. Порядок: сначала подсказка, затем
+    // альтернативы в их собственном порядке предпочтения. Дубликаты убираем:
+    // одна и та же попытка дважды только ест бюджет отправки.
+    let mut targets = vec![addr];
+    if let Ok(guard) = shared.alternatives.lock() {
+        if let Some(extra) = guard.get(key) {
+            for candidate in extra {
+                if !targets.contains(candidate) {
+                    targets.push(*candidate);
+                }
+            }
         }
-        Err(_) => {
-            tracing::warn!("DIRECT: connect to {} timed out", addr);
-            return None;
+    }
+
+    let mut connected: Option<(QuicConnection, SocketAddr)> = None;
+    for (index, target) in targets.iter().enumerate() {
+        match tokio::time::timeout(
+            CONNECT_TIMEOUT,
+            shared.client.connect(*target, "p2p-messenger"),
+        )
+        .await
+        {
+            Ok(Ok(conn)) => {
+                connected = Some((conn, *target));
+                break;
+            }
+            Ok(Err(e)) => tracing::warn!("DIRECT: connect to {} failed: {}", target, e),
+            Err(_) => tracing::warn!("DIRECT: connect to {} timed out", target),
         }
+        if index + 1 < targets.len() {
+            // Второй стек: сосед мог сменить сеть, а старый адрес ещё в книге.
+            let next = targets[index + 1];
+            tracing::info!("DIRECT: trying alternative address {} for {}", next, String::from_utf8_lossy(key));
+        }
+    }
+    let Some((conn, addr)) = connected else {
+        return None;
     };
     tracing::info!("QUIC connect ok to {}", addr);
 
