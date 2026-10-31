@@ -228,6 +228,9 @@ interface P2PCoreHandle {
     // Не ответил в пределах строгого таймаута - ядро само уходит на публичные.
     // Пустая строка выключает своего брокера. false - адрес не разобран.
     boolean set_own_broker(string host_port);
+    // Отвечает ли брокер по этому адресу сейчас (проверка перед сохранением).
+    // Блокирующая: приложение зовёт её из фоновой нитки.
+    boolean probe_own_broker(string host_port);
 
     // K4-1: «свои» для presence - контакты и участники моих групп. Ядро шлёт
     // им личный presence напрямую по QUIC, а в общий топик брокера пишет
@@ -243,6 +246,16 @@ interface P2PCoreHandle {
     string? observed_public_ip();
 
     string network_status();
+    // Диагностика прямого канала: машинная строка `DIRECT: …`, слова
+    // для человека собирает приложение (DirectChannelText.kt).
+    string direct_channel_status();
+    // Часть 2 (устойчивость сети): «только через relay» и «экономия трафика»
+    // на мобильной. `metered` присылает приложение: ядро не видит тариф.
+    void set_network_path_policy(boolean relay_only, boolean save_traffic, boolean metered);
+    boolean direct_channel_blocked();
+    // Kill-switch IPv6 из настроек: false - приложение работает только по IPv4
+    // (выбор адресов, публикация в mDNS/QR, привязка сокетов). Действует сразу.
+    void set_ipv6_enabled(boolean enabled);
     u64 connected_peers();
     // Not MQTT presence or a saved address: recently sampled signed QUIC neighbour.
     boolean has_live_swarm_peer();

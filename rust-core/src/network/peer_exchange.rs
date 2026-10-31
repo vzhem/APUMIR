@@ -57,6 +57,11 @@ pub fn valid_node_id(value: &str) -> bool {
 /// addresses must not be distributed as Internet bootstrap endpoints. A global IP can still be
 /// behind NAT/firewall; only a successful exchange proves reachability from this device.
 pub fn is_public_endpoint(addr: SocketAddr) -> bool {
+    // Dual-stack: IPv4-пир, пришедший на сокет `[::]`, выглядит как
+    // `::ffff:a.b.c.d`. Без нормализации он попадал в ветку IPv6 и не проходил
+    // проверку глобального unicast — то есть нормальный IPv4-адрес молча
+    // отбрасывался. Нормализуем до разбора семьи.
+    let addr = crate::network::dual_stack::canonical(addr);
     if addr.port() == 0 { return false; }
     match addr.ip() {
         IpAddr::V4(ip) => {
@@ -80,8 +85,13 @@ pub fn is_public_endpoint(addr: SocketAddr) -> bool {
 }
 
 pub fn usable_local_endpoint(addr: SocketAddr) -> bool {
+    // Та же нормализация, что и в `is_public_endpoint`: локальный адрес из
+    // dual-stack сокета приходит v4-mapped.
+    let addr = crate::network::dual_stack::canonical(addr);
     addr.port() != 0 && !addr.ip().is_unspecified() && !addr.ip().is_multicast()
         && !addr.ip().is_loopback()
+        // link-local без zone id недостижим — не годится и как локальный путь.
+        && !crate::network::dual_stack::is_link_local(addr.ip())
 }
 
 fn canonical<T: Serialize>(domain: &[u8], value: &T) -> Option<Vec<u8>> {
@@ -112,6 +122,10 @@ pub struct AddressLease {
 impl AddressLease {
     pub fn create(identity: &InstalledSigningIdentity, endpoint: SocketAddr, now: i64) -> Option<Self> {
         if !is_public_endpoint(endpoint) || now <= 0 { return None; }
+        // Подписываем нормализованный адрес: иначе один и тот же IPv4 мог быть
+        // подписан в двух видах (`1.1.1.1` и `::ffff:1.1.1.1`), и записи
+        // считались бы разными.
+        let endpoint = crate::network::dual_stack::canonical(endpoint);
         let claims = AddressClaims {
             node_id: identity.legacy_routing_node_id().to_string(), endpoint,
             issued_at_ms: now, expires_at_ms: now.checked_add(ADDRESS_LIFETIME_MS)?,
@@ -265,7 +279,15 @@ struct State {
     sent: VecDeque<i64>,
     ingress: VecDeque<i64>,
     last_inbound: HashMap<String, i64>,
-    self_lease: Option<AddressLease>,
+    /// Свои подписанные адреса — по одному на стек (IPv6 и IPv4).
+    ///
+    /// Формат каталога менять не пришлось: запись и так ключуется парой
+    /// «узел + endpoint», и `trim_records` разрешает два адреса на узел
+    /// (`MAX_PER_NODE_ADDRESSES`). Значит «оба стека в подписанном каталоге» —
+    /// это ДВЕ обычные аренды одного узла, а не новое поле в `AddressClaims`:
+    /// такое поле старый телефон отверг бы целиком из-за
+    /// `deny_unknown_fields`, а две отдельные подписи он понимает без правок.
+    self_leases: Vec<AddressLease>,
     observed_own: Option<(SocketAddr, i64)>,
     /// Briefly retry sending a changed own lease, even if an old request was pending.
     urgent_own_until_ms: i64,
@@ -382,7 +404,7 @@ impl PeerExchange {
 
     pub fn reset_session(&self) {
         let mut s = self.state.lock().unwrap();
-        s.pending.clear(); s.authenticated.clear(); s.next_round_ms = 0; s.observed_own = None; s.self_lease = None;
+        s.pending.clear(); s.authenticated.clear(); s.next_round_ms = 0; s.observed_own = None; s.self_leases.clear();
         s.urgent_own_until_ms = 0;
         self.wake();
     }
@@ -495,6 +517,16 @@ impl PeerExchange {
         &self, identity: &InstalledSigningIdentity, own_addr: Option<SocketAddr>,
         candidates: Vec<Candidate>, targets: &[String], now: i64,
     ) -> Vec<PreparedExchange> {
+        self.plan_multi(identity, own_addr.into_iter().collect(), candidates, targets, now)
+    }
+
+    /// То же, что [`PeerExchange::plan`], но своих адресов может быть два — по
+    /// одному на стек (см. `State::self_leases`). В каталог уезжают обе
+    /// подписанные аренды, и пир пробует ту, что у него достижима.
+    pub fn plan_multi(
+        &self, identity: &InstalledSigningIdentity, own_addrs: Vec<SocketAddr>,
+        candidates: Vec<Candidate>, targets: &[String], now: i64,
+    ) -> Vec<PreparedExchange> {
         let mut s = self.state.lock().unwrap();
         cleanup(&mut s, now);
         let expired: Vec<(String, Pending)> = s.pending.iter().filter(|(_, p)| p.deadline_ms <= now)
@@ -508,7 +540,7 @@ impl PeerExchange {
             } else { fail(&mut s, &id, pending.endpoint, now); }
         }
         if !self.wake.swap(false, Ordering::Relaxed) && now < s.next_round_ms { return Vec::new(); }
-        refresh_self(&mut s, identity, own_addr, now);
+        refresh_self(&mut s, identity, &own_addrs, now);
         let mut candidates = candidates;
         for r in s.records.values() {
             candidates.push(Candidate { node_id: r.lease.claims.node_id.clone(), endpoint: r.lease.claims.endpoint,
@@ -574,7 +606,7 @@ impl PeerExchange {
         let mut s = self.state.lock().unwrap(); cleanup(&mut s, now);
         if s.pending.len() >= MAX_PARALLEL_EXCHANGES || s.sent.len() >= MAX_REQUESTS_PER_MINUTE || s.pending.contains_key(peer) { return None; }
         if s.attempts.get(&(peer.into(), endpoint)).map(|a| a.failures > 0 && a.retry_at_ms > now).unwrap_or(false) { return None; }
-        refresh_self(&mut s, identity, own, now);
+        refresh_own_leases(&mut s, identity, own, now);
         let mut nonce = [0; 16]; OsRng.fill_bytes(&mut nonce);
         let claims = ExchangeClaims { version: 1, reply: false, from: identity.legacy_routing_node_id().into(),
             to: peer.into(), nonce, created_at_ms: now, channel_binding: [0; 32], signing_key: identity.public_key().try_into().ok()?,
@@ -670,7 +702,7 @@ impl PeerExchange {
                 reported_checked_at_ms: reported });
         }
         trim_records(&mut s);
-        refresh_self(&mut s, identity, own_addr, now);
+        refresh_own_leases(&mut s, identity, own_addr, now);
         let response = if c.reply { None } else {
             let records = select_records(&s, &c.known, &c.targets, identity.legacy_routing_node_id(), MAX_RECORDS, now);
             encode(identity, ExchangeClaims { version: 1, reply: true,
@@ -768,27 +800,67 @@ fn trim_records(s: &mut State) {
     }
 }
 
-fn refresh_self(s: &mut State, identity: &InstalledSigningIdentity, own: Option<SocketAddr>, now: i64) {
-    let endpoint = own.filter(|addr| is_public_endpoint(*addr)).or_else(|| {
-        s.observed_own.filter(|(_, at)| now.saturating_sub(*at) <= ONLINE_WINDOW_MS).map(|(addr, _)| addr)
-    });
-    let Some(endpoint) = endpoint else { s.self_lease = None; return; };
-    if s.self_lease.as_ref().map(|l| l.claims.endpoint == endpoint
-        && l.claims.signing_key.as_slice() == identity.public_key()
-        && now.saturating_sub(l.claims.issued_at_ms) < SELF_RENEW_MS).unwrap_or(false) { return; }
-    s.self_lease = AddressLease::create(identity, endpoint, now);
+/// Обновить свои аренды, не потеряв второй стек.
+///
+/// Вызывается там, где о своём адресе известно не всё (`probe`, `handle`):
+/// переданный адрес главнее, уже объявленные аренды добавляются к нему.
+/// Иначе один вызов с единственным адресом сузил бы каталог до одного стека.
+fn refresh_own_leases(s: &mut State, identity: &InstalledSigningIdentity, extra: Option<SocketAddr>, now: i64) {
+    // Новое знание идёт ПЕРВЫМ: свежее отражение STUN должно вытеснить
+    // устаревший адрес того же семейства, а не оказаться отброшенным им.
+    let mut current: Vec<SocketAddr> = extra.into_iter().collect();
+    current.extend(s.self_leases.iter().map(|lease| lease.claims.endpoint));
+    refresh_self(s, identity, &current, now);
+}
+
+fn refresh_self(s: &mut State, identity: &InstalledSigningIdentity, own: &[SocketAddr], now: i64) {
+    // Свой адрес по стеку: IPv6 и IPv4 — разные пути доставки, и у каждого своя
+    // подписанная аренда. Список приводим к «не больше одного адреса на
+    // семейство»: второй адрес того же стека каталогу не нужен.
+    let mut endpoints: Vec<SocketAddr> = Vec::new();
+    for addr in own.iter().copied().filter(|addr| is_public_endpoint(*addr)) {
+        let addr = crate::network::dual_stack::canonical(addr);
+        if !endpoints.iter().any(|known: &SocketAddr| known.is_ipv6() == addr.is_ipv6()) {
+            endpoints.push(addr);
+        }
+    }
+    if endpoints.is_empty() {
+        if let Some(addr) = s.observed_own
+            .filter(|(_, at)| now.saturating_sub(*at) <= ONLINE_WINDOW_MS)
+            .map(|(addr, _)| crate::network::dual_stack::canonical(addr))
+        {
+            endpoints.push(addr);
+        }
+    }
+    endpoints.sort_by_key(|addr| crate::network::dual_stack::rank(addr.ip()).unwrap_or(u8::MAX));
+    endpoints.truncate(MAX_PER_NODE_ADDRESSES);
+    // Ничего нового не узнали (адрес ещё не определён) — прежние аренды не
+    // трогаем: иначе одно «пока не знаю» стирало бы рабочий адрес из каталога.
+    if endpoints.is_empty() { return; }
+    let unchanged = endpoints.len() == s.self_leases.len()
+        && endpoints.iter().all(|endpoint| s.self_leases.iter().any(|lease| {
+            lease.claims.endpoint == *endpoint
+                && lease.claims.signing_key.as_slice() == identity.public_key()
+                && now.saturating_sub(lease.claims.issued_at_ms) < SELF_RENEW_MS
+        }));
+    if unchanged { return; }
+    s.self_leases = endpoints.into_iter()
+        .filter_map(|endpoint| AddressLease::create(identity, endpoint, now))
+        .collect();
 }
 
 fn known_bloom(s: &State, now: i64) -> Vec<u8> {
     let mut bloom = vec![0; BLOOM_BYTES];
     for r in s.records.values().filter(|r| r.lease.claims.expires_at_ms > now) { bloom_add(&mut bloom, r.lease.fingerprint()); }
-    if let Some(own) = &s.self_lease { bloom_add(&mut bloom, own.fingerprint()); }
+    for own in &s.self_leases { bloom_add(&mut bloom, own.fingerprint()); }
     bloom
 }
 
 fn select_records(s: &State, bloom: &[u8], targets: &[String], our_id: &str, limit: usize, now: i64) -> Vec<SharedRecord> {
     let mut records: Vec<CachedRecord> = s.records.values().filter(|r| r.lease.claims.expires_at_ms > now).cloned().collect();
-    if let Some(own) = &s.self_lease { records.push(CachedRecord { lease: own.clone(), locally_checked_at_ms: now, reported_checked_at_ms: now }); }
+    for own in &s.self_leases {
+        records.push(CachedRecord { lease: own.clone(), locally_checked_at_ms: now, reported_checked_at_ms: now });
+    }
     // Explicit targets bypass Bloom filters: false positives must not hide the wanted contact.
     records.retain(|r| targets.contains(&r.lease.claims.node_id) || !bloom_has(bloom, r.lease.fingerprint()));
     records.sort_by(|a, b| {
@@ -831,15 +903,66 @@ mod tests {
     }
 
     #[test]
+    fn both_own_stacks_are_published_as_separate_leases() {
+        // Часть 4: «оба стека в подписанном каталоге» — это две обычные
+        // аренды одного узла (по одной на семейство), а не новое поле в
+        // `AddressClaims`, которое старый телефон отверг бы целиком.
+        let a = identity(1);
+        let b = identity(2);
+        let da = PeerExchange::open(None);
+        let db = PeerExchange::open(None);
+        let v6: SocketAddr = "[2a00:1450:4001::1]:7777".parse().unwrap();
+        let v4: SocketAddr = "8.8.4.1:7777".parse().unwrap();
+        let q = da
+            .plan_multi(
+                &a,
+                vec![v4, v6],
+                vec![Candidate {
+                    node_id: b.legacy_routing_node_id().into(),
+                    endpoint: addr(2),
+                    learned_at_ms: NOW,
+                    live_connection: false,
+                }],
+                &[],
+                NOW,
+            )
+            .remove(0);
+        assert!(da.bind_request(&q, BINDING, addr(2)));
+        let effect = db
+            .handle(&b, &q.encode(&a, BINDING).unwrap(), BINDING, addr(1), Some(addr(2)), NOW)
+            .unwrap();
+        let mine: Vec<SocketAddr> = effect
+            .candidates
+            .iter()
+            .filter(|(id, _, _)| id == a.legacy_routing_node_id())
+            .map(|(_, endpoint, _)| *endpoint)
+            .collect();
+        assert!(mine.contains(&v6), "IPv6-аренда не уехала: {mine:?}");
+        assert!(mine.contains(&v4), "IPv4-аренда не уехала: {mine:?}");
+        assert_eq!(mine.len(), 2, "ровно по одному адресу на стек: {mine:?}");
+        // Тот же узел может быть известен по двум адресам — это не ошибка.
+        assert_eq!(db.candidates(NOW).iter().filter(|(id, _, _)| id == a.legacy_routing_node_id()).count(), 2);
+    }
+
+    #[test]
     fn public_address_filter_excludes_lan_cgnat_tests_and_ipv6_local() {
         for bad in ["10.1.2.3:7777", "100.64.0.2:7777", "100.127.255.255:9", "172.31.2.3:1",
             "192.168.1.1:7", "127.0.0.1:7777", "169.254.1.2:7", "0.0.0.0:8", "224.0.0.1:8",
             "192.0.2.1:7777", "198.51.100.1:7777", "203.0.113.1:7777", "8.8.8.8:0",
             "[::1]:7777", "[fe80::1]:7777", "[fc00::1]:7777", "[ff02::1]:7777",
-            "[::ffff:10.0.0.1]:7777", "[2001:db8::1]:7777"] {
+            "[::ffff:10.0.0.1]:7777", "[::ffff:192.168.1.1]:7777",
+            "[2001:db8::1]:7777"] {
             assert!(!is_public_endpoint(bad.parse().unwrap()), "{bad}");
         }
-        for good in ["1.1.1.1:7777", "8.8.8.8:34567", "[2606:4700:4700::1111]:7777"] {
+        for good in [
+            "1.1.1.1:7777",
+            "8.8.8.8:34567",
+            "[2606:4700:4700::1111]:7777",
+            // v4-mapped глобальный IPv4 (приходит с dual-stack сокета) — это
+            // обычный публичный IPv4, а не «непонятный IPv6».
+            "[::ffff:1.1.1.1]:7777",
+            "[::ffff:8.8.8.8]:34567",
+        ] {
             assert!(is_public_endpoint(good.parse().unwrap()), "{good}");
         }
         assert!(!valid_node_id("pk_ab_public"));

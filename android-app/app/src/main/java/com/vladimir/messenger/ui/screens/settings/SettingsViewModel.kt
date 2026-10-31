@@ -735,7 +735,17 @@ class SettingsViewModel @Inject constructor(
             // Раунд 190: человекочитаемая версия той же строки. Ядро не
             // трогаем - разбор на стороне приложения; если формат когда-
             // нибудь изменится, вернётся пусто и экран покажет сырую.
-            val mqttHuman = MqttLinkText.humanize(mqttLine)
+            // Часть 1 IPv6: второй строкой - прямой канал словами (стек,
+            // внешний адрес, нужен ли обходной путь). Показывается в той же
+            // карточке «Сеть сообщений» и уходит в «Скопировать».
+            val directHuman = withContext(Dispatchers.IO) {
+                com.vladimir.messenger.data.diagnostics.DirectChannelText.humanize(
+                    RustBridge.directChannelStatus(),
+                )
+            }
+            val mqttHuman = listOf(MqttLinkText.humanize(mqttLine), directHuman)
+                .filter { it.isNotBlank() }
+                .joinToString("\n")
 
             _uiState.update {
                 it.copy(

@@ -88,6 +88,9 @@ pub enum MqttLivenessAssessment {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MqttRestartReason {
     NotificationChannelClosed,
+    /// Человек поменял свой брокер в настройках: пересоздать сессию по новому
+    /// адресу (не сбой, а осознанное изменение).
+    BrokerChanged,
     EventLoopTaskFinished,
     Stalled {
         phase: MqttLoopPhase,
@@ -100,6 +103,7 @@ impl MqttRestartReason {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::NotificationChannelClosed => "notification_channel_closed",
+            Self::BrokerChanged => "broker_settings_changed",
             Self::EventLoopTaskFinished => "eventloop_task_finished",
             Self::Stalled { .. } => "eventloop_stalled",
             Self::ProbeStopped => "liveness_probe_stopped",

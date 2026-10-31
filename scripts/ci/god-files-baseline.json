@@ -20,9 +20,9 @@
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/chat/ChatDetailViewModel.kt": 1865,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/chat/ChatListScreen.kt": 1898,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupAdminScreen.kt": 1525,
-    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupChatScreen.kt": 2975,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupChatScreen.kt": 2973,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupChatViewModel.kt": 2053,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupsScreen.kt": 1531,
-    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsScreen.kt": 2911
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsScreen.kt": 2883
   }
 }

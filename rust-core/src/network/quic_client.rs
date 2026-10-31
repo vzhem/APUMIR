@@ -49,6 +49,19 @@ pub const MAX_IDLE_TIMEOUT_SECS: u64 = 60;
 /// 30 с и больше) и позволяет пулу переиспользовать соединение.
 pub const KEEP_ALIVE_INTERVAL_SECS: u64 = 20;
 
+/// Начальный размер QUIC-датаграммы (байт).
+///
+/// 1200 — минимум, который обязан пропускать любой путь (RFC 9000 §14).
+/// Именно это важно для IPv6: минимальный MTU IPv6 равен 1280, а туннели
+/// (VPN, 6to4, часть мобильных APN) часто ровно 1280, то есть больше 1200
+/// байт полезной нагрузки там просто не пройдёт. Раньше значение было
+/// умолчанием quinn; фиксируем его явно, чтобы «ускорение» настройкой не
+/// вернуло фрагментацию на IPv6-туннелях.
+pub const QUIC_INITIAL_MTU: u16 = 1200;
+
+/// Пол по MTU для PMTU-обнаружения quinn: ниже 1200 не опускаемся никогда.
+pub const QUIC_MIN_MTU: u16 = 1200;
+
 // ═══════════════════════════════════════════════════════════════════
 // ОШИБКИ
 // ═══════════════════════════════════════════════════════════════════
@@ -475,8 +488,10 @@ impl QuicClient {
     /// Создать новый QUIC endpoint, привязанный к указанному порту.
     ///
     /// # Аргументы
-    /// - `bind_addr` — адрес для привязки, обычно `0.0.0.0:0` (любой порт)
-    ///   или `0.0.0.0:7777` (наш стандартный порт)
+    /// - `bind_addr` — адрес для привязки. «Любой» адрес (`0.0.0.0:7777`,
+    ///   `0.0.0.0:0`) означает dual-stack: сокет встаёт на `[::]:порт` с
+    ///   `only_v6 = false` и принимает и IPv6, и IPv4. Явный адрес (тест на
+    ///   `127.0.0.1:0`, привязка к конкретному интерфейсу) уважается как есть.
     pub fn new(bind_addr: SocketAddr) -> QuicResult<Self> {
         // Устанавливаем криптопровайдер aws-lc-rs как default
         // (нужно один раз на процесс — второй вызов будет проигнорирован)
@@ -491,9 +506,19 @@ impl QuicClient {
         // Настройка клиента (для исходящих соединений)
         let client_config = make_client_config()?;
 
+        // Сокет создаём сами: только так можно выставить `only_v6 = false`
+        // явно и получить true dual-stack (см. `dual_stack::bind_udp_dual`).
+        let std_socket = endpoint_socket(bind_addr)?;
+        let runtime = current_runtime()?;
+
         // Создаём endpoint
-        let mut endpoint = Endpoint::server(server_config, bind_addr)
-            .map_err(|e| QuicClientError::EndpointCreation(e.to_string()))?;
+        let mut endpoint = Endpoint::new(
+            quinn::EndpointConfig::default(),
+            Some(server_config),
+            std_socket,
+            runtime,
+        )
+        .map_err(|e| QuicClientError::EndpointCreation(e.to_string()))?;
 
         // Устанавливаем клиентскую конфигурацию (для исходящих connect())
         endpoint.set_default_client_config(client_config);
@@ -519,11 +544,8 @@ impl QuicClient {
         let server_config = make_server_config(cert, key)?;
         let client_config = make_client_config()?;
 
-        let std_socket = std::net::UdpSocket::bind(bind_addr)
-            .map_err(|e| QuicClientError::EndpointCreation(e.to_string()))?;
-        let runtime: Arc<dyn quinn::Runtime> = quinn::default_runtime().ok_or_else(|| {
-            QuicClientError::EndpointCreation("no async runtime in scope".to_string())
-        })?;
+        let std_socket = endpoint_socket(bind_addr)?;
+        let runtime = current_runtime()?;
         let inner = runtime
             .wrap_udp_socket(std_socket)
             .map_err(|e| QuicClientError::EndpointCreation(e.to_string()))?;
@@ -696,6 +718,28 @@ fn generate_self_signed_cert() -> QuicResult<(CertificateDer<'static>, PrivatePk
     Ok((cert_der, key_der))
 }
 
+/// Сокет endpoint'а.
+///
+/// «Любой» IPv4-адрес (`0.0.0.0:порт`) трактуется как «любой вообще»: берём
+/// `[::]:порт` с `only_v6 = false`, то есть один сокет на оба стека. Если
+/// IPv6 недоступен, `dual_stack::bind_udp_dual` сам откатывается на IPv4 —
+/// телефон без IPv6 продолжает работать как раньше.
+fn endpoint_socket(bind_addr: SocketAddr) -> QuicResult<std::net::UdpSocket> {
+    let socket = if bind_addr.ip().is_unspecified() && bind_addr.is_ipv4() {
+        crate::network::dual_stack::bind_udp_dual(bind_addr.port())
+    } else {
+        std::net::UdpSocket::bind(bind_addr)
+    };
+    socket.map_err(|e| QuicClientError::EndpointCreation(e.to_string()))
+}
+
+/// Runtime, из которого создаётся endpoint (quinn берёт его из контекста).
+fn current_runtime() -> QuicResult<Arc<dyn quinn::Runtime>> {
+    quinn::default_runtime().ok_or_else(|| {
+        QuicClientError::EndpointCreation("no async runtime in scope".to_string())
+    })
+}
+
 /// Конфигурация сервера (для приёма входящих соединений).
 fn make_server_config(
     cert: CertificateDer<'static>,
@@ -718,6 +762,9 @@ fn make_server_config(
     let mut transport = quinn::TransportConfig::default();
     transport.max_concurrent_uni_streams(256_u32.into());
     transport.max_concurrent_bidi_streams(256_u32.into());
+    // См. `QUIC_INITIAL_MTU`: путь IPv6-туннеля не пропустит больше 1200 байт.
+    transport.initial_mtu(QUIC_INITIAL_MTU);
+    transport.min_mtu(QUIC_MIN_MTU);
     transport.max_idle_timeout(Some(
         Duration::from_secs(MAX_IDLE_TIMEOUT_SECS).try_into().unwrap(),
     ));
@@ -748,6 +795,8 @@ fn make_client_config() -> QuicResult<ClientConfig> {
 
     // Настройки транспорта
     let mut transport = quinn::TransportConfig::default();
+    transport.initial_mtu(QUIC_INITIAL_MTU);
+    transport.min_mtu(QUIC_MIN_MTU);
     transport.max_idle_timeout(Some(
         Duration::from_secs(MAX_IDLE_TIMEOUT_SECS).try_into().unwrap(),
     ));

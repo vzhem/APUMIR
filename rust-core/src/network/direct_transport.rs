@@ -192,6 +192,11 @@ enum Command {
     Forget {
         peer_id: String,
     },
+    /// Сменить сеть (Wi-Fi → мобильная, VPN, авиарежим): все соединения
+    /// открыты со старым адресом источника и маршрутом, поэтому пул
+    /// закрывается целиком. Очередь сообщений это не трогает: она живёт
+    /// выше транспорта (`relay_queue`/Room), а недосланное повторится.
+    ForgetAll,
 }
 
 /// Общее состояние транспорта.
@@ -208,6 +213,17 @@ struct Shared {
     on_inbound: Option<InboundHandler>,
     on_bound_frame: Option<BoundFrameHandler>,
     on_file_session: Option<FileSessionHandler>,
+    /// «Только через relay» / «экономия трафика на мобильной»: прямой канал
+    /// не используется ни на отправку, ни на приём. Сокет остаётся открытым
+    /// (закрывать и поднимать заново дороже и рискованнее), но кадры в него
+    /// не уходят, а входящие соединения закрываются сразу. Ставится из
+    /// настроек: `P2PCore::set_network_path_policy`.
+    relay_only: Arc<std::sync::atomic::AtomicBool>,
+    /// Второй стек узла: адреса, которые пробуются, если основной не ответил.
+    /// Заполняется движком, когда mDNS/QR принёс больше одного адреса
+    /// (см. `mdns::DiscoveredNode::alt_addresses`). Ключ — peer_id в байтах,
+    /// как в пуле.
+    alternatives: Arc<std::sync::Mutex<HashMap<Vec<u8>, Vec<SocketAddr>>>>,
 }
 
 impl Shared {
@@ -220,7 +236,9 @@ impl Shared {
         }
         match self.pool.insert(key, conn.clone()).await {
             Ok(()) => {
-                let remote = conn.remote_address();
+                // dual-stack: IPv4-пир приходит сюда как ::ffff:a.b.c.d —
+                // в азбуку адресов он должен попасть обычным IPv4.
+                let remote = crate::network::dual_stack::canonical(conn.remote_address());
                 tracing::info!(
                     "DIRECT: adopted inbound connection from {} at {}",
                     sender,
@@ -283,6 +301,8 @@ impl DirectTransport {
         let (client, side) =
             QuicClient::new_with_side_channel(bind_addr).map_err(|e| e.to_string())?;
         let shared = Arc::new(Shared {
+            alternatives: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            relay_only: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             client: Arc::new(client),
             pool: Arc::new(ConnectionPool::with_idle_timeout(
                 POOL_CAPACITY,
@@ -337,6 +357,12 @@ impl DirectTransport {
         payload: Vec<u8>,
         kind: JobKind,
     ) -> bool {
+        // Настройка «только через relay» / «экономия трафика на мобильной»:
+        // прямой канал не используем вовсе. Возвращаем `false` сразу -
+        // вызывающий уходит на запасной путь без ожидания таймаутов.
+        if self.is_relay_only() {
+            return false;
+        }
         let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(1);
         let command = Command::Send {
             peer_id: peer_id.to_string(),
@@ -380,6 +406,9 @@ impl DirectTransport {
         payload: Vec<u8>,
         kind: JobKind,
     ) -> bool {
+        if self.is_relay_only() {
+            return false;
+        }
         let (reply_tx, reply_rx) = oneshot::channel();
         let command = Command::Send {
             peer_id: peer_id.to_string(),
@@ -405,6 +434,9 @@ impl DirectTransport {
     pub async fn send_bound(
         &self, peer_id: &str, addr: Option<SocketAddr>, factory: BoundFrameFactory,
     ) -> bool {
+        if self.is_relay_only() {
+            return false;
+        }
         let (reply_tx, reply_rx) = oneshot::channel();
         let command = Command::Send {
             peer_id: peer_id.to_string(),
@@ -417,6 +449,9 @@ impl DirectTransport {
     }
 
     pub fn send_bound_blocking(&self, peer_id: &str, addr: Option<SocketAddr>, factory: BoundFrameFactory) -> bool {
+        if self.is_relay_only() {
+            return false;
+        }
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         let command = Command::Send { peer_id: peer_id.into(), job: SendJob {
             addr, payload: FramePayload::Bound(factory), kind: JobKind::Interactive,
@@ -446,6 +481,52 @@ impl DirectTransport {
     /// to defer idle history probes, regardless of whether it is a contact.
     pub async fn has_any_connection(&self) -> bool {
         self.shared.pool.len().await > 0
+    }
+
+    /// Включить/выключить «только через relay» (см. `Shared::relay_only`).
+    pub fn set_relay_only(&self, value: bool) {
+        self.shared
+            .relay_only
+            .store(value, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Прямой канал сейчас запрещён настройкой?
+    pub fn is_relay_only(&self) -> bool {
+        self.shared.relay_only.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Запомнить второй стек узла (см. `Shared::alternatives`).
+    ///
+    /// Отдельный адрес нужен там, где первый недостижим: телефон в чужой
+    /// сети, IPv6 за туннелем, закрытый UDP в одном из стеков. Список
+    /// ограничен тремя адресами: это подсказка, а не таблица маршрутов.
+    pub fn set_alternatives(&self, peer_id: &str, mut addrs: Vec<SocketAddr>) {
+        use crate::network::dual_stack;
+        addrs = addrs
+            .into_iter()
+            .map(dual_stack::canonical)
+            .filter(|addr| dual_stack::rank(addr.ip()).is_some())
+            .collect();
+        addrs.sort_by_key(|addr| dual_stack::rank(addr.ip()).unwrap_or(u8::MAX));
+        addrs.dedup();
+        addrs.truncate(3);
+        if let Ok(mut guard) = self.shared.alternatives.lock() {
+            if addrs.is_empty() {
+                guard.remove(peer_id.as_bytes());
+            } else {
+                guard.insert(peer_id.as_bytes().to_vec(), addrs);
+            }
+        }
+    }
+
+    /// Сменить сеть: закрыть все соединения пула и забыть подсказки адресов.
+    ///
+    /// Сокет `[::]` остаётся тем же — он слушает на всех интерфейсах, поэтому
+    /// при смене Wi-Fi/LTE пересоздавать endpoint не нужно (и нельзя: старый
+    /// порт 7777 мог бы остаться занятым). Устаревают именно соединения:
+    /// их адрес источника и маршрут уже не существуют.
+    pub fn network_changed(&self) {
+        let _ = self.tx.try_send(Command::ForgetAll);
     }
 
     /// Забыть соединение с узлом: следующая отправка откроет новое.
@@ -479,6 +560,14 @@ async fn run_accept_loop(shared: Arc<Shared>) {
             match tokio::time::timeout(INBOUND_HANDSHAKE_TIMEOUT, connecting).await {
                 Ok(Ok(connection)) => {
                     let conn = QuicConnection::new(connection);
+                    if shared.relay_only.load(std::sync::atomic::Ordering::Acquire) {
+                        // Настройка запрещает прямой канал: не принимаем и не
+                        // усыновляем, чтобы путь был ровно один - relay.
+                        // `return`, а не `continue`: это тело задачи
+                        // (`tokio::spawn`), цикла вокруг нет.
+                        conn.close(b"relay only");
+                        return;
+                    }
                     tracing::info!("QUIC: incoming connection from {}", conn.remote_address());
                     read_loop(conn, shared, true).await;
                 }
@@ -528,7 +617,11 @@ async fn read_loop(conn: QuicConnection, shared: Arc<Shared>, inbound: bool) {
             || payload.starts_with(super::peer_assistance::ASSIST_MAGIC) {
             let Some(handler) = &shared.on_bound_frame else { continue; };
             let Ok(binding) = conn.peer_exchange_channel_binding() else { continue; };
-            let result = handler(&payload, binding, conn.remote_address());
+            let result = handler(
+                &payload,
+                binding,
+                crate::network::dual_stack::canonical(conn.remote_address()),
+            );
             (result.sender, result.response)
         } else {
             ((shared.on_frame)(payload), None)
@@ -611,6 +704,14 @@ async fn run_command_loop(mut rx: mpsc::Receiver<Command>, shared: Arc<Shared>) 
                             }
                         }
                         lanes.insert(peer_id, lane);
+                    }
+                    Command::ForgetAll => {
+                        lanes.clear();
+                        shared.pool.shutdown().await;
+                        if let Ok(mut guard) = shared.alternatives.lock() {
+                            guard.clear();
+                        }
+                        tracing::info!("DIRECT: network changed, pooled connections closed");
                     }
                     Command::Forget { peer_id } => {
                         lanes.remove(&peer_id);
@@ -721,7 +822,8 @@ async fn send_one(
             FramePayload::Plain(bytes) => Cow::Borrowed(bytes.as_slice()),
             FramePayload::Bound(factory) => {
                 let Ok(binding) = conn.peer_exchange_channel_binding() else { return SendOutcome::StreamFailed; };
-                let Some(bytes) = factory(binding, conn.remote_address()) else { return SendOutcome::StreamFailed; };
+                let peer_addr = crate::network::dual_stack::canonical(conn.remote_address());
+                let Some(bytes) = factory(binding, peer_addr) else { return SendOutcome::StreamFailed; };
                 if bytes.len() > super::peer_assistance::MAX_ASSIST_BYTES { return SendOutcome::StreamFailed; }
                 Cow::Owned(bytes)
             }
@@ -814,22 +916,47 @@ async fn acquire(
         );
         return None;
     };
+    // Адрес пришёл из адресной книги, mDNS или QR: v4-mapped сводим к IPv4,
+    // чтобы ключи пула и проверки «публичный/локальный» видели один и тот же адрес.
+    let addr = crate::network::dual_stack::canonical(addr);
 
-    let conn = match tokio::time::timeout(
-        CONNECT_TIMEOUT,
-        shared.client.connect(addr, "p2p-messenger"),
-    )
-    .await
-    {
-        Ok(Ok(conn)) => conn,
-        Ok(Err(e)) => {
-            tracing::warn!("DIRECT: connect to {} failed: {}", addr, e);
-            return None;
+    // Основной адрес и второй стек узла. Порядок: сначала подсказка, затем
+    // альтернативы в их собственном порядке предпочтения. Дубликаты убираем:
+    // одна и та же попытка дважды только ест бюджет отправки.
+    let mut targets = vec![addr];
+    if let Ok(guard) = shared.alternatives.lock() {
+        if let Some(extra) = guard.get(key) {
+            for candidate in extra {
+                if !targets.contains(candidate) {
+                    targets.push(*candidate);
+                }
+            }
         }
-        Err(_) => {
-            tracing::warn!("DIRECT: connect to {} timed out", addr);
-            return None;
+    }
+
+    let mut connected: Option<(QuicConnection, SocketAddr)> = None;
+    for (index, target) in targets.iter().enumerate() {
+        match tokio::time::timeout(
+            CONNECT_TIMEOUT,
+            shared.client.connect(*target, "p2p-messenger"),
+        )
+        .await
+        {
+            Ok(Ok(conn)) => {
+                connected = Some((conn, *target));
+                break;
+            }
+            Ok(Err(e)) => tracing::warn!("DIRECT: connect to {} failed: {}", target, e),
+            Err(_) => tracing::warn!("DIRECT: connect to {} timed out", target),
         }
+        if index + 1 < targets.len() {
+            // Второй стек: сосед мог сменить сеть, а старый адрес ещё в книге.
+            let next = targets[index + 1];
+            tracing::info!("DIRECT: trying alternative address {} for {}", next, String::from_utf8_lossy(key));
+        }
+    }
+    let Some((conn, addr)) = connected else {
+        return None;
     };
     tracing::info!("QUIC connect ok to {}", addr);
 
@@ -862,70 +989,103 @@ async fn acquire(
 /// Серверы пробуются по очереди, каждый с таймаутом `per_server`. Ответы
 /// приходят через боковой канал (обёртка сокета отводит всё, что похоже на
 /// STUN, см. `SharedUdpSocket`).
+///
+/// Резолв теперь dual-stack: раньше из ответа DNS брался только IPv4
+/// (`find(|a| a.is_ipv4())`), то есть в сети с IPv6 мы заведомо ходили по
+/// IPv4 и получали внешний адрес чужого стека. Теперь адреса сервера идут в
+/// порядке предпочтения (IPv6 → IPv4), и при неудаче на одном адресе
+/// пробуется следующий: у `stun.l.google.com` AAAA нет вовсе, у
+/// `stun.cloudflare.com` есть оба.
+///
+/// Возвращается нормализованный адрес: на dual-stack сокете отражение IPv4
+/// приходит как `::ffff:a.b.c.d`, а публиковать его как IPv6 нельзя.
 pub async fn stun_via_side_channel(
     side: &mut UdpSideChannel,
     servers: &[&str],
     per_server: Duration,
 ) -> Option<SocketAddr> {
+    stun_via_side_channel_family(side, servers, per_server, None).await
+}
+
+/// То же, но можно ограничить семейство адресов сервера.
+///
+/// `Some(true)` — спрашивать только IPv6-адреса серверов, `Some(false)` —
+/// только IPv4. Нужно затем, чтобы узнать отражение **второго** стека: двойной
+/// путь (IPv6 + IPv4) — это два разных отражения с одного и того же сокета, и
+/// одно из них бесполезно для пира в другом стеке (часть 4: «оба стека в
+/// каталоге адресов»).
+pub async fn stun_via_side_channel_family(
+    side: &mut UdpSideChannel,
+    servers: &[&str],
+    per_server: Duration,
+    only_ipv6: Option<bool>,
+) -> Option<SocketAddr> {
     use super::ice::{decode_binding_response, encode_binding_request};
-    use std::net::ToSocketAddrs;
+
+    let request = match encode_binding_request() {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("STUN(7777): encode failed: {}", e);
+            return None;
+        }
+    };
 
     for server in servers {
         let server_owned = server.to_string();
         // DNS-резолв блокирующий - выносим из реактора.
-        let resolved = tokio::task::spawn_blocking(move || {
-            server_owned
-                .to_socket_addrs()
-                .ok()
-                .and_then(|mut it| it.find(|a| a.is_ipv4()))
+        let targets = tokio::task::spawn_blocking(move || {
+            crate::network::dual_stack::resolve_ordered(&server_owned)
         })
         .await
-        .ok()
-        .flatten();
-        let Some(target) = resolved else {
-            tracing::warn!("STUN(7777): cannot resolve {}", server);
-            continue;
-        };
-        let request = match encode_binding_request() {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!("STUN(7777): encode failed: {}", e);
-                return None;
-            }
-        };
-        side.drain();
-        if let Err(e) = side.send_to(target, &request).await {
-            tracing::warn!("STUN(7777): send to {} failed: {}", server, e);
+        .unwrap_or_default();
+        let targets: Vec<SocketAddr> = targets
+            .into_iter()
+            .filter(|target| only_ipv6.map(|v6| target.is_ipv6() == v6).unwrap_or(true))
+            .collect();
+        if targets.is_empty() {
+            tracing::warn!("STUN(7777): cannot resolve {} for the requested stack", server);
             continue;
         }
-        let deadline = tokio::time::Instant::now() + per_server;
-        loop {
-            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-            if remaining.is_zero() {
-                tracing::warn!("STUN(7777): {} timed out", server);
-                break;
+        for target in targets {
+            side.drain();
+            if let Err(e) = side.send_to(target, &request).await {
+                tracing::warn!("STUN(7777): send to {} failed: {}", target, e);
+                continue;
             }
-            match tokio::time::timeout(remaining, side.recv()).await {
-                Ok(Some((from, bytes))) => {
-                    if from != target {
-                        // Чужая/запоздалая датаграмма - не наш ответ.
-                        continue;
-                    }
-                    match decode_binding_response(&bytes) {
-                        Ok(addr) => {
-                            tracing::info!("STUN(7777): {} sees us as {}", server, addr);
-                            return Some(addr);
-                        }
-                        Err(e) => {
-                            tracing::warn!("STUN(7777): bad response from {}: {}", server, e);
-                            break;
-                        }
-                    }
-                }
-                Ok(None) => return None, // сокет закрыт
-                Err(_) => {
-                    tracing::warn!("STUN(7777): {} timed out", server);
+            let deadline = tokio::time::Instant::now() + per_server;
+            loop {
+                let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+                if remaining.is_zero() {
+                    tracing::warn!("STUN(7777): {} timed out", target);
                     break;
+                }
+                match tokio::time::timeout(remaining, side.recv()).await {
+                    Ok(Some((from, bytes))) => {
+                        // Сравниваем нормализованно: ответ на IPv4-запрос
+                        // приходит с v4-mapped источником.
+                        if crate::network::dual_stack::canonical(from)
+                            != crate::network::dual_stack::canonical(target)
+                        {
+                            // Чужая/запоздалая датаграмма - не наш ответ.
+                            continue;
+                        }
+                        match decode_binding_response(&bytes) {
+                            Ok(addr) => {
+                                let addr = crate::network::dual_stack::canonical(addr);
+                                tracing::info!("STUN(7777): {} sees us as {}", target, addr);
+                                return Some(addr);
+                            }
+                            Err(e) => {
+                                tracing::warn!("STUN(7777): bad response from {}: {}", target, e);
+                                break;
+                            }
+                        }
+                    }
+                    Ok(None) => return None, // сокет закрыт
+                    Err(_) => {
+                        tracing::warn!("STUN(7777): {} timed out", target);
+                        break;
+                    }
                 }
             }
         }

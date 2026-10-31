@@ -205,6 +205,80 @@ pub fn mqtt_link_summary() -> String {
     out
 }
 
+/// «Сеть сменилась: переподключайся сейчас».
+///
+/// Цикл MQTT сам переподключается с паузой до
+/// [`MQTT_RECONNECT_BACKOFF_MAX_SECS`] секунд. Без этого флага переход
+/// Wi-Fi → мобильная сеть означал бы до 30 секунд молчания даже при живом
+/// интернете. Флаг ставит ядро (`on_network_available`), читает и снимает
+/// [`wait_before_reconnect`].
+static RECONNECT_NOW: AtomicBool = AtomicBool::new(false);
+
+/// Поколение настроек брокера. Меняется, когда человек вписал (или убрал)
+/// СВОЙ брокер в настройках: список брокеров читается при создании сессии, и
+/// без этого сигнала новый адрес подействовал бы только после перезапуска
+/// приложения. Сессия сравнивает поколение со своим и просит пересоздание
+/// через тот же путь, что и «зависшая» сессия (`restart_reason`).
+static BROKER_SETTINGS_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+/// Текущее поколение настроек брокера.
+pub fn broker_settings_generation() -> u64 {
+    BROKER_SETTINGS_GENERATION.load(Ordering::Acquire)
+}
+
+/// Отметить, что настройки брокера изменились.
+///
+/// Следующая итерация сессии увидит расхождение поколений, закроет текущую
+/// сессию и поднимется заново — уже по новому адресу, без перезапуска службы
+/// и без потери очереди (очередь живёт выше транспорта).
+pub fn note_broker_settings_changed() {
+    BROKER_SETTINGS_GENERATION.fetch_add(1, Ordering::AcqRel);
+    wake_reconnect();
+}
+
+/// Разбудить цикл переподключения: сеть могла появиться раньше, чем кончилась
+/// пауза. Безопасно звать сколько угодно раз.
+pub fn wake_reconnect() {
+    RECONNECT_NOW.store(true, Ordering::Release);
+}
+
+/// Пауза перед переподключением, которую можно прервать сменой сети.
+///
+/// Разбита на короткие шаги намеренно: `select!` с каналом потребовал бы
+/// держать вторую половину канала во всех четырёх циклах (основной брокер,
+/// вторичный, WSS-мост, арендатор), а флаг читается из любого места.
+/// Следующая пауза переподключения по единой политике (`network::timing`).
+fn next_reconnect_backoff(current_secs: u64) -> u64 {
+    use crate::network::timing::BackoffPolicy;
+    // `current_secs` — уже действующая пауза (1, 2, 4, …). Политика берёт
+    // номер попытки, поэтому переводим секунды обратно в номер степени.
+    let attempt = match current_secs {
+        0 | 1 => 0,
+        value => (u64::BITS - value.leading_zeros()).saturating_sub(1),
+    };
+    BackoffPolicy::RECONNECT
+        .delay(attempt.saturating_add(1))
+        .as_secs()
+        .clamp(1, MQTT_RECONNECT_BACKOFF_MAX_SECS)
+}
+
+async fn wait_before_reconnect(seconds: u64) {
+    let step = Duration::from_millis(250);
+    let mut waited = Duration::ZERO;
+    let total = Duration::from_secs(seconds);
+    while waited < total {
+        if RECONNECT_NOW.swap(false, Ordering::AcqRel) {
+            tracing::info!("MQTT: network changed, reconnecting without waiting for backoff");
+            return;
+        }
+        tokio::time::sleep(step).await;
+        waited += step;
+    }
+    // Пауза кончилась сама: старый сигнал больше не нужен, иначе следующая
+    // пауза закончится мгновенно без причины.
+    RECONNECT_NOW.store(false, Ordering::Release);
+}
+
 const PRESENCE_INTERVAL: Duration = Duration::from_secs(120);
 const MQTT_EVENT_BUFFER: usize = 256;
 const MQTT_CLIENT_REQUEST_BUFFER: usize = 100;
@@ -370,6 +444,9 @@ pub struct MqttTransport {
     secondary_liveness: Arc<MqttLivenessProbe>,
     #[cfg(feature = "mqtt-dual-broker")]
     secondary_ready: Arc<AtomicBool>,
+    /// Поколение настроек брокера, с которым эта сессия создана (см.
+    /// `BROKER_SETTINGS_GENERATION`).
+    broker_generation: u64,
     /// Ephemeral pairing sessions must not clear or publish the persistent presence topic.
     ephemeral: bool,
     node_id: String,
@@ -838,6 +915,7 @@ impl MqttTransport {
             eventloop_task: None,
             eventloop_watchdog_task: None,
             liveness,
+            broker_generation: broker_settings_generation(),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             notification_channel_closed: false,
             has_connected_once: false,
@@ -1225,10 +1303,8 @@ impl MqttTransport {
                                 reconnect_backoff_secs,
                                 error
                             );
-                            tokio::time::sleep(Duration::from_secs(reconnect_backoff_secs)).await;
-                            reconnect_backoff_secs = reconnect_backoff_secs
-                                .saturating_mul(2)
-                                .min(MQTT_RECONNECT_BACKOFF_MAX_SECS);
+                            wait_before_reconnect(reconnect_backoff_secs).await;
+                            reconnect_backoff_secs = next_reconnect_backoff(reconnect_backoff_secs);
                         }
                     }
                 }
@@ -1426,10 +1502,8 @@ impl MqttTransport {
                             reconnect_backoff_secs,
                             streak
                         );
-                        tokio::time::sleep(Duration::from_secs(reconnect_backoff_secs)).await;
-                        reconnect_backoff_secs = reconnect_backoff_secs
-                            .saturating_mul(2)
-                            .min(MQTT_RECONNECT_BACKOFF_MAX_SECS);
+                        wait_before_reconnect(reconnect_backoff_secs).await;
+                        reconnect_backoff_secs = next_reconnect_backoff(reconnect_backoff_secs);
                     }
                 }
             };
@@ -1846,6 +1920,12 @@ impl MqttTransport {
         if self.shutdown_requested.load(Ordering::Acquire) {
             return None;
         }
+        // Свой брокер поменяли в настройках: сессия создана со старым адресом,
+        // её надо поднять заново. Это не сбой — причина отдельная, чтобы в
+        // журнале было видно, почему сессия пересоздалась.
+        if self.broker_generation != broker_settings_generation() {
+            return Some(MqttRestartReason::BrokerChanged);
+        }
 
         let eventloop_task_finished = self
             .eventloop_task
@@ -1969,6 +2049,21 @@ pub struct MqttEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reconnect_backoff_grows_then_holds_at_the_cap() {
+        // Тот же ряд, что был до правки (1, 2, 4, 8, 16, 30, 30…): правка
+        // только собрала число в `network::timing`, поведение не изменилось.
+        let mut secs = 1u64;
+        let mut seen = vec![secs];
+        for _ in 0..8 {
+            secs = next_reconnect_backoff(secs);
+            seen.push(secs);
+        }
+        assert_eq!(seen, vec![1, 2, 4, 8, 16, 30, 30, 30, 30]);
+        // И ни одна пауза не выходит за потолок.
+        assert!(seen.iter().all(|value| *value <= MQTT_RECONNECT_BACKOFF_MAX_SECS));
+    }
 
     /// Наш предел обязан покрывать то, что очередь пересылки пообещала
     /// хранить: иначе запись лежит в очереди и «ждёт получателя» вечно, потому

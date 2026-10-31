@@ -255,6 +255,13 @@ impl P2PCoreHandle {
         self.inner.lock().unwrap().set_own_broker(host_port)
     }
 
+    /// Отвечает ли брокер по этому адресу прямо сейчас (кнопка «Проверить»).
+    /// `false` — адрес не разобран, порт закрыт или это не MQTT-брокер.
+    /// Блокирующая: в приложении вызывается из фоновой нитки.
+    pub fn probe_own_broker(&self, host_port: String) -> bool {
+        self.inner.lock().unwrap().probe_broker_address(host_port)
+    }
+
     /// K4-1: «свои» для presence (контакты и участники моих групп).
     /// Их ядро обслуживает лично, а в общий топик пишет редкий маяк.
     pub fn set_presence_audience(&self, ids: Vec<String>) -> u32 {
@@ -279,6 +286,38 @@ impl P2PCoreHandle {
 
     pub fn network_status(&self) -> String {
         self.inner.lock().unwrap().network_status()
+    }
+
+    /// Диагностика прямого канала (стек, внешний адрес, нужен ли обходной
+    /// путь). Машинная строка `DIRECT: …`; слова для человека собирает
+    /// приложение, см. `DirectChannelText.kt`.
+    pub fn direct_channel_status(&self) -> String {
+        self.inner.lock().unwrap().direct_channel_status()
+    }
+
+    /// Настройки пути доставки: «только через relay» и «экономия трафика на
+    /// мобильной». Применяются сразу, без перезапуска службы. `metered`
+    /// присылает приложение (оно знает про мобильную сеть и «Экономию
+    /// трафика» системы), потому что ядро этого не видит.
+    pub fn set_network_path_policy(&self, relay_only: bool, save_traffic: bool, metered: bool) {
+        self.inner
+            .lock()
+            .unwrap()
+            .set_network_path_policy(relay_only, save_traffic, metered)
+    }
+
+    /// Действует ли сейчас запрет прямого канала (для диагностики).
+    pub fn direct_channel_blocked(&self) -> bool {
+        self.inner.lock().unwrap().network_path_suppresses_direct()
+    }
+
+    /// Kill-switch IPv6 из настроек: `false` — только IPv4. Флаг общий для
+    /// процесса (см. `network::dual_stack::set_ipv6_enabled`), поэтому
+    /// достаточно выставить его один раз при старте службы и при
+    /// переключении; он действует на следующие привязки сокетов и на выбор
+    /// адресов.
+    pub fn set_ipv6_enabled(&self, enabled: bool) {
+        crate::network::dual_stack::set_ipv6_enabled(enabled)
     }
 
     pub fn connected_peers(&self) -> u64 {

@@ -23,6 +23,7 @@ pub mod custody_relay;
 pub mod connection_pool;
 pub mod dht;
 pub mod direct_transport;
+pub mod dual_stack;
 pub mod fallback_chain;
 pub mod file_control;
 pub mod file_custody;
@@ -54,6 +55,7 @@ pub mod relay_queue;
 pub mod router;
 pub mod socks5;
 pub mod swarm_first;
+pub mod timing;
 pub mod wire;
 
 // Реэкспорты для удобства
@@ -65,7 +67,7 @@ pub use custody_relay::{
     CUSTODY_DROP_PREFIX, CUSTODY_OFFER_PREFIX,
 };
 pub use address_lookup::{
-    parse_query, parse_reply, query_payload, reply_payload, AddressLookup,
+    parse_query, parse_reply, query_payload, reply_payload, reply_payload_multi, AddressLookup,
 };
 pub use dht::{bucket_index, xor_distance, Bucket, DhtNodeInfo, RoutingTable};
 pub use ice::{IceError, StunClient, DEFAULT_STUN_SERVERS};

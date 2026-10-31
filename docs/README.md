@@ -43,6 +43,7 @@
 | [`CHAT_OPENING.md`](CHAT_OPENING.md) | Открытие личного чата без ожидания сети |
 | [`CONVERSATION_WALLPAPERS.md`](CONVERSATION_WALLPAPERS.md) | Фон отдельного чата |
 | [`CORE_ROADMAP.md`](CORE_ROADMAP.md) | План развития ядра |
+| [`DUAL_STACK_IPV6.md`](DUAL_STACK_IPV6.md) | Dual-stack: IPv6 и IPv4 в прямом канале |
 | [`FLASH_BACKUP_RUNBOOK.md`](FLASH_BACKUP_RUNBOOK.md) | Памятка по копии на флешку |
 | [`GROUP_QUIET_HOURS.md`](GROUP_QUIET_HOURS.md) | Расписание запрета сообщений в группе |
 | [`HEART_GAME.md`](HEART_GAME.md) | Игровые сердечки рейтинга |

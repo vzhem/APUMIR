@@ -37,7 +37,12 @@ class NetworkMonitor(private val context: Context) {
             Log.i(TAG, "Network available")
             TransferDiagnostics.count(Counters.NETWORK_CHANGES)
             TransferDiagnostics.record("net", "сеть появилась")
-            callbackScope.launch { RustBridge.onNetworkAvailable() }
+            callbackScope.launch {
+                // Настройки пути доставки зависят от сети (мобильная или нет),
+                // а при старте службы это первый момент, когда ядро уже живо.
+                com.vladimir.messenger.data.swarm.NetworkPathSettings.applyToCore(context)
+                RustBridge.onNetworkAvailable()
+            }
         }
 
         override fun onLost(network: Network) {
@@ -72,6 +77,11 @@ class NetworkMonitor(private val context: Context) {
             }
             if (transport != lastTransport) {
                 lastTransport = transport
+                // Сменилась сеть (Wi-Fi → мобильная, включился VPN): «экономия
+                // трафика» должна сработать сразу, а не после перезапуска.
+                callbackScope.launch {
+                    com.vladimir.messenger.data.swarm.NetworkPathSettings.applyToCore(context)
+                }
                 TransferDiagnostics.record(
                     "net",
                     "сеть: $transport" + if (!hasInternet) ", без интернета" else "",

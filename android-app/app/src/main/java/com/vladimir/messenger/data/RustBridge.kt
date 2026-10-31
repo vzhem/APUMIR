@@ -28,6 +28,10 @@ object RustBridge {
     @Volatile
     private var engine: P2pCoreHandle? = null
 
+    /** Запомненная политика пути доставки (см. `setNetworkPathPolicy`). */
+    @Volatile
+    private var pathPolicy: PathPolicy? = null
+
     @Volatile
     private var engineRunning: Boolean = false
 
@@ -259,6 +263,10 @@ object RustBridge {
 
             // Apply saved consent before the first inbound packet, including worker wakeups.
             applyOnlineHelperPolicy(e)
+            // Настройки пути доставки и kill-switch IPv6 — до `start()`: сокеты
+            // привязываются там, и выключенный IPv6 обязан быть выключен уже к
+            // этому моменту.
+            applyPathPolicy(e)
             val ok = e.start()
             if (ok) {
                 engine = e
@@ -435,6 +443,134 @@ object RustBridge {
     } catch (e: Throwable) {
         Log.w(TAG, "coreBuildInfo failed: ${e.message}")
         "недоступно"
+    }
+
+    /**
+     * Машинная строка о прямом канале: `DIRECT: bind=… public=… lan_v6=…
+     * relay=…`. Слова собирает [com.vladimir.messenger.data.diagnostics.DirectChannelText].
+     * Пусто/`недоступно` — ядро ещё не поднято: карточка тогда просто молчит.
+     */
+    fun directChannelStatus(): String = try {
+        // Метод живёт на ручке ядра (`direct_channel_status` в lib.udl), а не
+        // в namespace: у namespace только функции модуля вроде coreBuildInfo().
+        engine?.directChannelStatus() ?: ""
+    } catch (e: Throwable) {
+        Log.w(TAG, "directChannelStatus failed: ${e.message}")
+        ""
+    }
+
+    /**
+     * Kill-switch IPv6: `false` — приложение ходит только по IPv4. Ядро
+     * хранит флаг на процесс (выбор адресов, публикация, привязка сокетов),
+     * поэтому одного вызова при старте службы и при переключении достаточно.
+     */
+    fun setIpv6Enabled(enabled: Boolean) {
+        pathPolicy = currentPathPolicy().copy(ipv6 = enabled)
+        this.engine?.let { applyPathPolicy(it) }
+    }
+
+    /**
+     * Политика пути доставки: «только через relay» и «экономия трафика на
+     * мобильной». Применяется сразу (`set_network_path_policy` в ядре), без
+     * перезапуска службы. Ошибку глотаем с логом: без ядра настройка просто
+     * подействует после его старта.
+     */
+    fun setNetworkPathPolicy(relayOnly: Boolean, saveTraffic: Boolean, metered: Boolean) {
+        // Значение запоминаем даже без ядра: `NetworkMonitor` узнаёт о сети
+        // раньше, чем служба поднимает движок, и настройка не должна потеряться.
+        pathPolicy = currentPathPolicy().copy(
+            relayOnly = relayOnly,
+            saveTraffic = saveTraffic,
+            metered = metered,
+        )
+        this.engine?.let { applyPathPolicy(it) }
+    }
+
+    /**
+     * Свой MQTT-брокер в том виде, в каком его ждёт ядро.
+     *
+     * `null` — «не трогали»: тогда ядро остаётся с тем, что записано в его
+     * конфиге (переменная сборки `APU_MQTT_BROKER`). Пустая строка — это
+     * осознанное «только публичные брокеры».
+     */
+    @Volatile
+    private var ownBroker: String? = null
+
+    /**
+     * Задать свой брокер. `false` — ядро не разобрало адрес; в этом случае
+     * значение не запоминается, чтобы опечатка не выключила рабочую настройку.
+     */
+    fun setOwnBroker(text: String): Boolean {
+        val core = this.engine
+        if (core == null) {
+            // Ядра ещё нет (старт приложения): запомним и применим при старте.
+            ownBroker = text
+            return true
+        }
+        val accepted = try {
+            core.setOwnBroker(text)
+        } catch (e: Throwable) {
+            Log.w(TAG, "setOwnBroker failed: ${e.message}")
+            false
+        }
+        if (accepted) ownBroker = text
+        return accepted
+    }
+
+    /**
+     * Отвечает ли брокер по адресу прямо сейчас. Блокирующая (до 6 с) —
+     * вызывать из фоновой нитки; в приложении это IO-диспетчер.
+     */
+    fun probeOwnBroker(text: String): Boolean {
+        val core = this.engine ?: return false
+        return try {
+            core.probeOwnBroker(text)
+        } catch (e: Throwable) {
+            Log.w(TAG, "probeOwnBroker failed: ${e.message}")
+            false
+        }
+    }
+
+    /** Настройки пути доставки, которые надо применить к новому движку. */
+    private data class PathPolicy(
+        val relayOnly: Boolean = false,
+        val saveTraffic: Boolean = false,
+        val metered: Boolean = false,
+        val ipv6: Boolean = true,
+    )
+
+    private fun currentPathPolicy(): PathPolicy = pathPolicy ?: PathPolicy()
+
+    /**
+     * Применить запомненную политику к живому движку. Ошибки только в лог:
+     * настройка пути не должна мешать старту ядра.
+     */
+    private fun applyPathPolicy(core: P2pCoreHandle) {
+        val policy = currentPathPolicy()
+        // Kill-switch IPv6 — до `start()`: он влияет на привязку сокетов.
+        runCatching { core.setIpv6Enabled(policy.ipv6) }
+            .onFailure { Log.w(TAG, "setIpv6Enabled failed: ${it.message}") }
+        // Свой брокер — тоже до `start()`: список брокеров читается, когда
+        // поднимается MQTT-сессия.
+        ownBroker?.let { saved ->
+            runCatching { core.setOwnBroker(saved) }
+                .onFailure { Log.w(TAG, "setOwnBroker failed: ${it.message}") }
+        }
+        runCatching {
+            core.setNetworkPathPolicy(
+                relayOnly = policy.relayOnly,
+                saveTraffic = policy.saveTraffic,
+                metered = policy.metered,
+            )
+        }.onFailure { Log.w(TAG, "setNetworkPathPolicy failed: ${it.message}") }
+    }
+
+    /** Прямой канал сейчас запрещён настройкой (для диагностики). */
+    fun directChannelBlocked(): Boolean = try {
+        engine?.directChannelBlocked() ?: false
+    } catch (e: Throwable) {
+        Log.w(TAG, "directChannelBlocked failed: ${e.message}")
+        false
     }
 
     fun nodeId(): String? {

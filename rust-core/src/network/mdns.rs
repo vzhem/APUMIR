@@ -88,8 +88,16 @@ pub struct DiscoveredNode {
     /// Короткое имя (обычно имя устройства)
     pub name: String,
 
-    /// Адрес и порт для подключения
+    /// Адрес и порт для подключения (лучший из объявленных: IPv6 впереди)
     pub address: SocketAddr,
+
+    /// Остальные объявленные адреса того же узла — второй стек.
+    ///
+    /// Узел публикует и AAAA, и A (см. `publish_self_device`). Раньше брался
+    /// один адрес, и если он оказывался недостижим (например, IPv6 в чужой
+    /// сети), сосед считался пропавшим, хотя второй стек работал. Транспорт
+    /// пробует эти адреса, когда первый не отвечает.
+    pub alt_addresses: Vec<SocketAddr>,
 
     /// NodeID если удалось прочитать из TXT-записи (hex-строка)
     pub node_id_hex: Option<String>,
@@ -156,8 +164,15 @@ impl MdnsService {
         public_addr: Option<&str>,
         device_id_hex: Option<&str>,
     ) -> MdnsResult<()> {
-        // Определяем локальный IP
-        let local_ip = get_local_ip()?;
+        // Публикуем ВСЕ пригодные локальные адреса, IPv6 впереди: раньше уходил
+        // один IPv4 (`get_local_ip`), и в сети только-v6 объявление было пустым
+        // по адресу — сосед не мог к нам прийти, хотя mDNS работал.
+        let local_ips = local_addresses()?;
+        let ips_text = local_ips
+            .iter()
+            .map(|ip| ip.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
 
         // TXT-записи с метаданными
         let mut properties: HashMap<String, String> = HashMap::new();
@@ -179,7 +194,7 @@ impl MdnsService {
             SERVICE_TYPE,
             instance_name,
             &hostname,
-            local_ip,
+            ips_text.as_str(),
             port,
             Some(properties),
         )
@@ -243,18 +258,31 @@ impl MdnsService {
                         }
                     }
 
-                    // Извлекаем адрес (берём первый IPv4)
+                    // Извлекаем адрес: предпочитаем глобальный IPv6, откат на
+                    // IPv4. Раньше брался первый IPv4 — в сети только-v6 сосед
+                    // оставался невидимым, хотя его AAAA был в объявлении.
+                    // link-local не берём: он достижим только с zone id,
+                    // которого в `SocketAddr` нет.
                     let addresses = info.get_addresses();
-                    let ip = addresses
-                        .iter()
-                        .find(|a| a.is_ipv4())
-                        .copied()
-                        .or_else(|| addresses.iter().next().copied());
-
-                    let Some(ip) = ip else {
+                    let Some(ip) = crate::network::dual_stack::pick(addresses.iter()) else {
                         continue;
                     };
                     let socket_addr = SocketAddr::new(ip, info.get_port());
+                    // Второй стек: то, что объявлено сверх выбранного адреса.
+                    let alt_addresses: Vec<SocketAddr> = {
+                        let mut rest: Vec<SocketAddr> = addresses
+                            .iter()
+                            .filter(|candidate| **candidate != ip)
+                            .filter(|candidate| crate::network::dual_stack::reachable(**candidate))
+                            .map(|candidate| SocketAddr::new(*candidate, info.get_port()))
+                            .collect();
+                        rest.sort_by_key(|addr| {
+                            crate::network::dual_stack::rank(addr.ip()).unwrap_or(u8::MAX)
+                        });
+                        rest.dedup();
+                        rest.truncate(3);
+                        rest
+                    };
 
                     // TXT-записи
                     let properties = info.get_properties();
@@ -284,6 +312,7 @@ impl MdnsService {
                         protocol_version,
                         public_addr,
                         device_id_hex,
+                        alt_addresses,
                     };
 
                     discovered.lock().await.insert(full_name, node);
@@ -342,26 +371,12 @@ pub fn find_device_endpoint<'a>(
     })
 }
 
-fn get_local_ip() -> MdnsResult<IpAddr> {
-    let addrs = if_addrs::get_if_addrs().map_err(|e| MdnsError::Daemon(e.to_string()))?;
-
-    // Ищем первый non-loopback IPv4
-    for iface in &addrs {
-        let ip = iface.ip();
-        if !ip.is_loopback() && ip.is_ipv4() {
-            return Ok(ip);
-        }
+fn local_addresses() -> MdnsResult<Vec<IpAddr>> {
+    let addrs = crate::network::dual_stack::local_shareable_ips();
+    if addrs.is_empty() {
+        return Err(MdnsError::NoLocalIp);
     }
-
-    // Fallback — любой non-loopback
-    for iface in &addrs {
-        let ip = iface.ip();
-        if !ip.is_loopback() {
-            return Ok(ip);
-        }
-    }
-
-    Err(MdnsError::NoLocalIp)
+    Ok(addrs)
 }
 
 /// Очистить имя от запрещённых mDNS-символов.
@@ -402,13 +417,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_get_local_ip() {
+    async fn test_local_addresses_are_shareable() {
         // На большинстве систем должен быть хотя бы один non-loopback интерфейс
-        let ip = get_local_ip();
-        match ip {
-            Ok(ip) => {
-                assert!(!ip.is_loopback());
-                println!("✅ Локальный IP определён: {}", ip);
+        match local_addresses() {
+            Ok(list) => {
+                assert!(!list.is_empty());
+                println!("✅ Локальные адреса: {:?}", list);
+                for ip in list {
+                    assert!(!ip.is_loopback());
+                    assert!(!crate::network::dual_stack::is_link_local(ip));
+                }
             }
             Err(_) => {
                 println!("⚠️  Не удалось определить локальный IP (нет сети?) — это нормально в изолированной среде");
@@ -457,7 +475,27 @@ mod tests {
             protocol_version: Some(1),
             public_addr: None,
             device_id_hex: device.map(str::to_string),
+            alt_addresses: Vec::new(),
         }
+    }
+
+    /// Второй стек объявления: оба адреса сохраняются, лучший — первым.
+    #[test]
+    fn alt_addresses_keep_both_stacks() {
+        use std::net::IpAddr;
+        let addresses = [
+            IpAddr::V6("2606:4700:4700::1111".parse().unwrap()),
+            IpAddr::V4("192.168.1.10".parse().unwrap()),
+        ];
+        let best = crate::network::dual_stack::pick(addresses.iter()).unwrap();
+        assert!(best.is_ipv6());
+        let rest: Vec<_> = addresses
+            .iter()
+            .filter(|candidate| **candidate != best)
+            .filter(|candidate| crate::network::dual_stack::reachable(**candidate))
+            .map(|candidate| SocketAddr::new(*candidate, 7777))
+            .collect();
+        assert_eq!(rest, vec!["192.168.1.10:7777".parse::<SocketAddr>().unwrap()]);
     }
 
     #[test]
