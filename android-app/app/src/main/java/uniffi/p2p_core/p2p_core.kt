@@ -904,6 +904,16 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
+
+
+
+
+
+
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -937,6 +947,10 @@ internal interface UniffiLib : Library {
     ): Long
     fun uniffi_p2p_core_fn_method_p2pcorehandle_create_chat(`ptr`: Pointer,`chatId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_direct_channel_blocked(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_direct_channel_status(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_method_p2pcorehandle_drain_events(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_method_p2pcorehandle_external_transport_allowed(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
@@ -977,6 +991,8 @@ internal interface UniffiLib : Library {
     ): Long
     fun uniffi_p2p_core_fn_method_p2pcorehandle_poll_event(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_probe_own_broker(`ptr`: Pointer,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_public_key(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_p2p_core_fn_method_p2pcorehandle_publish_pairing_code(`ptr`: Pointer,`code`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1003,6 +1019,10 @@ internal interface UniffiLib : Library {
     ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_set_file_custody_enabled(`ptr`: Pointer,`enabled`: Byte,`dbPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_set_ipv6_enabled(`ptr`: Pointer,`enabled`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_set_network_path_policy(`ptr`: Pointer,`relayOnly`: Byte,`saveTraffic`: Byte,`metered`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_p2p_core_fn_method_p2pcorehandle_set_own_broker(`ptr`: Pointer,`hostPort`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_set_presence_audience(`ptr`: Pointer,`ids`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1343,6 +1363,10 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_create_chat(
     ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_direct_channel_blocked(
+    ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_direct_channel_status(
+    ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_drain_events(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_external_transport_allowed(
@@ -1383,6 +1407,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_poll_event(
     ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_probe_own_broker(
+    ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_public_key(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_publish_pairing_code(
@@ -1408,6 +1434,10 @@ internal interface UniffiLib : Library {
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_set_custody_enabled(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_set_file_custody_enabled(
+    ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_set_ipv6_enabled(
+    ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_set_network_path_policy(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_set_own_broker(
     ): Short
@@ -1607,6 +1637,12 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_create_chat() != 34450.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_direct_channel_blocked() != 30994.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_direct_channel_status() != 30739.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_drain_events() != 49976.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1667,6 +1703,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_poll_event() != 30692.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_probe_own_broker() != 50310.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_public_key() != 16033.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1704,6 +1743,12 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_set_file_custody_enabled() != 64686.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_set_ipv6_enabled() != 22202.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_set_network_path_policy() != 45769.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_set_own_broker() != 38529.toShort()) {
@@ -2179,6 +2224,10 @@ public interface P2pCoreHandleInterface {
     
     fun `createChat`(`chatId`: kotlin.String): kotlin.Boolean
     
+    fun `directChannelBlocked`(): kotlin.Boolean
+    
+    fun `directChannelStatus`(): kotlin.String
+    
     fun `drainEvents`(): List<CoreEventFfi>
     
     fun `externalTransportAllowed`(): kotlin.Boolean
@@ -2219,6 +2268,8 @@ public interface P2pCoreHandleInterface {
     
     fun `pollEvent`(): CoreEventFfi?
     
+    fun `probeOwnBroker`(`hostPort`: kotlin.String): kotlin.Boolean
+    
     fun `publicKey`(): kotlin.String?
     
     fun `publishPairingCode`(`code`: kotlin.String, `payload`: kotlin.String): kotlin.Boolean
@@ -2244,6 +2295,10 @@ public interface P2pCoreHandleInterface {
     fun `setCustodyEnabled`(`enabled`: kotlin.Boolean): kotlin.Boolean
     
     fun `setFileCustodyEnabled`(`enabled`: kotlin.Boolean, `dbPath`: kotlin.String): kotlin.Boolean
+    
+    fun `setIpv6Enabled`(`enabled`: kotlin.Boolean)
+    
+    fun `setNetworkPathPolicy`(`relayOnly`: kotlin.Boolean, `saveTraffic`: kotlin.Boolean, `metered`: kotlin.Boolean)
     
     fun `setOwnBroker`(`hostPort`: kotlin.String): kotlin.Boolean
     
@@ -2393,6 +2448,30 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_create_chat(
         it, FfiConverterString.lower(`chatId`),_status)
+}
+    }
+    )
+    }
+    
+
+    override fun `directChannelBlocked`(): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_direct_channel_blocked(
+        it, _status)
+}
+    }
+    )
+    }
+    
+
+    override fun `directChannelStatus`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_direct_channel_status(
+        it, _status)
 }
     }
     )
@@ -2637,6 +2716,18 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     
 
+    override fun `probeOwnBroker`(`hostPort`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_probe_own_broker(
+        it, FfiConverterString.lower(`hostPort`),_status)
+}
+    }
+    )
+    }
+    
+
     override fun `publicKey`(): kotlin.String? {
             return FfiConverterOptionalString.lift(
     callWithPointer {
@@ -2790,6 +2881,28 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     }
     )
     }
+    
+
+    override fun `setIpv6Enabled`(`enabled`: kotlin.Boolean)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_set_ipv6_enabled(
+        it, FfiConverterBoolean.lower(`enabled`),_status)
+}
+    }
+    
+    
+
+    override fun `setNetworkPathPolicy`(`relayOnly`: kotlin.Boolean, `saveTraffic`: kotlin.Boolean, `metered`: kotlin.Boolean)
+        = 
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_set_network_path_policy(
+        it, FfiConverterBoolean.lower(`relayOnly`),FfiConverterBoolean.lower(`saveTraffic`),FfiConverterBoolean.lower(`metered`),_status)
+}
+    }
+    
     
 
     override fun `setOwnBroker`(`hostPort`: kotlin.String): kotlin.Boolean {
