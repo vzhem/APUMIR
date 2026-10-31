@@ -606,7 +606,7 @@ impl PeerExchange {
         let mut s = self.state.lock().unwrap(); cleanup(&mut s, now);
         if s.pending.len() >= MAX_PARALLEL_EXCHANGES || s.sent.len() >= MAX_REQUESTS_PER_MINUTE || s.pending.contains_key(peer) { return None; }
         if s.attempts.get(&(peer.into(), endpoint)).map(|a| a.failures > 0 && a.retry_at_ms > now).unwrap_or(false) { return None; }
-        refresh_self(&mut s, identity, own, now);
+        refresh_own_leases(&mut s, identity, own, now);
         let mut nonce = [0; 16]; OsRng.fill_bytes(&mut nonce);
         let claims = ExchangeClaims { version: 1, reply: false, from: identity.legacy_routing_node_id().into(),
             to: peer.into(), nonce, created_at_ms: now, channel_binding: [0; 32], signing_key: identity.public_key().try_into().ok()?,
@@ -702,11 +702,7 @@ impl PeerExchange {
                 reported_checked_at_ms: reported });
         }
         trim_records(&mut s);
-        // Ответ на чужую посылку не должен сузить наш каталог до одного
-        // стека: берём уже известные аренды и добавляем переданный адрес.
-        let mut current: Vec<SocketAddr> = s.self_leases.iter().map(|lease| lease.claims.endpoint).collect();
-        current.extend(own_addr);
-        refresh_self(&mut s, identity, &current, now);
+        refresh_own_leases(&mut s, identity, own_addr, now);
         let response = if c.reply { None } else {
             let records = select_records(&s, &c.known, &c.targets, identity.legacy_routing_node_id(), MAX_RECORDS, now);
             encode(identity, ExchangeClaims { version: 1, reply: true,
@@ -802,6 +798,17 @@ fn trim_records(s: &mut State) {
         if *count >= MAX_PER_NODE_ADDRESSES || kept >= MAX_DIRECTORY_ENTRIES { s.records.remove(&key); }
         else { *count += 1; kept += 1; }
     }
+}
+
+/// Обновить свои аренды, не потеряв второй стек.
+///
+/// Вызывается там, где о своём адресе известно не всё (`probe`, `handle`):
+/// уже объявленные аренды берём из состояния и добавляем переданный адрес.
+/// Иначе один вызов с единственным адресом сузил бы каталог до одного стека.
+fn refresh_own_leases(s: &mut State, identity: &InstalledSigningIdentity, extra: Option<SocketAddr>, now: i64) {
+    let mut current: Vec<SocketAddr> = s.self_leases.iter().map(|lease| lease.claims.endpoint).collect();
+    current.extend(extra);
+    refresh_self(s, identity, &current, now);
 }
 
 fn refresh_self(s: &mut State, identity: &InstalledSigningIdentity, own: &[SocketAddr], now: i64) {

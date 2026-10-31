@@ -5228,7 +5228,7 @@ impl P2PCore {
             .and_then(|slot| slot.as_ref().map(|transport| transport.local_addr()));
         let bind_stack = match bind {
             Some(addr) if addr.is_ipv6() => "ipv6",
-            Some(addr) => "ipv4",
+            Some(_) => "ipv4",
             None => "down",
         };
         let now = crate::storage::models::now_ms();
