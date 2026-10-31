@@ -803,11 +803,13 @@ fn trim_records(s: &mut State) {
 /// Обновить свои аренды, не потеряв второй стек.
 ///
 /// Вызывается там, где о своём адресе известно не всё (`probe`, `handle`):
-/// уже объявленные аренды берём из состояния и добавляем переданный адрес.
+/// переданный адрес главнее, уже объявленные аренды добавляются к нему.
 /// Иначе один вызов с единственным адресом сузил бы каталог до одного стека.
 fn refresh_own_leases(s: &mut State, identity: &InstalledSigningIdentity, extra: Option<SocketAddr>, now: i64) {
-    let mut current: Vec<SocketAddr> = s.self_leases.iter().map(|lease| lease.claims.endpoint).collect();
-    current.extend(extra);
+    // Новое знание идёт ПЕРВЫМ: свежее отражение STUN должно вытеснить
+    // устаревший адрес того же семейства, а не оказаться отброшенным им.
+    let mut current: Vec<SocketAddr> = extra.into_iter().collect();
+    current.extend(s.self_leases.iter().map(|lease| lease.claims.endpoint));
     refresh_self(s, identity, &current, now);
 }
 
