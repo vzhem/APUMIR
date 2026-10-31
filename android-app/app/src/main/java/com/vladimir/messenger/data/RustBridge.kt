@@ -514,7 +514,7 @@ object RustBridge {
             false
         }
         if (accepted) ownBroker = text
-        accepted
+        return accepted
     }
 
     /**

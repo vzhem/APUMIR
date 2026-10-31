@@ -65,7 +65,7 @@ object BrokerSettings {
             if (end <= 1) return null
             val hostPart = withoutPath.substring(0, end + 1)
             val rest = withoutPath.substring(end + 1)
-            if (rest.isEmpty()) hostPart to DEFAULT_PORT
+            if (rest.isEmpty()) hostPart to DEFAULT_PORT.toString()
             else if (!rest.startsWith(":")) return null
             else hostPart to rest.drop(1)
         } else {
