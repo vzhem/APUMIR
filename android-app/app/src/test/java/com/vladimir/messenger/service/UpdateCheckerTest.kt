@@ -2,6 +2,7 @@ package com.vladimir.messenger.service
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -96,6 +97,34 @@ class UpdateCheckerTest {
         assertEquals("already_allowed", safeManualWindow("already_allowed"))
         assertEquals("opened", safeManualWindow("opened"))
         assertEquals("unknown", safeManualWindow("opened-by-hand"))
+    }
+
+    @Test
+    fun `notification version normalization ignores v prefix and build suffix`() {
+        assertEquals("11.74.474", normalizeUpdateVersion("v11.74.474"))
+        assertEquals("11.74.474", normalizeUpdateVersion(" V11.74.474-beta+build.7 "))
+    }
+
+    @Test
+    fun `notification is allowed only for a newer version and not repeated for same release`() {
+        assertNull(updateNotificationSkipReason("11.74.473", "v11.74.474", ""))
+        assertEquals("not_newer", updateNotificationSkipReason("11.74.474", "v11.74.474", ""))
+        assertEquals("not_newer", updateNotificationSkipReason("11.74.475", "v11.74.474", ""))
+        assertEquals("already_notified", updateNotificationSkipReason("11.74.473", "v11.74.474", "11.74.474"))
+        assertEquals("already_notified", updateNotificationSkipReason("11.74.473", "11.74.474", "v11.74.474-beta"))
+    }
+
+    @Test
+    fun `notification never rolls back to an older version after a newer one was shown`() {
+        assertEquals("stale_version", updateNotificationSkipReason("11.74.473", "v11.74.474", "11.74.475"))
+        assertNull(updateNotificationSkipReason("11.74.473", "v11.74.475", "11.74.474"))
+    }
+
+    @Test
+    fun `malformed candidate cannot consume a notification attempt`() {
+        assertEquals("invalid_version", updateNotificationSkipReason("11.74.473", "latest", ""))
+        assertEquals("invalid_version", updateNotificationSkipReason("11.74.473", "", ""))
+        assertNull(updateNotificationSkipReason("11.74.473", "v11.74.474", "broken"))
     }
 
     @Test

@@ -92,40 +92,6 @@ data class DiagnosticsJournalEntry(
     val detail: String,
 )
 
-/** Privacy-safe summary of release checks and update-notification delivery. */
-data class UpdateDiagnosticFacts(
-    val currentVersion: String = "",
-    val latestVersion: String = "",
-    val lastCheckAtMs: Long = 0L,
-    val checkDurationMs: Long? = null,
-    val trigger: String = "never",
-    val source: String = "none",
-    val outcome: String = "never_checked",
-    /**
-     * Что сделала ручная кнопка с внешним каналом:
-     * `opened` - открыла (иначе строка обновления могла не появиться вовсе),
-     * `already_allowed` - канал и так был открыт, `not_manual` - авто-проверка,
-     * `not_attempted` - ручная, но до внешнего запроса дело не дошло.
-     */
-    val manualExternalWindow: String = "unknown",
-    val httpStatus: Int? = null,
-    val githubOutcome: String = "not_attempted",
-    val githubHttpStatus: Int? = null,
-    val relayOutcome: String = "not_attempted",
-    val relayHttpStatus: Int? = null,
-    val notificationVersion: String = "",
-    val notificationKind: String = "never",
-    val notificationAtMs: Long = 0L,
-    val notificationResult: String = "never",
-    val notificationsAllowed: Boolean? = null,
-    val notificationChannelEnabled: Boolean? = null,
-    val notificationChannelImportance: Int? = null,
-) {
-    companion object {
-        val EMPTY = UpdateDiagnosticFacts()
-    }
-}
-
 /**
  * Факты отчёта, собранные на телефоне. Обычные значения: ни Android, ни ядра
  * здесь уже нет — только то, что человеку нужно прочитать.
@@ -1089,42 +1055,6 @@ object DiagnosticsReport {
         appendLine("im_the_server=${facts.serverMode}")
         appendLine("power_save=${facts.powerSave} · doze=${facts.deviceIdle} · battery_exempt=${facts.batteryExempt}")
         appendLine("battery=${facts.batteryPercent}% (${if (facts.batteryCharging) "зарядка" else "разряд"})")
-        appendLine()
-    }
-
-    private fun StringBuilder.appendUpdateDiagnostics(facts: DiagnosticsFacts) {
-        val update = facts.updateDiagnostics
-        appendLine("[обновления]")
-        appendLine("current_version=${safeDiagnosticToken(update.currentVersion.ifBlank { facts.appVersion.substringBefore(" (") })}")
-        appendLine("latest_version=${safeDiagnosticToken(update.latestVersion).ifBlank { "unknown" }}")
-        appendLine("last_check_trigger=${safeDiagnosticToken(update.trigger).ifBlank { "unknown" }}")
-        appendLine("last_check_source=${safeDiagnosticToken(update.source).ifBlank { "unknown" }}")
-        appendLine("last_check_result=${safeDiagnosticToken(update.outcome).ifBlank { "unknown" }}")
-        appendLine("last_check_manual_external_window=${safeDiagnosticToken(update.manualExternalWindow).ifBlank { "unknown" }}")
-        appendLine("last_check_http_status=${update.httpStatus?.takeIf { it in 100..599 }?.toString() ?: "unknown"}")
-        appendLine("github_check_result=${safeDiagnosticToken(update.githubOutcome).ifBlank { "unknown" }}")
-        appendLine("github_http_status=${update.githubHttpStatus?.takeIf { it in 100..599 }?.toString() ?: "unknown"}")
-        appendLine("relay_check_result=${safeDiagnosticToken(update.relayOutcome).ifBlank { "unknown" }}")
-        appendLine("relay_http_status=${update.relayHttpStatus?.takeIf { it in 100..599 }?.toString() ?: "unknown"}")
-        if (update.lastCheckAtMs > 0L) {
-            appendLine("last_check_at=${stamp(update.lastCheckAtMs)}")
-            val ageSec = ((facts.createdAtMs - update.lastCheckAtMs).coerceAtLeast(0L) / 1000L).toInt()
-            appendLine("last_check_ago=${MqttLinkText.humanAgo(ageSec)}")
-        } else {
-            appendLine("last_check_at=нет")
-        }
-        appendLine("last_check_duration_ms=${update.checkDurationMs?.coerceAtLeast(0L)?.toString() ?: "unknown"}")
-        appendLine("last_notification_attempt_version=${safeDiagnosticToken(update.notificationVersion).ifBlank { "none" }}")
-        appendLine("last_notification_attempt_kind=${safeDiagnosticToken(update.notificationKind).ifBlank { "unknown" }}")
-        appendLine("last_notification_attempt_result=${safeDiagnosticToken(update.notificationResult).ifBlank { "unknown" }}")
-        if (update.notificationAtMs > 0L) {
-            appendLine("last_notification_attempt_at=${stamp(update.notificationAtMs)}")
-        } else {
-            appendLine("last_notification_attempt_at=нет")
-        }
-        appendLine("notifications_allowed=${update.notificationsAllowed?.toString() ?: "unknown"}")
-        appendLine("update_channel_enabled=${update.notificationChannelEnabled?.toString() ?: "unknown"}")
-        appendLine("update_channel_importance=${update.notificationChannelImportance?.toString() ?: "unknown"}")
         appendLine()
     }
 

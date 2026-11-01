@@ -2375,4 +2375,12 @@
     <string name="st_update_already_downloading">Обновление уже скачивается. Дождитесь окончания или остановите приём.</string>
     <string name="st_neighbor_offer_gone">Сосед больше не раздаёт эту версию. Нажмите «Проверить новую версию».</string>
     <string name="st_official_download_failed">Не удалось скачать обновление с официального сайта. Попробуйте ещё раз.</string>
+
+    <!-- Системные уведомления об обновлении APU -->
+    <string name="update_notification_channel_name">Обновления APU</string>
+    <string name="update_notification_channel_description">Уведомления о новых версиях APU</string>
+    <string name="update_notification_title">Доступно обновление APU</string>
+    <string name="update_notification_official_text">Версия %1$s доступна. Нажмите, чтобы скачать и установить.</string>
+    <string name="update_notification_peer_text">Сосед раздаёт обновления %1$s. Нажмите, затем откройте Настройки → Обновления.</string>
+    <string name="update_notification_compact_text">Доступен компактный пакет обновления %1$s. Нажмите, затем откройте Настройки → Обновления.</string>
 </resources>

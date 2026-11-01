@@ -32,6 +32,9 @@ object UpdateDiagnosticsStore {
     private const val KEY_NOTIFICATION_KIND = "notification_kind"
     private const val KEY_NOTIFICATION_AT = "notification_at"
     private const val KEY_NOTIFICATION_RESULT = "notification_result"
+    private const val KEY_STARTUP_CORE_READY = "startup_core_ready"
+    private const val KEY_STARTUP_WAIT_MS = "startup_wait_ms"
+    private const val KEY_PENDING_OFFICIAL_VERSION = "pending_official_version"
 
     internal class CheckTrace(
         val startedAtMs: Long,
@@ -143,6 +146,19 @@ object UpdateDiagnosticsStore {
         editor.apply()
     }
 
+    fun recordStartupWait(context: Context, coreReady: Boolean, waitMs: Long) {
+        prefs(context).edit()
+            .putBoolean(KEY_STARTUP_CORE_READY, coreReady)
+            .putLong(KEY_STARTUP_WAIT_MS, waitMs.coerceAtLeast(0L))
+            .apply()
+    }
+
+    fun recordPendingOfficial(context: Context, version: String) {
+        prefs(context).edit()
+            .putString(KEY_PENDING_OFFICIAL_VERSION, safeVersion(version))
+            .apply()
+    }
+
     fun recordNotification(context: Context, version: String, kind: String, result: String) {
         prefs(context).edit()
             .putString(KEY_NOTIFICATION_VERSION, safeVersion(version))
@@ -176,6 +192,13 @@ object UpdateDiagnosticsStore {
             notificationsAllowed = allowed,
             notificationChannelEnabled = channelEnabled,
             notificationChannelImportance = channelImportance,
+            startupCoreReady = if (preferences.contains(KEY_STARTUP_CORE_READY)) {
+                preferences.getBoolean(KEY_STARTUP_CORE_READY, false)
+            } else {
+                null
+            },
+            startupWaitMs = preferences.getLong(KEY_STARTUP_WAIT_MS, -1L).takeIf { it >= 0L },
+            pendingOfficialVersion = preferences.getString(KEY_PENDING_OFFICIAL_VERSION, "").orEmpty(),
         )
     }
 
@@ -205,7 +228,7 @@ object UpdateDiagnosticsStore {
         value.filter { it.isLetterOrDigit() || it in ".+-_" }.take(64)
 
     private fun safeTrigger(value: String): String = when (value) {
-        "manual", "foreground", "background" -> value
+        "manual", "foreground", "background", "startup", "permission" -> value
         else -> "automatic"
     }
 
@@ -215,7 +238,8 @@ object UpdateDiagnosticsStore {
     }
 
     private fun safeNotificationOutcome(value: String): String = when (value) {
-        "posted", "already_notified", "permission_blocked", "channel_blocked", "post_failed", "never" -> value
+        "posted", "already_notified", "permission_blocked", "channel_blocked", "post_failed",
+        "not_newer", "stale_version", "invalid_version", "never" -> value
         else -> "unknown"
     }
 }

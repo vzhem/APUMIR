@@ -3,7 +3,7 @@
   "threshold": 1200,
   "ceilings": {
     "android-app/app/src/main/java/com/vladimir/messenger/data/call/CallManager.kt": 1894,
-    "android-app/app/src/main/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReport.kt": 1561,
+    "android-app/app/src/main/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReport.kt": 1491,
     "android-app/app/src/main/java/com/vladimir/messenger/data/file/FileTransferReceiver.kt": 2452,
     "android-app/app/src/main/java/com/vladimir/messenger/data/file/FileTransferRouter.kt": 1889,
     "android-app/app/src/main/java/com/vladimir/messenger/data/group/GroupFileSwarm.kt": 1207,
