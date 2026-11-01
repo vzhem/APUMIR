@@ -238,7 +238,7 @@ impl MdnsService {
             // Ждём следующее событие с оставшимся таймаутом
             let event = tokio::task::spawn_blocking({
                 let recv = receiver.clone();
-                move || recv.recv_timeout(Duration::from_millis(200))
+                move || recv.recv_timeout(remaining)
             })
             .await;
 

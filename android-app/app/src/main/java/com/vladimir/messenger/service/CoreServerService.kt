@@ -14,13 +14,10 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
-import android.os.PowerManager
 import android.os.SystemClock
 import androidx.core.app.ServiceCompat
-import com.vladimir.messenger.data.call.CallIncoming
 import android.util.Log
 import com.vladimir.messenger.domain.model.MessageChannel
 import com.vladimir.messenger.data.relay.RelayEnvelope
@@ -71,7 +68,7 @@ class CoreServerService : Service() {
 
     /** Досылка офлайн-очереди своим ритмом: коротким шагом, пока есть что слать. */
     private val chatOutboxPump: ChatOutboxPump by lazy {
-        ChatOutboxPump(appDatabase.messageDao(), chatRepository)
+        ChatOutboxPump(appDatabase.messageDao(), chatRepository, coreWorkWakeLock)
     }
     @Inject lateinit var contactRepository: ContactRepository
     @Inject lateinit var mtProxyRepository: MtProxyRepository
@@ -114,9 +111,9 @@ class CoreServerService : Service() {
     private var gossipStarted = false
     @Inject lateinit var proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot
 
-    private var wakeLock: PowerManager.WakeLock? = null
-    private var lastWakeLockAtElapsed = 0L
-    private var multicastLock: WifiManager.MulticastLock? = null
+    private val coreWorkWakeLock by lazy { CoreWorkWakeLock(applicationContext) }
+    private val callWorkWakeLock by lazy { CallWorkWakeLock(applicationContext) }
+    private var multicastGate: CoreMulticastLock? = null
     private var networkMonitor: NetworkMonitor? = null
     private val serviceJob = kotlinx.coroutines.SupervisorJob()
     private val serviceScope = CoroutineScope(Dispatchers.IO + serviceJob)
@@ -138,7 +135,6 @@ class CoreServerService : Service() {
     // пропуска подряд = 200 секунд. Уборка реже: она будит процесс, спешить некуда.
     private val PRESENCE_TTL_MS = 200_000L    // ~3 пропущенных MQTT-пульса
     private val PRESENCE_SWEEP_MS = 60_000L
-    private val FILE_PUMP_INTERVAL_MS = 20000L
     private val INITIAL_FILE_PUMP_DELAY_MS = 5000L
     /** Boot-time readiness only: a failed key unlock cannot be diagnosed as a peer-key change. */
     @Volatile private var localCryptoReadyAtStartup = false
@@ -618,25 +614,15 @@ class CoreServerService : Service() {
         OperationalDiagnostics.phase(DiagnosticPhase.SERVICE_START)
         Log.i(TAG, "CoreServerService created")
         TransferDiagnostics.record("core", "служба ядра запускается")
-        val powerManager = getSystemService(POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK, "P2PMessenger::CoreWakeLock"
-        ).apply {
-            setReferenceCounted(false)
-            acquire(CallIncoming.CORE_WAKE_LOCK_MS)
+        // CPU бодрствует только на время работы (события/файлы/звонок), а не
+        // постоянно. Multicast Wi-Fi держим лишь пока приложение на экране.
+        multicastGate = CoreMulticastLock(applicationContext).also {
+            it.sync(DeliveryCadence.isForeground())
         }
-        lastWakeLockAtElapsed = SystemClock.elapsedRealtime()
-        OperationalDiagnostics.wake.acquire(lastWakeLockAtElapsed, CallIncoming.CORE_WAKE_LOCK_MS)
-
-        try {
-            val wifiManager = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
-            multicastLock = wifiManager.createMulticastLock("P2PMessenger::MdnsLock").apply {
-                setReferenceCounted(false)
-                acquire()
+        serviceScope.launch {
+            callManager.uiState.collect { state ->
+                callWorkWakeLock.setPhase(state.phase, serviceScope)
             }
-            Log.i(TAG, "MulticastLock acquired")
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to acquire MulticastLock", e)
         }
 
         
@@ -841,14 +827,7 @@ class CoreServerService : Service() {
                     runCatching { pumpMirrorFiles() }
                         .onFailure { Log.w(TAG, "file bytes pump failed: ${it.message}") }
                 }
-                val wakeHeld = wakeLock?.isHeld == true
-                val wakeAge = SystemClock.elapsedRealtime() - lastWakeLockAtElapsed
-                if (CallIncoming.shouldRefreshWakeLock(wakeHeld, wakeAge)) {
-                    runCatching { wakeLock?.acquire(CallIncoming.CORE_WAKE_LOCK_MS) }.onSuccess {
-                        if (wakeLock?.isHeld == true) OperationalDiagnostics.wake.acquire(SystemClock.elapsedRealtime(), CallIncoming.CORE_WAKE_LOCK_MS)
-                    }
-                    lastWakeLockAtElapsed = SystemClock.elapsedRealtime()
-                }
+                multicastGate?.sync(DeliveryCadence.isForeground())
                 sincePump++
                 kotlinx.coroutines.delay(30_000L)
             }
@@ -1099,7 +1078,7 @@ class CoreServerService : Service() {
                     while (kotlinx.coroutines.currentCoroutineContext().isActive) {
                         runCatching { updateChecker.suspendExternalDownloadsForSwarm() }
                             .onFailure { Log.w(TAG, "Update download barrier: ${it.message}") }
-                        kotlinx.coroutines.delay(2_500L)
+                        kotlinx.coroutines.delay(ServiceIdleCadence.UPDATE_BARRIER_MS)
                     }
                 }
                 // Раунд 263: ядро поднято - сплэш может отпустить человека.
@@ -2149,12 +2128,9 @@ class CoreServerService : Service() {
         filePumpJob?.cancel()
         networkMonitor?.stop()
         RustBridge.shutdownAsync()
-        try {
-            multicastLock?.release()
-            Log.i(TAG, "MulticastLock released")
-        } catch (_: Exception) { /* освобождение блокировки в onDestroy: повторять нечего */ }
-        OperationalDiagnostics.wake.release(SystemClock.elapsedRealtime())
-        wakeLock?.release()
+        multicastGate?.release()
+        callWorkWakeLock.stop()
+        coreWorkWakeLock.releaseAll()
         // «Убили» — быстрый подъём; осознанный перезапуск (reconnect) сюда не относится.
         ServiceLifecycleHooks.onDestroyed(applicationContext, planned = intentionalRestart)
         super.onDestroy()
@@ -2270,29 +2246,33 @@ class CoreServerService : Service() {
         }
 
         eventPollingJob = serviceScope.launch {
-            Log.i(TAG, "Event polling started")
+            Log.i(TAG, "Event wait started (condvar, no idle polling)")
             var lastStatusRefreshAtMs = 0L
             while (isActive) {
-                // K3: события файловых кусков приходят пучками (пока файл
-                // льётся стримами). Пока очередь не пуста - работаем
-                // коротким шагом, иначе куски ждали бы полные POLL_INTERVAL_MS
-                // и ACK-окно отправителя почти не двигалось. В простое шаг
-                // прежний (POLL_INTERVAL_MS), пустые опросы дёшевы.
-                val busy = try {
+                if (!RustBridge.isRunning()) {
+                    delay(1_000L)
+                    continue
+                }
+                // Спим на условной переменной Rust: событие будит сразу,
+                // таймаут лишь изредка обновляет статус. CPU в простое не крутится.
+                RustBridge.awaitEvents(DeliveryCadence.eventWaitMs())
+                val lease = coreWorkWakeLock.acquire()
+                var hadError = false
+                try {
                     RuntimeDiagnostics.measure(DiagnosticOperation.CORE_EVENTS) {
                         val events = RustBridge.drainEvents()
                         if (events.isNotEmpty()) DeliveryCadence.touch()
                         events.forEach { event -> handleEvent(event) }
-                        RustBridge.pendingEvents() > 0L || events.size >= BUSY_BATCH
                     }
                 } catch (ex: Exception) {
                     Log.e(TAG, "Event polling error", ex)
-                    false
+                    hadError = true
+                } finally {
+                    lease.close()
                 }
                 val statusNowMs = android.os.SystemClock.elapsedRealtime()
                 if (statusNowMs - lastStatusRefreshAtMs >= POLL_INTERVAL_MS) {
                     lastStatusRefreshAtMs = statusNowMs
-                    // Метка жизни: по ней сторож понимает, что нас убили без onDestroy.
                     runCatching { DeliveryAssurance.markAlive(applicationContext) }
                     try {
                         val status = RustBridge.networkStatus()
@@ -2302,8 +2282,7 @@ class CoreServerService : Service() {
                         Log.e(TAG, "Status polling error", ex)
                     }
                 }
-                // Пока экран смотрят - четверть секунды, иначе прежние пять.
-                delay(DeliveryCadence.pollDelayMs(busy))
+                if (hadError) delay(1_000L)
             }
         }
 
@@ -2314,8 +2293,12 @@ class CoreServerService : Service() {
             kotlinx.coroutines.delay(INITIAL_FILE_PUMP_DELAY_MS)
             chatOutboxPump.start(serviceScope)
             while (isActive) {
+                val lease = coreWorkWakeLock.acquire()
+                var hadWork = false
                 try {
-                    RuntimeDiagnostics.measure(DiagnosticOperation.FILE_PUMP) { fileTransferRouter.pumpOutgoing() }
+                try {
+                    val summary = RuntimeDiagnostics.measure(DiagnosticOperation.FILE_PUMP) { fileTransferRouter.pumpOutgoing() }
+                    hadWork = summary != null && (summary.packetsSent > 0 || summary.transfersPumped > 0)
                 } catch (ex: Exception) {
                     Log.w(TAG, "File pump error: ${ex.message}")
                 }
@@ -2364,11 +2347,18 @@ class CoreServerService : Service() {
                 } catch (ex: Exception) {
                     Log.w(TAG, "Join request pump error: ${ex.message}")
                 }
-                // Раунд 179: недоставленные сообщения (гифки-ссылки и текст
-                // QUEUED_OFFLINE) досылает свой насос - коротким шагом, пока
-                // есть что досылать (см. ChatOutboxPump; раньше это был один
-                // круг из трёх по двадцать секунд, то есть раз в минуту).
-                delay(FILE_PUMP_INTERVAL_MS)
+                // Раунд 179: недоставленные сообщения досылает свой насос
+                // (ChatOutboxPump). Здесь лишь страховка; в простое шаг реже.
+                } finally {
+                    lease.close()
+                }
+                delay(
+                    ServiceIdleCadence.filePumpDelayMs(
+                        hadWork = hadWork,
+                        recentlyActive = DeliveryCadence.idleMs() < DeliveryCadence.ACTIVITY_WINDOW_MS,
+                        onScreen = DeliveryCadence.isForeground(),
+                    ),
+                )
             }
         }
     }
@@ -3294,7 +3284,6 @@ class CoreServerService : Service() {
 
         const val EXTRA_DISPLAY_NAME = "display_name"
         const val POLL_INTERVAL_MS = 5000L
-        private const val BUSY_BATCH = 8
         /** Под каким именем нас уже записал справочник. */
         private const val REGISTRY_NAME_KEY = "registry_registered_name"
         /** Когда записал. */

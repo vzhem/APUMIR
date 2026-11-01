@@ -11,18 +11,11 @@ package com.vladimir.messenger.ui.components
 // проводу. Старые параметрические коды ("ball-3") и эмодзи дорисовываются
 // совместимо: параметрические сводятся к ближайшей форме, эмодзи - текстом.
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -98,16 +91,9 @@ fun TopicIconView(icon: String, size: Dp) {
 
 @Composable
 fun AnimatedTopicIcon(kind: String, modifier: Modifier = Modifier) {
-    val transition = rememberInfiniteTransition(label = "topic-icon")
-    val t by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "topic-icon-t",
-    )
+    // Покой: значок темы рисуется один раз. Бесконечный перелив на каждой
+    // строке списка держал GPU в кадре даже когда человек ничего не делал.
+    val t = REST_PHASE
     Canvas(modifier = modifier) {
         val drawer = DRAWERS[kind] ?: DRAWERS.getValue(TopicIconCatalog.DEFAULT)
         val idx = TopicIconCatalog.kinds.indexOf(kind)
@@ -116,6 +102,9 @@ fun AnimatedTopicIcon(kind: String, modifier: Modifier = Modifier) {
 }
 
 // ── движение, общее для всех форм ────────────────────────────────────────────
+
+/// Фаза покоя: формы остаются узнаваемыми, но кадры не запрашиваются.
+private const val REST_PHASE = 0.18f
 
 private val PI2 = (2.0 * Math.PI).toFloat()
 private fun sinF(x: Float): Float = sin(x.toDouble()).toFloat()

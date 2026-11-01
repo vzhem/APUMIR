@@ -31,6 +31,7 @@ import kotlinx.coroutines.launch
 class ChatOutboxPump(
     private val messageDao: MessageDao,
     private val chatRepository: ChatRepository,
+    private val wakeLock: CoreWorkWakeLock? = null,
 ) {
 
     private var job: Job? = null
@@ -49,7 +50,11 @@ class ChatOutboxPump(
                 try {
                     queued = messageDao.queuedOfflineCount()
                     if (queued > 0) {
-                        sent = chatRepository.pumpQueuedOffline()
+                        sent = if (wakeLock != null) {
+                            wakeLock.withLock { chatRepository.pumpQueuedOffline() }
+                        } else {
+                            chatRepository.pumpQueuedOffline()
+                        }
                         DeliveryCadence.touch()
                     }
                 } catch (cancelled: CancellationException) {

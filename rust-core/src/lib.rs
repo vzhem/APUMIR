@@ -101,14 +101,30 @@ pub enum MessageStatusFfi {
 
 pub struct P2PCoreHandle {
     inner: std::sync::Mutex<P2PCore>,
+    /// Общая шина событий: ожидание на ней не держит замок `inner`.
+    events: std::sync::Arc<crate::engine::events::EventBus>,
 }
 
 impl P2PCoreHandle {
+    fn from_core(core: P2PCore) -> Self {
+        let events = core.events_handle();
+        Self {
+            inner: std::sync::Mutex::new(core),
+            events,
+        }
+    }
+
     fn new(display_name: String) -> Self {
         let config = EngineConfig::new(display_name);
-        Self {
-            inner: std::sync::Mutex::new(P2PCore::new(config)),
-        }
+        Self::from_core(P2PCore::new(config))
+    }
+
+    /// Спать до события или таймаута; возвращает число событий в очереди.
+    /// Вызывается из Kotlin вместо опроса раз в 250 мс.
+    pub fn await_events(&self, timeout_ms: u64) -> u64 {
+        self.events
+            .wait_for_events(std::time::Duration::from_millis(timeout_ms.min(60_000)))
+            as u64
     }
 
     pub fn start(&self) -> bool {
@@ -517,9 +533,7 @@ pub fn create_engine_with_keys(
 ) -> std::sync::Arc<P2PCoreHandle> {
     let config = EngineConfig::new(display_name)
         .with_keys(public_key, private_key);
-    std::sync::Arc::new(P2PCoreHandle {
-        inner: std::sync::Mutex::new(P2PCore::new(config)),
-    })
+    std::sync::Arc::new(P2PCoreHandle::from_core(P2PCore::new(config)))
 }
 
 /// M8-C slice 3: engine с durable encrypted relay custody. Пустые строки ключей
@@ -535,9 +549,7 @@ pub fn create_engine_durable(
     if !public_key.is_empty() && !private_key.is_empty() {
         config = config.with_keys(public_key, private_key);
     }
-    std::sync::Arc::new(P2PCoreHandle {
-        inner: std::sync::Mutex::new(P2PCore::new(config)),
-    })
+    std::sync::Arc::new(P2PCoreHandle::from_core(P2PCore::new(config)))
 }
 
 /// M8-C slice 3: установить at-rest ключ из Android Keystore моста.

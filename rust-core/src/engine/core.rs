@@ -635,6 +635,12 @@ pub struct P2PCore {
 
 impl P2PCore {
     pub fn new(config: EngineConfig) -> Self {
+        Self::new_with_events(config, Arc::new(EventBus::with_defaults()))
+    }
+
+    /// Сборка с общей шиной: FFI-рукоятка ждёт события на ней, не удерживая
+    /// замок самого движка (иначе ожидание блокировало бы отправку).
+    pub fn new_with_events(config: EngineConfig, events: Arc<EventBus>) -> Self {
         // Файл азбуки живёт рядом с relay-базой (тот же app-private каталог,
         // что Android передаёт в `create_engine_durable`). Без базы —
         // память, save отключён. Путь считаем ДО литерала: `config`
@@ -652,7 +658,7 @@ impl P2PCore {
             crypto: Arc::new(CryptoManager::new()),
             network: Arc::new(NetworkManagerFfi::new()),
             storage: Arc::new(StorageManagerFfi::new()),
-            events: Arc::new(EventBus::with_defaults()),
+            events,
             runtime: None,
             peer_addrs: Arc::new(Mutex::new(HashMap::new())),
             own_broker_shared: Arc::new(Mutex::new(None)),
@@ -5103,6 +5109,7 @@ impl P2PCore {
         self.peer_exchange.flush(true, crate::storage::models::now_ms());
         self.state = EngineState::Stopped;
         self.events.emit(CoreEvent::EngineStopped);
+        self.events.wake_waiters();
     }
 
     pub fn node_id(&self) -> Option<String> {
@@ -6374,6 +6381,10 @@ impl P2PCore {
 
     pub fn poll_event(&self) -> Option<CoreEvent> {
         self.events.poll()
+    }
+
+    pub fn events_handle(&self) -> Arc<EventBus> {
+        Arc::clone(&self.events)
     }
 
     pub fn drain_events(&self) -> Vec<CoreEvent> {

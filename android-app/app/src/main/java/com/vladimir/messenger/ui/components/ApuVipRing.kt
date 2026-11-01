@@ -20,12 +20,6 @@ package com.vladimir.messenger.ui.components
 // меньше — поэтому VIP-строка выше остальных не становится.
 // =============================================================================
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -60,10 +54,6 @@ import kotlin.math.sin
 /** Ширина золотого кольца: у VIP-аватарки край круга занят им. */
 val VipRingWidth: Dp = 2.5.dp
 
-/** Полный цикл блеска: девять секунд спокойствия, две с половиной — волна. */
-private const val SHEEN_CYCLE_MS = 9_000
-private const val SHEEN_LAP_MS = 2_500
-
 /** Цвета кольца те же, что у плашки VIP: одна награда — один металл. */
 private val GoldLight = Color(0xFFFFE9A8)
 private val GoldMid = Color(0xFFE7B93F)
@@ -79,20 +69,9 @@ private val GoldEdge = Color(0xFFFFF6D5)
  */
 @Composable
 fun VipRing(modifier: Modifier = Modifier) {
-    // Одна бесконечная анимация на аватарку. Она есть только у VIP-строк: у
-    // обычных контактов ни анимации, ни лишней работы в кадре нет.
-    val transition = rememberInfiniteTransition(label = "vip-ring")
-    val phase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = SHEEN_CYCLE_MS, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "vip-ring-phase",
-    )
-    // Блеск живёт только в начале цикла: за это окно волна обегает кольцо.
-    val lap = phase * SHEEN_CYCLE_MS / SHEEN_LAP_MS
+    // Кольцо металлическое и в покое: фаза за пределами волны блеска,
+    // поэтому список VIP-аватарок не запрашивает кадры без действия человека.
+    val lap = 2f
 
     Canvas(modifier) {
         val stroke = VipRingWidth.toPx()

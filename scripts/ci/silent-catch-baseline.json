@@ -49,7 +49,7 @@
     "android-app/app/src/main/java/com/vladimir/messenger/data/voice/VoiceTranscriber.kt": 2,
     "android-app/app/src/main/java/com/vladimir/messenger/domain/usecase/CreateIdentityUseCase.kt": 1,
     "android-app/app/src/main/java/com/vladimir/messenger/service/CloudflareRelay.kt": 1,
-    "android-app/app/src/main/java/com/vladimir/messenger/service/CoreServerService.kt": 2,
+    "android-app/app/src/main/java/com/vladimir/messenger/service/CoreServerService.kt": 1,
     "android-app/app/src/main/java/com/vladimir/messenger/service/UpdateChecker.kt": 1,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/components/AvatarBitmaps.kt": 3,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/components/ConversationWallpaperDialog.kt": 2,

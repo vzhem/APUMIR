@@ -193,7 +193,8 @@ APK, скачанный с официального сайта (DownloadManager)
   (строку в чат не писать); `onOfferAccepted` — и рою групп, и
   `ApkSeeder.onSeedJoined` (полосы со всех сидов); `GroupFileSeeder.mayServe`
   — для `apkseed` разрешено всем.
-- `CoreServerService` — `apkSeeder.pump()` в файловом насосе (20 с),
+- `CoreServerService` — `apkSeeder.pump()` в файловом насосе (20 с при
+  активной передаче, 60/120 с в простое — `ServiceIdleCadence`),
   `onPeerOnline` — разбудить запрос.
 - UI — Настройки, раздел «Обновления» (`SettingsScreen` + карточка
   `ApkUpdatesCard`): своя раздача (версия, имя файла, размер, «получили:

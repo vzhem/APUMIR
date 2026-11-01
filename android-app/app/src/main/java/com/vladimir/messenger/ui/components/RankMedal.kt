@@ -1,15 +1,8 @@
 package com.vladimir.messenger.ui.components
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -48,29 +41,10 @@ fun RankMedal(
      */
     vip: Boolean = false,
 ) {
-    val transition = rememberInfiniteTransition(label = "rank-medal")
-
-    // Покачивание на ленте: маятник, а не равномерное вращение.
-    val swing by transition.animateFloat(
-        initialValue = -7f,
-        targetValue = 7f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2200, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "rank-medal-swing",
-    )
-
-    // Отблеск: 0..1 - положение светлой полосы, идущей по диску.
-    val shine by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 3600, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "rank-medal-shine",
-    )
+    // Медаль висит в шапке постоянно, поэтому в простое она неподвижна:
+    // объём и блик остаются, бесконечные кадры - нет.
+    val swing = 0f
+    val shine = 0.32f
 
     Canvas(modifier = modifier.size(size)) {
         val w = this.size.width

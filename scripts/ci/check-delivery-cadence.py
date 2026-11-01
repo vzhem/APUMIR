@@ -28,13 +28,20 @@ class DeliveryCadenceContractTest(unittest.TestCase):
         self.pump = read(SERVICE / "ChatOutboxPump.kt")
         self.main = read(MAIN)
 
-    def test_event_bus_is_polled_fast_while_the_screen_is_on(self):
-        self.assertIn("FOREGROUND_POLL_MS = 250L", self.cadence)
-        self.assertIn("IDLE_POLL_MS = 5_000L", self.cadence)
-        self.assertIn("delay(DeliveryCadence.pollDelayMs(busy))", self.service)
-        # Прежняя формула «пять секунд, если очередь пуста» больше не живёт.
-        self.assertNotIn("delay(if (busy) BUSY_POLL_INTERVAL_MS else POLL_INTERVAL_MS)", self.service)
-        self.assertNotIn("BUSY_POLL_INTERVAL_MS =", self.service)
+    def test_event_bus_waits_on_a_condvar_instead_of_idle_polling(self):
+        # Поток спит в Rust и просыпается от события; таймерного опроса нет.
+        self.assertIn("EVENT_WAIT_MS = 5_000L", self.cadence)
+        self.assertIn("RustBridge.awaitEvents(DeliveryCadence.eventWaitMs())", self.service)
+        self.assertNotIn("pollDelayMs", self.cadence)
+        self.assertNotIn("delay(DeliveryCadence.pollDelayMs(busy))", self.service)
+        self.assertNotIn("FOREGROUND_POLL_MS = 250L", self.cadence)
+        bridge = read(ROOT / "android-app/app/src/main/java/com/vladimir/messenger/data/RustBridge.kt")
+        self.assertIn("fun awaitEvents(", bridge)
+        udl = read(ROOT / "rust-core/src/lib.udl")
+        self.assertIn("u64 await_events(u64 timeout_ms);", udl)
+        events = read(ROOT / "rust-core/src/engine/events.rs")
+        self.assertIn("Condvar", events)
+        self.assertIn("wait_for_events", events)
 
     def test_incoming_batch_marks_activity(self):
         self.assertIn("if (events.isNotEmpty()) DeliveryCadence.touch()", self.service)
@@ -53,6 +60,26 @@ class DeliveryCadenceContractTest(unittest.TestCase):
         dao = read(ROOT / "android-app/app/src/main/java/com/vladimir/messenger/data/local/dao/MessageDao.kt")
         self.assertIn("suspend fun queuedOfflineCount(): Int", dao)
         self.assertIn("WHERE isFromMe = 1 AND status = 'QUEUED_OFFLINE'\")", dao)
+
+    def test_idle_pumps_back_off_and_wake_lock_is_bounded(self):
+        idle = read(SERVICE / "ServiceIdleCadence.kt")
+        self.assertIn("FILE_PUMP_IDLE_FOREGROUND_MS = 60_000L", idle)
+        self.assertIn("FILE_PUMP_IDLE_BACKGROUND_MS = 120_000L", idle)
+        self.assertIn("ServiceIdleCadence.filePumpDelayMs(", self.service)
+        self.assertIn("ServiceIdleCadence.UPDATE_BARRIER_MS", self.service)
+        self.assertNotIn("kotlinx.coroutines.delay(2_500L)", self.service)
+        wake = read(SERVICE / "CoreWorkWakeLock.kt")
+        self.assertIn("WORK_WAKE_LOCK_MS = 5 * 60 * 1000L", wake)
+        self.assertIn("coreWorkWakeLock.acquire()", self.service)
+        # Постоянный замок службы больше не берётся в onCreate.
+        self.assertNotIn("P2PMessenger::CoreWakeLock", self.service)
+        self.assertNotIn("shouldRefreshWakeLock", self.service)
+
+    def test_decorative_ui_has_no_infinite_idle_animation(self):
+        ui = ROOT / "android-app/app/src/main/java/com/vladimir/messenger/ui/components"
+        for name in ("AnimatedTopicIcon.kt", "RankMedal.kt", "ApuVipRing.kt", "ShinyEmoji.kt",
+                     "ShimmerIcon.kt", "ApuSkeleton.kt", "GifCatalogDialog.kt", "MessageReactions.kt"):
+            self.assertNotIn("rememberInfiniteTransition", read(ui / name), name)
 
     def test_first_retry_is_seconds_not_a_minute(self):
         self.assertIn("FOREGROUND_LADDER_MS = longArrayOf(5_000L, 10_000L, 30_000L, 60_000L)", self.cadence)

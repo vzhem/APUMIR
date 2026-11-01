@@ -2,13 +2,6 @@ package com.vladimir.messenger.ui.components
 
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.animateColor
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -427,25 +420,9 @@ fun GifCatalogBody(
 /** Переливающаяся синяя точка «уже в нашей сети» (правый верхний угол). */
 @Composable
 private fun NetDot(modifier: Modifier = Modifier) {
-    val transition = rememberInfiniteTransition(label = "netdot")
-    val glow by transition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 650, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "netdotGlow",
-    )
-    val tint by transition.animateColor(
-        initialValue = Color(0xFF2F80ED),
-        targetValue = Color(0xFF8FC1FF),
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 650, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "netdotTint",
-    )
+    // Статичная метка «уже в нашей сети»: каталог может быть открыт долго.
+    val glow = 0.85f
+    val tint = Color(0xFF5B9DF2)
     Box(
         modifier = modifier
             .padding(4.dp)
