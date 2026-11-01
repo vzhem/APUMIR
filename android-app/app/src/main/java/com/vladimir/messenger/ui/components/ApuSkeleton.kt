@@ -1,11 +1,5 @@
 package com.vladimir.messenger.ui.components
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -19,7 +13,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,13 +27,9 @@ import androidx.compose.ui.unit.dp
  * пользователь видит очертания будущих сообщений — так делают премиальные мессенджеры.
  */
 fun Modifier.apuSkeleton(): Modifier = composed {
-    val transition = rememberInfiniteTransition(label = "apuSkeleton")
-    val shift by transition.animateFloat(
-        initialValue = -1f,
-        targetValue = 2f,
-        animationSpec = infiniteRepeatable(tween(durationMillis = 1300, easing = LinearEasing), RepeatMode.Restart),
-        label = "apuSkeletonShift",
-    )
+    // Заглушка загрузки статична: если сеть долгая, она не должна крутить
+    // бесконечный перелив и греть телефон.
+    val shift = 0.35f
     val base = Color(0xFFE6ECF3)
     val glow = Color.White.copy(alpha = 0.85f)
     background(

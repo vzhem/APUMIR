@@ -19,16 +19,9 @@ package com.vladimir.messenger.ui.components
 // Разметка не перерисовывается — двигается только заливка.
 // =============================================================================
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
@@ -72,30 +65,10 @@ fun ShimmerIcon(
     size: Dp = 24.dp,
     durationMs: Int = 4200,
 ) {
-    val transition = rememberInfiniteTransition(label = "shimmer")
-
-    // Сдвиг градиента: цвета перетекают друг в друга без остановки.
-    val shift by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMs, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "shift",
-    )
-
-    // Блик идёт медленнее перелива, поэтому вспышка читается отдельным
-    // событием, а не частью смены цвета.
-    val glare by transition.animateFloat(
-        initialValue = -1f,
-        targetValue = 2f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMs * 2, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "glare",
-    )
+    // Покой: металлический градиент и блик на месте, но значок не
+    // перерисовывается каждый кадр, пока меню просто открыто.
+    val shift = 0.35f
+    val glare = 0.5f
 
     Icon(
         imageVector = imageVector,

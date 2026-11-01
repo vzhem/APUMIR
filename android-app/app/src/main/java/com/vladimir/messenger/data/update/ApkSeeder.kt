@@ -103,6 +103,10 @@ class ApkSeeder @Inject constructor(
     private val _download = MutableStateFlow<Download?>(null)
     val download: StateFlow<Download?> = _download.asStateFlow()
 
+    /** Версия уже запрошенного у соседей APK, пока первые куски ещё не пошли. */
+    private val _pendingRequest = MutableStateFlow<String?>(null)
+    val pendingRequest: StateFlow<String?> = _pendingRequest.asStateFlow()
+
     private val _ready = MutableStateFlow<Ready?>(null)
     val ready: StateFlow<Ready?> = _ready.asStateFlow()
 
@@ -110,22 +114,6 @@ class ApkSeeder @Inject constructor(
     val receivedApks: StateFlow<List<ReceivedApk>> = _receivedApks.asStateFlow()
 
     // ── Дифф-патч обновления в рое (раунд 133) ──────────────────────────────
-
-    private class PendingPatchAsk(
-        val fromVersion: String,
-        val toVersion: String,
-        val sha256: String,
-        val apkSha256: String,
-        val startedAtMs: Long,
-    ) {
-        var askedSeed: String? = null
-        var askedAtMs: Long = 0L
-        var attempts: Int = 0
-        /** Кого уже спрашивали в этом круге: следующий — другой сид. */
-        val tried = LinkedHashSet<String>()
-        /** Кто уже шлёт полосы (предложение принято приёмником, K2). */
-        val striping = LinkedHashSet<String>()
-    }
 
     private val _patchOffers = MutableStateFlow<List<PatchOfferUi>>(emptyList())
     val patchOffers: StateFlow<List<PatchOfferUi>> = _patchOffers.asStateFlow()
@@ -137,16 +125,6 @@ class ApkSeeder @Inject constructor(
     @Volatile private var lastPatchAnnounceAtMs = 0L
 
     // ── Моя просьба о новой версии ──────────────────────────────────────────
-
-    private class PendingAsk(val version: String, val sha256: String, val startedAtMs: Long) {
-        var askedSeed: String? = null
-        var askedAtMs: Long = 0L
-        var attempts: Int = 0
-        /** Кого уже спрашивали в этом круге: следующий — другой сид. */
-        val tried = LinkedHashSet<String>()
-        /** Кто уже шлёт полосы (предложение принято приёмником, K2). */
-        val striping = LinkedHashSet<String>()
-    }
 
     @Volatile private var pending: PendingAsk? = null
     @Volatile private var initDone = false
@@ -720,11 +698,25 @@ class ApkSeeder @Inject constructor(
         Log.i(TAG, "auto update ask v$version -> ${targets.size} node(s)")
     }
 
-    /** Начать качать объявленную версию (карточка «Скачать»). */
-    suspend fun requestUpdate(nodeId: String) {
-        val offer = _offers.value.firstOrNull { it.nodeId == nodeId } ?: return
-        val seeds = _offers.value.filter { it.version == offer.version && it.sha256 == offer.sha256 }.map { it.nodeId }
-        startPending(offer.version, offer.sha256, seeds)
+    /**
+     * Начать качать объявленную версию (карточка «Скачать»).
+     *
+     * Возвращает false, только если предложение исчезло до нажатия. Уже идущая
+     * просьба/приём — это true: второй тап не создаёт вторую просьбу и не сбрасывает
+     * круг сидов. Замок держится на время проверки, чтобы два быстрых тапа не
+     * проскочили до записи `pending`.
+     */
+    suspend fun requestUpdate(nodeId: String): Boolean {
+        mutex.withLock {
+            if (pending != null || patchPending != null || _download.value != null) return true
+            val offer = _offers.value.firstOrNull { it.nodeId == nodeId } ?: return false
+            val seeds = _offers.value.filter { it.version == offer.version && it.sha256 == offer.sha256 }.map { it.nodeId }
+            startPending(offer.version, offer.sha256, seeds)
+        }
+        // Сетевой круг — уже вне замка: второй тап не создаст вторую просьбу,
+        // но помпа/отмена не ждут доставку первого `upwant`.
+        runCatching { askNext() }.onFailure { Log.w(TAG, "update ask next failed: ${it.message}") }
+        return true
     }
 
     /** Начать качать ПАТЧ, который раздаёт узел [nodeId] (карточка «компактно»). */
@@ -781,6 +773,7 @@ class ApkSeeder @Inject constructor(
                 runCatching { router.dropTransfer(row.transferId) }
             }
         }
+        _pendingRequest.value = null
         _download.value = null
         Log.i(TAG, "update download cancelled")
     }
@@ -1148,6 +1141,7 @@ class ApkSeeder @Inject constructor(
                 restored.askedAtMs = saved.askedAtMs
                 restored.askedSeed?.let(restored.tried::add)
             }
+            _pendingRequest.value = saved.version
             _download.value = downloadRow(saved.version, saved.sha256)
         }
         // Раунд 133: патч-просьба и патч-объявления (перезапуск).
@@ -1554,11 +1548,11 @@ class ApkSeeder @Inject constructor(
         val now = System.currentTimeMillis()
         val p = PendingAsk(version, sha256, now)
         pending = p
+        _pendingRequest.value = version
         store.savePending(
             ApkUpdateStore.Pending(version, sha256, now, 0, "", 0L, seeds),
         )
         _ready.value = null // новое скачивание перезаписывает «Готово»
-        askNext()
     }
 
     private suspend fun knownSeedsFor(p: PendingAsk): Set<String> {
@@ -1641,6 +1635,7 @@ class ApkSeeder @Inject constructor(
     private suspend fun clearPending() {
         pending = null
         store.savePending(null)
+        _pendingRequest.value = null
         _download.value = null
     }
 

@@ -121,6 +121,7 @@ FILE_WIRE="$BASE/main/java/com/vladimir/messenger/data/file/FileTransferWire.kt"
 FILE_UDP="$BASE/main/java/com/vladimir/messenger/data/file/FileUdpWire.kt"
 SEALED_WIRE="$BASE/main/java/com/vladimir/messenger/data/security/SealedWire.kt"
 OUTGOING_POLICY="$BASE/main/java/com/vladimir/messenger/data/security/OutgoingPayloadPolicy.kt"
+CONTACT_RESET_WIRE="$BASE/main/java/com/vladimir/messenger/data/contactreset/ContactResetWire.kt"
 OUTGOING_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/data/security/OutgoingPayloadPolicyTest.kt"
 DEFERRED_WIRE="$BASE/main/java/com/vladimir/messenger/data/schedule/DeferredWire.kt"
 DEFERRED_POLICY="$BASE/main/java/com/vladimir/messenger/data/schedule/DeferredDeliveryPolicy.kt"
@@ -187,7 +188,7 @@ PYGEN
     "$STORY_FEEDBACK_WIRE" "$STORY_FEEDBACK_LEDGER" "$STORY_FEEDBACK_OUTBOX" \
     "$STORY_FEEDBACK_WIRE_TEST" "$STORY_FEEDBACK_LEDGER_TEST" "$STORY_FEEDBACK_OUTBOX_TEST" \
     "$UPDATE_POLICY" "$UPDATE_POLICY_TEST" \
-    "$CALL_WIRE" "$FILE_CODEC" "$FILE_WIRE" "$FILE_UDP" "$SEALED_WIRE" "$OUTGOING_POLICY" "$OUTGOING_POLICY_TEST" \
+    "$CALL_WIRE" "$FILE_CODEC" "$FILE_WIRE" "$FILE_UDP" "$SEALED_WIRE" "$OUTGOING_POLICY" "$OUTGOING_POLICY_TEST" "$CONTACT_RESET_WIRE" \
     "$DEFERRED_WIRE" "$DEFERRED_POLICY" "$DEFERRED_WIRE_TEST" "$DEFERRED_POLICY_TEST" \
     "$SELF_SEED_POLICY" "$SELF_SEED_POLICY_TEST" "$SEND_TIME_POLICY" "$SEND_TIME_TEST" \
     "$STORY_PUBLISH" "$STORY_PUBLISH_TEST" "$RETENTION" "$RETENTION_TEST" \

@@ -66,6 +66,7 @@
 | [`RELAY_STORAGE_DIAGNOSTICS.md`](RELAY_STORAGE_DIAGNOSTICS.md) | Диагностика relay-хранилища |
 | [`RELAY_STORAGE_FORENSICS.md`](RELAY_STORAGE_FORENSICS.md) | Разбор большого relay-хранилища |
 | [`RESTORE_ON_NEW_PC.md`](RESTORE_ON_NEW_PC.md) | Продолжение работы на новом ПК |
+| [`IDLE_POWER.md`](IDLE_POWER.md) | Лёгкий простой: нагрев/батарея без действий |
 | [`RUNTIME_DIAGNOSTICS.md`](RUNTIME_DIAGNOSTICS.md) | Расширенная диагностика |
 | [`SCHEDULED_PREDELIVERY.md`](SCHEDULED_PREDELIVERY.md) | Предварительная доставка и отложенный показ |
 | [`SCHEDULED_SEND_DATE_TIME.md`](SCHEDULED_SEND_DATE_TIME.md) | Произвольная дата и время отправки |

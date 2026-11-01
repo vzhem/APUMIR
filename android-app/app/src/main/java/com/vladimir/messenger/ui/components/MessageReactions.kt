@@ -3,15 +3,8 @@ package com.vladimir.messenger.ui.components
 import androidx.compose.ui.res.stringResource
 import com.vladimir.messenger.R
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -241,26 +234,10 @@ private fun PickerEmoji(
         )
     }
 
-    // Свой значок дышит и слегка покачивается - его видно среди двадцати.
-    val pulse = rememberInfiniteTransition(label = "reaction-pulse")
-    val pulseScale by pulse.animateFloat(
-        initialValue = 1f,
-        targetValue = if (isMine) 1.18f else 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 780, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "reaction-pulse-scale",
-    )
-    val tilt by pulse.animateFloat(
-        initialValue = 0f,
-        targetValue = if (isMine) 8f else 0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 780, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "reaction-pulse-tilt",
-    )
+    // Свой значок выделен размером и золотой рамкой, но не дышит постоянно:
+    // открытая палитра реакций не должна греть телефон в простое.
+    val pulseScale = if (isMine) 1.12f else 1f
+    val tilt = 0f
 
     Text(
         emoji,

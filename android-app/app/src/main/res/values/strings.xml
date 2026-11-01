@@ -2366,4 +2366,13 @@
     <string name="group_forward_author">%1$s · автор: %2$s</string>
     <string name="call_background_failed">Фон не применился: %1$s</string>
     <string name="call_background_preparing">Фон подготавливается…</string>
+    <string name="st_download_request_accepted">Запрос на скачивание принят. Начинаю — повторно нажимать не нужно.</string>
+    <string name="st_official_starting">Начинаю скачивание с официального сайта…</string>
+    <string name="st_official_started">Скачивание с официального сайта началось</string>
+    <string name="st_neighbor_starting">Начинаю скачивание у соседей…</string>
+    <string name="st_neighbor_started">Скачивание у соседей началось</string>
+    <string name="st_download_no_second_tap">Повторное нажатие не нужно. Готовый файл сам появится в «Обновлениях».</string>
+    <string name="st_update_already_downloading">Обновление уже скачивается. Дождитесь окончания или остановите приём.</string>
+    <string name="st_neighbor_offer_gone">Сосед больше не раздаёт эту версию. Нажмите «Проверить новую версию».</string>
+    <string name="st_official_download_failed">Не удалось скачать обновление с официального сайта. Попробуйте ещё раз.</string>
 </resources>

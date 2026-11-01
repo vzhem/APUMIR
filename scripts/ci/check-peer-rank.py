@@ -170,9 +170,10 @@ class PeerRankContractTest(unittest.TestCase):
         self.assertIn("Brush.sweepGradient(", RING)
         self.assertIn("GoldEdge", RING)
         self.assertIn("GoldShadow", RING)
-        # Блеск редкий и живёт только у VIP: анимация в общем компоненте.
-        self.assertIn("SHEEN_CYCLE_MS", RING)
-        self.assertIn("rememberInfiniteTransition(label = \"vip-ring\")", RING)
+        # Кольцо остаётся объёмным, но в простое статично: бесконечная
+        # анимация на каждой VIP-аватарке грела телефон (задача 2026-11-01).
+        self.assertNotIn("rememberInfiniteTransition", RING)
+        self.assertIn("val lap = 2f", RING)
         # Аватарка с кольцом: картинка или инициалы, кольцо по краю круга.
         self.assertIn("fun PeerAvatar(", RING)
         self.assertIn("val VipRingWidth: Dp = 2.5.dp", RING)

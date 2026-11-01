@@ -2,7 +2,8 @@
 //! Все события которые Kotlin получает через callback
 
 use std::collections::VecDeque;
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
+use std::time::Duration;
 
 // ============================================================
 // Event Types
@@ -154,6 +155,7 @@ impl std::fmt::Display for CoreEvent {
 /// Шина событий — очередь событий для Kotlin
 pub struct EventBus {
     queue: Mutex<VecDeque<CoreEvent>>,
+    ready: Condvar,
     max_size: usize,
 }
 
@@ -161,6 +163,7 @@ impl EventBus {
     pub fn new(max_size: usize) -> Self {
         Self {
             queue: Mutex::new(VecDeque::new()),
+            ready: Condvar::new(),
             max_size,
         }
     }
@@ -195,6 +198,8 @@ impl EventBus {
             }
         }
         queue.push_back(event);
+        // Будим ожидающий Kotlin-поток сразу, а не по таймеру опроса.
+        self.ready.notify_one();
     }
 
     /// Получить одно событие (для polling из Kotlin)
@@ -206,6 +211,26 @@ impl EventBus {
     pub fn drain(&self) -> Vec<CoreEvent> {
         let mut queue = self.queue.lock().unwrap();
         queue.drain(..).collect()
+    }
+
+    /// Блокирующее ожидание события для FFI: поток спит на Condvar и не
+    /// тратит CPU, пока очередь пуста. Возвращает число событий после
+    /// пробуждения (0 - истёк таймаут). Замок движка при этом НЕ держится.
+    pub fn wait_for_events(&self, timeout: Duration) -> usize {
+        let queue = self.queue.lock().unwrap();
+        if !queue.is_empty() {
+            return queue.len();
+        }
+        let (queue, _result) = self
+            .ready
+            .wait_timeout_while(queue, timeout, |q| q.is_empty())
+            .unwrap();
+        queue.len()
+    }
+
+    /// Разбудить ожидающих без события (остановка движка).
+    pub fn wake_waiters(&self) {
+        self.ready.notify_all();
     }
 
     /// Сколько событий в очереди
@@ -420,6 +445,47 @@ mod tests {
     fn test_bus_poll_empty_returns_none() {
         let bus = EventBus::with_defaults();
         assert!(bus.poll().is_none());
+    }
+
+    #[test]
+    fn wait_returns_immediately_when_events_are_queued() {
+        let bus = EventBus::with_defaults();
+        bus.emit(CoreEvent::EngineStopped);
+        assert_eq!(bus.wait_for_events(Duration::from_secs(5)), 1);
+    }
+
+    #[test]
+    fn wait_times_out_on_empty_bus_without_busy_loop() {
+        let bus = EventBus::with_defaults();
+        let start = std::time::Instant::now();
+        assert_eq!(bus.wait_for_events(Duration::from_millis(30)), 0);
+        assert!(start.elapsed() >= Duration::from_millis(25));
+    }
+
+    #[test]
+    fn emit_wakes_a_waiting_reader() {
+        let bus = std::sync::Arc::new(EventBus::with_defaults());
+        let writer = std::sync::Arc::clone(&bus);
+        let handle = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            writer.emit(CoreEvent::EngineStopped);
+        });
+        let start = std::time::Instant::now();
+        assert_eq!(bus.wait_for_events(Duration::from_secs(5)), 1);
+        assert!(start.elapsed() < Duration::from_secs(2));
+        handle.join().unwrap();
+    }
+
+    #[test]
+    fn wake_waiters_releases_empty_bus() {
+        let bus = std::sync::Arc::new(EventBus::with_defaults());
+        let waker = std::sync::Arc::clone(&bus);
+        let handle = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            waker.wake_waiters();
+        });
+        assert_eq!(bus.wait_for_events(Duration::from_secs(5)), 0);
+        handle.join().unwrap();
     }
 
     // --- Раунд 119: сообщения не выбрасываются при переполнении ---

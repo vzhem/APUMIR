@@ -11,9 +11,9 @@
     "android-app/app/src/main/java/com/vladimir/messenger/data/group/GroupWire.kt": 2595,
     "android-app/app/src/main/java/com/vladimir/messenger/data/mirror/MirrorSync.kt": 3810,
     "android-app/app/src/main/java/com/vladimir/messenger/data/repository/ChatRepository.kt": 1626,
-    "android-app/app/src/main/java/com/vladimir/messenger/data/update/ApkSeeder.kt": 1786,
-    "android-app/app/src/main/java/com/vladimir/messenger/service/CoreServerService.kt": 3305,
-    "android-app/app/src/main/java/com/vladimir/messenger/ui/components/AnimatedTopicIcon.kt": 1575,
+    "android-app/app/src/main/java/com/vladimir/messenger/data/update/ApkSeeder.kt": 1781,
+    "android-app/app/src/main/java/com/vladimir/messenger/service/CoreServerService.kt": 3294,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/components/AnimatedTopicIcon.kt": 1564,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/components/ApuDiagnosticsUi.kt": 1241,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/channels/ChannelScreen.kt": 1631,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/chat/ChatDetailScreen.kt": 1674,
@@ -23,6 +23,6 @@
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupChatScreen.kt": 2973,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupChatViewModel.kt": 2053,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupsScreen.kt": 1531,
-    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsScreen.kt": 2883
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsScreen.kt": 2857
   }
 }

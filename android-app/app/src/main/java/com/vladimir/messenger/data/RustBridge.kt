@@ -833,6 +833,21 @@ object RustBridge {
 
     fun pendingEvents(): Long = engine?.pendingEvents()?.toLong() ?: 0L
 
+    /**
+     * Спать до события ядра или таймаута; возвращает число событий в очереди.
+     * Поток паркуется на Condvar в Rust и не тратит CPU в простое. Вызывать
+     * только из фонового потока (служба ядра), не с главного.
+     */
+    fun awaitEvents(timeoutMs: Long): Long {
+        if (rejectMainThreadCall("awaitEvents")) return 0L
+        return try {
+            engine?.awaitEvents(timeoutMs.coerceAtLeast(0L).toULong())?.toLong() ?: 0L
+        } catch (ex: Exception) {
+            Log.e(TAG, "awaitEvents error", ex)
+            0L
+        }
+    }
+
     /** M8-C: честный режим relay custody ("durable-encrypted" / "ram-only" / "disabled"). */
     fun relayCustodyMode(): String = try {
         engine?.relayCustodyMode() ?: "disabled"

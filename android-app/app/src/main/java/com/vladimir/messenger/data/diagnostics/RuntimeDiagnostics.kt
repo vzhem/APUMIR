@@ -22,6 +22,8 @@ import java.util.concurrent.atomic.AtomicLong
 
 /** Process-local bounded health metrics. No message/identity data or stack traces. */
 object RuntimeDiagnostics {
+    /** Проба главного потока в простое: раз в 5 с, а не каждую секунду. */
+    private const val UI_PROBE_INTERVAL_MS = 5_000L
     val operations = OperationHealthTracker { SystemClock.uptimeMillis() }
     private val ui = UiResponsivenessTracker()
     private val main = Handler(Looper.getMainLooper())
@@ -82,7 +84,7 @@ object RuntimeDiagnostics {
                         TransferDiagnostics.recordWarning("health", "главный поток не ответил на пробу ${overdue}мс; это не подтверждённый ANR")
                     }
                 }
-            }, 0, 1000, TimeUnit.MILLISECONDS)
+            }, 0, UI_PROBE_INTERVAL_MS, TimeUnit.MILLISECONDS)
         }
         app.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
             override fun onActivityStarted(activity: Activity) { started.add(activity); update() }
