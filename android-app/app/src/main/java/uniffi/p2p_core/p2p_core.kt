@@ -914,6 +914,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -939,6 +941,8 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_p2p_core_fn_method_p2pcorehandle_add_contact(`ptr`: Pointer,`userId`: RustBuffer.ByValue,`displayName`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
+    fun uniffi_p2p_core_fn_method_p2pcorehandle_await_events(`ptr`: Pointer,`timeoutMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
     fun uniffi_p2p_core_fn_method_p2pcorehandle_configure_online_helper(`ptr`: Pointer,`enabled`: Byte,`maxRoutes`: Int,`maxBytesPerMinute`: Int,`maxRelaysPerMinute`: Int,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
     fun uniffi_p2p_core_fn_method_p2pcorehandle_connect_via_invite(`ptr`: Pointer,`link`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1355,6 +1359,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_add_contact(
     ): Short
+    fun uniffi_p2p_core_checksum_method_p2pcorehandle_await_events(
+    ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_configure_online_helper(
     ): Short
     fun uniffi_p2p_core_checksum_method_p2pcorehandle_connect_via_invite(
@@ -1623,6 +1629,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_add_contact() != 32965.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_await_events() != 51170.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_p2p_core_checksum_method_p2pcorehandle_configure_online_helper() != 7151.toShort()) {
@@ -2216,6 +2225,8 @@ public interface P2pCoreHandleInterface {
     
     fun `addContact`(`userId`: kotlin.String, `displayName`: kotlin.String): kotlin.Boolean
     
+    fun `awaitEvents`(`timeoutMs`: kotlin.ULong): kotlin.ULong
+    
     fun `configureOnlineHelper`(`enabled`: kotlin.Boolean, `maxRoutes`: kotlin.UInt, `maxBytesPerMinute`: kotlin.UInt, `maxRelaysPerMinute`: kotlin.UInt): kotlin.Boolean
     
     fun `connectViaInvite`(`link`: kotlin.String): kotlin.Boolean
@@ -2400,6 +2411,18 @@ open class P2pCoreHandle: Disposable, AutoCloseable, P2pCoreHandleInterface {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_add_contact(
         it, FfiConverterString.lower(`userId`),FfiConverterString.lower(`displayName`),_status)
+}
+    }
+    )
+    }
+    
+
+    override fun `awaitEvents`(`timeoutMs`: kotlin.ULong): kotlin.ULong {
+            return FfiConverterULong.lift(
+    callWithPointer {
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_p2p_core_fn_method_p2pcorehandle_await_events(
+        it, FfiConverterULong.lower(`timeoutMs`),_status)
 }
     }
     )
