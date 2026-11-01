@@ -1,11 +1,13 @@
 package com.vladimir.messenger.data.security
 
+import com.vladimir.messenger.data.contactreset.ContactResetWire
 import org.junit.Assert.*
 import org.junit.Test
 
 class EphemeralControlTest {
     @Test fun typingAndCatalogHintsAreStableAcrossRetryButSeparateAcrossRecipients() {
-        for (text in listOf("APUTYP1|APUGAME1|signed-snapshot", "APUTYP1|1", "APUTYP1|0", "APUGRP1|typ|group|topic|1", "APUGIF1|have|[]", "APUSTK1|thmb|opaque")) {
+        val reset = ContactResetWire.build(ContactResetWire.EPOCH, "pk_${"ab".repeat(32)}", "", ByteArray(32) { 1 }, ByteArray(32) { 2 })
+        for (text in listOf("APUTYP1|APUGAME1|signed-snapshot", "APUTYP1|1", "APUTYP1|0", "APUGRP1|typ|group|topic|1", "APUGIF1|have|[]", "APUSTK1|thmb|opaque", reset)) {
             val id = EphemeralControl.transportId("caller-id", "peer-a", text)
             assertTrue(id.startsWith("eph1-"))
             assertEquals(id, EphemeralControl.transportId("caller-id", "peer-a", text))

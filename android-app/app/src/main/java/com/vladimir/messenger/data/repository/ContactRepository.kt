@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.local.dao.ContactDao
+import com.vladimir.messenger.data.local.dao.ContactResetDao
 import com.vladimir.messenger.data.local.entity.ContactEntity
 import com.vladimir.messenger.data.security.DeviceIdentityHistory
 import com.vladimir.messenger.domain.model.Contact
@@ -21,27 +22,35 @@ class ContactRepository @Inject constructor(
     private val contactDao: ContactDao,
     private val chatRepository: ChatRepository,
     @ApplicationContext private val appContext: Context,
+    private val resetDao: ContactResetDao,
 ) {
     fun observeContacts(): Flow<List<Contact>> =
         contactDao.observeAllContacts().map { it.map { e -> e.toDomain() } }
 
     /** Full, key-free contact snapshot used only inside the authenticated mirror channel. */
-    suspend fun mirrorContactSnapshot(): List<org.json.JSONObject> =
-        contactDao.observeAllContactsOnce().map { entity ->
+    suspend fun mirrorContactSnapshot(): List<org.json.JSONObject> {
+        val epoch = resetDao.state()?.epoch ?: 0
+        return contactDao.observeAllContactsOnce().map { entity ->
             org.json.JSONObject()
                 .put("a", "put")
                 .put("id", entity.id)
                 .put("name", entity.displayName)
                 .put("user", entity.username)
                 .put("fp", entity.fingerprint)
+                .put("resetEpoch", epoch)
         }
+    }
 
     suspend fun addContact(
         displayName: String,
         fingerprint: String,
         username: String = "",
+        automatic: Boolean = false,
     ): Result<Contact> {
         return try {
+            if (automatic && isResetDeferred(fingerprint)) {
+                return Result.failure(Exception(RESET_DEFERRED))
+            }
             val existing = contactDao.getContactByFingerprint(fingerprint)
             if (existing != null) {
                 return Result.failure(Exception("Contact already exists"))
@@ -62,6 +71,7 @@ class ContactRepository @Inject constructor(
             )
 
             contactDao.insertContact(entity)
+            if (!automatic) resetDao.markRestored(contactId, System.currentTimeMillis())
             // р234: тот же контакт должен появиться на партнёрском устройстве.
             publishContact("put", entity)
             Result.success(entity.toDomain())
@@ -314,8 +324,9 @@ class ContactRepository @Inject constructor(
      * небольшой (идентификатор, имя, @имя, отпечаток) и запечатан на себя;
      * при применении чужого кадра повторно не рассылается - следит MirrorHub.
      */
-    private fun publishContact(action: String, entity: ContactEntity) {
+    private suspend fun publishContact(action: String, entity: ContactEntity) {
         if (entity.id.isBlank()) return
+        val epoch = resetDao.state()?.epoch ?: 0
         runCatching {
             com.vladimir.messenger.data.mirror.MirrorHub.publishContact(
                 org.json.JSONObject()
@@ -323,9 +334,17 @@ class ContactRepository @Inject constructor(
                     .put("id", entity.id)
                     .put("name", entity.displayName)
                     .put("user", entity.username)
-                    .put("fp", entity.fingerprint),
+                    .put("fp", entity.fingerprint)
+                    .put("resetEpoch", epoch),
             )
-        }
+        }.onFailure { Log.w("ContactRepository", "mirror contact publish failed: ${it.message}") }
+    }
+
+    /** Automatic contact creation is deferred until the signed reset hello restores the peer. */
+    suspend fun isResetDeferred(nodeId: String): Boolean {
+        if (resetDao.state() == null) return false
+        val candidate = resetDao.candidate(nodeId) ?: return false
+        return candidate.restoredAtMs == null
     }
 
     /**
@@ -338,6 +357,12 @@ class ContactRepository @Inject constructor(
     suspend fun applyMirrorContact(signal: org.json.JSONObject) {
         val id = signal.optString("id")
         if (id.isBlank()) return
+        val localEpoch = resetDao.state()?.epoch ?: 0
+        val signalEpoch = signal.optInt("resetEpoch", 0)
+        if (localEpoch != 0 && signalEpoch != localEpoch) {
+            Log.i("ContactRepository", "mirror: stale contact epoch ignored")
+            return
+        }
         if (signal.optString("a") == "del") {
             val entity = contactDao.getContactById(id) ?: return
             contactDao.deleteContact(entity)
@@ -363,6 +388,7 @@ class ContactRepository @Inject constructor(
                     username = username,
                 ),
             )
+            resetDao.markRestored(id, System.currentTimeMillis())
         } else {
             contactDao.updateContact(
                 existing.copy(
@@ -393,6 +419,10 @@ class ContactRepository @Inject constructor(
     suspend fun updateUsername(contactId: String, username: String) {
         contactDao.updateUsername(contactId, username)
         contactDao.getContactById(contactId)?.let { publishContact("put", it) }
+    }
+
+    companion object {
+        const val RESET_DEFERRED = "Contact reset deferred until signed hello"
     }
 
     suspend fun renameContact(contactId: String, newName: String): Result<Unit> {

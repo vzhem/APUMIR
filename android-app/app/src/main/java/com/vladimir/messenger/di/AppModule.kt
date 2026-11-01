@@ -66,6 +66,7 @@ object AppModule {
                 AppDatabase.MIGRATION_35_36,
                 AppDatabase.MIGRATION_36_37,
                 AppDatabase.MIGRATION_37_38,
+                AppDatabase.MIGRATION_38_39,
             )
             // Никакого fallbackToDestructiveMigration(): он молча удаляет все
             // таблицы, если миграции не нашлось, — для мессенджера это тихая
@@ -86,6 +87,9 @@ object AppModule {
 
     @Provides @Singleton
     fun provideContactDao(db: AppDatabase): ContactDao = db.contactDao()
+
+    @Provides @Singleton
+    fun provideContactResetDao(db: AppDatabase): com.vladimir.messenger.data.local.dao.ContactResetDao = db.contactResetDao()
 
     /** Ранги собеседников: знак VIP у имён и золотое кольцо у аватарок. */
     @Provides @Singleton
@@ -168,5 +172,6 @@ object AppModule {
         @ApplicationContext context: Context,
         contactDao: ContactDao,
         chatRepository: ChatRepository,
-    ): ContactRepository = ContactRepository(contactDao, chatRepository, context)
+        resetDao: com.vladimir.messenger.data.local.dao.ContactResetDao,
+    ): ContactRepository = ContactRepository(contactDao, chatRepository, context, resetDao)
 }

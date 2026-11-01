@@ -1,6 +1,8 @@
 package com.vladimir.messenger.data.group
 
 import android.util.Log
+import com.vladimir.messenger.data.contactreset.ContactResetCoordinator
+import com.vladimir.messenger.data.contactreset.ContactResetWire
 
 /**
  * Приём групповых событий из общего потока сообщений.
@@ -15,6 +17,7 @@ import android.util.Log
  */
 class GroupRouter(
     private val repository: GroupRepository,
+    private val contactReset: ContactResetCoordinator,
 ) {
 
     suspend fun routeIncoming(
@@ -23,6 +26,9 @@ class GroupRouter(
         messageId: String,
         text: String,
     ): Boolean {
+        if (ContactResetWire.isPacket(text)) {
+            return contactReset.receive(senderId, text)
+        }
         if (!GroupWire.isGroupPacket(text)) return false
 
         val packet = GroupWire.parse(text)

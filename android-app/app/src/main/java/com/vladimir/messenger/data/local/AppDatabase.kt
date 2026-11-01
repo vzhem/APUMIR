@@ -6,6 +6,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.vladimir.messenger.data.local.dao.ChatDao
 import com.vladimir.messenger.data.local.dao.ContactDao
+import com.vladimir.messenger.data.local.dao.ContactResetDao
 import com.vladimir.messenger.data.local.dao.DirectoryDao
 import com.vladimir.messenger.data.local.dao.AvatarDao
 import com.vladimir.messenger.data.local.dao.NicknameDao
@@ -23,6 +24,8 @@ import com.vladimir.messenger.data.local.dao.ProfileHeartDao
 import com.vladimir.messenger.data.local.dao.SavedItemDao
 import com.vladimir.messenger.data.local.entity.ChatEntity
 import com.vladimir.messenger.data.local.entity.ContactEntity
+import com.vladimir.messenger.data.local.entity.ContactResetCandidateEntity
+import com.vladimir.messenger.data.local.entity.ContactResetStateEntity
 import com.vladimir.messenger.data.local.entity.DirectoryEntity
 import com.vladimir.messenger.data.local.entity.NicknameEntity
 import com.vladimir.messenger.data.local.entity.NicknameSuppressionEntity
@@ -57,7 +60,7 @@ import com.vladimir.messenger.data.local.dao.GroupPollDao
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 38
+const val APP_DATABASE_VERSION = 39
 
 @Database(
     entities = [
@@ -67,6 +70,8 @@ const val APP_DATABASE_VERSION = 38
         MessageReactionEntity::class,
         MessageRepostEntity::class,
         ContactEntity::class,
+        ContactResetStateEntity::class,
+        ContactResetCandidateEntity::class,
         PeerRankEntity::class,
         FileTransferEntity::class,
         FileTransferChunkEntity::class,
@@ -99,6 +104,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun messageRepostDao(): MessageRepostDao
     abstract fun mtProtoProxyDao(): MtProtoProxyDao
     abstract fun contactDao(): ContactDao
+    abstract fun contactResetDao(): ContactResetDao
     abstract fun fileTransferDao(): FileTransferDao
     abstract fun fileExchangePeerDao(): FileExchangePeerDao
     abstract fun groupDao(): GroupDao
@@ -115,6 +121,50 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun groupPollDao(): GroupPollDao
 
     companion object {
+        /**
+         * One-time address-book reset (owner request 2026-11-01).
+         * Only the visible contact directory is cleared. Chats, messages,
+         * groups, nicknames and cryptographic keys stay untouched. Pre-reset
+         * rows become recovery candidates; a later signed hello may restore
+         * only a live, updated peer. Old mirror snapshots cannot resurrect them.
+         */
+        val MIGRATION_38_39 = object : Migration(38, 39) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `contact_reset_state` (" +
+                        "`id` INTEGER NOT NULL, `epoch` INTEGER NOT NULL, " +
+                        "`startedAtMs` INTEGER NOT NULL, `cacheClearedAtMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`id`))"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `contact_reset_candidates` (" +
+                        "`nodeId` TEXT NOT NULL, `displayName` TEXT NOT NULL, " +
+                        "`username` TEXT NOT NULL, `fingerprint` TEXT NOT NULL, " +
+                        "`restoredAtMs` INTEGER, `lastAttemptAtMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`nodeId`))"
+                )
+                db.execSQL(
+                    "INSERT OR IGNORE INTO `contact_reset_candidates` " +
+                        "(nodeId, displayName, username, fingerprint, restoredAtMs, lastAttemptAtMs) " +
+                        "SELECT id, displayName, username, fingerprint, NULL, 0 FROM contacts WHERE id LIKE 'pk_%'"
+                )
+                db.execSQL(
+                    "INSERT OR IGNORE INTO `contact_reset_candidates` " +
+                        "(nodeId, displayName, username, fingerprint, restoredAtMs, lastAttemptAtMs) " +
+                        "SELECT contactId, contactName, '', contactId, NULL, 0 FROM chats WHERE contactId LIKE 'pk_%'"
+                )
+                db.execSQL(
+                    "INSERT OR IGNORE INTO `contact_reset_candidates` " +
+                        "(nodeId, displayName, username, fingerprint, restoredAtMs, lastAttemptAtMs) " +
+                        "SELECT nodeId, '', '', nodeId, NULL, 0 FROM file_exchange_peers WHERE nodeId LIKE 'pk_%'"
+                )
+                db.execSQL("DELETE FROM contacts WHERE id LIKE 'pk_%'")
+                db.execSQL(
+                    "INSERT OR IGNORE INTO `contact_reset_state` (id, epoch, startedAtMs, cacheClearedAtMs) " +
+                        "VALUES (1, 1, CAST(strftime('%s','now') AS INTEGER) * 1000, 0)"
+                )
+            }
+        }
         /**
          * Реакции: до пяти разных значков от одного человека на сообщение.
          * Ключ таблицы расширяется значком; строки переносятся как есть.

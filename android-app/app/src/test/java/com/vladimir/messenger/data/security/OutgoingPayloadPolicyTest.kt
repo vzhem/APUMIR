@@ -1,5 +1,6 @@
 package com.vladimir.messenger.data.security
 
+import com.vladimir.messenger.data.contactreset.ContactResetWire
 import com.vladimir.messenger.data.file.FileTransferWire
 import com.vladimir.messenger.data.file.FileUdpWire
 import org.junit.Assert.assertEquals
@@ -33,15 +34,16 @@ class OutgoingPayloadPolicyTest {
     @Test
     fun `only valid public bootstrap and discovery bypass sealing`() {
         val hello = FileTransferWire.encodeHelloBinding(ByteArray(96) { 7 })
+        val reset = ContactResetWire.build(ContactResetWire.EPOCH, peer, "Телефон", ByteArray(64) { 1 }, ByteArray(96) { 2 })
         val udp = FileUdpWire.buildUdpSignal(
             FileUdpWire.KIND_UFSEEK, ByteArray(96) { 7 },
             listOf("192.0.2.1" to 4242), ByteArray(FileUdpWire.SESSION_TAG_BYTES) { 1 },
         )
-        for (signal in listOf(hello, "APULAN1|req", "APULAN1|offer|192.0.2.1|1234", udp)) {
+        for (signal in listOf(hello, reset, "APULAN1|req", "APULAN1|offer|192.0.2.1|1234", udp)) {
             assertTrue(OutgoingPayloadPolicy.isPublicControl(signal))
             assertEquals(signal, OutgoingPayloadPolicy.prepare(peer, signal) { error("must not seal bootstrap") })
         }
-        for (private in listOf("Привет", "apu-file1|encoded", "APUGRP1|post|body", "apu-file-hello1|!!!", "APULAN1|private", "APUUDP1|private")) {
+        for (private in listOf("Привет", "apu-file1|encoded", "APUGRP1|post|body", "APUGRP1|dir1|broken", "apu-file-hello1|!!!", "APULAN1|private", "APUUDP1|private")) {
             assertFalse(OutgoingPayloadPolicy.isPublicControl(private))
             assertNull(OutgoingPayloadPolicy.prepare(peer, private) { null })
         }

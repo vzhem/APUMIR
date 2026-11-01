@@ -1,5 +1,6 @@
 package com.vladimir.messenger.data.security
 
+import com.vladimir.messenger.data.contactreset.ContactResetWire
 import com.vladimir.messenger.data.file.FileTransferWire
 import com.vladimir.messenger.data.file.FileUdpWire
 import com.vladimir.messenger.data.call.CallWire
@@ -21,6 +22,7 @@ object OutgoingPayloadPolicy {
     }
 
     fun isPublicControl(text: String): Boolean = when {
+        ContactResetWire.isPacket(text) -> ContactResetWire.parse(text) != null
         FileTransferWire.isHelloText(text) ->
             runCatching { FileTransferWire.decodeHelloBinding(text) }.isSuccess
         isLanSignal(text) -> true

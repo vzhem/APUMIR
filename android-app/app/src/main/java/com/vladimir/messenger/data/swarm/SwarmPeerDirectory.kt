@@ -3,6 +3,7 @@ package com.vladimir.messenger.data.swarm
 import android.content.Context
 import android.util.Log
 import com.vladimir.messenger.data.local.dao.ContactDao
+import com.vladimir.messenger.data.local.dao.ContactResetDao
 import com.vladimir.messenger.data.local.dao.FileExchangePeerDao
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.NicknameDao
@@ -30,6 +31,7 @@ class SwarmPeerDirectory @Inject constructor(
     private val nicknameDao: NicknameDao,
     private val fileExchangePeerDao: FileExchangePeerDao,
     private val groupDao: GroupDao,
+    private val resetDao: ContactResetDao,
 ) {
     private val mutex = Mutex()
     private var cached: PeerKnowledge = PeerKnowledge.EMPTY
@@ -63,7 +65,8 @@ class SwarmPeerDirectory @Inject constructor(
      */
     suspend fun audienceIds(): List<String> {
         val k = knowledge()
-        return (k.contacts + k.verified + k.privileged)
+        val resetCandidates = resetDao.pendingIds()
+        return (k.contacts + k.verified + k.privileged + resetCandidates)
             .filter { it.isNotBlank() }
     }
 

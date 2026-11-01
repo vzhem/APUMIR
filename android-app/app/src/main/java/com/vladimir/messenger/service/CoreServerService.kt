@@ -2880,8 +2880,8 @@ class CoreServerService : Service() {
                         Log.i(TAG, "No chat with $senderId - auto-creating contact and chat")
                         try {
                             val autoName = NodeIds.autoName(senderId)
-                            val contactResult = contactRepository.addContact(autoName, senderId)
-                            if (contactResult.isFailure && contactResult.exceptionOrNull()?.message != "Contact already exists") {
+                            val contactResult = contactRepository.addContact(autoName, senderId, automatic = true)
+                            if (contactResult.isFailure && contactResult.exceptionOrNull()?.message != "Contact already exists" && contactResult.exceptionOrNull()?.message != ContactRepository.RESET_DEFERRED) {
                                 Log.e(TAG, "Auto-add contact failed: " + contactResult.exceptionOrNull()?.message)
                                 return
                             }
@@ -3112,7 +3112,7 @@ class CoreServerService : Service() {
                                 // addContact вернёт ошибку «уже есть», если
                                 // запись успели создать параллельно - это не
                                 // помеха переносу, поэтому результат не проверяем.
-                                contactRepository.addContact(peerName, peerId)
+                                if (contactRepository.addContact(peerName, peerId, automatic = true).exceptionOrNull()?.message == ContactRepository.RESET_DEFERRED) return@runCatching
                                 chatRepository.getOrCreateChat(peerId, peerName)
                                 for (old in twins) {
                                     chatRepository.absorbChatOf(old, peerId)

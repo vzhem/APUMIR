@@ -305,7 +305,10 @@ object GroupsModule {
 
     @Provides
     @Singleton
-    fun provideGroupRouter(repository: GroupRepository): GroupRouter = GroupRouter(repository)
+    fun provideGroupRouter(
+        repository: GroupRepository,
+        contactReset: com.vladimir.messenger.data.contactreset.ContactResetCoordinator,
+    ): GroupRouter = GroupRouter(repository, contactReset)
 
     /** Очередь заявок на вступление: отдельная папка в данных приложения. */
     @Provides
