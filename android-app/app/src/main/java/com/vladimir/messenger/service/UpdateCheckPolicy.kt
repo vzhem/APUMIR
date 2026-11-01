@@ -89,7 +89,7 @@ internal fun updateNotificationSkipReason(
     if (last.isBlank()) return null
     if (last == candidate) return "already_notified"
     if (!isComparableUpdateVersion(last)) return null
-    return if (isVersionNewer(last, candidate)) "stale_version" else null
+    return if (isVersionNewer(candidate, last)) "stale_version" else null
 }
 
 /** Numeric comparison: `v11.16` is newer than `v11.9`, regardless of string order. */
