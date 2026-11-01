@@ -3,7 +3,7 @@
   "threshold": 1200,
   "ceilings": {
     "android-app/app/src/main/java/com/vladimir/messenger/data/call/CallManager.kt": 1894,
-    "android-app/app/src/main/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReport.kt": 1561,
+    "android-app/app/src/main/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReport.kt": 1491,
     "android-app/app/src/main/java/com/vladimir/messenger/data/file/FileTransferReceiver.kt": 2452,
     "android-app/app/src/main/java/com/vladimir/messenger/data/file/FileTransferRouter.kt": 1889,
     "android-app/app/src/main/java/com/vladimir/messenger/data/group/GroupFileSwarm.kt": 1207,
@@ -11,7 +11,7 @@
     "android-app/app/src/main/java/com/vladimir/messenger/data/group/GroupWire.kt": 2595,
     "android-app/app/src/main/java/com/vladimir/messenger/data/mirror/MirrorSync.kt": 3810,
     "android-app/app/src/main/java/com/vladimir/messenger/data/repository/ChatRepository.kt": 1626,
-    "android-app/app/src/main/java/com/vladimir/messenger/data/update/ApkSeeder.kt": 1781,
+    "android-app/app/src/main/java/com/vladimir/messenger/data/update/ApkSeeder.kt": 1779,
     "android-app/app/src/main/java/com/vladimir/messenger/service/CoreServerService.kt": 3294,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/components/AnimatedTopicIcon.kt": 1564,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/components/ApuDiagnosticsUi.kt": 1241,
@@ -23,6 +23,6 @@
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupChatScreen.kt": 2973,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupChatViewModel.kt": 2053,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupsScreen.kt": 1531,
-    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsScreen.kt": 2857
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsScreen.kt": 2853
   }
 }

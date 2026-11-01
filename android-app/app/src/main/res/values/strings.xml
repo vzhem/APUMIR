@@ -1697,6 +1697,7 @@
     <string name="ready_subtitle_tpl">%1$s, %2$s; уже раздаётся соседям</string>
     <string name="receiving_tpl">Принимаю v%1$s</string>
     <string name="receiving_progress_tpl">%1$s из %2$s; кусками от %3$d сосед(ей)</string>
+    <string name="receiving_stalled_tpl">%1$s из %2$s; ход встал — снимаю зависшую передачу и прошу другой сид</string>
     <string name="update_transfer_space_blocked_tpl">%1$s из %2$s; освободите место на устройстве (сохраняется запас 512 МБ)</string>
     <string name="receiving_compact_tpl">Принимаю v%1$s (компактно)</string>
     <string name="receiving_patch_tpl">%1$s из %2$s — качаем только разницу версий</string>
@@ -2375,4 +2376,20 @@
     <string name="st_update_already_downloading">Обновление уже скачивается. Дождитесь окончания или остановите приём.</string>
     <string name="st_neighbor_offer_gone">Сосед больше не раздаёт эту версию. Нажмите «Проверить новую версию».</string>
     <string name="st_official_download_failed">Не удалось скачать обновление с официального сайта. Попробуйте ещё раз.</string>
+    <string name="st_official_download_cancelled">Загрузка с официального сайта остановлена.</string>
+    <string name="st_official_switching_from_neighbors">Останавливаю приём у соседей и начинаю загрузку с официального сайта.</string>
+    <string name="st_official_progress_title">Загрузка с сайта v%1$s</string>
+    <string name="st_official_progress_tpl">%1$s из %2$s · %3$d%%</string>
+    <string name="st_official_progress_unknown_tpl">Скачано %1$s; размер пока неизвестен</string>
+    <string name="st_official_paused">Загрузка приостановлена системой (сеть или ожидание). Можно отменить и запустить снова.</string>
+    <string name="st_official_cancel_download">Остановить загрузку с сайта</string>
+    <string name="st_official_retry_download">Повторить загрузку с сайта</string>
+
+    <!-- Системные уведомления об обновлении APU -->
+    <string name="update_notification_channel_name">Обновления APU</string>
+    <string name="update_notification_channel_description">Уведомления о новых версиях APU</string>
+    <string name="update_notification_title">Доступно обновление APU</string>
+    <string name="update_notification_official_text">Версия %1$s доступна. Нажмите, чтобы скачать и установить.</string>
+    <string name="update_notification_peer_text">Сосед раздаёт обновления %1$s. Нажмите, затем откройте Настройки → Обновления.</string>
+    <string name="update_notification_compact_text">Доступен компактный пакет обновления %1$s. Нажмите, затем откройте Настройки → Обновления.</string>
 </resources>

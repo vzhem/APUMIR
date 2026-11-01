@@ -6,10 +6,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -19,6 +22,8 @@ import com.vladimir.messenger.data.update.Offer
 import com.vladimir.messenger.data.update.PatchOfferUi
 import com.vladimir.messenger.ui.components.ApuSettingsDivider
 import com.vladimir.messenger.ui.components.ApuSettingsItem
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
 
 /**
  * Кнопки выбора источника обновления вынесены из [SettingsScreen] по шву
@@ -27,24 +32,39 @@ import com.vladimir.messenger.ui.components.ApuSettingsItem
  */
 @Composable
 internal fun OfficialUpdateDownloadItem(
-    checking: Boolean,
-    starting: Boolean,
-    active: Boolean,
-    blocked: Boolean,
+    viewModel: SettingsViewModel,
     version: String?,
-    onClick: () -> Unit,
 ) {
-    val busy = checking || starting || active || blocked
+    val checking by viewModel.updatesChecking.collectAsStateWithLifecycle()
+    val starting by viewModel.officialDownloadStarting.collectAsStateWithLifecycle()
+    val active by viewModel.officialDownloadActive.collectAsStateWithLifecycle()
+    val state by viewModel.officialDownloadState.collectAsStateWithLifecycle()
+
+    // Системное уведомление DownloadManager можно смахнуть. Пока раздел
+    // «Обновления» на экране и загрузка жива, карточка сама перечитывает ход.
+    // Вне экрана опроса нет; в простое телефон не будим.
+    LaunchedEffect(active, state?.downloadId) {
+        if (active) {
+            while (true) {
+                delay(2_000L)
+                viewModel.refreshOfficialDownload()
+            }
+        }
+    }
+
+    val busy = checking || starting || active
     val title = when {
         starting -> stringResource(R.string.st_official_starting)
         active -> stringResource(R.string.st_official_started)
         checking -> stringResource(R.string.st_official_checking)
+        state?.isFailed == true -> stringResource(R.string.st_official_retry_download)
         version != null -> stringResource(R.string.st_official_download_version, version.removePrefix("v"))
         else -> stringResource(R.string.st_official_download)
     }
     val subtitle = when {
-        starting || active -> stringResource(R.string.st_download_no_second_tap)
-        blocked -> stringResource(R.string.st_update_already_downloading)
+        starting -> stringResource(R.string.st_download_request_accepted)
+        active -> stringResource(R.string.st_download_no_second_tap)
+        state?.isFailed == true -> stringResource(R.string.st_official_download_failed)
         else -> stringResource(R.string.st_official_check_download_hint)
     }
     val progress: (@Composable () -> Unit)? = if (busy) {
@@ -56,9 +76,44 @@ internal fun OfficialUpdateDownloadItem(
         icon = Icons.Default.CloudDownload,
         title = title,
         subtitle = subtitle,
-        onClick = if (busy) null else onClick,
+        onClick = if (busy) null else viewModel::onDownloadOfficialRelease,
         trailingContent = progress,
     )
+
+    val visible = state?.takeIf { !it.isSuccessful }
+    if (visible != null) {
+        ApuSettingsDivider()
+        val detail = when {
+            visible.isFailed -> stringResource(R.string.st_official_download_failed)
+            visible.status == "paused" -> stringResource(R.string.st_official_paused)
+            visible.totalBytes > 0L -> stringResource(
+                R.string.st_official_progress_tpl,
+                StoragePolicy.format(visible.downloadedBytes),
+                StoragePolicy.format(visible.totalBytes),
+                visible.percent,
+            )
+            else -> stringResource(R.string.st_official_progress_unknown_tpl, StoragePolicy.format(visible.downloadedBytes))
+        }
+        ApuSettingsItem(
+            icon = Icons.Default.Download,
+            title = stringResource(R.string.st_official_progress_title, visible.version.removePrefix("v")),
+            subtitle = detail,
+        )
+        if (visible.isActive) {
+            ApuSettingsItem(
+                icon = Icons.Default.Close,
+                title = stringResource(R.string.st_official_cancel_download),
+                onClick = viewModel::onCancelOfficialDownload,
+            )
+        }
+        if (visible.isFailed) {
+            ApuSettingsItem(
+                icon = Icons.Default.Refresh,
+                title = stringResource(R.string.st_official_retry_download),
+                onClick = viewModel::onDownloadOfficialRelease,
+            )
+        }
+    }
 }
 
 @Composable

@@ -80,6 +80,7 @@
 | [`SWARM_HELPER_ROADMAP.md`](SWARM_HELPER_ROADMAP.md) | Телефоны-помощники |
 | [`SWARM_MOBILE.md`](SWARM_MOBILE.md) | Рой через мобильную связь |
 | [`UPDATE_SEEDING.md`](UPDATE_SEEDING.md) | Раздача обновления роем |
+| [`UPDATE_NOTIFICATIONS.md`](UPDATE_NOTIFICATIONS.md) | Системные уведомления об обновлении и диагностика запуска |
 | [`VERSION_STATISTICS.md`](VERSION_STATISTICS.md) | Статистика версий у пользователей |
 | [`VIDEO_STORIES_PLAN.md`](VIDEO_STORIES_PLAN.md) | Видеоистории |
 | [`WALLPAPER_ICONS.md`](WALLPAPER_ICONS.md) | Значки фирменных обоев |

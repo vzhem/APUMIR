@@ -1606,6 +1606,7 @@
     <string name="ready_subtitle_tpl">%1$s, %2$s; already shared with nearby devices</string>
     <string name="receiving_tpl">Receiving v%1$s</string>
     <string name="receiving_progress_tpl">%1$s of %2$s; in pieces from %3$d peers</string>
+    <string name="receiving_stalled_tpl">%1$s of %2$s; stalled — dropping the stuck transfer and asking another seed</string>
     <string name="update_transfer_space_blocked_tpl">%1$s of %2$s; free device storage (a 512 MB reserve is kept)</string>
     <string name="receiving_compact_tpl">Receiving v%1$s (compact)</string>
     <string name="receiving_patch_tpl">%1$s of %2$s — downloading only the version difference</string>
@@ -2359,4 +2360,20 @@ The file is not on this phone</string>
     <string name="st_update_already_downloading">An update is already downloading. Wait for it to finish or stop the transfer.</string>
     <string name="st_neighbor_offer_gone">The neighbor is no longer sharing this version. Tap “Check for a new version”.</string>
     <string name="st_official_download_failed">Could not download the update from the official site. Please try again.</string>
+    <string name="st_official_download_cancelled">The official-site download was stopped.</string>
+    <string name="st_official_switching_from_neighbors">Stopping the neighbor receive and starting the official-site download.</string>
+    <string name="st_official_progress_title">Downloading from the site v%1$s</string>
+    <string name="st_official_progress_tpl">%1$s of %2$s · %3$d%%</string>
+    <string name="st_official_progress_unknown_tpl">%1$s downloaded; total size is not known yet</string>
+    <string name="st_official_paused">The system paused the download (network or waiting). You can cancel it and start again.</string>
+    <string name="st_official_cancel_download">Stop the site download</string>
+    <string name="st_official_retry_download">Retry the site download</string>
+
+    <!-- APU update notifications -->
+    <string name="update_notification_channel_name">APU updates</string>
+    <string name="update_notification_channel_description">Notifications about new APU versions</string>
+    <string name="update_notification_title">APU update available</string>
+    <string name="update_notification_official_text">Version %1$s is available. Tap to download and install.</string>
+    <string name="update_notification_peer_text">A neighbor is sharing update %1$s. Tap, then open Settings → Updates.</string>
+    <string name="update_notification_compact_text">A compact update package for %1$s is available. Tap, then open Settings → Updates.</string>
 </resources>

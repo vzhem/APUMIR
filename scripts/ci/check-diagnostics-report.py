@@ -113,7 +113,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn("DiagnosticsPrivacy.redact", collector)
 
     def test_report_has_every_section_the_owner_reads(self):
-        report = source(DIAG / "DiagnosticsReport.kt")
+        report = source(DIAG / "DiagnosticsReport.kt") + source(DIAG / "UpdateDiagnosticsReport.kt")
         for section in (
             "[сводка]",
             "[окружение]",
@@ -938,7 +938,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
                             self.assertNotIn(forbidden, span, f"{relative}: {method} с {forbidden}")
 
     def test_update_check_fallback_and_notification_state_are_reported_safely(self):
-        report = source(DIAG / "DiagnosticsReport.kt")
+        report = source(DIAG / "DiagnosticsReport.kt") + source(DIAG / "UpdateDiagnosticsReport.kt")
         collector = source(DIAG / "TransferDiagnostics.kt")
         store = source(MAIN / "service/UpdateDiagnosticsStore.kt")
         checker = source(MAIN / "service/UpdateChecker.kt")
@@ -961,6 +961,18 @@ class DiagnosticsContractsTest(unittest.TestCase):
         self.assertIn("UpdateDiagnosticsStore.recordNotification", notifier)
         self.assertIn("permission_blocked", notifier)
         self.assertIn("channel_blocked", notifier)
+        self.assertIn("updateNotificationSkipReason", notifier)
+        self.assertIn("normalizeUpdateVersion", notifier)
+        self.assertIn("notifyPendingOfficialRelease", notifier)
+        main = source(MAIN / "MainActivity.kt")
+        self.assertIn("CoreStatus.ready.first { it }", main)
+        self.assertIn("recordStartupWait", main)
+        self.assertIn("retryUpdateNotificationAfterPermission", main)
+        self.assertIn("notifyOfficialRelease(release)", main)
+        update_report = source(DIAG / "UpdateDiagnosticsReport.kt")
+        for field in ("startup_core_ready=", "startup_wait_ms=", "pending_official_version="):
+            with self.subTest(field=field):
+                self.assertIn(field, update_report)
         # Only safe tokens/statuses are persisted; release URLs, notes, and body text stay out.
         for forbidden in ("downloadUrl", "releaseNotes", "httpGet(", "RELAY_BASE"):
             with self.subTest(forbidden=forbidden):

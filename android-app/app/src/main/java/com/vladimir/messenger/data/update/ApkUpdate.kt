@@ -38,6 +38,18 @@ object ApkUpdate {
     fun isDownloadStalled(lastProgressAtMs: Long, nowMs: Long): Boolean =
         nowMs >= lastProgressAtMs && nowMs - lastProgressAtMs >= STALLED_DOWNLOAD_REASK_MS
 
+    /**
+     * Зависшую входящую строку можно снять и попросить другой сид. Завершённые
+     * не трогаем; ожидание места — не зависание, а отдельное состояние карточки.
+     */
+    fun shouldDropStalledIncoming(
+        state: String,
+        waitingForDeviceSpace: Boolean,
+        updatedAtMs: Long,
+        nowMs: Long,
+    ): Boolean = state !in setOf("COMPLETE", "FAILED", "CANCELLED", "EXPIRED") &&
+        !waitingForDeviceSpace && isDownloadStalled(updatedAtMs, nowMs)
+
     data class SeedSelection(val nodeId: String, val resetTried: Boolean)
 
     /**

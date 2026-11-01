@@ -29,7 +29,9 @@ import com.vladimir.messenger.data.call.CallIncoming
 import com.vladimir.messenger.data.call.CallManager
 import com.vladimir.messenger.data.call.CallStateMachine
 import com.vladimir.messenger.service.CoreServerService
+import com.vladimir.messenger.service.CoreStatus
 import com.vladimir.messenger.service.UpdateChecker
+import com.vladimir.messenger.service.UpdateDiagnosticsStore
 import com.vladimir.messenger.ui.navigation.NavCallEntryPoint
 import com.vladimir.messenger.service.UpdateNotifier
 import com.vladimir.messenger.ui.components.ApuSettingsDialog
@@ -52,7 +54,10 @@ import dagger.hilt.android.EntryPointAccessors
 import com.vladimir.messenger.data.repository.ContactRepository
 import com.vladimir.messenger.service.BotApi
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
@@ -119,6 +124,7 @@ class MainActivity : ComponentActivity() {
     ) { isGranted: Boolean ->
         if (isGranted) {
             Log.i("MainActivity", "Notification permission granted")
+            retryUpdateNotificationAfterPermission()
         } else {
             Log.w("MainActivity", "Notification permission denied")
         }
@@ -161,6 +167,12 @@ class MainActivity : ComponentActivity() {
     /** Интервал повторных проверок обновления при возврате в приложение. */
     private val resumeUpdateCheckIntervalMs = 5L * 60 * 1000
 
+    /** Стартовая проверка ждёт готовности ядра, а не стреляет в ещё пустой мост. */
+    private var startupUpdateJob: Job? = null
+
+    /** Один сетевой запрос обновления за раз: разрешение/возврат не плодят дубли. */
+    private var updateCheckJob: Job? = null
+
     private var lastHandledInviteUri: String? = null
     private val viewModel: MainViewModel by viewModels()
 
@@ -187,10 +199,53 @@ class MainActivity : ComponentActivity() {
      * 60 запросов/час), закрытая «Позже» версия в этой сессии не надоедает.
      */
     private fun maybeCheckForUpdates() {
+        if (startupUpdateJob?.isActive == true || updateCheckJob?.isActive == true) return
         val now = System.currentTimeMillis()
         if (now - lastUpdateCheckAtMs < resumeUpdateCheckIntervalMs) return
         lastUpdateCheckAtMs = now
         checkForUpdates()
+    }
+
+    /**
+     * Холодный старт: ядро поднимается асинхронно. Прежний немедленный
+     * авто-запрос видел `RustBridge.isRunning() == false` и молча откладывался,
+     * а пятиминутный тормоз не давал повторить проверку при возврате.
+     * Теперь ждём сигнал готовности (ограниченно, без опроса в цикле).
+     */
+    private fun startUpdateCheckAfterCoreReady(trigger: String = "startup") {
+        if (startupUpdateJob?.isActive == true || updateCheckJob?.isActive == true) return
+        startupUpdateJob = lifecycleScope.launch {
+            val startedAt = android.os.SystemClock.elapsedRealtime()
+            val ready = withTimeoutOrNull(STARTUP_CORE_WAIT_MS) {
+                CoreStatus.ready.first { it }
+            } != null
+            val waitedMs = android.os.SystemClock.elapsedRealtime() - startedAt
+            UpdateDiagnosticsStore.recordStartupWait(applicationContext, ready, waitedMs)
+            if (!ready) {
+                Log.i("MainActivity", "Startup update check deferred: core is not ready yet")
+                return@launch
+            }
+            lastUpdateCheckAtMs = System.currentTimeMillis()
+            updateCheckJob = coroutineContext[Job]
+            performUpdateCheck(manual = false, trigger = trigger)
+        }
+    }
+
+    /** Разрешение выдали после первой проверки: сохранённая карточка не теряется. */
+    private fun retryUpdateNotificationAfterPermission() {
+        val entryPoint = EntryPointAccessors.fromApplication(
+            applicationContext,
+            MainActivityEntryPoint::class.java,
+        )
+        val currentVersion = runCatching {
+            packageManager.getPackageInfo(packageName, 0).versionName.orEmpty()
+        }.getOrDefault("")
+        val pending = entryPoint.updateNotifier().notifyPendingOfficialRelease(currentVersion)
+        if (pending != null) {
+            if (pending.version != dismissedUpdateVersion) updateRelease = pending
+            return
+        }
+        startUpdateCheckAfterCoreReady(trigger = "permission")
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -500,7 +555,7 @@ class MainActivity : ComponentActivity() {
         } else {
             Log.i("MainActivity", "core start deferred until local identity exists")
         }
-        checkForUpdates()
+        startUpdateCheckAfterCoreReady()
         // Раунд 251: убираем из «Скачанных» наш мусор `.trashed-*APU*` -
         // остатки старых APK обновлений, которые DownloadManager не стирает,
         // а переименовывает. В фоне, на загрузку экрана не влияет.
@@ -729,38 +784,48 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun checkForUpdates(manual: Boolean = false) {
+    private fun checkForUpdates(manual: Boolean = false, trigger: String = if (manual) "manual" else "foreground") {
+        if (startupUpdateJob?.isActive == true || updateCheckJob?.isActive == true) return
         lastUpdateCheckAtMs = System.currentTimeMillis()
-        lifecycleScope.launch {
-            try {
-                val entryPoint = EntryPointAccessors.fromApplication(
-                    applicationContext,
-                    MainActivityEntryPoint::class.java
-                )
-                val updateChecker = entryPoint.updateChecker()
-                val appVersion = try {
-                        packageManager.getPackageInfo(packageName, 0).versionName ?: "v0.0.0"
-                    } catch (_: Exception) {
-                        // Имя версии нужно только для проверки обновлений:
-                        // без него запрос уйдёт с "v0.0.0" и всё равно сработает.
-                        "v0.0.0"
-                    }
-                    val release = updateChecker.checkForUpdate(appVersion, manual = manual)
-                if (release != null) {
-                    if (release.version == dismissedUpdateVersion) {
-                        // Эту версию уже отложили «Позже» в этой сессии —
-                        // не показываем окно снова; более новую покажем.
-                        Log.d("MainActivity", "Update ${release.version} dismissed earlier this session")
-                        return@launch
-                    }
-                    Log.i("MainActivity", "New version available: ${release.version}")
-                    updateRelease = release
-                } else {
-                    Log.d("MainActivity", "App is up to date (or check skipped: no network/limit)")
-                }
-            } catch (e: Exception) {
-                Log.w("MainActivity", "Update check failed: ${e.message}")
+        updateCheckJob = lifecycleScope.launch {
+            performUpdateCheck(manual = manual, trigger = trigger)
+        }
+    }
+
+    private suspend fun performUpdateCheck(manual: Boolean, trigger: String) {
+        try {
+            val entryPoint = EntryPointAccessors.fromApplication(
+                applicationContext,
+                MainActivityEntryPoint::class.java,
+            )
+            val updateChecker = entryPoint.updateChecker()
+            val appVersion = try {
+                packageManager.getPackageInfo(packageName, 0).versionName ?: "v0.0.0"
+            } catch (_: Exception) {
+                // Имя версии нужно только для проверки обновлений:
+                // без него запрос уйдёт с "v0.0.0" и всё равно сработает.
+                "v0.0.0"
             }
+            val release = updateChecker.checkForUpdate(appVersion, manual = manual, trigger = trigger)
+            if (release != null) {
+                if (release.version == dismissedUpdateVersion) {
+                    // Эту версию уже отложили «Позже» в этой сессии —
+                    // не показываем окно снова; более новую покажем.
+                    Log.d("MainActivity", "Update ${release.version} dismissed earlier this session")
+                    return
+                }
+                // Экранная карточка и системное уведомление — один релиз.
+                // Notifier сам отсекает дубли и не «съедает» версию при запрете.
+                entryPoint.updateNotifier().notifyOfficialRelease(release)
+                Log.i("MainActivity", "New version available: ${release.version}")
+                updateRelease = release
+            } else {
+                Log.d("MainActivity", "App is up to date (or check skipped: no network/limit)")
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w("MainActivity", "Update check failed: ${e.message}")
         }
     }
 
@@ -841,5 +906,8 @@ class MainActivity : ComponentActivity() {
     private companion object {
         /** Тег журнала передачи ранга: ищем по нему при разборе на телефоне. */
         const val TAG_RANK = "PeerRank"
+
+        /** Сколько ждём готовности ядра на холодном старте, без вечного ожидания. */
+        const val STARTUP_CORE_WAIT_MS = 60_000L
     }
 }

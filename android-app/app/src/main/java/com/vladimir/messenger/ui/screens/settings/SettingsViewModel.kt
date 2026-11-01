@@ -189,6 +189,13 @@ class SettingsViewModel @Inject constructor(
     val officialDownloadActive: kotlinx.coroutines.flow.StateFlow<Boolean>
         get() = _officialDownloadActive.asStateFlow()
 
+    /** Ход официальной загрузки: системное уведомление можно смахнуть, карточка остаётся. */
+    private val _officialDownloadState =
+        MutableStateFlow<com.vladimir.messenger.service.UpdateChecker.OfficialDownloadState?>(null)
+    val officialDownloadState:
+        kotlinx.coroutines.flow.StateFlow<com.vladimir.messenger.service.UpdateChecker.OfficialDownloadState?>
+        get() = _officialDownloadState.asStateFlow()
+
     /** Кнопка скачивания у соседей нажата: просьба уже принята, первые куски ещё могут идти. */
     private val _neighborDownloadStarting = MutableStateFlow(false)
     val neighborDownloadStarting: kotlinx.coroutines.flow.StateFlow<Boolean>
@@ -201,10 +208,42 @@ class SettingsViewModel @Inject constructor(
     private val officialTapGate = UpdateDownloadTapGate()
     private val neighborTapGate = UpdateDownloadTapGate()
 
-    private fun updateDownloadBusy(): Boolean =
-        _officialDownloadStarting.value || _officialDownloadActive.value ||
-            _neighborDownloadStarting.value || apkSeeder.pendingRequest.value != null ||
+    private fun officialDownloadBusy(): Boolean =
+        _officialDownloadStarting.value || _officialDownloadActive.value
+
+    private fun neighborDownloadBusy(): Boolean =
+        _neighborDownloadStarting.value || apkSeeder.pendingRequest.value != null ||
             apkSeeder.download.value != null || apkSeeder.patchDownload.value != null
+
+    private fun updateDownloadBusy(): Boolean = officialDownloadBusy() || neighborDownloadBusy()
+
+    /** Перечитать DownloadManager: прогресс/пауза/отказ видны и без системной шторки. */
+    fun refreshOfficialDownload() {
+        viewModelScope.launch {
+            val state = withContext(Dispatchers.IO) { updateChecker.officialDownloadState() }
+            _officialDownloadState.value = state
+            _officialDownloadActive.value = state?.isActive == true
+            if (state == null || state.isSuccessful) apkSeeder.pickupDownloadedApks()
+        }
+    }
+
+    fun onCancelOfficialDownload() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { updateChecker.cancelOfficialDownload() }
+            refreshOfficialDownload()
+            toastIf(context.getString(R.string.st_official_download_cancelled))
+        }
+    }
+
+    private suspend fun stopNeighborDownloadForOfficial() {
+        if (!neighborDownloadBusy()) return
+        toastIf(context.getString(R.string.st_official_switching_from_neighbors))
+        withContext(Dispatchers.IO) {
+            apkSeeder.cancelDownload()
+            apkSeeder.cancelPatchDownload()
+        }
+        _neighborDownloadStarting.value = false
+    }
 
     // ── Рой APK (docs/UPDATE_SEEDING.md): карточка «Обновления» ─────────────
 
@@ -258,10 +297,7 @@ class SettingsViewModel @Inject constructor(
     fun onUpdatesAppeared() {
         apkSeeder.refreshReceivedApks()
         apkSeeder.pickupDownloadedApks()
-        viewModelScope.launch {
-            val active = withContext(Dispatchers.IO) { updateChecker.hasActiveUpdateDownload() }
-            _officialDownloadActive.value = active
-        }
+        refreshOfficialDownload()
     }
 
     /**
@@ -487,7 +523,7 @@ class SettingsViewModel @Inject constructor(
      */
     fun onDownloadOfficialRelease() {
         if (!officialTapGate.tryAcquire()) return
-        if (updateDownloadBusy()) {
+        if (officialDownloadBusy()) {
             officialTapGate.release()
             toastIf(context.getString(R.string.upd_download_already_running))
             return
@@ -511,15 +547,11 @@ class SettingsViewModel @Inject constructor(
                     return@launch
                 }
                 // Пока шла проверка, человек мог запустить приём у соседей.
-                if (_neighborDownloadStarting.value || apkSeeder.pendingRequest.value != null ||
-                    apkSeeder.download.value != null || apkSeeder.patchDownload.value != null
-                ) {
-                    toastIf(context.getString(R.string.upd_download_already_running))
-                    return@launch
-                }
+                // Явный выбор сайта останавливает рой, а не запирает кнопку.
+                stopNeighborDownloadForOfficial()
                 val id = withContext(Dispatchers.IO) { updateChecker.downloadApk(release, preferOfficial = true) }
                 if (id >= 0L) {
-                    _officialDownloadActive.value = true
+                    refreshOfficialDownload()
                     toastIf(context.getString(R.string.st_download_started))
                 } else {
                     // Компактный патч уже собран, установщик открыт.
@@ -531,7 +563,7 @@ class SettingsViewModel @Inject constructor(
             } catch (e: Exception) {
                 Log.w("SettingsVM", "official update download failed", e)
                 if (e is com.vladimir.messenger.service.UpdateChecker.UpdateDownloadBlockedException && e.inFlight) {
-                    _officialDownloadActive.value = true
+                    refreshOfficialDownload()
                 }
                 toastIf(com.vladimir.messenger.ui.update.UpdateDownloadMessages.forError(context, e))
             } finally {
@@ -545,15 +577,12 @@ class SettingsViewModel @Inject constructor(
     private val officialDownloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(receiverContext: Context, intent: Intent) {
             if (intent.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
-            val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
             viewModelScope.launch {
-                val active = withContext(Dispatchers.IO) { updateChecker.hasActiveUpdateDownload() }
-                _officialDownloadActive.value = active
-                if (!active) {
-                    val failed = withContext(Dispatchers.IO) { updateChecker.downloadFailed(id) }
-                    if (failed) toastIf(context.getString(R.string.st_official_download_failed))
-                    apkSeeder.pickupDownloadedApks()
-                }
+                val state = withContext(Dispatchers.IO) { updateChecker.officialDownloadState() }
+                _officialDownloadState.value = state
+                _officialDownloadActive.value = state?.isActive == true
+                if (state?.isFailed == true) toastIf(context.getString(R.string.st_official_download_failed))
+                if (state == null || state.isSuccessful) apkSeeder.pickupDownloadedApks()
             }
         }
     }

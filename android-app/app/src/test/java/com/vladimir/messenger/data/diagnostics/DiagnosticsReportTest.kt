@@ -750,6 +750,9 @@ class DiagnosticsReportTest {
                     notificationsAllowed = true,
                     notificationChannelEnabled = true,
                     notificationChannelImportance = 3,
+                    startupCoreReady = true,
+                    startupWaitMs = 321L,
+                    pendingOfficialVersion = "v11.74.341",
                 ),
             ),
             journal = emptyList(),
@@ -770,6 +773,9 @@ class DiagnosticsReportTest {
         assertTrue(report.contains("notifications_allowed=true"))
         assertTrue(report.contains("update_channel_enabled=true"))
         assertTrue(report.contains("update_channel_importance=3"))
+        assertTrue(report.contains("startup_core_ready=true"))
+        assertTrue(report.contains("startup_wait_ms=321"))
+        assertTrue(report.contains("pending_official_version=v11.74.341"))
         assertFalse(report.contains("https://"))
         assertFalse(report.contains("downloadUrl"))
         assertFalse(report.contains("releaseNotes"))

@@ -2534,12 +2534,8 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
 
     SettingsCard {
         OfficialUpdateDownloadItem(
-            checking = checking,
-            starting = officialStarting,
-            active = officialActive,
-            blocked = neighborStarting || pendingRequest != null || download != null || patchDownload != null,
+            viewModel = viewModel,
             version = official?.version,
-            onClick = viewModel::onDownloadOfficialRelease,
         )
         ApuSettingsDivider()
 
@@ -2582,7 +2578,7 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
                     )
                 } else {
                     stringResource(
-                        R.string.receiving_progress_tpl,
+                        if (d.stalled) R.string.receiving_stalled_tpl else R.string.receiving_progress_tpl,
                         StoragePolicy.format(d.receivedBytes),
                         StoragePolicy.format(d.totalBytes),
                         offers.size.coerceAtLeast(1),

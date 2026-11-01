@@ -62,6 +62,36 @@ internal fun manualExternalWindowUntil(nowMs: Long, currentUntilMs: Long, window
 internal fun externalReleaseAllowed(transportAllowed: Boolean, manualWindowActive: Boolean): Boolean =
     transportAllowed || manualWindowActive
 
+/** Единая форма версии для защиты от повторного уведомления: `v` и хвосты не создают дубль. */
+internal fun normalizeUpdateVersion(version: String): String =
+    version.trim().removePrefix("v").removePrefix("V").substringBefore('-').substringBefore('+')
+
+private fun isComparableUpdateVersion(version: String): Boolean =
+    version.isNotBlank() && version.split('.').all { it.toIntOrNull() != null }
+
+/**
+ * Почему уведомление о версии можно пропустить. `null` — показываем.
+ *
+ * Правило чистое и проверяется JVM-тестами: не уведомляем о не более новой
+ * версии, не дублируем уже показанную (даже если пришёл другой вариант написания `v`/суффикс)
+ * и не откатываемся на старую версию после более новой. Заблокированное
+ * разрешение/канал сюда не попадает: такая попытка не должна «съедать» версию.
+ */
+internal fun updateNotificationSkipReason(
+    currentVersion: String,
+    candidateVersion: String,
+    lastNotifiedVersion: String,
+): String? {
+    val candidate = normalizeUpdateVersion(candidateVersion)
+    if (candidate.isBlank() || !isComparableUpdateVersion(candidate)) return "invalid_version"
+    if (currentVersion.isNotBlank() && !isVersionNewer(currentVersion, candidateVersion)) return "not_newer"
+    val last = normalizeUpdateVersion(lastNotifiedVersion)
+    if (last.isBlank()) return null
+    if (last == candidate) return "already_notified"
+    if (!isComparableUpdateVersion(last)) return null
+    return if (isVersionNewer(candidate, last)) "stale_version" else null
+}
+
 /** Numeric comparison: `v11.16` is newer than `v11.9`, regardless of string order. */
 internal fun isVersionNewer(current: String, latest: String): Boolean {
     fun parse(value: String): List<Int>? {
