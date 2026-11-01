@@ -43,7 +43,7 @@ class OfficialUpdateButton(unittest.TestCase):
         self.assertIn('fun officialDownloadState(): OfficialDownloadState?', checker)
         self.assertIn('fun cancelOfficialDownload(): Boolean', checker)
         self.assertIn('COLUMN_BYTES_DOWNLOADED_SO_FAR', checker)
-        self.assertIn('COLUMN_TOTAL_BYTES', checker)
+        self.assertIn('COLUMN_TOTAL_SIZE_BYTES', checker)
         self.assertIn('STATUS_PAUSED', checker)
         self.assertIn('STATUS_FAILED', checker)
         item = (MAIN / 'ui/screens/settings/ApkUpdateDownloadItems.kt').read_text()
