@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import com.vladimir.messenger.R
 import com.vladimir.messenger.data.swarm.StoragePolicy
 import com.vladimir.messenger.data.update.Offer
+import com.vladimir.messenger.data.update.PatchOfferUi
 import com.vladimir.messenger.ui.components.ApuSettingsDivider
 import com.vladimir.messenger.ui.components.ApuSettingsItem
 
@@ -124,4 +125,24 @@ internal fun NeighborUpdateDownloadItem(
             onClick = onCancelPending,
         )
     }
+}
+
+@Composable
+internal fun PatchUpdateDownloadItem(
+    offers: List<PatchOfferUi>,
+    blocked: Boolean,
+    onDownload: (String) -> Unit,
+) {
+    val best = offers.firstOrNull() ?: return
+    if (blocked) return
+    ApuSettingsItem(
+        icon = Icons.Default.Download,
+        title = stringResource(R.string.st_dl_patch_title, best.toVersion),
+        subtitle = stringResource(
+            R.string.patch_offer_tpl,
+            StoragePolicy.format(best.sizeBytes),
+            offers.size.coerceAtLeast(1),
+        ),
+        onClick = { onDownload(best.nodeId) },
+    )
 }

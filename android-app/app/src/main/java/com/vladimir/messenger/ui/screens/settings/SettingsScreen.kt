@@ -2622,19 +2622,13 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
                 onClick = viewModel::onCancelPatchDownload,
             )
         }
-        // Раунд 133: сосед раздаёт ПАТЧ для ровно нашей версии — качаем
-        // разницу, а не весь APK. Соберём файл на месте и сверим sha256.
-        val patchBest = patchOffers.firstOrNull()
-        if (patchBest != null && download == null && patchDownload == null && ready == null &&
-            !officialStarting && !officialActive && !neighborStarting && pendingRequest == null
-        ) {
-            SettingsItem(
-                icon    = Icons.Default.Download,
-                title   = stringResource(R.string.st_dl_patch_title, patchBest.toVersion),
-                subtitle = stringResource(R.string.patch_offer_tpl, StoragePolicy.format(patchBest.sizeBytes), patchOffers.size.coerceAtLeast(1)),
-                onClick = { viewModel.onDownloadPatchFrom(patchBest.nodeId) },
-            )
-        }
+        // Раунд 133: компактный патч от соседа; во время любой загрузки скрыт.
+        PatchUpdateDownloadItem(
+            offers = patchOffers,
+            blocked = download != null || patchDownload != null || ready != null ||
+                officialStarting || officialActive || neighborStarting || pendingRequest != null,
+            onDownload = viewModel::onDownloadPatchFrom,
+        )
         // Выбор источника: сосед или официальный сайт. Состояние одного тапа
         // живёт в ApkUpdateDownloadItems: нажатие сразу видно, повтор закрыт.
         NeighborUpdateDownloadItem(
