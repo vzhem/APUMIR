@@ -38,6 +38,7 @@ class AddressBookBackup @Inject constructor(
     @ApplicationContext private val context: Context,
     private val botApi: BotApi,
     private val swarm: AddressBookSwarmBackup,
+    private val contactReset: com.vladimir.messenger.data.contactreset.ContactResetCoordinator,
 ) {
     companion object {
         /** Потолок для чтения файла азбуки целиком (см. docs/AUDIT_2026-10-26.md, п. 4.5). */
@@ -157,7 +158,10 @@ class AddressBookBackup @Inject constructor(
      * asks actual neighbours and only falls back after the direct-search window.
      * Its merged hints enter the running engine through importAddressBookJson.
      */
-    suspend fun restoreBeforeStart(): String = ""
+    suspend fun restoreBeforeStart(): String {
+        contactReset.prepareNetworkCaches()
+        return ""
+    }
 
     /**
      * Ручное восстановление из настроек: ТОЛЬКО по явному нажатию —
@@ -200,8 +204,9 @@ class AddressBookBackup @Inject constructor(
      * @return сколько адресов добавлено.
      */
     private suspend fun mergeIntoLocalBook(parsed: JSONObject): Int = withContext(Dispatchers.IO) {
+        val filtered = contactReset.filterAddressBook(parsed)
         if (RustBridge.isRunning()) {
-            val added = RustBridge.importAddressBookJson(parsed.toString())
+            val added = RustBridge.importAddressBookJson(filtered.toString())
             if (added < 0) {
                 Log.w(TAG, "running core rejected address book; refusing to overwrite its live file")
                 return@withContext 0
@@ -215,17 +220,17 @@ class AddressBookBackup @Inject constructor(
         } else {
             null
         }
-        val incoming = parsed.optJSONArray("entries")
+        val incoming = filtered.optJSONArray("entries")
         if (incoming == null || incoming.length() == 0) return@withContext 0
         if (local == null) {
             // Своей азбуки ещё нет - копия и становится той самой единственной.
-            writeBook(parsed)
+            writeBook(filtered)
             return@withContext incoming.length()
         }
         val localEntries = local.optJSONArray("entries")
         if (localEntries == null) {
             // Битая локальная азбука - заменяем целиком присланной.
-            writeBook(parsed)
+            writeBook(filtered)
             return@withContext incoming.length()
         }
         val known = HashSet<String>()
