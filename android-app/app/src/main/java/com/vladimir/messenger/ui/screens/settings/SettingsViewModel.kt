@@ -23,6 +23,12 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.widget.Toast
+import android.content.BroadcastReceiver
+import android.content.Intent
+import android.content.IntentFilter
+import android.app.DownloadManager
+import android.os.Build
+import com.vladimir.messenger.ui.update.UpdateDownloadTapGate
 
 data class SettingsUiState(
     val displayName: String = "Anonymous",
@@ -173,6 +179,33 @@ class SettingsViewModel @Inject constructor(
     val officialRelease: kotlinx.coroutines.flow.StateFlow<com.vladimir.messenger.service.UpdateChecker.ReleaseInfo?>
         get() = _officialRelease.asStateFlow()
 
+    /** Кнопка официального скачивания нажата: запрос уже принят, идёт проверка/постановка. */
+    private val _officialDownloadStarting = MutableStateFlow(false)
+    val officialDownloadStarting: kotlinx.coroutines.flow.StateFlow<Boolean>
+        get() = _officialDownloadStarting.asStateFlow()
+
+    /** Официальная загрузка стоит в DownloadManager и ещё не завершена. */
+    private val _officialDownloadActive = MutableStateFlow(false)
+    val officialDownloadActive: kotlinx.coroutines.flow.StateFlow<Boolean>
+        get() = _officialDownloadActive.asStateFlow()
+
+    /** Кнопка скачивания у соседей нажата: просьба уже принята, первые куски ещё могут идти. */
+    private val _neighborDownloadStarting = MutableStateFlow(false)
+    val neighborDownloadStarting: kotlinx.coroutines.flow.StateFlow<Boolean>
+        get() = _neighborDownloadStarting.asStateFlow()
+
+    /** Версия APK, уже запрошенного у соседей (пока приёмник не показал куски). */
+    val apkPendingRequest: kotlinx.coroutines.flow.StateFlow<String?>
+        get() = apkSeeder.pendingRequest
+
+    private val officialTapGate = UpdateDownloadTapGate()
+    private val neighborTapGate = UpdateDownloadTapGate()
+
+    private fun updateDownloadBusy(): Boolean =
+        _officialDownloadStarting.value || _officialDownloadActive.value ||
+            _neighborDownloadStarting.value || apkSeeder.pendingRequest.value != null ||
+            apkSeeder.download.value != null || apkSeeder.patchDownload.value != null
+
     // ── Рой APK (docs/UPDATE_SEEDING.md): карточка «Обновления» ─────────────
 
     /** Моя раздача обновления (сидер — синглтон, потоки живые). */
@@ -225,6 +258,10 @@ class SettingsViewModel @Inject constructor(
     fun onUpdatesAppeared() {
         apkSeeder.refreshReceivedApks()
         apkSeeder.pickupDownloadedApks()
+        viewModelScope.launch {
+            val active = withContext(Dispatchers.IO) { updateChecker.hasActiveUpdateDownload() }
+            _officialDownloadActive.value = active
+        }
     }
 
     /**
@@ -324,11 +361,33 @@ class SettingsViewModel @Inject constructor(
 
     /** Начать качать версию, которую раздаёт узел [nodeId]. */
     fun onDownloadUpdateFrom(nodeId: String) {
-        viewModelScope.launch { runCatching { apkSeeder.requestUpdate(nodeId) } }
+        if (!neighborTapGate.tryAcquire()) return
+        if (updateDownloadBusy()) {
+            neighborTapGate.release()
+            toastIf(context.getString(R.string.upd_download_already_running))
+            return
+        }
+        _neighborDownloadStarting.value = true
+        toastIf(context.getString(R.string.st_download_request_accepted))
+        viewModelScope.launch {
+            try {
+                val started = withContext(Dispatchers.IO) { apkSeeder.requestUpdate(nodeId) }
+                if (!started) toastIf(context.getString(R.string.st_neighbor_offer_gone))
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w("SettingsVM", "neighbor update request failed", e)
+                toastIf(context.getString(R.string.toast_download_failed, e.message ?: ""))
+            } finally {
+                _neighborDownloadStarting.value = false
+                neighborTapGate.release()
+            }
+        }
     }
 
     /** Остановить приём обновления. */
     fun onCancelUpdateDownload() {
+        _neighborDownloadStarting.value = false
         viewModelScope.launch { runCatching { apkSeeder.cancelDownload() } }
     }
 
@@ -427,9 +486,20 @@ class SettingsViewModel @Inject constructor(
      * «Обновить до vX» и раздача соседям начнутся без человека.
      */
     fun onDownloadOfficialRelease() {
-        if (_updatesChecking.value) return
-        // Set synchronously so rapid taps cannot start duplicate checks/downloads.
+        if (!officialTapGate.tryAcquire()) return
+        if (updateDownloadBusy()) {
+            officialTapGate.release()
+            toastIf(context.getString(R.string.upd_download_already_running))
+            return
+        }
+        if (_updatesChecking.value) {
+            officialTapGate.release()
+            return
+        }
+        // Состояние и текст появляются в том же нажатии, до сетевого запроса.
+        _officialDownloadStarting.value = true
         _updatesChecking.value = true
+        toastIf(context.getString(R.string.st_download_request_accepted))
         viewModelScope.launch {
             try {
                 val current = context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0"
@@ -440,40 +510,69 @@ class SettingsViewModel @Inject constructor(
                     toastIf(context.getString(if (outcome == "up_to_date") R.string.st_no_updates else R.string.st_check_unreachable))
                     return@launch
                 }
-                val activeId = officialDownloadId
-                if (activeId != null && officialDownloadVersion == release.version) {
-                    val manager = context.getSystemService(android.content.Context.DOWNLOAD_SERVICE) as android.app.DownloadManager
-                    val exists = withContext(Dispatchers.IO) {
-                        manager.query(android.app.DownloadManager.Query().setFilterById(activeId))?.use { cursor ->
-                            cursor.moveToFirst() && cursor.getInt(cursor.getColumnIndexOrThrow(android.app.DownloadManager.COLUMN_STATUS)) in setOf(
-                                android.app.DownloadManager.STATUS_PENDING, android.app.DownloadManager.STATUS_RUNNING,
-                                android.app.DownloadManager.STATUS_PAUSED, android.app.DownloadManager.STATUS_SUCCESSFUL,
-                            )
-                        } == true
-                    }
-                    if (exists) {
-                        toastIf(context.getString(R.string.st_official_already_requested))
-                        return@launch
-                    }
+                // Пока шла проверка, человек мог запустить приём у соседей.
+                if (_neighborDownloadStarting.value || apkSeeder.pendingRequest.value != null ||
+                    apkSeeder.download.value != null || apkSeeder.patchDownload.value != null
+                ) {
+                    toastIf(context.getString(R.string.upd_download_already_running))
+                    return@launch
                 }
                 val id = withContext(Dispatchers.IO) { updateChecker.downloadApk(release, preferOfficial = true) }
-                officialDownloadId = id
-                officialDownloadVersion = release.version
-                toastIf(context.getString(R.string.st_download_started))
+                if (id >= 0L) {
+                    _officialDownloadActive.value = true
+                    toastIf(context.getString(R.string.st_download_started))
+                } else {
+                    // Компактный патч уже собран, установщик открыт.
+                    _officialDownloadActive.value = false
+                    toastIf(com.vladimir.messenger.ui.update.UpdateDownloadMessages.forStarted(context, id))
+                }
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // «Уже качается» - не поломка: у замка свой текст, см.
-                // UpdateDownloadMessages.
+                Log.w("SettingsVM", "official update download failed", e)
+                if (e is com.vladimir.messenger.service.UpdateChecker.UpdateDownloadBlockedException && e.inFlight) {
+                    _officialDownloadActive.value = true
+                }
                 toastIf(com.vladimir.messenger.ui.update.UpdateDownloadMessages.forError(context, e))
             } finally {
+                _officialDownloadStarting.value = false
                 _updatesChecking.value = false
+                officialTapGate.release()
             }
         }
     }
 
-    private var officialDownloadId: Long? = null
-    private var officialDownloadVersion: String? = null
+    private val officialDownloadReceiver = object : BroadcastReceiver() {
+        override fun onReceive(receiverContext: Context, intent: Intent) {
+            if (intent.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE) return
+            val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L)
+            viewModelScope.launch {
+                val active = withContext(Dispatchers.IO) { updateChecker.hasActiveUpdateDownload() }
+                _officialDownloadActive.value = active
+                if (!active) {
+                    val failed = withContext(Dispatchers.IO) { updateChecker.downloadFailed(id) }
+                    if (failed) toastIf(context.getString(R.string.st_official_download_failed))
+                    apkSeeder.pickupDownloadedApks()
+                }
+            }
+        }
+    }
+
+    private fun registerOfficialDownloadReceiver() {
+        val filter = IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(officialDownloadReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            context.registerReceiver(officialDownloadReceiver, filter)
+        }
+    }
+
+    override fun onCleared() {
+        runCatching { context.unregisterReceiver(officialDownloadReceiver) }
+            .onFailure { Log.w("SettingsVM", "unregister download receiver failed: ${it.message}") }
+        super.onCleared()
+    }
 
     private fun toastIf(message: String) {
         if (message.isBlank()) return
@@ -542,6 +641,8 @@ class SettingsViewModel @Inject constructor(
             it.copy(protectedNick = runCatching { identityBackup.protectedNickname(context) }.getOrNull())
         }
         refreshServerSection()
+        runCatching { registerOfficialDownloadReceiver() }
+            .onFailure { Log.w("SettingsVM", "register download receiver failed: ${it.message}") }
     }
 
     /** Раздел «Сервер»: доступность, отклик, состояние копии азбуки. */

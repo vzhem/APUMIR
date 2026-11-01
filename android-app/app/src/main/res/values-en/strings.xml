@@ -2350,4 +2350,13 @@ The file is not on this phone</string>
     <string name="st_official_checking">Checking the version on the official site…</string>
     <string name="st_official_check_download_hint">Check for a fresh version and download it if it is newer than the installed one</string>
     <string name="st_official_already_requested">This version is already downloading or downloaded. Check the downloads and ready updates.</string>
+    <string name="st_download_request_accepted">Download request accepted. Starting — no second tap is needed.</string>
+    <string name="st_official_starting">Starting download from the official site…</string>
+    <string name="st_official_started">Download from the official site has started</string>
+    <string name="st_neighbor_starting">Starting download from neighbors…</string>
+    <string name="st_neighbor_started">Download from neighbors has started</string>
+    <string name="st_download_no_second_tap">No second tap is needed. The finished file will appear under “Updates” by itself.</string>
+    <string name="st_update_already_downloading">An update is already downloading. Wait for it to finish or stop the transfer.</string>
+    <string name="st_neighbor_offer_gone">The neighbor is no longer sharing this version. Tap “Check for a new version”.</string>
+    <string name="st_official_download_failed">Could not download the update from the official site. Please try again.</string>
 </resources>

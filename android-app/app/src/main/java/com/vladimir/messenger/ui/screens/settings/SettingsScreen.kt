@@ -2516,6 +2516,10 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
     val patchDownload by viewModel.apkPatchDownload.collectAsStateWithLifecycle()
     val checking by viewModel.updatesChecking.collectAsStateWithLifecycle()
     val official by viewModel.officialRelease.collectAsStateWithLifecycle()
+    val officialStarting by viewModel.officialDownloadStarting.collectAsStateWithLifecycle()
+    val officialActive by viewModel.officialDownloadActive.collectAsStateWithLifecycle()
+    val neighborStarting by viewModel.neighborDownloadStarting.collectAsStateWithLifecycle()
+    val pendingRequest by viewModel.apkPendingRequest.collectAsStateWithLifecycle()
     val apkPick by viewModel.apkPick.collectAsStateWithLifecycle()
     var markTarget by remember { mutableStateOf<MarkTarget?>(null) }
 
@@ -2529,15 +2533,13 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
     LaunchedEffect(Unit) { viewModel.onUpdatesAppeared() }
 
     SettingsCard {
-        SettingsItem(
-            icon = Icons.Default.CloudDownload,
-            title = when {
-                checking -> stringResource(R.string.st_official_checking)
-                official != null -> stringResource(R.string.st_official_download_version, official!!.version.removePrefix("v"))
-                else -> stringResource(R.string.st_official_download)
-            },
-            subtitle = stringResource(R.string.st_official_check_download_hint),
-            onClick = if (checking) null else viewModel::onDownloadOfficialRelease,
+        OfficialUpdateDownloadItem(
+            checking = checking,
+            starting = officialStarting,
+            active = officialActive,
+            blocked = neighborStarting || pendingRequest != null || download != null || patchDownload != null,
+            version = official?.version,
+            onClick = viewModel::onDownloadOfficialRelease,
         )
         ApuSettingsDivider()
 
@@ -2623,7 +2625,9 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
         // Раунд 133: сосед раздаёт ПАТЧ для ровно нашей версии — качаем
         // разницу, а не весь APK. Соберём файл на месте и сверим sha256.
         val patchBest = patchOffers.firstOrNull()
-        if (patchBest != null && download == null && patchDownload == null && ready == null) {
+        if (patchBest != null && download == null && patchDownload == null && ready == null &&
+            !officialStarting && !officialActive && !neighborStarting && pendingRequest == null
+        ) {
             SettingsItem(
                 icon    = Icons.Default.Download,
                 title   = stringResource(R.string.st_dl_patch_title, patchBest.toVersion),
@@ -2631,41 +2635,17 @@ private fun ApkUpdatesCard(viewModel: SettingsViewModel) {
                 onClick = { viewModel.onDownloadPatchFrom(patchBest.nodeId) },
             )
         }
-        // Выбор, откуда качать. Проверка нашла обновление И на официальном
-        // сайте, И у соседей в сети — показываем обе кнопки рядом.
-        // Локальные копии: делегированные свойства не умнее cast'ов, а
-        // условие в переменной не даёт smart cast для best.
-        val officialNow = official
-        val best = offers.firstOrNull()
-        if (officialNow != null && best != null && download == null && patchDownload == null && ready == null) {
-            Text(
-                stringResource(R.string.settings_update_two_places),
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
-            )
-
-            SettingsItem(
-                icon    = Icons.Default.Download,
-                title   = stringResource(R.string.st_dl_net_v, best.version),
-                subtitle = stringResource(R.string.pieces_offer_tpl, offers.size),
-                onClick = { viewModel.onDownloadUpdateFrom(best.nodeId) },
-            )
-        } else {
-            // Предложение соседа: лучший (самый новый) первый. Версия — на
-            // самой кнопке: «Скачать v…».
-            if (best != null && download == null && patchDownload == null && ready == null) {
-                SettingsItem(
-                    icon    = Icons.Default.Download,
-                    title   = stringResource(R.string.st_dl_v, best.version),
-                    subtitle = if (offers.size > 1) {
-                        stringResource(R.string.offers_many_tpl, offers.size, StoragePolicy.format(best.sizeBytes))
-                    } else {
-                        stringResource(R.string.offer_one_tpl, StoragePolicy.format(best.sizeBytes))
-                    },
-                    onClick = { viewModel.onDownloadUpdateFrom(best.nodeId) },
-                )
-            }
-        }
+        // Выбор источника: сосед или официальный сайт. Состояние одного тапа
+        // живёт в ApkUpdateDownloadItems: нажатие сразу видно, повтор закрыт.
+        NeighborUpdateDownloadItem(
+            offers = offers,
+            officialAvailable = official != null,
+            starting = neighborStarting,
+            pendingVersion = pendingRequest.takeIf { download == null },
+            blocked = officialStarting || officialActive || download != null || patchDownload != null || ready != null,
+            onDownload = viewModel::onDownloadUpdateFrom,
+            onCancelPending = viewModel::onCancelUpdateDownload,
+        )
         // Принятые APK: «раздать полученный» (сценарий: APK переслан с ПК).
         val shareReceivedTitle = stringResource(R.string.settings_share_received)
         receivedApks.forEach { apk ->
