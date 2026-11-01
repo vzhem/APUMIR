@@ -36,6 +36,22 @@ class ApkUpdateTest {
     }
 
     @Test
+    fun stalledIncomingRowIsDroppedBeforeAskingAnotherSeed() {
+        val now = 10_000L + ApkUpdate.STALLED_DOWNLOAD_REASK_MS
+        assertTrue(ApkUpdate.shouldDropStalledIncoming("TRANSFERRING", false, 10_000L, now))
+        assertTrue(ApkUpdate.shouldDropStalledIncoming("OFFERED", false, 10_000L, now))
+        // Ещё идёт, ждёт места или уже завершена — не трогаем.
+        assertFalse(ApkUpdate.shouldDropStalledIncoming("TRANSFERRING", false, now, now))
+        assertFalse(ApkUpdate.shouldDropStalledIncoming("TRANSFERRING", true, 10_000L, now))
+        assertFalse(ApkUpdate.shouldDropStalledIncoming("COMPLETE", false, 10_000L, now))
+        assertFalse(ApkUpdate.shouldDropStalledIncoming("FAILED", false, 10_000L, now))
+        assertFalse(ApkUpdate.shouldDropStalledIncoming("CANCELLED", false, 10_000L, now))
+        assertFalse(ApkUpdate.shouldDropStalledIncoming("EXPIRED", false, 10_000L, now))
+        // Откат часов не считаем зависанием.
+        assertFalse(ApkUpdate.shouldDropStalledIncoming("TRANSFERRING", false, now, 10_000L))
+    }
+
+    @Test
     fun stalledDownloadPrefersAnUntriedSeedOutsideTheCurrentStripe() {
         assertEquals(
             ApkUpdate.SeedSelection("seed-b", resetTried = false),

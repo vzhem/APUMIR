@@ -85,6 +85,9 @@ class UpdateChecker @Inject constructor(
         private const val MANUAL_DOWNLOAD_WINDOW_MS = 90L * 60_000L
         private const val MANUAL_WINDOW_PREFS = "update_manual_window"
         private const val KEY_MANUAL_WINDOW_UNTIL = "until_wall_ms"
+        private const val OFFICIAL_DOWNLOAD_PREFS = "update_official_download"
+        private const val KEY_OFFICIAL_DOWNLOAD_ID = "download_id"
+        private const val KEY_OFFICIAL_DOWNLOAD_VERSION = "version"
     }
 
     /**
@@ -231,6 +234,23 @@ class UpdateChecker @Inject constructor(
         val title: String,
         val file: File,
     )
+
+    /** Снимок официальной загрузки для карточки «Обновления» (без URL и заметок). */
+    data class OfficialDownloadState(
+        val downloadId: Long,
+        val version: String,
+        val status: String,
+        val downloadedBytes: Long,
+        val totalBytes: Long,
+        val reason: Int,
+    ) {
+        val isActive: Boolean get() = status == "pending" || status == "running" || status == "paused"
+        val isFailed: Boolean get() = status == "failed"
+        val isSuccessful: Boolean get() = status == "successful"
+        val percent: Int get() = if (totalBytes > 0L) {
+            ((downloadedBytes.coerceAtLeast(0L) * 100L) / totalBytes).toInt().coerceIn(0, 100)
+        } else 0
+    }
 
     /**
      * Успешные загрузки APK по данным DownloadManager (наши «APU v…» и любой
@@ -581,6 +601,80 @@ class UpdateChecker @Inject constructor(
         false
     }
 
+    /**
+     * Видимое состояние официальной загрузки. Системное уведомление
+     * DownloadManager человек может смахнуть, а загрузка (или её отказ)
+     * остаётся: карточка в «Обновлениях» показывает ход и даёт отмену/повтор.
+     */
+    fun officialDownloadState(): OfficialDownloadState? = runCatching {
+        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+            ?: return@runCatching null
+        val prefs = context.getSharedPreferences(OFFICIAL_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
+        var id = prefs.getLong(KEY_OFFICIAL_DOWNLOAD_ID, -1L)
+        if (id < 0L) id = activeOfficialDownloadId(manager) ?: -1L
+        if (id < 0L) return@runCatching null
+        manager.query(DownloadManager.Query().setFilterById(id))?.use { cursor ->
+            if (!cursor.moveToFirst()) {
+                UpdateDownloadGate.lost(prefs.getString(KEY_OFFICIAL_DOWNLOAD_VERSION, "").orEmpty())
+                return@runCatching null
+            }
+            val titleIdx = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
+            val title = if (titleIdx >= 0) cursor.getString(titleIdx).orEmpty() else ""
+            if (!title.startsWith("APU v")) return@runCatching null
+            val status = when (cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))) {
+                DownloadManager.STATUS_PENDING -> "pending"
+                DownloadManager.STATUS_RUNNING -> "running"
+                DownloadManager.STATUS_PAUSED -> "paused"
+                DownloadManager.STATUS_SUCCESSFUL -> "successful"
+                DownloadManager.STATUS_FAILED -> "failed"
+                else -> "unknown"
+            }
+            val version = title.removePrefix("APU v")
+            if (status == "failed") UpdateDownloadGate.lost(version)
+            if (status == "successful") UpdateDownloadGate.finished(version)
+            OfficialDownloadState(
+                downloadId = id,
+                version = version,
+                status = status,
+                downloadedBytes = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)),
+                totalBytes = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_BYTES)),
+                reason = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON)),
+            )
+        }
+    }.getOrElse {
+        Log.w(TAG, "official download state query failed: ${it.message}")
+        null
+    }
+
+    /** Отменить официальную загрузку и сразу освободить замок повторного нажатия. */
+    fun cancelOfficialDownload(): Boolean = runCatching {
+        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+            ?: return@runCatching false
+        val prefs = context.getSharedPreferences(OFFICIAL_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
+        val state = officialDownloadState()
+        val id = state?.downloadId ?: prefs.getLong(KEY_OFFICIAL_DOWNLOAD_ID, -1L)
+        if (id >= 0L) manager.remove(id)
+        UpdateDownloadGate.lost(state?.version ?: prefs.getString(KEY_OFFICIAL_DOWNLOAD_VERSION, "").orEmpty())
+        prefs.edit().remove(KEY_OFFICIAL_DOWNLOAD_ID).remove(KEY_OFFICIAL_DOWNLOAD_VERSION).apply()
+        true
+    }.getOrElse {
+        Log.w(TAG, "official download cancel failed: ${it.message}")
+        false
+    }
+
+    private fun activeOfficialDownloadId(manager: DownloadManager): Long? {
+        val active = DownloadManager.STATUS_PENDING or DownloadManager.STATUS_RUNNING or DownloadManager.STATUS_PAUSED
+        manager.query(DownloadManager.Query().setFilterByStatus(active))?.use { cursor ->
+            val titleIdx = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
+            val idIdx = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)
+            while (cursor.moveToNext()) {
+                val title = if (titleIdx >= 0) cursor.getString(titleIdx).orEmpty() else ""
+                if (title.startsWith("APU v")) return cursor.getLong(idIdx)
+            }
+        }
+        return null
+    }
+
     fun hasActiveUpdateDownload(): Boolean = runCatching {
         val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
             ?: return@runCatching false
@@ -642,6 +736,7 @@ class UpdateChecker @Inject constructor(
             setDescription("Скачивание обновления APU")
             setMimeType("application/vnd.android.package-archive")
             setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            setAllowedOverMetered(true)
             setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
         }
         
@@ -650,6 +745,10 @@ class UpdateChecker @Inject constructor(
         }
         val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val downloadId = downloadManager.enqueue(request)
+        context.getSharedPreferences(OFFICIAL_DOWNLOAD_PREFS, Context.MODE_PRIVATE).edit()
+            .putLong(KEY_OFFICIAL_DOWNLOAD_ID, downloadId)
+            .putString(KEY_OFFICIAL_DOWNLOAD_VERSION, releaseInfo.version)
+            .apply()
         scannedInCurrentSwarmWindow = false
         // A signed neighbour may have answered between permission and enqueue.
         if (!externalReleaseAllowedNow()) {

@@ -34,6 +34,8 @@ data class Download(
     val receivedBytes: Long,
     val totalBytes: Long,
     val waitingForDeviceSpace: Boolean = false,
+    /** Ход не двигался; сервис снимает старую строку и просит другой сид. */
+    val stalled: Boolean = false,
 )
 
 /** Обновление скачано: можно ставить и уже раздаём. */

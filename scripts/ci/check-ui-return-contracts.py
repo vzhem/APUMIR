@@ -129,5 +129,71 @@ class UpdateDownloadOnceTest(unittest.TestCase):
         self.assertIn("python3 scripts/ci/check-ui-return-contracts.py", workflow)
 
 
+class UpdateDownloadRecoveryTest(unittest.TestCase):
+    """Жалоба 2026-11-01: рой встал, а сайт не даёт скачать повторно."""
+
+    def setUp(self):
+        self.seeder = read(JAVA / "data/update/ApkSeeder.kt")
+        self.recovery = read(JAVA / "data/update/ApkUpdateStallRecovery.kt")
+        self.policy = read(JAVA / "data/update/ApkUpdate.kt")
+        self.checker = read(JAVA / "service/UpdateChecker.kt")
+        self.vm = read(JAVA / "ui/screens/settings/SettingsViewModel.kt")
+        self.item = read(JAVA / "ui/screens/settings/ApkUpdateDownloadItems.kt")
+
+    def test_stalled_incoming_row_is_dropped_before_reask(self):
+        self.assertIn("fun shouldDropStalledIncoming(", self.policy)
+        self.assertIn("suspend fun dropStalledIncoming(", self.recovery)
+        self.assertIn("router.declineIncoming(row)", self.recovery)
+        self.assertIn("router.dropTransfer(row.transferId)", self.recovery)
+        reask = self.seeder.split("private suspend fun reask(", 1)[1].split("private suspend fun reaskPatch(", 1)[0]
+        self.assertIn("ApkUpdateStallRecovery.dropStalledIncoming", reask)
+        self.assertLess(reask.index("dropStalledIncoming"), reask.index("askNext("))
+        reask_patch = self.seeder.split("private suspend fun reaskPatch(", 1)[1].split("private suspend fun clearPending(", 1)[0]
+        self.assertIn("ApkUpdateStallRecovery.dropStalledIncoming", reask_patch)
+
+    def test_waiting_for_space_is_not_treated_as_a_stall(self):
+        self.assertIn("!waitingForDeviceSpace && isDownloadStalled", self.policy)
+        self.assertIn("row.errorCode != FileTransferReceiver.ERROR_NO_SPACE", self.seeder)
+
+    def test_official_source_can_replace_a_stuck_neighbor_receive(self):
+        self.assertIn("private fun officialDownloadBusy()", self.vm)
+        self.assertIn("private fun neighborDownloadBusy()", self.vm)
+        self.assertIn("private suspend fun stopNeighborDownloadForOfficial()", self.vm)
+        official = self.vm.split("fun onDownloadOfficialRelease()", 1)[1].split("private val officialDownloadReceiver", 1)[0]
+        self.assertIn("if (officialDownloadBusy())", official)
+        self.assertIn("stopNeighborDownloadForOfficial()", official)
+        self.assertIn("apkSeeder.cancelDownload()", self.vm)
+        self.assertIn("apkSeeder.cancelPatchDownload()", self.vm)
+
+    def test_official_progress_is_visible_without_the_system_notification(self):
+        self.assertIn("data class OfficialDownloadState(", self.checker)
+        self.assertIn("fun officialDownloadState(): OfficialDownloadState?", self.checker)
+        self.assertIn("fun cancelOfficialDownload(): Boolean", self.checker)
+        self.assertIn("UpdateDownloadGate.lost", self.checker)
+        self.assertIn("LaunchedEffect(active, state?.downloadId)", self.item)
+        self.assertIn("delay(2_000L)", self.item)
+        self.assertIn("viewModel.refreshOfficialDownload()", self.item)
+        self.assertIn("viewModel::onCancelOfficialDownload", self.item)
+        self.assertIn("st_official_retry_download", self.item)
+
+    def test_recovery_strings_exist_in_both_languages(self):
+        for folder in ("values", "values-en"):
+            strings = read(RES / folder / "strings.xml")
+            for key in (
+                "st_official_download_cancelled",
+                "st_official_switching_from_neighbors",
+                "st_official_progress_tpl",
+                "st_official_paused",
+                "st_official_cancel_download",
+                "st_official_retry_download",
+                "receiving_stalled_tpl",
+            ):
+                self.assertIn(f'name="{key}"', strings)
+
+    def test_stall_policy_has_a_unit_test(self):
+        test = read(ROOT / "android-app/app/src/test/java/com/vladimir/messenger/data/update/ApkUpdateTest.kt")
+        self.assertIn("stalledIncomingRowIsDroppedBeforeAskingAnotherSeed", test)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

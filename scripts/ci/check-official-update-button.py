@@ -11,10 +11,10 @@ class OfficialUpdateButton(unittest.TestCase):
         # The button itself lives in ApkUpdateDownloadItems.kt (one-tap gate);
         # the card must still place the official source before swarm seeding.
         self.assertLess(ui.index('OfficialUpdateDownloadItem('), ui.index('seed?.let'))
-        self.assertEqual(1, ui.count('viewModel::onDownloadOfficialRelease'))
         item = (MAIN / 'ui/screens/settings/ApkUpdateDownloadItems.kt').read_text()
         self.assertIn('R.string.st_official_download', item)
-        self.assertIn('onClick = if (busy) null else onClick', item)
+        self.assertIn('onClick = if (busy) null else viewModel::onDownloadOfficialRelease', item)
+        self.assertEqual(2, item.count('viewModel::onDownloadOfficialRelease'))
         vm = (MAIN / 'ui/screens/settings/SettingsViewModel.kt').read_text().split('fun onDownloadOfficialRelease()')[1].split('private val officialDownloadReceiver')[0]
         self.assertLess(vm.index('checkForUpdate('), vm.index('downloadApk('))
         self.assertIn('if (release == null)', vm)
@@ -27,12 +27,33 @@ class OfficialUpdateButton(unittest.TestCase):
         self.assertLess(vm.index('_officialDownloadStarting.value = true'), vm.index('viewModelScope.launch'))
         self.assertIn('st_download_request_accepted', vm)
         self.assertIn('preferOfficial = true', vm)
+        # A stuck neighbor receive must not lock the official source: an explicit
+        # site tap stops the swarm first, then downloads.
+        self.assertIn('stopNeighborDownloadForOfficial()', vm)
+        self.assertIn('officialDownloadBusy()', vm)
 
     def test_explicit_source_does_not_change_automatic_default(self):
         checker = (MAIN / 'service/UpdateChecker.kt').read_text()
         self.assertIn('preferOfficial: Boolean = false', checker)
         self.assertIn('!preferOfficial && directSwarmHasNewer', checker)
         self.assertIn('if (preferOfficial) extendManualWindow', checker)
+
+    def test_official_download_has_visible_progress_cancel_and_retry(self):
+        checker = (MAIN / 'service/UpdateChecker.kt').read_text()
+        self.assertIn('fun officialDownloadState(): OfficialDownloadState?', checker)
+        self.assertIn('fun cancelOfficialDownload(): Boolean', checker)
+        self.assertIn('COLUMN_BYTES_DOWNLOADED_SO_FAR', checker)
+        self.assertIn('COLUMN_TOTAL_BYTES', checker)
+        self.assertIn('STATUS_PAUSED', checker)
+        self.assertIn('STATUS_FAILED', checker)
+        item = (MAIN / 'ui/screens/settings/ApkUpdateDownloadItems.kt').read_text()
+        self.assertIn('viewModel.refreshOfficialDownload()', item)
+        self.assertIn('viewModel::onCancelOfficialDownload', item)
+        self.assertIn('st_official_retry_download', item)
+        self.assertIn('st_official_progress_tpl', item)
+        vm = (MAIN / 'ui/screens/settings/SettingsViewModel.kt').read_text()
+        self.assertIn('fun refreshOfficialDownload()', vm)
+        self.assertIn('fun onCancelOfficialDownload()', vm)
 
 if __name__ == '__main__':
     unittest.main()

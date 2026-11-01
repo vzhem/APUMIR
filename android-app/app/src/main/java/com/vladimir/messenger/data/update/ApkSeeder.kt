@@ -1603,12 +1603,12 @@ class ApkSeeder @Inject constructor(
         }
         val row = activeUpdateTransfer(p.sha256)
         if (row != null && !ApkUpdate.isDownloadStalled(row.updatedAtMs, now)) return // progress продолжается
-        val interval = if (row != null) {
-            ApkUpdate.STALLED_DOWNLOAD_REASK_MS
-        } else {
-            (REASK_BASE_MS * p.attempts.coerceAtLeast(1)).coerceAtMost(REASK_MAX_MS)
-        }
+        val interval = if (row != null) ApkUpdate.STALLED_DOWNLOAD_REASK_MS
+        else (REASK_BASE_MS * p.attempts.coerceAtLeast(1)).coerceAtMost(REASK_MAX_MS)
         if (now - p.askedAtMs < interval) return
+        if (row != null && ApkUpdateStallRecovery.dropStalledIncoming(transferDao, router, p.sha256, now)) {
+            p.striping.clear(); p.tried.clear(); _download.value = null
+        }
         // При простаивающей передаче выбираем сид, который ещё не участвует
         // в полосе, чтобы не спрашивать повторно только текущий источник.
         askNext(activeSeeds = if (row != null) p.striping else emptySet())
@@ -1623,12 +1623,12 @@ class ApkSeeder @Inject constructor(
         }
         val row = activeUpdateTransfer(p.sha256)
         if (row != null && !ApkUpdate.isDownloadStalled(row.updatedAtMs, now)) return // progress продолжается
-        val interval = if (row != null) {
-            ApkUpdate.STALLED_DOWNLOAD_REASK_MS
-        } else {
-            (REASK_BASE_MS * p.attempts.coerceAtLeast(1)).coerceAtMost(REASK_MAX_MS)
-        }
+        val interval = if (row != null) ApkUpdate.STALLED_DOWNLOAD_REASK_MS
+        else (REASK_BASE_MS * p.attempts.coerceAtLeast(1)).coerceAtMost(REASK_MAX_MS)
         if (now - p.askedAtMs < interval) return
+        if (row != null && ApkUpdateStallRecovery.dropStalledIncoming(transferDao, router, p.sha256, now)) {
+            p.striping.clear(); p.tried.clear(); _patchDownload.value = null
+        }
         askPatchNext(activeSeeds = if (row != null) p.striping else emptySet())
     }
 
@@ -1649,11 +1649,7 @@ class ApkSeeder @Inject constructor(
 
     /** Незавершённая входящая передача APK/патча в виртуальном чате обновлений. */
     private suspend fun activeUpdateTransfer(sha256: String) =
-        transferDao.getForFile(ApkUpdate.CHAT_ID, sha256)
-            .firstOrNull {
-                it.direction == "INCOMING" &&
-                    it.state !in setOf("COMPLETE", "FAILED", "CANCELLED", "EXPIRED")
-            }
+        ApkUpdateStallRecovery.activeTransfer(transferDao, sha256)
 
     /** Строка приёма: есть живая INCOMING передачи в apkseed — её ход. */
     private suspend fun downloadRow(version: String, sha256: String): Download? {
@@ -1663,6 +1659,8 @@ class ApkSeeder @Inject constructor(
             receivedBytes = row.transferredBytes,
             totalBytes = row.totalBytes,
             waitingForDeviceSpace = row.errorCode == FileTransferReceiver.ERROR_NO_SPACE,
+            stalled = row.errorCode != FileTransferReceiver.ERROR_NO_SPACE &&
+                ApkUpdate.isDownloadStalled(row.updatedAtMs, System.currentTimeMillis()),
         )
     }
 
