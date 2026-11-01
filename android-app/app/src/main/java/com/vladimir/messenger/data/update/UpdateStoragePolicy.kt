@@ -40,7 +40,7 @@ object UpdateStoragePolicy {
 
     /** Only app-owned hash-named seed artifacts, never metadata or user files. */
     fun isOrphanSeedArtifact(name: String, activeSeedSha: String?, activePatchSha: String?): Boolean {
-        val sha = name.substringBeforeLast('.', "")
+        val sha = name.removeSuffix(".tmp").substringBeforeLast('.', "")
         if (!sha.matches(Regex("^[0-9a-f]{64}$"))) return false
         if (sha == activeSeedSha || sha == activePatchSha) return false
         return name == "$sha.apk" || name == "$sha.bspatch" || name == "$sha.apk.tmp"
