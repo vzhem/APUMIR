@@ -143,8 +143,8 @@ class ContactResetCoordinator @Inject constructor(
                 ContactResetWire.build(ContactResetWire.EPOCH, myId, name, token, binding)
             }.getOrElse {
                 Log.w(TAG, "contact reset hello build failed: ${it.message}")
-                continue
-            }
+                null
+            } ?: continue
             runCatching {
                 RustBridge.sendMessage("dir-reset-${ContactResetWire.EPOCH}", candidate.nodeId, candidate.nodeId, wire)
             }.onFailure { Log.w(TAG, "contact reset hello send failed: ${it.message}") }
