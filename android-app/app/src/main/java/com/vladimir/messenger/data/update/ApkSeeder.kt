@@ -233,18 +233,19 @@ class ApkSeeder @Inject constructor(
         size: Long,
         name: String,
         autoReseed: Boolean,
+        copyPlaintext: Boolean = true,
     ): String {
         val sha = ApkUpdate.sha256OfFile(source)
         replaceSeedIfDifferent(sha)
         // Копия: исходный файл — чужой (из чата, из папок), раздаём свою.
-        // Самосев: источник — собственный APK, копия совпадает с ним —
-        // копирование пропускаем (копировать файл на себя нельзя).
+        // Самосев установленной версии: открытый APK уже есть в sourceDir,
+        // поэтому вторую открытую копию не держим — соседи получат куски.
         val copy = File(seedRoot, "$sha.apk")
         val selfSource = source.absolutePath == copy.absolutePath
         val temporary = File(seedRoot, "$sha.apk.tmp")
         check(seedRoot.mkdirs() || seedRoot.isDirectory) { "Cannot create seed directory" }
         try {
-            if (!selfSource) {
+            if (!selfSource && copyPlaintext) {
                 Files.copy(source.toPath(), temporary.toPath(), StandardCopyOption.REPLACE_EXISTING)
                 try {
                     Files.move(temporary.toPath(), copy.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
@@ -260,7 +261,7 @@ class ApkSeeder @Inject constructor(
         return mutex.withLock {
             val prepared = try {
                 preparation.get().prepareGroupCopy(
-                    source = copy,
+                    source = if (copyPlaintext || selfSource) copy else source,
                     displayName = name,
                     mediaType = "application/vnd.android.package-archive",
                     messageId = ApkUpdate.CHAT_ID,
@@ -400,7 +401,7 @@ class ApkSeeder @Inject constructor(
                 (ApkUpdate.compareVersions(existingSeed.version, current) ?: 1) < 0
             if (!seedOutdated) return forget("")
         }
-        val error = startSeeding(file, version, size, name, autoReseed = true)
+        val error = startSeeding(file, version, size, name, autoReseed = true, copyPlaintext = comparison > 0)
         if (error.isNotBlank()) return error
         store.addAdopted(
             ApkUpdateStore.Adopted(file.absolutePath, name, sha, size, System.currentTimeMillis()),
@@ -965,7 +966,7 @@ class ApkSeeder @Inject constructor(
         }
         val source = File(appContext.applicationInfo.sourceDir)
         if (!source.isFile) return@withLock
-        val error = startSeeding(source, current, source.length(), "APU-v$current.apk", autoReseed = true)
+        val error = startSeeding(source, current, source.length(), "APU-v$current.apk", autoReseed = true, copyPlaintext = false)
         if (error.isNotBlank()) {
             Log.w(TAG, "self-seed v$current deferred: $error")
         } else {
@@ -1042,21 +1043,12 @@ class ApkSeeder @Inject constructor(
             val handOff = if (underSeedRoot) {
                 file
             } else {
-                // Имя берём из sha, а не из displayName: в имени файла от
-                // собеседника бывает «/» и «..», а установщику имя не нужно.
-                val copy = File(
-                    com.vladimir.messenger.data.update.UpdateFileRoots.installHandoff(appContext),
-                    "install-${readyInfo.sha256.take(16).ifBlank { "update" }}.apk",
-                )
-                val copied = withContext(Dispatchers.IO) {
-                    runCatching { file.copyTo(copy, overwrite = true) }.isSuccess &&
-                        copy.length() == file.length()
-                }
-                if (!copied) {
-                    runCatching { copy.delete() }
+                withContext(Dispatchers.IO) {
+                    runCatching { UpdateInstallHandoff.copy(appContext, file, readyInfo.sha256, readyInfo.version) }
+                }.getOrElse {
+                    Log.w(TAG, "install handoff copy failed: ${it.message}")
                     return "Файл обновления не скопировался целиком — скачайте заново"
                 }
-                copy
             }
             val uri = FileProvider.getUriForFile(appContext, authority, handOff)
             val intent = Intent(Intent.ACTION_VIEW).apply {

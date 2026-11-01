@@ -292,6 +292,23 @@ class FileTransferChunkStore(
         return total
     }
 
+    /** Bytes of quota-exempt APK copies (update seeding). Reported separately from the forwarding quota. */
+    fun quotaExemptBytes(): Long {
+        val base = rootDirectory(create = false)
+        if (!base.isDirectory) return 0L
+        var total = 0L
+        base.walkTopDown().forEach { file ->
+            check(!Files.isSymbolicLink(file.toPath())) { "Symbolic entry in file transfer store" }
+            if (file.isFile && CHUNK_FILE.matches(file.name)) {
+                val transferDir = file.parentFile?.parentFile
+                if (transferDir != null && File(transferDir, EXEMPT_MARKER_FILE).isFile) {
+                    total = Math.addExact(total, file.length())
+                }
+            }
+        }
+        return total
+    }
+
     /** Пометить передачу льготной (APK): её куски не считаются и не лимитируются. */
     private fun markExempt(transferId: String) {
         val dir = transferDirectory(transferId, create = true)

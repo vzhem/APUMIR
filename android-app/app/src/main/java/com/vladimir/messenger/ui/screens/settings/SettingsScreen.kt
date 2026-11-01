@@ -1570,23 +1570,7 @@ private fun SettingsTabContent(
             }
             if (section == SettingsSection.Files) {
             item { SettingsSectionTitle(stringResource(R.string.section_file_transfer)) }
-            item {
-                SettingsCard {
-                    SettingsItem(
-                        icon     = Icons.Default.Delete,
-                        title    = stringResource(R.string.settings_stop_stuck),
-                        subtitle = stringResource(R.string.settings_stop_stuck_hint),
-                        onClick  = viewModel::onCancelStalledTransfers,
-                    )
-                    ApuSettingsDivider()
-                    SettingsItem(
-                        icon     = Icons.Default.CleaningServices,
-                        title    = stringResource(R.string.settings_clear_done),
-                        subtitle = stringResource(R.string.settings_clear_done_hint),
-                        onClick  = viewModel::onPurgeCompletedTransfers,
-                    )
-                }
-            }
+            item { FileTransferSettingsCards(viewModel) }
 
             // ----------------------------------------------------------------
             // РАЗДАЧА: темп, в котором телефон рассылает и раздаёт дальше
