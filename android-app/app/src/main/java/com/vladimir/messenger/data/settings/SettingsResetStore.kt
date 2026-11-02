@@ -104,6 +104,10 @@ object SettingsResetStore {
     suspend fun resetChats(context: Context) {
         ChatFolderStore.reset(context)
         ConversationWallpaper.resetAllPersonal(context)
+        com.vladimir.messenger.data.location.MapAppPreferenceStore.set(
+            context,
+            com.vladimir.messenger.data.location.MapApp.ASK,
+        )
     }
 
     /** All local notification pauses, including topic-specific pauses. */

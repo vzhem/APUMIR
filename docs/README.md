@@ -88,6 +88,7 @@
 | [`VOICE_PLAYBACK.md`](VOICE_PLAYBACK.md) | Старт голосовых только по нажатию |
 | [`WALLPAPER_ICONS.md`](WALLPAPER_ICONS.md) | Значки фирменных обоев |
 | [`DIAGNOSTICS_REVIEW_2026-10-16.md`](DIAGNOSTICS_REVIEW_2026-10-16.md) | Разбор отчёта `apu-diag/5` от 16.10.2026 |
+| [`MAP_OPENING.md`](MAP_OPENING.md) | Выбор приложения для геопозиций и настройка по умолчанию |
 | [`M8_E_F_PREP.md`](M8_E_F_PREP.md) | Подготовительный план M8-E / M8-F |
 | [`NEW_DEVELOPMENT_PC.md`](NEW_DEVELOPMENT_PC.md) | Настройка нового компьютера для разработки |
 

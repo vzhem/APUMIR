@@ -1293,7 +1293,7 @@ private fun SettingsTabContent(
                     )
                 }
             }
-
+            item { MapAppSettingsCard() }
             }
             if (section == SettingsSection.Appearance) {
             item { SettingsSectionTitle(stringResource(R.string.language_section)) }

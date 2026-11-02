@@ -587,6 +587,7 @@ class MainActivity : ComponentActivity() {
         com.vladimir.messenger.data.profile.PeerBirthdayStore.init(this)
         com.vladimir.messenger.data.profile.EmojiStatusStore.init(this)
         com.vladimir.messenger.data.profile.InvitePrivacyStore.init(this)
+        com.vladimir.messenger.data.location.MapAppPreferenceStore.initialize(this)
         setContent {
             val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
             // Обложка перед входом. Правило - в SplashGate: первый экран

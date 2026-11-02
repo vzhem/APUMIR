@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
@@ -35,7 +36,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -75,6 +78,9 @@ fun LocationPickerDialog(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val openMap = rememberOpenMapAction()
+    var bottomPanelHeight by remember { mutableStateOf(220.dp) }
     var label by remember { mutableStateOf("") }
     var centerLat by remember { mutableStateOf(ownFix.lat) }
     var centerLon by remember { mutableStateOf(ownFix.lon) }
@@ -231,7 +237,7 @@ fun LocationPickerDialog(
                 onClick = { moveTo(ownFix.lat, ownFix.lon, own = true, name = null) },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = 196.dp)
+                    .padding(end = 16.dp, bottom = bottomPanelHeight + 24.dp)
                     .size(48.dp)
                     .clip(CircleShape)
                     .background(Color.White.copy(alpha = 0.96f)),
@@ -248,6 +254,7 @@ fun LocationPickerDialog(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
+                    .onSizeChanged { bottomPanelHeight = with(density) { it.height.toDp() } }
                     .padding(12.dp)
                     .clip(RoundedCornerShape(18.dp))
                     .background(Color.White.copy(alpha = 0.97f))
@@ -282,14 +289,26 @@ fun LocationPickerDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Spacer(Modifier.height(10.dp))
+                // Viewing the point externally is not sending it. The picker stays
+                // open with its caption/centre intact when the person returns.
+                ApuPremiumButton(
+                    label = stringResource(R.string.loc_open_maps),
+                    icon = Icons.Filled.OpenInNew,
+                    onClick = { openMap(centerLat, centerLon) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
                 Row(modifier = Modifier.fillMaxWidth()) {
-                    ApuTextAction(
+                    ApuPremiumButton(
                         label = stringResource(R.string.loc_cancel),
                         onClick = onDismiss,
+                        style = DiagnosticsActionStyle.QUIET,
                         modifier = Modifier.weight(1f),
                     )
                     Spacer(Modifier.size(10.dp))
-                    ApuTextAction(
+                    // Two-line house button: the full send label remains readable
+                    // instead of the old one-line "Send this po…" truncation.
+                    ApuPremiumButton(
                         label = stringResource(R.string.loc_send_point),
                         onClick = {
                             onSend(
@@ -299,6 +318,7 @@ fun LocationPickerDialog(
                                 label.trim(),
                             )
                         },
+                        style = DiagnosticsActionStyle.PRIMARY,
                         modifier = Modifier.weight(1f),
                     )
                 }
