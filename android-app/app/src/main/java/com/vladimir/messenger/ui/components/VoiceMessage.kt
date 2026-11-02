@@ -64,6 +64,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vladimir.messenger.R
+import com.vladimir.messenger.data.voice.VoicePlaybackPolicy
 import com.vladimir.messenger.data.voice.VoicePlaybackSpeedStore
 import com.vladimir.messenger.data.voice.VoiceTranscriber
 import com.vladimir.messenger.util.VoiceNote
@@ -103,8 +104,13 @@ fun VoiceMessagePlayer(
         }.getOrNull()
     }
     LaunchedEffect(Unit) { VoicePlaybackSpeedStore.initialize(context) }
-    LaunchedEffect(player, playbackSpeed) {
-        player?.let { applyVoicePlaybackSpeed(it, playbackSpeed) }
+    // Never push playback params to an idle/paused MediaPlayer: on some devices
+    // setPlaybackParams() starts playback by itself. Speed changes while paused
+    // are applied on the next explicit play tap or while already playing.
+    LaunchedEffect(player, playing, playbackSpeed) {
+        if (player != null && VoicePlaybackPolicy.shouldApplyPlaybackParams(playing)) {
+            applyVoicePlaybackSpeed(player, playbackSpeed)
+        }
     }
     DisposableEffect(player) {
         onDispose { runCatching { player?.release() } }
@@ -136,9 +142,11 @@ fun VoiceMessagePlayer(
                     playing = false
                 } else {
                     runCatching {
-                        applyVoicePlaybackSpeed(p, playbackSpeed)
                         p.start()
                         playing = true
+                        applyVoicePlaybackSpeed(p, playbackSpeed)
+                    }.onFailure { failure ->
+                        android.util.Log.w("VoiceMessage", "Cannot start voice playback", failure)
                     }
                 }
             },
@@ -453,12 +461,17 @@ fun formatVoiceTime(total: Int): String = "%d:%02d".format(total / 60, total % 6
 
 private fun applyVoicePlaybackSpeed(player: MediaPlayer, speed: Float) {
     runCatching {
+        // Belt-and-braces against the platform side effect: never touch params
+        // unless the player is already actively playing.
+        if (!player.isPlaying) return@runCatching
         player.setPlaybackParams(
             PlaybackParams()
                 .setSpeed(VoicePlaybackSpeedStore.normalize(speed))
                 // Keep the speaker's pitch natural while stretching the timing.
                 .setPitch(1f),
         )
+    }.onFailure { failure ->
+        android.util.Log.w("VoiceMessage", "Cannot apply voice playback speed", failure)
     }
 }
 

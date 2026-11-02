@@ -107,6 +107,7 @@ jobs:
           python3 scripts/ci/check-ui-return-contracts.py
           python3 scripts/ci/check-update-storage.py
           python3 scripts/ci/check-profile-background.py
+          python3 scripts/ci/check-voice-playback.py
           python3 scripts/ci/check-topic-read-contract.py
           python3 scripts/ci/check-invite-text.py
 
