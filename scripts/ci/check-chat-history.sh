@@ -112,6 +112,8 @@ STORY_FEEDBACK_OUTBOX_TEST="$BASE/test/java/com/vladimir/messenger/data/story/St
 DIAG_MQTT="$BASE/main/java/com/vladimir/messenger/data/diagnostics/MqttLinkText.kt"
 DIAG_REPORT_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReportTest.kt"
 DIAG_MQTT_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/MqttLinkTextTest.kt"
+# Чистая JVM-модель, которую теперь использует проверка выбора uCoz APK.
+APK_UPDATE="$BASE/main/java/com/vladimir/messenger/data/update/ApkUpdate.kt"
 UPDATE_POLICY="$BASE/main/java/com/vladimir/messenger/service/UpdateCheckPolicy.kt"
 UPDATE_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/service/UpdateCheckerTest.kt"
 # Fail-closed личных сообщений и безопасный cooldown тяжёлого самосева:
@@ -188,7 +190,7 @@ PYGEN
     "$OP_HEALTH" "$OP_BOUNDED_READ" "$OP_CLEANUP" "$OP_HEALTH_TEST" "$STORY_QUEUE" "$STORY_QUEUE_TEST" "$RUNTIME_HEALTH" "$RUNTIME_HEALTH_TEST" "$DIAG_REPORT" "$UPDATE_DIAG_REPORT" "$RELAY_STORAGE" "$RELAY_STORAGE_TEST" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
     "$STORY_FEEDBACK_WIRE" "$STORY_FEEDBACK_LEDGER" "$STORY_FEEDBACK_OUTBOX" \
     "$STORY_FEEDBACK_WIRE_TEST" "$STORY_FEEDBACK_LEDGER_TEST" "$STORY_FEEDBACK_OUTBOX_TEST" \
-    "$UPDATE_POLICY" "$UPDATE_POLICY_TEST" \
+    "$APK_UPDATE" "$UPDATE_POLICY" "$UPDATE_POLICY_TEST" \
     "$CALL_WIRE" "$FILE_CODEC" "$FILE_WIRE" "$FILE_UDP" "$SEALED_WIRE" "$OUTGOING_POLICY" "$OUTGOING_POLICY_TEST" "$CONTACT_RESET_WIRE" \
     "$DEFERRED_WIRE" "$DEFERRED_POLICY" "$DEFERRED_WIRE_TEST" "$DEFERRED_POLICY_TEST" \
     "$SELF_SEED_POLICY" "$SELF_SEED_POLICY_TEST" "$SEND_TIME_POLICY" "$SEND_TIME_TEST" \
