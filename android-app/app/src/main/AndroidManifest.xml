@@ -50,6 +50,35 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
+    <!-- Android 11+ package visibility: only map handlers and browsers, never
+         QUERY_ALL_PACKAGES. Availability is checked on demand; opening a real
+         point additionally requires an explicit tap in APU. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="geo" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="yandexmaps" android:host="maps.yandex.ru" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" android:host="2gis.ru" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" android:host="yandex.ru" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.APP_BROWSER" />
+        </intent>
+        <package android:name="ru.yandex.yandexmaps" />
+        <package android:name="com.google.android.apps.maps" />
+        <package android:name="ru.dublgis.dgismobile" />
+    </queries>
+
     <application
         android:name=".MessengerApplication"
         android:allowBackup="false"

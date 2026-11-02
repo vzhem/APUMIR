@@ -580,12 +580,14 @@ class MainActivity : ComponentActivity() {
         UsernameHolder.init(this)
         AvatarHolder.init(this)
         com.vladimir.messenger.data.profile.VideoAvatarStore.init(this)
+        com.vladimir.messenger.data.profile.ProfileBackgroundStore.init(this)
         // День рождения: своя дата с галочкой видимости и даты друзей,
         // пришедшие роевой рассылкой (`bday`).
         com.vladimir.messenger.data.profile.BirthdayStore.init(this)
         com.vladimir.messenger.data.profile.PeerBirthdayStore.init(this)
         com.vladimir.messenger.data.profile.EmojiStatusStore.init(this)
         com.vladimir.messenger.data.profile.InvitePrivacyStore.init(this)
+        com.vladimir.messenger.data.location.MapAppPreferenceStore.initialize(this)
         setContent {
             val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
             // Обложка перед входом. Правило - в SplashGate: первый экран

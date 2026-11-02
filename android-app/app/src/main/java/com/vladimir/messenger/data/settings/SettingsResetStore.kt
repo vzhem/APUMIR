@@ -92,6 +92,7 @@ object SettingsResetStore {
         AppFontSizeHolder.set(context, AppFontSize.STANDARD)
         WallpaperHolder.set(context, null)
         WallpaperTintHolder.set(context, WallpaperTint.CLASSIC)
+        com.vladimir.messenger.data.profile.ProfileBackgroundStore.clear(context)
         TextColorSettingsStore.resetAll(context)
         TranslationSettings.set(context, false)
         AppLanguageHolder.set(context, AppLanguage.DEFAULT)
@@ -103,6 +104,10 @@ object SettingsResetStore {
     suspend fun resetChats(context: Context) {
         ChatFolderStore.reset(context)
         ConversationWallpaper.resetAllPersonal(context)
+        com.vladimir.messenger.data.location.MapAppPreferenceStore.set(
+            context,
+            com.vladimir.messenger.data.location.MapApp.ASK,
+        )
     }
 
     /** All local notification pauses, including topic-specific pauses. */

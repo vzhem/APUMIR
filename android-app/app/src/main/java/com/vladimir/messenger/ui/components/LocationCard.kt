@@ -1,8 +1,5 @@
 package com.vladimir.messenger.ui.components
 
-import android.content.ActivityNotFoundException
-import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,8 +29,8 @@ import com.vladimir.messenger.util.LocationShare
 
 /**
  * Карточка «Геопозиция» в пузыре сообщения (личные чаты и группы): метка,
- * координаты, точность и подпись отправителя. Тап открывает точку в картах
- * (geo:), а если карт на телефоне нет — в браузере на OpenStreetMap.
+ * координаты, точность и подпись отправителя. Тап открывает точку через
+ * общую настройку приложения карт; отсутствие приложения не скрывается.
  */
 @Composable
 fun LocationCardView(
@@ -41,7 +38,7 @@ fun LocationCardView(
     textColor: Color,
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
+    val openMap = rememberOpenMapAction()
     Column(modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
@@ -86,21 +83,7 @@ fun LocationCardView(
             color = textColor,
             modifier = Modifier
                 .padding(top = 6.dp)
-                .clickable {
-                    val geo = Intent(Intent.ACTION_VIEW, Uri.parse(LocationShare.geoUri(location)))
-                    try {
-                        context.startActivity(geo)
-                    } catch (e: ActivityNotFoundException) {
-                        runCatching {
-                            context.startActivity(
-                                Intent(
-                                    Intent.ACTION_VIEW,
-                                    Uri.parse(LocationShare.webUrl(location.lat, location.lon)),
-                                ),
-                            )
-                        }
-                    }
-                },
+                .clickable { openMap(location.lat, location.lon) },
         )
     }
 }

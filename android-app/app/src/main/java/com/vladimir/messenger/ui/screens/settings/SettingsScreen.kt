@@ -101,7 +101,7 @@ import com.vladimir.messenger.R
 import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.ProfileScreenBackground
 import com.vladimir.messenger.ui.components.AvatarPickerDialog
 import com.vladimir.messenger.ui.components.MyAvatar
 import com.vladimir.messenger.ui.theme.AvatarHolder
@@ -199,7 +199,7 @@ fun SettingsScreen(
             // Смахивание вправо работает как «Назад».
             .swipeBack(onBack = { if (settingsSection != null && !showProfile) settingsSection = null else onBackClick() }),
     ) {
-        ChatWallpaper()
+        ProfileScreenBackground(active = showProfile)
         Scaffold(
             containerColor = Color.Transparent,
             bottomBar = bottomBar,
@@ -701,9 +701,9 @@ private fun ProfileTabContent(
                 }
             }
 
+            item { ProfileBackgroundSettingsCard() }
             // День рождения: сама дата и рядом галочка «видна друзьям».
-            // Скрытая дата не покидает телефон — друзьям не уходит даже сам
-            // факт, что она задана.
+            // Скрытая дата не покидает телефон — друзьям не уходит даже сам факт, что она задана.
             item {
                 val visibleLabel = stringResource(R.string.settings_birthday_visible)
                 SettingsCard {
@@ -1293,7 +1293,7 @@ private fun SettingsTabContent(
                     )
                 }
             }
-
+            item { MapAppSettingsCard() }
             }
             if (section == SettingsSection.Appearance) {
             item { SettingsSectionTitle(stringResource(R.string.language_section)) }

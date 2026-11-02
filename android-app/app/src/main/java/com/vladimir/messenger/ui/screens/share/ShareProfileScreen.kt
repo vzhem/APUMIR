@@ -24,7 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.vladimir.messenger.ui.components.Avatar
-import com.vladimir.messenger.ui.components.ChatWallpaper
+import com.vladimir.messenger.ui.components.ProfileScreenBackground
 import com.vladimir.messenger.ui.components.MyAvatar
 import com.vladimir.messenger.util.QrCodeGenerator
 import androidx.compose.foundation.Image
@@ -50,7 +50,7 @@ fun ShareProfileScreen(
 
     // Подложка на весь экран, в том числе под верхней панелью.
     Box(modifier = Modifier.fillMaxSize()) {
-        ChatWallpaper()
+        ProfileScreenBackground()
         Scaffold(
         containerColor = androidx.compose.ui.graphics.Color.Transparent,
         topBar = {
