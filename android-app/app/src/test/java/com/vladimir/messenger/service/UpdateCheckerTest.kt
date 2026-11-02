@@ -28,6 +28,54 @@ class UpdateCheckerTest {
     }
 
     @Test
+    fun `uCoz APK is selected only when sidecar version and release digest match`() {
+        val releaseSha = "8d81ddc7646b81131bba6072182eb62f6977643aa3008e22d6e7e995798f9706"
+        assertTrue(
+            siteApkMatchesLatest(
+                siteVersion = "v11.74.477",
+                latestVersion = "11.74.477",
+                siteSha256 = "SHA256:$releaseSha".uppercase(),
+                latestSha256 = "sha256:$releaseSha",
+            ),
+        )
+        assertFalse(
+            siteApkMatchesLatest(
+                siteVersion = "v11.74.476",
+                latestVersion = "v11.74.477",
+                siteSha256 = releaseSha,
+                latestSha256 = releaseSha,
+            ),
+        )
+        assertFalse(
+            siteApkMatchesLatest(
+                siteVersion = "v11.74.477",
+                latestVersion = "v11.74.477",
+                siteSha256 = "0".repeat(64),
+                latestSha256 = releaseSha,
+            ),
+        )
+        assertFalse(
+            siteApkMatchesLatest(
+                siteVersion = "v11.74.477",
+                latestVersion = "v11.74.477",
+                siteSha256 = null,
+                latestSha256 = releaseSha,
+            ),
+        )
+        // If the relay can only provide a tag (for example while its API cache
+        // is warming), a valid matching version remains usable without a hash.
+        assertTrue(
+            siteApkMatchesLatest(
+                siteVersion = "v11.74.477",
+                latestVersion = "11.74.477",
+                siteSha256 = null,
+                latestSha256 = null,
+            ),
+        )
+        assertFalse(siteApkMatchesLatest("latest", "v11.74.477", releaseSha, releaseSha))
+    }
+
+    @Test
     fun `tries relay fallback when GitHub is unavailable or malformed`() {
         assertTrue(shouldTryRelayFallback("network_error"))
         assertTrue(shouldTryRelayFallback("http_error"))

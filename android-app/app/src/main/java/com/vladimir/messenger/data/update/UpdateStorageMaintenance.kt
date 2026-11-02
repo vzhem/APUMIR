@@ -3,9 +3,11 @@ package com.vladimir.messenger.data.update
 import android.content.Context
 import android.util.Log
 import com.vladimir.messenger.data.file.FileTransferChunkStore
+import com.vladimir.messenger.data.file.FileTransferKeyVault
 import com.vladimir.messenger.data.file.FileTransferRouter
 import com.vladimir.messenger.data.file.ReceivedFileStore
 import com.vladimir.messenger.data.local.dao.FileTransferDao
+import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import java.nio.file.Files
@@ -19,9 +21,9 @@ import kotlinx.coroutines.withContext
 /**
  * Removes redundant *update* copies, never user documents.
  *
- * The encrypted swarm copy (chunks + wrapped key + transfer row) is the seed.
- * Once an update is installed, its plaintext received/seed/handoff copies are
- * redundant. A pending newer APK is kept until installed or expired.
+ * One verified encrypted swarm copy is kept as the active seed. Once an update
+ * is installed, redundant plaintext and older/duplicate encrypted copies are
+ * removed; a newer pending APK and the current active seed are kept.
  */
 @Singleton
 class UpdateStorageMaintenance @Inject constructor(
@@ -29,6 +31,7 @@ class UpdateStorageMaintenance @Inject constructor(
     private val transferDao: FileTransferDao,
     private val router: FileTransferRouter,
     private val updateChecker: com.vladimir.messenger.service.UpdateChecker,
+    private val apkDownloadMaintenance: ApkDownloadMaintenance,
 ) {
     private val mutex = Mutex()
 
@@ -58,20 +61,51 @@ class UpdateStorageMaintenance @Inject constructor(
             var result = UpdateInstallHandoff.cleanup(app, installed, nowMs).let {
                 CleanupResult(it.deleted, it.freedBytes, it.failed)
             }
+            val downloads = apkDownloadMaintenance.cleanupInstalledDownloads(installed)
+            result += CleanupResult(downloads.deleted, downloads.freedBytes, downloads.failed)
+
             val seedRoot = UpdateFileRoots.seed(app)
             val store = ApkUpdateStore(seedRoot)
             val seed = store.loadSeed()
             val patch = store.loadPatchSeed()
             val receivedStore = ReceivedFileStore(File(app.noBackupFilesDir, "file_received/v1"))
+            val chunkStore = FileTransferChunkStore.forApplication(app)
+            val seedVersionComparison = seed?.let { ApkUpdate.compareVersions(it.version, installed) }
+            val protectedSeedTransferId = if (seed != null && seedVersionComparison != null && seedVersionComparison >= 0) {
+                runCatching {
+                    transferDao.getForFile(ApkUpdate.CHAT_ID, seed.sha256)
+                        .firstOrNull { router.groupSeeder.canSeed(it, router::hasTransferKey) }
+                        ?.transferId
+                }.onFailure { Log.w(TAG, "update cleanup: active seed check failed: ${it.message}") }
+                    .getOrNull()
+            } else null
+            val installedSeedReady = seedVersionComparison == 0 && protectedSeedTransferId != null
 
-            // Plaintext of an already-installed received update. The INCOMING row,
-            // wrapped key and encrypted chunks remain, so the phone keeps seeding.
+            // An obsolete completed update is no longer needed once a newer
+            // version is installed. Keep the active installed seed and every
+            // newer pending update; remove duplicate/older encrypted copies.
             val rows = runCatching { transferDao.getForChatLimited(ApkUpdate.CHAT_ID, 128) }
                 .getOrElse {
                     Log.w(TAG, "update cleanup: transfer query failed: ${it.message}")
                     emptyList()
                 }
             for (row in rows) {
+                if (UpdateStoragePolicy.mayDeleteRedundantEncryptedTransfer(
+                        chatId = row.chatId,
+                        direction = row.direction,
+                        state = row.state,
+                        displayName = row.displayName,
+                        transferId = row.transferId,
+                        installedVersion = installed,
+                        protectedSeedTransferId = protectedSeedTransferId,
+                        installedSeedReady = installedSeedReady,
+                    )
+                ) {
+                    result += deleteRedundantTransfer(app, row, chunkStore, receivedStore)
+                    continue
+                }
+                // Plaintext of an already-installed received update is redundant
+                // when its encrypted seed remains available for neighbors.
                 val ready = runCatching { router.groupSeeder.canSeed(row, router::hasTransferKey) }
                     .getOrDefault(false)
                 if (!UpdateStoragePolicy.mayDeleteReceivedPlaintext(
@@ -150,6 +184,56 @@ class UpdateStorageMaintenance @Inject constructor(
             0L
         }
         Report(installedBytes, nativeBytes, seedBytes, encrypted, receivedBytes, handoff, public)
+    }
+
+    private suspend fun deleteRedundantTransfer(
+        app: Context,
+        row: FileTransferEntity,
+        chunkStore: FileTransferChunkStore,
+        receivedStore: ReceivedFileStore,
+    ): CleanupResult {
+        val transferId = row.transferId
+        var freedBytes = 0L
+        try {
+            // This path is limited by policy to completed update copies (or an
+            // old seeding row), never an ordinary file or the protected seed.
+            router.groupSeeder.forget(transferId)
+            val chunksBefore = chunkStore.transferChunkBytes(transferId)
+            val receivedFile = receivedStore.receivedFile(transferId, row.displayName)
+            val receivedBefore = receivedFile?.takeIf { it.isFile }?.length() ?: 0L
+
+            val chunksDeleted = chunkStore.deleteTransfer(transferId)
+            val chunksAfter = chunkStore.transferChunkBytes(transferId)
+            freedBytes += (chunksBefore - chunksAfter).coerceAtLeast(0L)
+            if (!chunksDeleted) {
+                Log.w(TAG, "update cleanup: encrypted transfer files could not be fully removed")
+                return CleanupResult(0, freedBytes, 1)
+            }
+
+            val receivedDeleted = receivedStore.deleteTransfer(transferId)
+            val receivedAfter = receivedFile?.takeIf { it.isFile }?.length() ?: 0L
+            freedBytes += (receivedBefore - receivedAfter).coerceAtLeast(0L)
+            if (!receivedDeleted) {
+                Log.w(TAG, "update cleanup: received APK copy could not be fully removed")
+                return CleanupResult(0, freedBytes, 1)
+            }
+            if (!FileTransferKeyVault.deleteKey(app, transferId)) {
+                Log.w(TAG, "update cleanup: wrapped key could not be removed")
+                return CleanupResult(0, freedBytes, 1)
+            }
+
+            val rowsDeleted = transferDao.deleteTransfer(transferId)
+            if (rowsDeleted == 0 && transferDao.getTransfer(transferId) != null) {
+                Log.w(TAG, "update cleanup: obsolete transfer row could not be removed")
+                return CleanupResult(0, freedBytes, 1)
+            }
+            return CleanupResult(1, freedBytes, 0)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            Log.w(TAG, "update cleanup: obsolete transfer removal failed: ${error.message}")
+            return CleanupResult(0, freedBytes, 1)
+        }
     }
 
     private fun delete(file: File): CleanupResult {

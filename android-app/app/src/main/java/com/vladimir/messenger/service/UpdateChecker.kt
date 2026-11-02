@@ -35,6 +35,9 @@ class UpdateChecker @Inject constructor(
         private const val TAG = "UpdateChecker"
         private const val GITHUB_API = "https://api.github.com/repos"
         private const val HTTP_TIMEOUT = 10000
+        private const val SITE_METADATA_TIMEOUT = 5000
+        private const val SITE_APK_METADATA_URL = "https://apu.clan.su/downloads/latest.json"
+        private const val SITE_APK_URL = "https://apu.clan.su/downloads/app-release.apk"
         
         // TODO: заменить на реальные значения
         private const val GITHUB_USER = "vzhem"
@@ -472,22 +475,24 @@ class UpdateChecker @Inject constructor(
                 }
             }
             // Older Actions workflows name the release APK app-release.apk.
-            val downloadUrl = legacyUrl ?: canonicalUrl
-            if (downloadUrl == null) {
+            // Check that the release really contains an APK, but keep the actual
+            // fallback download on our relay instead of exposing a GitHub URL.
+            if (legacyUrl == null && canonicalUrl == null) {
                 Log.w(TAG, "No supported APK asset found in release")
                 UpdateDiagnosticsStore.markSource(trace, "github", "asset_missing", latestVersion)
                 return@withContext null
             }
             UpdateDiagnosticsStore.markSource(trace, "github", "update_available", latestVersion)
-            ReleaseInfo(
+            val release = ReleaseInfo(
                 version = latestVersion,
-                downloadUrl = downloadUrl,
+                downloadUrl = "$RELAY_BASE/update/apk",
                 releaseNotes = humanNotes(json.optString("body", "")),
                 publishedAt = json.optString("published_at", ""),
                 patchUrl = patchUrl,
                 patchFrom = patchFrom,
                 apkSha256 = apkSha256,
             )
+            preferUcozApkIfCurrent(release)
         } catch (error: Exception) {
             Log.d(TAG, "GitHub update check failed: ${error.message}")
             UpdateDiagnosticsStore.markSource(
@@ -496,6 +501,61 @@ class UpdateChecker @Inject constructor(
                 if (trace.githubHttpStatus == 200) "invalid_response" else "network_error",
             )
             null
+        }
+    }
+
+    /**
+     * Prefer the static uCoz APK only when the sidecar exactly matches the
+     * authoritative release version and, when available, its published SHA-256.
+     * A missing or stale sidecar leaves the existing relay/GitHub fallback URL
+     * untouched. The APK itself is never probed or downloaded just to check its
+     * version, so stale copies are rejected before installation begins.
+     */
+    private fun preferUcozApkIfCurrent(
+        release: ReleaseInfo,
+        allowSiteMirror: Boolean = true,
+    ): ReleaseInfo {
+        if (!allowSiteMirror || !externalReleaseAllowedNow()) return release
+        var connection: HttpURLConnection? = null
+        return try {
+            val metadataUrl = "$SITE_APK_METADATA_URL?nocache=${System.currentTimeMillis()}"
+            val currentConnection = URL(metadataUrl).openConnection() as HttpURLConnection
+            connection = currentConnection
+            currentConnection.apply {
+                requestMethod = "GET"
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("Cache-Control", "no-cache, no-store")
+                setRequestProperty("Pragma", "no-cache")
+                setRequestProperty("User-Agent", "APU-Update-Checker")
+                connectTimeout = SITE_METADATA_TIMEOUT
+                readTimeout = SITE_METADATA_TIMEOUT
+                useCaches = false
+            }
+            if (currentConnection.responseCode != HttpURLConnection.HTTP_OK) {
+                Log.i(TAG, "uCoz APK metadata unavailable; keeping relay fallback")
+                return release
+            }
+            val metadata = BufferedReader(InputStreamReader(currentConnection.inputStream)).use { it.readText() }
+            val json = JSONObject(metadata)
+            val siteVersion = json.optString("version", "").trim()
+            val siteSha256 = json.optString("sha256", "").takeIf { it.isNotBlank() }
+            if (!siteApkMatchesLatest(siteVersion, release.version, siteSha256, release.apkSha256)) {
+                Log.i(TAG, "uCoz APK copy is stale or mismatched; keeping relay fallback")
+                return release
+            }
+            Log.i(TAG, "uCoz APK matches the latest release; selecting site download")
+            release.copy(
+                downloadUrl = SITE_APK_URL,
+                // A site APK is the preferred full artifact. Do not bypass it
+                // with the GitHub delta patch optimization.
+                patchUrl = null,
+                patchFrom = null,
+            )
+        } catch (error: Exception) {
+            Log.i(TAG, "uCoz APK metadata check failed; keeping relay fallback (${error.javaClass.simpleName})")
+            release
+        } finally {
+            connection?.disconnect()
         }
     }
 
@@ -512,6 +572,7 @@ class UpdateChecker @Inject constructor(
                 ?: return@withContext null
             val json = JSONObject(response)
             val latestVersion = json.optString("tag_name", "").trim()
+            val metadataStale = json.optBoolean("metadata_stale", false)
             if (latestVersion.isBlank()) {
                 UpdateDiagnosticsStore.markSource(trace, "relay", "invalid_response")
                 return@withContext null
@@ -524,13 +585,21 @@ class UpdateChecker @Inject constructor(
             // Адрес из ответа принимаем только на нашем домене: в кэше сервиса
             // мог остаться прежний адрес, и загрузка уходила в никуда.
             val apkUrl = UpdateLinks.apkDownloadUrl(json.optString("apk_url", ""), RELAY_BASE)
+            val digest = json.optString("apk_sha256", "")
+                .removePrefix("sha256:")
+                .lowercase()
+                .takeIf { value -> value.length == 64 && value.all { it in '0'..'9' || it in 'a'..'f' } }
             Log.i(TAG, "New version available via relay: $latestVersion")
             UpdateDiagnosticsStore.markSource(trace, "relay", "update_available", latestVersion)
-            ReleaseInfo(
-                version = latestVersion,
-                downloadUrl = apkUrl,
-                releaseNotes = humanNotes(json.optString("notes", "")),
-                publishedAt = json.optString("published_at", ""),
+            preferUcozApkIfCurrent(
+                ReleaseInfo(
+                    version = latestVersion,
+                    downloadUrl = apkUrl,
+                    releaseNotes = humanNotes(json.optString("notes", "")),
+                    publishedAt = json.optString("published_at", ""),
+                    apkSha256 = digest,
+                ),
+                allowSiteMirror = !metadataStale,
             )
         } catch (error: Exception) {
             Log.d(TAG, "Relay update check failed: ${error.message}")

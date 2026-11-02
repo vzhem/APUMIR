@@ -1133,7 +1133,7 @@
     <string name="storage_update_hint">These copies are outside “Forwarding space”. The system app size also includes extracted code and data.</string>
     <string name="storage_update_installed">Installed APK: %1$s; extracted libraries: %2$s.</string>
     <string name="storage_update_copies">Update copies total: %1$s (encrypted seeding %2$s, plaintext seed copy %3$s, received APK %4$s, installer handoff %5$s, APK downloads %6$s).</string>
-    <string name="storage_update_note">Cleanup removes only redundant copies of already-installed updates. Chats, keys, voice notes and received documents are untouched; seeding of the current version is preserved.</string>
+    <string name="storage_update_note">Cleanup removes unneeded downloads and old or duplicate copies of already-installed updates. The current seed and newer pending updates are kept; chats, identity keys, voice notes and received documents are untouched.</string>
     <string name="storage_update_clean">Remove redundant update copies</string>
     <!-- Пакет 36: сообщения избранного и групп (ViewModel) -->
     <string name="sv_removed">Removed from Favorites</string>

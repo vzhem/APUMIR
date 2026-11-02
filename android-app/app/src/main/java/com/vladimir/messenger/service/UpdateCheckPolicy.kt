@@ -1,5 +1,30 @@
 package com.vladimir.messenger.service
 
+import com.vladimir.messenger.data.update.ApkUpdate
+
+/**
+ * A static uCoz APK is trusted only when its small sidecar identifies the same
+ * release as the authoritative GitHub/relay metadata. If the official release
+ * has a digest, the sidecar must carry the same SHA-256 too.
+ */
+internal fun siteApkMatchesLatest(
+    siteVersion: String,
+    latestVersion: String,
+    siteSha256: String?,
+    latestSha256: String?,
+): Boolean {
+    if (!ApkUpdate.isSame(siteVersion, latestVersion)) return false
+    val expectedSha = normalizedUpdateSha256(latestSha256) ?: return latestSha256.isNullOrBlank()
+    return normalizedUpdateSha256(siteSha256) == expectedSha
+}
+
+private fun normalizedUpdateSha256(value: String?): String? {
+    val raw = value?.trim().orEmpty()
+    val digest = (if (raw.startsWith("sha256:", ignoreCase = true)) raw.substringAfter(':') else raw)
+        .lowercase()
+    return digest.takeIf { it.length == 64 && it.all { char -> char in '0'..'9' || char in 'a'..'f' } }
+}
+
 /** GitHub outages/invalid responses may use the relay; a valid «current» is final. */
 internal fun shouldTryRelayFallback(githubOutcome: String): Boolean =
     githubOutcome != "up_to_date" && githubOutcome != "update_available"
