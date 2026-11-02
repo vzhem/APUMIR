@@ -14,14 +14,17 @@ import dagger.hilt.components.SingletonComponent
 @InstallIn(SingletonComponent::class)
 interface MaintenanceEntryPoint {
     fun fileTransferRouter(): com.vladimir.messenger.data.file.FileTransferRouter
+    fun updateStorageMaintenance(): com.vladimir.messenger.data.update.UpdateStorageMaintenance
 }
 
 class MaintenanceWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result = try {
         AutomaticMaintenance.run(applicationContext)
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            EntryPointAccessors.fromApplication(applicationContext, MaintenanceEntryPoint::class.java)
-                .fileTransferRouter().purgeExpiredTransfers()
+            val entry = EntryPointAccessors.fromApplication(applicationContext, MaintenanceEntryPoint::class.java)
+            entry.fileTransferRouter().purgeExpiredTransfers()
+            runCatching { entry.updateStorageMaintenance().cleanup() }
+                .onFailure { android.util.Log.w("MaintenanceWorker", "update copy cleanup failed: ${it.message}") }
         }
         Result.success()
     } catch (cancelled: CancellationException) {

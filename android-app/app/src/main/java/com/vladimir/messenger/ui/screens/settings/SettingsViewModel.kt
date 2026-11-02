@@ -76,6 +76,7 @@ class SettingsViewModel @Inject constructor(
     private val botApi: com.vladimir.messenger.service.BotApi,
     private val identityBackup: com.vladimir.messenger.data.security.IdentityBackup,
     private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
+    private val updateStorage: com.vladimir.messenger.data.update.UpdateStorageMaintenance,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -750,6 +751,49 @@ class SettingsViewModel @Inject constructor(
 
     /** Сколько чужих байт держим для получателей не в сети (этап 7 роя). */
     suspend fun custodyHeldBytes(): Long = fileTransferRouter.custodyHeldBytes()
+
+    // ── Место обновления: отдельные копии APK вне квоты пересылки ──────────
+    private val _updateStorageReport =
+        MutableStateFlow<com.vladimir.messenger.data.update.UpdateStorageMaintenance.Report?>(null)
+    val updateStorageReport:
+        kotlinx.coroutines.flow.StateFlow<com.vladimir.messenger.data.update.UpdateStorageMaintenance.Report?>
+        get() = _updateStorageReport.asStateFlow()
+
+    private val _updateStorageBusy = MutableStateFlow(false)
+    val updateStorageBusy: kotlinx.coroutines.flow.StateFlow<Boolean>
+        get() = _updateStorageBusy.asStateFlow()
+
+    fun refreshUpdateStorage() {
+        viewModelScope.launch {
+            _updateStorageReport.value = withContext(Dispatchers.IO) {
+                runCatching { updateStorage.report() }
+                    .onFailure { Log.w("SettingsViewModel", "update storage report failed: ${it.message}") }
+                    .getOrNull()
+            }
+        }
+    }
+
+    fun onCleanUpdateStorage() {
+        if (!_updateStorageBusy.compareAndSet(false, true)) return
+        viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    runCatching { updateStorage.cleanup() }
+                        .onFailure { Log.w("SettingsViewModel", "update storage cleanup failed: ${it.message}") }
+                        .getOrNull()
+                }
+                val message = if (result == null) {
+                    context.getString(R.string.st_cleanup_failed)
+                } else {
+                    context.getString(R.string.st_update_storage_cleaned, com.vladimir.messenger.data.swarm.StoragePolicy.format(result.freedBytes))
+                }
+                android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_SHORT).show()
+                refreshUpdateStorage()
+            } finally {
+                _updateStorageBusy.value = false
+            }
+        }
+    }
 
     /** Освободить место: удалить локальные файлы завершённых передач. */
     fun onPurgeCompletedTransfers() {

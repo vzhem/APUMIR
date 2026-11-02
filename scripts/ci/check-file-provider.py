@@ -77,7 +77,9 @@ class FileProviderContract(unittest.TestCase):
         каталог.
         """
         seeder = (MAIN / "data/update/ApkSeeder.kt").read_text()
-        self.assertIn("UpdateFileRoots.installHandoff(appContext)", seeder)
+        handoff = (MAIN / "data/update/UpdateInstallHandoff.kt").read_text()
+        self.assertIn("UpdateInstallHandoff.copy(appContext, file, readyInfo.sha256, readyInfo.version)", seeder)
+        self.assertIn("UpdateFileRoots.installHandoff(context)", handoff)
         self.assertIn("UpdateFileRoots.migrateLegacySeed(appContext)", seeder)
         roots = (MAIN / "data/update/UpdateFileRoots.kt").read_text()
         # Действующее место — filesDir; noBackupFilesDir остаётся только как

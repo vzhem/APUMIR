@@ -209,6 +209,7 @@ if python3 scripts/ci/check-chat-startup.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-mute-notice.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-relay-storage-forensics.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-automatic-maintenance.py >>"$LOG" 2>&1 && \
+   python3 scripts/ci/check-update-storage.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-diagnostics-report.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-file-provider.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-signing.py >>"$LOG" 2>&1 && \

@@ -29,6 +29,10 @@ interface FileTransferDao {
     @Query("SELECT * FROM file_transfers WHERE chatId = :chatId ORDER BY createdAtMs ASC")
     fun observeForChat(chatId: String): Flow<List<FileTransferEntity>>
 
+    /** Ограниченная выборка служебного чата для отчёта о месте и уборки копий обновления. */
+    @Query("SELECT * FROM file_transfers WHERE chatId = :chatId ORDER BY updatedAtMs DESC LIMIT :limit")
+    suspend fun getForChatLimited(chatId: String, limit: Int): List<FileTransferEntity>
+
     /**
      * Состояния очереди передач одним запросом (COMPLETE/FAILED/WAITING_RECIPIENT/…).
      * Нужен отчёту «Логи» и сводке в настройках: у владельца не должно быть
