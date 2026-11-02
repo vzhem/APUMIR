@@ -62,6 +62,7 @@
 | [`OPERATIONAL_DIAGNOSTICS_AND_STORIES.md`](OPERATIONAL_DIAGNOSTICS_AND_STORIES.md) | Операционные метрики и досылка историй |
 | [`PC_TRANSFER.md`](PC_TRANSFER.md) | Перенос работы на другой ПК |
 | [`PEER_EXCHANGE.md`](PEER_EXCHANGE.md) | Прямой поиск через участников |
+| [`PROFILE_BACKGROUND.md`](PROFILE_BACKGROUND.md) | Локальный фон профиля |
 | [`PROFILE_SETTINGS_STYLE.md`](PROFILE_SETTINGS_STYLE.md) | Оформление профиля и настроек |
 | [`RELAY_STORAGE_DIAGNOSTICS.md`](RELAY_STORAGE_DIAGNOSTICS.md) | Диагностика relay-хранилища |
 | [`RELAY_STORAGE_FORENSICS.md`](RELAY_STORAGE_FORENSICS.md) | Разбор большого relay-хранилища |

@@ -2088,6 +2088,17 @@
     <string name="conversation_wallpaper_reset_done_body">Личные настройки фона этого чата возвращены к значениям по умолчанию.</string>
     <string name="conversation_wallpaper_reset_shared_done_body">Общий фон чата убран. Личные обои участников не изменены.</string>
     <string name="conversation_wallpaper_wait">Подготовка и сохранение…</string>
+    <string name="profile_background_title">Фон профиля</string>
+    <string name="profile_background_hint">Своё изображение для экрана профиля</string>
+    <string name="profile_background_custom_set">Своё изображение установлено</string>
+    <string name="profile_background_local_hint">Фон виден только вам на этом устройстве и не отправляется собеседникам.</string>
+    <string name="profile_background_preview">Предпросмотр фона профиля</string>
+    <string name="profile_background_choose">Выбрать изображение</string>
+    <string name="profile_background_reset">Вернуть стандартный фон</string>
+    <string name="profile_background_wait">Подготовка и сохранение…</string>
+    <string name="profile_background_saved">Фон профиля сохранён</string>
+    <string name="profile_background_reset_done">Стандартный фон возвращён</string>
+    <string name="profile_background_error">Не удалось установить фон. Попробуйте другое изображение.</string>
 
     <string name="heart_game_title">Подними себе рейтинг</string>
     <string name="heart_game_hint">Поймай сердце: +1 игровое сердечко. Каждые 1 000 сердечек дают +1 ранг; подтверждённое приглашение для ранга сразу добавляет в игру 1 000 сердечек. Сердце появляется раз в 45–55 секунд, пока приложение открыто. Включение публикует ваш ник и счёт в сети.</string>

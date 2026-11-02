@@ -1977,6 +1977,17 @@ The file is not on this phone</string>
     <string name="conversation_wallpaper_reset_done_body">This chat’s personal background settings have been returned to their defaults.</string>
     <string name="conversation_wallpaper_reset_shared_done_body">The shared chat background was removed. Members’ personal backgrounds were not changed.</string>
     <string name="conversation_wallpaper_wait">Preparing and saving…</string>
+    <string name="profile_background_title">Profile background</string>
+    <string name="profile_background_hint">Your own image for the profile screen</string>
+    <string name="profile_background_custom_set">Custom image is set</string>
+    <string name="profile_background_local_hint">The background is visible only to you on this device and is not sent to contacts.</string>
+    <string name="profile_background_preview">Profile background preview</string>
+    <string name="profile_background_choose">Choose image</string>
+    <string name="profile_background_reset">Restore default background</string>
+    <string name="profile_background_wait">Preparing and saving…</string>
+    <string name="profile_background_saved">Profile background saved</string>
+    <string name="profile_background_reset_done">Default background restored</string>
+    <string name="profile_background_error">Could not set the background. Try another image.</string>
 
     <string name="heart_game_title">Boost your rating</string>
     <string name="heart_game_hint">Catch a heart for +1 game heart. Every 1,000 hearts gives +1 rank; a confirmed invitation for rank immediately adds 1,000 hearts to the game. A heart appears every 45–55 seconds while the app is open. Enabling shares your username and score with the network.</string>

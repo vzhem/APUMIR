@@ -580,6 +580,7 @@ class MainActivity : ComponentActivity() {
         UsernameHolder.init(this)
         AvatarHolder.init(this)
         com.vladimir.messenger.data.profile.VideoAvatarStore.init(this)
+        com.vladimir.messenger.data.profile.ProfileBackgroundStore.init(this)
         // День рождения: своя дата с галочкой видимости и даты друзей,
         // пришедшие роевой рассылкой (`bday`).
         com.vladimir.messenger.data.profile.BirthdayStore.init(this)
