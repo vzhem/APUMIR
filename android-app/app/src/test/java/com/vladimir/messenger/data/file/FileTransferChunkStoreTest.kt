@@ -98,6 +98,19 @@ class FileTransferChunkStoreTest {
     }
 
     @Test
+    fun transferChunkByteCountIsLimitedToOneTransferAndIgnoresMetadata() {
+        val store = FileTransferChunkStore(root)
+        val otherTransfer = "fedcba9876543210fedcba9876543210"
+        store.storeEncryptedChunk(transferId, 0, ByteArray(64) { 1 }, ownerQuotaExempt = true)
+        store.storeEncryptedChunk(transferId, 1, ByteArray(96) { 2 }, ownerQuotaExempt = true)
+        store.storeManifest(transferId, ByteArray(128) { 3 })
+        store.storeEncryptedChunk(otherTransfer, 0, ByteArray(256) { 4 }, ownerQuotaExempt = true)
+
+        assertEquals(160L, store.transferChunkBytes(transferId))
+        assertEquals(256L, store.transferChunkBytes(otherTransfer))
+    }
+
+    @Test
     fun liveHeadroomIsAskedOnEveryWriteAndCanShrink() {
         // Ползунок «Место под пересылку»: хранилище не запоминает квоту, а
         // спрашивает остаток при каждой записи - смена настройки действует сразу.

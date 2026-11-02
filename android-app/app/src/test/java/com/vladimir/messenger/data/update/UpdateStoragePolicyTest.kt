@@ -30,6 +30,49 @@ class UpdateStoragePolicyTest {
     }
 
     @Test
+    fun encryptedCleanupKeepsCurrentSeedAndPendingNewerUpdates() {
+        fun may(
+            chat: String = ApkUpdate.CHAT_ID,
+            direction: String = "INCOMING",
+            state: String = "COMPLETE",
+            name: String = "APU-v11.74.474.apk",
+            transferId: String = "old-transfer",
+            protectedSeedId: String? = "current-seed",
+            installedSeedReady: Boolean = true,
+        ) = UpdateStoragePolicy.mayDeleteRedundantEncryptedTransfer(
+            chatId = chat,
+            direction = direction,
+            state = state,
+            displayName = name,
+            transferId = transferId,
+            installedVersion = "11.74.475",
+            protectedSeedTransferId = protectedSeedId,
+            installedSeedReady = installedSeedReady,
+        )
+
+        assertTrue(may()) // Older installed update can be discarded.
+        assertTrue(may(name = "APU-v11.74.475.apk")) // Duplicate only after current seed is ready.
+        assertFalse(may(name = "APU-v11.74.476.apk")) // Newer update is pending.
+        assertFalse(may(transferId = "current-seed"))
+        assertFalse(may(name = "APU-v11.74.475.apk", installedSeedReady = false))
+        assertFalse(may(chat = "personal-chat"))
+        assertFalse(may(name = "notes.apk"))
+        assertFalse(may(name = "MyApp-11.74.474.apk"))
+        assertFalse(may(state = "TRANSFERRING"))
+        assertFalse(may(direction = "OUTGOING", state = "TRANSFERRING"))
+    }
+
+    @Test
+    fun installedPublicDownloadCanBeRemovedButPendingAndUnrelatedDownloadsAreKept() {
+        assertTrue(UpdateStoragePolicy.mayDeleteInstalledDownload("APU v11.74.475", "11.74.475"))
+        assertTrue(UpdateStoragePolicy.mayDeleteInstalledDownload("APU v11.74.474", "11.74.475"))
+        assertFalse(UpdateStoragePolicy.mayDeleteInstalledDownload("APU v11.74.476", "11.74.475"))
+        assertFalse(UpdateStoragePolicy.mayDeleteInstalledDownload("Other App 1.2.3", "11.74.475"))
+        assertFalse(UpdateStoragePolicy.mayDeleteInstalledDownload("APU update", "11.74.475"))
+        assertFalse(UpdateStoragePolicy.mayDeleteInstalledDownload("APU v11.74.474 beta", "11.74.475"))
+    }
+
+    @Test
     fun seedPlaintextNeedsAReadyEncryptedCopyAndInstalledVersion() {
         assertTrue(UpdateStoragePolicy.mayDeleteSeedPlaintext("11.74.475", "11.74.475", true))
         assertTrue(UpdateStoragePolicy.mayDeleteSeedPlaintext("11.74.474", "11.74.475", true))

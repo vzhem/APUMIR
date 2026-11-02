@@ -309,6 +309,27 @@ class FileTransferChunkStore(
         return total
     }
 
+    /** Count only ciphertext chunks for one update transfer, matching [quotaExemptBytes]. */
+    @Synchronized
+    fun transferChunkBytes(transferId: String): Long {
+        validateTransferId(transferId)
+        val chunks = chunksDirectory(transferId, create = false)
+        if (!chunks.isDirectory) return 0L
+        var total = 0L
+        var examined = 0
+        Files.newDirectoryStream(chunks.toPath()).use { entries ->
+            for (path in entries) {
+                if (examined++ >= MAX_TRANSFER_CHUNK_FILES) break
+                if (Files.isSymbolicLink(path) ||
+                    !Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS) ||
+                    !CHUNK_FILE.matches(path.fileName.toString())
+                ) continue
+                total = Math.addExact(total, Files.size(path))
+            }
+        }
+        return total
+    }
+
     /** Пометить передачу льготной (APK): её куски не считаются и не лимитируются. */
     private fun markExempt(transferId: String) {
         val dir = transferDirectory(transferId, create = true)
@@ -414,6 +435,7 @@ class FileTransferChunkStore(
         const val MIN_CIPHERTEXT_BYTES = AEAD_TAG_BYTES
         const val MAX_CIPHERTEXT_BYTES = MAX_PLAINTEXT_CHUNK_BYTES + AEAD_TAG_BYTES
         private const val LEGACY_MAX_CHUNK_INDEX = 99_999_999L
+        private const val MAX_TRANSFER_CHUNK_FILES = 65_536
         private const val MANIFEST_FILE = "manifest.v1"
         private const val KEY_ENVELOPE_FILE = "key-envelope.v1"
         private const val ORIGIN_BINDING_FILE = "origin-binding.v1"
