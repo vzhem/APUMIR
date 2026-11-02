@@ -1,0 +1,632 @@
+<!--
+  APU one-page landing for uCoz.
+  Paste the full contents into Site -> Page Editor -> Home page -> HTML/source mode.
+  Download links default to the existing Worker and switch to the uCoz APK only
+  when /downloads/latest.json matches the latest release version and SHA-256.
+-->
+<style>
+  #apu-landing-root {
+    --apu-ink: #172c2c;
+    --apu-muted: #617675;
+    --apu-paper: #f6fbf8;
+    --apu-mint: #dcf4ec;
+    --apu-mint-strong: #bce9db;
+    --apu-gold: #f4c64f;
+    --apu-gold-dark: #9a6b06;
+    --apu-line: rgba(23, 44, 44, .11);
+    position: fixed;
+    inset: 0;
+    z-index: 2147483000;
+    overflow-x: hidden;
+    overflow-y: auto;
+    color: var(--apu-ink);
+    background:
+      radial-gradient(ellipse at 83% 10%, rgba(244, 198, 79, .20), transparent 29rem),
+      radial-gradient(ellipse at 13% 35%, rgba(96, 198, 164, .16), transparent 32rem),
+      var(--apu-paper);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  #apu-landing-root *,
+  #apu-landing-root *::before,
+  #apu-landing-root *::after { box-sizing: border-box; }
+
+  #apu-landing-root a { color: inherit; }
+  #apu-landing-root .apu-shell { width: min(1120px, calc(100% - 40px)); margin-inline: auto; }
+  #apu-landing-root .apu-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 22px 0;
+  }
+  #apu-landing-root .apu-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--apu-ink);
+    text-decoration: none;
+    font-size: 18px;
+    font-weight: 760;
+    letter-spacing: -.04em;
+  }
+  #apu-landing-root .apu-mark {
+    display: grid;
+    width: 42px;
+    height: 42px;
+    place-items: center;
+    border: 1px solid rgba(23, 44, 44, .08);
+    border-radius: 15px;
+    background: linear-gradient(145deg, #fff4cf, var(--apu-gold));
+    box-shadow: 0 8px 20px rgba(190, 143, 28, .17);
+    font-size: 15px;
+    font-weight: 850;
+    letter-spacing: -.09em;
+  }
+  #apu-landing-root .apu-nav {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    color: var(--apu-muted);
+    font-size: 14px;
+    font-weight: 600;
+  }
+  #apu-landing-root .apu-nav a { text-decoration: none; }
+  #apu-landing-root .apu-nav a:hover { color: var(--apu-ink); }
+  #apu-landing-root .apu-nav-cta {
+    padding: 10px 16px;
+    border: 1px solid var(--apu-line);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .66);
+  }
+
+  #apu-landing-root .apu-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1.07fr) minmax(310px, .93fr);
+    align-items: center;
+    gap: clamp(36px, 8vw, 92px);
+    min-height: 590px;
+    padding: 38px 0 76px;
+  }
+  #apu-landing-root .apu-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    padding: 8px 13px;
+    border: 1px solid rgba(56, 129, 106, .13);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .66);
+    color: #397968;
+    font-size: 12px;
+    font-weight: 720;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  #apu-landing-root .apu-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #58af8e;
+    box-shadow: 0 0 0 4px rgba(88, 175, 142, .13);
+  }
+  #apu-landing-root h1 {
+    max-width: 680px;
+    margin: 22px 0 18px;
+    font-size: clamp(48px, 7vw, 82px);
+    line-height: .99;
+    letter-spacing: -.075em;
+    font-weight: 780;
+  }
+  #apu-landing-root .apu-title-accent { color: #438d78; }
+  #apu-landing-root .apu-lead {
+    max-width: 540px;
+    margin: 0;
+    color: var(--apu-muted);
+    font-size: clamp(17px, 2vw, 19px);
+    line-height: 1.7;
+  }
+  #apu-landing-root .apu-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-top: 30px;
+  }
+  #apu-landing-root .apu-download {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 11px;
+    min-height: 58px;
+    padding: 0 24px;
+    border: 1px solid rgba(138, 98, 5, .14);
+    border-radius: 18px;
+    background: linear-gradient(135deg, #ffe89c, var(--apu-gold));
+    box-shadow: 0 12px 26px rgba(190, 143, 28, .20), inset 0 1px 0 rgba(255,255,255,.6);
+    color: #45330c !important;
+    text-decoration: none;
+    font-size: 16px;
+    font-weight: 760;
+    transition: transform .18s ease, box-shadow .18s ease;
+  }
+  #apu-landing-root .apu-download:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 16px 30px rgba(190, 143, 28, .25), inset 0 1px 0 rgba(255,255,255,.65);
+  }
+  #apu-landing-root .apu-download:focus-visible,
+  #apu-landing-root .apu-nav a:focus-visible,
+  #apu-landing-root .apu-text-link:focus-visible {
+    outline: 3px solid #438d78;
+    outline-offset: 4px;
+  }
+  #apu-landing-root .apu-download svg { width: 20px; height: 20px; }
+  #apu-landing-root .apu-small-link {
+    padding: 10px 4px;
+    color: var(--apu-muted);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 650;
+  }
+  #apu-landing-root .apu-small-link:hover { color: var(--apu-ink); }
+  #apu-landing-root .apu-version {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 15px;
+    color: #718582;
+    font-size: 12px;
+  }
+  #apu-landing-root .apu-version svg { width: 14px; height: 14px; }
+
+  #apu-landing-root .apu-visual {
+    position: relative;
+    display: grid;
+    min-height: 430px;
+    place-items: center;
+    isolation: isolate;
+  }
+  #apu-landing-root .apu-orbit {
+    position: absolute;
+    z-index: -1;
+    width: min(390px, 95%);
+    aspect-ratio: 1;
+    border: 1px solid rgba(57, 121, 104, .13);
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,255,255,.78), rgba(221,244,236,.42) 61%, transparent 62%);
+  }
+  #apu-landing-root .apu-orbit::before,
+  #apu-landing-root .apu-orbit::after {
+    position: absolute;
+    content: "";
+    border: 1px solid rgba(57, 121, 104, .10);
+    border-radius: 50%;
+    inset: 8%;
+  }
+  #apu-landing-root .apu-orbit::after { inset: 17%; }
+  #apu-landing-root .apu-phone {
+    position: relative;
+    width: min(280px, 72%);
+    padding: 13px;
+    border: 1px solid rgba(23, 44, 44, .10);
+    border-radius: 38px;
+    background: rgba(255, 255, 255, .78);
+    box-shadow: 0 30px 80px rgba(33, 80, 68, .18), 0 3px 10px rgba(33, 80, 68, .06);
+    transform: rotate(3deg);
+  }
+  #apu-landing-root .apu-phone-screen {
+    min-height: 390px;
+    padding: 18px 14px;
+    overflow: hidden;
+    border-radius: 27px;
+    background:
+      radial-gradient(circle at 85% 10%, rgba(244,198,79,.18), transparent 130px),
+      linear-gradient(180deg, #eaf8f2, #f7fbf7 74%);
+  }
+  #apu-landing-root .apu-phone-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 21px;
+    color: #6f8680;
+    font-size: 10px;
+    font-weight: 700;
+  }
+  #apu-landing-root .apu-phone-app { color: var(--apu-ink); font-size: 14px; font-weight: 800; }
+  #apu-landing-root .apu-chat-title { margin: 0 0 13px; font-size: 19px; font-weight: 760; letter-spacing: -.04em; }
+  #apu-landing-root .apu-chat-subtitle { margin: -9px 0 18px; color: #7e918d; font-size: 10px; }
+  #apu-landing-root .apu-message {
+    width: fit-content;
+    max-width: 88%;
+    margin: 9px 0;
+    padding: 11px 13px;
+    border: 1px solid rgba(23, 44, 44, .04);
+    border-radius: 15px 15px 15px 5px;
+    background: rgba(255,255,255,.9);
+    color: #526562;
+    font-size: 11px;
+    box-shadow: 0 4px 10px rgba(40, 78, 67, .04);
+  }
+  #apu-landing-root .apu-message.apu-outgoing {
+    margin-left: auto;
+    border-radius: 15px 15px 5px 15px;
+    background: #d0eee2;
+    color: #356a5b;
+  }
+  #apu-landing-root .apu-chat-preview {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 21px;
+    padding: 12px;
+    border: 1px solid rgba(23, 44, 44, .07);
+    border-radius: 16px;
+    background: rgba(255,255,255,.72);
+  }
+  #apu-landing-root .apu-avatar {
+    display: grid;
+    flex: 0 0 34px;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    border-radius: 12px;
+    background: linear-gradient(145deg, #ffe9a5, #f4c64f);
+    color: #68500e;
+    font-size: 12px;
+    font-weight: 800;
+  }
+  #apu-landing-root .apu-preview-lines { flex: 1; min-width: 0; }
+  #apu-landing-root .apu-preview-lines b { display: block; color: #536864; font-size: 10px; }
+  #apu-landing-root .apu-preview-lines span { display: block; margin-top: 3px; color: #9aa8a4; font-size: 9px; }
+  #apu-landing-root .apu-floating-note {
+    position: absolute;
+    right: -5px;
+    bottom: 37px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 12px 15px;
+    border: 1px solid rgba(23, 44, 44, .08);
+    border-radius: 15px;
+    background: rgba(255,255,255,.9);
+    box-shadow: 0 12px 28px rgba(33, 80, 68, .10);
+    color: #54716a;
+    font-size: 11px;
+    font-weight: 680;
+  }
+  #apu-landing-root .apu-floating-icon {
+    display: grid;
+    width: 25px;
+    height: 25px;
+    place-items: center;
+    border-radius: 9px;
+    background: #e0f3e8;
+    color: #438d78;
+    font-size: 14px;
+  }
+
+  #apu-landing-root .apu-section { padding: 58px 0; }
+  #apu-landing-root .apu-section-head { max-width: 620px; margin-bottom: 27px; }
+  #apu-landing-root .apu-kicker {
+    color: #438d78;
+    font-size: 12px;
+    font-weight: 750;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+  #apu-landing-root h2 {
+    margin: 9px 0 10px;
+    font-size: clamp(30px, 4vw, 42px);
+    line-height: 1.08;
+    letter-spacing: -.055em;
+  }
+  #apu-landing-root .apu-section-intro { margin: 0; color: var(--apu-muted); font-size: 15px; line-height: 1.7; }
+  #apu-landing-root .apu-features {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 15px;
+  }
+  #apu-landing-root .apu-feature {
+    min-height: 190px;
+    padding: 22px;
+    border: 1px solid var(--apu-line);
+    border-radius: 22px;
+    background: rgba(255, 255, 255, .72);
+    box-shadow: 0 10px 28px rgba(33, 80, 68, .04);
+  }
+  #apu-landing-root .apu-feature-icon {
+    display: grid;
+    width: 44px;
+    height: 44px;
+    place-items: center;
+    margin-bottom: 18px;
+    border: 1px solid rgba(23, 44, 44, .05);
+    border-radius: 15px;
+    background: linear-gradient(145deg, #fff5d6, #f7d974);
+    font-size: 19px;
+  }
+  #apu-landing-root .apu-feature h3 { margin: 0 0 7px; font-size: 17px; letter-spacing: -.03em; }
+  #apu-landing-root .apu-feature p { margin: 0; color: var(--apu-muted); font-size: 13px; line-height: 1.65; }
+  #apu-landing-root .apu-install {
+    display: grid;
+    grid-template-columns: .78fr 1.22fr;
+    gap: 48px;
+    align-items: start;
+    padding: clamp(25px, 5vw, 46px);
+    border: 1px solid rgba(23, 44, 44, .08);
+    border-radius: 28px;
+    background: linear-gradient(130deg, rgba(224,244,236,.9), rgba(255,255,255,.87));
+  }
+  #apu-landing-root .apu-steps { display: grid; gap: 14px; }
+  #apu-landing-root .apu-step {
+    display: grid;
+    grid-template-columns: 35px 1fr;
+    gap: 13px;
+    align-items: start;
+    padding-bottom: 14px;
+    border-bottom: 1px solid rgba(23, 44, 44, .08);
+  }
+  #apu-landing-root .apu-step:last-child { padding-bottom: 0; border-bottom: 0; }
+  #apu-landing-root .apu-step-num {
+    display: grid;
+    width: 31px;
+    height: 31px;
+    place-items: center;
+    border-radius: 11px;
+    background: #fff0bc;
+    color: #84630c;
+    font-size: 12px;
+    font-weight: 800;
+  }
+  #apu-landing-root .apu-step strong { display: block; margin: 1px 0 3px; font-size: 14px; }
+  #apu-landing-root .apu-step span { display: block; color: var(--apu-muted); font-size: 12px; line-height: 1.6; }
+  #apu-landing-root .apu-bottom-cta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    margin: 62px 0 45px;
+    padding: 27px 30px;
+    border: 1px solid rgba(23, 44, 44, .08);
+    border-radius: 22px;
+    background: rgba(255, 255, 255, .82);
+  }
+  #apu-landing-root .apu-bottom-cta h2 { margin: 0 0 6px; font-size: clamp(22px, 3vw, 30px); }
+  #apu-landing-root .apu-bottom-cta p { margin: 0; color: var(--apu-muted); font-size: 13px; }
+  #apu-landing-root .apu-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 21px 0 28px;
+    border-top: 1px solid var(--apu-line);
+    color: #869591;
+    font-size: 11px;
+  }
+  #apu-landing-root .apu-footer a { color: #577a70; text-decoration: none; }
+  #apu-landing-root .apu-footer a:hover { text-decoration: underline; }
+
+  @media (max-width: 800px) {
+    #apu-landing-root .apu-hero { grid-template-columns: 1fr; gap: 18px; min-height: auto; padding: 55px 0 30px; }
+    #apu-landing-root .apu-visual { min-height: 405px; }
+    #apu-landing-root .apu-features { grid-template-columns: 1fr; }
+    #apu-landing-root .apu-feature { min-height: 0; }
+    #apu-landing-root .apu-install { grid-template-columns: 1fr; gap: 25px; }
+    #apu-landing-root .apu-bottom-cta { align-items: flex-start; flex-direction: column; }
+  }
+  @media (max-width: 520px) {
+    #apu-landing-root .apu-shell { width: min(100% - 28px, 1120px); }
+    #apu-landing-root .apu-topbar { padding: 14px 0; }
+    #apu-landing-root .apu-nav { gap: 0; }
+    #apu-landing-root .apu-nav a:not(.apu-nav-cta) { display: none; }
+    #apu-landing-root .apu-nav-cta { padding: 9px 12px; font-size: 12px; }
+    #apu-landing-root .apu-hero { padding-top: 43px; }
+    #apu-landing-root h1 { font-size: clamp(44px, 13vw, 64px); }
+    #apu-landing-root .apu-visual { min-height: 380px; }
+    #apu-landing-root .apu-phone { width: min(260px, 75%); }
+    #apu-landing-root .apu-floating-note { right: -2px; bottom: 22px; }
+    #apu-landing-root .apu-section { padding: 39px 0; }
+    #apu-landing-root .apu-install { padding: 22px; border-radius: 22px; }
+    #apu-landing-root .apu-bottom-cta { margin: 40px 0 30px; padding: 21px; }
+    #apu-landing-root .apu-footer { align-items: flex-start; flex-direction: column; gap: 7px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #apu-landing-root *, #apu-landing-root *::before, #apu-landing-root *::after {
+      scroll-behavior: auto !important;
+      transition-duration: .01ms !important;
+    }
+  }
+</style>
+
+<div id="apu-landing-root">
+  <header class="apu-shell apu-topbar">
+    <a class="apu-brand" href="#top" aria-label="APU — на главную">
+      <span class="apu-mark">APU</span>
+      <span>APU<span style="color:#438d78">.</span></span>
+    </a>
+    <nav class="apu-nav" aria-label="Навигация">
+      <a href="#features">Возможности</a>
+      <a href="#install">Установка</a>
+      <a class="apu-nav-cta" href="#download">Скачать приложение</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="apu-shell apu-hero">
+      <div>
+        <span class="apu-eyebrow"><span class="apu-dot"></span> Общение без лишнего</span>
+        <h1>Ближе друг к другу.<br><span class="apu-title-accent">Проще на связи.</span></h1>
+        <p class="apu-lead">APU — мессенджер для личных чатов, сообществ и обмена файлами. Установите приложение и оставайтесь на связи с теми, кто важен.</p>
+        <div class="apu-actions" id="download">
+          <a class="apu-download" data-apu-download href="https://p2p-relay.apuchat.workers.dev/update/apk" download="app-release.apk" aria-label="Скачать приложение APU для Android">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3.5v11m0 0 4-4m-4 4-4-4M5 17.5v2A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Скачать APU для Android
+          </a>
+          <a class="apu-small-link" href="#install">Как установить&nbsp; →</a>
+        </div>
+        <div class="apu-version" aria-live="polite">
+          <svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M10 2.5a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15Z" stroke="currentColor" stroke-width="1.4"/><path d="m6.7 10.2 2.1 2.1 4.7-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span id="apu-version">Последняя версия приложения</span>
+        </div>
+      </div>
+
+      <div class="apu-visual" aria-hidden="true">
+        <div class="apu-orbit"></div>
+        <div class="apu-phone">
+          <div class="apu-phone-screen">
+            <div class="apu-phone-top"><span>9:41</span><span class="apu-phone-app">APU</span><span>● ● ●</span></div>
+            <p class="apu-chat-title">Сообщения</p>
+            <p class="apu-chat-subtitle">Ваши разговоры — в одном месте</p>
+            <div class="apu-message">Привет! Ты уже здесь? ☀️</div>
+            <div class="apu-message apu-outgoing">Да, всё получилось 🙂</div>
+            <div class="apu-message">Отлично, скоро напишу!</div>
+            <div class="apu-chat-preview">
+              <span class="apu-avatar">А</span>
+              <span class="apu-preview-lines"><b>Наше сообщество</b><span>Новые сообщения уже здесь</span></span>
+              <span style="color:#8aa29a;font-size:10px">сейчас</span>
+            </div>
+            <div class="apu-chat-preview">
+              <span class="apu-avatar" style="background:linear-gradient(145deg,#d7f0e4,#a9d9c6);color:#397968">М</span>
+              <span class="apu-preview-lines"><b>Маша</b><span>Фото и документы</span></span>
+              <span style="color:#8aa29a;font-size:10px">10:24</span>
+            </div>
+          </div>
+        </div>
+        <div class="apu-floating-note"><span class="apu-floating-icon">✦</span> Чаты и сообщества в APU</div>
+      </div>
+    </section>
+
+    <section class="apu-shell apu-section" id="features">
+      <div class="apu-section-head">
+        <span class="apu-kicker">Всё важное рядом</span>
+        <h2>Общайтесь своим способом</h2>
+        <p class="apu-section-intro">Личные разговоры, сообщества и файлы — без перегруженного интерфейса.</p>
+      </div>
+      <div class="apu-features">
+        <article class="apu-feature">
+          <span class="apu-feature-icon" aria-hidden="true">☼</span>
+          <h3>Личные чаты</h3>
+          <p>Общайтесь с близкими и возвращайтесь к важным разговорам в удобное время.</p>
+        </article>
+        <article class="apu-feature">
+          <span class="apu-feature-icon" aria-hidden="true">◉</span>
+          <h3>Сообщества</h3>
+          <p>Объединяйтесь по интересам, читайте каналы и делитесь новостями.</p>
+        </article>
+        <article class="apu-feature">
+          <span class="apu-feature-icon" aria-hidden="true">↗</span>
+          <h3>Файлы и обновления</h3>
+          <p>Передавайте нужные файлы и устанавливайте новые версии APU с этой страницы.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="apu-shell apu-section" id="install">
+      <div class="apu-install">
+        <div>
+          <span class="apu-kicker">Начать просто</span>
+          <h2>Установка за пару шагов</h2>
+          <p class="apu-section-intro">Скачайте установочный файл на Android-устройство и откройте его после загрузки.</p>
+        </div>
+        <div class="apu-steps">
+          <div class="apu-step"><span class="apu-step-num">01</span><span><strong>Скачайте APK</strong><span>Нажмите «Скачать APU для Android» выше.</span></span></div>
+          <div class="apu-step"><span class="apu-step-num">02</span><span><strong>Откройте файл</strong><span>Найдите загрузку в уведомлениях или папке «Загрузки».</span></span></div>
+          <div class="apu-step"><span class="apu-step-num">03</span><span><strong>Подтвердите установку</strong><span>Следуйте подсказкам Android. Если система спросит разрешение на установку, подтвердите его для браузера.</span></span></div>
+        </div>
+      </div>
+
+      <div class="apu-bottom-cta">
+        <div><h2>Готовы попробовать APU?</h2><p>Скачайте приложение и начните общение.</p></div>
+        <a class="apu-download" data-apu-download href="https://p2p-relay.apuchat.workers.dev/update/apk" download="app-release.apk">
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3.5v11m0 0 4-4m-4 4-4-4M5 17.5v2A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5v-2" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Скачать приложение
+        </a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="apu-shell apu-footer">
+    <span>© APU · Официальная страница приложения</span>
+    <a href="#top" class="apu-text-link">Наверх ↑</a>
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var label = document.getElementById('apu-version');
+    var links = document.querySelectorAll('[data-apu-download]');
+    var latestUrl = 'https://p2p-relay.apuchat.workers.dev/update/latest';
+    var fallbackApkUrl = 'https://p2p-relay.apuchat.workers.dev/update/apk';
+    var siteMetadataUrl = 'https://apu.clan.su/downloads/latest.json';
+    var siteApkUrl = 'https://apu.clan.su/downloads/app-release.apk';
+
+    function setDownloadUrl(url) {
+      for (var i = 0; i < links.length; i++) links[i].href = url;
+    }
+
+    function fetchJson(url) {
+      return fetch(url + (url.indexOf('?') < 0 ? '?' : '&') + 't=' + Date.now(), {
+        cache: 'no-store',
+        credentials: 'omit'
+      }).then(function (response) {
+        if (!response.ok) throw new Error('metadata unavailable');
+        return response.json();
+      });
+    }
+
+    function versionParts(value) {
+      var clean = String(value || '').trim().replace(/^[vV]/, '').split(/[+-]/)[0];
+      if (!/^\d+(?:\.\d+)*$/.test(clean)) return null;
+      return clean.split('.').map(function (part) { return Number(part); });
+    }
+
+    function sameVersion(left, right) {
+      var a = versionParts(left);
+      var b = versionParts(right);
+      if (!a || !b) return false;
+      var length = Math.max(a.length, b.length);
+      for (var i = 0; i < length; i++) {
+        if ((a[i] || 0) !== (b[i] || 0)) return false;
+      }
+      return true;
+    }
+
+    function sha256(value) {
+      var clean = String(value || '').trim().replace(/^sha256:/i, '').toLowerCase();
+      return /^[a-f0-9]{64}$/.test(clean) ? clean : '';
+    }
+
+    function siteCopyMatches(release, site) {
+      if (!sameVersion(site.version, release.tag_name)) return false;
+      var expectedRaw = String(release.apk_sha256 || '').trim();
+      if (!expectedRaw) return true;
+      var expected = sha256(expectedRaw);
+      var actual = sha256(site.sha256);
+      return !!expected && expected === actual;
+    }
+
+    // Safe default: if JavaScript or metadata is unavailable, the button still
+    // uses the existing relay and can never unknowingly serve an old site APK.
+    setDownloadUrl(fallbackApkUrl);
+
+    fetchJson(latestUrl).then(function (release) {
+      var version = release && typeof release.tag_name === 'string' ? release.tag_name.trim() : '';
+      if (!version) throw new Error('release version unavailable');
+      if (release.metadata_stale === true) {
+        if (label) label.textContent = 'Последняя версия временно недоступна';
+        return;
+      }
+      if (label) label.textContent = 'Актуальная версия · ' + version;
+
+      fetchJson(siteMetadataUrl).then(function (site) {
+        if (siteCopyMatches(release, site)) setDownloadUrl(siteApkUrl);
+      }).catch(function () {
+        // Missing/old site metadata keeps the relay fallback selected.
+      });
+    }).catch(function () {
+      if (label) label.textContent = 'Сведения о версии временно недоступны';
+    });
+  })();
+</script>

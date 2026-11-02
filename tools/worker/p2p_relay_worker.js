@@ -1359,6 +1359,17 @@ async function handleVersion(env) {
 const RELEASE_REPO = "vzhem/APUMIR";
 const RELEASE_ASSET = "app-release.apk";
 
+/** SHA-256 официального APK из GitHub Releases API, если опубликован. */
+function releaseApkSha256(release) {
+  const assets = release && Array.isArray(release.assets) ? release.assets : [];
+  const asset = assets.find((item) =>
+    item && typeof item.name === "string" && item.name.toLowerCase() === RELEASE_ASSET.toLowerCase()
+  );
+  const digest = asset && typeof asset.digest === "string" ? asset.digest : "";
+  const match = digest.match(/^sha256:([a-f0-9]{64})$/i);
+  return match ? match[1].toLowerCase() : "";
+}
+
 /** Ответ сервиса для телефона: адрес APK всегда от текущего домена. */
 function latestResponse(payload, extraHeaders = {}) {
   return new Response(JSON.stringify(payload), {
@@ -1435,6 +1446,8 @@ async function handleUpdateLatest(request, env) {
       tag_name: typeof data.tag_name === "string" ? data.tag_name : "",
       notes: typeof data.body === "string" ? data.body.slice(0, 4096) : "",
       published_at: typeof data.published_at === "string" ? data.published_at : "",
+      apk_sha256: releaseApkSha256(data),
+      metadata_stale: false,
       // APK телефон тоже берёт здесь же: /update/apk отдаёт файл последнего
       // релиза с этого домена (в жёсткой сети другой путь всё равно не пройдёт).
       apk_url: apkUrl,
@@ -1457,6 +1470,8 @@ async function handleUpdateLatest(request, env) {
       tag_name: tag,
       notes: same && typeof cached.notes === "string" ? cached.notes : "",
       published_at: same && typeof cached.published_at === "string" ? cached.published_at : "",
+      apk_sha256: same && typeof cached.apk_sha256 === "string" ? cached.apk_sha256 : "",
+      metadata_stale: false,
       apk_url: apkUrl,
     };
     await writeLatestCache(env, payload);
@@ -1481,6 +1496,7 @@ function withCurrentApkUrl(cached, request) {
   }
   if (!payload || typeof payload !== "object") return cached;
   payload.apk_url = new URL("/update/apk", request.url).toString();
+  payload.metadata_stale = true;
   return JSON.stringify(payload);
 }
 
