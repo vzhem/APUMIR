@@ -29,7 +29,10 @@
   `check-docs-index.py` (69 документов), `check-hardcoded-strings.py`,
   `check-silent-catch.py`, `check-god-files.py`, разбор RU/EN XML ресурсов.
   JVM/Android-сборку локально запустить нельзя: в sandbox отсутствуют `java` и
-  `JAVA_HOME`; веточный workflow будет запущен после отправки коммита.
+  `JAVA_HOME`. **Веточная CI-сборка зелёная** на `2787e97`: Build Release APK run
+  [41474952777](https://github.com/vzhem/APUMIR/actions/runs/41474952777), 22m52s;
+  все контракты, native build, JVM unit tests, assemble/sign/checksum прошли;
+  `Create Release` пропущен, релиз не публиковался.
 - Физическая проверка результата на телефоне владельца остаётся необходимой:
   Android-кэш и системные распакованные данные в этой карточке не видны.
 
