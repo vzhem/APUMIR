@@ -63,9 +63,10 @@
   метаинформация оставляет резервный Worker URL; GitHub-ссылки в HTML не показываются.
 - В приложении `UpdateChecker` делает ту же проверку до загрузки APK: если uCoz sidecar
   точный, выбирает uCoz-файл и отключает обход через delta patch; иначе остаётся старый
-  путь Worker (полный APK) / существующий GitHub delta-механизм. Worker `/update/latest`
-  теперь отдаёт SHA-256 asset и пометку `metadata_stale`, чтобы приложение и страница
-  не выбирали uCoz по устаревшему кэшу Worker.
+  путь Worker (полный APK) / существующий GitHub delta-механизм. В исходнике
+  `tools/worker/p2p_relay_worker.js` добавлены SHA-256 asset и пометка `metadata_stale`,
+  чтобы приложение и страница не выбирали uCoz по устаревшему кэшу. Live Worker агентом
+  не развёртывался.
 - Создан `website/latest.json` для текущего APK (`v11.74.477`, SHA-256
   `8d81ddc7646b81131bba6072182eb62f6977643aa3008e22d6e7e995798f9706`). Владелец
   сам загружает sidecar в `/downloads/latest.json` после проверки APK; для будущих релизов
