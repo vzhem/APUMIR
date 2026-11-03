@@ -109,6 +109,13 @@ class HeartGameContracts(unittest.TestCase):
         network = (SRC / 'data/heartgame/HeartGameNetwork.kt').read_text()
         self.assertIn('HeartGameWire.shortNodeName(id)', network)
         self.assertNotIn('UsernameHolder.name.value.orEmpty()', network)
+        # Подписанный «pk_...» - заглушка отправителя без имени, а не ник:
+        # получатель обязан предпочесть настоящее имя из адресной книги,
+        # иначе в лидерах висит короткий узел (владелец, 03.11.2026).
+        self.assertIn('fun isNodePlaceholder(', wire)
+        self.assertIn('!isNodePlaceholder(signed, entry)', wire)
+        # Отправитель без @ника подписывается именем профиля, а не «pk_...».
+        self.assertIn('PROFILE_NAME_KEY = "display_name"', network)
 
     def test_private_account_scoped_score_and_opt_in(self):
         store = (SRC / 'data/heartgame/HeartGameStore.kt').read_text()

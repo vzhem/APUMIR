@@ -176,11 +176,20 @@ object HeartGameWire {
      */
     fun displayName(entry: Entry, contactName: String?): String {
         val signed = entry.name.trim()
-        if (signed.isNotEmpty()) return signed
+        // Подписанным может прийти само короткое обозначение узла: отправитель
+        // подставляет его, когда имя профиля ещё не задано (см.
+        // HeartGameNetwork). Это заглушка, а не ник: настоящее имя из адресной
+        // книги важнее её, иначе в лидерах висит «pk_b68664...14e6» у человека,
+        // которого телефон знает по имени (жалоба владельца 03.11.2026).
+        if (signed.isNotEmpty() && !isNodePlaceholder(signed, entry)) return signed
         val known = contactName?.trim().orEmpty()
         if (known.isNotEmpty()) return known
         return shortNodeName(entry.nodeId, entry.keyId)
     }
+
+    /** Подписано короткое обозначение узла, а не имя человека. */
+    fun isNodePlaceholder(name: String, entry: Entry): Boolean =
+        name.trim() == shortNodeName(entry.nodeId, entry.keyId)
 
     /** Короткое обозначение узла: «pk_1a2b3c…9f0e». Пустым не бывает. */
     fun shortNodeName(nodeId: String, keyId: String = ""): String {
@@ -192,7 +201,8 @@ object HeartGameWire {
     /** Ключ склейки: имя без регистра; без имени - свой узел, ни с кем не вместе. */
     private fun mergeKey(group: List<Entry>): String {
         val name = group.firstNotNullOfOrNull { entry ->
-            entry.name.trim().lowercase(java.util.Locale.ROOT).takeIf { it.isNotEmpty() }
+            entry.name.trim().lowercase(java.util.Locale.ROOT)
+                .takeIf { it.isNotEmpty() && !isNodePlaceholder(entry.name, entry) }
         }
         if (name != null) return "name:" + name
         val node = group.first().nodeId.trim().lowercase(java.util.Locale.ROOT)
