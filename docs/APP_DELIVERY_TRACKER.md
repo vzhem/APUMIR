@@ -38,7 +38,14 @@
   Локально зелёные: `check-god-files`, `check-hardcoded-strings`,
   `check-silent-catch`, `check-docs-index`, `check-rank-entitlements`.
 - Android/JVM-сборка локально не запускается (в песочнице нет `java`), поэтому
-  компиляцию и `testReleaseUnitTest` подтверждает только веточная CI-сборка.
+  компиляцию и `testReleaseUnitTest` подтверждает веточная CI-сборка.
+  Первый прогон нашёл две мои ошибки в выносе файлов (потерянный `@OptIn` у
+  `MessageInputBar`, потерянные `nowMs` и `onVoiceLocked`/`onCallLocked`/
+  `onVideoLocked`) и неверное ожидание в новом тесте — всё исправлено.
+  **JVM unit tests зелёные** на `67a7e05`: run 41578213181, 1461 тест, включая
+  `FeatureRankPolicyTest` и обновлённый `FileTransferRankPolicyTest`.
+  Сборка APK (`Build Release APK`) на этой ветке идёт отдельным прогоном;
+  результат фиксируется здесь после её завершения.
 - Документ со списком и таблицей проверок: `docs/RANK_ENTITLEMENTS.md`.
 
 ## Лишние копии APK: исправлено и опубликовано в v11.74.478, 2026-11-02
