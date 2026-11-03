@@ -1306,14 +1306,14 @@ fun ChatDetailScreen(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 internal fun MessageInputBar(
     text: String,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onSendChoice: (com.vladimir.messenger.ui.components.SendChoice) -> Unit = {},
     onVoiceReady: (android.net.Uri) -> Unit = {},
-    /** Ранг ещё не открыл голосовые: кнопка объясняет это вместо записи. */
-    onVoiceLocked: () -> Unit = {},
+    onVoiceLocked: () -> Unit = {},   // ранг: голосовые ещё закрыты
     scheduled: List<com.vladimir.messenger.data.schedule.ScheduledSendStore.Item> = emptyList(),
     onCancelScheduled: (String) -> Unit = {},
     replyAuthor: String? = null,
