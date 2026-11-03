@@ -96,12 +96,12 @@ class FileTransferRankPolicyTest {
     }
 
     @Test
-    fun groupAndChannelCreationUnlockAtTenAndThirty() {
+    fun groupAndChannelCreationUnlockAtTen() {
         assertTrue(!FileTransferRankPolicy.canCreateGroup(9))
         assertTrue(FileTransferRankPolicy.canCreateGroup(10))
         assertTrue(FileTransferRankPolicy.canCreateGroup(1_000))
-        assertTrue(!FileTransferRankPolicy.canCreateChannel(29))
-        assertTrue(FileTransferRankPolicy.canCreateChannel(30))
+        assertTrue(!FileTransferRankPolicy.canCreateChannel(9))
+        assertTrue(FileTransferRankPolicy.canCreateChannel(10))
         assertTrue(FileTransferRankPolicy.canCreateChannel(1_000))
     }
 
@@ -159,10 +159,10 @@ class FileTransferRankPolicyTest {
     fun rankSummariesDescribeCommunityUnlocks() {
         val conductor = FileTransferRankPolicy.entitlement(10).unlockedFeatureSummary()
         assertTrue("Создание групп" in conductor)
-        assertTrue("Создание каналов" !in conductor)
+        assertTrue("Создание каналов" in conductor)
+        // С «Проводника» открыто всё: у «Навигатора» тот же полный список.
         val navigator = FileTransferRankPolicy.entitlement(30).unlockedFeatureSummary()
-        assertTrue("Создание групп" in navigator)
-        assertTrue("Создание каналов" in navigator)
+        assertEquals(conductor, navigator)
     }
 
     @Test

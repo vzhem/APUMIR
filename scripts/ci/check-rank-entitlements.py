@@ -11,7 +11,8 @@
 
   1) пороги собраны В ОДНОМ месте (`data/rank/FeatureRankPolicy.kt`), и
      `FileTransferRankPolicy` не держит собственных чисел: он берёт порог из
-     `FeatureRankPolicy`/`RankCapability`;
+     `FeatureRankPolicy`/`RankCapability`; с 10 ранга разрешено всё — ни один
+     порог не выше «Проводника», а каналы открываются вместе с группами;
   2) ключевые ограничения проверяются НЕ ТОЛЬКО в Compose, но и там, где
      действие реально начинается (ViewModel/сервис): вложения, геолокация,
      звонки, истории, видео;
@@ -60,7 +61,7 @@ class RankEntitlementsContract(unittest.TestCase):
             ("CREATE_POLL", 3),
             ("SEND_VIDEO", 10),
             ("CREATE_GROUP", 10),
-            ("CREATE_CHANNEL", 30),
+            ("CREATE_CHANNEL", 10),
         ):
             self.assertRegex(
                 self.policy,
@@ -71,6 +72,18 @@ class RankEntitlementsContract(unittest.TestCase):
         # нечем заработать и нечем пользоваться свежей установке.
         for name in ("SEND_TEXT", "RECEIVE_MEDIA", "JOIN_COMMUNITIES", "HEART_GAME", "SHARE_CONTACT"):
             self.assertRegex(self.policy, rf"{name}\(0\)", f"{name} must stay free at rank 0")
+
+    def test_everything_is_allowed_from_tenth_rank(self):
+        # Решение владельца: с 10 ранга разрешено всё. Ни одна возможность не
+        # вправе требовать больше «Проводника», а создание сообществ в
+        # репозитории проверяется тем же рубежом, что и на экране: канал не
+        # должен снова уехать на отдельный высокий порог мимо политики.
+        thresholds = [int(value) for value in re.findall(r"^\s+[A-Z_]+\((\d+)\),?\s*$", self.policy, re.M)]
+        self.assertTrue(thresholds, "capability thresholds must be parseable")
+        self.assertEqual(10, max(thresholds), "no capability may open above rank 10")
+        self.assertIn("const val FULL_ACCESS_RANK = 10", self.policy)
+        groups_module = read(JAVA / "di/GroupsModule.kt")
+        self.assertIn("entitlement.canCreateGroup && entitlement.canCreateChannel", groups_module)
 
     def test_attachment_policy_does_not_hardcode_ranks_again(self):
         self.assertIn("FeatureRankPolicy.CIRCLE_RANK", self.file_policy)

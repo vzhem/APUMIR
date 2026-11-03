@@ -399,12 +399,12 @@ class GroupRepository(
     /** Когда последний раз просили конкретный узел представиться. */
     private val lastWhoIsAskedMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
-    /** Для экранов: доступно ли текущему рангу создание групп. */
+    /** Для экранов: доступно ли текущему рангу создание групп и каналов. */
     fun canCreateGroupsNow(): Boolean = canCreateGroups()
 
     /**
-     * Создание группы. Возвращает ошибку, если ранг не даёт права создавать
-     * группы, — правило из MASTER_PLAN и FileTransferRankPolicy.canCreateGroup.
+     * Создание группы или канала. Возвращает ошибку, если ранг не даёт права
+     * создавать сообщества, — правило FileTransferRankPolicy (с 10, «Проводник»).
      */
     suspend fun createGroup(
         title: String,
@@ -419,7 +419,7 @@ class GroupRepository(
     ): Result<GroupSummary> {
         if (!canCreateGroups()) {
             return Result.failure(
-                IllegalStateException("Создание групп доступно с ранга «Проводник»")
+                IllegalStateException("Создание групп и каналов доступно с ранга «Проводник»")
             )
         }
         val me = myId()
