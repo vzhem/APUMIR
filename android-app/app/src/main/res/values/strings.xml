@@ -537,6 +537,7 @@
     <string name="rank_invite_body">Отправьте ссылку другу. После подтверждения приглашение добавит в игру 1 000 сердечек — это эквивалент одного шага ранга.</string>
     <string name="rank_grows_title">Ранг растёт от сердечек и приглашений</string>
     <string name="rank_benefits_title">Ранги и возможности</string>
+    <string name="rank_feature_locked">%1$s открывается с ранга «%2$s» — это %3$d подтверждённых приглашений. Сейчас подтверждено: %4$d.</string>
     <!-- Согласие на языковой пакет -->
     <string name="translate_consent_title">Скачать языковой пакет?</string>
     <string name="translate_consent_body">Для перевода нужны языковые пакеты Google (около 30 МБ на каждый язык). Они скачиваются один раз, когда встречается текст на новом языке. Текст сообщений при этом не отправляется на сервер.</string>
@@ -1789,7 +1790,7 @@
     <string name="gif_server_busy">Сервер перегружен — показываю сохранённые гифки.</string>
     <string name="cdv_downloading_from">Качается с %1$s - сейчас отправим</string>
     <string name="cdv_asked_by">Просили: %1$s</string>
-    <string name="cdv_files_locked">Отправка файлов, фото и видео открывается с ранга «Круг друзей» — это 3 подтверждённых приглашения. Сейчас подтверждено: %1$d.</string>
+    <string name="cdv_files_locked">Отправка фото, файлов и голосовых открывается с ранга «Круг друзей» — это 3 подтверждённых приглашения. Видео открывается с ранга «Проводник». Сейчас подтверждено: %1$d.</string>
     <string name="cdv_gif_not_sent">Гифка не отправлена: %1$s</string>
     <string name="peer_node_suffix">%1$s узел</string>
     <string name="identity_nick_hint">Никнейм для восстановления: @%1$s</string>

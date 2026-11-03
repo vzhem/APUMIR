@@ -1068,11 +1068,28 @@ class ChatListViewModel @Inject constructor(
         const val MAX_WINDOW = 3000
     }
 
+    /**
+     * Публикация своей истории открывается с «Круга друзей» (3 подтверждённых
+     * приглашения); просмотр чужих остаётся бесплатным. Правило и текст отказа
+     * живут в data/rank — здесь только состояние экрана.
+     */
+    fun canPublishStory(): Boolean = StoryRankGate.canPublish(appContext)
+
+    /** Тап по «добавить историю» без права: объясняем в общей плашке ошибок. */
+    fun onStoryLocked() {
+        _uiState.update { it.copy(error = StoryRankGate.lockedNotice(appContext)) }
+    }
+
     fun acknowledgeError(expected: String) {
         _uiState.update { if (it.error == expected) it.copy(error = null) else it }
     }
 
     internal fun publishVideoStory(exported: com.vladimir.messenger.data.story.StoryVideoExporter.Exported) {
+        if (!canPublishStory()) {
+            onStoryLocked()
+            exported.delete()
+            return
+        }
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
@@ -1098,6 +1115,10 @@ class ChatListViewModel @Inject constructor(
     /** Своя история: сохранить и разослать контактам личных чатов. */
     fun publishStory(text: String, bg: Int, photoB64: String? = null, photoCircle: Boolean = false) {
         if (text.isBlank() && photoB64 == null) return
+        if (!canPublishStory()) {
+            onStoryLocked()
+            return
+        }
         viewModelScope.launch {
             val me = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 com.vladimir.messenger.data.RustBridge.nodeId().orEmpty()

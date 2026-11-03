@@ -7,13 +7,14 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.RustBridge
-import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.file.FileTransferRouter
 import com.vladimir.messenger.data.file.OutgoingFilePreparationService
 import com.vladimir.messenger.data.local.MessagePinPolicy
 import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.dao.MessagePinMutation
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
+import com.vladimir.messenger.data.rank.RankCapability
+import com.vladimir.messenger.data.rank.RankRights
 import com.vladimir.messenger.data.referral.ReferralRankStore
 import com.vladimir.messenger.data.repository.ChatRepository
 import com.vladimir.messenger.domain.model.Message
@@ -33,84 +34,6 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
 
-data class ChatDetailUiState(
-    val messages: List<Message> = emptyList(),
-    /** Раунд 173: закреплённые сообщения чата (свежие вверху). */
-    val pinned: List<Message> = emptyList(),
-    /** р235: собеседник сейчас печатает («печатает…» в шапке чата). */
-    val isPeerTyping: Boolean = false,
-    /**
-     * р241: переписка с СОБСТВЕННЫМ узлом (в контакты попал свой адрес -
-     * например, отсканировали собственный QR из профиля). Такая переписка
-     * никуда не ведёт: собеседника в ней нет. Показываем честную плашку,
-     * вместо того чтобы молча копить строки «в ожидании».
-     */
-    val isSelfChat: Boolean = false,
-    /**
-     * Собеседник сообщил ранг VIP (APURANK1) — у имени в шапке чата появляется
-     * знак, а вокруг аватарки — объёмное золотое кольцо с блеском.
-     */
-    val peerVip: Boolean = false,
-    /** Что известно о ранге собеседника (null - ещё не сообщал). */
-    val peerRankQualified: Int? = null,
-    /**
-     * От собеседника приходят конверты, которые не вскрываются: у него осталась
-     * прежняя копия нашего ключа (переустановка/восстановление профиля). Пока
-     * это так, в переписке висит золотая плашка с объяснением и кнопкой
-     * «Отправить мой ключ» — раньше об этом знал только отчёт «Логи».
-     */
-    val keyDesync: Boolean = false,
-    /**
-     * Переписка с САМИМ СОБОЙ и мой ранг — VIP: тогда кольцо и знак показываем
-     * у своего узла (в такой переписке собеседника нет).
-     */
-    val selfVip: Boolean = false,
-    val transfers: List<FileTransferEntity> = emptyList(),
-    val inputText: String       = "",
-    val isLoading: Boolean      = true,
-    /** Local database error, distinct from sending/network errors. */
-    val historyError: String?   = null,
-    val isSending: Boolean      = false,
-    val isPreparingFile: Boolean = false,
-    val error: String?          = null,
-    val isContactOnline: Boolean = false,
-    /** Срок паузы уведомлений этого личного чата. */
-    val mutedUntilMs: Long = 0L,
-    /** @никнейм собеседника: показывает карточка профиля. */
-    val contactUsername: String = "",
-    /** Сердечки и анти-рейтинг профиля собеседника. */
-    val heartCount: Int = 0,
-    val heartMine: Boolean = false,
-    val antiRatingCount: Int = 0,
-    val antiRatingMine: Boolean = false,
-    /** Временное предупреждение о всплеске жалоб (не одиночные отметки). */
-    val antiRatingWarning: Boolean = false,
-    val antiRatingUntilMs: Long = 0,
-    val scrollToBottom: Boolean = false,
-    val pendingSave: com.vladimir.messenger.data.file.PendingFileExport? = null,
-    /** Non-null asks the screen to open Android's system picker for an explicit file retry. */
-    val pendingRetryFilePickerId: String? = null,
-    /** Ранг ещё не открыл вложения: кнопка объяснит это сразу, а не после выбора файла. */
-    val canSendAttachments: Boolean = true,
-    val attachmentsLockedHint: String = "",
-    /** Каталог GIF (наш сервер): гифки, курсор «ещё», состояние. */
-    val gifItems: List<com.vladimir.messenger.data.gif.GifItem> = emptyList(),
-    val gifNext: String = "",
-    val gifLoading: Boolean = false,
-    val gifError: String? = null,
-    /** Раунд 192: мягкая плашка, когда показываем сохранённые результаты. */
-    val gifNotice: String? = null,
-    /** Раунд 121: свой каталог роя. tab: "swarm" | "external". */
-    val gifTab: String = "swarm",
-    val myGifs: List<com.vladimir.messenger.data.gif.GifLibEntry> = emptyList(),
-    val swarmGifs: List<com.vladimir.messenger.data.gif.SwarmGif> = emptyList(),
-    val swarmStatus: String? = null,
-    /** Реакции по сообщениям: ключ - id сообщения. */
-    val reactions: Map<String, List<com.vladimir.messenger.data.reaction.ReactionSummary>> = emptyMap(),
-    /** Счётчик репостов по сообщениям: ключ - id сообщения. */
-    val repostCounts: Map<String, Int> = emptyMap(),
-    val replyTo: Message? = null,
-)
 
 @HiltViewModel
 class ChatDetailViewModel @Inject constructor(
@@ -494,27 +417,51 @@ class ChatDetailViewModel @Inject constructor(
     }
 
     /**
-     * Отправка файлов, фото, видео, GIF и стикеров открывается с ранга
-     * «Круг друзей» (3 подтверждённых приглашения). Текст доступен всегда.
+     * Права ранга в этом чате. Правила и тексты — в data/rank: экран только
+     * раскладывает снимок по состоянию.
+     */
+    private val rankRights = RankRights(appContext)
+
+    /**
+     * Фото, файлы, голосовые, GIF и стикеры открываются с «Круга друзей» (3),
+     * видео — с «Проводника» (10), звонки — с «Круга друзей». Текст доступен
+     * всегда.
      */
     private fun refreshAttachmentRights() {
-        val qualified = ReferralRankStore.qualifiedDirectCount(appContext)
-        val allowed = FileTransferRankPolicy.canSendAttachments(qualified)
+        val rights = rankRights.snapshot()
         _uiState.update {
             it.copy(
-                canSendAttachments = allowed,
-                attachmentsLockedHint = if (allowed) {
-                    ""
-                } else {
-                    appContext.getString(R.string.cdv_files_locked, qualified) + " " + appContext.getString(R.string.cdv_text_unlimited)
-                },
+                canSendAttachments = rights.canAttach,
+                attachmentsLockedHint = rankRights.attachLockedHint(rights),
+                canSendVideo = rights.canSendVideo,
+                videoLockedHint = rankRights.videoLockedHint(rights),
+                canCall = rights.canCall,
+                canVideoCall = rights.canVideoCall,
+                callLockedHint = rankRights.callLockedHint(rights),
             )
         }
     }
 
+    /** Готовый текст отказа по возможности — один на все экраны. */
+    private fun lockedHint(capability: RankCapability): String =
+        rankRights.lockedHint(capability)
+
+    // Отказ в общей плашке ошибок чата (одна строка: файл у потолка god-файлов).
+    private fun notify(text: String) = _uiState.update { it.copy(error = text) }
+
+
     /** Тап по скрепке при закрытых вложениях: объясняем, а не открываем выбор файла. */
-    fun onAttachmentsLocked() {
-        _uiState.update { it.copy(error = it.attachmentsLockedHint) }
+    fun onAttachmentsLocked() = notify(_uiState.value.attachmentsLockedHint)
+
+    /**
+     * Третий рубеж для GIF: карточка в панели ввода могла остаться от прошлой
+     * версии, а сервер каталога отдал бы её и «Гостю». Право — то же, что у
+     * остальных вложений: «Круг друзей» (3).
+     */
+    private fun gifAllowed(): Boolean {
+        if (rankRights.isAllowed(RankCapability.SEND_GIF)) return true
+        notify(_uiState.value.attachmentsLockedHint)
+        return false
     }
 
     /** Раунд 173: закреплённые сообщения - живой поток в шапку чата. */
@@ -779,6 +726,11 @@ class ChatDetailViewModel @Inject constructor(
      * со ссылкой на карту второй строкой).
      */
     fun sendLocation(lat: Double, lon: Double, accuracyM: Int?, label: String) {
+        // Геолокация — отправка своего наружу, поэтому с «Круга друзей» (3).
+        if (!rankRights.isAllowed(RankCapability.SHARE_LOCATION)) {
+            notify(lockedHint(RankCapability.SHARE_LOCATION))
+            return
+        }
         viewModelScope.launch {
             sendMessageUseCase(
                 chatId,
@@ -959,9 +911,9 @@ class ChatDetailViewModel @Inject constructor(
         if (_uiState.value.isPreparingFile) return
         // Второй рубеж: даже если кнопку обошли, подготовка файла не пройдёт.
         if (!_uiState.value.canSendAttachments) {
-            _uiState.update { it.copy(error = it.attachmentsLockedHint) }
-            return
+            _uiState.update { it.copy(error = it.attachmentsLockedHint) }; return
         }
+        if (rankRights.isVideoLocked(uri)) return notify(_uiState.value.videoLockedHint)
         viewModelScope.launch {
             _uiState.update { it.copy(isPreparingFile = true) }
             var targetRecipientId: String? = null
@@ -1445,6 +1397,7 @@ class ChatDetailViewModel @Inject constructor(
      */
     fun attachLocalGif(sha256: String) {
         if (_uiState.value.isPreparingFile) return
+        if (!gifAllowed()) return
         viewModelScope.launch {
             try {
                 sendGifRefInternal(sha256)
@@ -1579,6 +1532,7 @@ class ChatDetailViewModel @Inject constructor(
      */
     fun requestSwarmGif(swarm: com.vladimir.messenger.data.gif.SwarmGif) {
         if (_uiState.value.isPreparingFile) return
+        if (!gifAllowed()) return
         viewModelScope.launch {
             try {
                 sendGifRefInternal(swarm.entry.sha256)
@@ -1597,6 +1551,7 @@ class ChatDetailViewModel @Inject constructor(
      */
     fun attachGif(item: com.vladimir.messenger.data.gif.GifItem) {
         if (_uiState.value.isPreparingFile) return
+        if (!gifAllowed()) return
         viewModelScope.launch {
             _uiState.update { it.copy(isPreparingFile = true, error = null) }
             try {

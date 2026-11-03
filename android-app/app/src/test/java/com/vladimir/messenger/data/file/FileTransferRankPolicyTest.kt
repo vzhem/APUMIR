@@ -44,9 +44,13 @@ class FileTransferRankPolicyTest {
         }
         canSend(3, "image/jpeg", 1)
         canSend(3, "application/pdf", 1)
-        canSend(3, "video/mp4", 1)
         canSend(1_000, "image/gif", 1)
         assertTrue(FileTransferRankPolicy.canSendAttachments(3))
+        // Видео — отдельный, более высокий порог (решение владельца 2026-11-03).
+        assertThrows(IllegalStateException::class.java) {
+            FileTransferRankPolicy.requireCanSend(3, "video/mp4", 1)
+        }
+        canSend(10, "video/mp4", 1)
     }
 
     @Test
@@ -57,6 +61,15 @@ class FileTransferRankPolicyTest {
         val message = failure.message.orEmpty()
         assertTrue(message.contains("Круг друзей"))
         assertTrue(message.contains("Текстовые сообщения доступны"))
+
+        // Видео объясняет свой, более высокий ранг — иначе человек ищет
+        // несуществующую проблему на «Круге друзей».
+        val videoFailure = assertThrows(IllegalStateException::class.java) {
+            FileTransferRankPolicy.requireCanSend(3, "video/mp4", 1)
+        }
+        val videoMessage = videoFailure.message.orEmpty()
+        assertTrue(videoMessage.contains("Проводник"))
+        assertTrue(videoMessage.contains("10"))
     }
 
     @Test
@@ -65,6 +78,7 @@ class FileTransferRankPolicyTest {
         val mib = 1024L * 1024
         canSend(3, "image/png", Long.MAX_VALUE)
         canSend(3, "application/zip", 10 * mib + 1)
+        // Видео открывается с «Проводника», но размер и там не ограничен.
         canSend(10, "video/mp4", Long.MAX_VALUE)
         assertEquals("Проводник", FileTransferRankPolicy.entitlement(10).rankName)
     }
@@ -135,7 +149,10 @@ class FileTransferRankPolicyTest {
         val circle = FileTransferRankPolicy.entitlement(3).unlockedFeatureSummary()
         assertTrue("Отправка фото" in circle)
         assertTrue("Отправка файлов" in circle)
-        assertTrue("Отправка видео" in circle)
+        assertTrue("Голосовые сообщения" in circle)
+        // Видео на «Круге друзей» ещё закрыто — оно в списке «Проводника».
+        assertTrue("Отправка видео" !in circle)
+        assertTrue("Отправка видео" in FileTransferRankPolicy.entitlement(10).unlockedFeatureSummary())
     }
 
     @Test

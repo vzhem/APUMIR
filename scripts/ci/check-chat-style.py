@@ -227,7 +227,9 @@ class ChatStyleTest(unittest.TestCase):
         self.assertIn("if (known && !leftover && localCryptoReadyAtStartup)", service)
         self.assertIn("leftover=$leftover", service)
 
-        view_model = source("screens/chat/ChatDetailViewModel.kt")
+        # Поля состояния вынесены в ChatDetailUiState.kt (потолок god-файлов):
+        # проверяем и ViewModel, и файл состояния.
+        view_model = source("screens/chat/ChatDetailViewModel.kt") + source("screens/chat/ChatDetailUiState.kt")
         self.assertTrue("val keyDesync: Boolean = false" in view_model, "нет поля в состоянии чата")
         self.assertTrue("observeKeyDesync(chat.contactId)" in view_model, "нет наблюдения за пометкой")
         self.assertTrue("fun onKeyDesyncAction()" in view_model, "нет действия «отдать ключ»")

@@ -703,6 +703,8 @@ class CallManager @Inject constructor(
     /** Исходящий звонок (кнопка в чате). Безопасно при повторном нажатии. */
     fun startOutgoing(peerId: String, peerName: String, video: Boolean = false) {
         val now = nowMs()
+        // Ранг (CallRankGate, есть и deep link). Входящие не ограничены.
+        if (rejectByRank(peerId, peerName, video)) return
         synchronized(this) {
             val current = machine
             if (current != null && current.phase != CallStateMachine.Phase.IDLE &&
@@ -718,15 +720,7 @@ class CallManager @Inject constructor(
                     claimEngineForOutgoing(peerId, peerName, video)
                     return
                 }
-                _uiState.value = CallUiState(
-                    phase = CallStateMachine.Phase.ENDED,
-                    peerId = peerId,
-                    peerName = peerName,
-                    outgoing = true,
-                    video = video,
-                    endText = "Нет подключения к сети",
-                )
-                scheduleIdleReset()
+                finishBeforeStart(peerId, peerName, video, "Нет подключения к сети")
                 Log.w(TAG, "startOutgoing rejected: engine not running")
                 return
             }
@@ -764,6 +758,24 @@ class CallManager @Inject constructor(
     }
 
     /** р233: идёт ли звонок у этого устройства (передача роли во время звонка запрещена). */
+    /**
+     * Отказ по рангу (правило — [CallRankGate]): true — звонок не начат.
+     */
+    private fun rejectByRank(peerId: String, peerName: String, video: Boolean): Boolean {
+        val refusal = CallRankGate.rejection(appContext, video) ?: return false
+        finishBeforeStart(peerId, peerName, video, refusal)
+        return true
+    }
+
+    /** «Не начали»: завершённое состояние с причиной (одна копия на все отказы). */
+    private fun finishBeforeStart(peerId: String, peerName: String, video: Boolean, reason: String) {
+        _uiState.value = CallUiState(
+            phase = CallStateMachine.Phase.ENDED, peerId = peerId, peerName = peerName,
+            outgoing = true, video = video, endText = reason,
+        )
+        scheduleIdleReset()
+    }
+
     fun isBusy(): Boolean = synchronized(this) {
         val sm = machine ?: return@synchronized false
         sm.phase != CallStateMachine.Phase.IDLE && sm.phase != CallStateMachine.Phase.ENDED
@@ -1848,19 +1860,6 @@ class CallManager @Inject constructor(
             .onFailure { Log.w(TAG, "call server start failed: ${it.message}") }
     }
 
-    private fun randomKey(): ByteArray {
-        val key = ByteArray(16)
-        random.nextBytes(key)
-        return key
-    }
-
-    private fun newCallId(): String {
-        val bytes = ByteArray(16)
-        random.nextBytes(bytes)
-        return bytes.joinToString("") { "%02x".format(it.toInt() and 0xff) }
-    }
-
-    private fun nowMs(): Long = System.currentTimeMillis()
 
     companion object {
         private const val TAG = "CallManager"

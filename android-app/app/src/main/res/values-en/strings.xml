@@ -440,6 +440,7 @@
     <string name="rank_invite_body">Send a link to a friend. After the invitation is confirmed, the game gets 1,000 hearts — the equivalent of one rank step.</string>
     <string name="rank_grows_title">Your rank grows with hearts and invitations</string>
     <string name="rank_benefits_title">Ranks and perks</string>
+    <string name="rank_feature_locked">%1$s opens at the “%2$s” rank — that takes %3$d confirmed invitations. Confirmed so far: %4$d.</string>
     <!-- Согласие на языковой пакет -->
     <string name="translate_consent_title">Download language pack?</string>
     <string name="translate_consent_body">Translation needs Google language packs (about 30 MB per language). They download once, when text in a new language appears. Message text is not sent to any server.</string>
@@ -1675,7 +1676,7 @@
     <string name="gif_server_busy">The server is overloaded — showing saved GIFs.</string>
     <string name="cdv_downloading_from">Downloading from %1$s — will send now</string>
     <string name="cdv_asked_by">Requested by: %1$s</string>
-    <string name="cdv_files_locked">Sending files, photos and videos opens at the “Circle of friends” rank — that takes 3 confirmed invitations. Confirmed so far: %1$d.</string>
+    <string name="cdv_files_locked">Sending photos, files and voice messages opens at the “Circle of friends” rank — that takes 3 confirmed invitations. Video opens at the “Guide” rank. Confirmed so far: %1$d.</string>
     <string name="cdv_gif_not_sent">GIF not sent: %1$s</string>
     <string name="peer_node_suffix">%1$s node</string>
     <string name="identity_nick_hint">Nickname for recovery: @%1$s</string>

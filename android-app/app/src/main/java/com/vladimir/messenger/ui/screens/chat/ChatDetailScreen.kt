@@ -81,19 +81,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 
-private data class ChatRow(
-    val key: String,
-    val message: Message?,
-    val transfer: FileTransferEntity?,
-    val orderMs: Long,
-)
-
-private data class LocalSettingsUndo(
-    val scope: String,
-    val wallpaper: String?,
-    val textColor: String?,
-)
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatDetailScreen(
@@ -354,7 +341,7 @@ fun ChatDetailScreen(
             } else {
                 null
             },
-            onCall = if (contactId.startsWith("pk_")) {
+            onCall = if (contactId.startsWith("pk_") && uiState.canCall) {
                 {
                     showPeerProfile = false
                     onCallClick(contactId, contactName)
@@ -408,9 +395,9 @@ fun ChatDetailScreen(
                     ApuAction(title = stringResource(R.string.action_search), icon = Icons.Default.Search,
                         onClick = { searchOpen = !searchOpen; if (!searchOpen) searchQuery = "" }),
                     ApuAction(title = stringResource(R.string.menu_call), icon = Icons.Default.Call,
-                        enabled = canCall, onClick = { onCallClick(contactId, contactName) }),
+                        enabled = canCall && uiState.canCall, onClick = { onCallClick(contactId, contactName) }),
                     ApuAction(title = stringResource(R.string.menu_video_call), icon = Icons.Default.Videocam,
-                        enabled = canCall, onClick = { onVideoCallClick(contactId, contactName) }),
+                        enabled = canCall && uiState.canVideoCall, onClick = { onVideoCallClick(contactId, contactName) }),
                     if (contactId.isNotBlank()) ApuAction(title = stringResource(R.string.chat_rename),
                         icon = Icons.Default.Edit, onClick = { onRenameClick(contactId, contactName) }) else null,
                     ApuAction(title = stringResource(R.string.conversation_wallpaper), icon = Icons.Default.Wallpaper,
@@ -465,6 +452,7 @@ fun ChatDetailScreen(
                 },
                 scheduled    = scheduledAll.filter { !it.isGroup && it.targetId == chatId },
                 onVoiceReady = { uri -> viewModel.onFileSelected(uri) },
+                onVoiceLocked = viewModel::onVoiceLocked,
                 onCancelScheduled = { id -> com.vladimir.messenger.worker.ScheduledSendWorker.cancel(context, id) },
                 replyAuthor  = uiState.replyTo?.replyAuthor?.ifBlank { if (uiState.replyTo?.isFromMe == true) stringResource(R.string.grp_you) else contactName },
                 replyText    = uiState.replyTo?.content.orEmpty(),
@@ -1318,13 +1306,14 @@ fun ChatDetailScreen(
 }
 
 @Composable
-@OptIn(ExperimentalFoundationApi::class)
-private fun MessageInputBar(
+internal fun MessageInputBar(
     text: String,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
     onSendChoice: (com.vladimir.messenger.ui.components.SendChoice) -> Unit = {},
     onVoiceReady: (android.net.Uri) -> Unit = {},
+    /** Ранг ещё не открыл голосовые: кнопка объясняет это вместо записи. */
+    onVoiceLocked: () -> Unit = {},
     scheduled: List<com.vladimir.messenger.data.schedule.ScheduledSendStore.Item> = emptyList(),
     onCancelScheduled: (String) -> Unit = {},
     replyAuthor: String? = null,
@@ -1616,7 +1605,7 @@ private fun MessageInputBar(
                 // Три кнопки делят ширину строки: на узких экранах не вылетают за край.
                 ApuTextAction(
                     label = stringResource(R.string.voice_record_short),
-                    onClick = { voice.toggle() },
+                    onClick = { if (canAttach) voice.toggle() else onVoiceLocked() },
                     enabled = !isSending && !isSelfChat,
                     icon = Icons.Filled.Mic,
                     modifier = Modifier.weight(1f),
@@ -1650,25 +1639,6 @@ private fun MessageInputBar(
                     },
                 )
             }
-        }
-    }
-}
-
-@Composable
-private fun ChatHistoryError(message: String, onRetry: () -> Unit, modifier: Modifier = Modifier) {
-    ApuBubbleCard(modifier = modifier.padding(16.dp)) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(message, color = ApuBubbleTextColor, style = MaterialTheme.typography.bodyMedium)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                stringResource(R.string.chat_history_retry_hint),
-                color = ApuBubbleMutedColor,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            ApuTextAction(label = stringResource(R.string.action_retry), onClick = onRetry)
         }
     }
 }
