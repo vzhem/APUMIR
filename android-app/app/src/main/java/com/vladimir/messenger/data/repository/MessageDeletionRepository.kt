@@ -40,6 +40,8 @@ class MessageDeletionRepository @Inject constructor(
     private val reactionDao: MessageReactionDao,
     private val outbox: DeletionOutbox,
     private val groupDao: GroupDao,
+    /** р252: удалённое сообщение уносит и карточку своего опроса. */
+    private val directPollRepository: com.vladimir.messenger.data.directpoll.DirectPollRepository,
 ) {
 
     /** Удалить сообщение только у себя (в любом чате). */
@@ -326,6 +328,8 @@ class MessageDeletionRepository @Inject constructor(
         for (row in stale) messageDao.deleteById(row.id)
         messageDao.deleteById(messageId)
         reactionDao.deleteForMessage(messageId)
+        // р252: карточка опроса без своего сообщения-вопроса - сирота.
+        runCatching { directPollRepository.deleteForMessage(messageId) }
         refreshPreview(chatId)
     }
 

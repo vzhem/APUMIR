@@ -70,8 +70,9 @@ class ChatStartupTest(unittest.TestCase):
         self.assertEqual(2, screen.count("onRetry = viewModel::retryMessages"))
 
     def test_retry_uses_shared_bubble_style(self):
-        screen = read("ui/screens/chat/ChatDetailScreen.kt")
-        retry = screen.split("private fun ChatHistoryError(", 1)[1]
+        # Плашка «Повторить» вынесена из экрана отдельным файлом по потолку
+        # god-файлов (ChatHistoryError.kt); проверяется тот же текст и стиль.
+        retry = read("ui/screens/chat/ChatHistoryError.kt")
         self.assertIn("ApuBubbleCard", retry)
         self.assertIn("ApuBubbleTextColor", retry)
         self.assertIn("ApuBubbleMutedColor", retry)

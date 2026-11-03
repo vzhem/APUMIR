@@ -67,6 +67,7 @@ object AppModule {
                 AppDatabase.MIGRATION_36_37,
                 AppDatabase.MIGRATION_37_38,
                 AppDatabase.MIGRATION_38_39,
+                AppDatabase.MIGRATION_39_40,
             )
             // Никакого fallbackToDestructiveMigration(): он молча удаляет все
             // таблицы, если миграции не нашлось, — для мессенджера это тихая
@@ -140,6 +141,11 @@ object AppModule {
     @Provides
     fun provideGroupPollDao(db: AppDatabase): com.vladimir.messenger.data.local.dao.GroupPollDao =
         db.groupPollDao()
+
+    /** р252: опросы личных чатов (ранг 3). */
+    @Provides
+    fun provideDirectPollDao(db: AppDatabase): com.vladimir.messenger.data.local.dao.DirectPollDao =
+        db.directPollDao()
 
     @Provides @Singleton
     fun provideGroupDao(db: AppDatabase): GroupDao = db.groupDao()

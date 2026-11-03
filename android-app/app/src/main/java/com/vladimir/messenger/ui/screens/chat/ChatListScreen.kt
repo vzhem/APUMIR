@@ -454,7 +454,7 @@ fun ChatListScreen(
                         ?: if (folder != null) InboxSection.All else return@HorizontalPager
                     SectionPage(
                         section = section,
-                        onAddStory = { storyComposer = true },
+                        onAddStory = { if (viewModel.canPublishStory()) storyComposer = true else viewModel.onStoryLocked() },
                         onDeleteStory = viewModel::deleteStory,
                         // Отклики на истории: значки и комментарии зрителей.
                         onReactStory = viewModel::reactToStory,
