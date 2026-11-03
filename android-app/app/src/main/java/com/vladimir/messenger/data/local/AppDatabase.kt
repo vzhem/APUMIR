@@ -51,16 +51,19 @@ import com.vladimir.messenger.data.local.entity.PostManifestEntity
 import com.vladimir.messenger.data.local.entity.PostSignerEntity
 import com.vladimir.messenger.data.local.entity.GroupPollEntity
 import com.vladimir.messenger.data.local.entity.GroupPollVoteEntity
+import com.vladimir.messenger.data.local.entity.DirectPollEntity
+import com.vladimir.messenger.data.local.entity.DirectPollVoteEntity
 import com.vladimir.messenger.data.local.dao.PostManifestDao
 import com.vladimir.messenger.data.local.dao.PostSignerDao
 import com.vladimir.messenger.data.local.dao.GroupPollDao
+import com.vladimir.messenger.data.local.dao.DirectPollDao
 
 /**
  * Версия схемы. Вынесена в константу, потому что её сверяет резервная копия
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 39
+const val APP_DATABASE_VERSION = 40
 
 @Database(
     entities = [
@@ -93,6 +96,8 @@ const val APP_DATABASE_VERSION = 39
         PostSignerEntity::class,
         GroupPollEntity::class,
         GroupPollVoteEntity::class,
+        DirectPollEntity::class,
+        DirectPollVoteEntity::class,
     ],
     version = APP_DATABASE_VERSION,
     exportSchema = false,
@@ -119,6 +124,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun postManifestDao(): PostManifestDao
     abstract fun postSignerDao(): PostSignerDao
     abstract fun groupPollDao(): GroupPollDao
+    abstract fun directPollDao(): DirectPollDao
 
     companion object {
         /**
@@ -165,6 +171,42 @@ abstract class AppDatabase : RoomDatabase() {
                 )
             }
         }
+        /**
+         * Опросы личных чатов (ранг 3). Новые таблицы, старые не трогаются:
+         * вопрос живёт в самом сообщении, здесь только варианты, автор и
+         * голоса двух собеседников.
+         */
+        val MIGRATION_39_40 = object : Migration(39, 40) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `direct_polls` (" +
+                        "`pollId` TEXT NOT NULL, `chatId` TEXT NOT NULL, " +
+                        "`messageId` TEXT NOT NULL, `question` TEXT NOT NULL, " +
+                        "`optionsCsv` TEXT NOT NULL, `anonymous` INTEGER NOT NULL, " +
+                        "`creatorId` TEXT NOT NULL, `createdAtMs` INTEGER NOT NULL, " +
+                        "`closed` INTEGER NOT NULL, PRIMARY KEY(`pollId`))"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_direct_polls_chatId` " +
+                        "ON `direct_polls` (`chatId`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_direct_polls_messageId` " +
+                        "ON `direct_polls` (`messageId`)"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `direct_poll_votes` (" +
+                        "`pollId` TEXT NOT NULL, `voterId` TEXT NOT NULL, " +
+                        "`choicesCsv` TEXT NOT NULL, `atMs` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`pollId`, `voterId`))"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_direct_poll_votes_pollId` " +
+                        "ON `direct_poll_votes` (`pollId`)"
+                )
+            }
+        }
+
         /**
          * Реакции: до пяти разных значков от одного человека на сообщение.
          * Ключ таблицы расширяется значком; строки переносятся как есть.

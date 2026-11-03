@@ -22,6 +22,7 @@ import com.vladimir.messenger.ui.components.PeerAvatar
 import com.vladimir.messenger.ui.components.ApuCircleCheckIndicator
 import com.vladimir.messenger.ui.components.ApuMessageModerationDialog
 import com.vladimir.messenger.ui.components.ApuPollCard
+import androidx.compose.material.icons.filled.BarChart
 import com.vladimir.messenger.ui.components.ApuSettingsDangerColor
 import com.vladimir.messenger.ui.components.PeerProfileSheet
 import com.vladimir.messenger.ui.components.apuBubbleSurface
@@ -1537,7 +1538,35 @@ fun GroupChatScreen(
                                     )
                                 }
                             }
+                            // р252: опрос - та же кнопка, что и в личном чате.
+                            // Ранг «Круг друзей» (3) проверяет ViewModel: диалог
+                            // открывается только там, где возможность открыта.
+                            IconButton(
+                                onClick = {
+                                    if (uiState.canCreatePoll) showCreatePoll = true
+                                    else viewModel.onCreatePollLocked()
+                                },
+                                enabled = !uiState.isPreparingFile && !uiState.sending,
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                Icon(
+                                    Icons.Filled.BarChart,
+                                    contentDescription = stringResource(R.string.poll_new_title),
+                                    tint = if (uiState.canCreatePoll) Color(0xFF5A6472) else Color(0xFF9AA3AF),
+                                )
+                            }
                         }
+                    }
+                    if (showCreatePoll) {
+                        // Диалог создания: вопрос станет текстом сообщения,
+                        // варианты уйдут конвертом опроса (р250).
+                        com.vladimir.messenger.ui.components.CreatePollDialog(
+                            onDismiss = { showCreatePoll = false },
+                            onCreate = { draft ->
+                                showCreatePoll = false
+                                viewModel.createPoll(draft)
+                            },
+                        )
                     }
                     if (voice.recording || voice.processing) {
                         VoiceRecordBar(voice)
@@ -2931,43 +2960,5 @@ private fun slowModeHint(seconds: Int, role: String?): String {
         stringResource(R.string.gc_slow_admin, label)
     } else {
         stringResource(R.string.gc_slow_member, label)
-    }
-}
-
-/**
- * Красная кнопка SOS над полем ввода: сплошной красный цвет и крупная
- * подпись - кнопку должно быть видно и понятно сразу, без чтения.
- * Пока идёт пауза от повторного нажатия, кнопка серая и показывает,
- * сколько секунд осталось; во время отправки - что сигнал уже уходит.
- */
-@Composable
-private fun SosButton(
-    sending: Boolean,
-    waitSeconds: Long,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val enabled = !sending && waitSeconds <= 0L
-    val label = when {
-        sending -> stringResource(R.string.sos_sending)
-        waitSeconds > 0L -> stringResource(R.string.sos_wait_seconds, waitSeconds)
-        else -> stringResource(R.string.sos_button)
-    }
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(
-                if (enabled) Color(0xFFC62828) else Color(0xFF8E8E93),
-            )
-            .clickable(enabled = enabled) { onClick() }
-            .padding(vertical = 12.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            label,
-            color = Color.White,
-            fontWeight = FontWeight.Bold,
-            style = MaterialTheme.typography.titleMedium,
-        )
     }
 }

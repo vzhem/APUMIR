@@ -235,20 +235,24 @@ class ChatStyleTest(unittest.TestCase):
         self.assertTrue("fun onKeyDesyncAction()" in view_model, "нет действия «отдать ключ»")
 
         screen = source("screens/chat/ChatDetailScreen.kt")
+        # Панель ввода вынесена из экрана по потолку god-файлов (ChatInputBar.kt);
+        # плашка живёт в ней, поэтому оформление проверяем там, а подключение
+        # к экрану — по самому экрану.
+        bar = source("screens/chat/ChatInputBar.kt")
         self.assertTrue("keyDesync    = uiState.keyDesync" in screen, "плашка не подключена к экрану")
         self.assertTrue("onKeyDesyncAction = viewModel::onKeyDesyncAction" in screen, "кнопка не подключена")
         # Плашка — в премиальном стиле «Логов»: золото, нить, блеск ПОД текстом,
         # тёмные чернила (контраст проверяет test_premium_palette_keeps_contrast
         # в контракте отчёта).
-        self.assertTrue(".background(apuGoldBrush(), noticeShape)" in screen, "нет золотой подложки")
-        self.assertTrue("apuPremiumThread(shape = noticeShape, inset = 18.dp)" in screen, "нет золотой нити")
-        self.assertTrue("apuPremiumGloss(noticeShape, intensity = 0.8f" in screen, "нет блеска")
-        self.assertTrue("color = ApuGoldInk," in screen, "текст плашки не тёмными чернилами")
+        self.assertTrue(".background(apuGoldBrush(), noticeShape)" in bar, "нет золотой подложки")
+        self.assertTrue("apuPremiumThread(shape = noticeShape, inset = 18.dp)" in bar, "нет золотой нити")
+        self.assertTrue("apuPremiumGloss(noticeShape, intensity = 0.8f" in bar, "нет блеска")
+        self.assertTrue("color = ApuGoldInk," in bar, "текст плашки не тёмными чернилами")
         # Текст плашки и подпись кнопки живут в строковых ресурсах: у
         # конверта, который не открылся, причина может быть любой из трёх,
         # и обещать «ключ собеседника сменился» больше нельзя.
-        self.assertTrue("stringResource(R.string.chat_peer_key_stale)" in screen, "нет объяснения словами")
-        self.assertTrue("stringResource(R.string.chat_resend_key)" in screen, "нет кнопки действия")
+        self.assertTrue("stringResource(R.string.chat_peer_key_stale)" in bar, "нет объяснения словами")
+        self.assertTrue("stringResource(R.string.chat_resend_key)" in bar, "нет кнопки действия")
         labels = (ROOT / "android-app/app/src/main/res/values/strings.xml").read_text()
         self.assertIn('name="chat_peer_key_stale"', labels)
         self.assertIn('name="chat_resend_key"', labels)

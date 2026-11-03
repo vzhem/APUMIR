@@ -34,7 +34,6 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
 
-
 @HiltViewModel
 class ChatDetailViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
@@ -62,6 +61,8 @@ class ChatDetailViewModel @Inject constructor(
     private val peerRankStore: com.vladimir.messenger.data.rank.PeerRankStore,
     /** Отклики на истории: значки и комментарии из просмотра истории собеседника. */
     private val storyFeedback: com.vladimir.messenger.data.story.StoryFeedbackRepository,
+    /** р252: опросы личных чатов (ранг 3). */
+    private val pollRepository: com.vladimir.messenger.data.directpoll.DirectPollRepository,
 ) : ViewModel() {
 
     // chatId передаётся через навигацию (SavedStateHandle)
@@ -122,6 +123,7 @@ class ChatDetailViewModel @Inject constructor(
         observeTransfers()
         observeReactions()
         observeReposts()
+        observePolls()
         markAsRead()
         observeGifArrivals()
         observeStickerArrivals()
@@ -231,6 +233,43 @@ class ChatDetailViewModel @Inject constructor(
             }
         }
     }
+
+    // ── р252: опросы личного чата ───────────────────────────────────────────
+
+    /** Карточки опросов этого чата (ключ - id сообщения вопроса). */
+    private fun observePolls() = viewModelScope.launch {
+        pollRepository.observeChat(chatId).collect { polls -> _uiState.update { it.copy(polls = polls) } }
+    }
+
+    /**
+     * Новый опрос в личном чате: правила и пересылка — в [DirectPollActions],
+     * здесь только состояние экрана.
+     */
+    fun createPoll(question: String, options: List<String>, anonymous: Boolean) =
+        DirectPollActions.create(
+            scope = viewModelScope,
+            polls = pollRepository,
+            chats = chatRepository,
+            chatId = chatId,
+            peerId = peerId,
+            lockedHint = if (_uiState.value.canCreatePoll) "" else _uiState.value.pollLockedHint,
+            question = question,
+            options = options,
+            anonymous = anonymous,
+            notify = ::notify,
+            onSending = { sending -> _uiState.update { it.copy(isSending = sending) } },
+            onSent = { _uiState.update { it.copy(scrollToBottom = true) } },
+            invalidHint = appContext.getString(R.string.gc_poll_needs),
+            sendErrorHint = { message -> appContext.getString(R.string.cd_send_error, message) },
+        )
+
+    /** Голос за вариант: свой выбор виден сразу, итоги — из базы. */
+    fun togglePollChoice(poll: com.vladimir.messenger.data.group.PollSummary, index: Int) =
+        DirectPollActions.toggle(viewModelScope, pollRepository, chatId, peerId, poll, index)
+
+    /** Закрыть опрос вправе только автор вопроса. */
+    fun closePoll(poll: com.vladimir.messenger.data.group.PollSummary) =
+        DirectPollActions.close(viewModelScope, pollRepository, chatId, peerId, poll)
 
     /** Счётчик репостов чата: поток уже уведён на IO внутри репозитория. */
     private fun observeReposts() {
@@ -430,12 +469,25 @@ class ChatDetailViewModel @Inject constructor(
                 videoLockedHint = rankRights.videoLockedHint(rights),
                 canCall = rights.canCall, canVideoCall = rights.canVideoCall,
                 callLockedHint = rankRights.callLockedHint(rights),
+                // р252: опросы - «Круг друзей» (3), голосовать можно всегда.
+                canCreatePoll = rankRights.isAllowed(RankCapability.CREATE_POLL),
+                pollLockedHint = rankRights.lockedHint(RankCapability.CREATE_POLL),
             )
         }
     }
 
     /** Отказ в общей плашке ошибок чата. */
     private fun notify(text: String) = _uiState.update { it.copy(error = text) }
+
+    /** Гифки экрана — из `ChatGifActions`; состояние остаётся здесь. */
+    private fun gifSink() = ChatGifActions.Sink(
+        scope = viewModelScope,
+        context = appContext,
+        state = _uiState,
+        chats = chatRepository,
+        chatId = chatId,
+        gifAllowed = ::gifAllowed,
+    )
 
     /** Тап по скрепке при закрытых вложениях: объясняем, а не открываем выбор файла. */
     fun onAttachmentsLocked() = notify(_uiState.value.attachmentsLockedHint)
@@ -1133,6 +1185,18 @@ class ChatDetailViewModel @Inject constructor(
         }
     }
 
+    fun onGifCatalogOpened() = ChatGifActions.onCatalogOpened(gifSink())
+
+    fun setGifTab(tab: String) = ChatGifActions.setTab(gifSink(), tab)
+
+    fun ensureGifRef(sha256: String) = ChatGifActions.ensureRef(gifSink(), sha256)
+
+    private suspend fun ensureGifRefInternal(sha256: String) =
+        ChatGifActions.ensureRefInternal(gifSink(), sha256)
+
+    private suspend fun sendGifRefInternal(sha256: String) =
+        ChatGifActions.sendRef(gifSink(), sha256)
+
     /**
      * Отправить стикер в личный чат: картинкой (та же файловая машина, что у
      * скрепки), но сразу - без диалога выбора. Стикер встаёт в «Недавние».
@@ -1296,43 +1360,15 @@ class ChatDetailViewModel @Inject constructor(
             com.vladimir.messenger.data.sticker.StickerLibrary.arrivalsFlow().collect { sha ->
                 _uiState.update { it.copy(swarmStatus = null) }
                 refreshStickers()
-                val wanted = pendingSwarmStickerSha
-                if (wanted != null && wanted == sha) {
-                    pendingSwarmStickerSha = null
-                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                        stickerLibrary.entryOf(sha)
-                    }?.let { sendSticker(it) }
-                }
+                // Ждали именно этот стикер из панели — шлём сразу, как пришёл.
+                if (sha != pendingSwarmStickerSha) return@collect
+                pendingSwarmStickerSha = null
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { stickerLibrary.entryOf(sha) }
+                    ?.let { sendSticker(it) }
             }
         }
     }
 
-    fun onGifCatalogOpened() {
-        viewModelScope.launch {
-            runCatching {
-                com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
-                    appContext, chatRepository, force = false,
-                )
-            }
-            val my = runCatching {
-                com.vladimir.messenger.data.gif.GifLibrary.entries(appContext)
-            }.getOrDefault(emptyList())
-            val swarm = runCatching {
-                com.vladimir.messenger.data.gif.GifLibrary.swarmCatalog(appContext)
-            }.getOrDefault(emptyList())
-            _uiState.update {
-                it.copy(
-                    gifTab = if (my.isNotEmpty() || swarm.isNotEmpty()) "swarm" else "external",
-                    myGifs = my,
-                    swarmGifs = swarm,
-                )
-            }
-        }
-    }
-
-    fun setGifTab(tab: String) {
-        _uiState.update { it.copy(gifTab = tab) }
-    }
     /**
      * Раунд 124: СВОЯ гифка из хранилища телефона. Ложится в библиотеку
      * (превью + индекс), объявляется в каталоге нашей сети - теперь она
@@ -1380,7 +1416,6 @@ class ChatDetailViewModel @Inject constructor(
         }
     }
 
-
     /**
      * Раунд 128: гифка из моей библиотеки уходит ССЫЛКОЙ. В чате появляется
      * ОДНА карточка от моего лица; байты собеседник тихо подтянет с
@@ -1399,72 +1434,6 @@ class ChatDetailViewModel @Inject constructor(
                 }
             }
         }
-    }
-
-    /**
-     * Раунд 128: отправить ССЫЛКУ на гифку (от моего лица). Никаких файлов
-     * по переписке: карточка одна, байты каждый телефон подтягивает тихо с
-     * хранителей из каталога сети.
-     */
-    private suspend fun sendGifRefInternal(sha256: String) {
-        val chat = chatRepository.getChatById(chatId) ?: error(appContext.getString(R.string.cdv_chat_unavailable))
-        val recipientId = chat.contactId
-        val messageId = UUID.randomUUID().toString()
-        // р245: это устройство без сети (зеркало)? Тогда ссылку отправляет
-        // партнёр-активный. Раньше вызов шёл в ядро напрямую: движка здесь нет,
-        // отправка возвращала false, и строка висела «в ожидании» вечно -
-        // гифка с телефона-зеркала до собеседника не доходила вовсе.
-        val viaMirror = chatRepository.sendGifRefViaMirror(
-            chatId = chatId,
-            recipientId = recipientId,
-            sha256 = sha256,
-            messageId = messageId,
-        )
-        if (viaMirror) {
-            _uiState.update { it.copy(scrollToBottom = true) }
-            return
-        }
-        val sent = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            runCatching {
-                RustBridge.sendMessage(
-                    messageId, chatId, recipientId,
-                    com.vladimir.messenger.data.gif.GifLibrary.refContent(sha256),
-                )
-            }.getOrDefault(false)
-        }
-        // Раунд 178: гифка больше НЕ ждёт собеседника. Отправилось - хорошо;
-        // нет - карточка всё равно появляется в чате и встаёт в телефонную
-        // очередь QUEUED_OFFLINE: доставим сами при его появлении в сети
-        // (retryPendingMessagesForPeer/FULL SYNC по presence), а байты он
-        // доберёт из роя у хранителей - я среди них.
-        chatRepository.insertGifRefMessage(
-            chatId = chatId,
-            recipientId = recipientId,
-            messageId = messageId,
-            sha256 = sha256,
-            timestamp = System.currentTimeMillis(),
-            status = if (sent) "LOCAL_FILE"
-            else com.vladimir.messenger.domain.model.MessageStatus.QUEUED_OFFLINE.name,
-        )
-        _uiState.update {
-            it.copy(
-                scrollToBottom = true,
-                swarmStatus = if (sent) null
-                else appContext.getString(R.string.cd_gif_later),
-            )
-        }
-        // Раунд 131: я мог только что скачать эту гифку - объявить каталог,
-        // чтобы все узнали хранителя и смогли тихо забрать байты.
-        runCatching {
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                com.vladimir.messenger.data.gif.GifLibrary.syncWithSwarm(
-                    appContext, chatRepository, force = false,
-                )
-            }
-        }
-        // Своя карточка тоже должна ожить: если гифки у меня нет - тихо
-        // попросим у сети (тротлимб внутри GifLibrary).
-        ensureGifRefInternal(sha256)
     }
 
     private val thumbRequestedAt = HashMap<String, Long>()
@@ -1488,32 +1457,6 @@ class ChatDetailViewModel @Inject constructor(
                     )
                 }
             }
-        }
-    }
-
-    /**
-     * Раунд 128: убедиться, что гифка есть в моей библиотеке (для карточки-
-     * ссылки). Нет - тихо попросить у хранителей сети.
-     */
-    fun ensureGifRef(sha256: String) {
-        viewModelScope.launch { ensureGifRefInternal(sha256) }
-    }
-
-    private suspend fun ensureGifRefInternal(sha256: String) {
-        val have = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            com.vladimir.messenger.data.gif.GifLibrary.gifFile(appContext, sha256)?.isFile == true
-        }
-        if (have) return
-        val holders = runCatching {
-            com.vladimir.messenger.data.gif.GifLibrary.swarmCatalog(appContext)
-        }.getOrDefault(emptyList())
-            .firstOrNull { it.entry.sha256 == sha256 }?.holders.orEmpty()
-        if (holders.isEmpty()) return
-        com.vladimir.messenger.data.gif.GifLibrary.rememberWant(sha256)
-        runCatching {
-            com.vladimir.messenger.data.gif.GifLibrary.requestGif(
-                appContext, chatRepository, sha256, holders,
-            )
         }
     }
 

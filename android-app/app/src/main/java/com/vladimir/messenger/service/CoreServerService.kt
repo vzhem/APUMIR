@@ -95,9 +95,11 @@ class CoreServerService : Service() {
     @Inject lateinit var heartGameNetwork: com.vladimir.messenger.data.heartgame.HeartGameNetwork
     @Inject lateinit var peerRankRouter: com.vladimir.messenger.data.rank.PeerRankRouter
     @Inject lateinit var peerRankStore: com.vladimir.messenger.data.rank.PeerRankStore
-    @Inject lateinit var peerRankBroadcaster: com.vladimir.messenger.data.rank.PeerRankBroadcaster
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
+    // р252: опросы личных чатов (ранг 3) - служебный конверт APUPOLL1.
+    /** р252: опросы личных чатов - через посредника, чтобы не растить этот файл. */
+    private val directPolls by lazy { DirectPollRouting.bind(this, directPollRepository) }
     @Inject lateinit var repostRepository: com.vladimir.messenger.data.repost.RepostRepository
     // Отклики на истории: значки и комментарии зрителей (см. docs/STORY_REACTIONS_AND_COMMENTS.md).
     @Inject lateinit var storyFeedback: com.vladimir.messenger.data.story.StoryFeedbackRepository
@@ -108,8 +110,8 @@ class CoreServerService : Service() {
     @Inject lateinit var swarmBudget: com.vladimir.messenger.data.swarm.SwarmBudget
     @Inject lateinit var gifPreparation: com.vladimir.messenger.data.file.OutgoingFilePreparationService
     @Inject lateinit var stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary
-    private var gossipStarted = false
     @Inject lateinit var proxyAutopilot: com.vladimir.messenger.service.ProxyAutopilot
+    private var gossipStarted = false
 
     private val coreWorkWakeLock by lazy { CoreWorkWakeLock(applicationContext) }
     private val callWorkWakeLock by lazy { CallWorkWakeLock(applicationContext) }
@@ -463,6 +465,7 @@ class CoreServerService : Service() {
             return true
         }
         if (routePacket(TAG, "reaction") { reactionRepository.routeIncoming(senderId, text) }) return true
+        if (directPolls.incoming(senderId, text)) return true // р252: опрос
         if (routePacket(TAG, "repost") { repostRepository.routeIncoming(senderId, text) }) return true
         if (routePacket(TAG, "deletion") { messageDeletion.routeIncoming(senderId, text) }) return true
         if (routePacket(TAG, "edit") { messageEdit.routeIncoming(senderId, text) }) return true
@@ -1872,6 +1875,7 @@ class CoreServerService : Service() {
             Log.i(TAG, "Mirror envelope: reaction from ${senderId.takeLast(8)} applied")
             return true
         }
+        if (directPolls.incoming(senderId, text)) return true // р252
         if (routePacket(TAG, "repost") { repostRepository.routeIncoming(senderId, text) }) {
             Log.i(TAG, "Mirror envelope: repost from ${senderId.takeLast(8)} applied")
             return true
@@ -1967,6 +1971,7 @@ class CoreServerService : Service() {
             Log.i(TAG, "Mirror action: реакция с тени применена локально")
             return
         }
+        if (directPolls.mirrorAction(peerId, text)) return // р252
         if (routePacket(TAG, "repost.mirror") { repostRepository.applyMirrorOutgoing(peerId, groupId, text) }) {
             Log.i(TAG, "Mirror action: репост с тени применён локально")
             return
@@ -2703,6 +2708,10 @@ class CoreServerService : Service() {
                     // Реакции на сообщения: APUREACT1-конверт разбирается здесь
                     // же, до авто-создания контакта, иначе значок превратился бы
                     // в мусорную строку в чате.
+                    // р252: опрос в личном чате - тоже не сообщение.
+                    if (directPolls.incoming(senderId, text)) {
+                        directPolls.acknowledge(messageId, senderId); return
+                    }
                     if (reactionRepository.routeIncoming(senderId, text)) {
                         try {
                             RustBridge.sendDeliveryAck(messageId, senderId)
@@ -3012,9 +3021,7 @@ class CoreServerService : Service() {
                             // внутри: не чаще раза в сутки одному).
                             serviceScope.launch {
                                 runCatching {
-                                    if (peerRankStore.qualifiedFor(peerId) == null) {
-                                        peerRankBroadcaster.requestRank(peerId)
-                                    }
+                                    if (peerRankStore.qualifiedFor(peerId) == null) { requestPeerRank(peerId) }
                                 }
                             }
                             Log.i(TAG, "🟢 ONLINE: $peerName")
@@ -3258,17 +3265,8 @@ class CoreServerService : Service() {
         return if (peers > 0) "$head - рядом ${peersWord(peers)}" else head
     }
 
-    /** «1 собеседник», «2 собеседника», «5 собеседников». */
-    private fun peersWord(peers: Long): String {
-        val n = (peers % 100).toInt()
-        val word = when {
-            n in 11..14 -> "собеседников"
-            n % 10 == 1 -> "собеседник"
-            n % 10 in 2..4 -> "собеседника"
-            else -> "собеседников"
-        }
-        return "$peers $word"
-    }
+    /** «1 собеседник», «2 собеседника», «5 собеседников» — в `PeersWord.kt`. */
+    private fun peersWord(peers: Long): String = com.vladimir.messenger.service.peersWord(peers)
 
     private fun updateNotification(status: String) {
         if (status == lastNotificationText) return

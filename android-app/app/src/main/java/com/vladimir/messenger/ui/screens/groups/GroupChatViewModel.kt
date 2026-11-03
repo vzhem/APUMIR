@@ -30,7 +30,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
-
 @HiltViewModel
 class GroupChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
@@ -280,6 +279,13 @@ class GroupChatViewModel @Inject constructor(
 
     fun onAttachLocked() {
         _uiState.update { it.copy(error = it.attachLockedHint.ifBlank { appContext.getString(R.string.grp_attach_unavailable) }) }
+    }
+
+    /** Кнопка опроса при закрытой возможности: объясняем причину, а не молчим. */
+    fun onCreatePollLocked() {
+        _uiState.update {
+            it.copy(error = it.pollLockedHint.ifBlank { appContext.getString(R.string.gc_poll_needs) })
+        }
     }
 
     /**
@@ -624,14 +630,12 @@ class GroupChatViewModel @Inject constructor(
                 _uiState.update { it.copy(swarmStatus = null) }
                 refreshStickers()
                 val wanted = pendingSwarmStickerSha
-                if (wanted != null && wanted == sha) {
+                // Ждали этот стикер и тема выбрана — шлём сразу, иначе он
+                // уйдёт со следующим нажатием (правило прежнее).
+                if (wanted != null && wanted == sha && _uiState.value.selectedTopicId != null) {
                     pendingSwarmStickerSha = null
-                    // В группу пошлём сами, как только выбрана тема.
-                    if (_uiState.value.selectedTopicId != null) {
-                        kotlinx.coroutines.withContext(Dispatchers.IO) {
-                            stickerLibrary.entryOf(sha)
-                        }?.let { sendSticker(it) }
-                    }
+                    kotlinx.coroutines.withContext(Dispatchers.IO) { stickerLibrary.entryOf(sha) }
+                        ?.let { sendSticker(it) }
                 }
             }
         }
@@ -779,7 +783,6 @@ class GroupChatViewModel @Inject constructor(
         }
     }
 
-
     /**
      * Раунд 130: гифка в группу/комментарии уходит ССЫЛКОЙ (как в личке):
      * в ленту попадает карточка от лица отправителя, байты каждый участник
@@ -911,12 +914,8 @@ class GroupChatViewModel @Inject constructor(
     // ── р250: опросы ────────────────────────────────────────────────────────
 
     /** Карточки опросов этой группы (канала): ключ - id сообщения. */
-    private fun observePolls() {
-        viewModelScope.launch {
-            groupRepository.observePolls(groupId).collect { polls ->
-                _uiState.update { it.copy(polls = polls) }
-            }
-        }
+    private fun observePolls() = viewModelScope.launch {
+        groupRepository.observePolls(groupId).collect { polls -> _uiState.update { it.copy(polls = polls) } }
     }
 
     /**
@@ -937,9 +936,7 @@ class GroupChatViewModel @Inject constructor(
             return
         }
         val question = draft.question.trim()
-        val options = draft.options
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
+        val options = draft.options.map { it.trim() }.filter { it.isNotBlank() }
             .take(com.vladimir.messenger.data.group.GroupWire.MAX_POLL_OPTIONS)
             .map { it.take(com.vladimir.messenger.data.group.GroupWire.MAX_POLL_OPTION_CHARS) }
         if (question.isBlank() || options.size < com.vladimir.messenger.data.group.GroupWire.MIN_POLL_OPTIONS) {

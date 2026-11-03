@@ -73,6 +73,11 @@ data class ChatDetailUiState(
     /** Отправка только фото/файлов/голоса/GIF/стикеров, видео ещё закрыто («Проводник», 10). */
     val canSendVideo: Boolean = true,
     val videoLockedHint: String = "",
+    /** р252: опросы открываются с «Круга друзей» (3); голосовать можно всегда. */
+    val canCreatePoll: Boolean = true,
+    val pollLockedHint: String = "",
+    /** Карточки опросов этого чата: ключ - id сообщения с вопросом. */
+    val polls: Map<String, com.vladimir.messenger.data.group.PollSummary> = emptyMap(),
     /** Звонки и видеозвонки открываются с «Круга друзей» (3). */
     val canCall: Boolean = true,
     val canVideoCall: Boolean = true,
