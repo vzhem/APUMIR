@@ -416,17 +416,10 @@ class ChatDetailViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Права ранга в этом чате. Правила и тексты — в data/rank: экран только
-     * раскладывает снимок по состоянию.
-     */
+    /** Права ранга в этом чате: правила и тексты — в data/rank. */
     private val rankRights = RankRights(appContext)
 
-    /**
-     * Фото, файлы, голосовые, GIF и стикеры открываются с «Круга друзей» (3),
-     * видео — с «Проводника» (10), звонки — с «Круга друзей». Текст доступен
-     * всегда.
-     */
+    /** Фото, файлы, голос, GIF, стикеры, видео и звонки — раскладка снимка прав. */
     private fun refreshAttachmentRights() {
         val rights = rankRights.snapshot()
         _uiState.update {
@@ -435,29 +428,28 @@ class ChatDetailViewModel @Inject constructor(
                 attachmentsLockedHint = rankRights.attachLockedHint(rights),
                 canSendVideo = rights.canSendVideo,
                 videoLockedHint = rankRights.videoLockedHint(rights),
-                canCall = rights.canCall,
-                canVideoCall = rights.canVideoCall,
+                canCall = rights.canCall, canVideoCall = rights.canVideoCall,
                 callLockedHint = rankRights.callLockedHint(rights),
             )
         }
     }
 
-    /** Готовый текст отказа по возможности — один на все экраны. */
-    private fun lockedHint(capability: RankCapability): String =
-        rankRights.lockedHint(capability)
-
-    // Отказ в общей плашке ошибок чата (одна строка: файл у потолка god-файлов).
+    /** Отказ в общей плашке ошибок чата. */
     private fun notify(text: String) = _uiState.update { it.copy(error = text) }
-
 
     /** Тап по скрепке при закрытых вложениях: объясняем, а не открываем выбор файла. */
     fun onAttachmentsLocked() = notify(_uiState.value.attachmentsLockedHint)
 
-    /**
-     * Третий рубеж для GIF: карточка в панели ввода могла остаться от прошлой
-     * версии, а сервер каталога отдал бы её и «Гостю». Право — то же, что у
-     * остальных вложений: «Круг друзей» (3).
-     */
+    /** Микрофон при закрытых голосовых: объясняем, а не начинаем запись. */
+    fun onVoiceLocked() = notify(_uiState.value.attachmentsLockedHint)
+
+    /** Кнопка звонка при закрытых звонках: объясняем, а не открываем звонок. */
+    fun onCallLocked() = notify(_uiState.value.callLockedHint)
+
+    /** Видео до «Проводника»: объясняем, а не молчим. */
+    fun onVideoLocked() = notify(_uiState.value.videoLockedHint)
+
+    /** Третий рубеж для GIF: карточка панели могла остаться от прошлой версии. */
     private fun gifAllowed(): Boolean {
         if (rankRights.isAllowed(RankCapability.SEND_GIF)) return true
         notify(_uiState.value.attachmentsLockedHint)
@@ -728,8 +720,7 @@ class ChatDetailViewModel @Inject constructor(
     fun sendLocation(lat: Double, lon: Double, accuracyM: Int?, label: String) {
         // Геолокация — отправка своего наружу, поэтому с «Круга друзей» (3).
         if (!rankRights.isAllowed(RankCapability.SHARE_LOCATION)) {
-            notify(lockedHint(RankCapability.SHARE_LOCATION))
-            return
+            notify(rankRights.lockedHint(RankCapability.SHARE_LOCATION)); return
         }
         viewModelScope.launch {
             sendMessageUseCase(

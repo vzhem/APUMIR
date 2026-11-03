@@ -296,7 +296,7 @@ class CallManager @Inject constructor(
             }
             syncChannelIdentity()
             ensureCallServer()
-            sendKey = randomKey()
+            sendKey = CallIdentifiers.randomKey(random)
             val callerKey = CallWire.decodeBytes(offer.mediaKeyB64)
             recvKey = callerKey
             remoteHost = offer.lanHost
@@ -726,8 +726,8 @@ class CallManager @Inject constructor(
             }
             syncChannelIdentity()
             ensureCallServer()
-            val callId = newCallId()
-            val key = randomKey()
+            val callId = CallIdentifiers.newCallId(random)
+            val key = CallIdentifiers.randomKey(random)
             sendKey = key
             recvKey = null
             remoteHost = null
@@ -758,16 +758,14 @@ class CallManager @Inject constructor(
     }
 
     /** р233: идёт ли звонок у этого устройства (передача роли во время звонка запрещена). */
-    /**
-     * Отказ по рангу (правило — [CallRankGate]): true — звонок не начат.
-     */
+    /** Отказ по рангу (правило — [CallRankGate]): true — звонок не начат. */
     private fun rejectByRank(peerId: String, peerName: String, video: Boolean): Boolean {
         val refusal = CallRankGate.rejection(appContext, video) ?: return false
         finishBeforeStart(peerId, peerName, video, refusal)
         return true
     }
 
-    /** «Не начали»: завершённое состояние с причиной (одна копия на все отказы). */
+    /** «Не начали»: завершённое состояние с причиной (одна копия на отказы). */
     private fun finishBeforeStart(peerId: String, peerName: String, video: Boolean, reason: String) {
         _uiState.value = CallUiState(
             phase = CallStateMachine.Phase.ENDED, peerId = peerId, peerName = peerName,
@@ -1853,6 +1851,8 @@ class CallManager @Inject constructor(
         val nodeId = RustBridge.nodeId() ?: return
         if (nodeId.startsWith("pk_")) audioChannel.myNodeId = nodeId
     }
+
+    private fun nowMs(): Long = System.currentTimeMillis()
 
     @Synchronized
     private fun ensureCallServer() {
