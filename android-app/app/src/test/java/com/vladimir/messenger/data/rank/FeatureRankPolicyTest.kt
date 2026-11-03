@@ -141,8 +141,9 @@ class FeatureRankPolicyTest {
 
     @Test
     fun negativeRankCountsAsGuest() {
-        // Испорченное хранилище не должно открывать возможности.
-        assertEquals(0, FeatureRankPolicy.referralsShort(-5, RankCapability.SEND_PHOTO))
+        // Испорченное хранилище не должно открывать возможности, а подсказка
+        // «сколько осталось» считается как у гостя: 3 - 0 = 3.
+        assertEquals(3, FeatureRankPolicy.referralsShort(-5, RankCapability.SEND_PHOTO))
         assertFalse(FeatureRankPolicy.isAllowed(-1, RankCapability.SEND_PHOTO))
         assertEquals(1, FeatureRankPolicy.referralsShort(2, RankCapability.SEND_PHOTO))
         assertEquals(0, FeatureRankPolicy.referralsShort(10, RankCapability.SEND_PHOTO))
