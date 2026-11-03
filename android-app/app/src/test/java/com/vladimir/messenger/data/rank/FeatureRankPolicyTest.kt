@@ -11,8 +11,9 @@ import org.junit.Test
  *
  * Правило одно на всё приложение: ранг 0–2 — минимальный режим (текст, приём
  * медиа, вступление в сообщества, игра сердечек, контакты). Отправка своего
- * наружу открывается с «Круга друзей» (3), видео и создание групп — с
- * «Проводника» (10), создание каналов — с «Навигатора» (30).
+ * наружу открывается с «Круга друзей» (3), а с «Проводника» (10) разрешено
+ * всё: видео, создание групп и каналов, автосбор прокси. Выше 10 новых
+ * возможностей нет.
  */
 class FeatureRankPolicyTest {
 
@@ -56,16 +57,43 @@ class FeatureRankPolicyTest {
 
     @Test
     fun videoAndCommunitiesOpenAboveThirdRank() {
-        listOf(RankCapability.SEND_VIDEO, RankCapability.CREATE_GROUP, RankCapability.PROXY_AUTOMATIC)
-            .forEach { capability ->
-                assertEquals(10, capability.minimumQualifiedReferrals)
-                assertFalse("${capability.name} stays closed on the circle rank",
-                    FeatureRankPolicy.isAllowed(3, capability))
-                assertTrue(FeatureRankPolicy.isAllowed(10, capability))
-            }
-        assertEquals(30, RankCapability.CREATE_CHANNEL.minimumQualifiedReferrals)
-        assertFalse(FeatureRankPolicy.isAllowed(29, RankCapability.CREATE_CHANNEL))
-        assertTrue(FeatureRankPolicy.isAllowed(30, RankCapability.CREATE_CHANNEL))
+        listOf(
+            RankCapability.SEND_VIDEO,
+            RankCapability.CREATE_GROUP,
+            RankCapability.CREATE_CHANNEL,
+            RankCapability.PROXY_AUTOMATIC,
+        ).forEach { capability ->
+            assertEquals(10, capability.minimumQualifiedReferrals)
+            assertFalse("${capability.name} stays closed on the circle rank",
+                FeatureRankPolicy.isAllowed(3, capability))
+            assertFalse("${capability.name} stays closed just below the conductor rank",
+                FeatureRankPolicy.isAllowed(9, capability))
+            assertTrue(FeatureRankPolicy.isAllowed(10, capability))
+        }
+    }
+
+    @Test
+    fun everythingIsAllowedFromTheTenthRank() {
+        // Решение владельца: с 10 ранга разрешено всё. Ни один порог не вправе
+        // уехать выше «Проводника», иначе здесь появится закрытая возможность.
+        assertEquals(10, FeatureRankPolicy.FULL_ACCESS_RANK)
+        assertEquals(
+            10,
+            RankCapability.entries.maxOf { it.minimumQualifiedReferrals },
+        )
+        assertFalse(FeatureRankPolicy.isEverythingAllowed(9))
+        assertTrue(FeatureRankPolicy.isEverythingAllowed(10))
+        RankCapability.entries.forEach { capability ->
+            assertTrue(
+                "${capability.name} must be open at rank 10",
+                FeatureRankPolicy.isAllowed(10, capability),
+            )
+            assertEquals(0, FeatureRankPolicy.referralsShort(10, capability))
+        }
+        assertEquals(
+            RankCapability.entries.toList(),
+            FeatureRankPolicy.unlockedFeatures(10),
+        )
     }
 
     @Test
@@ -111,8 +139,13 @@ class FeatureRankPolicyTest {
         // Видео и сообщества — не на третьем ранге.
         assertTrue("Отправка видео" !in newAtCircle)
         assertTrue("Создание групп" !in newAtCircle)
-        assertTrue("Отправка видео" in RankFeatureSummary.describeNewAt(10))
-        assertTrue("Создание каналов" in RankFeatureSummary.describeNewAt(30))
+        assertTrue("Создание каналов" !in newAtCircle)
+        val newAtConductor = RankFeatureSummary.describeNewAt(10)
+        assertTrue("Отправка видео" in newAtConductor)
+        assertTrue("Создание групп" in newAtConductor)
+        assertTrue("Создание каналов" in newAtConductor)
+        // Выше «Проводника» новых возможностей нет: только статус и знак.
+        assertTrue(RankFeatureSummary.describeNewAt(30).isEmpty())
     }
 
     @Test
@@ -126,7 +159,7 @@ class FeatureRankPolicyTest {
     fun rankNamesMatchTheSharedRankLadder() {
         assertEquals("Круг друзей", FeatureRankPolicy.rankNameFor(RankCapability.SEND_PHOTO))
         assertEquals("Проводник", FeatureRankPolicy.rankNameFor(RankCapability.SEND_VIDEO))
-        assertEquals("Навигатор", FeatureRankPolicy.rankNameFor(RankCapability.CREATE_CHANNEL))
+        assertEquals("Проводник", FeatureRankPolicy.rankNameFor(RankCapability.CREATE_CHANNEL))
     }
 
     @Test

@@ -294,11 +294,12 @@ object GroupsModule {
                 .getString(DISPLAY_NAME_KEY, "")
                 .orEmpty()
         },
-        // Создание групп доступно с ранга «Проводник» (10 квалифицированных
-        // приглашённых) — правило MASTER_PLAN и FileTransferRankPolicy.
+        // Создание групп и каналов доступно с ранга «Проводник» (10
+        // квалифицированных приглашённых) — FileTransferRankPolicy.
         canCreateGroups = {
             val qualified = ReferralRankStore.qualifiedDirectCount(context.applicationContext)
-            FileTransferRankPolicy.entitlement(qualified).canCreateGroup
+            val entitlement = FileTransferRankPolicy.entitlement(qualified)
+            entitlement.canCreateGroup && entitlement.canCreateChannel
         },
         appContext = context.applicationContext,
     )

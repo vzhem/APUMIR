@@ -9,8 +9,11 @@ import com.vladimir.messenger.data.file.FileTransferRankPolicy
  * текстовые сообщения, приём и просмотр присланных файлов, вступление в
  * сообщества, игра «Сердечки», обмен контактами. Всё, что требует отправки
  * чего-то своего наружу (фото, голос, GIF, стикеры, документы, геолокация,
- * истории, опросы, звонки), открывается с третьего ранга; видео и создание
- * сообществ — выше (решения владельца от 2026-08-27 и 2026-11-03).
+ * истории, опросы, звонки), открывается с третьего ранга; видео, создание
+ * групп и каналов и автосбор прокси — с десятого. Решение владельца:
+ * с десятого ранга («Проводник») разрешено ВСЁ — выше него новых возможностей
+ * нет, растут только статус, знак и VIP-оформление (решения владельца от
+ * 2026-08-27 и 2026-11-03).
  *
  * Почему отдельный объект, а не «по месту»: правил стало больше одного
  * экрана, и каждое новое ограничение, дописанное прямо в экран, расходится с
@@ -80,8 +83,8 @@ enum class RankCapability(val minimumQualifiedReferrals: Int) {
     /** Автосбор, проверка и автоматический выбор прокси. */
     PROXY_AUTOMATIC(10),
 
-    /** Создание канала. */
-    CREATE_CHANNEL(30),
+    /** Создание канала: с того же «Проводника», что и группы. */
+    CREATE_CHANNEL(10),
 }
 
 object FeatureRankPolicy {
@@ -95,8 +98,12 @@ object FeatureRankPolicy {
     /** Ранг 10 — «Проводник»: первая ступень VIP. */
     const val CONDUCTOR_RANK = 10
 
-    /** Ранг 30 — «Навигатор». */
-    const val NAVIGATOR_RANK = 30
+    /**
+     * Ранг полного доступа: с «Проводника» (10) открыта каждая возможность
+     * из [RankCapability]. Ни один порог не вправе быть выше этого числа —
+     * ступени 20–1000 дают только статус и оформление.
+     */
+    const val FULL_ACCESS_RANK = 10
 
     /** Сколько подтверждённых приглашений нужно для возможности. */
     fun requiredReferrals(capability: RankCapability): Int = capability.minimumQualifiedReferrals
@@ -108,6 +115,10 @@ object FeatureRankPolicy {
     /** Все возможности, открытые на этом ранге. */
     fun unlockedFeatures(qualifiedDirectReferrals: Int): List<RankCapability> =
         RankCapability.entries.filter { isAllowed(qualifiedDirectReferrals, it) }
+
+    /** Открыто ли всё без остатка: с ранга полного доступа — да. */
+    fun isEverythingAllowed(qualifiedDirectReferrals: Int): Boolean =
+        qualifiedDirectReferrals.coerceAtLeast(0) >= FULL_ACCESS_RANK
 
     /**
      * Чего не хватает до возможности. 0 — уже открыта. Нужно подсказке «до
