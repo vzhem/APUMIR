@@ -95,10 +95,12 @@ class CoreServerService : Service() {
     @Inject lateinit var heartGameNetwork: com.vladimir.messenger.data.heartgame.HeartGameNetwork
     @Inject lateinit var peerRankRouter: com.vladimir.messenger.data.rank.PeerRankRouter
     @Inject lateinit var peerRankStore: com.vladimir.messenger.data.rank.PeerRankStore
+    @Inject lateinit var peerRankBroadcaster: com.vladimir.messenger.data.rank.PeerRankBroadcaster
     @Inject lateinit var callManager: com.vladimir.messenger.data.call.CallManager
     @Inject lateinit var reactionRepository: com.vladimir.messenger.data.reaction.ReactionRepository
     // р252: опросы личных чатов (ранг 3) - служебный конверт APUPOLL1.
     /** р252: опросы личных чатов - через посредника, чтобы не растить этот файл. */
+    @Inject lateinit var directPollRepository: com.vladimir.messenger.data.directpoll.DirectPollRepository
     private val directPolls by lazy { DirectPollRouting.bind(this, directPollRepository) }
     @Inject lateinit var repostRepository: com.vladimir.messenger.data.repost.RepostRepository
     // Отклики на истории: значки и комментарии зрителей (см. docs/STORY_REACTIONS_AND_COMMENTS.md).
@@ -2745,11 +2747,8 @@ class CoreServerService : Service() {
                     // Правка своего сообщения (APUEDIT1): применяется к
                     // строке автора, в переписку служебной строкой не идёт.
                     if (messageEdit.routeIncoming(senderId, text)) {
-                        try {
-                            RustBridge.sendDeliveryAck(messageId, senderId)
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Edit packet ACK failed: " + e.message)
-                        }
+                        try { RustBridge.sendDeliveryAck(messageId, senderId) }
+                        catch (e: Exception) { Log.w(TAG, "Edit packet ACK failed: " + e.message) }
                         return
                     }
 
