@@ -267,17 +267,15 @@ class ChatDetailViewModel @Inject constructor(
     fun togglePollChoice(poll: com.vladimir.messenger.data.group.PollSummary, index: Int) =
         DirectPollActions.toggle(viewModelScope, pollRepository, chatId, peerId, poll, index)
 
-    /** Закрыть опрос вправе только автор вопроса. */
+    /** Закрыть опрос вправе только автор; кнопка до 3-го ранга объясняет отказ. */
     fun closePoll(poll: com.vladimir.messenger.data.group.PollSummary) =
         DirectPollActions.close(viewModelScope, pollRepository, chatId, peerId, poll)
 
+    fun onCreatePollLocked() = notify(_uiState.value.pollLockedHint)
+
     /** Счётчик репостов чата: поток уже уведён на IO внутри репозитория. */
-    private fun observeReposts() {
-        viewModelScope.launch {
-            repostRepository.observeCounts(chatId).collect { map ->
-                _uiState.update { it.copy(repostCounts = map) }
-            }
-        }
+    private fun observeReposts() = viewModelScope.launch {
+        repostRepository.observeCounts(chatId).collect { map -> _uiState.update { it.copy(repostCounts = map) } }
     }
 
     /** Поставить или снять реакцию на сообщение. */

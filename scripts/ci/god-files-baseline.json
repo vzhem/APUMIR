@@ -17,7 +17,7 @@
     "android-app/app/src/main/java/com/vladimir/messenger/ui/components/ApuDiagnosticsUi.kt": 1241,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/channels/ChannelScreen.kt": 1631,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/chat/ChatDetailScreen.kt": 1333,
-    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/chat/ChatDetailViewModel.kt": 1754,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/chat/ChatDetailViewModel.kt": 1752,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/chat/ChatListScreen.kt": 1898,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupAdminScreen.kt": 1525,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupChatScreen.kt": 2964,
