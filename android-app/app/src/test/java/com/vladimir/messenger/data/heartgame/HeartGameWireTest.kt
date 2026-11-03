@@ -194,6 +194,26 @@ class HeartGameWireTest {
         }
     }
 
+    @Test fun signedNodePlaceholderIsNotANameWhenContactKnowsBetter() {
+        // Отправитель без заданного имени подписывает счёт коротким
+        // обозначением узла. Это заглушка, а не ник: получатель, у которого
+        // человек есть в адресной книге, должен видеть настоящее имя
+        // (скриншот владельца 03.11.2026: в лидерах «pk_b68664...14e6»).
+        val placeholder = verify(record(score = 3356, name = HeartGameWire.shortNodeName(id)))!!
+        assertEquals(HeartGameWire.shortNodeName(id), placeholder.name)
+        assertEquals("server9", HeartGameWire.displayName(placeholder, "server9"))
+        // Без известного имени заглушка остаётся честным последним рубежом.
+        assertEquals(HeartGameWire.shortNodeName(id), HeartGameWire.displayName(placeholder, null))
+        assertEquals(HeartGameWire.shortNodeName(id), HeartGameWire.displayName(placeholder, "  "))
+        // Настоящее подписанное имя по-прежнему сильнее адресной книги.
+        val named = verify(record(score = 10, name = "server7"))!!
+        assertEquals("server7", HeartGameWire.displayName(named, "server9"))
+        // Заглушка не склеивает чужие строки по «имени» в таблице.
+        val other = otherNode(placeholder, "pk_" + "cd".repeat(32))
+            .copy(keyId = "11".repeat(32), name = HeartGameWire.shortNodeName("pk_" + "cd".repeat(32)), score = 5)
+        assertEquals(2, HeartGameWire.table(listOf(placeholder, other), ownKey = null).size)
+    }
+
     @Test fun shortNodeNameFallsBackToKeyWhenTheNodeIsMissing() {
         assertEquals("pk_", HeartGameWire.shortNodeName("", ""))
         val key = "ab".repeat(32)

@@ -57,6 +57,21 @@ class ChatStartupTest(unittest.TestCase):
         mapping = repository.split("private fun MessageEntity.toDomain()", 1)[1].split("suspend fun getMessageById", 1)[0]
         self.assertIn("recipientId = recipientId", mapping)
 
+    def test_init_never_touches_properties_declared_after_it(self):
+        # Регрессия v11.74.479: init{} синхронно звал refreshAttachmentRights(),
+        # а поле rankRights стояло НИЖЕ init. Свойства Kotlin инициализируются
+        # по порядку объявления, поэтому открытие любого личного чата падало
+        # с NullPointerException до первого кадра. Компилятор и JVM-тесты
+        # этого не видят - только порядок строк в файле.
+        vm = read("ui/screens/chat/ChatDetailViewModel.kt")
+        self.assertLess(
+            vm.index("private val rankRights"),
+            vm.index("init {"),
+            "rankRights must be declared before init: init calls refreshAttachmentRights() synchronously",
+        )
+        init_block = vm.split("init {", 1)[1].split("}", 1)[0]
+        self.assertIn("refreshAttachmentRights()", init_block)
+
     def test_database_error_ends_loading_and_can_be_retried(self):
         vm = read("ui/screens/chat/ChatDetailViewModel.kt")
         self.assertIn("it.copy(isLoading = false, historyError =", vm)

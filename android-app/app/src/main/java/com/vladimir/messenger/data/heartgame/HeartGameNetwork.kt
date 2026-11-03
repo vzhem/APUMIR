@@ -230,8 +230,13 @@ class HeartGameNetwork @Inject constructor(
         val binding = IdentitySigningKeyStore.existingVerifiedBinding(context) ?: return null
         // Имя уходит подписанным, и пустым оно быть не должно: получатель видит
         // результат с сердечками и не понимает, чей он (жалоба владельца
-        // 29.10.2026). Профиль без имени - короткое обозначение узла.
-        val name = UsernameHolder.name.value?.trim()?.takeIf { it.isNotEmpty() }
+        // 29.10.2026). Порядок: @ник, затем имя профиля (display_name) — оно
+        // есть и у тех, кто @ник не задавал; короткое обозначение узла только
+        // когда не задано ни то, ни другое (жалоба владельца 03.11.2026: в
+        // лидерах «вместо ника pk_...»).
+        val name = (UsernameHolder.name.value?.trim()?.takeIf { it.isNotEmpty() }
+            ?: context.getSharedPreferences(PROFILE_PREFS, Context.MODE_PRIVATE)
+                .getString(PROFILE_NAME_KEY, null)?.trim()?.takeIf { it.isNotEmpty() })
             ?.take(48)
             ?: HeartGameWire.shortNodeName(id)
         val own = IdentitySigningKeyStore.withSeed(context) { seed ->
@@ -272,6 +277,9 @@ class HeartGameNetwork @Inject constructor(
 
     private companion object {
         const val TAG = "HeartSync"
+        /** Профиль владельца: тот же файл и ключ, что у OwnInvite/GroupsModule. */
+        const val PROFILE_PREFS = "p2p_prefs"
+        const val PROFILE_NAME_KEY = "display_name"
         /** Потолок адресатов за один раунд; при большом списке выборка случайная и со временем покрывает всех. */
         const val MAX_TARGETS_PER_ROUND = 32
         /** Не отвечать одному узлу на ручные запросы счёта чаще раза в минуту. */

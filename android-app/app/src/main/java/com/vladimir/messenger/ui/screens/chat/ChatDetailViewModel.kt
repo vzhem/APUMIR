@@ -96,6 +96,9 @@ class ChatDetailViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ChatDetailUiState())
     val uiState: StateFlow<ChatDetailUiState> = _uiState.asStateFlow()
 
+    // До init: init синхронно зовёт refreshAttachmentRights, а свойства Kotlin создаются по порядку объявления.
+    private val rankRights = RankRights(appContext)
+
     private val historyObserver = ChatHistoryObserver(
         scope = viewModelScope,
         messages = { getMessagesUseCase(chatId) },
@@ -452,9 +455,6 @@ class ChatDetailViewModel @Inject constructor(
                 }
         }
     }
-
-    /** Права ранга в этом чате: правила и тексты — в data/rank. */
-    private val rankRights = RankRights(appContext)
 
     /** Фото, файлы, голос, GIF, стикеры, видео и звонки — раскладка снимка прав. */
     private fun refreshAttachmentRights() {
