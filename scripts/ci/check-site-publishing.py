@@ -45,6 +45,7 @@ def load_module(name: str, path: Path):
 packs_script = load_module("make_feature_packs", ROOT / "scripts/release/make-feature-packs.py")
 chunked = load_module("chunked_upload", ROOT / "scripts/release/chunked_upload.py")
 ftp_upload = load_module("ftp_upload", ROOT / "scripts/release/ftp_upload.py")
+ftp_cleanup = load_module("ftp_cleanup", ROOT / "scripts/release/ftp_cleanup.py")
 
 
 class CatalogParityTest(unittest.TestCase):
@@ -115,13 +116,21 @@ class ReleasePipelineTest(unittest.TestCase):
 class FakeFtp:
     """Поддельный FTP-сервер: STOR создаёт, APPE дописывает, size сверяет."""
 
-    def __init__(self):
+    def __init__(self, deny_appe=False, root_names=()):
         self.files: dict[str, bytearray] = {}
         self.commands: list[str] = []
+        self.deleted: list[str] = []
+        self.deny_appe = deny_appe
+        self.root_names = list(root_names)
+        self.cwd_calls: list[str] = []
 
     def storbinary(self, command, reader):
         verb, name = command.split(" ", 1)
         self.commands.append(verb)
+        if verb == "APPE" and self.deny_appe:
+            import ftplib
+
+            raise ftplib.error_perm("502 APPE not implemented")
         data = reader.read()
         if verb == "STOR":
             self.files[name] = bytearray(data)
@@ -130,6 +139,28 @@ class FakeFtp:
 
     def size(self, name):
         return len(self.files.get(name, b""))
+
+    def delete(self, name):
+        self.deleted.append(name)
+        self.files.pop(name, None)
+
+    def nlst(self):
+        return list(self.root_names)
+
+    def connect(self, host, timeout=None):
+        pass
+
+    def login(self, user, password):
+        pass
+
+    def cwd(self, part):
+        self.cwd_calls.append(part)
+
+    def mkd(self, part):
+        pass
+
+    def quit(self):
+        pass
 
 
 class FtpChunkedUploadTest(unittest.TestCase):
@@ -153,6 +184,50 @@ class FtpChunkedUploadTest(unittest.TestCase):
             self.assertEqual(sleeps, [300, 300])
             self.assertEqual(ftp.commands, ["STOR", "APPE", "APPE"])
             self.assertEqual(bytes(ftp.files["app-release.apk"]), payload)
+
+    def test_appe_denied_falls_back_to_single_transfer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "app-release.apk"
+            payload = bytes(range(256)) * 11000
+            source.write_bytes(payload)
+            ftp = FakeFtp(deny_appe=True)
+            chunks = ftp_upload.upload_file(
+                ftp, source, "app-release.apk",
+                chunk_bytes=1 * 1024 * 1024, delay_seconds=0,
+                sleeper=lambda s: None, log=lambda *a: None,
+            )
+            # Огрызок первой части убран, файл лёг целиком и побайтно.
+            self.assertEqual(chunks, 1)
+            self.assertEqual(ftp.deleted, ["app-release.apk"])
+            self.assertEqual(bytes(ftp.files["app-release.apk"]), payload)
+
+    def test_empty_remote_dir_still_goes_to_downloads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "pack.zip"
+            source.write_bytes(b"z" * 100)
+            ftp = FakeFtp()
+            ftp_upload.upload_all(
+                [source], "host", "user", "pass", "",
+                delay_seconds=0, ftp_factory=lambda: ftp,
+                sleeper=lambda s: None, log=lambda *a: None,
+            )
+            self.assertEqual(ftp.cwd_calls, ["downloads"])
+
+    def test_cleanup_removes_only_known_release_names(self):
+        ftp = FakeFtp(root_names=[
+            "app-release.apk", "feature-packs.json",
+            "feature-pack-translate-arm64-v8a.zip",
+            "index.html", "my-photo.jpg",
+        ])
+        removed = ftp_cleanup.cleanup(ftp, log=lambda *a: None)
+        self.assertEqual(
+            sorted(removed),
+            ["app-release.apk", "feature-pack-translate-arm64-v8a.zip", "feature-packs.json"],
+        )
+        self.assertNotIn("index.html", ftp.deleted)
+        self.assertNotIn("my-photo.jpg", ftp.deleted)
+        # Список уборки: ровно 9 пакетов + 4 фиксированных имени.
+        self.assertEqual(len(ftp_cleanup.known_root_junk()), 13)
 
     def test_small_file_single_transfer_without_pause(self):
         with tempfile.TemporaryDirectory() as tmp:
