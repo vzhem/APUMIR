@@ -63,6 +63,21 @@
     <string name="settings_nav_updates_hint">New app versions</string>
     <string name="settings_nav_help">Help and about</string>
     <string name="settings_nav_help_hint">Support, logs and version</string>
+    <string name="settings_nav_features">Extra features</string>
+    <string name="settings_nav_features_hint">Optional downloads: translation, voice to text, video effects</string>
+    <string name="feature_packs_intro">The app installs light and works right away: messages, communities and receiving files are built in. Heavy features can be downloaded here at any time — no rank is required.</string>
+    <string name="feature_packs_pack_translate">Message translation</string>
+    <string name="feature_packs_pack_translate_hint">Translate incoming messages on the phone, with no server</string>
+    <string name="feature_packs_pack_voice">Voice to text</string>
+    <string name="feature_packs_pack_voice_hint">Transcribe voice messages to text on the phone</string>
+    <string name="feature_packs_pack_face">Video effects</string>
+    <string name="feature_packs_pack_face_hint">Face, filters and background change in video stories and video calls</string>
+    <string name="feature_packs_size">%1$s MB for your phone</string>
+    <string name="feature_packs_download_all">The full feature set in one selection</string>
+    <string name="feature_packs_select_all">Select all</string>
+    <string name="feature_packs_total">Everything together: %1$s MB</string>
+    <string name="feature_packs_total_selected">Selected for download: %1$s MB</string>
+    <string name="feature_packs_pending">The packs are not published yet: your choice is saved and the download will start automatically with the next app update.</string>
     <string name="section_about">About</string>
 
     <string name="language_section">Language</string>
