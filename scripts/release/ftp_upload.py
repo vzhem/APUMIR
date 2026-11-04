@@ -45,56 +45,73 @@ def normalize_host(raw: str) -> str:
     return host.rstrip("/")
 
 
+def _append_session(ftp, remote_name: str, data: bytes, offset: int, log) -> None:
+    """Одна сессия продолжения: дописать data к файлу на сервере с позиции offset.
+
+    Сначала APPE (дописывание в конец). Если сервер его запретил — REST:
+    передача с перезапуском с позиции offset в тот же файл. Отказ обоих —
+    ошибка наружу, а не молчание.
+    """
+    if offset == 0:
+        ftp.storbinary(f"STOR {remote_name}", _Reader(data))
+        return
+    try:
+        ftp.storbinary(f"APPE {remote_name}", _Reader(data))
+        return
+    except ftplib.error_perm as appe_error:
+        log(f"{remote_name}: APPE запрещён ({appe_error}), пробую продолжить через REST с {offset} Б")
+    ftp.storbinary(f"STOR {remote_name}", _Reader(data), rest=offset)
+
+
 def upload_file(ftp, source: Path, remote_name: str,
                 chunk_bytes: int = MAX_CHUNK_MB * MB,
                 delay_seconds: int = DEFAULT_DELAY_SECONDS,
                 sleeper=time.sleep, log=print) -> int:
-    """Залить один файл; большие — частями по chunk_bytes с паузами.
+    """Залить один файл по схеме владельца: файл отправляется целиком, но
+    передача останавливается на каждых 100 МБ — 100, 200, 300 и так до
+    конца; между остановками пауза 5 минут; в конце проверка размера.
 
-    Возвращает число переданных частей. [ftp] нужен с методами
-    storbinary(cmd, fileobj) и size(name) — настоящий ftplib.FTP или
-    тестовая замена.
+    Файл на куски-файлы не режется: каждая сессия продолжает тот же файл
+    на сервере с места остановки. Возвращает число сессий. [ftp] нужен с
+    методами storbinary(cmd, fileobj, rest=...) и size(name).
     """
     if chunk_bytes < 1 or chunk_bytes > MAX_CHUNK_MB * MB:
         raise ValueError(f"chunk must be 1..{MAX_CHUNK_MB} MB")
     total = source.stat().st_size
-    chunks = max(1, (total + chunk_bytes - 1) // chunk_bytes)
-    sent = 0
+    sessions = 0
     with source.open("rb") as handle:
-        for index in range(chunks):
-            data = handle.read(chunk_bytes)
-            if index > 0:
-                log(f"пауза {delay_seconds} с перед частью {index + 1}/{chunks}…")
-                sleeper(delay_seconds)
-            command = f"STOR {remote_name}" if index == 0 else f"APPE {remote_name}"
+        sent = 0
+        # Продолжаем свой же недолитый файл, если он уже есть на сервере.
+        existing = ftp.size(remote_name) or 0
+        if 0 < existing < total:
+            sent = existing
+            log(f"{remote_name}: на сервере уже {existing} Б — продолжаю с этого места")
+        elif existing >= total and existing != 0:
             try:
-                ftp.storbinary(command, _Reader(data))
-            except ftplib.error_perm:
-                if index == 0:
-                    raise
-                # Сервер запретил дописывание (APPE): честный запасной путь —
-                # убрать огрызок и передать файл целиком одной передачей,
-                # чтобы на сайте не осталось битого хвоста.
-                log(f"{remote_name}: сервер отказал в APPE — передаю файл целиком одной передачей")
-                try:
-                    ftp.delete(remote_name)
-                except Exception:
-                    pass
-                handle.seek(0)
-                ftp.storbinary(f"STOR {remote_name}", handle)
-                remote = ftp.size(remote_name)
-                if remote is not None and remote != total:
-                    raise IOError(f"{remote_name}: на сервере {remote} Б, ожидалось {total} Б")
-                log(f"{remote_name}: передан целиком ({total} Б)")
-                return 1
-            sent += len(data)
+                ftp.delete(remote_name)
+            except Exception:
+                pass
+        while sent < total:
+            if sessions > 0:
+                log(f"пауза {delay_seconds} с перед продолжением…")
+                sleeper(delay_seconds)
+            cap = min(total, sent + chunk_bytes)
+            handle.seek(sent)
+            data = handle.read(cap - sent)
+            _append_session(ftp, remote_name, data, sent, log)
+            sessions += 1
             remote = ftp.size(remote_name)
-            if remote is not None and remote != sent:
+            if remote is not None and remote != cap:
                 raise IOError(
-                    f"{remote_name}: после части {index + 1} на сервере {remote} Б, ожидалось {sent} Б"
+                    f"{remote_name}: после остановки на {cap} Б на сервере {remote} Б"
                 )
-            log(f"{remote_name}: часть {index + 1}/{chunks} передана, на сервере {sent} из {total} Б")
-    return chunks
+            sent = cap
+            log(f"{remote_name}: остановка на {sent} из {total} Б")
+    remote = ftp.size(remote_name)
+    if remote is not None and remote != total:
+        raise IOError(f"{remote_name}: проверка в конце — на сервере {remote} Б, ожидалось {total} Б")
+    log(f"{remote_name}: загружен целиком и проверен ({total} Б, сессий: {sessions})")
+    return sessions
 
 
 class _Reader:
@@ -159,8 +176,12 @@ def main(argv: list[str] | None = None) -> int:
         if not path.is_file():
             print(f"file not found: {path}")
             return 2
-    upload_all(files, host, user, password, remote_dir,
-               args.delay_seconds, args.chunk_mb * MB)
+    try:
+        upload_all(files, host, user, password, remote_dir,
+                   args.delay_seconds, args.chunk_mb * MB)
+    except Exception as error:  # причина обязана быть видна в запуске, не только exit code
+        print(f"::error::FTP upload failed: {type(error).__name__}: {error}")
+        raise
     print("все файлы на сайте")
     return 0
 

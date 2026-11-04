@@ -124,15 +124,18 @@ class FakeFtp:
         self.root_names = list(root_names)
         self.cwd_calls: list[str] = []
 
-    def storbinary(self, command, reader):
+    def storbinary(self, command, reader, rest=None):
         verb, name = command.split(" ", 1)
-        self.commands.append(verb)
+        self.commands.append(verb if rest is None else f"{verb}+REST{rest}")
         if verb == "APPE" and self.deny_appe:
             import ftplib
 
             raise ftplib.error_perm("502 APPE not implemented")
         data = reader.read()
-        if verb == "STOR":
+        if verb == "STOR" and rest:
+            current = self.files.get(name, bytearray())
+            self.files[name] = bytearray(current[:rest]) + bytearray(data)
+        elif verb == "STOR":
             self.files[name] = bytearray(data)
         else:
             self.files.setdefault(name, bytearray()).extend(data)
@@ -185,20 +188,22 @@ class FtpChunkedUploadTest(unittest.TestCase):
             self.assertEqual(ftp.commands, ["STOR", "APPE", "APPE"])
             self.assertEqual(bytes(ftp.files["app-release.apk"]), payload)
 
-    def test_appe_denied_falls_back_to_single_transfer(self):
+    def test_appe_denied_continues_via_rest(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "app-release.apk"
             payload = bytes(range(256)) * 11000
             source.write_bytes(payload)
             ftp = FakeFtp(deny_appe=True)
-            chunks = ftp_upload.upload_file(
+            sessions = ftp_upload.upload_file(
                 ftp, source, "app-release.apk",
                 chunk_bytes=1 * 1024 * 1024, delay_seconds=0,
                 sleeper=lambda s: None, log=lambda *a: None,
             )
-            # Огрызок первой части убран, файл лёг целиком и побайтно.
-            self.assertEqual(chunks, 1)
-            self.assertEqual(ftp.deleted, ["app-release.apk"])
+            # APPE запрещён — продолжение идёт через REST с места остановки,
+            # файл собирается побайтно, остановок по нарастающей три.
+            self.assertEqual(sessions, 3)
+            self.assertEqual(ftp.commands[0], "STOR")
+            self.assertTrue(any(c.startswith("STOR+REST") for c in ftp.commands[1:]))
             self.assertEqual(bytes(ftp.files["app-release.apk"]), payload)
 
     def test_empty_remote_dir_still_goes_to_downloads(self):

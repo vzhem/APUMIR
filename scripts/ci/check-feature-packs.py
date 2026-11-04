@@ -49,6 +49,9 @@ class FeaturePacksContract(unittest.TestCase):
         screen = read(JAVA / "ui/screens/settings/SettingsScreen.kt")
         self.assertIn("SettingsSection.Features", screen)
         self.assertIn("FeaturePacksSettings()", screen)
+        # Пункт обязан быть в корневом списке настроек: без него раздел
+        # существует, но владелец не может в него попасть (было в 482).
+        self.assertIn("onSectionChange(SettingsSection.Features)", screen)
         settings = read(JAVA / "ui/screens/settings/FeaturePacksSettings.kt")
         self.assertIn("FeaturePackCatalog.packs.forEach", settings)
         self.assertIn("ApuPremiumSwitch", settings)

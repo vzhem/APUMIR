@@ -1058,6 +1058,13 @@ private fun SettingsTabContent(
                             trailingContent = { Icon(Icons.Default.ChevronRight, null) },
                         )
                         SettingsItem(
+                            icon = Icons.Default.Extension,
+                            title = stringResource(R.string.settings_nav_features),
+                            subtitle = stringResource(R.string.settings_nav_features_hint),
+                            onClick = { onSectionChange(SettingsSection.Features) },
+                            trailingContent = { Icon(Icons.Default.ChevronRight, null) },
+                        )
+                        SettingsItem(
                             icon = Icons.Default.Help,
                             title = stringResource(R.string.settings_nav_help),
                             subtitle = stringResource(R.string.settings_nav_help_hint),
