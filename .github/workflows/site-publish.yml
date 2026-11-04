@@ -112,6 +112,22 @@ jobs:
       # Главный канал сайта: uCoz FTP, каталог /downloads. Порядок важен
       # (website/INSTALL_UCOZ.md): сначала файлы, манифесты — последними,
       # чтобы сайт ни секунды не ссылался на то, чего ещё нет.
+      # Уборка главной папки FTP: первый блин положил файлы релиза в корень
+      # вместо /downloads. Скрипт удаляет только известные имена файлов
+      # релиза (двойники); чужие файлы не трогает.
+      - name: Clean misplaced files in FTP root
+        if: steps.tag.outputs.SKIP != '1'
+        env:
+          APU_FTP_HOST: ${{ secrets.APU_UCOZ_FTP_HOST }}
+          APU_FTP_USER: ${{ secrets.APU_UCOZ_FTP_USER }}
+          APU_FTP_PASSWORD: ${{ secrets.APU_UCOZ_FTP_PASSWORD }}
+        run: |
+          if [ -z "$APU_FTP_HOST" ] || [ -z "$APU_FTP_USER" ] || [ -z "$APU_FTP_PASSWORD" ]; then
+            echo "::notice::Секреты FTP не заданы — уборка корня пропущена."
+            exit 0
+          fi
+          python3 scripts/release/ftp_cleanup.py
+
       - name: Upload to apu.clan.su via FTP
         if: steps.tag.outputs.SKIP != '1'
         env:

@@ -67,7 +67,26 @@ def upload_file(ftp, source: Path, remote_name: str,
                 log(f"пауза {delay_seconds} с перед частью {index + 1}/{chunks}…")
                 sleeper(delay_seconds)
             command = f"STOR {remote_name}" if index == 0 else f"APPE {remote_name}"
-            ftp.storbinary(command, _Reader(data))
+            try:
+                ftp.storbinary(command, _Reader(data))
+            except ftplib.error_perm:
+                if index == 0:
+                    raise
+                # Сервер запретил дописывание (APPE): честный запасной путь —
+                # убрать огрызок и передать файл целиком одной передачей,
+                # чтобы на сайте не осталось битого хвоста.
+                log(f"{remote_name}: сервер отказал в APPE — передаю файл целиком одной передачей")
+                try:
+                    ftp.delete(remote_name)
+                except Exception:
+                    pass
+                handle.seek(0)
+                ftp.storbinary(f"STOR {remote_name}", handle)
+                remote = ftp.size(remote_name)
+                if remote is not None and remote != total:
+                    raise IOError(f"{remote_name}: на сервере {remote} Б, ожидалось {total} Б")
+                log(f"{remote_name}: передан целиком ({total} Б)")
+                return 1
             sent += len(data)
             remote = ftp.size(remote_name)
             if remote is not None and remote != sent:
@@ -97,6 +116,9 @@ def upload_all(files: list[Path], host: str, user: str, password: str,
                remote_dir: str, delay_seconds: int,
                chunk_bytes: int = MAX_CHUNK_MB * MB,
                ftp_factory=ftplib.FTP, sleeper=time.sleep, log=print) -> None:
+    # Пустая строка из окружения — это «не задано», а не «корень сервера»:
+    # именно так файлы однажды уехали в главную папку вместо /downloads.
+    remote_dir = (remote_dir or "").strip() or "/downloads"
     ftp = ftp_factory()
     ftp.connect(host, timeout=120)
     try:
@@ -128,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
     host = normalize_host(os.environ.get("APU_FTP_HOST", ""))
     user = os.environ.get("APU_FTP_USER", "")
     password = os.environ.get("APU_FTP_PASSWORD", "")
-    remote_dir = os.environ.get("APU_FTP_REMOTE_DIR", "/downloads")
+    remote_dir = os.environ.get("APU_FTP_REMOTE_DIR") or "/downloads"
     if not host or not user or not password:
         print("не заданы APU_FTP_HOST / APU_FTP_USER / APU_FTP_PASSWORD")
         return 2
