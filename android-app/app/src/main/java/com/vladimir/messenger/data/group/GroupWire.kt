@@ -226,6 +226,20 @@ object GroupWire {
      */
     const val KIND_UPDATE_ASK = "upask"
     /**
+     * «Я раздаю пакет функций» (раздача пакетов роем, docs/FEATURE_PACKS.md):
+     * `fpk|пакет|abi|sha256|байт|atMs`. Как `upk`: только от самого узла,
+     * без эпидемии. У кого пакет скачан — тот и раздаёт; у кого нет —
+     * спрашивает `fpask`/`fpwant`. Старые телефоны вид не знают и молча
+     * отбрасывают.
+     */
+    const val KIND_FEATURE_PACK = "fpk"
+    /** «Пришли мне пакет функций»: `fpwant|пакет|abi|sha256|b64(привязка)`. */
+    const val KIND_FEATURE_PACK_WANT = "fpwant"
+    /** «У меня нет этого пакета»: ответ на `fpwant`, проси у другого. */
+    const val KIND_FEATURE_PACK_NONE = "fpnone"
+    /** «У тебя есть пакет?» соседу лично: `fpask|пакет|abi`. */
+    const val KIND_FEATURE_PACK_ASK = "fpask"
+    /**
      * «Я раздаю ПАТЧ обновления» (рой APK, раунд 133):
      * `uppk|от_версии|до_версии|sha256_патча|байт|sha256_apk|atMs`.
      * Патч — та же разница, что качается с официального сайта (формат
@@ -910,6 +924,39 @@ object GroupWire {
         ) : Packet()
 
         /**
+         * Отправитель раздаёт пакет функций [packId] под [abi]
+         * (раздача пакетов роем): файл с [sha256] размером [sizeBytes].
+         */
+        data class FeaturePackHave(
+            val packId: String,
+            val abi: String,
+            val sha256: String,
+            val sizeBytes: Long,
+            val atMs: Long,
+        ) : Packet()
+
+        /** Просьба о пакете [packId] под [abi] ([sha256]); [binding] — как у [UpdateWant]. */
+        data class FeaturePackWant(
+            val packId: String,
+            val abi: String,
+            val sha256: String,
+            val binding: ByteArray = ByteArray(0),
+        ) : Packet()
+
+        /** У отправителя пакета [packId] под [abi] нет (ответ на [FeaturePackWant]). */
+        data class FeaturePackNone(
+            val packId: String,
+            val abi: String,
+            val sha256: String,
+        ) : Packet()
+
+        /** «У тебя есть пакет [packId] под [abi]?» — вопрос одному соседу. */
+        data class FeaturePackAsk(
+            val packId: String,
+            val abi: String,
+        ) : Packet()
+
+        /**
          * Отправитель раздаёт ДИФФ-ПАТЧ обновления (рой APK, раунд 133):
          * от версии [fromVersion] до [toVersion], файл патча [patchSha256]
          * размером [sizeBytes]; собранный из патча APK обязан сойтись с
@@ -1226,6 +1273,48 @@ object GroupWire {
         require(isUpdateVersion(version)) { "bad update version" }
         require(isSha256(sha256)) { "bad file sha256" }
         return "$PREFIX|$KIND_UPDATE_NONE|$version|$sha256"
+    }
+
+    /** Раздача пакетов роем: допустимый id пакета (`translate`, `voice-text`, …). */
+    fun isFeaturePackId(value: String): Boolean =
+        value.length in 1..32 && value.all { it in 'a'..'z' || it in '0'..'9' || it == '-' }
+
+    /** Раздача пакетов роем: допустимая архитектура пакета. */
+    fun isFeaturePackAbi(value: String): Boolean =
+        value == "arm64-v8a" || value == "armeabi-v7a" || value == "x86_64"
+
+    /** «Я раздаю пакет функций»: пакет, архитектура, файл и его размер. */
+    fun buildFeaturePackHave(packId: String, abi: String, sha256: String, sizeBytes: Long, atMs: Long): String {
+        require(isFeaturePackId(packId)) { "bad feature pack id" }
+        require(isFeaturePackAbi(abi)) { "bad feature pack abi" }
+        require(isSha256(sha256)) { "bad file sha256" }
+        require(sizeBytes in 0L..MAX_UPDATE_SIZE_BYTES) { "bad feature pack size" }
+        return "$PREFIX|$KIND_FEATURE_PACK|$packId|$abi|$sha256|${sizeBytes.coerceAtLeast(0L)}|${atMs.coerceAtLeast(0L)}"
+    }
+
+    /** «Пришли мне пакет функций»: пакет, архитектура, файл, моя привязка. */
+    fun buildFeaturePackWant(packId: String, abi: String, sha256: String, binding: ByteArray): String {
+        require(isFeaturePackId(packId)) { "bad feature pack id" }
+        require(isFeaturePackAbi(abi)) { "bad feature pack abi" }
+        require(isSha256(sha256)) { "bad file sha256" }
+        require(binding.size <= MAX_FILE_WANT_BINDING_BYTES) { "binding too long" }
+        val bindingCell = if (binding.isEmpty()) "" else Base64.getUrlEncoder().withoutPadding().encodeToString(binding)
+        return "$PREFIX|$KIND_FEATURE_PACK_WANT|$packId|$abi|$sha256|$bindingCell"
+    }
+
+    /** «У меня нет этого пакета»: ответ на просьбу, спрашивайте другого. */
+    fun buildFeaturePackNone(packId: String, abi: String, sha256: String): String {
+        require(isFeaturePackId(packId)) { "bad feature pack id" }
+        require(isFeaturePackAbi(abi)) { "bad feature pack abi" }
+        require(isSha256(sha256)) { "bad file sha256" }
+        return "$PREFIX|$KIND_FEATURE_PACK_NONE|$packId|$abi|$sha256"
+    }
+
+    /** «У тебя есть этот пакет?» — вопрос одному соседу. */
+    fun buildFeaturePackAsk(packId: String, abi: String): String {
+        require(isFeaturePackId(packId)) { "bad feature pack id" }
+        require(isFeaturePackAbi(abi)) { "bad feature pack abi" }
+        return "$PREFIX|$KIND_FEATURE_PACK_ASK|$packId|$abi"
     }
 
     /** «Есть что-нибудь новее моей версии?» (рой APK): кнопка «Проверить». */
@@ -2369,6 +2458,52 @@ object GroupWire {
 
             KIND_UPDATE_ASK -> if (parts.size == 3 && isUpdateVersion(parts[2])) {
                 Packet.UpdateAsk(parts[2])
+            } else {
+                null
+            }
+
+            // Раздача пакетов функций роем (docs/FEATURE_PACKS.md): слот
+            // «группы» занимает id пакета, дальше — архитектура и файл.
+            KIND_FEATURE_PACK -> if (parts.size == 7) {
+                val size = parts[5].toLongOrNull() ?: return null
+                val at = parts[6].toLongOrNull() ?: return null
+                if (!isFeaturePackId(parts[2]) || !isFeaturePackAbi(parts[3]) ||
+                    !isSha256(parts[4]) || size !in 0L..MAX_UPDATE_SIZE_BYTES || at < 0
+                ) {
+                    return null
+                }
+                Packet.FeaturePackHave(parts[2], parts[3], parts[4], size, at)
+            } else {
+                null
+            }
+
+            KIND_FEATURE_PACK_WANT -> if (parts.size == 6) {
+                if (!isFeaturePackId(parts[2]) || !isFeaturePackAbi(parts[3]) || !isSha256(parts[4])) return null
+                val binding = if (parts[5].isEmpty()) {
+                    ByteArray(0)
+                } else {
+                    try {
+                        Base64.getUrlDecoder().decode(parts[5])
+                    } catch (_: IllegalArgumentException) {
+                        return null
+                    }
+                }
+                if (binding.size > MAX_FILE_WANT_BINDING_BYTES) return null
+                Packet.FeaturePackWant(parts[2], parts[3], parts[4], binding)
+            } else {
+                null
+            }
+
+            KIND_FEATURE_PACK_NONE -> if (parts.size == 5 && isFeaturePackId(parts[2]) &&
+                isFeaturePackAbi(parts[3]) && isSha256(parts[4])
+            ) {
+                Packet.FeaturePackNone(parts[2], parts[3], parts[4])
+            } else {
+                null
+            }
+
+            KIND_FEATURE_PACK_ASK -> if (parts.size == 4 && isFeaturePackId(parts[2]) && isFeaturePackAbi(parts[3])) {
+                Packet.FeaturePackAsk(parts[2], parts[3])
             } else {
                 null
             }

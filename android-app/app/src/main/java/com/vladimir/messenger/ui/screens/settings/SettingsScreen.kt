@@ -1810,6 +1810,11 @@ private fun SettingsTabContent(
             // ЛОГИ: отчёт для проверки прямой F4-передачи на двух телефонах.
             // ----------------------------------------------------------------
             }
+            if (section == SettingsSection.Features) {
+            item { SettingsSectionTitle(stringResource(R.string.settings_nav_features)) }
+            item { FeaturePacksSettings() }
+            }
+
             if (section == SettingsSection.Help) {
             item { SettingsSectionTitle(stringResource(R.string.section_support)) }
             item {
@@ -2317,97 +2322,6 @@ private fun ThemeModeChoices(selected: ThemeMode, onSelect: (ThemeMode) -> Unit)
     }
 }
 
-@Composable
-private fun SettingsResetCard(
-    title: String,
-    subtitle: String,
-    onClick: (() -> Unit)?,
-) {
-    SettingsCard {
-        SettingsItem(
-            icon = Icons.Default.RestartAlt,
-            title = title,
-            subtitle = subtitle,
-            onClick = onClick,
-        )
-    }
-}
-
-@Composable
-private fun SettingsResetDialog(
-    initialCategories: Set<SettingsResetCategory>,
-    selectable: Boolean,
-    onDismiss: () -> Unit,
-    onConfirm: (Set<SettingsResetCategory>) -> Unit,
-) {
-    var selected by remember(initialCategories) { mutableStateOf(initialCategories) }
-    val canConfirm = selected.isNotEmpty()
-    ApuSettingsDialog(
-        onDismissRequest = onDismiss,
-        icon = { ApuPremiumIconTile(icon = Icons.Default.RestartAlt, size = 34.dp, corner = 10.dp) },
-        title = { Text(stringResource(R.string.settings_reset_dialog_title)) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(stringResource(if (selectable) R.string.settings_reset_dialog_body else R.string.settings_reset_section_body))
-                SettingsResetCategory.entries.forEach { category ->
-                    val checked = category in selected
-                    Column {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .then(
-                                    if (selectable) Modifier.clickable {
-                                        selected = if (checked) selected - category else selected + category
-                                    } else Modifier
-                                )
-                                .padding(vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                stringResource(categoryLabelRes(category)),
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.weight(1f),
-                            )
-                            if (selectable) {
-                                ApuPremiumSwitch(
-                                    checked = checked,
-                                    onCheckedChange = { value ->
-                                        selected = if (value) selected + category else selected - category
-                                    },
-                                )
-                            } else if (checked) {
-                                Icon(Icons.Default.Check, contentDescription = null, tint = ApuBubbleAccentColor)
-                            }
-                        }
-                        Text(
-                            stringResource(categoryDetailsRes(category)),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                Text(
-                    stringResource(R.string.settings_reset_protected_note),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ApuBubbleMutedColor,
-                )
-            }
-        },
-        confirmButton = {
-            ApuTextAction(
-                label = stringResource(R.string.settings_reset_confirm),
-                onClick = { if (canConfirm) onConfirm(selected) },
-                enabled = canConfirm,
-                danger = true,
-            )
-        },
-        dismissButton = {
-            ApuTextAction(label = stringResource(R.string.action_cancel), onClick = onDismiss)
-        },
-    )
-}
-
 private fun SettingsSection.resetCategory(): SettingsResetCategory? = when (this) {
     SettingsSection.Chats -> SettingsResetCategory.CHATS
     SettingsSection.Notifications -> SettingsResetCategory.NOTIFICATIONS
@@ -2416,27 +2330,7 @@ private fun SettingsSection.resetCategory(): SettingsResetCategory? = when (this
     SettingsSection.Network -> SettingsResetCategory.NETWORK
     SettingsSection.Files -> SettingsResetCategory.FILES
     SettingsSection.Hearts -> SettingsResetCategory.HEARTS
-    SettingsSection.Updates, SettingsSection.Help -> null
-}
-
-private fun categoryLabelRes(category: SettingsResetCategory): Int = when (category) {
-    SettingsResetCategory.CHATS -> R.string.settings_reset_category_chats
-    SettingsResetCategory.NOTIFICATIONS -> R.string.settings_reset_category_notifications
-    SettingsResetCategory.APPEARANCE -> R.string.settings_reset_category_appearance
-    SettingsResetCategory.SECURITY -> R.string.settings_reset_category_security
-    SettingsResetCategory.NETWORK -> R.string.settings_reset_category_network
-    SettingsResetCategory.FILES -> R.string.settings_reset_category_files
-    SettingsResetCategory.HEARTS -> R.string.settings_reset_category_hearts
-}
-
-private fun categoryDetailsRes(category: SettingsResetCategory): Int = when (category) {
-    SettingsResetCategory.CHATS -> R.string.settings_reset_details_chats
-    SettingsResetCategory.NOTIFICATIONS -> R.string.settings_reset_details_notifications
-    SettingsResetCategory.APPEARANCE -> R.string.settings_reset_details_appearance
-    SettingsResetCategory.SECURITY -> R.string.settings_reset_details_security
-    SettingsResetCategory.NETWORK -> R.string.settings_reset_details_network
-    SettingsResetCategory.FILES -> R.string.settings_reset_details_files
-    SettingsResetCategory.HEARTS -> R.string.settings_reset_details_hearts
+    SettingsSection.Updates, SettingsSection.Help, SettingsSection.Features -> null
 }
 
 /** Разделы настроек: корень показывает список, пункт - свой подэкран. */
@@ -2450,13 +2344,14 @@ private enum class SettingsSection(val titleRes: Int) {
     Hearts(R.string.settings_nav_hearts),
     Updates(R.string.settings_nav_updates),
     Help(R.string.settings_nav_help),
+    Features(R.string.settings_nav_features),
 }
 
 @Composable
 private fun SettingsSectionTitle(title: String) = ApuSettingsSectionTitle(title)
 
 @Composable
-private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
+internal fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
     ApuSettingsCard(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
         content = content,
@@ -2464,7 +2359,7 @@ private fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
 }
 
 @Composable
-private fun SettingsItem(
+internal fun SettingsItem(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     subtitle: String? = null,

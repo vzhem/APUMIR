@@ -64,6 +64,7 @@
 | [`PEER_EXCHANGE.md`](PEER_EXCHANGE.md) | Прямой поиск через участников |
 | [`PROFILE_BACKGROUND.md`](PROFILE_BACKGROUND.md) | Локальный фон профиля |
 | [`RANK_ENTITLEMENTS.md`](RANK_ENTITLEMENTS.md) | Что доступно по рангам: минимум до третьего ранга и что открывается дальше |
+| [`FEATURE_PACKS.md`](FEATURE_PACKS.md) | Докачиваемые пакеты функций: лёгкая база, замер состава APK и раздел «Дополнительные функции» в настройках |
 | [`PROFILE_SETTINGS_STYLE.md`](PROFILE_SETTINGS_STYLE.md) | Оформление профиля и настроек |
 | [`RELAY_STORAGE_DIAGNOSTICS.md`](RELAY_STORAGE_DIAGNOSTICS.md) | Диагностика relay-хранилища |
 | [`RELAY_STORAGE_FORENSICS.md`](RELAY_STORAGE_FORENSICS.md) | Разбор большого relay-хранилища |

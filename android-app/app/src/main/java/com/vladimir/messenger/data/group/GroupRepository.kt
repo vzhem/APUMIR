@@ -187,6 +187,15 @@ class GroupRepository(
     private val onUpdatePatchPack: suspend (senderId: String, packet: GroupWire.Packet.UpdatePatchPack) -> Unit = { _, _ -> },
     private val onUpdatePatchWant: suspend (senderId: String, packet: GroupWire.Packet.UpdatePatchWant) -> Unit = { _, _ -> },
     /**
+     * Раздача пакетов функций роем (docs/FEATURE_PACKS.md): объявление
+     * «пакет у меня» `fpk`, просьба `fpwant`, отказ `fpnone`, вопрос
+     * `fpask`. По умолчанию ничего не делают — так живут JVM-тесты.
+     */
+    private val onFeaturePackHave: suspend (senderId: String, packet: GroupWire.Packet.FeaturePackHave) -> Unit = { _, _ -> },
+    private val onFeaturePackWant: suspend (senderId: String, packet: GroupWire.Packet.FeaturePackWant) -> Unit = { _, _ -> },
+    private val onFeaturePackNone: suspend (senderId: String, packet: GroupWire.Packet.FeaturePackNone) -> Unit = { _, _ -> },
+    private val onFeaturePackAsk: suspend (senderId: String, packet: GroupWire.Packet.FeaturePackAsk) -> Unit = { _, _ -> },
+    /**
      * Когда узел последний раз выходил на связь по наблюдениям ЭТОГО телефона
      * (`PeerRatingStore`), миллисекунды эпохи; null - этот телефон его ни
      * разу не видел. Нужно наследованию владения: «владелец удалился» здесь
@@ -3341,6 +3350,28 @@ class GroupRepository(
             is GroupWire.Packet.UpdateAsk -> backgroundScope.launch {
                 runCatching { onUpdateAsk(senderId, packet) }
                     .onFailure { Log.w(TAG, "update ask failed: ${it.message}") }
+            }
+
+            // Раздача пакетов функций роем: объявление, просьба, отказ и
+            // вопрос — в фоне; сами zip идут файловой машиной (`packseed`).
+            is GroupWire.Packet.FeaturePackHave -> backgroundScope.launch {
+                runCatching { onFeaturePackHave(senderId, packet) }
+                    .onFailure { Log.w(TAG, "feature pack have failed: ${it.message}") }
+            }
+
+            is GroupWire.Packet.FeaturePackWant -> backgroundScope.launch {
+                runCatching { onFeaturePackWant(senderId, packet) }
+                    .onFailure { Log.w(TAG, "feature pack want failed: ${it.message}") }
+            }
+
+            is GroupWire.Packet.FeaturePackNone -> backgroundScope.launch {
+                runCatching { onFeaturePackNone(senderId, packet) }
+                    .onFailure { Log.w(TAG, "feature pack none failed: ${it.message}") }
+            }
+
+            is GroupWire.Packet.FeaturePackAsk -> backgroundScope.launch {
+                runCatching { onFeaturePackAsk(senderId, packet) }
+                    .onFailure { Log.w(TAG, "feature pack ask failed: ${it.message}") }
             }
 
             // Раунд 133: дифф-патч обновления — объявление и просьба, в фоне;

@@ -91,6 +91,7 @@ class CoreServerService : Service() {
     @Inject lateinit var groupFiles: com.vladimir.messenger.data.group.GroupFileSwarm
     @Inject lateinit var swarmPeerDirectory: com.vladimir.messenger.data.swarm.SwarmPeerDirectory
     @Inject lateinit var apkSeeder: com.vladimir.messenger.data.update.ApkSeeder
+    @Inject lateinit var featurePackSeeder: com.vladimir.messenger.data.featurepacks.FeaturePackSeeder
     @Inject lateinit var referralAttributionRouter: com.vladimir.messenger.data.referral.ReferralAttributionRouter
     @Inject lateinit var heartGameNetwork: com.vladimir.messenger.data.heartgame.HeartGameNetwork
     @Inject lateinit var peerRankRouter: com.vladimir.messenger.data.rank.PeerRankRouter
@@ -2335,6 +2336,14 @@ class CoreServerService : Service() {
                     RuntimeDiagnostics.measure(DiagnosticOperation.APK_PUMP) { apkSeeder.pump() }
                 } catch (ex: Exception) {
                     Log.w(TAG, "Apk seeder pump error: ${ex.message}")
+                }
+                // Раздача пакетов функций роем (docs/FEATURE_PACKS.md):
+                // двигать просьбу о пакете, при тишине роя — официальный
+                // сайт, и объявлять соседям свои установленные пакеты.
+                try {
+                    RuntimeDiagnostics.measure(DiagnosticOperation.FEATURE_PACK_PUMP) { featurePackSeeder.pump() }
+                } catch (ex: Exception) {
+                    Log.w(TAG, "Feature pack seeder pump error: ${ex.message}")
                 }
                 // Раунд 137: недоставленные «удалить у всех» - личные (до ack)
                 // и групповые (эпидемией через помпу репозитория).

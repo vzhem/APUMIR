@@ -124,6 +124,9 @@ object GroupsModule {
         // Рой APK (обновление роем, docs/UPDATE_SEEDING.md): те же кольца,
         // что у файлов группы, — через Provider.
         apkSeeder: javax.inject.Provider<com.vladimir.messenger.data.update.ApkSeeder>,
+        // Раздача пакетов функций роем (docs/FEATURE_PACKS.md): через
+        // Provider, как рой APK, — сидер зависит от маршрутизатора файлов.
+        featurePackSeeder: javax.inject.Provider<com.vladimir.messenger.data.featurepacks.FeaturePackSeeder>,
         // Раунд 137: очередь «удалить у всех» - команда хранится и досылается,
         // пока не дойдёт до всех (через тех, кто в сети).
         deletionOutbox: com.vladimir.messenger.data.repository.DeletionOutbox,
@@ -232,6 +235,11 @@ object GroupsModule {
         // Раунд 133: дифф-патч обновления — тот же сидер.
         onUpdatePatchPack = { senderId, packet -> apkSeeder.get().onUpdatePatchPack(senderId, packet) },
         onUpdatePatchWant = { senderId, packet -> apkSeeder.get().onUpdatePatchWant(senderId, packet) },
+        // Раздача пакетов функций роем — в сидер пакетов.
+        onFeaturePackHave = { senderId, packet -> featurePackSeeder.get().onFeaturePackHave(senderId, packet) },
+        onFeaturePackWant = { senderId, packet -> featurePackSeeder.get().onFeaturePackWant(senderId, packet) },
+        onFeaturePackNone = { senderId, packet -> featurePackSeeder.get().onFeaturePackNone(senderId, packet) },
+        onFeaturePackAsk = { senderId, packet -> featurePackSeeder.get().onFeaturePackAsk(senderId, packet) },
         contactIds = { contactDao.allIds() },
         nicknameDao = nicknameDao,
         myUsername = {

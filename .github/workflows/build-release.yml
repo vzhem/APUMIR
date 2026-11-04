@@ -450,6 +450,13 @@ jobs:
           (cd "$APK_DIR" && sha256sum app-release.apk > SHA256SUMS.txt)
           cat "$APK_DIR/SHA256SUMS.txt"
 
+      # Состав APK по группам (ABI, нативные библиотеки, dex, ресурсы):
+      # замер для решения о докачиваемых пакетах функций. Печатается в лог
+      # и аннотации - виден без скачивания самого файла.
+      - name: Report APK composition
+        if: success()
+        run: python3 scripts/ci/apk-composition.py android-app/app/build/outputs/apk/release/app-release.apk
+
       # Upload the assembled, signed APK from this run (also for workflow_dispatch).
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

@@ -8,6 +8,46 @@ import org.junit.Test
 
 class GroupWireTest {
 
+    /** Раздача пакетов роем: «у кого есть — тот и раздаёт» (docs/FEATURE_PACKS.md). */
+    @Test
+    fun featurePackPacketsRoundTrip() {
+        val sha = "a".repeat(64)
+        val have = GroupWire.parse(
+            GroupWire.buildFeaturePackHave("translate", "arm64-v8a", sha, 38_908_032L, 123L),
+        ) as GroupWire.Packet.FeaturePackHave
+        assertEquals("translate", have.packId)
+        assertEquals("arm64-v8a", have.abi)
+        assertEquals(sha, have.sha256)
+        assertEquals(38_908_032L, have.sizeBytes)
+
+        val want = GroupWire.parse(
+            GroupWire.buildFeaturePackWant("voice-text", "armeabi-v7a", sha, byteArrayOf(1, 2, 3)),
+        ) as GroupWire.Packet.FeaturePackWant
+        assertEquals("voice-text", want.packId)
+        assertEquals(byteArrayOf(1, 2, 3).toList(), want.binding.toList())
+
+        val none = GroupWire.parse(
+            GroupWire.buildFeaturePackNone("face-effects", "x86_64", sha),
+        ) as GroupWire.Packet.FeaturePackNone
+        assertEquals("face-effects", none.packId)
+
+        val ask = GroupWire.parse(
+            GroupWire.buildFeaturePackAsk("translate", "arm64-v8a"),
+        ) as GroupWire.Packet.FeaturePackAsk
+        assertEquals("translate", ask.packId)
+        assertEquals("arm64-v8a", ask.abi)
+    }
+
+    /** Чужой id пакета, архитектура и sha пакетом не становятся. */
+    @Test
+    fun featurePackPacketsRejectGarbage() {
+        val sha = "a".repeat(64)
+        assertNull(GroupWire.parse("APUGRP1|fpk|Bad Pack|arm64-v8a|$sha|10|1"))
+        assertNull(GroupWire.parse("APUGRP1|fpk|translate|mips|$sha|10|1"))
+        assertNull(GroupWire.parse("APUGRP1|fpk|translate|arm64-v8a|notasha|10|1"))
+        assertNull(GroupWire.parse("APUGRP1|fpask|translate|windows"))
+    }
+
     @Test
     fun messageRoundTripKeepsTrickyText() {
         val text = "привет | труба\nвторая строка | 100% — ok"

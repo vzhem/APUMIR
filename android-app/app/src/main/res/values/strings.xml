@@ -110,6 +110,29 @@
     <string name="settings_nav_updates_hint">Новые версии приложения</string>
     <string name="settings_nav_help">Помощь и о программе</string>
     <string name="settings_nav_help_hint">Поддержка, журналы и версия</string>
+    <string name="settings_nav_features">Дополнительные функции</string>
+    <string name="settings_nav_features_hint">Что докачать: перевод, голос в текст, видеоэффекты</string>
+    <string name="feature_packs_intro">Приложение ставится лёгким и сразу работает: сообщения, сообщества и приём файлов на месте. Тяжёлые возможности можно докачать здесь в любой момент — ранг для этого не нужен.</string>
+    <string name="feature_packs_pack_translate">Перевод сообщений</string>
+    <string name="feature_packs_pack_translate_hint">Перевод входящих сообщений прямо на телефоне, без сервера</string>
+    <string name="feature_packs_pack_voice">Голосовые в текст</string>
+    <string name="feature_packs_pack_voice_hint">Расшифровка голосовых сообщений в текст на телефоне</string>
+    <string name="feature_packs_pack_face">Эффекты для видео</string>
+    <string name="feature_packs_pack_face_hint">Лицо, фильтры и смена фона в видеоисториях и видеозвонках</string>
+    <string name="feature_packs_size">%1$s МБ для вашего телефона</string>
+    <string name="feature_packs_download_all">Весь функционал одним пакетом выбора</string>
+    <string name="feature_packs_select_all">Выбрать всё</string>
+    <string name="feature_packs_total">Всё вместе: %1$s МБ</string>
+    <string name="feature_packs_total_selected">К догрузке выбрано: %1$s МБ</string>
+    <string name="feature_packs_pending">Откуда берётся пакет: в первую очередь — с официального сайта, без ограничений. Если сайт не отвечает или перегружен, пакет спросят у соседей по рою, у кого он уже скачан. Скачав пакет, ваш телефон сам начнёт раздавать его соседям.</string>
+    <string name="feature_packs_status_installed">Скачано — раздаётся соседям по рою</string>
+    <string name="feature_packs_status_asking">На сайте не нашлось — спрашиваем соседей по рою…</string>
+    <string name="feature_packs_status_downloading">Скачивается от соседа: %1$s из %2$s МБ</string>
+    <string name="feature_packs_status_official">Скачиваем с официального сайта…</string>
+    <string name="feature_packs_status_failed">Не удалось скачать пакет</string>
+    <string name="feature_packs_download">Скачать</string>
+    <string name="feature_packs_cancel">Отмена</string>
+    <string name="feature_packs_retry">Повторить</string>
     <string name="section_about">О приложении</string>
 
     <!-- Язык интерфейса -->
