@@ -124,7 +124,15 @@
     <string name="feature_packs_select_all">Выбрать всё</string>
     <string name="feature_packs_total">Всё вместе: %1$s МБ</string>
     <string name="feature_packs_total_selected">К догрузке выбрано: %1$s МБ</string>
-    <string name="feature_packs_pending">Пакеты ещё не опубликованы: выбор сохранён и загрузка начнётся автоматически с ближайшим обновлением приложения.</string>
+    <string name="feature_packs_pending">Откуда берётся пакет: сначала у соседей по рою, у кого он уже скачан, — они и раздают. Если в рое ни у кого нет, приложение скачает пакет с официального сайта. Скачав пакет, ваш телефон сам начнёт раздавать его соседям.</string>
+    <string name="feature_packs_status_installed">Скачано — раздаётся соседям по рою</string>
+    <string name="feature_packs_status_asking">Спрашиваем соседей по рою…</string>
+    <string name="feature_packs_status_downloading">Скачивается от соседа: %1$s из %2$s МБ</string>
+    <string name="feature_packs_status_official">В рое не нашлось — скачиваем с официального сайта…</string>
+    <string name="feature_packs_status_failed">Не удалось скачать пакет</string>
+    <string name="feature_packs_download">Скачать</string>
+    <string name="feature_packs_cancel">Отмена</string>
+    <string name="feature_packs_retry">Повторить</string>
     <string name="section_about">О приложении</string>
 
     <!-- Язык интерфейса -->

@@ -4,6 +4,7 @@ package com.vladimir.messenger.data.diagnostics
 enum class DiagnosticOperation {
     CORE_EVENTS, FILE_PUMP, GROUP_FILE_PUMP, APK_PUMP, DIRECT_DELETE_PUMP, GROUP_DELETE_PUMP,
     CHAT_RETRY_PUMP, STORY_PUMP, REPORT_FACTS, LOGCAT_READ, STORAGE_AUDIT, KEY_MODE_PROBE,
+    FEATURE_PACK_PUMP,
 }
 
 enum class DiagnosticOutcome { OK, FAILED, CANCELLED }

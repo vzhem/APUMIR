@@ -60,6 +60,30 @@ class FeaturePacksContract(unittest.TestCase):
                 read(JAVA / "data/featurepacks/FeaturePackStore.kt"),
             )
 
+    def test_swarm_distribution_is_wired_and_official_is_fallback(self):
+        wire = read(JAVA / "data/group/GroupWire.kt")
+        for packet in ("FeaturePackHave", "FeaturePackWant", "FeaturePackNone", "FeaturePackAsk"):
+            self.assertIn(f"data class {packet}(", wire)
+            self.assertIn(f"fun build{packet}(", wire)
+        repo = read(JAVA / "data/group/GroupRepository.kt")
+        for callback in ("onFeaturePackHave", "onFeaturePackWant", "onFeaturePackNone", "onFeaturePackAsk"):
+            self.assertIn(callback, repo)
+        module = read(JAVA / "di/GroupsModule.kt")
+        self.assertIn("featurePackSeeder", module)
+        seeder = read(JAVA / "data/featurepacks/FeaturePackSeeder.kt")
+        # Порядок владельца: сначала рой, потом соседи, потом сайт.
+        self.assertIn("RustBridge.liveSwarmPeerIds()", seeder)
+        self.assertIn("groupSeeder.offer", seeder)
+        self.assertIn("apu.clan.su/downloads", seeder)
+        self.assertIn("SWARM_WAIT_MS", seeder)
+        self.assertLess(seeder.index("askSwarm("), seeder.index("downloadFromOfficial("))
+        # Целостность: пакет принимается только по SHA-256.
+        self.assertIn("sha256OfFile", seeder)
+        router = read(JAVA / "data/file/FileTransferRouter.kt")
+        self.assertIn("routePackOffer", router)
+        service = read(JAVA / "service/CoreServerService.kt")
+        self.assertIn("featurePackSeeder.pump()", service)
+
     def test_strings_exist_in_both_locales(self):
         keys = (
             "settings_nav_features", "settings_nav_features_hint",
@@ -70,6 +94,10 @@ class FeaturePacksContract(unittest.TestCase):
             "feature_packs_download_all", "feature_packs_select_all",
             "feature_packs_total", "feature_packs_total_selected",
             "feature_packs_pending",
+            "feature_packs_status_installed", "feature_packs_status_asking",
+            "feature_packs_status_downloading", "feature_packs_status_official",
+            "feature_packs_status_failed", "feature_packs_download",
+            "feature_packs_cancel", "feature_packs_retry",
         )
         for folder in ("values", "values-en"):
             text = read(RES / folder / "strings.xml")

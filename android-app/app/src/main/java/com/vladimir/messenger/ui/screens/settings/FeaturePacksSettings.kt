@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -18,9 +19,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.vladimir.messenger.R
 import com.vladimir.messenger.data.featurepacks.FeaturePack
 import com.vladimir.messenger.data.featurepacks.FeaturePackCatalog
+import com.vladimir.messenger.data.featurepacks.FeaturePackSeeder
 import com.vladimir.messenger.data.featurepacks.FeaturePackStore
 import com.vladimir.messenger.ui.components.ApuPremiumSwitch
 import com.vladimir.messenger.ui.components.ApuSettingsCard
@@ -37,16 +40,18 @@ import com.vladimir.messenger.ui.components.HintBubbleTextColor
  * Ранги в этом разделе не участвуют: докачать можно в любой момент
  * (решение владельца, docs/FEATURE_PACKS.md).
  *
- * Стадия 1: каталог и выбор. Пакеты ещё не опубликованы на релизе,
- * поэтому каждая карточка честно говорит «пакет ещё не опубликован»,
- * а выбор сохраняется и подхватится загрузчиком следующей стадии.
+ * Откуда качается пакет — по замыслу владельца «у кого есть, тот и
+ * раздаёт»: сначала сосед по рою, у которого пакет уже стоит; если в рое
+ * ни у кого нет — официальный сайт apu.clan.su. Скачавший телефон сам
+ * становится раздающим. Статус каждого пакета виден прямо в строке.
  */
 @Composable
-fun FeaturePacksSettings() {
+fun FeaturePacksSettings(viewModel: FeaturePacksViewModel = hiltViewModel()) {
     val context = LocalContext.current
     val abi = remember { FeaturePackStore.deviceAbi() }
     var selected by remember { mutableStateOf(FeaturePackStore.selectedIds(context)) }
     val totalBytes = FeaturePackCatalog.totalBytes(selected, abi)
+    val packStates by viewModel.states.collectAsState()
 
     ApuSettingsCard(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -63,10 +68,14 @@ fun FeaturePacksSettings() {
                     pack = pack,
                     abi = abi,
                     checked = pack.id in selected,
+                    state = packStates[pack.id],
                     onCheckedChange = { value ->
                         FeaturePackStore.setSelected(context, pack.id, value)
                         selected = FeaturePackStore.selectedIds(context)
+                        if (value) viewModel.request(pack.id) else viewModel.cancel(pack.id)
                     },
+                    onDownloadClick = { viewModel.request(pack.id) },
+                    onCancelClick = { viewModel.cancel(pack.id) },
                 )
             }
             Row(
@@ -93,6 +102,7 @@ fun FeaturePacksSettings() {
                     onClick = {
                         FeaturePackStore.selectAll(context)
                         selected = FeaturePackStore.selectedIds(context)
+                        FeaturePackCatalog.packs.forEach { viewModel.request(it.id) }
                     },
                 )
             }
@@ -117,7 +127,10 @@ private fun FeaturePackRow(
     pack: FeaturePack,
     abi: String,
     checked: Boolean,
+    state: FeaturePackSeeder.PackState?,
     onCheckedChange: (Boolean) -> Unit,
+    onDownloadClick: () -> Unit,
+    onCancelClick: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -139,8 +152,62 @@ private fun FeaturePackRow(
                 style = MaterialTheme.typography.labelSmall,
                 color = HintBubbleMutedColor,
             )
+            PackStatusLine(state = state, onDownloadClick = onDownloadClick, onCancelClick = onCancelClick)
         }
         ApuPremiumSwitch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+/** Статус пакета под его описанием: качаем из роя, с сайта, раздаём и т.д. */
+@Composable
+private fun PackStatusLine(
+    state: FeaturePackSeeder.PackState?,
+    onDownloadClick: () -> Unit,
+    onCancelClick: () -> Unit,
+) {
+    val phase = state?.phase ?: FeaturePackSeeder.Phase.NOT_INSTALLED
+    when (phase) {
+        FeaturePackSeeder.Phase.INSTALLED -> Text(
+            stringResource(R.string.feature_packs_status_installed),
+            style = MaterialTheme.typography.labelSmall,
+            color = HintBubbleMutedColor,
+        )
+        FeaturePackSeeder.Phase.ASKING_SWARM -> Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                stringResource(R.string.feature_packs_status_asking),
+                style = MaterialTheme.typography.labelSmall,
+                color = HintBubbleMutedColor,
+                modifier = Modifier.weight(1f),
+            )
+            ApuTextAction(label = stringResource(R.string.feature_packs_cancel), onClick = onCancelClick)
+        }
+        FeaturePackSeeder.Phase.DOWNLOADING -> Text(
+            stringResource(
+                R.string.feature_packs_status_downloading,
+                formatMb(state?.receivedBytes ?: 0L),
+                formatMb(state?.totalBytes ?: 0L),
+            ),
+            style = MaterialTheme.typography.labelSmall,
+            color = HintBubbleMutedColor,
+        )
+        FeaturePackSeeder.Phase.OFFICIAL_DOWNLOAD -> Text(
+            stringResource(R.string.feature_packs_status_official),
+            style = MaterialTheme.typography.labelSmall,
+            color = HintBubbleMutedColor,
+        )
+        FeaturePackSeeder.Phase.FAILED -> Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                stringResource(R.string.feature_packs_status_failed),
+                style = MaterialTheme.typography.labelSmall,
+                color = HintBubbleMutedColor,
+                modifier = Modifier.weight(1f),
+            )
+            ApuTextAction(label = stringResource(R.string.feature_packs_retry), onClick = onDownloadClick)
+        }
+        FeaturePackSeeder.Phase.NOT_INSTALLED -> ApuTextAction(
+            label = stringResource(R.string.feature_packs_download),
+            onClick = onDownloadClick,
+        )
     }
 }
 

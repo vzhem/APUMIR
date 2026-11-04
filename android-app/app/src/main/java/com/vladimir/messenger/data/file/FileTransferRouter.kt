@@ -59,6 +59,12 @@ class FileTransferRouter @Inject constructor(
      * Берётся только при обработке предложений и завершении передачи.
      */
     private val apkSeeder: javax.inject.Provider<com.vladimir.messenger.data.update.ApkSeeder>,
+    /**
+     * Раздача пакетов функций роем (docs/FEATURE_PACKS.md). Через Provider
+     * по той же причине, что и рой APK: сидер пакетов зависит от этого
+     * маршрутизатора.
+     */
+    private val featurePackSeeder: javax.inject.Provider<com.vladimir.messenger.data.featurepacks.FeaturePackSeeder>,
     /** Раунд 139: библиотека стикеров - тихое оседание стикеров из роя. */
     private val storyVideos: com.vladimir.messenger.data.story.StoryVideoDelivery,
     private val stickerLibrary: com.vladimir.messenger.data.sticker.StickerLibrary,
@@ -228,6 +234,17 @@ class FileTransferRouter @Inject constructor(
                 } else {
                     false
                 }
+                // Пакет функций роем (docs/FEATURE_PACKS.md): файл в
+                // виртуальное сообщество «packseed» — карточка в чат не
+                // нужна; сидер пакетов отметит «установлено» и начнёт
+                // раздавать соседям сам.
+                val featurePack = if (!apkUpdate && !groupFile) {
+                    runCatching { featurePackSeeder.get().onFileReceived(chatId, senderId, fileSha256) }
+                        .onFailure { Log.w(TAG, "feature pack completion hook failed: ${it.message}") }
+                        .getOrDefault(false)
+                } else {
+                    false
+                }
                     // Раунд 139: стикер, которого телефон сам просил в панели
                     // «Из сети» (isWanted), приезжает тихо и без пузыря.
                     // Вычисляется до «если не апдейт/не файл группы»: ниже,
@@ -236,7 +253,7 @@ class FileTransferRouter @Inject constructor(
                         com.vladimir.messenger.data.sticker.StickerLibrary
                             .isWanted(fileSha256)
                     }.getOrDefault(false)
-                    if (!apkUpdate && !groupFile) {
+                    if (!apkUpdate && !groupFile && !featurePack) {
                         // Раунд 134: байты гифки приезжают ТИХО (раунд 128 - обмен
                         // только ссылками). Карточка-ссылка уже стоит в чате и
                         // оживёт сама, когда байты лягут в библиотеку (хук ниже);
@@ -531,11 +548,19 @@ class FileTransferRouter @Inject constructor(
                 if (groupRouting !is FileTransferReceiver.OfferRouting.Unknown) {
                     groupRouting
                 } else {
-                    // Рой APK (docs/UPDATE_SEEDING.md): рой групп этого файла
-                    // не знает — принимает в сообщество «apkseed» сидер, и
-                    // только если я сам запрашивал это обновление.
-                    runCatching { apkSeeder.get().routeApkOffer(senderId, fileSha256) }
+                    // Пакет функций роем: файл, который этот телефон сам
+                    // просил в «packseed», принимает сидер пакетов.
+                    val packRouting = runCatching { featurePackSeeder.get().routePackOffer(senderId, fileSha256) }
                         .getOrDefault(FileTransferReceiver.OfferRouting.Unknown)
+                    if (packRouting !is FileTransferReceiver.OfferRouting.Unknown) {
+                        packRouting
+                    } else {
+                        // Рой APK (docs/UPDATE_SEEDING.md): рой групп этого файла
+                        // не знает — принимает в сообщество «apkseed» сидер, и
+                        // только если я сам запрашивал это обновление.
+                        runCatching { apkSeeder.get().routeApkOffer(senderId, fileSha256) }
+                            .getOrDefault(FileTransferReceiver.OfferRouting.Unknown)
+                    }
                 }
             },
             groupSeed = FileTransferReceiver.GroupSeedHooks(

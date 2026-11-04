@@ -77,7 +77,15 @@
     <string name="feature_packs_select_all">Select all</string>
     <string name="feature_packs_total">Everything together: %1$s MB</string>
     <string name="feature_packs_total_selected">Selected for download: %1$s MB</string>
-    <string name="feature_packs_pending">The packs are not published yet: your choice is saved and the download will start automatically with the next app update.</string>
+    <string name="feature_packs_pending">Where a pack comes from: first from swarm neighbours who already have it — they share it. If nobody in the swarm has it, the app downloads it from the official site. Once downloaded, your phone starts sharing it with neighbours too.</string>
+    <string name="feature_packs_status_installed">Downloaded — sharing with swarm neighbours</string>
+    <string name="feature_packs_status_asking">Asking swarm neighbours…</string>
+    <string name="feature_packs_status_downloading">Downloading from a neighbour: %1$s of %2$s MB</string>
+    <string name="feature_packs_status_official">Not found in the swarm — downloading from the official site…</string>
+    <string name="feature_packs_status_failed">Could not download the pack</string>
+    <string name="feature_packs_download">Download</string>
+    <string name="feature_packs_cancel">Cancel</string>
+    <string name="feature_packs_retry">Retry</string>
     <string name="section_about">About</string>
 
     <string name="language_section">Language</string>
