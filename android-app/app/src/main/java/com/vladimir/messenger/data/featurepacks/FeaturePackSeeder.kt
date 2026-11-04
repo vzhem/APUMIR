@@ -34,17 +34,17 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /**
- * Раздача пакетов функций (docs/FEATURE_PACKS.md): «у кого есть — тот и
- * раздаёт». Порядок источников — как просил владелец:
+ * Раздача пакетов функций (docs/FEATURE_PACKS.md). Порядок источников —
+ * как решил владелец: официальный сайт в первую очередь и без
+ * ограничений, рой — если сайт не отвечает или перегружен:
  *
- *  1) **Рой**: сосед, у которого пакет уже скачан, отдаёт его файловой
+ *  1) **Официальный сайт**: zip с `apu.clan.su/downloads`, SHA-256 — по
+ *     официальному манифесту. Скачавший телефон сам становится раздающим.
+ *  2) **Рой**: сосед, у которого пакет уже скачан, отдаёт его файловой
  *     машиной (виртуальное сообщество [CHAT_ID], как рой APK); телефон
  *     получает пакет и сам становится раздающим.
- *  2) **Другие соседи**: объявления `fpk` собираются от всех, просьба
+ *  3) **Другие соседи**: объявления `fpk` собираются от всех, просьба
  *     `fpwant` уходит следующему, если первый отказал (`fpnone`).
- *  3) **Официальный сайт**: если в рое пакета ни у кого нет, телефон
- *     скачивает zip с `apu.clan.su/downloads` и сверяет SHA-256 по
- *     официальному манифесту — после чего тоже раздаёт соседям.
  *
  * Целостность: пакет принимается только при совпадении SHA-256 с
  * объявлением соседа или официальным манифестом. Ранги не участвуют:
@@ -87,6 +87,8 @@ class FeaturePackSeeder @Inject constructor(
     private val offers = HashMap<String, LinkedHashMap<String, Offer>>()
     private val triedSeeds = HashSet<String>()
     @Volatile private var officialTriedFor: String? = null
+    /** Когда ушли в рой после молчания сайта; помпа отсчитывает ожидание от неё. */
+    @Volatile private var swarmStartedAtMs = 0L
     @Volatile private var lastAnnounceAtMs = 0L
 
     private fun packDir(): File = File(appContext.filesDir, "feature_packs").apply { mkdirs() }
@@ -125,8 +127,9 @@ class FeaturePackSeeder @Inject constructor(
     // ── Просьба: сначала рой, потом официальный сайт ──────────────────────
 
     /**
-     * Владелец включил пакет: просим у роя. Если соседей с пакетом не
-     * нашлось за [SWARM_WAIT_MS] — помпа (pump) уйдёт на официальный сайт.
+     * Владелец включил пакет: сначала официальный сайт (без ограничений).
+     * Если сайт не отвечает или перегружен — просим у роя; соседей без
+     * пакета помпа за [SWARM_WAIT_MS] честно переводит в «не удалось».
      */
     suspend fun request(packId: String) {
         val pack = FeaturePackCatalog.pack(packId) ?: return
@@ -139,14 +142,15 @@ class FeaturePackSeeder @Inject constructor(
         }
         mutex.withLock {
             triedSeeds.clear()
-            officialTriedFor = null
+            officialTriedFor = packId
             FeaturePackStore.savePending(
                 appContext,
                 FeaturePackStore.Pending(packId, abi, offers[packId]?.values?.firstOrNull()?.sha256.orEmpty(), System.currentTimeMillis()),
             )
-            setState(PackState(packId, Phase.ASKING_SWARM, totalBytes = pack.sizeBytesFor(abi)))
+            setState(PackState(packId, Phase.OFFICIAL_DOWNLOAD, totalBytes = pack.sizeBytesFor(abi)))
         }
-        askSwarm(pack, abi)
+        // Сайт — в первую очередь; рой подключится сам, если сайт не ответит.
+        scope.launch { downloadFromOfficial(pack, abi, fallbackToSwarm = true) }
     }
 
     /** Отмена текущей догрузки (установленный пакет не трогаем). */
@@ -357,12 +361,12 @@ class FeaturePackSeeder @Inject constructor(
             }.getOrNull()
         }
 
-    // ── Официальный сайт: если в рое ни у кого нет ────────────────────────
+    // ── Официальный сайт: первый источник, рой — запасной ─────────────────
 
     /**
-     * Помпа раздела: двигает просьбу дальше. Рой ждём [SWARM_WAIT_MS];
-     * дальше один раз пробуем официальный сайт; прогресс передачи
-     * показываем в настройках.
+     * Помпа раздела: показывает прогресс передачи от соседа и честно
+     * завершает просьбу, если рой молчит дольше [SWARM_WAIT_MS]
+     * (официальный сайт к этому моменту уже пробовали первым).
      */
     suspend fun pump() {
         val pending = FeaturePackStore.pending(appContext)
@@ -375,14 +379,16 @@ class FeaturePackSeeder @Inject constructor(
                 } else {
                     null
                 }
+                val swarmSince = if (swarmStartedAtMs > 0L) swarmStartedAtMs else pending.startedAtMs
                 when {
                     row != null -> setState(
                         PackState(pack.id, Phase.DOWNLOADING, row.transferredBytes, row.totalBytes),
                     )
-                    System.currentTimeMillis() - pending.startedAtMs > SWARM_WAIT_MS &&
-                        officialTriedFor != pack.id -> {
-                        officialTriedFor = pack.id
-                        scope.launch { downloadFromOfficial(pack, pending.abi) }
+                    stateFor(pack.id).phase == Phase.ASKING_SWARM &&
+                        System.currentTimeMillis() - swarmSince > SWARM_WAIT_MS -> {
+                        FeaturePackStore.clearPending(appContext)
+                        setState(PackState(pack.id, Phase.FAILED, failure = "swarm timeout"))
+                        Log.i(TAG, "pack ${pack.id}: swarm did not answer in time")
                     }
                 }
             }
@@ -390,7 +396,7 @@ class FeaturePackSeeder @Inject constructor(
         announceInstalled()
     }
 
-    private suspend fun downloadFromOfficial(pack: FeaturePack, abi: String) {
+    private suspend fun downloadFromOfficial(pack: FeaturePack, abi: String, fallbackToSwarm: Boolean = false) {
         setState(PackState(pack.id, Phase.OFFICIAL_DOWNLOAD, totalBytes = pack.sizeBytesFor(abi)))
         val result = withContext(Dispatchers.IO) {
             runCatching {
@@ -432,8 +438,15 @@ class FeaturePackSeeder @Inject constructor(
             Log.i(TAG, "pack ${pack.id} installed from official site (${target.length()} B)")
         }.onFailure { error ->
             Log.w(TAG, "pack ${pack.id} official download failed: ${error.message}")
-            FeaturePackStore.clearPending(appContext)
-            setState(PackState(pack.id, Phase.FAILED, failure = error.message ?: "official download failed"))
+            if (fallbackToSwarm) {
+                // Сайт не отвечает или перегружен — спрашиваем рой.
+                swarmStartedAtMs = System.currentTimeMillis()
+                setState(PackState(pack.id, Phase.ASKING_SWARM, totalBytes = pack.sizeBytesFor(abi)))
+                scope.launch { askSwarm(pack, abi) }
+            } else {
+                FeaturePackStore.clearPending(appContext)
+                setState(PackState(pack.id, Phase.FAILED, failure = error.message ?: "official download failed"))
+            }
         }
     }
 
@@ -543,8 +556,8 @@ class FeaturePackSeeder @Inject constructor(
         private const val ASK_FANOUT = 8
         private const val MAX_OFFERS_PER_PACK = 16
 
-        /** Рой ждём столько; дальше — официальный сайт. */
-        private const val SWARM_WAIT_MS = 30_000L
+        /** Рой (запасной после сайта) ждём столько, дальше — честный отказ. */
+        private const val SWARM_WAIT_MS = 90_000L
 
         /** Объявления «пакет у меня» повторяем не чаще раза в 10 минут. */
         private const val ANNOUNCE_INTERVAL_MS = 10 * 60_000L

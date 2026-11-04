@@ -71,12 +71,13 @@ class FeaturePacksContract(unittest.TestCase):
         module = read(JAVA / "di/GroupsModule.kt")
         self.assertIn("featurePackSeeder", module)
         seeder = read(JAVA / "data/featurepacks/FeaturePackSeeder.kt")
-        # Порядок владельца: сначала рой, потом соседи, потом сайт.
+        # Порядок владельца: сайт в первую очередь, рой — запасной.
         self.assertIn("RustBridge.liveSwarmPeerIds()", seeder)
         self.assertIn("groupSeeder.offer", seeder)
         self.assertIn("apu.clan.su/downloads", seeder)
         self.assertIn("SWARM_WAIT_MS", seeder)
-        self.assertLess(seeder.index("askSwarm("), seeder.index("downloadFromOfficial("))
+        self.assertIn("fallbackToSwarm = true", seeder)
+        self.assertIn("Сайт — в первую очередь", seeder)
         # Целостность: пакет принимается только по SHA-256.
         self.assertIn("sha256OfFile", seeder)
         router = read(JAVA / "data/file/FileTransferRouter.kt")
