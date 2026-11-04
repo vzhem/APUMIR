@@ -101,6 +101,14 @@ jobs:
           print(payload)
           PY
 
+      # Система REST-передач кусками (≤100 МБ, пауза 5 минут) обязана быть
+      # рабочей, а не «готовой на бумаге»: каждый запуск публикации сначала
+      # прогоняет её против локального приёмника (нарезка, паузы,
+      # продолжение, сборка обратно). Падение здесь = красный процесс.
+      - name: Chunked transfer self-test (100 MB system)
+        if: steps.tag.outputs.SKIP != '1'
+        run: python3 scripts/release/chunked_upload.py --self-test
+
       # Главный канал сайта: uCoz FTP, каталог /downloads. Порядок важен
       # (website/INSTALL_UCOZ.md): сначала файлы, манифесты — последними,
       # чтобы сайт ни секунды не ссылался на то, чего ещё нет.
@@ -117,14 +125,39 @@ jobs:
             exit 0
           fi
           REMOTE_DIR="${FTP_REMOTE_DIR:-/downloads}"
+          # Владелец мог вписать хост с протоколом или слэшем на конце —
+          # приводим к чистому имени сервера, иначе адрес получается битым.
+          HOST="$FTP_HOST"
+          HOST="${HOST#ftp://}"
+          HOST="${HOST#FTP://}"
+          HOST="${HOST%/}"
+          echo "FTP host: $HOST, каталог: $REMOTE_DIR, логин задан: да"
+          # Предпроверка: вход и чтение каталога. Пароль в лог не попадает:
+          # curl без -v его не печатает, а адрес содержит только хост.
+          if ! curl --fail --silent --user "$FTP_USER:$FTP_PASSWORD" \
+              "ftp://$HOST$REMOTE_DIR/" --list-only > /tmp/ftp-list.txt; then
+            echo "::error::FTP: не удалось войти или открыть $REMOTE_DIR на $HOST. Проверьте секреты APU_UCOZ_FTP_HOST (только имя сервера, без ftp://), APU_UCOZ_FTP_USER и APU_UCOZ_FTP_PASSWORD и что каталог существует."
+            exit 1
+          fi
+          echo "FTP вход работает, в каталоге файлов: $(wc -l < /tmp/ftp-list.txt)"
           upload() {
             file="$1"
-            echo "FTP -> $REMOTE_DIR/$(basename "$file")"
+            name="$(basename "$file")"
+            echo "FTP -> $REMOTE_DIR/$name ($(stat -c %s "$file") Б)"
             curl --fail --silent --show-error \
               --user "$FTP_USER:$FTP_PASSWORD" \
               --ftp-create-dirs \
+              --retry 2 \
               -T "$file" \
-              "ftp://$FTP_HOST$REMOTE_DIR/$(basename "$file")"
+              "ftp://$HOST$REMOTE_DIR/$name"
+            # Сверка: сервер обязан видеть файл того же размера.
+            remote_size="$(curl --silent --user "$FTP_USER:$FTP_PASSWORD" \
+              "ftp://$HOST$REMOTE_DIR/$name" --head 2>/dev/null \
+              | tr -d '\r' | awk -F': ' 'tolower($1)=="content-length"{print $2}')"
+            if [ -n "$remote_size" ] && [ "$remote_size" != "$(stat -c %s "$file")" ]; then
+              echo "::error::FTP: $name на сервере $remote_size Б, ожидалось $(stat -c %s "$file") Б"
+              exit 1
+            fi
           }
           set -e
           for zip in site-files/feature-pack-*.zip; do upload "$zip"; done
