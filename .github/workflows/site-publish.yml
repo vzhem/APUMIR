@@ -115,55 +115,26 @@ jobs:
       - name: Upload to apu.clan.su via FTP
         if: steps.tag.outputs.SKIP != '1'
         env:
-          FTP_HOST: ${{ secrets.APU_UCOZ_FTP_HOST }}
-          FTP_USER: ${{ secrets.APU_UCOZ_FTP_USER }}
-          FTP_PASSWORD: ${{ secrets.APU_UCOZ_FTP_PASSWORD }}
-          FTP_REMOTE_DIR: ${{ vars.APU_UCOZ_FTP_REMOTE_DIR }}
+          APU_FTP_HOST: ${{ secrets.APU_UCOZ_FTP_HOST }}
+          APU_FTP_USER: ${{ secrets.APU_UCOZ_FTP_USER }}
+          APU_FTP_PASSWORD: ${{ secrets.APU_UCOZ_FTP_PASSWORD }}
+          APU_FTP_REMOTE_DIR: ${{ vars.APU_UCOZ_FTP_REMOTE_DIR }}
+          APU_UPLOAD_DELAY_SECONDS: "300"
         run: |
-          if [ -z "$FTP_HOST" ] || [ -z "$FTP_USER" ] || [ -z "$FTP_PASSWORD" ]; then
+          if [ -z "$APU_FTP_HOST" ] || [ -z "$APU_FTP_USER" ] || [ -z "$APU_FTP_PASSWORD" ]; then
             echo "::warning::Секреты APU_UCOZ_FTP_HOST/USER/PASSWORD не заданы — сайт не обновлён. Что сделать владельцу: docs/SITE_PUBLISHING.md"
             exit 0
           fi
-          REMOTE_DIR="${FTP_REMOTE_DIR:-/downloads}"
-          # Владелец мог вписать хост с протоколом или слэшем на конце —
-          # приводим к чистому имени сервера, иначе адрес получается битым.
-          HOST="$FTP_HOST"
-          HOST="${HOST#ftp://}"
-          HOST="${HOST#FTP://}"
-          HOST="${HOST%/}"
-          echo "FTP host: $HOST, каталог: $REMOTE_DIR, логин задан: да"
-          # Предпроверка: вход и чтение каталога. Пароль в лог не попадает:
-          # curl без -v его не печатает, а адрес содержит только хост.
-          if ! curl --fail --silent --user "$FTP_USER:$FTP_PASSWORD" \
-              "ftp://$HOST$REMOTE_DIR/" --list-only > /tmp/ftp-list.txt; then
-            echo "::error::FTP: не удалось войти или открыть $REMOTE_DIR на $HOST. Проверьте секреты APU_UCOZ_FTP_HOST (только имя сервера, без ftp://), APU_UCOZ_FTP_USER и APU_UCOZ_FTP_PASSWORD и что каталог существует."
-            exit 1
-          fi
-          echo "FTP вход работает, в каталоге файлов: $(wc -l < /tmp/ftp-list.txt)"
-          upload() {
-            file="$1"
-            name="$(basename "$file")"
-            echo "FTP -> $REMOTE_DIR/$name ($(stat -c %s "$file") Б)"
-            curl --fail --silent --show-error \
-              --user "$FTP_USER:$FTP_PASSWORD" \
-              --ftp-create-dirs \
-              --retry 2 \
-              -T "$file" \
-              "ftp://$HOST$REMOTE_DIR/$name"
-            # Сверка: сервер обязан видеть файл того же размера.
-            remote_size="$(curl --silent --user "$FTP_USER:$FTP_PASSWORD" \
-              "ftp://$HOST$REMOTE_DIR/$name" --head 2>/dev/null \
-              | tr -d '\r' | awk -F': ' 'tolower($1)=="content-length"{print $2}')"
-            if [ -n "$remote_size" ] && [ "$remote_size" != "$(stat -c %s "$file")" ]; then
-              echo "::error::FTP: $name на сервере $remote_size Б, ожидалось $(stat -c %s "$file") Б"
-              exit 1
-            fi
-          }
+          # Загрузка — кусками не больше 100 МБ с паузой 5 минут между
+          # частями (scripts/release/ftp_upload.py): APK 233 МБ уйдёт как
+          # 100 + 100 + остаток, на сайте ляжет целым файлом. Пароль в
+          # лог не попадает: скрипт печатает только шаги и размеры.
           set -e
-          for zip in site-files/feature-pack-*.zip; do upload "$zip"; done
-          upload site-files/feature-packs.json
-          upload site-files/app-release.apk
-          upload site-files/latest.json
+          python3 scripts/release/ftp_upload.py \
+            site-files/feature-pack-*.zip \
+            site-files/feature-packs.json \
+            site-files/app-release.apk \
+            site-files/latest.json
           echo "site updated: пакеты, манифест пакетов, APK, latest.json"
 
       # Система REST-передач большими кусками (по требованию владельца):
