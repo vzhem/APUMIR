@@ -1,0 +1,155 @@
+name: Publish release to official site
+
+# Официальный сайт (apu.clan.su) обновляется сам, когда релиз опубликован:
+# владелец просил «выпускаем релиз с новыми файлами — они автоматически
+# загружаются на сайт». Релиз у нас сначала черновик (draft), поэтому
+# событие именно published: сайт получает только то, что владелец уже
+# одобрил и выпустил для всех. Инструкция и секреты: docs/SITE_PUBLISHING.md.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Тег уже опубликованного релиза (например, v11.74.482)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: site-publish
+  cancel-in-progress: false
+
+jobs:
+  publish-to-site:
+    name: Upload release files to apu.clan.su
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out publishing scripts
+        uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: tag
+        env:
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          IS_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          set -e
+          TAG="${EVENT_TAG:-$INPUT_TAG}"
+          if [ -z "$TAG" ]; then
+            echo "::error::Не задан тег релиза"
+            exit 1
+          fi
+          echo "TAG=$TAG" >> "$GITHUB_OUTPUT"
+          echo "release tag: $TAG (prerelease: ${IS_PRERELEASE:-false})"
+          if [ "${IS_PRERELEASE:-false}" = "true" ]; then
+            echo "::notice::Пререлиз на сайт не публикуем: сайт — только для стабильных версий."
+            echo "SKIP=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download release assets
+        if: steps.tag.outputs.SKIP != '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.TAG }}
+        run: |
+          set -e
+          mkdir -p site-files
+          gh release download "$TAG" --repo "${{ github.repository }}" --dir site-files
+          ls -la site-files
+          # Состав сайта фиксированный: APK, сумма, пакеты и манифест пакетов.
+          test -f site-files/app-release.apk
+          test -f site-files/SHA256SUMS.txt
+          test -f site-files/feature-packs.json
+          ls site-files/feature-pack-*.zip
+
+      - name: Build site sidecar latest.json
+        if: steps.tag.outputs.SKIP != '1'
+        env:
+          TAG: ${{ steps.tag.outputs.TAG }}
+        run: |
+          set -e
+          SHA="$(awk '$2 == "app-release.apk" {print $1}' site-files/SHA256SUMS.txt)"
+          if [ -z "$SHA" ]; then
+            echo "::error::SHA256SUMS.txt без app-release.apk — sidecar не строим"
+            exit 1
+          fi
+          python3 - "$TAG" "$SHA" <<'PY'
+          import json, sys
+          payload = {"version": sys.argv[1], "sha256": sys.argv[2]}
+          with open("site-files/latest.json", "w", encoding="utf-8") as fh:
+              json.dump(payload, fh, ensure_ascii=False, indent=2)
+              fh.write("\n")
+          print(payload)
+          PY
+
+      # Главный канал сайта: uCoz FTP, каталог /downloads. Порядок важен
+      # (website/INSTALL_UCOZ.md): сначала файлы, манифесты — последними,
+      # чтобы сайт ни секунды не ссылался на то, чего ещё нет.
+      - name: Upload to apu.clan.su via FTP
+        if: steps.tag.outputs.SKIP != '1'
+        env:
+          FTP_HOST: ${{ secrets.APU_UCOZ_FTP_HOST }}
+          FTP_USER: ${{ secrets.APU_UCOZ_FTP_USER }}
+          FTP_PASSWORD: ${{ secrets.APU_UCOZ_FTP_PASSWORD }}
+          FTP_REMOTE_DIR: ${{ vars.APU_UCOZ_FTP_REMOTE_DIR }}
+        run: |
+          if [ -z "$FTP_HOST" ] || [ -z "$FTP_USER" ] || [ -z "$FTP_PASSWORD" ]; then
+            echo "::warning::Секреты APU_UCOZ_FTP_HOST/USER/PASSWORD не заданы — сайт не обновлён. Что сделать владельцу: docs/SITE_PUBLISHING.md"
+            exit 0
+          fi
+          REMOTE_DIR="${FTP_REMOTE_DIR:-/downloads}"
+          upload() {
+            file="$1"
+            echo "FTP -> $REMOTE_DIR/$(basename "$file")"
+            curl --fail --silent --show-error \
+              --user "$FTP_USER:$FTP_PASSWORD" \
+              --ftp-create-dirs \
+              -T "$file" \
+              "ftp://$FTP_HOST$REMOTE_DIR/$(basename "$file")"
+          }
+          set -e
+          for zip in site-files/feature-pack-*.zip; do upload "$zip"; done
+          upload site-files/feature-packs.json
+          upload site-files/app-release.apk
+          upload site-files/latest.json
+          echo "site updated: пакеты, манифест пакетов, APK, latest.json"
+
+      # Система REST-передач большими кусками (по требованию владельца):
+      # любой файл больше 100 МБ уходит на REST-приёмник кусками не больше
+      # 100 МБ с паузой 5 минут между кусками. Сейчас таких файлов среди
+      # пакетов нет, но система работает и ждёт свой адрес: включится,
+      # когда владелец задаст APU_UPLOAD_REST_BASE (docs/SITE_PUBLISHING.md).
+      - name: Chunked REST transfer for files over 100 MB
+        if: steps.tag.outputs.SKIP != '1'
+        env:
+          REST_BASE: ${{ secrets.APU_UPLOAD_REST_BASE }}
+          APU_UPLOAD_TOKEN: ${{ secrets.APU_UPLOAD_TOKEN }}
+          APU_UPLOAD_DELAY_SECONDS: "300"
+        run: |
+          if [ -z "$REST_BASE" ]; then
+            echo "::notice::APU_UPLOAD_REST_BASE не задан — REST-канал кусками выключен (система готова: scripts/release/chunked_upload.py)."
+            exit 0
+          fi
+          set -e
+          for file in site-files/*; do
+            size=$(stat -c %s "$file")
+            if [ "$size" -gt 104857600 ]; then
+              echo "REST кусками: $file ($size Б)"
+              python3 scripts/release/chunked_upload.py --base "$REST_BASE" "$file"
+            fi
+          done
+
+      - name: Summary
+        if: always() && steps.tag.outputs.SKIP != '1'
+        run: |
+          {
+            echo "## Сайт apu.clan.su — публикация ${{ steps.tag.outputs.TAG }}"
+            echo
+            echo "Файлы релиза скачаны из GitHub Release и подготовлены в site-files/."
+            echo "Загрузка на сайт — шаги выше: FTP (главный канал) и REST кусками (если настроен)."
+            echo "Проверка после прогона: https://apu.clan.su/downloads/feature-packs.json"
+          } >> "$GITHUB_STEP_SUMMARY"
