@@ -471,12 +471,22 @@ jobs:
           PACK_VERSION: ${{ steps.get_version.outputs.VERSION }}
         run: |
           mkdir -p "$RUNNER_TEMP/feature-packs"
-          NATIVE_DIR="$(find android-app/app/build/intermediates/merged_native_libs -type d -name out | head -n1)"
-          echo "native libs dir: $NATIVE_DIR"
+          # Лёгкая база: библиотек в APK нет. Источник — результаты
+          # сборки: каталог, где фактически лежит libvosk.so
+          # (формат <...>/<abi>/libvosk.so понимает генератор).
+          VOSK_PATH="$(find android-app/app/build -name 'libvosk.so' 2>/dev/null | head -n1)"
+          NATIVE_ARG=()
+          if [ -n "$VOSK_PATH" ]; then
+            NATIVE_ARG=(--native-libs-dir="$(dirname "$(dirname "$VOSK_PATH")")")
+            echo "native libs source: ${NATIVE_ARG[*]}"
+          else
+            echo "::warning::libvosk.so не найдена в сборке — пакеты соберутся из APK"
+          fi
           python3 scripts/release/make-feature-packs.py \
             android-app/app/build/outputs/apk/release/app-release.apk \
             "$RUNNER_TEMP/feature-packs" "$PACK_VERSION" \
-            --native-libs-dir="$NATIVE_DIR"
+            "${NATIVE_ARG[@]}" \
+            || { echo "::error::генератор пакетов функций упал; найденные .so:"; find android-app/app/build -name '*.so' 2>/dev/null | head -20; exit 1; }
           cp "$RUNNER_TEMP"/feature-packs/*.zip "$RUNNER_TEMP"/feature-packs/feature-packs.json \
             android-app/app/build/outputs/apk/release/
           ls -la android-app/app/build/outputs/apk/release/
