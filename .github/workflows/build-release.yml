@@ -457,6 +457,25 @@ jobs:
         if: success()
         run: python3 scripts/ci/apk-composition.py android-app/app/build/outputs/apk/release/app-release.apk
 
+      # Докачиваемые пакеты функций (docs/FEATURE_PACKS.md): 9 zip
+      # (3 пакета × 3 архитектуры) + манифест feature-packs.json из того же
+      # собранного APK. Каталог пакетов сторожит check-site-publishing.py:
+      # скрипт падает, если библиотека каталога не нашлась в APK. Файлы
+      # уезжают в GitHub Release ниже, а оттуда — автоматически на
+      # официальный сайт (.github/workflows/site-publish.yml).
+      - name: Build feature packs
+        if: success()
+        env:
+          PACK_VERSION: ${{ steps.get_version.outputs.VERSION }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/feature-packs"
+          python3 scripts/release/make-feature-packs.py \
+            android-app/app/build/outputs/apk/release/app-release.apk \
+            "$RUNNER_TEMP/feature-packs" "$PACK_VERSION"
+          cp "$RUNNER_TEMP"/feature-packs/*.zip "$RUNNER_TEMP"/feature-packs/feature-packs.json \
+            android-app/app/build/outputs/apk/release/
+          ls -la android-app/app/build/outputs/apk/release/
+
       # Upload the assembled, signed APK from this run (also for workflow_dispatch).
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -474,6 +493,8 @@ jobs:
           files: |
             android-app/app/build/outputs/apk/release/app-release.apk
             android-app/app/build/outputs/apk/release/SHA256SUMS.txt
+            android-app/app/build/outputs/apk/release/feature-pack-*.zip
+            android-app/app/build/outputs/apk/release/feature-packs.json
           name: Release ${{ steps.get_version.outputs.VERSION }}
           # Вариант заметок уже одобрен владельцем по RELEASE_PUBLICATION_POLICY.md.
           # Сначала создаём скрытый prerelease-draft; после проверки APK и суммы
