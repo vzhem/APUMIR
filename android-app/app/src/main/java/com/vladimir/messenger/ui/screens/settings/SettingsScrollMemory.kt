@@ -86,6 +86,7 @@ class SettingsScrollMemory {
         /** Порядок совпадает с `SettingsSection`; менять только вместе с ним. */
         private val MENU_KEYS = listOf(
             ROOT,
+            "Features",
             "Chats",
             "Notifications",
             "Appearance",
