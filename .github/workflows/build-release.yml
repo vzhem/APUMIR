@@ -477,8 +477,10 @@ jobs:
           VOSK_PATH="$(find android-app/app/build -name 'libvosk.so' 2>/dev/null | head -n1)"
           NATIVE_ARG=()
           if [ -n "$VOSK_PATH" ]; then
-            NATIVE_ARG=(--native-libs-dir="$(dirname "$(dirname "$VOSK_PATH")")")
-            echo "native libs source: ${NATIVE_ARG[*]}"
+            # Генератор сам найдёт библиотеки по всему дереву
+            # промежуточных файлов (разные ABI — в разных каталогах).
+            NATIVE_ARG=(--native-libs-dir=android-app/app/build/intermediates)
+            echo "native libs source: ${NATIVE_ARG[*]} (vosk: $VOSK_PATH)"
           else
             echo "::warning::libvosk.so не найдена в сборке — пакеты соберутся из APK"
           fi

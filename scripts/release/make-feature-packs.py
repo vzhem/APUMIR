@@ -44,6 +44,13 @@ def build_packs(apk_path: Path, out_dir: Path, version: str = "",
                 native_libs_dir: Path | None = None) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     entries = []
+    # Индекс нативных библиотек на диске: (abi, имя файла) -> путь.
+    # Библиотеки разных ABI могут лежать в разных промежуточных
+    # каталогах сборки (merged/stripped), поэтому ищем по всему дереву.
+    disk_index: dict[tuple[str, str], Path] = {}
+    if native_libs_dir is not None and native_libs_dir.is_dir():
+        for found in native_libs_dir.rglob("*.so"):
+            disk_index.setdefault((found.parent.name, found.name), found)
     with zipfile.ZipFile(apk_path) as apk:
         names = set(apk.namelist())
         for pack_id, libs in PACKS.items():
@@ -53,8 +60,8 @@ def build_packs(apk_path: Path, out_dir: Path, version: str = "",
                     # Лёгкая база: в APK этих библиотек больше нет — берём из
                     # каталога собранных нативных библиотек Gradle
                     # (<dir>/<abi>/<lib> или <dir>/lib/<abi>/<lib>).
-                    disk_file = None
-                    if native_libs_dir is not None:
+                    disk_file = disk_index.get((abi, lib))
+                    if disk_file is None and native_libs_dir is not None:
                         for candidate in (native_libs_dir / abi / lib,
                                           native_libs_dir / "lib" / abi / lib):
                             if candidate.is_file():
