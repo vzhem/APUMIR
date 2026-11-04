@@ -44,6 +44,7 @@ def load_module(name: str, path: Path):
 
 packs_script = load_module("make_feature_packs", ROOT / "scripts/release/make-feature-packs.py")
 chunked = load_module("chunked_upload", ROOT / "scripts/release/chunked_upload.py")
+ftp_upload = load_module("ftp_upload", ROOT / "scripts/release/ftp_upload.py")
 
 
 class CatalogParityTest(unittest.TestCase):
@@ -89,9 +90,16 @@ class ReleasePipelineTest(unittest.TestCase):
         self.assertIn("types: [published]", workflow)
         for secret in ("APU_UCOZ_FTP_HOST", "APU_UCOZ_FTP_USER", "APU_UCOZ_FTP_PASSWORD"):
             self.assertIn(secret, workflow)
-        # Манифесты уходят после файлов, которые они описывают.
-        self.assertLess(workflow.index("feature-pack-*.zip"), workflow.index('upload site-files/feature-packs.json'))
-        self.assertLess(workflow.index("upload site-files/app-release.apk"), workflow.index("upload site-files/latest.json"))
+        # Манифесты уходят после файлов, которые они описывают: порядок
+        # аргументов кусковой загрузки — zip-ы, манифест пакетов, APK, latest.
+        upload_block = workflow.split("scripts/release/ftp_upload.py", 1)[1]
+        order = [
+            upload_block.index("feature-pack-*.zip"),
+            upload_block.index("site-files/feature-packs.json"),
+            upload_block.index("site-files/app-release.apk"),
+            upload_block.index("site-files/latest.json"),
+        ]
+        self.assertEqual(order, sorted(order))
         # REST-канал кусками для больших файлов подключён, но не обязателен.
         self.assertIn("chunked_upload.py", workflow)
         self.assertIn("APU_UPLOAD_REST_BASE", workflow)
@@ -99,9 +107,66 @@ class ReleasePipelineTest(unittest.TestCase):
         self.assertIn("make-feature-packs.py site-files/app-release.apk", workflow)
         # Система кусков обязана доказывать работоспособность в каждом запуске.
         self.assertIn("chunked_upload.py --self-test", workflow)
-        # FTP-шаг: предпроверка входа и понятная ошибка, а не молчаливый exit.
-        self.assertIn("--list-only", workflow)
-        self.assertIn("FTP: не удалось войти", workflow)
+        # Загрузка на сайт идёт кусковой FTP-системой с паузой 5 минут.
+        self.assertIn("scripts/release/ftp_upload.py", workflow)
+        self.assertIn('APU_UPLOAD_DELAY_SECONDS: "300"', workflow)
+
+
+class FakeFtp:
+    """Поддельный FTP-сервер: STOR создаёт, APPE дописывает, size сверяет."""
+
+    def __init__(self):
+        self.files: dict[str, bytearray] = {}
+        self.commands: list[str] = []
+
+    def storbinary(self, command, reader):
+        verb, name = command.split(" ", 1)
+        self.commands.append(verb)
+        data = reader.read()
+        if verb == "STOR":
+            self.files[name] = bytearray(data)
+        else:
+            self.files.setdefault(name, bytearray()).extend(data)
+
+    def size(self, name):
+        return len(self.files.get(name, b""))
+
+
+class FtpChunkedUploadTest(unittest.TestCase):
+    def test_big_file_goes_in_100mb_chunks_with_5_minute_pauses(self):
+        self.assertEqual(ftp_upload.MAX_CHUNK_MB, 100)
+        self.assertEqual(ftp_upload.DEFAULT_DELAY_SECONDS, 300)
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "app-release.apk"
+            payload = bytes(range(256)) * 11000  # ~2,8 МБ «большого» файла
+            source.write_bytes(payload)
+            ftp = FakeFtp()
+            sleeps = []
+            chunks = ftp_upload.upload_file(
+                ftp, source, "app-release.apk",
+                chunk_bytes=1 * 1024 * 1024, delay_seconds=300,
+                sleeper=sleeps.append, log=lambda *a: None,
+            )
+            # 100 + 100 + остаток в масштабе теста: 3 части, паузы только
+            # между частями (2 × 300 с), первая — STOR, дальше — APPE.
+            self.assertEqual(chunks, 3)
+            self.assertEqual(sleeps, [300, 300])
+            self.assertEqual(ftp.commands, ["STOR", "APPE", "APPE"])
+            self.assertEqual(bytes(ftp.files["app-release.apk"]), payload)
+
+    def test_small_file_single_transfer_without_pause(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "pack.zip"
+            source.write_bytes(b"z" * 5000)
+            ftp = FakeFtp()
+            sleeps = []
+            chunks = ftp_upload.upload_file(
+                ftp, source, "pack.zip", chunk_bytes=1024 * 1024,
+                delay_seconds=300, sleeper=sleeps.append, log=lambda *a: None,
+            )
+            self.assertEqual(chunks, 1)
+            self.assertEqual(sleeps, [])
+            self.assertEqual(ftp.commands, ["STOR"])
 
     def test_chunked_self_test_really_runs(self):
         import subprocess
