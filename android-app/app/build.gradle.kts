@@ -192,6 +192,21 @@ android {
     }
 
     packaging {
+        // Лёгкая база (docs/FEATURE_PACKS.md): с -Papu.lightBase=true тяжёлые
+        // нативные библиотеки докачиваемых пакетов в APK не попадают —
+        // телефон докачает их из настроек (перевод, голос-в-текст, лицо).
+        // Релизная сборка CI всегда лёгкая; локальная сборка владельца —
+        // полная, чтобы функции работали без догрузки при отладке.
+        if (providers.gradleProperty("apu.lightBase").map { it.toBoolean() }.getOrElse(false)) {
+            jniLibs {
+                val packLibs = listOf(
+                    "libxeno_native.so", "libtranslate_jni.so", "liblanguage_id_l2c_jni.so",
+                    "libvosk.so", "libface_detector_v2_jni.so",
+                )
+                val abis = listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+                excludes += abis.flatMap { abi -> packLibs.map { lib -> "lib/$abi/$lib" } }
+            }
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
             // Служебные файлы зависимостей: в APK они нужны только для чтения

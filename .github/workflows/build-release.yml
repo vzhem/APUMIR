@@ -360,7 +360,9 @@ jobs:
         working-directory: ./android-app
         run: |
           set +e
-          ./gradlew :app:assembleRelease --no-daemon > "$RUNNER_TEMP/gradle-release.log" 2>&1
+          # Лёгкая база (docs/FEATURE_PACKS.md): тяжёлые библиотеки пакетов
+          # в APK не попадают, их соберёт шаг «Build feature packs» ниже.
+          ./gradlew :app:assembleRelease --no-daemon -Papu.lightBase=true > "$RUNNER_TEMP/gradle-release.log" 2>&1
           status=$?
           cat "$RUNNER_TEMP/gradle-release.log"
           exit "$status"
@@ -469,9 +471,12 @@ jobs:
           PACK_VERSION: ${{ steps.get_version.outputs.VERSION }}
         run: |
           mkdir -p "$RUNNER_TEMP/feature-packs"
+          NATIVE_DIR="$(find android-app/app/build/intermediates/merged_native_libs -type d -name out | head -n1)"
+          echo "native libs dir: $NATIVE_DIR"
           python3 scripts/release/make-feature-packs.py \
             android-app/app/build/outputs/apk/release/app-release.apk \
-            "$RUNNER_TEMP/feature-packs" "$PACK_VERSION"
+            "$RUNNER_TEMP/feature-packs" "$PACK_VERSION" \
+            --native-libs-dir="$NATIVE_DIR"
           cp "$RUNNER_TEMP"/feature-packs/*.zip "$RUNNER_TEMP"/feature-packs/feature-packs.json \
             android-app/app/build/outputs/apk/release/
           ls -la android-app/app/build/outputs/apk/release/

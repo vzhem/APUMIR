@@ -40,7 +40,8 @@ def pack_file_name(pack_id: str, abi: str) -> str:
     return f"feature-pack-{pack_id}-{abi}.zip"
 
 
-def build_packs(apk_path: Path, out_dir: Path, version: str = "") -> dict:
+def build_packs(apk_path: Path, out_dir: Path, version: str = "",
+                native_libs_dir: Path | None = None) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     entries = []
     with zipfile.ZipFile(apk_path) as apk:
@@ -49,6 +50,19 @@ def build_packs(apk_path: Path, out_dir: Path, version: str = "") -> dict:
             for abi in ABIS:
                 members = []
                 for lib in libs:
+                    # Лёгкая база: в APK этих библиотек больше нет — берём из
+                    # каталога собранных нативных библиотек Gradle
+                    # (<dir>/<abi>/<lib> или <dir>/lib/<abi>/<lib>).
+                    disk_file = None
+                    if native_libs_dir is not None:
+                        for candidate in (native_libs_dir / abi / lib,
+                                          native_libs_dir / "lib" / abi / lib):
+                            if candidate.is_file():
+                                disk_file = candidate
+                                break
+                    if disk_file is not None:
+                        members.append((lib, disk_file.read_bytes()))
+                        continue
                     entry = f"lib/{abi}/{lib}"
                     if entry not in names:
                         raise SystemExit(f"в APK нет {entry}: каталог пакетов разошёлся со сборкой")
@@ -78,14 +92,19 @@ def build_packs(apk_path: Path, out_dir: Path, version: str = "") -> dict:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) not in (3, 4):
+    args = [a for a in argv[1:] if not a.startswith("--native-libs-dir=")]
+    native_libs_dir = next(
+        (Path(a.split("=", 1)[1]) for a in argv[1:] if a.startswith("--native-libs-dir=")),
+        None,
+    )
+    if len(args) not in (2, 3):
         print(__doc__)
         return 2
-    apk = Path(argv[1])
+    apk = Path(args[0])
     if not apk.is_file():
         print(f"apk not found: {apk}")
         return 2
-    build_packs(apk, Path(argv[2]), argv[3] if len(argv) == 4 else "")
+    build_packs(apk, Path(args[1]), args[2] if len(args) == 3 else "", native_libs_dir)
     return 0
 
 
