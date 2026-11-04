@@ -92,11 +92,20 @@ def build_packs(apk_path: Path, out_dir: Path, version: str = "",
 
 
 def main(argv: list[str]) -> int:
-    args = [a for a in argv[1:] if not a.startswith("--native-libs-dir=")]
-    native_libs_dir = next(
-        (Path(a.split("=", 1)[1]) for a in argv[1:] if a.startswith("--native-libs-dir=")),
-        None,
-    )
+    raw = argv[1:]
+    args: list[str] = []
+    native_libs_dir: Path | None = None
+    index = 0
+    while index < len(raw):
+        item = raw[index]
+        if item.startswith("--native-libs-dir="):
+            native_libs_dir = Path(item.split("=", 1)[1])
+        elif item == "--native-libs-dir" and index + 1 < len(raw):
+            index += 1
+            native_libs_dir = Path(raw[index])
+        else:
+            args.append(item)
+        index += 1
     if len(args) not in (2, 3):
         print(__doc__)
         return 2
