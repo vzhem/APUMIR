@@ -95,6 +95,8 @@ class ReleasePipelineTest(unittest.TestCase):
         # REST-канал кусками для больших файлов подключён, но не обязателен.
         self.assertIn("chunked_upload.py", workflow)
         self.assertIn("APU_UPLOAD_REST_BASE", workflow)
+        # Релизы без пакетов (до этой автоматики) добирают пакеты из APK.
+        self.assertIn("make-feature-packs.py site-files/app-release.apk", workflow)
 
     def test_app_reads_same_site_paths(self):
         seeder = read(JAVA / "data/featurepacks/FeaturePackSeeder.kt")

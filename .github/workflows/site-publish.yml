@@ -60,10 +60,25 @@ jobs:
           mkdir -p site-files
           gh release download "$TAG" --repo "${{ github.repository }}" --dir site-files
           ls -la site-files
-          # Состав сайта фиксированный: APK, сумма, пакеты и манифест пакетов.
+          # Состав сайта фиксированный: APK и его сумма обязательны.
           test -f site-files/app-release.apk
           test -f site-files/SHA256SUMS.txt
-          test -f site-files/feature-packs.json
+
+      # Релизы до появления пакетов в сборке (например, v11.74.482) zip-ов
+      # не содержат: собираем пакеты из самого APK релиза здесь же, чтобы
+      # сайт получил полный набор файлов для любого опубликованного тега.
+      - name: Build feature packs if the release predates them
+        if: steps.tag.outputs.SKIP != '1'
+        env:
+          TAG: ${{ steps.tag.outputs.TAG }}
+        run: |
+          set -e
+          if [ -f site-files/feature-packs.json ] && ls site-files/feature-pack-*.zip >/dev/null 2>&1; then
+            echo "release already carries feature packs"
+            exit 0
+          fi
+          echo "release predates feature packs - building them from its APK"
+          python3 scripts/release/make-feature-packs.py site-files/app-release.apk site-files "$TAG"
           ls site-files/feature-pack-*.zip
 
       - name: Build site sidecar latest.json
