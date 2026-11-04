@@ -97,6 +97,21 @@ class ReleasePipelineTest(unittest.TestCase):
         self.assertIn("APU_UPLOAD_REST_BASE", workflow)
         # Релизы без пакетов (до этой автоматики) добирают пакеты из APK.
         self.assertIn("make-feature-packs.py site-files/app-release.apk", workflow)
+        # Система кусков обязана доказывать работоспособность в каждом запуске.
+        self.assertIn("chunked_upload.py --self-test", workflow)
+        # FTP-шаг: предпроверка входа и понятная ошибка, а не молчаливый exit.
+        self.assertIn("--list-only", workflow)
+        self.assertIn("FTP: не удалось войти", workflow)
+
+    def test_chunked_self_test_really_runs(self):
+        import subprocess
+
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "scripts/release/chunked_upload.py"), "--self-test"],
+            capture_output=True, text=True, timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("self-test OK", result.stdout)
 
     def test_app_reads_same_site_paths(self):
         seeder = read(JAVA / "data/featurepacks/FeaturePackSeeder.kt")

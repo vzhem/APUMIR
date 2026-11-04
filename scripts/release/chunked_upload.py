@@ -195,6 +195,67 @@ def plan_lines(manifest: dict, base: str, delay_seconds: int) -> list[str]:
     return lines
 
 
+def self_test() -> int:
+    """Проверка системы передач на локальном приёмнике: файл, куски, паузы,
+    продолжение, сборка обратно. Сети наружу нет, ожидания нет (пауза 0)."""
+    import http.server
+    import tempfile
+    import threading
+
+    store: dict[str, bytes] = {}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_PUT(self):  # noqa: N802 - имя задаёт http.server
+            length = int(self.headers.get("Content-Length") or 0)
+            store[self.path.lstrip("/")] = self.rfile.read(length)
+            self.send_response(200)
+            self.end_headers()
+
+        def do_HEAD(self):  # noqa: N802
+            name = self.path.lstrip("/")
+            if name in store:
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(store[name])))
+            else:
+                self.send_response(404)
+            self.end_headers()
+
+        def log_message(self, *args):  # тишина в логе самопроверки
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "selftest.bin"
+            source.write_bytes(os.urandom(2_600_000))
+            parts_dir = root / "parts"
+            manifest = split_file(source, parts_dir, chunk_mb=1)
+            assert len(manifest["parts"]) == 3, manifest["parts"]
+            base = f"http://127.0.0.1:{server.server_port}"
+            sleeps: list[int] = []
+            transport = HttpTransport(base)
+            # Первый кусок «уже на приёмнике» — проверяем продолжение.
+            transport.put(manifest["parts"][0]["name"], (parts_dir / manifest["parts"][0]["name"]).read_bytes())
+            sent = upload_parts(manifest, parts_dir, transport, delay_seconds=300,
+                                 sleeper=sleeps.append, log=lambda *a: None)
+            assert len(sent) == 2 and sleeps == [300, 300], (sent, sleeps)
+            # Собираем обратно из того, что принял «сервер».
+            received = root / "received"
+            received.mkdir()
+            for name, blob in store.items():
+                (received / name).write_bytes(blob)
+            target = root / "joined.bin"
+            reassemble(received, target)
+            assert target.read_bytes() == source.read_bytes()
+        print("self-test OK: нарезка ≤100 МБ, паузы между кусками, продолжение и сборка работают")
+        return 0
+    finally:
+        server.shutdown()
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("file", nargs="?", help="файл для передачи")
@@ -209,7 +270,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="только план, без сети и ожидания")
     parser.add_argument("--reassemble", nargs=2, metavar=("PARTS_DIR", "TARGET"),
                         help="собрать файл из кусков и сверить SHA-256")
+    parser.add_argument("--self-test", action="store_true",
+                        help="проверить систему передач на локальном приёмнике")
     args = parser.parse_args(argv)
+
+    if args.self_test:
+        return self_test()
 
     if args.reassemble:
         manifest = reassemble(Path(args.reassemble[0]), Path(args.reassemble[1]))
