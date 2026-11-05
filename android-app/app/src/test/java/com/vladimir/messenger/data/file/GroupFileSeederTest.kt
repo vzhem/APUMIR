@@ -107,4 +107,23 @@ class GroupFileSeederTest {
         assertEquals(0, directCalls)
         assertEquals(1, fallbackCalls)
     }
+
+    @Test
+    fun trafficSnapshotTracksUploadBytesActivePeersAndCompletedPeers() = runTest {
+        val transfer = row("group-chat")
+        dao.insertTransferIgnore(transfer)
+        val seed = seeder()
+        assertEquals(GroupFileSeeder.OfferResult.SENT, seed.offer(transfer, requester))
+
+        val active = seed.trafficSnapshot(id)
+        assertEquals(listOf(requester), active.activeRequesterIds)
+        assertEquals(0, active.completedRequesterCount)
+        assertTrue("encoded offer bytes should be counted", active.uploadedBytes > 0L)
+
+        seed.onAck(id, requester, transfer.chunkCount)
+        val complete = seed.trafficSnapshot(id)
+        assertTrue(complete.activeRequesterIds.isEmpty())
+        assertEquals(1, complete.completedRequesterCount)
+        assertEquals(active.uploadedBytes, complete.uploadedBytes)
+    }
 }

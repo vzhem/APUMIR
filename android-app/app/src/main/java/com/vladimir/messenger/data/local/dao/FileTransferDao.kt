@@ -64,6 +64,9 @@ interface FileTransferDao {
     @Query("SELECT * FROM file_transfers WHERE transferId = :transferId")
     suspend fun getTransfer(transferId: String): FileTransferEntity?
 
+    @Query("SELECT * FROM file_transfers WHERE transferId IN (:transferIds)")
+    suspend fun getTransfersByIds(transferIds: List<String>): List<FileTransferEntity>
+
     @Query(
         "SELECT * FROM file_transfers WHERE messageId = :messageId AND direction = 'OUTGOING' " +
             "ORDER BY createdAtMs DESC"
@@ -372,6 +375,13 @@ interface FileTransferDao {
      */
     @Query("SELECT * FROM file_transfers WHERE direction = 'OUTGOING' AND state = 'SEEDING'")
     suspend fun getSeeding(): List<FileTransferEntity>
+
+    /** Live inventory for the seeding dashboard; it never scans completed history. */
+    @Query(
+        "SELECT * FROM file_transfers WHERE direction = 'OUTGOING' AND state = 'SEEDING' " +
+            "ORDER BY createdAtMs DESC LIMIT :limit"
+    )
+    fun observeSeedingTransfers(limit: Int): Flow<List<FileTransferEntity>>
 
     @Transaction
     suspend fun insertNewTransfer(transfer: FileTransferEntity): Boolean =

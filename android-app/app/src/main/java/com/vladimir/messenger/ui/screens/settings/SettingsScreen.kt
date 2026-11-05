@@ -1582,7 +1582,6 @@ private fun SettingsTabContent(
             // ----------------------------------------------------------------
             // РАЗДАЧА: темп, в котором телефон рассылает и раздаёт дальше
             // ----------------------------------------------------------------
-            item { SettingsSectionTitle(stringResource(R.string.section_seeding)) }
             item {
                 SettingsCard {
                     val context = LocalContext.current

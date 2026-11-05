@@ -93,11 +93,11 @@ class ChatRepository @Inject constructor(
     suspend fun getAllContactIds(): List<String> =
         chatDao.getAllChats().map { it.contactId }.filter { it.isNotBlank() }.distinct()
 
-    fun observeMessages(chatId: String): Flow<List<Message>> =
-        messageDao.observeMessages(chatId)
-            .map { rows -> rows.map { it.toDomain() } }
-            .flowOn(Dispatchers.Default)
-
+    /**
+     * Direct chats open on a bounded tail window. Older rows are loaded separately
+     * when the user scrolls upward, so a year-long history is never materialized
+     * just to enter the conversation.
+     */
     /** Раунд 173: закрепы личного чата (без тем). */
     fun observePinnedChatMessages(chatId: String): Flow<List<Message>> =
         messageDao.observePinnedChatMessages(chatId)
@@ -1494,26 +1494,7 @@ class ChatRepository @Inject constructor(
         mutedUntilMs = mutedUntilMs,
     )
 
-    private fun MessageEntity.toDomain() = Message(
-        id = id,
-        chatId = chatId,
-        senderId = senderId,
-        content = content,
-        timestamp = timestamp,
-        isFromMe = isFromMe,
-        status = try { MessageStatus.valueOf(status) } catch (_: Exception) { MessageStatus.PENDING },
-        // Self-chat detection uses the LOCAL recipient; no JNI lookup on opening.
-        recipientId = recipientId,
-        // Тема нужна уведомлениям: тап ведёт в место сообщения.
-        topicId = topicId,
-        isPinned = isPinned,
-        editedAtMs = editedAtMs,
-        replyToId = replyToId,
-        replyAuthor = replyAuthor,
-        replyText = replyText,
-        textColor = textColor,
-        senderNameColor = senderNameColor,
-    )
+    private fun MessageEntity.toDomain() = toDomainMessage()
 
     suspend fun getMessageById(messageId: String): Message? {
         return messageDao.getMessageById(messageId)?.toDomain()
