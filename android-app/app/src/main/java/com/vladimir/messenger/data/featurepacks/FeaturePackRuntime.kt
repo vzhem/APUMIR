@@ -66,11 +66,17 @@ object FeaturePackRuntime {
     /**
      * Подключить нативные библиотеки функции. Нет пакета — false, и
      * вызывающий обязан обойтись без функции, а не падать.
+     *
+     * Полная версия приложения (app-full.apk, выбор при скачивании):
+     * библиотеки уже внутри APK — подключаем их напрямую, пакеты не нужны.
      */
     fun ensureLoaded(context: Context, feature: FeaturePackFeature): Boolean {
         val pack = FeaturePackCatalog.packFor(feature)
         if (pack.id in loadedPacks) return true
-        val installed = FeaturePackStore.installed(context, pack.id) ?: return false
+        val installed = FeaturePackStore.installed(context, pack.id)
+        if (installed == null) {
+            return tryLoadBundled(pack)
+        }
         val dir = packDir(context, pack, installed.abi)
         if (!pack.nativeLibs.all { File(dir, it).isFile }) {
             // Zip скачан, но ещё не распакован (например, приложение
@@ -88,4 +94,19 @@ object FeaturePackRuntime {
         }.onFailure { Log.w(TAG, "pack ${pack.id} load failed: ${it.message}") }
             .getOrDefault(false)
     }
+
+    /**
+     * Библиотеки, встроенные в сам APK (полная версия при скачивании):
+     * пробуем загрузить по именам из APK. В лёгкой базе их нет — честное
+     * false, функция останется недоступной до скачивания пакета.
+     */
+    private fun tryLoadBundled(pack: FeaturePack): Boolean = runCatching {
+        for (lib in pack.nativeLibs) {
+            System.loadLibrary(lib.removePrefix("lib").removeSuffix(".so"))
+        }
+        loadedPacks += pack.id
+        Log.i(TAG, "pack ${pack.id} native libraries bundled in APK")
+        true
+    }.onFailure { Log.w(TAG, "pack ${pack.id} is not bundled: ${it.message}") }
+        .getOrDefault(false)
 }

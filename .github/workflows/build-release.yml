@@ -367,6 +367,27 @@ jobs:
           cat "$RUNNER_TEMP/gradle-release.log"
           exit "$status"
 
+      # Второй вариант при скачивании (только релизные теги): полная
+      # версия одним файлом — все библиотеки внутри, функции работают
+      # сразу, в том числе на эмуляторе и без сети. Лежит рядом как
+      # app-full.apk; переподпишется тем же шагом ротации ниже, чтобы
+      # подпись совпадала с лёгкой базой. На сайт не грузится (большой
+      # файл), отдаётся с GitHub Release.
+      - name: Build full APK (everything inside)
+        if: github.ref_type == 'tag'
+        working-directory: ./android-app
+        run: |
+          set -e
+          APK_DIR=app/build/outputs/apk/release
+          cp "$APK_DIR/app-release.apk" "$RUNNER_TEMP/app-light.apk"
+          ./gradlew :app:assembleRelease --no-daemon > "$RUNNER_TEMP/gradle-full.log" 2>&1 || {
+            echo "::error::full build failed: $(tail -5 "$RUNNER_TEMP/gradle-full.log" | tr '\n' ' ')"
+            exit 1
+          }
+          cp "$APK_DIR/app-release.apk" "$APK_DIR/app-full.apk"
+          cp "$RUNNER_TEMP/app-light.apk" "$APK_DIR/app-release.apk"
+          ls -la "$APK_DIR"
+
       # Сырые логи Actions иногда недоступны через API/сеть. Оставляем хвост
       # тестов или компилятора как annotations, чтобы причина ошибки не терялась.
       - name: Expose Gradle failure tail
@@ -440,6 +461,23 @@ jobs:
             --out "$APK_DIR/app-release-rotated.apk" "$APK_DIR/app-release.apk"
           "$BT/apksigner" verify --verbose --print-certs "$APK_DIR/app-release-rotated.apk"
           mv -f "$APK_DIR/app-release-rotated.apk" "$APK_DIR/app-release.apk"
+          # Полная версия (если собрана) — той же парой ключей и
+          # родословной: подпись обязана совпадать с лёгкой базой, иначе
+          # варианты не встанут друг поверх друга обновлением.
+          if [ -f "$APK_DIR/app-full.apk" ]; then
+            "$BT/apksigner" sign \
+              --ks android-app/app/p2p-release.jks --ks-pass pass:p2p2026release \
+              --ks-key-alias p2p --key-pass pass:p2p2026release \
+              --next-signer \
+              --ks "$RUNNER_TEMP/apu-release.jks" --ks-pass "file:$RUNNER_TEMP/apu-release-ks.pass" \
+              --ks-key-alias "$APU_KS_ALIAS" --key-pass "file:$RUNNER_TEMP/apu-release-key.pass" \
+              --lineage "$LINEAGE" --rotation-min-sdk-version 28 \
+              --v4-signing-enabled false \
+              --out "$APK_DIR/app-full-rotated.apk" "$APK_DIR/app-full.apk"
+            "$BT/apksigner" verify --verbose --print-certs "$APK_DIR/app-full-rotated.apk"
+            mv -f "$APK_DIR/app-full-rotated.apk" "$APK_DIR/app-full.apk"
+            echo "full APK signed with the rotated key"
+          fi
           rm -f "$RUNNER_TEMP/apu-release.jks" "$RUNNER_TEMP/apu-release-ks.pass" "$RUNNER_TEMP/apu-release-key.pass"
           echo "signed with the rotated key"
 
@@ -449,7 +487,7 @@ jobs:
       - name: Create APK SHA-256 checksum
         run: |
           APK_DIR=android-app/app/build/outputs/apk/release
-          (cd "$APK_DIR" && sha256sum app-release.apk > SHA256SUMS.txt)
+          (cd "$APK_DIR" && sha256sum app-release.apk $(ls app-full.apk 2>/dev/null || true) > SHA256SUMS.txt)
           cat "$APK_DIR/SHA256SUMS.txt"
 
       # Состав APK по группам (ABI, нативные библиотеки, dex, ресурсы):
@@ -524,6 +562,7 @@ jobs:
         with:
           files: |
             android-app/app/build/outputs/apk/release/app-release.apk
+            android-app/app/build/outputs/apk/release/app-full.apk
             android-app/app/build/outputs/apk/release/SHA256SUMS.txt
             android-app/app/build/outputs/apk/release/feature-pack-*.zip
             android-app/app/build/outputs/apk/release/feature-packs.json

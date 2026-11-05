@@ -132,6 +132,14 @@ class FeaturePacksContract(unittest.TestCase):
             "feature_packs_status_downloading", "feature_packs_status_official",
             "feature_packs_status_failed", "feature_packs_download",
             "feature_packs_cancel", "feature_packs_retry",
+            "feature_packs_status_not_downloaded",
+            "feature_packs_status_site_downloading",
+            "feature_packs_status_swarm_downloading",
+            "feature_packs_status_progress", "feature_packs_status_ready",
+            "feature_packs_status_ready_seeding",
+            "feature_packs_status_downloaded_off",
+            "feature_packs_status_searching", "feature_packs_summary_ready",
+            "feature_packs_summary_none", "feature_packs_status_bundled",
         )
         for folder in ("values", "values-en"):
             text = read(RES / folder / "strings.xml")
@@ -157,6 +165,20 @@ class VisibleProgressContract(unittest.TestCase):
             "feature_packs_status_progress",
         ]:
             self.assertIn(needle, screen, needle)
+
+    def test_two_download_variants_exist(self):
+        # Выбор при скачивании: лёгкая база и полная версия одним файлом.
+        workflow = read(ROOT / ".github/workflows/build-release.yml")
+        self.assertIn("app-full.apk", workflow)
+        self.assertIn("Build full APK", workflow)
+        runtime = read(JAVA / "data/featurepacks/FeaturePackRuntime.kt")
+        self.assertIn("tryLoadBundled", runtime)
+        self.assertIn("System.loadLibrary", runtime)
+        landing = read(ROOT / "website/ucoz-landing.html")
+        self.assertIn("app-full.apk", landing)
+        self.assertIn("Полная версия одним файлом", landing)
+        screen = read(JAVA / "ui/screens/settings/FeaturePacksSettings.kt")
+        self.assertIn("feature_packs_status_bundled", screen)
 
     def test_official_download_reports_progress_and_cancels(self):
         seeder = read(JAVA / "data/featurepacks/FeaturePackSeeder.kt")

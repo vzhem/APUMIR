@@ -134,6 +134,7 @@
     <string name="feature_packs_status_ready_seeding">✓ Скачано — можно пользоваться · раздаётся соседям по рою</string>
     <string name="feature_packs_status_downloaded_off">Скачано, но выключено — включите переключатель справа, чтобы пользоваться</string>
     <string name="feature_packs_status_searching">Сайт не ответил — ищем пакет у соседей по рою…</string>
+    <string name="feature_packs_status_bundled">✓ Уже встроено в эту версию приложения — работает без скачивания</string>
     <string name="feature_packs_summary_ready">Готово к использованию: %1$d из %2$d функций</string>
     <string name="feature_packs_summary_none">Пока ничего не скачано: функции ниже работают после скачивания их пакетов</string>
     <string name="feature_packs_status_asking">На сайте не нашлось — спрашиваем соседей по рою…</string>
