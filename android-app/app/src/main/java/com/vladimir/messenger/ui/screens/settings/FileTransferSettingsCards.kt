@@ -21,6 +21,7 @@ import com.vladimir.messenger.ui.components.ApuPremiumButton
 import com.vladimir.messenger.ui.components.ApuSettingsCard
 import com.vladimir.messenger.ui.components.ApuSettingsDivider
 import com.vladimir.messenger.ui.components.ApuSettingsItem
+import com.vladimir.messenger.ui.components.ApuSettingsSectionTitle
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
 /**
@@ -48,6 +49,8 @@ internal fun FileTransferSettingsCards(viewModel: SettingsViewModel) {
         )
     }
     UpdateStorageCard(viewModel)
+    ApuSettingsSectionTitle(stringResource(R.string.section_seeding))
+    SeedingDashboardCard()
 }
 
 @Composable

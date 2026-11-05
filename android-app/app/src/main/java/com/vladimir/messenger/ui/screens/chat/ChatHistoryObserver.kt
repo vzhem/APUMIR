@@ -9,6 +9,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 
+/** Initial chat window and each on-demand history page stay strictly bounded. */
+internal const val CHAT_HISTORY_PAGE_SIZE = 100
+
 /**
  * Local history is published before any network side effect. A single, conflated
  * receipt worker must never hold up the Room collector, including later emissions.

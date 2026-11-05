@@ -257,13 +257,10 @@ fun ChatDetailScreen(
         pendingSave?.let { transfer -> savePicker.launch(transfer.displayName) }
     }
 
-    // Прокрутка к последнему сообщению
-    LaunchedEffect(uiState.scrollToBottom, uiState.messages.size) {
-        if (uiState.scrollToBottom && uiState.messages.isNotEmpty()) {
-            listState.animateScrollToItem(uiState.messages.size - 1)
-            viewModel.onScrolledToBottom()
-        }
-    }
+    ChatLatestMessageScrollEffect(
+        listState, uiState.scrollToBottom, uiState.messages.size, viewModel::onScrolledToBottom,
+    )
+    ChatHistoryPagingEffect(listState, viewModel::loadOlderMessages)
 
     // SnackBar для ошибок
     val snackbarHostState = remember { SnackbarHostState() }

@@ -96,12 +96,14 @@ class ChatDetailViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ChatDetailUiState())
     val uiState: StateFlow<ChatDetailUiState> = _uiState.asStateFlow()
 
+    private val historyPaging = DirectChatHistoryPaging()
+
     // До init: init синхронно зовёт refreshAttachmentRights, а свойства Kotlin создаются по порядку объявления.
     private val rankRights = RankRights(appContext)
 
     private val historyObserver = ChatHistoryObserver(
         scope = viewModelScope,
-        messages = { getMessagesUseCase(chatId) },
+        messages = { getMessagesUseCase(chatId, CHAT_HISTORY_PAGE_SIZE) },
         onMessages = ::showLocalMessages,
         reportRead = {
             withContext(Dispatchers.IO) {
@@ -584,21 +586,27 @@ class ChatDetailViewModel @Inject constructor(
     }
 
     private fun loadMessages() {
+        historyPaging.reset()
         _uiState.update { it.copy(isLoading = it.messages.isEmpty(), historyError = null) }
         historyObserver.start()
     }
 
     fun retryMessages() = loadMessages()
 
+    fun loadOlderMessages() = historyPaging.requestOlder(viewModelScope, { ts, id, limit ->
+        getMessagesUseCase.older(chatId, ts, id, limit)
+    }) { rows -> _uiState.update { it.copy(messages = rows) } }
+
     /** No suspend, JNI, database lookup or network send before publishing local rows. */
     private fun showLocalMessages(messages: List<Message>) {
         if (com.vladimir.messenger.BuildConfig.DEBUG) {
-            android.util.Log.d("ChatDetailVM", "Local history: ${messages.size} messages")
+            android.util.Log.d("ChatDetailVM", "Local history window: ${messages.size} messages")
         }
-        val isSelf = isSelfChat(messages, peerId)
+        val merged = historyPaging.showLatest(messages)
+        val isSelf = isSelfChat(merged, peerId)
         _uiState.update { state ->
             state.copy(
-                messages = messages,
+                messages = merged,
                 isLoading = false,
                 historyError = null,
                 isSelfChat = isSelf,
@@ -611,16 +619,6 @@ class ChatDetailViewModel @Inject constructor(
     private fun ownVip(): Boolean = com.vladimir.messenger.data.rank.PeerRankStore.isVipRank(
         com.vladimir.messenger.data.referral.ReferralRankStore.qualifiedDirectCount(appContext),
     )
-
-    /** Peer metadata arrives independently; history must not wait for a second DB query. */
-    private fun isSelfChat(messages: List<Message>, peer: String): Boolean {
-        val selfNode = com.vladimir.messenger.data.mirror.MirrorHub.nodeIdCached().ifBlank {
-            messages.firstNotNullOfOrNull { message ->
-                if (message.isFromMe) null else message.recipientId.takeIf { it.startsWith("pk_") }
-            }.orEmpty()
-        }
-        return selfNode.isNotBlank() && peer == selfNode
-    }
 
     private fun observeTransfers() {
         viewModelScope.launch {

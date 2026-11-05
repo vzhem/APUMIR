@@ -22,8 +22,25 @@ data class DeliveryAckJunkRow(val chatId: String, val count: Int)
 
 @Dao
 interface MessageDao {
-    @Query("SELECT * FROM messages WHERE chatId = :chatId ORDER BY timestamp ASC")
-    fun observeMessages(chatId: String): Flow<List<MessageEntity>>
+    /** Direct-chat startup reads only the newest window, not the entire lifetime of the chat. */
+    @Query(
+        "SELECT * FROM messages WHERE chatId = :chatId " +
+            "ORDER BY timestamp DESC, id DESC LIMIT :limit"
+    )
+    fun observeRecentMessages(chatId: String, limit: Int): Flow<List<MessageEntity>>
+
+    /** Older direct-chat rows are fetched only when the user scrolls to the top. */
+    @Query(
+        "SELECT * FROM messages WHERE chatId = :chatId AND " +
+            "(timestamp < :beforeTimestamp OR (timestamp = :beforeTimestamp AND id < :beforeId)) " +
+            "ORDER BY timestamp DESC, id DESC LIMIT :limit"
+    )
+    suspend fun getOlderMessages(
+        chatId: String,
+        beforeTimestamp: Long,
+        beforeId: String,
+        limit: Int,
+    ): List<MessageEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessage(message: MessageEntity)

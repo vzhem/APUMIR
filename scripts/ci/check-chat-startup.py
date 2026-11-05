@@ -17,10 +17,11 @@ def read(path):
 class ChatStartupTest(unittest.TestCase):
     def test_local_publication_does_not_call_network_or_wait_for_metadata(self):
         vm = read("ui/screens/chat/ChatDetailViewModel.kt")
-        method = vm.split("private fun showLocalMessages(", 1)[1].split("private fun isSelfChat(", 1)[0]
+        method = vm.split("private fun showLocalMessages(", 1)[1].split("private fun ownVip(", 1)[0]
         for forbidden in ("reportRead(", "RustBridge.", "getChatById(", "withContext(", "launch("):
             self.assertNotIn(forbidden, method)
-        self.assertIn("messages = messages", method)
+        self.assertIn("historyPaging.showLatest(messages)", method)
+        self.assertIn("messages = merged", method)
         self.assertIn("isLoading = false", method)
         self.assertIn("historyError = null", method)
         self.assertIn("onMessages = ::showLocalMessages", vm)
@@ -49,13 +50,26 @@ class ChatStartupTest(unittest.TestCase):
         repository = read("data/receipt/ReadReceiptRepository.kt")
         self.assertIn("if (it is CancellationException) throw it", repository)
 
-    def test_local_history_and_pins_are_mapped_off_the_ui_thread(self):
-        repository = read("data/repository/ChatRepository.kt")
-        history = repository.split("fun observeMessages(", 1)[1].split("suspend fun setMessagePinned(", 1)[0]
-        self.assertEqual(2, history.count(".flowOn(Dispatchers.Default)"))
+    def test_bounded_chat_history_and_mapping_stay_off_the_ui_thread(self):
+        history = read("data/repository/DirectChatHistoryStore.kt")
+        self.assertIn("observeRecentMessages(chatId, limit)", history)
+        self.assertIn("getOlderMessages(chatId, beforeTimestamp, beforeId, limit)", history)
+        self.assertEqual(1, history.count(".flowOn(Dispatchers.Default)"))
         self.assertNotIn("RustBridge.", history)
-        mapping = repository.split("private fun MessageEntity.toDomain()", 1)[1].split("suspend fun getMessageById", 1)[0]
+        mapping = read("data/repository/MessageEntityMapping.kt")
         self.assertIn("recipientId = recipientId", mapping)
+
+    def test_chat_entry_window_is_bounded_and_older_pages_are_on_demand(self):
+        dao = read("data/local/dao/MessageDao.kt")
+        self.assertIn("ORDER BY timestamp DESC, id DESC LIMIT :limit", dao)
+        self.assertIn("suspend fun getOlderMessages", dao)
+        use_case = read("domain/usecase/GetMessagesUseCase.kt")
+        self.assertIn("limit: Int = 100", use_case)
+        screen = read("ui/screens/chat/ChatHistoryPagingEffect.kt")
+        self.assertIn("firstVisible == 0 && scrolling", screen)
+        paging = read("ui/screens/chat/DirectChatHistoryPaging.kt")
+        self.assertIn("CHAT_HISTORY_PAGE_SIZE = 100", read("ui/screens/chat/ChatHistoryObserver.kt"))
+        self.assertIn("loadOlder(fetch)", paging)
 
     def test_init_never_touches_properties_declared_after_it(self):
         # Регрессия v11.74.479: init{} синхронно звал refreshAttachmentRights(),

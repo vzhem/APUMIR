@@ -5,6 +5,7 @@ import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import com.vladimir.messenger.data.update.ApkUpdate
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -80,6 +81,8 @@ class GroupFileSeeder(
     private val mutex = Mutex()
     /** "transferId|requester" -> плечо. */
     private val legs = ConcurrentHashMap<String, Leg>()
+    /** Cumulative encoded bytes actually accepted by transport, per transfer, for live rates. */
+    private val uploadedBytes = ConcurrentHashMap<String, AtomicLong>()
     /** transferId -> просители, подтвердившие весь файл (для карточки автора; только память). */
     private val served = ConcurrentHashMap<String, MutableSet<String>>()
     /** Сообщить рою: просителю отдан весь файл (он сам теперь сид). */
@@ -90,6 +93,20 @@ class GroupFileSeeder(
     fun servedCount(transferIdHex: String): Int = served[transferIdHex]?.size ?: 0
 
     fun activeLegs(): Int = legs.size
+
+    fun activeTransferIds(): List<String> = legs.values.map { it.transferIdHex }.distinct()
+
+    fun trafficSnapshot(transferIdHex: String): GroupSeedTraffic = GroupSeedTraffic(
+        activeRequesterIds = legs.values
+            .asSequence()
+            .filter { it.transferIdHex == transferIdHex }
+            .map { it.requester }
+            .distinct()
+            .sorted()
+            .toList(),
+        completedRequesterCount = servedCount(transferIdHex),
+        uploadedBytes = uploadedBytes[transferIdHex]?.get() ?: 0L,
+    )
 
     /**
      * Годится ли строка как источник общей копии: манифест с меткой группы,
@@ -144,6 +161,7 @@ class GroupFileSeeder(
         val sent = pushLeg(transfer, leg, now)
         if (sent == 0) {
             legs.remove(key)
+            clearTransientTrafficIfIdle(transfer)
             return@withLock OfferResult.UNREACHABLE
         }
         Log.i(TAG, "seed: offered $id (${transfer.totalBytes} B) to ${requester.takeLast(8)}; legs=${legs.size}")
@@ -169,6 +187,7 @@ class GroupFileSeeder(
                     Log.i(TAG, "seed: $transferIdHex fully delivered to ${from.takeLast(8)} (served=${servedCount(transferIdHex)})")
                 }
                 if (first) runCatching { onServed(transferIdHex, from) }
+                clearTransientTrafficIfIdle(row)
                 return
             }
             // Плечо могло пропасть при перезапуске: проситель подтверждает по
@@ -229,13 +248,24 @@ class GroupFileSeeder(
         for ((key, leg) in legs.entries.toList()) {
             val row = transferDao.getTransfer(leg.transferIdHex)
             if (row == null || row.expiresAtMs <= now) {
-                legs.remove(key); dropped++; continue
+                legs.remove(key)
+                if (row == null) {
+                    uploadedBytes.remove(leg.transferIdHex)
+                    served.remove(leg.transferIdHex)
+                } else {
+                    clearTransientTrafficIfIdle(row)
+                }
+                dropped++
+                continue
             }
             val silentSince = if (leg.lastAckAtMs == 0L) leg.startedAtMs else leg.lastAckAtMs
             val limit = if (leg.lastAckAtMs == 0L) OFFER_TIMEOUT_MS else STALL_TIMEOUT_MS
             if (now - silentSince >= limit) {
                 Log.i(TAG, "seed: ${leg.requester.takeLast(8)} silent for ${leg.transferIdHex}; leg dropped")
-                legs.remove(key); dropped++; continue
+                legs.remove(key)
+                clearTransientTrafficIfIdle(row)
+                dropped++
+                continue
             }
             if (!due(leg, row.chunkCount, now)) continue
             val sent = pushLeg(row, leg, now)
@@ -251,6 +281,7 @@ class GroupFileSeeder(
                 runCatching { chunkStore.deleteTransfer(row.transferId) }
                 runCatching { transferDao.deleteTransfer(row.transferId) }
                 served.remove(row.transferId)
+                uploadedBytes.remove(row.transferId)
                 Log.i(TAG, "seed: expired group copy ${row.transferId} removed")
             }
         }
@@ -262,6 +293,7 @@ class GroupFileSeeder(
         mutex.withLock {
             legs.keys.removeAll { it.startsWith("$transferIdHex|") }
             served.remove(transferIdHex)
+            uploadedBytes.remove(transferIdHex)
         }
     }
 
@@ -336,7 +368,9 @@ class GroupFileSeeder(
         val sendPacket = if (transfer.chatId == ApkUpdate.CHAT_ID) apkDirectTransport else directTransport
         var sent = 0
         for (fragment in FileTransferPacketCodec.fragment(FileTransferPacketCodec.Type.OFFER, transferId, 0L, offer)) {
-            check(sendPacket(to, FileTransferWire.encodeEncodedPacket(fragment))) { "direct send failed" }
+            val packet = FileTransferWire.encodeEncodedPacket(fragment)
+            check(sendPacket(to, packet)) { "direct send failed" }
+            recordUploaded(transfer.transferId, packet.length)
             sent++
         }
         if (offerOnly) return Window(sent, acked)
@@ -373,13 +407,26 @@ class GroupFileSeeder(
         var sent = 0
         try {
             for (fragment in FileTransferPacketCodec.fragment(FileTransferPacketCodec.Type.CHUNK, transferId, chunkIndex, ciphertext)) {
-                check(sendPacket(to, FileTransferWire.encodeEncodedPacket(fragment))) { "direct send failed" }
+                val packet = FileTransferWire.encodeEncodedPacket(fragment)
+                check(sendPacket(to, packet)) { "direct send failed" }
+                recordUploaded(id, packet.length)
                 sent++
             }
         } finally {
             ciphertext.fill(0)
         }
         return sent
+    }
+
+    private fun recordUploaded(transferId: String, byteCount: Int) {
+        if (byteCount > 0) uploadedBytes.computeIfAbsent(transferId) { AtomicLong() }.addAndGet(byteCount.toLong())
+    }
+
+    private fun clearTransientTrafficIfIdle(row: FileTransferEntity) {
+        if (row.direction == "INCOMING" && legs.values.none { it.transferIdHex == row.transferId }) {
+            uploadedBytes.remove(row.transferId)
+            served.remove(row.transferId)
+        }
     }
 
     private fun hexToBytes(transferIdHex: String): ByteArray =
