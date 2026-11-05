@@ -478,9 +478,15 @@ jobs:
           NATIVE_ARG=()
           if [ -n "$VOSK_PATH" ]; then
             # Генератор сам найдёт библиотеки по всему дереву
-            # промежуточных файлов (разные ABI — в разных каталогах).
+            # промежуточных файлов. Второй источник — распакованные
+            # AAR в кэше Gradle: исключения упаковки вырезают ARM-
+            # библиотеки ещё на этапе слияния, а в AAR они целы.
             NATIVE_ARG=(--native-libs-dir=android-app/app/build/intermediates)
-            echo "native libs source: ${NATIVE_ARG[*]} (vosk: $VOSK_PATH)"
+            XENO_ARM="$(find "$HOME/.gradle/caches" -name 'libxeno_native.so' -path '*arm64-v8a*' 2>/dev/null | head -n1)"
+            if [ -n "$XENO_ARM" ]; then
+              NATIVE_ARG+=(--native-libs-dir="$(dirname "$(dirname "$XENO_ARM")")")
+            fi
+            echo "native libs sources: ${NATIVE_ARG[*]} (vosk: $VOSK_PATH)"
           else
             echo "::warning::libvosk.so не найдена в сборке — пакеты соберутся из APK"
           fi

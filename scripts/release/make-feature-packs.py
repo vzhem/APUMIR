@@ -41,16 +41,24 @@ def pack_file_name(pack_id: str, abi: str) -> str:
 
 
 def build_packs(apk_path: Path, out_dir: Path, version: str = "",
-                native_libs_dir: Path | None = None) -> dict:
+                native_libs_dir: Path | None = None,
+                native_libs_dirs: list[Path] | None = None) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     entries = []
     # Индекс нативных библиотек на диске: (abi, имя файла) -> путь.
-    # Библиотеки разных ABI могут лежать в разных промежуточных
-    # каталогах сборки (merged/stripped), поэтому ищем по всему дереву.
+    # Библиотеки разных ABI могут лежать в разных каталогах (слияние
+    # Gradle, распакованные AAR в кэше), поэтому источников несколько
+    # и по каждому ищем по всему его дереву.
+    search_dirs = list(native_libs_dirs or [])
+    if native_libs_dir is not None:
+        search_dirs.append(native_libs_dir)
+    # Глобальная переменная для доступа из цикла ниже.
+    globals()["_SEARCH_DIRS"] = search_dirs
     disk_index: dict[tuple[str, str], Path] = {}
-    if native_libs_dir is not None and native_libs_dir.is_dir():
-        for found in native_libs_dir.rglob("*.so"):
-            disk_index.setdefault((found.parent.name, found.name), found)
+    for root in search_dirs:
+        if root.is_dir():
+            for found in root.rglob("*.so"):
+                disk_index.setdefault((found.parent.name, found.name), found)
     with zipfile.ZipFile(apk_path) as apk:
         names = set(apk.namelist())
         for pack_id, libs in PACKS.items():
@@ -120,7 +128,8 @@ def main(argv: list[str]) -> int:
     if not apk.is_file():
         print(f"apk not found: {apk}")
         return 2
-    build_packs(apk, Path(args[1]), args[2] if len(args) == 3 else "", native_libs_dir)
+    build_packs(apk, Path(args[1]), args[2] if len(args) == 3 else "",
+                native_libs_dirs=native_dirs)
     return 0
 
 
