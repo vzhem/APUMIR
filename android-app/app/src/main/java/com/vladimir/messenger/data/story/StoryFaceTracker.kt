@@ -56,6 +56,16 @@ internal class StoryFaceTracker(
             image.close()
             return
         }
+        // Лёгкая база: без докачанного пакета лица нативный детектор не
+        // трогаем — кадр просто проходит без эффектов, приложение не падает.
+        if (!com.vladimir.messenger.data.featurepacks.FeaturePackRuntime.ensureLoaded(
+                context,
+                com.vladimir.messenger.data.featurepacks.FeaturePackFeature.VIDEO_FACE_EFFECTS,
+            )
+        ) {
+            image.close()
+            return
+        }
         val input = InputImage.fromMediaImage(media, image.imageInfo.rotationDegrees)
         // Результат приходит на главном потоке (addOnSuccessListener без executor),
         // поэтому состояние Compose можно обновлять прямо из него.

@@ -338,6 +338,7 @@ class FeaturePackSeeder @Inject constructor(
             appContext,
             FeaturePackStore.Installed(pack.id, pending.abi, fileSha256, installedFile.length()),
         )
+        FeaturePackRuntime.extract(appContext, pack, pending.abi, installedFile)
         FeaturePackStore.clearPending(appContext)
         setState(PackState(pack.id, Phase.INSTALLED, totalBytes = installedFile.length()))
         Log.i(TAG, "pack ${pack.id} installed from swarm (${installedFile.length()} B), now seeding")
@@ -430,6 +431,7 @@ class FeaturePackSeeder @Inject constructor(
                 appContext,
                 FeaturePackStore.Installed(pack.id, abi, sha, target.length()),
             )
+            FeaturePackRuntime.extract(appContext, pack, abi, target)
             FeaturePackStore.clearPending(appContext)
             setState(PackState(pack.id, Phase.INSTALLED, totalBytes = target.length()))
             // Скачал с сайта — стань раздающим для роя.

@@ -130,6 +130,15 @@ object VoiceTranscriber {
     }
 
     private suspend fun ensureModel(context: Context, lang: String, onStage: (Stage) -> Unit): Model {
+        // Лёгкая база: libvosk живёт в докачиваемом пакете. Нет пакета —
+        // честный отказ вызывающему (он покажет «не удалось»), а не падение
+        // на загрузке нативной библиотеки.
+        check(
+            com.vladimir.messenger.data.featurepacks.FeaturePackRuntime.ensureLoaded(
+                context,
+                com.vladimir.messenger.data.featurepacks.FeaturePackFeature.VOICE_TRANSCRIPTION,
+            ),
+        ) { "voice-text feature pack is not installed" }
         model?.takeIf { modelLang == lang }?.let { return it }
         return modelMutex.withLock {
             model?.takeIf { modelLang == lang }?.let { return@withLock it }

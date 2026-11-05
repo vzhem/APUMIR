@@ -31,6 +31,36 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+class LightBaseContract(unittest.TestCase):
+    def test_light_base_flag_excludes_native_libs(self):
+        gradle = read(ROOT / "android-app/app/build.gradle.kts")
+        self.assertIn("apu.lightBase", gradle)
+        for lib in [
+            "libxeno_native.so", "libtranslate_jni.so",
+            "liblanguage_id_l2c_jni.so", "libvosk.so",
+            "libface_detector_v2_jni.so",
+        ]:
+            self.assertIn(lib, gradle, lib)
+
+    def test_runtime_loads_libs_from_pack(self):
+        runtime = read(JAVA / "data/featurepacks/FeaturePackRuntime.kt")
+        self.assertIn("System.load", runtime)
+        self.assertIn("feature_packs", runtime)
+        seeder = read(JAVA / "data/featurepacks/FeaturePackSeeder.kt")
+        self.assertIn("FeaturePackRuntime.extract", seeder)
+
+    def test_native_callers_are_guarded(self):
+        voice = read(JAVA / "data/voice/VoiceTranscriber.kt")
+        self.assertIn("VOICE_TRANSCRIPTION", voice)
+        self.assertIn("FeaturePackRuntime.ensureLoaded", voice)
+        ml = read(JAVA / "data/story/StoryFaceTracker.kt")
+        self.assertIn("VIDEO_FACE_EFFECTS", ml)
+        self.assertIn("FeaturePackRuntime.ensureLoaded", ml)
+        translator = read(JAVA / "data/translate/MessageTranslator.kt")
+        self.assertIn("MESSAGE_TRANSLATION", translator)
+        self.assertIn("FeaturePackRuntime.ensureLoaded", translator)
+
+
 class FeaturePacksContract(unittest.TestCase):
     def test_catalog_is_single_and_keeps_core_in_base(self):
         catalog = read(JAVA / "data/featurepacks/FeaturePackCatalog.kt")

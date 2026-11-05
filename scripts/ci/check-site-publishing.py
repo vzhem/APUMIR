@@ -93,7 +93,7 @@ class ReleasePipelineTest(unittest.TestCase):
             self.assertIn(secret, workflow)
         # Манифесты уходят после файлов, которые они описывают: порядок
         # аргументов кусковой загрузки — zip-ы, манифест пакетов, APK, latest.
-        upload_block = workflow.split("scripts/release/ftp_upload.py", 1)[1]
+        upload_block = workflow.split("--ftp-create-dirs", 1)[1]
         order = [
             upload_block.index("feature-pack-*.zip"),
             upload_block.index("site-files/feature-packs.json"),
@@ -108,8 +108,9 @@ class ReleasePipelineTest(unittest.TestCase):
         self.assertIn("make-feature-packs.py site-files/app-release.apk", workflow)
         # Система кусков обязана доказывать работоспособность в каждом запуске.
         self.assertIn("chunked_upload.py --self-test", workflow)
-        # Загрузка на сайт идёт кусковой FTP-системой с паузой 5 минут.
-        self.assertIn("scripts/release/ftp_upload.py", workflow)
+        # Загрузка на сайт — простой curl по маленьким файлам лёгкой базы
+        # в /downloads; кусковые системы остаются для больших файлов.
+        self.assertIn('REMOTE_DIR="${APU_FTP_REMOTE_DIR:-/downloads}"', workflow)
         self.assertIn('APU_UPLOAD_DELAY_SECONDS: "300"', workflow)
 
 

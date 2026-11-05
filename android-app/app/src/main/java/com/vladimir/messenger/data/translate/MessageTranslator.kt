@@ -49,6 +49,7 @@ object TranslationSettings {
 
     /** Вызывается из MainActivity.onCreate: читает сохранённое значение. */
     fun init(context: Context) {
+        MessageTranslator.init(context)
         _enabled.value = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY, false)
     }
@@ -61,6 +62,13 @@ object TranslationSettings {
 }
 
 object MessageTranslator {
+    @Volatile
+    private var appContext: Context? = null
+
+    fun init(context: Context) {
+        appContext = context.applicationContext
+    }
+
     /** Кэш результатов в памяти: при прокрутке сообщение не переводится заново. */
     private val cache = object : LinkedHashMap<String, MessageTranslation?>(64, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, MessageTranslation?>?): Boolean =
@@ -90,6 +98,16 @@ object MessageTranslator {
         val key = targetCode + "|" + text
         synchronized(cache) {
             if (cache.containsKey(key)) return cache[key]
+        }
+        // Лёгкая база: нативные библиотеки перевода — в докачиваемом
+        // пакете. Нет пакета — перевода нет (null), приложение не падает.
+        val context = appContext ?: return null
+        if (!com.vladimir.messenger.data.featurepacks.FeaturePackRuntime.ensureLoaded(
+                context,
+                com.vladimir.messenger.data.featurepacks.FeaturePackFeature.MESSAGE_TRANSLATION,
+            )
+        ) {
+            return null
         }
         val result = try {
             doTranslate(text, targetCode)
