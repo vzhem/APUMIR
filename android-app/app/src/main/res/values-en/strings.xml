@@ -50,7 +50,7 @@
     <string name="seed_dashboard_empty">No files are currently available to share. Files appear here when peers can request them from your device.</string>
     <string name="seed_dashboard_rate_tpl">%1$s/s</string>
     <string name="seed_dashboard_file_size">File size: %1$s</string>
-    <string name="seed_dashboard_file_speed">This file's upload speed: %1$s</string>
+    <string name="seed_dashboard_file_speed">This file\'s upload speed: %1$s</string>
     <string name="seed_dashboard_file_uploaded">Uploaded for this file this session: %1$s</string>
     <string name="seed_dashboard_file_peers">Downloading now: %1$d · completed this session: %2$d</string>
     <string name="seed_dashboard_file_peer_ids">Peers downloading now: %1$s</string>
