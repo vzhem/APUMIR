@@ -126,6 +126,16 @@
     <string name="feature_packs_total_selected">К догрузке выбрано: %1$s МБ</string>
     <string name="feature_packs_pending">Откуда берётся пакет: в первую очередь — с официального сайта, без ограничений. Если сайт не отвечает или перегружен, пакет спросят у соседей по рою, у кого он уже скачан. Скачав пакет, ваш телефон сам начнёт раздавать его соседям.</string>
     <string name="feature_packs_status_installed">Скачано — раздаётся соседям по рою</string>
+    <string name="feature_packs_status_not_downloaded">Не скачано</string>
+    <string name="feature_packs_status_site_downloading">Скачивается с официального сайта</string>
+    <string name="feature_packs_status_swarm_downloading">Скачивается от соседей по рою</string>
+    <string name="feature_packs_status_progress">%1$s из %2$s МБ · %3$d%%</string>
+    <string name="feature_packs_status_ready">✓ Скачано — можно пользоваться</string>
+    <string name="feature_packs_status_ready_seeding">✓ Скачано — можно пользоваться · раздаётся соседям по рою</string>
+    <string name="feature_packs_status_downloaded_off">Скачано, но выключено — включите переключатель справа, чтобы пользоваться</string>
+    <string name="feature_packs_status_searching">Сайт не ответил — ищем пакет у соседей по рою…</string>
+    <string name="feature_packs_summary_ready">Готово к использованию: %1$d из %2$d функций</string>
+    <string name="feature_packs_summary_none">Пока ничего не скачано: функции ниже работают после скачивания их пакетов</string>
     <string name="feature_packs_status_asking">На сайте не нашлось — спрашиваем соседей по рою…</string>
     <string name="feature_packs_status_downloading">Скачивается от соседа: %1$s из %2$s МБ</string>
     <string name="feature_packs_status_official">Скачиваем с официального сайта…</string>

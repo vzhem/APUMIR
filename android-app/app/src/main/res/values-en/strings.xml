@@ -79,6 +79,16 @@
     <string name="feature_packs_total_selected">Selected for download: %1$s MB</string>
     <string name="feature_packs_pending">Where a pack comes from: first of all from the official site, without limits. If the site does not answer or is overloaded, the pack is asked from swarm neighbours who already have it. Once downloaded, your phone starts sharing it with neighbours too.</string>
     <string name="feature_packs_status_installed">Downloaded — sharing with swarm neighbours</string>
+    <string name="feature_packs_status_not_downloaded">Not downloaded</string>
+    <string name="feature_packs_status_site_downloading">Downloading from the official site</string>
+    <string name="feature_packs_status_swarm_downloading">Downloading from swarm neighbours</string>
+    <string name="feature_packs_status_progress">%1$s of %2$s MB · %3$d%%</string>
+    <string name="feature_packs_status_ready">✓ Downloaded — ready to use</string>
+    <string name="feature_packs_status_ready_seeding">✓ Downloaded — ready to use · sharing with swarm neighbours</string>
+    <string name="feature_packs_status_downloaded_off">Downloaded but off — flip the switch on the right to use it</string>
+    <string name="feature_packs_status_searching">The site did not answer — looking for the pack among swarm neighbours…</string>
+    <string name="feature_packs_summary_ready">Ready to use: %1$d of %2$d features</string>
+    <string name="feature_packs_summary_none">Nothing downloaded yet: the features below work once their packs are downloaded</string>
     <string name="feature_packs_status_asking">Not on the site — asking swarm neighbours…</string>
     <string name="feature_packs_status_downloading">Downloading from a neighbour: %1$s of %2$s MB</string>
     <string name="feature_packs_status_official">Downloading from the official site…</string>

@@ -155,6 +155,14 @@ class FeaturePackSeeder @Inject constructor(
 
     /** Отмена текущей догрузки (установленный пакет не трогаем). */
     suspend fun cancel(packId: String) {
+        downloadJobs.remove(packId)?.cancel()
+        runCatching {
+            packDir().listFiles()?.forEach { file ->
+                if (file.name.startsWith("feature-pack-$packId-") && file.name.endsWith(".download")) {
+                    file.delete()
+                }
+            }
+        }
         mutex.withLock {
             if (FeaturePackStore.pending(appContext)?.packId == packId) {
                 FeaturePackStore.clearPending(appContext)
@@ -416,7 +424,14 @@ class FeaturePackSeeder @Inject constructor(
                 val fileName = found.optString("file").ifEmpty { pack.downloadFileName(abi) }
                 check(GroupWire.isSha256(sha)) { "manifest checksum missing" }
                 val temporary = File(packDir(), "$fileName.download")
-                httpDownloadTo("$DOWNLOADS_BASE/$fileName", temporary) ?: error("download failed")
+                // Прогресс для экрана: сколько байт уже легло из скольких.
+                val downloaded = httpDownloadTo("$DOWNLOADS_BASE/$fileName", temporary) { received, total ->
+                    if (downloadJobs[pack.id]?.isCancelled == true) {
+                        throw kotlinx.coroutines.CancellationException("pack download cancelled")
+                    }
+                    setState(PackState(pack.id, Phase.OFFICIAL_DOWNLOAD, received, total))
+                }
+                check(downloaded) { "download failed" }
                 check(sha256OfFile(temporary) == sha) { "official checksum mismatch" }
                 val target = packFile(pack, abi)
                 if (!temporary.renameTo(target)) {
@@ -522,12 +537,37 @@ class FeaturePackSeeder @Inject constructor(
         }
     }
 
-    private fun httpDownloadTo(url: String, target: File): Boolean {
+    /**
+     * Скачивание файла пакета с докладом прогресса: [onProgress] получает
+     * (принято байт, всего байт по серверу) — экран показывает полосу и
+     * проценты, а не глухое «подождите».
+     */
+    private fun httpDownloadTo(
+        url: String,
+        target: File,
+        onProgress: ((received: Long, total: Long) -> Unit)? = null,
+    ): Boolean {
         val connection = openConnection(url) ?: return false
         return try {
             if (connection.responseCode !in 200..299) return false
+            val total = connection.contentLengthLong
             connection.inputStream.use { input ->
-                target.outputStream().use { output -> input.copyTo(output) }
+                target.outputStream().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var received = 0L
+                    var lastReport = 0L
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        output.write(buffer, 0, read)
+                        received += read
+                        if (onProgress != null && received - lastReport >= 256 * 1024) {
+                            lastReport = received
+                            onProgress(received, total)
+                        }
+                    }
+                    onProgress?.invoke(received, total)
+                }
             }
             true
         } finally {

@@ -142,5 +142,32 @@ class FeaturePacksContract(unittest.TestCase):
                 )
 
 
+class VisibleProgressContract(unittest.TestCase):
+    """Владелец должен видеть: что качается, что скачалось, чем можно пользоваться."""
+
+    def test_screen_shows_badges_progress_and_summary(self):
+        screen = read(JAVA / "ui/screens/settings/FeaturePacksSettings.kt")
+        for needle in [
+            "StatusBadge",
+            "LinearProgressIndicator",
+            "feature_packs_summary_ready",
+            "feature_packs_status_ready_seeding",
+            "feature_packs_status_downloaded_off",
+            "feature_packs_status_not_downloaded",
+            "feature_packs_status_progress",
+        ]:
+            self.assertIn(needle, screen, needle)
+
+    def test_official_download_reports_progress_and_cancels(self):
+        seeder = read(JAVA / "data/featurepacks/FeaturePackSeeder.kt")
+        for needle in [
+            "contentLengthLong",
+            "onProgress",
+            "downloadJobs",
+            "CancellationException",
+        ]:
+            self.assertIn(needle, seeder, needle)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
