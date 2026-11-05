@@ -482,11 +482,13 @@ jobs:
             # AAR в кэше Gradle: исключения упаковки вырезают ARM-
             # библиотеки ещё на этапе слияния, а в AAR они целы.
             NATIVE_ARG=(--native-libs-dir=android-app/app/build/intermediates)
-            # Разные библиотеки лежат в разных AAR — отдаём генератору
-            # все каталоги трансформов Gradle, он найдёт каждую по ABI.
-            for cache_dir in "$HOME"/.gradle/caches/transforms-*; do
-              if [ -d "$cache_dir" ]; then
-                NATIVE_ARG+=(--native-libs-dir="$cache_dir")
+            # Разные библиотеки лежат в разных AAR: ищем каждую по
+            # всему кэшу Gradle и отдаём генератору корень её jni.
+            for lib in libxeno_native.so libtranslate_jni.so liblanguage_id_l2c_jni.so libvosk.so libface_detector_v2_jni.so; do
+              found="$(find "$HOME/.gradle/caches" -name "$lib" -path '*arm64-v8a*' 2>/dev/null | head -n1)"
+              if [ -n "$found" ]; then
+                NATIVE_ARG+=(--native-libs-dir="$(dirname "$(dirname "$found")")")
+                echo "source for $lib: $(dirname "$(dirname "$found")")"
               fi
             done
             echo "native libs sources: ${NATIVE_ARG[*]} (vosk: $VOSK_PATH)"
