@@ -81,6 +81,9 @@ class FeaturePackSeeder @Inject constructor(
     private val _states = MutableStateFlow<Map<String, PackState>>(emptyMap())
     val states: StateFlow<Map<String, PackState>> = _states.asStateFlow()
 
+    /** Идущие загрузки с официального сайта: пакет -> задача (для отмены). */
+    private val downloadJobs = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Job>()
+
     /** Объявления соседей: packId -> nodeId -> (sha256, размер, когда). */
     private data class Offer(val nodeId: String, val sha256: String, val sizeBytes: Long, val atMs: Long)
 
@@ -150,7 +153,8 @@ class FeaturePackSeeder @Inject constructor(
             setState(PackState(packId, Phase.OFFICIAL_DOWNLOAD, totalBytes = pack.sizeBytesFor(abi)))
         }
         // Сайт — в первую очередь; рой подключится сам, если сайт не ответит.
-        scope.launch { downloadFromOfficial(pack, abi, fallbackToSwarm = true) }
+        downloadJobs[packId]?.cancel()
+        downloadJobs[packId] = scope.launch { downloadFromOfficial(pack, abi, fallbackToSwarm = true) }
     }
 
     /** Отмена текущей догрузки (установленный пакет не трогаем). */
@@ -454,6 +458,12 @@ class FeaturePackSeeder @Inject constructor(
             announceInstalled()
             Log.i(TAG, "pack ${pack.id} installed from official site (${target.length()} B)")
         }.onFailure { error ->
+            if (error is kotlinx.coroutines.CancellationException) {
+                // Владелец нажал «Отмена»: состояние уже NOT_INSTALLED,
+                // в рой после отмены не уходим.
+                Log.i(TAG, "pack ${pack.id} official download cancelled")
+                return@onFailure
+            }
             Log.w(TAG, "pack ${pack.id} official download failed: ${error.message}")
             if (fallbackToSwarm) {
                 // Сайт не отвечает или перегружен — спрашиваем рой.
