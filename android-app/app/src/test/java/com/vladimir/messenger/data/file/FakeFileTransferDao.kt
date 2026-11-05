@@ -21,6 +21,14 @@ class FakeFileTransferDao : FileTransferDao {
     override fun observeForChat(chatId: String): Flow<List<FileTransferEntity>> =
         observe.map { transfers.values.filter { entity -> entity.chatId == chatId } }
 
+    override fun observeSeedingTransfers(limit: Int): Flow<List<FileTransferEntity>> =
+        observe.map {
+            transfers.values
+                .filter { entity -> entity.direction == "OUTGOING" && entity.state == "SEEDING" }
+                .sortedByDescending { entity -> entity.createdAtMs }
+                .take(limit.coerceAtLeast(0))
+        }
+
     override suspend fun getForChatLimited(chatId: String, limit: Int): List<FileTransferEntity> =
         transfers.values.filter { it.chatId == chatId }
             .sortedByDescending { it.updatedAtMs }
