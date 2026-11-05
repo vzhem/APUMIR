@@ -15,7 +15,7 @@
 
 - PR #113 слит в `main` (merge `ad4226fb7d2b16ac34481b6734abd0fbc12fbbdb`); release tag CI `42109779678` прошёл ancestry, native/core, Android release build, подпись, 1 484 JVM-теста и сборку feature packs.
 - Опубликованы `app-release.apk` (77 252 269 байт), `app-full.apk` (233 565 007 байт), `SHA256SUMS.txt`, 9 архивов feature packs и `feature-packs.json`. Checksum-файл создан в том же успешном release workflow; GitHub asset metadata содержит SHA-256 digests.
-- Публикация на официальный сайт прошла успешно: workflow `42113660451` загрузил файлы и sidecar `latest.json`.
+- Публикация на официальный сайт прошла успешно: workflow `42113660451` завершился, FTP-загрузка файлов и sidecar `latest.json` прошла; в логе отмечено, что optional REST-канал крупных передач (`APU_UPLOAD_REST_BASE`) не настроен.
 - Автоматические сборки и тесты прошли; отдельная ручная проверка на физическом телефоне не проводилась.
 
 ## Открытие личных чатов без чтения всей истории, 2026-11-05
