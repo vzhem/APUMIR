@@ -28,6 +28,9 @@ class FakeFileTransferDao : FileTransferDao {
 
     override suspend fun getTransfer(transferId: String): FileTransferEntity? = transfers[transferId]
 
+    override suspend fun getTransfersByIds(transferIds: List<String>): List<FileTransferEntity> =
+        transferIds.mapNotNull(transfers::get)
+
     override suspend fun getOutgoingForMessage(messageId: String): List<FileTransferEntity> =
         transfers.values
             .filter { it.messageId == messageId && it.direction == "OUTGOING" }
