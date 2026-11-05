@@ -110,6 +110,10 @@ class FeaturePackSeeder @Inject constructor(
             val installed = FeaturePackStore.installed(appContext, pack.id)
             if (installed != null && installed.abi == abi && packFile(pack, abi).isFile) {
                 restored[pack.id] = PackState(pack.id, Phase.INSTALLED, totalBytes = installed.sizeBytes)
+            } else if (installed == null && FeaturePackRuntime.ensureLoaded(appContext, pack.feature)) {
+                // Полная версия при скачивании: библиотеки внутри APK,
+                // скачивать нечего — функция работает сразу.
+                restored[pack.id] = PackState(pack.id, Phase.INSTALLED, totalBytes = pack.sizeBytesFor(abi))
             }
         }
         FeaturePackStore.pending(appContext)?.let { pending ->

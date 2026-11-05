@@ -70,9 +70,12 @@ fun FeaturePacksSettings(viewModel: FeaturePacksViewModel = hiltViewModel()) {
     val packStates by viewModel.states.collectAsState()
 
     // Сводка сверху: сколько функций уже скачано и включено — то есть
-    // реально работает прямо сейчас.
+    // реально работает прямо сейчас. В полной версии при скачивании всё
+    // встроено в APK и работает без переключателей.
     val readyCount = FeaturePackCatalog.packs.count { pack ->
-        packStates[pack.id]?.phase == FeaturePackSeeder.Phase.INSTALLED && pack.id in selected
+        val installedPhase = packStates[pack.id]?.phase == FeaturePackSeeder.Phase.INSTALLED
+        val bundled = installedPhase && FeaturePackStore.installed(context, pack.id) == null
+        installedPhase && (bundled || pack.id in selected)
     }
 
     ApuSettingsCard(modifier = Modifier.fillMaxWidth()) {
@@ -193,9 +196,14 @@ private fun FeaturePackRow(
             ApuPremiumSwitch(checked = checked, onCheckedChange = onCheckedChange)
         }
         // Статус — на всю ширину строки: плашка, полоса загрузки, проценты.
+        // Полная версия при скачивании: пакет не скачивался, а встроен в APK.
+        val context = LocalContext.current
+        val bundled = state?.phase == FeaturePackSeeder.Phase.INSTALLED &&
+            FeaturePackStore.installed(context, pack.id) == null
         PackStatusLine(
             state = state,
             checked = checked,
+            bundled = bundled,
             onDownloadClick = onDownloadClick,
             onCancelClick = onCancelClick,
         )
@@ -211,6 +219,7 @@ private fun FeaturePackRow(
 private fun PackStatusLine(
     state: FeaturePackSeeder.PackState?,
     checked: Boolean,
+    bundled: Boolean = false,
     onDownloadClick: () -> Unit,
     onCancelClick: () -> Unit,
 ) {
@@ -218,13 +227,13 @@ private fun PackStatusLine(
     when (phase) {
         FeaturePackSeeder.Phase.INSTALLED -> StatusBadge(
             text = stringResource(
-                if (checked) {
-                    R.string.feature_packs_status_ready_seeding
-                } else {
-                    R.string.feature_packs_status_downloaded_off
+                when {
+                    bundled -> R.string.feature_packs_status_bundled
+                    checked -> R.string.feature_packs_status_ready_seeding
+                    else -> R.string.feature_packs_status_downloaded_off
                 },
             ),
-            color = if (checked) PackReadyColor else PackOffColor,
+            color = if (checked || bundled) PackReadyColor else PackOffColor,
         )
         FeaturePackSeeder.Phase.OFFICIAL_DOWNLOAD -> DownloadProgress(
             title = stringResource(R.string.feature_packs_status_site_downloading),
