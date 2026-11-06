@@ -88,6 +88,13 @@ object FeaturePackRuntime {
             for (lib in pack.nativeLibs) {
                 System.load(File(dir, lib).absolutePath)
             }
+            // Проба ТЕМ ЖЕ вызовом, которым SDK поднимёт библиотеку сам
+            // (System.loadLibrary по имени): у ML Kit это <clinit> на его
+            // пуле, где ошибку никто не ловит и процесс падает. Имя не
+            // поднимается — функция честно недоступна, приложение живёт.
+            for (lib in pack.nativeLibs) {
+                System.loadLibrary(lib.removePrefix("lib").removeSuffix(".so"))
+            }
             loadedPacks += pack.id
             Log.i(TAG, "pack ${pack.id} native libraries loaded")
             true

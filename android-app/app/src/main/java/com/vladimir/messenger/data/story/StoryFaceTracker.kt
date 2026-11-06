@@ -63,10 +63,7 @@ internal class StoryFaceTracker(
         get() = detectorOrLoad() != null
 
     private fun detectorOrLoad(): FaceDetector? = detector ?: synchronized(this) {
-        detector ?: runCatching { newStoryFaceDetector() }
-            .onFailure { android.util.Log.w("StoryFaceTracker", "Face detector unavailable", it) }
-            .getOrNull()
-            .also { detector = it }
+        detector ?: newStoryFaceDetectorOrNull(context).also { detector = it }
     }
 
     @ExperimentalGetImage
@@ -136,6 +133,32 @@ internal class StoryFaceTracker(
         synchronized(this) { detector.also { detector = null } }?.close()
     }
 
+}
+
+/**
+ * Детектор лица с проверкой нативного модуля ДО первого обращения к ML Kit.
+ *
+ * Лёгкая база не содержит `libface_detector_v2_jni.so` (docs/FEATURE_PACKS.md):
+ * библиотека приезжает пакетом «Эффекты лиц». ML Kit поднимает её САМ в
+ * `<clinit>` на СВОЁМ пуле потоков (владелец 2026-11-06, CUBOT KINGKONG X:
+ * `pool-7-thread-1`, `UnsatisfiedLinkError: libface_detector_v2_jni.so not
+ * found`) — ошибку там никто не ловит, и процесс умирает через секунды после
+ * открытия экрана записи. Поэтому путь к детектору один и охраняемый:
+ * [FeaturePackRuntime.ensureLoaded] поднимает библиотеки пакета и пробует
+ * `System.loadLibrary` тем же вызовом, что ML Kit; нет модуля — честный null,
+ * фильтры лица выключаются, запись остаётся.
+ */
+internal fun newStoryFaceDetectorOrNull(context: Context): FaceDetector? {
+    if (!com.vladimir.messenger.data.featurepacks.FeaturePackRuntime.ensureLoaded(
+            context,
+            com.vladimir.messenger.data.featurepacks.FeaturePackFeature.VIDEO_FACE_EFFECTS,
+        )
+    ) {
+        return null
+    }
+    return runCatching { newStoryFaceDetector() }
+        .onFailure { android.util.Log.w("StoryFaceTracker", "Face detector unavailable", it) }
+        .getOrNull()
 }
 
 /** Один детектор на все проходы: и предпросмотр, и анализ записанного файла. */

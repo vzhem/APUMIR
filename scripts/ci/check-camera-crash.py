@@ -22,7 +22,13 @@
   3) запрос микрофона защищён: отказ лаунчера — запись без звука с видимой
      причиной, а не падение;
   4) след последнего падения (`CrashTrace`) установлен в `MessengerApplication`
-     и попадает в отчёт «Логи» — иначе повторное падение снова нечем разбирать.
+     и попадает в отчёт «Логи» — иначе повторное падение снова нечем разбирать;
+  5) путь к детектору ОДИН и охраняемый пакетным гейтом (`FeaturePackRuntime`):
+     в лёгкой базе нет `libface_detector_v2_jni.so`, ML Kit поднимает её в
+     `<clinit>` на СВОЁМ пуле, где runCatching вызывающего бессилен (стек
+     владельца 2026-11-06: `pool-7-thread-1`, UnsatisfiedLinkError). Поэтому
+     ensureLoaded обязан поднять библиотеки пакета и ПРОБОВАТЬ `System.loadLibrary`
+     тем же вызовом, что SDK; мимо гейта детектор не создаётся нигде.
 
 Запуск:
     python3 scripts/ci/check-camera-crash.py
@@ -71,6 +77,53 @@ def main() -> int:
         "faceTrackingAvailable = true" not in recorder,
         "StoryVideoRecorder: фильтры лица не должны включаться «вслепую», "
         "без проверки модуля ML Kit",
+    )
+
+    # 5) пакетный гейт: без нативного модуля детектор не создаётся ---------
+    factory = re.search(
+        r"internal fun newStoryFaceDetectorOrNull\(context: Context\)(.*?)\n\}",
+        tracker,
+        re.S,
+    )
+    check(
+        factory is not None,
+        "StoryFaceTracker: нет охраняемого фабрикатора newStoryFaceDetectorOrNull — "
+        "прямой FaceDetection.getClient() без пакета убивает процесс на пуле ML Kit",
+    )
+    if factory is not None:
+        body = factory.group(1)
+        gate = body.find("FeaturePackRuntime.ensureLoaded")
+        create = body.find("newStoryFaceDetector()")
+        check(
+            0 <= gate < create,
+            "StoryFaceTracker: ensureLoaded обязан стоять ДО создания детектора "
+            "(иначе ML Kit сам поднимет библиотеку и уронит процесс)",
+        )
+    check(
+        "detector ?: newStoryFaceDetectorOrNull(context)" in tracker,
+        "StoryFaceTracker: detectorOrLoad обязан идти через охраняемый фабрикатор",
+    )
+    baker = read(JAVA / "data/story/StoryFaceBaker.kt")
+    check(
+        "newStoryFaceDetectorOrNull(context)" in baker,
+        "StoryFaceBaker: анализ записанного файла обязан идти через охраняемый "
+        "фабрикатор детектора",
+    )
+    check(
+        "newStoryFaceDetector()" not in baker,
+        "StoryFaceBaker: прямой вызов newStoryFaceDetector() мимо пакетного гейта",
+    )
+    check(
+        "suspend fun analyze(context: Context" in baker,
+        "StoryFaceBaker: analyze обязан получать context — без него не проверить пакет",
+    )
+    runtime = read(JAVA / "data/featurepacks/FeaturePackRuntime.kt")
+    probe = runtime.find("System.load(File(dir, lib).absolutePath)")
+    load_library = runtime.find("System.loadLibrary(lib.removePrefix")
+    check(
+        0 <= probe < load_library,
+        "FeaturePackRuntime: после System.load(путь пакета) обязана идти проба "
+        "System.loadLibrary(имя) — тем же вызовом, которым SDK уронит процесс",
     )
 
     camera = read(JAVA / "ui/components/StoryVideoCamera.kt")
