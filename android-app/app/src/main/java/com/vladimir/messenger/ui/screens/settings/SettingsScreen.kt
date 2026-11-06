@@ -611,7 +611,6 @@ private fun ProfileTabContent(
                                 }
                             }
                         }
-                        com.vladimir.messenger.ui.components.VideoAvatarCaptionLine()
                         if (avatarUri != null) {
                             Spacer(Modifier.height(6.dp))
                             ApuTextAction(
