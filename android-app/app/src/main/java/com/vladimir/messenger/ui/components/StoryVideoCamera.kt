@@ -2,6 +2,7 @@ package com.vladimir.messenger.ui.components
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -189,7 +190,20 @@ internal fun StoryVideoCamera(
     }
     // Просим микрофон сразу при открытии экрана, если его ещё нет; отказ оставит запись без звука.
     LaunchedEffect(Unit) {
-        if (!audio) audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+        if (!audio) {
+            try {
+                audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+            } catch (failure: Throwable) {
+                // Запрос разрешения не должен ронять экран записи: без
+                // микрофона запись продолжается без звука, причина видна на
+                // экране. Падение при нажатии «Записать видео» 2026-11-06 было
+                // мгновенным — каждый шаг открытия камеры теперь обязан
+                // деградировать текстом, а не смертью процесса.
+                Log.w("StoryVideoCamera", "Cannot request the microphone permission", failure)
+                audio = false
+                error = context.getString(R.string.story_record_mic_denied)
+            }
+        }
     }
     DisposableEffect(session, owner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -215,7 +229,11 @@ internal fun StoryVideoCamera(
                 ready = true
             } catch (cancelled: CancellationException) {
                 throw cancelled
-            } catch (failure: Exception) {
+            } catch (failure: Throwable) {
+                // Не только Exception: сбой инициализации CameraX/ML Kit
+                // приходит как Error, и без этого перехвата он убивал бы
+                // процесс при открытии камеры на любом телефоне.
+                Log.w("StoryVideoCamera", "Cannot open the camera", failure)
                 error = failure.message ?: context.getString(R.string.story_record_open_failed)
             }
         }
@@ -314,7 +332,11 @@ internal fun StoryVideoCamera(
                             handedOff = true
                         } catch (cancelled: CancellationException) {
                             throw cancelled
-                        } catch (failure: Exception) {
+                        } catch (failure: Throwable) {
+                            // Обработка (фон, фильтр, эффект голоса) — медиа-код:
+                            // любая ошибка показывается текстом, но не роняет
+                            // приложение после уже снятого видео.
+                            Log.w("StoryVideoCamera", "Cannot process the recorded video", failure)
                             error = failure.message ?: context.getString(R.string.story_record_read_failed)
                         } finally {
                             stopping = false
@@ -328,7 +350,10 @@ internal fun StoryVideoCamera(
                     }
                 }
             })
-        } catch (failure: Exception) {
+        } catch (failure: Throwable) {
+            // Error уровня инициализации записи тоже не должен убивать экран:
+            // человек видит причину и может повторить запись.
+            Log.w("StoryVideoCamera", "Cannot start recording", failure)
             recording = false
             error = failure.message ?: context.getString(R.string.story_record_start_failed)
         }

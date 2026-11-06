@@ -91,7 +91,10 @@ internal class StoryVideoRecorder(
         val bound = try {
             camera.bindToLifecycle(owner, selector, newPreview, newCapture, newAnalysis).also {
                 analysis = newAnalysis
-                faceTrackingAvailable = true
+                // Фильтр лица требует и анализ кадров, и модуль ML Kit: без
+                // модуля анализ остаётся (фоны живут от него), но фильтры
+                // честно помечаются недоступными.
+                faceTrackingAvailable = tracker.detectorAvailable
             }
         } catch (_: IllegalArgumentException) {
             // Комбинация из трёх use case не поддерживается: запись важнее фильтров.

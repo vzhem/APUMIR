@@ -124,6 +124,8 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
         }.onFailure { Log.w("MessengerApp", "same-device identity cleanup skipped", it) }
         com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.install(this)
         com.vladimir.messenger.data.diagnostics.RuntimeDiagnostics.install(this)
+        // След последнего падения: рано, чтобы поймать падение любого экрана.
+        com.vladimir.messenger.data.diagnostics.CrashTrace.install(this)
         // р236: черновики сообщений (недописанный текст поля ввода).
         com.vladimir.messenger.data.draft.DraftStore.attach(applicationContext)
         createNotificationChannels()

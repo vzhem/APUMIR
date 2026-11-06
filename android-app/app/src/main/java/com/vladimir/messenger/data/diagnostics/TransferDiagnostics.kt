@@ -395,7 +395,8 @@ object TransferDiagnostics {
             com.vladimir.messenger.data.story.DurableStorySender.report(context.applicationContext) +
             com.vladimir.messenger.data.story.StoryFeedbackStore.report(context.applicationContext) +
             com.vladimir.messenger.data.maintenance.AutomaticMaintenance.report(context.applicationContext) +
-            com.vladimir.messenger.data.schedule.ScheduledSendStore.cancelDiagnostics()
+            com.vladimir.messenger.data.schedule.ScheduledSendStore.cancelDiagnostics() +
+            CrashTrace.report(context.applicationContext)
         snapshotOf(facts.copy(relayStorage = storage, runtimeHealth = health,
             operationalHealth = OperationalDiagnostics.tracker.snapshot(), operationalDetails = details),
             journalSnapshot.first, logcat.lines, createdAtMs)
