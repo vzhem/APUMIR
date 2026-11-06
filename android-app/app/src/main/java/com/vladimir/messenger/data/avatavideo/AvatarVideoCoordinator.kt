@@ -65,6 +65,15 @@ class AvatarVideoCoordinator @Inject constructor(
                 }.onFailure { Log.w(TAG, "video avatar resync failed: ${it.message}") }
             }
         }
+        // Кольцо загрузки у собеседников: пока хоть один ролик ждём, следим за
+        // прогрессом входящих передач; когда ждать нечего — цикл почти бесплатен.
+        scope.launch {
+            while (true) {
+                delay(DOWNLOAD_POLL_MS)
+                runCatching { pumpDownloads() }
+                    .onFailure { Log.w(TAG, "video avatar download poll failed: ${it.message}") }
+            }
+        }
     }
 
     /** Своё видео сменили — анонс уходит сразу, без ожидания фонового цикла. */
@@ -93,6 +102,7 @@ class AvatarVideoCoordinator @Inject constructor(
     }
 
     private suspend fun onAnnounce(senderId: String, packet: AvatarVideoWire.Packet.Announce) {
+        PeerVideoAvatarStore.bump(context, "announce-in")
         // Объявлять чужое видео нельзя: ролик всегда от его владельца.
         if (packet.ownerId != senderId) {
             Log.w(TAG, "video avatar announce for someone else dropped")
@@ -107,7 +117,11 @@ class AvatarVideoCoordinator @Inject constructor(
     }
 
     private suspend fun onReady(senderId: String, packet: AvatarVideoWire.Packet.Ready) {
-        if (packet.ownerId != myNodeId()) return
+        // Просьба адресована владельцу ролика. Клиенты до v11.74.491 клали в
+        // поле свой id — принимаем и такой конверт, чтобы просьба не терялась
+        // ни в какой паре сборок.
+        if (packet.ownerId != myNodeId() && packet.ownerId != senderId) return
+        PeerVideoAvatarStore.bump(context, "ready-in")
         sendMyVideoTo(senderId, packet.sha256)
     }
 
@@ -120,9 +134,12 @@ class AvatarVideoCoordinator @Inject constructor(
         val key = "$READY_AT_PREFIX$ownerId:$sha256"
         if (now - prefs.getLong(key, 0L) < READY_THROTTLE_MS) return
         prefs.edit().putLong(key, now).apply()
-        val myId = myNodeId() ?: return
-        val wire = AvatarVideoWire.ready(myId, sha256)
+        // Поле «владелец» в просьбе — ЧЕЙ ролик просим (получатель просьбы).
+        // Раньше сюда клали свой id, и владелец в onReady молча отбрасывал
+        // просьбу: файл не уходил никогда, у друзей оставался постер.
+        val wire = AvatarVideoWire.ready(ownerId, sha256)
         runCatching { RustBridge.sendMessage(messageId("avatar-video-ready"), ownerId, ownerId, wire) }
+            .onSuccess { PeerVideoAvatarStore.bump(context, "ready-out") }
             .onFailure { Log.w(TAG, "video avatar ready send failed: ${it.message}") }
     }
 
@@ -132,11 +149,11 @@ class AvatarVideoCoordinator @Inject constructor(
         if (mine.sha256 != sha256) return // просят не то, что сейчас стоит
         val file = mine.path.let(::File).takeIf { it.isFile } ?: return
         val messageId = "avatar-video:${sha256.take(16)}:$peerId"
-        // Одна строка передачи на (ролик, собеседника): повторная просьба не
-        // плодит копии, а законченная передача не переотправляется заново.
-        val existing = transferDao.getOutgoingForMessage(messageId)
-        if (existing.any { it.state != "FAILED" && it.state != "CANCELLED" }) return
         val now = System.currentTimeMillis()
+        // Одна строка передачи на (ролик, собеседника): повторная просьба не
+        // плодит копии; законченная или истёкшая передача не мешает новой.
+        val existing = transferDao.getOutgoingForMessage(messageId)
+        if (existing.any { it.state != "FAILED" && it.state != "CANCELLED" && it.expiresAtMs > now }) return
         runCatching {
             preparation.prepareFromFile(
                 source = file,
@@ -148,7 +165,9 @@ class AvatarVideoCoordinator @Inject constructor(
                 nowMs = now,
                 expiresAtMs = now + TRANSFER_TTL_MS,
             )
-        }.onFailure { Log.w(TAG, "video avatar send prepare failed: ${it.message}") }
+        }
+            .onSuccess { PeerVideoAvatarStore.bump(context, "file-out") }
+            .onFailure { Log.w(TAG, "video avatar send prepare failed: ${it.message}") }
     }
 
     /** Объявить свой текущий видеоаватар (или его отсутствие) всем контактам. */
@@ -170,6 +189,7 @@ class AvatarVideoCoordinator @Inject constructor(
         prefs.edit().putLong(ANNOUNCE_AT_KEY, now).apply()
         ids.forEach { peer ->
             runCatching { RustBridge.sendMessage(messageId("avatar-video-announce"), peer, peer, wire) }
+                .onSuccess { PeerVideoAvatarStore.bump(context, "announce-out") }
                 .onFailure { Log.w(TAG, "video avatar announce to $peer failed: ${it.message}") }
         }
     }
@@ -179,6 +199,29 @@ class AvatarVideoCoordinator @Inject constructor(
         PeerVideoAvatarStore.missing(context).forEach { meta ->
             requestVideo(meta.ownerId, meta.sha256)
         }
+    }
+
+    /**
+     * Прогресс скачивания роликов собеседников — для кольца загрузки вокруг
+     * аватара. По объявленному sha ищем активную входящую передачу и меряем её
+     * байты; пока строки нет (просьба ушла, файл ещё не пошёл) — прогресса нет.
+     */
+    private suspend fun pumpDownloads() {
+        val missing = PeerVideoAvatarStore.missing(context)
+        if (missing.isEmpty()) {
+            PeerVideoAvatarStore.setDownloads(emptyMap())
+            return
+        }
+        val incoming = runCatching { transferDao.getActiveIncoming(System.currentTimeMillis()) }
+            .getOrDefault(emptyList())
+        val map = HashMap<String, Float>(missing.size)
+        for (meta in missing) {
+            val row = incoming.firstOrNull { it.displayName == AvatarVideoWire.fileName(meta.sha256) }
+            if (row != null && row.totalBytes > 0L) {
+                map[meta.ownerId] = (row.transferredBytes.toFloat() / row.totalBytes).coerceIn(0f, 1f)
+            }
+        }
+        PeerVideoAvatarStore.setDownloads(map)
     }
 
     /** Текущее состояние СВОЕГО видеоаватара; null — его нет (остался постер). */
@@ -229,6 +272,8 @@ class AvatarVideoCoordinator @Inject constructor(
         const val MY_SHA_FOR_KEY = "myVideoShaForMtime"
         const val ANNOUNCE_THROTTLE_MS = 30L * 60 * 1000
         const val READY_THROTTLE_MS = 15L * 60 * 1000
+        /** Шаг опроса прогресса скачивания для кольца загрузки. */
+        const val DOWNLOAD_POLL_MS = 750L
         const val RESYNC_EVERY_MS = 6L * 60 * 60 * 1000
         /** Срок строки передачи — сутки, как у файла видеоистории. */
         const val TRANSFER_TTL_MS = 24L * 60 * 60 * 1000

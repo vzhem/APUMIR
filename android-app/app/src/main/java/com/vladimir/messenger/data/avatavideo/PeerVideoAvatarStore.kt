@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 object PeerVideoAvatarStore {
     private const val TAG = "PeerVideoAvatarStore"
     private const val PREFS = "peer-video-avatars-v1"
+    private const val COUNTS = "peer-video-avatars-counters-v1"
     private const val DIR = "peer-video-avatars-v1"
     private const val MAX_FILES = 200
     private const val MAX_TOTAL_BYTES = 128L * 1024 * 1024
@@ -183,6 +184,47 @@ object PeerVideoAvatarStore {
         prefs(context).all.mapNotNull { (owner, raw) ->
             (raw as? String)?.let { parseMeta(owner, it) }
         }.filter { meta -> File(dir(context), meta.sha256 + ".mp4").let { !it.isFile || it.length() != meta.bytes } }
+
+    /**
+     * Скачивания роликов собеседников для кольца загрузки: владелец → доля
+     * полученных байтов (0..1). Запись появляется, только когда байты уже идут;
+     * «просьба ушла, файл ещё не пошёл» — записи нет, кольцо обегает круг.
+     */
+    private val _downloads = MutableStateFlow<Map<String, Float>>(emptyMap())
+    val downloads = _downloads.asStateFlow()
+
+    fun setDownloads(map: Map<String, Float>) {
+        if (_downloads.value != map) _downloads.value = map
+    }
+
+    /** Все объявления собеседников: для отчёта «Логов» и догоняющей просьбы. */
+    fun metas(context: Context): List<Meta> =
+        prefs(context).all.mapNotNull { (owner, raw) -> (raw as? String)?.let { parseMeta(owner, it) } }
+
+    /**
+     * Счётчик событий обмена (объявления, просьбы, файлы) для отчёта «Логов».
+     * Живёт в отдельных настройках: [sweep] разбирает каждый ключ своих
+     * настроек как метаданные и счётчики там мешали бы уборке.
+     */
+    fun bump(context: Context, key: String) {
+        val prefs = context.getSharedPreferences(COUNTS, Context.MODE_PRIVATE)
+        prefs.edit().putLong(key, prefs.getLong(key, 0L) + 1L).apply()
+    }
+
+    /** Раздел «[видеоаватары]» в «Логах»: где сейчас цепочка обмена с друзьями. */
+    fun report(context: Context): String {
+        val all = metas(context)
+        val have = all.count { fileFor(context, it.ownerId) != null }
+        val going = downloads.value.size
+        val counts = context.getSharedPreferences(COUNTS, Context.MODE_PRIVATE)
+        fun n(key: String): Long = counts.getLong(key, 0L)
+        return "[видеоаватары]\n" +
+            "собеседников с видео: ${all.size} · роликов на месте: $have · ждут файл: ${all.size - have} · байты идут: $going\n" +
+            "объявления: принято ${n("announce-in")}, отправлено ${n("announce-out")} · " +
+            "просьбы: отправлено ${n("ready-out")}, принято ${n("ready-in")} · " +
+            "файлы: получено ${n("file-in")}, отклонено ${n("file-reject")}, отправлено ${n("file-out")}\n" +
+            "Пока ролик едет — вокруг аватара собеседника крутится кольцо загрузки; полный круг означает, что ролик на месте и играет зацикленно. Транспортный успех не подтверждает показ.\n"
+    }
 
     private fun parseMeta(owner: String, raw: String): Meta? {
         val parts = raw.split("|")

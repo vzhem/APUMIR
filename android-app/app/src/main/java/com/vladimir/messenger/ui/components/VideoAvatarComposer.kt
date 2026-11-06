@@ -140,6 +140,9 @@ private fun VideoAvatarFlow(
                 circle = clamped.circle
             },
             maxDurationMs = VideoAvatarPolicy.MAX_DURATION_MS,
+            // Подпись в видеоаватаре не показывается (запрос владельца
+            // 2026-11-06): поле подписи остаётся только у видеоисторий.
+            showCaption = false,
             titleRes = R.string.av_video_editor_title,
             coverLabelRes = R.string.av_video_cover_label,
             resetHintRes = R.string.av_video_reset_hint,
@@ -173,7 +176,6 @@ private fun VideoAvatarFlow(
                                 else R.string.story_photo_rectangle,
                             ),
                         )
-                        if (ready.draft.caption.isNotBlank()) Text(ready.draft.caption)
                         Text(stringResource(R.string.av_video_result_hint))
                         ApuPremiumButton(
                             label = stringResource(

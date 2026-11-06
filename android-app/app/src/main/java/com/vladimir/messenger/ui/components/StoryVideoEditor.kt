@@ -61,6 +61,11 @@ internal fun StoryVideoEditor(
     draft: StoryVideoDraft,
     onDraftChange: (StoryVideoDraft) -> Unit,
     maxDurationMs: Long = StoryVideoDraft.MAX_DURATION_MS,
+    /**
+     * Поле подписи (текстом) — только у видеоисторий: для видеоаватара подпись
+     * не показывается (запрос владельца 2026-11-06), и поле его только путает.
+     */
+    showCaption: Boolean = true,
     @androidx.annotation.StringRes titleRes: Int = R.string.story_record_title,
     @androidx.annotation.StringRes coverLabelRes: Int = R.string.story_record_cover,
     @androidx.annotation.StringRes resetHintRes: Int = R.string.story_video_reset_hint,
@@ -154,7 +159,7 @@ internal fun StoryVideoEditor(
                         player.pause()
                         player.seekTo(changed.exportedCoverMs)
                     })
-                ApuFormTextField(value = draft.caption, label = stringResource(R.string.story_record_caption_label),
+                if (showCaption) ApuFormTextField(value = draft.caption, label = stringResource(R.string.story_record_caption_label),
                     singleLine = false, enabled = !busy,
                     onValueChange = { onDraftChange(draft.copy(caption = it.take(StoryVideoDraft.MAX_CAPTION_CHARS))) })
                 ApuTextAction(label = stringResource(R.string.story_video_reset),

@@ -69,15 +69,23 @@ object SpecialMediaInbox {
         row: FileTransferEntity,
         receivedFile: (String, String) -> File?,
     ) {
-        val expected = PeerVideoAvatarStore.metaFor(context, row.peerNodeId) ?: return
+        val expected = PeerVideoAvatarStore.metaFor(context, row.peerNodeId)
+        if (expected == null) {
+            PeerVideoAvatarStore.bump(context, "file-reject")
+            return
+        }
         if (expected.sha256 != row.fileSha256 || expected.bytes != row.totalBytes) {
             Log.w(TAG, "peer video avatar transfer does not match the announce, dropped")
+            PeerVideoAvatarStore.bump(context, "file-reject")
             return
         }
         if (PeerVideoAvatarStore.fileFor(context, row.peerNodeId)?.length() == expected.bytes) return
         val file = receivedFile(row.transferId, row.displayName) ?: return
         if (!PeerVideoAvatarStore.install(context, row.peerNodeId, file, expected)) {
             Log.w(TAG, "peer video avatar was not installed for ${row.peerNodeId}")
+            PeerVideoAvatarStore.bump(context, "file-reject")
+        } else {
+            PeerVideoAvatarStore.bump(context, "file-in")
         }
     }
 }

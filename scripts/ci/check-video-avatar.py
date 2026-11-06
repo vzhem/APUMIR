@@ -28,7 +28,11 @@
   9) доставка не завязана на постоянные идентификаторы конвертов (иначе
      повторные анонсы проглатываются как дубликаты и у друзей остаётся
      постер), состояние своего видео читается ДО первого анонса, а подпись
-     в профиле текстом не показывается (запрос владельца 2026-11-06).
+     в профиле текстом не показывается (запрос владельца 2026-11-06);
+ 10) просьба ролика адресована ВЛАДЕЛЬЦУ видео (со своим id в поле владелец
+     молча отбрасывал просьбу — файл не уходил никогда), вокруг ещё не
+     приехавшего ролика крутится кольцо загрузки (12 часов → по часовой), а
+     «Логи» показывают цепочку обмена (запрос владельца 2026-11-06).
 
 Запуск:
     python3 scripts/ci/check-video-avatar.py
@@ -335,8 +339,42 @@ class VideoAvatarContract(unittest.TestCase):
         # подписи в общем редакторе остаётся — паритет с видеоисториями.
         self.assertNotIn("VideoAvatarCaption", self.settings)
         self.assertFalse((JAVA / "ui/components/VideoAvatarCaption.kt").exists())
-        self.assertIn("MAX_CAPTION_CHARS", self.rules)
+        # Поле подписи текстом убрано и из окна видеоаватара (запрос владельца
+        # 2026-11-06: «Поле ввода текста так и осталось. Нужно убрать»):
+        # редактор один, но поле подписи показывается только видеоисториям.
+        self.assertIn("showCaption: Boolean = true", self.editor)
+        self.assertIn("if (showCaption) ApuFormTextField(value = draft.caption", self.editor)
         self.assertIn("caption = it.take(StoryVideoDraft.MAX_CAPTION_CHARS)", self.editor)
+        self.assertIn("showCaption = false", self.composer)
+        self.assertNotIn("draft.caption", self.composer)
+        self.assertIn("MAX_CAPTION_CHARS", self.rules)
+
+    # 10) просьба ролика и кольцо загрузки ----------------------------------
+    def test_ready_asks_the_video_owner_and_the_ring_shows_the_download(self):
+        # ГЛАВНОЕ (запрос владельца 2026-11-06: «Аватарки у друзей так и
+        # статичны»): поле «владелец» в просьбе — чей ролик просят. Со своим
+        # id владелец молча отбрасывал просьбу, файл не уходил никогда.
+        self.assertIn("AvatarVideoWire.ready(ownerId, sha256)", self.coord)
+        self.assertNotIn("AvatarVideoWire.ready(myId", self.coord)
+        # Старые клиенты клали в поле свой id — просьба не должна теряться.
+        self.assertIn("packet.ownerId != senderId", self.coord)
+        # Кольцо загрузки: объявлено, но не приехало — доля байтов по передаче.
+        self.assertIn("fun pumpDownloads(", self.coord)
+        self.assertIn("transferDao.getActiveIncoming(", self.coord)
+        self.assertIn("AvatarVideoWire.fileName(meta.sha256)", self.coord)
+        self.assertIn("it.expiresAtMs > now", self.coord)
+        self.assertIn("VideoAvatarLoadingRing(", self.peer)
+        self.assertIn("PeerVideoAvatarStore.downloads", self.peer)
+        self.assertIn("PeerVideoAvatarStore.metaFor(context, peerId)", self.peer)
+        self.assertIn("fun setDownloads(", self.store)
+        # «Логи» показывают цепочку обмена: по отчёту видно, где она рвётся.
+        self.assertIn("fun report(context: Context): String", self.store)
+        self.assertIn("PeerVideoAvatarStore.bump(", self.coord)
+        self.assertIn("PeerVideoAvatarStore.bump(", self.inbox)
+        self.assertIn(
+            "PeerVideoAvatarStore.report(",
+            read(JAVA / "data/diagnostics/TransferDiagnostics.kt"),
+        )
 
 
 if __name__ == "__main__":

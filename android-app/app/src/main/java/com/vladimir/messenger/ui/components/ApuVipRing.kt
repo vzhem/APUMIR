@@ -20,11 +20,18 @@ package com.vladimir.messenger.ui.components
 // меньше — поэтому VIP-строка выше остальных не становится.
 // =============================================================================
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
@@ -220,5 +227,55 @@ private fun PeerVideoAvatarLayer(peerId: String?) {
         androidx.compose.runtime.key(video.absolutePath, circle) {
             VideoAvatarPlayback(path = video.absolutePath, circle = circle)
         }
+    } else {
+        // Ролик объявлен, но ещё не приехал: вокруг постера крутится кольцо
+        // загрузки — по нему видно, что видео есть и оно едет (запрос владельца
+        // 2026-11-06: «показать загрузку в виде кольца вокруг кружка»).
+        val announced = remember(peerId, version) { PeerVideoAvatarStore.metaFor(context, peerId) != null }
+        if (announced) {
+            val downloads by PeerVideoAvatarStore.downloads.collectAsState()
+            VideoAvatarLoadingRing(progress = downloads[peerId], modifier = Modifier.fillMaxSize())
+        }
+    }
+}
+
+/**
+ * Кольцо загрузки видеоаватара собеседника. Полоса идёт от «12 часов» по
+ * часовой стрелке и показывает, сколько байтов уже приехало; полный круг —
+ * ролик на месте и дальше крутится зацикленно сам. Пока байты не пошли
+ * (просьба ушла, файл ещё не начат) — то же кольцо обегает круг.
+ */
+@Composable
+private fun VideoAvatarLoadingRing(progress: Float?, modifier: Modifier = Modifier) {
+    if (progress == null) {
+        val rotation by rememberInfiniteTransition(label = "avv-load").animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Restart),
+            label = "avv-load-angle",
+        )
+        LoadingRingCanvas(modifier, arcStart = rotation - 90f, arcSweep = 88f)
+    } else {
+        LoadingRingCanvas(modifier, arcStart = -90f, arcSweep = 360f * progress.coerceIn(0f, 1f))
+    }
+}
+
+@Composable
+private fun LoadingRingCanvas(modifier: Modifier, arcStart: Float, arcSweep: Float) {
+    Canvas(modifier) {
+        val stroke = 2.5.dp.toPx()
+        val inset = stroke / 2f + 1.dp.toPx()
+        val topLeft = Offset(inset, inset)
+        val arcSize = Size(size.width - inset * 2f, size.height - inset * 2f)
+        drawArc(
+            color = GoldDeep.copy(alpha = 0.30f),
+            startAngle = 0f, sweepAngle = 360f, useCenter = false,
+            topLeft = topLeft, size = arcSize, style = Stroke(stroke),
+        )
+        drawArc(
+            color = GoldMid,
+            startAngle = arcStart, sweepAngle = arcSweep, useCenter = false,
+            topLeft = topLeft, size = arcSize, style = Stroke(stroke, cap = StrokeCap.Round),
+        )
     }
 }
