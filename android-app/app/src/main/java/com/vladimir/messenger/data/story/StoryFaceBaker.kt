@@ -59,7 +59,8 @@ internal object StoryFaceBaker {
         onProgress: (Float) -> Unit,
     ): StoryFaceBakeResult {
         if (!filter.isActive) return StoryFaceBakeResult(source, null)
-        val timeline = StoryFaceAnalysis.analyze(source) { onProgress(it * 0.5f) }
+        val timeline = StoryFaceAnalysis.analyze(context, source) { onProgress(it * 0.5f) }
+            ?: return StoryFaceBakeResult(source, "Фильтры лица недоступны: не хватает пакета функций «Эффекты лиц»")
         if (timeline.isEmpty) {
             return StoryFaceBakeResult(source, "Лицо в кадре не нашлось, видео сохранено без фильтра")
         }
@@ -200,10 +201,14 @@ internal object StoryFaceAnalysis {
     private const val TIMEOUT_US = 10_000L
     private const val TASK_TIMEOUT_S = 10L
 
-    suspend fun analyze(file: File, onProgress: (Float) -> Unit): StoryFaceTimeline = withContext(Dispatchers.IO) {
+    suspend fun analyze(context: Context, file: File, onProgress: (Float) -> Unit): StoryFaceTimeline? = withContext(Dispatchers.IO) {
+        // Нет нативного модуля лица — анализа не будет, вызывающий скажет об
+        // этом честно. Детектор создаётся только охраняемым фабрикатором:
+        // прямой FaceDetection.getClient() без пакета убивал процесс (стек
+        // владельца 2026-11-06: UnsatisfiedLinkError на пуле ML Kit).
+        val detector = newStoryFaceDetectorOrNull(context) ?: return@withContext null
         val retriever = MediaMetadataRetriever()
         val extractor = MediaExtractor()
-        val detector = newStoryFaceDetector()
         var decoder: MediaCodec? = null
         try {
             retriever.setDataSource(file.absolutePath)
