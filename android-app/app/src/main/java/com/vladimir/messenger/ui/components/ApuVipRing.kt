@@ -166,8 +166,8 @@ fun PeerAvatar(
     size: Dp,
     modifier: Modifier = Modifier,
     vip: Boolean = false,
-    overlay: @Composable BoxScope.() -> Unit = {},
     peerId: String? = null,
+    overlay: @Composable BoxScope.() -> Unit = {},
 ) {
     // Разбор картинки — в фоне и один раз на строку base64 (AvatarBitmaps).
     val bitmap = AvatarBitmaps.rememberAvatar(avatarB64)

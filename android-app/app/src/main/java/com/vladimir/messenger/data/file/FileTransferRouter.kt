@@ -808,7 +808,7 @@ class FileTransferRouter @Inject constructor(
                 FileTransferKeyVault.deleteKey(appContext, row.transferId)
             }, completed = { row ->
                 if (row.direction == "OUTGOING") releaseOutgoingChunks(row.transferId)
-                else acceptStoryVideo(row)
+                else acceptSpecialMedia(row)
             }, requestKey = { requestExchangeBinding(it) }) }.onFailure { Log.w(TAG, "Story video maintenance deferred", it) }
             outgoingTransferMutex.lock()
             try {
