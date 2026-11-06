@@ -75,6 +75,12 @@ internal object VideoAvatarInstaller {
                     caption = exported.draft.caption,
                     circle = exported.draft.circle,
                 )
+                // Второе устройство той же личности получает ролик зеркалом:
+                // метка поля и публикация снимка профиля (docs/VIDEO_AVATAR.md).
+                com.vladimir.messenger.data.mirror.ProfileMirror.noteLocalChange(
+                    context,
+                    com.vladimir.messenger.data.mirror.ProfileMirror.FIELD_VAV,
+                )
                 Installed(
                     path = target.absolutePath,
                     posterUri = posterUri,
@@ -92,5 +98,9 @@ internal object VideoAvatarInstaller {
         val previous: File? = VideoAvatarStore.snapshot().path?.let(::File)
         VideoAvatarStore.clear(context)
         previous?.takeIf { it.isFile }?.delete()
+        com.vladimir.messenger.data.mirror.ProfileMirror.noteLocalChange(
+            context,
+            com.vladimir.messenger.data.mirror.ProfileMirror.FIELD_VAV,
+        )
     }
 }

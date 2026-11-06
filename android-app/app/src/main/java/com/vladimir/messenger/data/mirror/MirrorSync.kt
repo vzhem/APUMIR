@@ -2579,6 +2579,7 @@ class MirrorChannel(
         // ключа не знает и просто не заметит, а новая увидит расхождение даты
         // и сама запросит снимок профиля.
         .put("pb", ProfileMirror.cachedBirthdayDigest(context))
+        .put("pv", ProfileMirror.cachedVideoDigest(context))
 
     private fun sendEvent(kind: String, payload: JSONObject): Boolean {
         val sealed = sealPayload(payload) ?: return false
@@ -2791,6 +2792,7 @@ class MirrorChannel(
         // полный снимок и слиться (онлайн-поиск расхождений профиля).
         ProfileMirror.notePartnerDigest(obj.optString("pd", ""))
         ProfileMirror.notePartnerBirthdayDigest(obj.optString("pb", ""))
+        ProfileMirror.notePartnerVideoDigest(obj.optString("pv", ""))
         maybeRequestProfile()
     }
 
@@ -2844,11 +2846,12 @@ class MirrorChannel(
     private fun maybeRequestProfile() {
         val pd = ProfileMirror.partnerDigest
         val pb = ProfileMirror.partnerBirthdayDigest
+        val pv = ProfileMirror.partnerVideoDigest
         val profileDiffers = pd.isNotBlank() && pd != ProfileMirror.cachedDigest(context)
-        // Пустой отпечаток даты = партнёр на старой сборке: расхождения нет,
-        // иначе снимок профиля гонялся бы каждые 10 секунд без причины.
+        // Пустой отпечаток = партнёр на старой сборке: расхождения нет, иначе снимок гонялся бы каждые 10 с.
         val birthdayDiffers = pb.isNotBlank() && pb != ProfileMirror.cachedBirthdayDigest(context)
-        if (!profileDiffers && !birthdayDiffers) return
+        val videoDiffers = pv.isNotBlank() && pv != ProfileMirror.cachedVideoDigest(context)
+        if (!profileDiffers && !birthdayDiffers && !videoDiffers) return
         val now = System.currentTimeMillis()
         if (now - lastProfReqAt < 10_000L) return
         lastProfReqAt = now
@@ -3441,12 +3444,9 @@ class MirrorChannel(
                         initialProfileHadData = profileHasData
                     }
                     need.forEach { kind ->
-                        val name = if (kind == ProfileMirror.FIELD_AV) incoming.avName else incoming.wallName
-                        val sha = if (kind == ProfileMirror.FIELD_AV) incoming.avSha else incoming.wallSha
-                        val size = if (kind == ProfileMirror.FIELD_AV) incoming.avBytes else incoming.wallBytes
-                        if (name.isBlank() || sha.isBlank()) return@forEach
                         // Older peers omit the size; the first pbytes frame carries
                         // it and still enters the same verified resumable writer.
+                        val (name, sha, size) = ProfileMirror.transferOf(incoming, kind) ?: return@forEach
                         val pending = PendingProfileImage(kind, name, sha, size.coerceAtLeast(0L))
                         initialProfilePending[kind + "|" + name] = pending
                         requestProfileImage(pending, force = true)

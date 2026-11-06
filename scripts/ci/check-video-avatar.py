@@ -135,6 +135,18 @@ class VideoAvatarContract(unittest.TestCase):
         # Плеер не живёт вечно: снятие с композиции освобождает декодер.
         self.assertIn("player.release()", self.avatar)
 
+    def test_live_playback_is_opt_in_and_reaches_the_chat_list(self):
+        # Флаг явный: по умолчанию постер, иначе плеер заводился бы на каждом
+        # мелком аватаре (отклики, просмотр истории) и сажал батарею.
+        self.assertIn("playVideo: Boolean = false", self.avatar)
+        self.assertIn("if (video != null && playVideo)", self.avatar)
+        stories = read(JAVA / "ui/components/Stories.kt")
+        self.assertIn("playVideo = true", stories)
+        # Плеер заводится только у своей ячейки ленты, не у чужих историй.
+        bubble = stories.split("private fun StoryBubble(")[1].split("\n@Composable")[0]
+        self.assertIn("playVideo = true", bubble)
+        self.assertNotIn("playVideo", stories.split("fun StoryViewerDialog(")[1])
+
     # 5) постер наружу, ролик себе ------------------------------------------
     def test_poster_goes_out_as_the_regular_avatar_and_the_clip_stays_private(self):
         self.assertIn("AvatarFiles.saveCoverFile(context, exported.cover)", self.installer)
@@ -183,6 +195,33 @@ class VideoAvatarContract(unittest.TestCase):
         self.assertNotIn("prepareVideoAvatar", self.settings)
         self.assertNotIn("prepareVideoAvatar", read(JAVA / "util/AvatarFiles.kt"))
 
+    def test_the_clip_mirrors_to_the_second_device_with_the_profile(self):
+        mirror = read(JAVA / "data/mirror/ProfileMirror.kt")
+        sync = read(JAVA / "data/mirror/MirrorSync.kt")
+        # Ролик едет тем же resumable каналом, что аватар и обои, но со своим
+        # потолком: 24 МБ в три раза больше картинки.
+        self.assertIn('const val FIELD_VAV = "vav"', mirror)
+        self.assertIn("const val VIDEO_MAX_BYTES = VideoAvatarPolicy.MAX_EXPORT_BYTES", mirror)
+        self.assertIn("private fun capFor(kind: String): Long", mirror)
+        self.assertIn("fun transferOf(state: State, kind: String)", mirror)
+        self.assertIn("FIELD_AV, FIELD_VAV -> File(context.filesDir, \"avatar\")", mirror)
+        self.assertIn("VideoAvatarStore.set(", mirror)
+        self.assertIn("AvatarFiles.pruneVideos(app, keep = target)", mirror)
+        # Отпечаток видеоаватара — отдельная строка hello/hb: старая сборка её
+        # не знает, и общий отпечаток гонял бы снимок профиля каждые 10 секунд.
+        self.assertIn("fun videoDigest(): String", mirror)
+        self.assertIn("fun cachedVideoDigest(context: Context): String", mirror)
+        self.assertIn("fun notePartnerVideoDigest(digest: String)", mirror)
+        # Общий отпечаток профиля (name|nick|theme|avSha|wallSha) не меняется:
+        # иначе устройства на разных сборках вечно запрашивали бы снимок.
+        self.assertIn('listOf(name, nick, theme, avSha, wallSha)', mirror)
+        self.assertIn('.put("pv", ProfileMirror.cachedVideoDigest(context))', sync)
+        self.assertIn('ProfileMirror.notePartnerVideoDigest(obj.optString("pv", ""))', sync)
+        self.assertIn("pv != ProfileMirror.cachedVideoDigest(context)", sync)
+        # Установка и уборка видеоаватара публикуют поле второму устройству.
+        self.assertIn("ProfileMirror.FIELD_VAV", self.installer)
+        self.assertIn("ProfileMirror.noteLocalChange(", self.installer)
+
     def test_policy_is_pure_and_covered_by_the_jvm_gate(self):
         # Чистый файл: без Android его компилирует и гоняет check-chat-history.sh.
         self.assertNotIn("import android.", self.rules)
@@ -191,6 +230,15 @@ class VideoAvatarContract(unittest.TestCase):
         self.assertIn("VideoAvatarPolicy.kt", harness)
         self.assertIn("VideoAvatarPolicyTest.kt", harness)
         self.assertIn("com.vladimir.messenger.data.profile.VideoAvatarPolicyTest", harness)
+        # Зеркало видеоаватара (чистая арифметика снимка) гоняется полным
+        # компиляционным гейтом вместе с тестом дня рождения.
+        compile_step = read(ROOT / "scripts/ci/check-android-compile.sh")
+        self.assertIn("*ProfileMirrorVideoAvatarTest*", compile_step)
+        self.assertIn("*VideoAvatarPolicyTest*", compile_step)
+        self.assertTrue(
+            (ROOT / "android-app/app/src/test/java/com/vladimir/messenger/data/mirror/"
+             "ProfileMirrorVideoAvatarTest.kt").is_file(),
+        )
 
 
 if __name__ == "__main__":

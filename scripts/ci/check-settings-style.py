@@ -503,8 +503,9 @@ class SettingsStyleTest(unittest.TestCase):
         # (владелец 2026-10-07: «чтобы аккаунт VIP должно быть видно везде»).
         self.assertIn("VipRing(Modifier.matchParentSize())", avatar)
         self.assertIn("rememberSelfVip()", avatar)
-        self.assertIn("size = 108", source("screens/settings/SettingsScreen.kt"))
-        self.assertIn("size = 96", source("screens/share/ShareProfileScreen.kt"))
+        settings = source("screens/settings/SettingsScreen.kt")
+        self.assertIn("size = 108, playVideo = true", settings)
+        self.assertIn("size = 96, playVideo = true", source("screens/share/ShareProfileScreen.kt"))
 
     def test_groups_screen_and_create_dialog_use_house_style(self):
         groups = source("screens/groups/GroupsScreen.kt")

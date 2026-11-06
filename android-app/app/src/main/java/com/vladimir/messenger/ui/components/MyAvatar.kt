@@ -42,19 +42,18 @@ import com.vladimir.messenger.data.profile.VideoAvatarStore
 import com.vladimir.messenger.ui.theme.AvatarHolder
 import java.io.File
 
-/**
- * Живое видео играем только на крупном аватаре — в профиле и на экране
- * «поделиться профилем». В лентах и списках (54, 40, 32 dp) остаётся
- * кадр-постер: плеер на каждом маленьком аватаре играл бы ролик без остановки
- * и сажал батарею там, где его всё равно не разглядеть.
- */
-private const val VIDEO_PLAYBACK_MIN_SIZE = 96
-
 @Composable
 fun MyAvatar(
     displayName: String,
     modifier: Modifier = Modifier,
     size: Int = 52,
+    /**
+     * Играть видеоаватар живьём. Включают там, где свой аватар виден крупно и
+     * долго: профиль, «поделиться профилем» и своя ячейка в ленте историй
+     * списка чатов. По умолчанию выключено — в мелких аватарах (просмотр
+     * истории, отклики) плеер крутил бы ролик впустую и сажал батарею.
+     */
+    playVideo: Boolean = false,
 ) {
     val context = LocalContext.current
     val avatarUri by AvatarHolder.uri.collectAsState()
@@ -101,7 +100,7 @@ fun MyAvatar(
                 Avatar(name = displayName, modifier = Modifier.fillMaxSize(), size = size)
             }
             val video = videoPath
-            if (video != null && size >= VIDEO_PLAYBACK_MIN_SIZE) {
+            if (video != null && playVideo) {
                 // key: при смене видео плеер создаётся заново под новый файл.
                 androidx.compose.runtime.key(video, videoCircle) {
                     VideoAvatarPlayback(path = video, circle = videoCircle)

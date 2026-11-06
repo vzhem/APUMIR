@@ -446,7 +446,7 @@ private fun ProfileTabContent(
                                     .border(2.dp, ApuBubbleAccentColor.copy(alpha = 0.38f), CircleShape)
                                     .padding(5.dp),
                             ) {
-                                MyAvatar(displayName = uiState.displayName, modifier = Modifier.fillMaxSize(), size = 108)
+                                MyAvatar(displayName = uiState.displayName, modifier = Modifier.fillMaxSize(), size = 108, playVideo = true)
                             }
                             Box(
                                 modifier = Modifier.align(Alignment.BottomEnd).size(30.dp)
