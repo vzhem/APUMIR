@@ -61,6 +61,10 @@ class VideoAvatarContract(unittest.TestCase):
         self.assertIn("VideoAvatarRankGate.lockedNotice(context)", self.composer)
         # И там, где файл реально сохраняется: UI можно обойти.
         self.assertIn("VideoAvatarRankGate.requireCanSet(context)", self.installer)
+        # Установщик внутренний: на входе `StoryVideoExporter.Exported` —
+        # внутренний тип видеоисторий, а публичная функция не вправе его
+        # показывать (на этом в CI падал `:app:compileReleaseKotlin`).
+        self.assertIn("internal object VideoAvatarInstaller", self.installer)
         self.assertIn("RankCapability.VIDEO_AVATAR", read(JAVA / "data/profile/VideoAvatarRankGate.kt"))
 
     # 2) паритет с видеоисториями -------------------------------------------

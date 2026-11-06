@@ -23,8 +23,13 @@ import kotlinx.coroutines.withContext
  *  3. **Постер наружу, видео себе.** Кадр становится обычным аватаром
  *     (`AvatarHolder`, JPEG уезжает собеседникам и второму устройству), а ролик
  *     остаётся в приватной папке и играет только у владельца.
+ *
+ * `internal`: на входе [StoryVideoExporter.Exported] — внутренний тип
+ * видеоисторий, и публичная функция не вправе его показывать (компилятор
+ * Kotlin это ловит: «Function 'public' exposes its 'internal' parameter
+ * type»). Внутри модуля приложения установщик виден всем, кому нужен.
  */
-object VideoAvatarInstaller {
+internal object VideoAvatarInstaller {
 
     /** Что установлено: путь к ролику, URI постера и выбор из редактора. */
     data class Installed(
