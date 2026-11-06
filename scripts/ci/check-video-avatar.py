@@ -24,7 +24,11 @@
   7) поток не живёт в god-файле настроек;
   8) видеокружки СОБЕСЕДНИКОВ: общий плеер крутит их ролики везде, где
      встречается аватар контакта; ролик доезжает анонсом/просьбой обычной
-     файловой передачей, старые клиенты остаются на постере.
+     файловой передачей, старые клиенты остаются на постере;
+  9) доставка не завязана на постоянные идентификаторы конвертов (иначе
+     повторные анонсы проглатываются как дубликаты и у друзей остаётся
+     постер), состояние своего видео читается ДО первого анонса, а подпись
+     в профиле текстом не показывается (запрос владельца 2026-11-06).
 
 Запуск:
     python3 scripts/ci/check-video-avatar.py
@@ -304,6 +308,35 @@ class VideoAvatarContract(unittest.TestCase):
         # приём и отправка живут в новых файлах data/avatavideo/.
         self.assertNotIn("AvatarVideo", read(JAVA / "data/group/GroupWire.kt"))
         self.assertNotIn("AvatarVideo", read(JAVA / "data/group/GroupRepository.kt"))
+
+    # 9) доставка и подпись -------------------------------------------------
+    def test_announces_never_look_like_retries_and_caption_stays_out_of_profile(self):
+        # Application стартует до MainActivity: анонс обязан брать состояние
+        # своего видео уже загруженным, иначе уходит «ролика нет» и у друзей
+        # навсегда остаётся постер вместо ролика.
+        self.assertIn("VideoAvatarStore.init(context)", self.coord)
+        self.assertLess(
+            self.coord.index("VideoAvatarStore.init(context)"),
+            self.coord.index("announceAll(force = true)"),
+        )
+        # Идентификаторы конвертов — новые на каждую отправку: постоянный id
+        # ядро и приёмник считают повтором доставленного пакета и молча глотают.
+        self.assertIn("UUID.randomUUID()", self.coord)
+        self.assertIn('messageId("avatar-video-announce")', self.coord)
+        self.assertIn('messageId("avatar-video-ready")', self.coord)
+        # Повторная просьба — своя на каждый ролик: новый видеоаватар
+        # запрашивается сразу, не дожидаясь конца таймаута по старому.
+        self.assertIn('val key = "$READY_AT_PREFIX$ownerId:$sha256"', self.coord)
+        # avv1 — служебный конверт, как контакт-сброс: не растит долгий журнал.
+        ephemeral = read(JAVA / "data/security/EphemeralControl.kt")
+        self.assertIn('"APUGRP1|avv1|"', ephemeral.split("fun isReplaceable", 1)[1])
+        # Подпись видеоаватара в профиле текстом не показывается (запрос
+        # владельца 2026-11-06: «подпись в профиле текстом ненужна»); поле
+        # подписи в общем редакторе остаётся — паритет с видеоисториями.
+        self.assertNotIn("VideoAvatarCaption", self.settings)
+        self.assertFalse((JAVA / "ui/components/VideoAvatarCaption.kt").exists())
+        self.assertIn("MAX_CAPTION_CHARS", self.rules)
+        self.assertIn("caption = it.take(StoryVideoDraft.MAX_CAPTION_CHARS)", self.editor)
 
 
 if __name__ == "__main__":

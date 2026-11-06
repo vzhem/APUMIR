@@ -9,6 +9,7 @@ import com.vladimir.messenger.data.local.dao.FileTransferDao
 import com.vladimir.messenger.data.profile.VideoAvatarStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
@@ -46,6 +47,11 @@ class AvatarVideoCoordinator @Inject constructor(
 
     /** Первый запуск приложения: догоняющие просьбы, анонс, уборка, повторы. */
     fun start() {
+        // Application стартует до MainActivity, а своё видео живёт в
+        // VideoAvatarStore, который до MainActivity не инициализирован: первый
+        // анонс уходил бы «ролика нет» и оставлял у друзей постер («статичная
+        // картинка»). init идемпотентен — второй вызов из MainActivity не мешает.
+        VideoAvatarStore.init(context)
         AvatarVideoGossip.attach(this)
         PeerVideoAvatarStore.sweep(context)
         scope.launch {
@@ -109,12 +115,14 @@ class AvatarVideoCoordinator @Inject constructor(
     private suspend fun requestVideo(ownerId: String, sha256: String) {
         if (sha256.isEmpty()) return
         val now = System.currentTimeMillis()
-        val key = "$READY_AT_PREFIX$ownerId"
+        // Ключ — по ролику, а не только по владельцу: новый видеоаватар
+        // запрашивается сразу, не дожидаясь конца таймаута по старому.
+        val key = "$READY_AT_PREFIX$ownerId:$sha256"
         if (now - prefs.getLong(key, 0L) < READY_THROTTLE_MS) return
         prefs.edit().putLong(key, now).apply()
         val myId = myNodeId() ?: return
         val wire = AvatarVideoWire.ready(myId, sha256)
-        runCatching { RustBridge.sendMessage("avatar-video-ready", ownerId, ownerId, wire) }
+        runCatching { RustBridge.sendMessage(messageId("avatar-video-ready"), ownerId, ownerId, wire) }
             .onFailure { Log.w(TAG, "video avatar ready send failed: ${it.message}") }
     }
 
@@ -161,7 +169,7 @@ class AvatarVideoCoordinator @Inject constructor(
         if (ids.isEmpty()) return
         prefs.edit().putLong(ANNOUNCE_AT_KEY, now).apply()
         ids.forEach { peer ->
-            runCatching { RustBridge.sendMessage("avatar-video-announce", peer, peer, wire) }
+            runCatching { RustBridge.sendMessage(messageId("avatar-video-announce"), peer, peer, wire) }
                 .onFailure { Log.w(TAG, "video avatar announce to $peer failed: ${it.message}") }
         }
     }
@@ -194,6 +202,15 @@ class AvatarVideoCoordinator @Inject constructor(
     }
 
     private fun myNodeId(): String? = RustBridge.nodeId()
+
+    /**
+     * Идентификатор конверта — новый на каждую отправку. С постоянным id ядро
+     * и приёмник считают следующий конверт повтором уже доставленного пакета и
+     * молча проглатывают: до друзей доходил только самый первый анонс, а после
+     * него настоящий ролик никогда не запрашивался — так и оставалась
+     * «статичная картинка».
+     */
+    private fun messageId(prefix: String): String = "$prefix:${UUID.randomUUID()}"
 
     private data class MyVideo(
         val sha256: String,

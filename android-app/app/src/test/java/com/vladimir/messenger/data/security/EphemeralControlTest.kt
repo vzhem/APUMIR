@@ -7,7 +7,7 @@ import org.junit.Test
 class EphemeralControlTest {
     @Test fun typingAndCatalogHintsAreStableAcrossRetryButSeparateAcrossRecipients() {
         val reset = ContactResetWire.build(ContactResetWire.EPOCH, "pk_${"ab".repeat(32)}", "", ByteArray(32) { 1 }, ByteArray(32) { 2 })
-        for (text in listOf("APUTYP1|APUGAME1|signed-snapshot", "APUTYP1|1", "APUTYP1|0", "APUGRP1|typ|group|topic|1", "APUGIF1|have|[]", "APUSTK1|thmb|opaque", reset)) {
+        for (text in listOf("APUTYP1|APUGAME1|signed-snapshot", "APUTYP1|1", "APUTYP1|0", "APUGRP1|typ|group|topic|1", "APUGRP1|avv1|an|owner|${"ab".repeat(32)}|42|1|0", "APUGRP1|avv1|rd|owner|${"ab".repeat(32)}", "APUGIF1|have|[]", "APUSTK1|thmb|opaque", reset)) {
             val id = EphemeralControl.transportId("caller-id", "peer-a", text)
             assertTrue(id.startsWith("eph1-"))
             assertEquals(id, EphemeralControl.transportId("caller-id", "peer-a", text))
