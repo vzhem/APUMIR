@@ -46,6 +46,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.vladimir.messenger.data.avatavideo.PeerVideoAvatarStore
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.referral.ReferralRankStore
 import kotlin.math.PI
@@ -152,6 +153,11 @@ fun rememberSelfVip(): Boolean {
  * При [vip] вокруг неё объёмное золотое кольцо, а сама картинка чуть меньше —
  * внешний размер и место в строке не меняются. [overlay] — то, что экран
  * рисует поверх круга (например, точка «в сети»).
+ *
+ * [peerId] — node id того, кто на аватаре: у контакта с видеоаватаром его
+ * ролик крутится везде, где встречается аватар (список и чат, профиль,
+ * участники группы/канала, отклики, дни рождения, визитка). Без id или без
+ * приехавшего ролика остаётся прежний постер.
  */
 @Composable
 fun PeerAvatar(
@@ -161,6 +167,7 @@ fun PeerAvatar(
     modifier: Modifier = Modifier,
     vip: Boolean = false,
     overlay: @Composable BoxScope.() -> Unit = {},
+    peerId: String? = null,
 ) {
     // Разбор картинки — в фоне и один раз на строку base64 (AvatarBitmaps).
     val bitmap = AvatarBitmaps.rememberAvatar(avatarB64)
@@ -185,10 +192,33 @@ fun PeerAvatar(
             } else {
                 Avatar(name = name, modifier = Modifier.size(inner), size = inner.value.toInt())
             }
+            // Видеокружок собеседника поверх постера: пока ролик не приехал
+            // (или его убрали), крутится нечего и слой просто не рисуется.
+            PeerVideoAvatarLayer(peerId = peerId)
         }
         if (vip) {
             VipRing(Modifier.matchParentSize())
         }
         overlay()
+    }
+}
+
+/**
+ * Слой видеоаватара собеседника: находит приехавший ролик и зацикленно играет
+ * его той же формой (круг/квадрат), что выбрал владелец. Данные перечитываются
+ * по поколению хранилища: установленный ролик появляется без перезахода в экран.
+ */
+@Composable
+private fun PeerVideoAvatarLayer(peerId: String?) {
+    if (peerId.isNullOrBlank()) return
+    val context = LocalContext.current
+    val version by PeerVideoAvatarStore.changed.collectAsState()
+    val video = remember(peerId, version) { PeerVideoAvatarStore.fileFor(context, peerId) }
+    if (video != null) {
+        val circle = remember(peerId, version) { PeerVideoAvatarStore.circleFor(context, peerId) }
+        // key: при смене ролика плеер создаётся заново под новый файл.
+        androidx.compose.runtime.key(video.absolutePath, circle) {
+            VideoAvatarPlayback(path = video.absolutePath, circle = circle)
+        }
     }
 }

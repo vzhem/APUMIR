@@ -317,7 +317,8 @@ object GroupsModule {
     fun provideGroupRouter(
         repository: GroupRepository,
         contactReset: com.vladimir.messenger.data.contactreset.ContactResetCoordinator,
-    ): GroupRouter = GroupRouter(repository, contactReset)
+        avatarVideos: com.vladimir.messenger.data.avatavideo.AvatarVideoCoordinator,
+    ): GroupRouter = GroupRouter(repository, contactReset, avatarVideos)
 
     /** Очередь заявок на вступление: отдельная папка в данных приложения. */
     @Provides

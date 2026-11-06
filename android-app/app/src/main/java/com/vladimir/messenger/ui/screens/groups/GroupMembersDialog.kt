@@ -97,6 +97,7 @@ internal fun GroupMembersDialog(
                                     name = member.displayName.ifBlank { member.nodeId.take(8) },
                                     avatarB64 = avatars[member.nodeId],
                                     size = 40.dp,
+                                    peerId = member.nodeId,
                                 )
                                 Spacer(Modifier.width(10.dp))
                                 Column {

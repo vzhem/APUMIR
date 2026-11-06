@@ -387,7 +387,7 @@ fun ChatDetailScreen(
                 onProfile = { showPeerProfile = true },
                 avatar = if (contactId.isNotBlank()) ({
                     PeerAvatar(name = contactName, avatarB64 = headerAvatars[contactId],
-                        vip = uiState.peerVip || uiState.selfVip, size = 30.dp)
+                        vip = uiState.peerVip || uiState.selfVip, size = 30.dp, peerId = contactId)
                 }) else null,
                 vip = uiState.peerVip,
                 actions = listOfNotNull(

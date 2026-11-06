@@ -2106,7 +2106,7 @@ private fun JoinRequestRow(
             PeerAvatar(
                 name = request.displayName.ifBlank { request.nodeId.take(8) },
                 avatarB64 = applicantAvatars[request.nodeId],
-                size = 44.dp,
+                size = 44.dp, peerId = request.nodeId,
             )
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -2381,7 +2381,7 @@ private fun MessageBubble(
                             name = senderName,
                             avatarB64 = senderAvatars[message.senderId],
                             vip = senderVip,
-                            size = 24.dp,
+                            size = 24.dp, peerId = message.senderId,
                         )
                         Text(
                             senderName,

@@ -1,6 +1,8 @@
 package com.vladimir.messenger.data.group
 
 import android.util.Log
+import com.vladimir.messenger.data.avatavideo.AvatarVideoCoordinator
+import com.vladimir.messenger.data.avatavideo.AvatarVideoWire
 import com.vladimir.messenger.data.contactreset.ContactResetCoordinator
 import com.vladimir.messenger.data.contactreset.ContactResetWire
 
@@ -18,6 +20,7 @@ import com.vladimir.messenger.data.contactreset.ContactResetWire
 class GroupRouter(
     private val repository: GroupRepository,
     private val contactReset: ContactResetCoordinator,
+    private val avatarVideos: AvatarVideoCoordinator,
 ) {
 
     suspend fun routeIncoming(
@@ -28,6 +31,12 @@ class GroupRouter(
     ): Boolean {
         if (ContactResetWire.isPacket(text)) {
             return contactReset.receive(senderId, text)
+        }
+        // Видеоаватары собеседников тем же конвертом APUGRP1|: свой вид
+        // разбирается здесь, а старые клиенты глотают его как неразобранный
+        // групповой пакет и не показывают служебный текст в чате.
+        if (AvatarVideoWire.isPacket(text)) {
+            return avatarVideos.receive(senderId, text)
         }
         if (!GroupWire.isGroupPacket(text)) return false
 

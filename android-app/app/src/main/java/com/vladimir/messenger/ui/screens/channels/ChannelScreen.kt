@@ -1002,7 +1002,7 @@ private fun PostCard(
                             name = post.authorName,
                             avatarB64 = authorAvatars[post.authorId],
                             vip = authorVip,
-                            size = 24.dp,
+                            size = 24.dp, peerId = post.authorId,
                         )
                         Text(
                             "${post.authorName} - $time",

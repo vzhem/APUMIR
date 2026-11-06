@@ -248,6 +248,7 @@ fun ShareContactChooserDialog(
                                 },
                                 avatarB64 = avatars[contact.id],
                                 size = 44.dp,
+                                peerId = contact.id,
                             )
                             Spacer(Modifier.width(11.dp))
                             Column(modifier = Modifier.weight(1f)) {

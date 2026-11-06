@@ -113,6 +113,7 @@ fun ContactCard(
             avatarB64 = avatars[chat.contactId],
             vip = peerVip,
             size = 52.dp,
+            peerId = chat.contactId,
         ) {
             // Точка онлайн-статуса
             if (chat.isContactOnline) {

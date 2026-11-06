@@ -199,6 +199,7 @@ fun BirthdayBannerRow(
                     name = guest.name,
                     avatarB64 = avatarB64,
                     size = 44.dp,
+                    peerId = guest.nodeId,
                     overlay = {
                         Box(
                             modifier = Modifier

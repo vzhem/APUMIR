@@ -21,7 +21,10 @@
      фоне, кадр-постер как запасной слой; никакого `VideoView`;
   5) постер уходит наружу обычным аватаром, ролик остаётся в приватной папке;
   6) строки есть в обеих локалях;
-  7) поток не живёт в god-файле настроек.
+  7) поток не живёт в god-файле настроек;
+  8) видеокружки СОБЕСЕДНИКОВ: общий плеер крутит их ролики везде, где
+     встречается аватар контакта; ролик доезжает анонсом/просьбой обычной
+     файловой передачей, старые клиенты остаются на постере.
 
 Запуск:
     python3 scripts/ci/check-video-avatar.py
@@ -47,10 +50,18 @@ class VideoAvatarContract(unittest.TestCase):
         self.installer = read(JAVA / "data/profile/VideoAvatarInstaller.kt")
         self.rules = read(JAVA / "data/profile/VideoAvatarPolicy.kt")
         self.avatar = read(JAVA / "ui/components/MyAvatar.kt")
+        self.player = read(JAVA / "ui/components/VideoAvatarPlayer.kt")
+        self.peer = read(JAVA / "ui/components/ApuVipRing.kt")
         self.editor = read(JAVA / "ui/components/StoryVideoEditor.kt")
         self.camera = read(JAVA / "ui/components/StoryVideoCamera.kt")
         self.story_composer = read(JAVA / "ui/components/StoryVideoComposer.kt")
         self.settings = read(JAVA / "ui/screens/settings/SettingsScreen.kt")
+        self.wire = read(JAVA / "data/avatavideo/AvatarVideoWire.kt")
+        self.store = read(JAVA / "data/avatavideo/PeerVideoAvatarStore.kt")
+        self.coord = read(JAVA / "data/avatavideo/AvatarVideoCoordinator.kt")
+        self.inbox = read(JAVA / "data/avatavideo/SpecialMediaInbox.kt")
+        self.group_router = read(JAVA / "data/group/GroupRouter.kt")
+        self.my_video_store = read(JAVA / "data/profile/VideoAvatarStore.kt")
 
     # 1) ранг ----------------------------------------------------------------
     def test_video_avatar_opens_at_the_circle_rank(self):
@@ -117,23 +128,27 @@ class VideoAvatarContract(unittest.TestCase):
 
     # 4) показ в профиле -----------------------------------------------------
     def test_profile_plays_the_avatar_through_a_texture_view_in_a_loop(self):
+        # Плеер один на все видеоаватары (свой и чужие): копия «для профиля»
+        # расходилась бы с остальными по зацикливанию, звуку и паузе в фоне.
+        self.assertIn("VideoAvatarPlayback(", self.avatar)
         # SurfaceView уходит из-под круглой маски Compose — только TextureView.
-        self.assertIn("StoryVideoSurface(", self.avatar)
+        self.assertIn("StoryVideoSurface(", self.player)
         # `VideoView(` и `android.widget.VideoView` — прежний способ: он и был
         # квадратным поверх круглого аватара. В комментарии слово остаться может.
-        self.assertNotIn("VideoView(", self.avatar)
-        self.assertNotIn("android.widget.VideoView", self.avatar)
-        self.assertIn("Player.REPEAT_MODE_ONE", self.avatar)
-        self.assertIn("player.volume = 0f", self.avatar)
+        for text, where in ((self.avatar, "MyAvatar"), (self.player, "VideoAvatarPlayer")):
+            self.assertNotIn("VideoView(", text, where)
+            self.assertNotIn("android.widget.VideoView", text, where)
+        self.assertIn("Player.REPEAT_MODE_ONE", self.player)
+        self.assertIn("player.volume = 0f", self.player)
         # В фоне плеер стоит: аватар не должен играть в кармане.
-        self.assertIn("Lifecycle.Event.ON_STOP -> player.pause()", self.avatar)
-        self.assertIn("Lifecycle.Event.ON_START -> player.play()", self.avatar)
+        self.assertIn("Lifecycle.Event.ON_STOP -> player.pause()", self.player)
+        self.assertIn("Lifecycle.Event.ON_START -> player.play()", self.player)
         # Постер/инициалы остаются под видео: ролик мог не доехать зеркалом.
         self.assertIn("AvatarBitmaps.cachedUri(avatarUri)", self.avatar)
         self.assertIn("Avatar(name = displayName, modifier = Modifier.fillMaxSize(), size = size)", self.avatar)
-        self.assertIn("var broken by remember(path)", self.avatar)
+        self.assertIn("var broken by remember(path)", self.player)
         # Плеер не живёт вечно: снятие с композиции освобождает декодер.
-        self.assertIn("player.release()", self.avatar)
+        self.assertIn("player.release()", self.player)
 
     def test_live_playback_is_opt_in_and_reaches_the_chat_list(self):
         # Флаг явный: по умолчанию постер, иначе плеер заводился бы на каждом
@@ -239,6 +254,56 @@ class VideoAvatarContract(unittest.TestCase):
             (ROOT / "android-app/app/src/test/java/com/vladimir/messenger/data/mirror/"
              "ProfileMirrorVideoAvatarTest.kt").is_file(),
         )
+
+    # 8) видеокружки собеседников -------------------------------------------
+    def test_peer_video_avatars_play_everywhere(self):
+        # Показ: у PeerAvatar есть peerId и общий плеер крутит ролик поверх
+        # постера (запрос владельца 2026-11-06: «видиокружочки профиля крутились
+        # на профиле чата и во всех других местах»).
+        self.assertIn("peerId: String? = null", self.peer)
+        self.assertIn("PeerVideoAvatarLayer(peerId = peerId)", self.peer)
+        self.assertIn("VideoAvatarPlayback(path = video.absolutePath", self.peer)
+        self.assertIn("PeerVideoAvatarStore.fileFor(", self.peer)
+        # Все места, где встречается аватар собеседника, передают его id.
+        ui = JAVA / "ui"
+        peer_call_sites = 0
+        for path in ui.rglob("*.kt"):
+            if path.name in ("ApuVipRing.kt", "MyAvatar.kt"):
+                continue
+            peer_call_sites += len(re.findall(r"peerId = ", read(path)))
+        self.assertGreaterEqual(peer_call_sites, 12, "peerId должен дойти до всех мест показа")
+        # Провод: анонс и просьба живут отдельным видом группового конверта —
+        # старые клиенты глотают его как неразобранный пакет и не видят текст в чате.
+        self.assertIn('PREFIX = "APUGRP1|avv1|"', self.wire)
+        self.assertIn("fun announce(", self.wire)
+        self.assertIn("fun ready(", self.wire)
+        self.assertIn("fun reserved(", self.wire)
+        # Приём: GroupRouter разбирает вид avv1 до групповых пакетов.
+        self.assertIn("AvatarVideoWire.isPacket(text)", self.group_router)
+        self.assertIn("avatarVideos.receive(senderId, text)", self.group_router)
+        # Обмен: владелец анонсирует sha, отвечает на просьбу, повторяет по расписанию.
+        self.assertIn("fun receive(senderId: String, text: String)", self.coord)
+        self.assertIn("announceAll(", self.coord)
+        self.assertIn("sendMyVideoTo(", self.coord)
+        self.assertIn("catchUpRequests(", self.coord)
+        self.assertIn("AvatarVideoGossip.attach(this)", self.coord)
+        # Смена своего видеоаватара уходит контактам сразу, а не к следующему анонсу.
+        self.assertIn("AvatarVideoGossip.onMyVideoChanged(context)", self.my_video_store)
+        # Хранилище проверяет sha256 и размер и ограничено по объёму.
+        self.assertIn("sha256Of(", self.store)
+        self.assertIn("MAX_TOTAL_BYTES", self.store)
+        self.assertIn("fun sweep(", self.store)
+        self.assertIn("fun install(", self.store)
+        # Файлы приходят обычной передачей и не попадают в чат как вложение.
+        self.assertIn("AvatarVideoWire.reserved(", self.inbox)
+        self.assertIn("PeerVideoAvatarStore.install(", self.inbox)
+        router = read(JAVA / "data/file/FileTransferRouter.kt")
+        self.assertIn("AvatarVideoWire.reserved(displayName)", router)
+        self.assertIn("SpecialMediaInbox.accept(", router)
+        # Сервисный конверт не догоняется на старых клиентах и не растит god-файлы:
+        # приём и отправка живут в новых файлах data/avatavideo/.
+        self.assertNotIn("AvatarVideo", read(JAVA / "data/group/GroupWire.kt"))
+        self.assertNotIn("AvatarVideo", read(JAVA / "data/group/GroupRepository.kt"))
 
 
 if __name__ == "__main__":

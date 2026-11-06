@@ -168,6 +168,7 @@ fun StoriesStrip(
                 title = list.last().authorName.ifBlank { "?" },
                 avatar = avatars[list.first().authorId],
                 viewed = list.map { it.id in seen },
+                peerId = list.first().authorId,
                 slotWidth = peerSlot,
                 showLabel = labelsVisible,
                 compact = compact,
@@ -186,6 +187,8 @@ private fun StoryBubble(
     viewed: List<Boolean>,
     self: Boolean = false,
     selfName: String? = null,
+    /** Кто выложил историю: его видеоаватар крутится в кружке ленты. */
+    peerId: String? = null,
     /** Сколько историй сейчас в полосе — для золотой объёмной цифры. */
     totalStories: Int = 0,
     /** Ширина слота: уже кружка — соседи наезжают, полоса стоит стопкой. */
@@ -257,7 +260,7 @@ private fun StoryBubble(
                         playVideo = true,
                     )
                 } else {
-                    PeerAvatar(name = title, avatarB64 = avatar, size = 54.dp)
+                    PeerAvatar(name = title, avatarB64 = avatar, size = 54.dp, peerId = peerId)
                 }
             }
             if (self && onAddClick != null) {
@@ -532,7 +535,8 @@ fun StoryViewerDialog(
                                 size = 40,
                             )
                         } else {
-                            PeerAvatar(current.authorName, avatars[current.authorId], 40.dp)
+                            PeerAvatar(current.authorName, avatars[current.authorId], 40.dp,
+                                peerId = current.authorId)
                         }
                         Column(Modifier.weight(1f).padding(start = 10.dp)) {
                             Text(if (current.mine) stringResource(R.string.story_you) else current.authorName,
