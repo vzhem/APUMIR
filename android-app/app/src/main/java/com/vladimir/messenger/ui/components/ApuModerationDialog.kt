@@ -29,6 +29,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -43,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.vladimir.messenger.data.group.GroupPermissions
+import com.vladimir.messenger.ui.theme.AvatarStore
 
 /**
  * Итог выбора в диалоге удаления и модерации сообщения/поста.
@@ -279,7 +281,13 @@ fun ApuMessageModerationDialog(
                             .padding(horizontal = 10.dp, vertical = 7.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Avatar(name = displayAuthor, size = 30)
+                        val avatars by AvatarStore.avatars.collectAsState()
+                        PeerAvatar(
+                            name = displayAuthor,
+                            avatarB64 = avatars[authorId],
+                            size = 30.dp,
+                            peerId = authorId,
+                        )
                         Spacer(Modifier.width(8.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Row(

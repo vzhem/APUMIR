@@ -251,8 +251,7 @@ private fun StoryBubble(
                     }
                 }
                 if (self) {
-                    // Свой аватар в списке чатов играет живьём, как в телеграм:
-                    // плеер один (своя ячейка), а у остальных — обычная картинка.
+                    // Своя ячейка играет через MyAvatar, чужая — через PeerAvatar.
                     MyAvatar(
                         displayName = selfName.orEmpty().ifBlank { title },
                         modifier = Modifier.size(54.dp),

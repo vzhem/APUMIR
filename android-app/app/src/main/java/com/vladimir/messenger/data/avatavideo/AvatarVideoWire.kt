@@ -15,7 +15,8 @@ package com.vladimir.messenger.data.avatavideo
  *
  * Форматы (поля через `|`, в поле не может быть `|` и управляющих):
  *   анонс: `APUGRP1|avv1|an|<владелец>|<sha256|пусто=снять>|<байт>|<круг 0/1>|<когда>`
- *   готов: `APUGRP1|avv1|rd|<владелец>|<sha256>`
+ *   готов: `APUGRP1|avv1|rd|<владелец>|<sha256>` — «владелец» здесь ЧЕЙ ролик
+ *       просят (адресат просьбы), а не кто просит.
  *
  * Пустой sha в анонсе — «видеоаватар убран»: получатель сносит и файл, и запись.
  */
@@ -37,7 +38,10 @@ object AvatarVideoWire {
             val updatedAtMs: Long,
         ) : Packet
 
-        /** Контакт просит ролик: присылать файл с этим sha. */
+        /**
+         * Контакт просит ролик: присылать файл с этим sha. `ownerId` — чей
+         * ролик просят (владелец, которому адресована просьба).
+         */
         data class Ready(val ownerId: String, val sha256: String) : Packet
     }
 
@@ -54,6 +58,7 @@ object AvatarVideoWire {
             updatedAtMs.toString(),
         ).joinToString("|")
 
+    /** Просьба отдать ролик: [ownerId] — чей ролик просят (получатель просьбы). */
     fun ready(ownerId: String, sha256: String): String =
         PREFIX + listOf("rd", ownerId, sha256.lowercase()).joinToString("|")
 

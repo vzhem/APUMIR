@@ -25,12 +25,15 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -217,8 +220,52 @@ private fun PeerVideoAvatarLayer(peerId: String?) {
     if (video != null) {
         val circle = remember(peerId, version) { PeerVideoAvatarStore.circleFor(context, peerId) }
         // key: при смене ролика плеер создаётся заново под новый файл.
-        androidx.compose.runtime.key(video.absolutePath, circle) {
-            VideoAvatarPlayback(path = video.absolutePath, circle = circle)
+        androidx.compose.runtime.key(peerId, video.absolutePath, circle) {
+            // Полный круг виден лишь после проверки файла и до первого кадра.
+            var awaitingFrame by remember { mutableStateOf(true) }
+            VideoAvatarPlayback(path = video.absolutePath, circle = circle, onLoadingFinished = { awaitingFrame = false })
+            if (awaitingFrame) VideoAvatarLoadingRing(progress = 1f, modifier = Modifier.fillMaxSize())
+        }
+    } else {
+        // Ролик объявлен, но ещё не приехал: вокруг постера виден фактический
+        // прогресс. Пока байтов нет, отметка неподвижна на «12 часах».
+        val meta = remember(peerId, version) { PeerVideoAvatarStore.metaFor(context, peerId) }
+        if (meta != null) {
+            val downloads by PeerVideoAvatarStore.downloads.collectAsState()
+            val progress = downloads[peerId]?.takeIf { it.sha256 == meta.sha256 }?.fraction
+            VideoAvatarLoadingRing(progress = progress, modifier = Modifier.fillMaxSize())
+        }
+    }
+}
+
+/**
+ * Честный ход загрузки: начало на «12 часах», дальше по часовой стрелке.
+ * Пока файл не проверен и не установлен, оставляем небольшой незаполненный
+ * участок; после установки кольцо сменяется зацикленным роликом. Без байтов
+ * отметка не движется: ожидание не выдаётся за скачивание.
+ */
+@Composable
+private fun VideoAvatarLoadingRing(progress: Float?, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val stroke = 2.5.dp.toPx()
+        val inset = stroke / 2f + 1.dp.toPx()
+        if (size.minDimension <= inset * 2f) return@Canvas
+        val topLeft = Offset(inset, inset)
+        val arcSize = Size(size.width - inset * 2f, size.height - inset * 2f)
+        drawArc(
+            color = GoldDeep.copy(alpha = 0.30f),
+            startAngle = 0f, sweepAngle = 360f, useCenter = false,
+            topLeft = topLeft, size = arcSize, style = Stroke(stroke),
+        )
+        val fraction = (progress ?: 0f).coerceIn(0f, 1f)
+        if (fraction == 0f) {
+            drawCircle(color = GoldMid, radius = stroke / 2f, center = Offset(size.width / 2f, inset))
+        } else {
+            drawArc(
+                color = GoldMid,
+                startAngle = -90f, sweepAngle = 360f * fraction, useCenter = false,
+                topLeft = topLeft, size = arcSize, style = Stroke(stroke, cap = StrokeCap.Round),
+            )
         }
     }
 }

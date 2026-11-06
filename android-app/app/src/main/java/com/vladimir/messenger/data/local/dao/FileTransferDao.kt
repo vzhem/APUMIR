@@ -100,6 +100,22 @@ interface FileTransferDao {
     )
     suspend fun getActiveIncoming(nowMs: Long): List<FileTransferEntity>
 
+    /**
+     * Только видеоаватары: уведомляет UI при изменении байтов, без частого
+     * опроса базы. VERIFYING/COMPLETE нужны на время проверки и восстановления
+     * после остановки процесса; активные передачи не вытесняются завершёнными.
+     */
+    @Query(
+        """
+        SELECT * FROM file_transfers
+        WHERE direction = 'INCOMING' AND displayName LIKE 'apu-avatar-video-%'
+          AND state IN ('OFFERED', 'TRANSFERRING', 'VERIFYING', 'COMPLETE')
+        ORDER BY CASE WHEN state = 'COMPLETE' THEN 1 ELSE 0 END, updatedAtMs DESC
+        LIMIT 512
+        """
+    )
+    fun observeAvatarVideoIncoming(): Flow<List<FileTransferEntity>>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertTransferIgnore(transfer: FileTransferEntity): Long
 

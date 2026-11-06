@@ -393,6 +393,7 @@ object TransferDiagnostics {
             .getOrDefault(RuntimeHealthSnapshot())
         val details = OperationalDiagnostics.storageTrend(storage) + OperationalDiagnostics.journalReport() + OperationalDiagnostics.wakeReport() + logcat.relayCleanup.render() +
             com.vladimir.messenger.data.story.DurableStorySender.report(context.applicationContext) +
+            com.vladimir.messenger.data.avatavideo.PeerVideoAvatarStore.report(context.applicationContext) +
             com.vladimir.messenger.data.story.StoryFeedbackStore.report(context.applicationContext) +
             com.vladimir.messenger.data.maintenance.AutomaticMaintenance.report(context.applicationContext) +
             com.vladimir.messenger.data.schedule.ScheduledSendStore.cancelDiagnostics() +

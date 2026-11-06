@@ -80,6 +80,19 @@ class FakeFileTransferDao : FileTransferDao {
             .sortedBy { it.updatedAtMs }
             .take(16)
 
+    override fun observeAvatarVideoIncoming(): Flow<List<FileTransferEntity>> =
+        observe.map {
+            transfers.values
+                .filter { entity ->
+                    entity.direction == "INCOMING" &&
+                        entity.displayName.startsWith("apu-avatar-video-", ignoreCase = true) &&
+                        entity.state in setOf("OFFERED", "TRANSFERRING", "VERIFYING", "COMPLETE")
+                }
+                .sortedWith(compareBy<FileTransferEntity> { entity -> entity.state == "COMPLETE" }
+                    .thenByDescending { entity -> entity.updatedAtMs })
+                .take(512)
+        }
+
     override suspend fun insertTransferIgnore(transfer: FileTransferEntity): Long {
         if (transfers.containsKey(transfer.transferId)) return -1L
         transfers[transfer.transferId] = transfer
