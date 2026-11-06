@@ -378,6 +378,8 @@ class VideoAvatarContract(unittest.TestCase):
         self.assertIn("_changed.update", announce)
         self.assertIn("fun pumpDownloads(", self.coord)
         self.assertIn("transferDao.observeAvatarVideoIncoming()", self.coord)
+        fake_dao = read(ROOT / "android-app/app/src/test/java/com/vladimir/messenger/data/file/FakeFileTransferDao.kt")
+        self.assertIn("override fun observeAvatarVideoIncoming()", fake_dao)
         self.assertIn('row.peerNodeId != ownerId', transfer_policy)
         self.assertIn('row.fileSha256 != sha256', transfer_policy)
         self.assertIn('row.totalBytes != expectedBytes', transfer_policy)

@@ -1,6 +1,12 @@
 package com.vladimir.messenger.data.avatavideo
 
+import com.vladimir.messenger.data.file.FakeFileTransferDao
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -59,6 +65,21 @@ class AvatarVideoTransferPolicyTest {
         assertNull(progress(row.copy(state = "FAILED")))
         assertNull(progress(row.copy(expiresAtMs = now)))
         assertNull(AvatarVideoTransferPolicy.progress("owner", sha, 0L, row.copy(totalBytes = 0L), now))
+    }
+
+    @Test
+    fun avatarQueryFiltersSortsAndEmitsProgressChanges() = runBlocking {
+        val dao = FakeFileTransferDao()
+        dao.insertTransferIgnore(incoming().copy(transferId = "active"))
+        dao.insertTransferIgnore(incoming().copy(transferId = "complete", state = "COMPLETE", updatedAtMs = now + 1))
+        dao.insertTransferIgnore(incoming().copy(transferId = "outgoing", direction = "OUTGOING"))
+        dao.insertTransferIgnore(incoming().copy(transferId = "story", displayName = "apu-story-video-123.mp4"))
+        dao.insertTransferIgnore(incoming().copy(transferId = "failed", state = "FAILED"))
+        val observed = dao.observeAvatarVideoIncoming()
+        assertEquals(listOf("active", "complete"), observed.first().map { it.transferId })
+        val next = async(start = CoroutineStart.UNDISPATCHED) { observed.drop(1).first() }
+        dao.advanceProgress("active", "TRANSFERRING", 7L, 750L, now + 2L, null)
+        assertEquals(750L, next.await().first { it.transferId == "active" }.transferredBytes)
     }
 
     @Test
