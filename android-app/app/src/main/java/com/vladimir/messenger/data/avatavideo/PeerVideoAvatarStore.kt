@@ -6,8 +6,10 @@ import com.vladimir.messenger.util.copyWithLimit
 import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
+import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 /**
  * Принятые видеоаватары собеседников: файл ролика и выбранная им форма.
@@ -29,6 +31,9 @@ object PeerVideoAvatarStore {
     private const val DIR = "peer-video-avatars-v1"
     private const val MAX_FILES = 200
     private const val MAX_TOTAL_BYTES = 128L * 1024 * 1024
+    // Защищены монитором этого объекта. После перезапуска набор пуст, поэтому
+    // sweep удалит оставшиеся после сбоя временные копии, не трогая активные.
+    private val activeParts = mutableSetOf<String>()
 
     /** Чего ждём и что стоит: sha, размер, круг/квадрат, объявление и последний показ. */
     data class Meta(
@@ -69,6 +74,7 @@ object PeerVideoAvatarStore {
      * или он от другого ролика), отправителю стоит запросить его готовностью.
      * Пустой sha — снятие видеоаватара: запись и файл уходят.
      */
+    @Synchronized
     fun noteAnnounce(
         context: Context,
         ownerId: String,
@@ -83,17 +89,16 @@ object PeerVideoAvatarStore {
             return false
         }
         val current = metaFor(context, ownerId)
-        if (current == null || current.sha256 != sha256) {
-            // Ролик сменился: старый файл немедленно не нужен, sweep доберёт.
-            writeMeta(context, ownerId, sha256, bytes, circle, updatedAtMs, System.currentTimeMillis())
-            return true
-        }
-        // Тот же ролик: обновить отметку времени и решить по наличию файла.
+        val visibleChange = current == null || current.sha256 != sha256 ||
+            current.bytes != bytes || current.circle != circle
+        // Сначала сохраняем объявление, затем уведомляем Compose. Иначе уже
+        // открытый список запомнит «видео нет» и не покажет кольцо до установки.
         writeMeta(
             context, ownerId, sha256, bytes, circle,
-            maxOf(current.updatedAtMs, updatedAtMs),
+            maxOf(current?.updatedAtMs ?: 0L, updatedAtMs),
             System.currentTimeMillis(),
         )
+        if (visibleChange) _changed.update { it + 1 }
         return fileFor(context, ownerId) == null
     }
 
@@ -118,7 +123,8 @@ object PeerVideoAvatarStore {
             return false
         }
         val target = File(dir, expected.sha256 + ".mp4")
-        val temp = File(dir, expected.sha256 + ".part")
+        val temp = File(dir, expected.sha256 + "-" + UUID.randomUUID() + ".part")
+        synchronized(this) { activeParts.add(temp.name) }
         try {
             FileInputStream(source).use { input ->
                 temp.outputStream().use { out ->
@@ -128,32 +134,52 @@ object PeerVideoAvatarStore {
                     out.fd.sync()
                 }
             }
-            if (!temp.renameTo(target)) return false
+            val installed = synchronized(this) {
+                // Пока копировали, владелец мог заменить или снять ролик.
+                // Не восстанавливаем старое объявление поверх более нового.
+                val current = metaFor(context, ownerId)
+                if (current == null || current.sha256 != expected.sha256 || current.bytes != expected.bytes) {
+                    false
+                } else if (!temp.renameTo(target)) {
+                    false
+                } else {
+                    _changed.update { it + 1 }
+                    true
+                }
+            }
+            if (!installed) {
+                Log.w(TAG, "peer video avatar changed or could not be installed for $ownerId")
+                return false
+            }
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
-            temp.delete()
             Log.w(TAG, "peer video avatar install failed for $ownerId: ${failure.message}")
             return false
+        } finally {
+            synchronized(this) {
+                temp.delete()
+                activeParts.remove(temp.name)
+            }
         }
-        writeMeta(
-            context, ownerId, expected.sha256, expected.bytes, expected.circle,
-            expected.updatedAtMs, System.currentTimeMillis(),
-        )
-        _changed.value = _changed.value + 1
         sweep(context)
         return true
     }
 
-    /** Видеоаватар убран владельцем: запись и файл исчезают, остаётся постер. */
+    /** Видеоаватар убран владельцем: запись исчезает, остаётся постер. */
+    @Synchronized
     fun retract(context: Context, ownerId: String) {
-        val current = metaFor(context, ownerId)
+        val current = metaFor(context, ownerId) ?: return
         prefs(context).edit().remove(ownerId).apply()
-        if (current != null) File(dir(context), current.sha256 + ".mp4").delete()
-        _changed.value = _changed.value + 1
+        // Один и тот же ролик может быть у нескольких людей.
+        if (metas(context).none { it.sha256 == current.sha256 }) {
+            File(dir(context), current.sha256 + ".mp4").delete()
+        }
+        _changed.update { it + 1 }
     }
 
     /** Держать хранилище в пределах: лишнее по давности показа удаляется. */
+    @Synchronized
     fun sweep(context: Context) {
         val prefs = prefs(context)
         val all = prefs.all.mapNotNull { (owner, raw) ->
@@ -162,21 +188,24 @@ object PeerVideoAvatarStore {
         val dir = dir(context)
         val referenced = all.map { it.sha256 + ".mp4" }.toSet()
         dir.listFiles()?.forEach { file ->
-            if (file.isFile && file.name !in referenced && !file.name.endsWith(".part")) file.delete()
+            if (file.isFile && file.name !in referenced && file.name !in activeParts) file.delete()
         }
         var overCount = all.size - MAX_FILES
         var overBytes = all.sumOf { it.bytes } - MAX_TOTAL_BYTES
         if (overCount <= 0 && overBytes <= 0) return
         val editor = prefs.edit()
+        val removed = mutableListOf<Meta>()
         all.sortedBy { it.lastSeenMs }.forEach { meta ->
             if (overCount <= 0 && overBytes <= 0) return@forEach
             editor.remove(meta.ownerId)
-            File(dir, meta.sha256 + ".mp4").delete()
+            removed += meta
             overCount -= 1
             overBytes -= meta.bytes
         }
         editor.apply()
-        _changed.value = _changed.value + 1
+        val stillUsed = metas(context).map { it.sha256 }.toSet()
+        removed.filter { it.sha256 !in stillUsed }.forEach { File(dir, it.sha256 + ".mp4").delete() }
+        _changed.update { it + 1 }
     }
 
     /** Ролики без файлов: кому повторить просьбу при старте (догоняющий запрос). */
@@ -187,13 +216,15 @@ object PeerVideoAvatarStore {
 
     /**
      * Скачивания роликов собеседников для кольца загрузки: владелец → доля
-     * полученных байтов (0..1). Запись появляется, только когда байты уже идут;
-     * «просьба ушла, файл ещё не пошёл» — записи нет, кольцо обегает круг.
+     * полученных байтов (0..0.95 до проверки и установки). Когда файла ещё
+     * нет в передаче, записи нет и отметка стоит в начале кольца.
      */
-    private val _downloads = MutableStateFlow<Map<String, Float>>(emptyMap())
+    data class Download(val sha256: String, val fraction: Float)
+
+    private val _downloads = MutableStateFlow<Map<String, Download>>(emptyMap())
     val downloads = _downloads.asStateFlow()
 
-    fun setDownloads(map: Map<String, Float>) {
+    fun setDownloads(map: Map<String, Download>) {
         if (_downloads.value != map) _downloads.value = map
     }
 
@@ -206,6 +237,7 @@ object PeerVideoAvatarStore {
      * Живёт в отдельных настройках: [sweep] разбирает каждый ключ своих
      * настроек как метаданные и счётчики там мешали бы уборке.
      */
+    @Synchronized
     fun bump(context: Context, key: String) {
         val prefs = context.getSharedPreferences(COUNTS, Context.MODE_PRIVATE)
         prefs.edit().putLong(key, prefs.getLong(key, 0L) + 1L).apply()
@@ -219,11 +251,11 @@ object PeerVideoAvatarStore {
         val counts = context.getSharedPreferences(COUNTS, Context.MODE_PRIVATE)
         fun n(key: String): Long = counts.getLong(key, 0L)
         return "[видеоаватары]\n" +
-            "собеседников с видео: ${all.size} · роликов на месте: $have · ждут файл: ${all.size - have} · байты идут: $going\n" +
-            "объявления: принято ${n("announce-in")}, отправлено ${n("announce-out")} · " +
-            "просьбы: отправлено ${n("ready-out")}, принято ${n("ready-in")} · " +
-            "файлы: получено ${n("file-in")}, отклонено ${n("file-reject")}, отправлено ${n("file-out")}\n" +
-            "Пока ролик едет — вокруг аватара собеседника крутится кольцо загрузки; полный круг означает, что ролик на месте и играет зацикленно. Транспортный успех не подтверждает показ.\n"
+            "собеседников с видео: ${all.size} · роликов на месте: $have · ждут файл: ${all.size - have} · есть передача: $going\n" +
+            "объявления: принято ${n("announce-in")}, прямых отправок ${n("announce-out")}, отложено ${n("announce-deferred")} · " +
+            "просьбы: прямых отправок ${n("ready-out")}, отложено ${n("ready-deferred")}, принято ${n("ready-in")} · " +
+            "файлы: получено ${n("file-in")}, отклонено ${n("file-reject")}, подготовлено ${n("file-out")}\n" +
+            "Кольцо показывает принятые байты; полный круг — файл проверен, далее запуск видео. Транспортный успех не подтверждает показ.\n"
     }
 
     private fun parseMeta(owner: String, raw: String): Meta? {

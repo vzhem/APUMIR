@@ -7,6 +7,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -32,9 +33,10 @@ import java.io.File
  */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
-internal fun VideoAvatarPlayback(path: String, circle: Boolean) {
+internal fun VideoAvatarPlayback(path: String, circle: Boolean, onLoadingFinished: () -> Unit = {}) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
+    val loadingFinished by rememberUpdatedState(onLoadingFinished)
     // Ролик мог не доехать (зеркало, чистка кэша): тогда молча остаётся постер.
     var broken by remember(path) { mutableStateOf(false) }
     val player = remember(path) { ExoPlayer.Builder(context).build() }
@@ -47,8 +49,14 @@ internal fun VideoAvatarPlayback(path: String, circle: Boolean) {
             }
         }
         val listener = object : Player.Listener {
+            override fun onRenderedFirstFrame() {
+                loadingFinished()
+            }
+
             override fun onPlayerError(error: PlaybackException) {
+                android.util.Log.w("VideoAvatarPlayer", "Avatar playback failed", error)
                 broken = true
+                loadingFinished()
             }
         }
         owner.lifecycle.addObserver(observer)

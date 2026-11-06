@@ -20,12 +20,6 @@ package com.vladimir.messenger.ui.components
 // меньше — поэтому VIP-строка выше остальных не становится.
 // =============================================================================
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -37,7 +31,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -224,47 +220,36 @@ private fun PeerVideoAvatarLayer(peerId: String?) {
     if (video != null) {
         val circle = remember(peerId, version) { PeerVideoAvatarStore.circleFor(context, peerId) }
         // key: при смене ролика плеер создаётся заново под новый файл.
-        androidx.compose.runtime.key(video.absolutePath, circle) {
-            VideoAvatarPlayback(path = video.absolutePath, circle = circle)
+        androidx.compose.runtime.key(peerId, video.absolutePath, circle) {
+            // Полный круг виден лишь после проверки файла и до первого кадра.
+            var awaitingFrame by remember { mutableStateOf(true) }
+            VideoAvatarPlayback(path = video.absolutePath, circle = circle, onLoadingFinished = { awaitingFrame = false })
+            if (awaitingFrame) VideoAvatarLoadingRing(progress = 1f, modifier = Modifier.fillMaxSize())
         }
     } else {
-        // Ролик объявлен, но ещё не приехал: вокруг постера крутится кольцо
-        // загрузки — по нему видно, что видео есть и оно едет (запрос владельца
-        // 2026-11-06: «показать загрузку в виде кольца вокруг кружка»).
-        val announced = remember(peerId, version) { PeerVideoAvatarStore.metaFor(context, peerId) != null }
-        if (announced) {
+        // Ролик объявлен, но ещё не приехал: вокруг постера виден фактический
+        // прогресс. Пока байтов нет, отметка неподвижна на «12 часах».
+        val meta = remember(peerId, version) { PeerVideoAvatarStore.metaFor(context, peerId) }
+        if (meta != null) {
             val downloads by PeerVideoAvatarStore.downloads.collectAsState()
-            VideoAvatarLoadingRing(progress = downloads[peerId], modifier = Modifier.fillMaxSize())
+            val progress = downloads[peerId]?.takeIf { it.sha256 == meta.sha256 }?.fraction
+            VideoAvatarLoadingRing(progress = progress, modifier = Modifier.fillMaxSize())
         }
     }
 }
 
 /**
- * Кольцо загрузки видеоаватара собеседника. Полоса идёт от «12 часов» по
- * часовой стрелке и показывает, сколько байтов уже приехало; полный круг —
- * ролик на месте и дальше крутится зацикленно сам. Пока байты не пошли
- * (просьба ушла, файл ещё не начат) — то же кольцо обегает круг.
+ * Честный ход загрузки: начало на «12 часах», дальше по часовой стрелке.
+ * Пока файл не проверен и не установлен, оставляем небольшой незаполненный
+ * участок; после установки кольцо сменяется зацикленным роликом. Без байтов
+ * отметка не движется: ожидание не выдаётся за скачивание.
  */
 @Composable
 private fun VideoAvatarLoadingRing(progress: Float?, modifier: Modifier = Modifier) {
-    if (progress == null) {
-        val rotation by rememberInfiniteTransition(label = "avv-load").animateFloat(
-            initialValue = 0f,
-            targetValue = 360f,
-            animationSpec = infiniteRepeatable(tween(1200, easing = LinearEasing), RepeatMode.Restart),
-            label = "avv-load-angle",
-        )
-        LoadingRingCanvas(modifier, arcStart = rotation - 90f, arcSweep = 88f)
-    } else {
-        LoadingRingCanvas(modifier, arcStart = -90f, arcSweep = 360f * progress.coerceIn(0f, 1f))
-    }
-}
-
-@Composable
-private fun LoadingRingCanvas(modifier: Modifier, arcStart: Float, arcSweep: Float) {
     Canvas(modifier) {
         val stroke = 2.5.dp.toPx()
         val inset = stroke / 2f + 1.dp.toPx()
+        if (size.minDimension <= inset * 2f) return@Canvas
         val topLeft = Offset(inset, inset)
         val arcSize = Size(size.width - inset * 2f, size.height - inset * 2f)
         drawArc(
@@ -272,10 +257,15 @@ private fun LoadingRingCanvas(modifier: Modifier, arcStart: Float, arcSweep: Flo
             startAngle = 0f, sweepAngle = 360f, useCenter = false,
             topLeft = topLeft, size = arcSize, style = Stroke(stroke),
         )
-        drawArc(
-            color = GoldMid,
-            startAngle = arcStart, sweepAngle = arcSweep, useCenter = false,
-            topLeft = topLeft, size = arcSize, style = Stroke(stroke, cap = StrokeCap.Round),
-        )
+        val fraction = (progress ?: 0f).coerceIn(0f, 1f)
+        if (fraction == 0f) {
+            drawCircle(color = GoldMid, radius = stroke / 2f, center = Offset(size.width / 2f, inset))
+        } else {
+            drawArc(
+                color = GoldMid,
+                startAngle = -90f, sweepAngle = 360f * fraction, useCenter = false,
+                topLeft = topLeft, size = arcSize, style = Stroke(stroke, cap = StrokeCap.Round),
+            )
+        }
     }
 }

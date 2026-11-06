@@ -215,7 +215,7 @@ class FileTransferRouter @Inject constructor(
                 if (com.vladimir.messenger.data.story.StoryVideoWire.reserved(displayName) ||
                     com.vladimir.messenger.data.avatavideo.AvatarVideoWire.reserved(displayName)) {
                     transferDao.getForFile(chatId, fileSha256).firstOrNull {
-                        it.direction == "INCOMING" && it.peerNodeId == senderId && it.displayName == displayName && it.state == "COMPLETE"
+                        it.messageId == messageId && it.direction == "INCOMING" && it.peerNodeId == senderId && it.displayName == displayName && it.state == "COMPLETE"
                     }?.let { acceptSpecialMedia(it) }
                     return@FileChatNotifier // Never create a chat card or mirror a story as an attachment.
                 }

@@ -30,9 +30,9 @@
      постер), состояние своего видео читается ДО первого анонса, а подпись
      в профиле текстом не показывается (запрос владельца 2026-11-06);
  10) просьба ролика адресована ВЛАДЕЛЬЦУ видео (со своим id в поле владелец
-     молча отбрасывал просьбу — файл не уходил никогда), вокруг ещё не
-     приехавшего ролика крутится кольцо загрузки (12 часов → по часовой), а
-     «Логи» показывают цепочку обмена (запрос владельца 2026-11-06).
+     молча отбрасывал просьбу), кольцо показывает реальные принятые байты
+     (12 часов → по часовой), а «Логи» показывают цепочку обмена; повторы не
+     теряются до запуска ядра и при смене старой версии (2026-11-06).
 
 Запуск:
     python3 scripts/ci/check-video-avatar.py
@@ -280,6 +280,9 @@ class VideoAvatarContract(unittest.TestCase):
                 continue
             peer_call_sites += len(re.findall(r"peerId = ", read(path)))
         self.assertGreaterEqual(peer_call_sites, 12, "peerId должен дойти до всех мест показа")
+        moderation = read(ui / "components/ApuModerationDialog.kt")
+        self.assertIn("peerId = authorId", moderation)
+        self.assertIn("avatarB64 = avatars[authorId]", moderation)
         # Провод: анонс и просьба живут отдельным видом группового конверта —
         # старые клиенты глотают его как неразобранный пакет и не видят текст в чате.
         self.assertIn('PREFIX = "APUGRP1|avv1|"', self.wire)
@@ -356,17 +359,44 @@ class VideoAvatarContract(unittest.TestCase):
         # id владелец молча отбрасывал просьбу, файл не уходил никогда.
         self.assertIn("AvatarVideoWire.ready(ownerId, sha256)", self.coord)
         self.assertNotIn("AvatarVideoWire.ready(myId", self.coord)
-        # Старые клиенты клали в поле свой id — просьба не должна теряться.
-        self.assertIn("packet.ownerId != senderId", self.coord)
-        # Кольцо загрузки: объявлено, но не приехало — доля байтов по передаче.
+        # Старые клиенты клали в поле свой id — обе формы покрыты JVM-тестом.
+        transfer_policy = read(JAVA / "data/avatavideo/AvatarVideoTransferPolicy.kt")
+        self.assertIn("AvatarVideoTransferPolicy.acceptsReady(", self.coord)
+        self.assertIn("packetOwner == myId || packetOwner == senderId", transfer_policy)
+        self.assertIn("lastReadyOwnerAtMs:", self.coord)  # не наследуем старый ошибочный throttle
+        self.assertIn("CoreStatus.ready.collect", self.coord)
+        self.assertIn("restoreCompletedVideos()", self.coord)
+        self.assertIn("fileRouter.get().pumpOutgoing()", self.coord)
+        self.assertIn("if (!accepted) requestMissingMessageBinding(ownerId)", self.coord)
+        self.assertIn("if (!accepted) requestMissingMessageBinding(peer)", self.coord)
+        self.assertIn("if (contactDao.getContactById(senderId) == null) return", self.coord)
+        self.assertIn("file.name !in activeParts", self.store)
+        # Метаданные уведомляют открытый экран о новом ролике, а прогресс
+        # берётся только у совпадающего отправителя, sha и размера. Room
+        # присылает обновления сам; бесконечного опроса и анимации в простое нет.
+        announce = self.store.split("fun noteAnnounce(", 1)[1].split("fun install(", 1)[0]
+        self.assertIn("_changed.update", announce)
         self.assertIn("fun pumpDownloads(", self.coord)
-        self.assertIn("transferDao.getActiveIncoming(", self.coord)
-        self.assertIn("AvatarVideoWire.fileName(meta.sha256)", self.coord)
-        self.assertIn("it.expiresAtMs > now", self.coord)
+        self.assertIn("transferDao.observeAvatarVideoIncoming()", self.coord)
+        self.assertIn('row.peerNodeId != ownerId', transfer_policy)
+        self.assertIn('row.fileSha256 != sha256', transfer_policy)
+        self.assertIn('row.totalBytes != expectedBytes', transfer_policy)
+        self.assertIn('AvatarVideoWire.fileName(sha256)', transfer_policy)
+        self.assertIn('MAX_UNVERIFIED_PROGRESS = 0.95f', transfer_policy)
         self.assertIn("VideoAvatarLoadingRing(", self.peer)
         self.assertIn("PeerVideoAvatarStore.downloads", self.peer)
         self.assertIn("PeerVideoAvatarStore.metaFor(context, peerId)", self.peer)
+        self.assertIn("startAngle = -90f, sweepAngle = 360f * fraction", self.peer)
+        self.assertNotIn("rememberInfiniteTransition", self.peer)
+        self.assertIn("onRenderedFirstFrame()", self.player)
+        self.assertIn("VideoAvatarLoadingRing(progress = 1f", self.peer)
         self.assertIn("fun setDownloads(", self.store)
+        # Повторный файл с тем же sha должен установиться из новой передачи,
+        # а не из старой COMPLETE-строки, у которой файла уже может не быть.
+        router = read(JAVA / "data/file/FileTransferRouter.kt")
+        self.assertIn('it.messageId == messageId && it.direction == "INCOMING"', router)
+        self.assertTrue((ROOT / "android-app/app/src/test/java/com/vladimir/messenger/data/avatavideo/"
+                         "AvatarVideoTransferPolicyTest.kt").is_file())
         # «Логи» показывают цепочку обмена: по отчёту видно, где она рвётся.
         self.assertIn("fun report(context: Context): String", self.store)
         self.assertIn("PeerVideoAvatarStore.bump(", self.coord)
