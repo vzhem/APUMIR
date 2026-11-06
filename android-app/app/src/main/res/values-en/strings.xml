@@ -2421,6 +2421,15 @@ The file is not on this phone</string>
     <string name="av_video_set">Video avatar set: it plays in your profile, friends see a frame from it</string>
     <string name="av_video_too_long">The video must be up to 15 seconds — it’s an avatar, not a movie</string>
     <string name="av_video_failed">Couldn’t set the video avatar</string>
+    <string name="av_video_editor_title">Video avatar · up to 15 seconds</string>
+    <string name="av_video_source_hint">Record a video or pick an existing one. Everything from video stories is available: front and rear camera, pause, sound, torch, face filters, background replacement, voice effects, trimming, poster frame and caption.</string>
+    <string name="av_video_trim_hint">The clip is longer than 15 seconds: pick a fragment in the editor — the avatar loops.</string>
+    <string name="av_video_cover_label">Poster frame: %1$s s from the start of the fragment</string>
+    <string name="av_video_install">Set the video avatar</string>
+    <string name="av_video_installing">Setting the video avatar…</string>
+    <string name="av_video_result_hint">The video loops silently in your profile. Friends and lists see the frame you picked.</string>
+    <string name="av_video_reset_hint">Choose what to reset, or reset everything: the first 15 seconds (or the whole short clip), the poster frame at the start, the original sound, an empty caption and the regular shape. The source video stays.</string>
+    <string name="av_video_reset_done_body">The chosen video avatar settings are back to their defaults.</string>
     <string name="settings_remove_video_avatar">Remove the video avatar</string>
     <string name="diag_warnings_title">Warnings and errors</string>
     <string name="diag_warnings_hint">Tap “warn.” or “errors” — we’ll show exactly which ones right away.</string>

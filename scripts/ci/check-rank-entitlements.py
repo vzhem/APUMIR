@@ -56,6 +56,7 @@ class RankEntitlementsContract(unittest.TestCase):
             ("SEND_DOCUMENT", 3),
             ("SHARE_LOCATION", 3),
             ("PUBLISH_STORY", 3),
+            ("VIDEO_AVATAR", 3),
             ("CALL_VOICE", 3),
             ("CALL_VIDEO", 3),
             ("CREATE_POLL", 3),
@@ -119,6 +120,10 @@ class RankEntitlementsContract(unittest.TestCase):
         self.assertIn("CallRankGate.rejection(", read(JAVA / "data/call/CallManager.kt"))
         # Истории: публикация проверяется в ViewModel списка чатов.
         self.assertIn("StoryRankGate.canPublish(", read(JAVA / "ui/screens/chat/ChatListViewModel.kt"))
+        # Видеоаватар: отказ виден до записи (окно создания) И проверяется там,
+        # где файл сохраняется, — иначе старый экран поставил бы видео мимо ранга.
+        self.assertIn("VideoAvatarRankGate.canSet(", read(JAVA / "ui/components/VideoAvatarComposer.kt"))
+        self.assertIn("VideoAvatarRankGate.requireCanSet(", read(JAVA / "data/profile/VideoAvatarInstaller.kt"))
 
     # 3) приём и входящие звонки не ограничены --------------------------------
     def test_incoming_sides_are_never_rank_limited(self):

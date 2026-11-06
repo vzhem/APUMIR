@@ -67,6 +67,12 @@ fun AvatarPickerDialog(
     onTakePhoto: () -> Unit,
     /** Поставить видеоаватар (только личный профиль; у групп кнопка не показывается). */
     onPickVideo: (() -> Unit)? = null,
+    /**
+     * Почему видеоаватар ещё закрыт: готовый текст отказа по рангу. Кнопка
+     * остаётся видимой — человек должен видеть, чего ему не хватает, а не
+     * гадать, где пропала функция.
+     */
+    videoLockedHint: String? = null,
     onDismiss: () -> Unit,
 ) {
     val ids = remember(context) {
@@ -180,6 +186,14 @@ fun AvatarPickerDialog(
                         onClick = onPickVideo,
                         modifier = Modifier.fillMaxWidth(),
                     )
+                    val lockedHint = videoLockedHint
+                    if (!lockedHint.isNullOrBlank()) {
+                        Text(
+                            text = lockedHint,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = ApuBubbleMutedColor,
+                        )
+                    }
                 }
 
                 ApuPremiumContentButton(

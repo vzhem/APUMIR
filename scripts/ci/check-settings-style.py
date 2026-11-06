@@ -264,11 +264,23 @@ class SettingsStyleTest(unittest.TestCase):
         text = source("screens/settings/SettingsScreen.kt")
         for event in (
             "onMyQr", "onCopyLink", "onUsername", "onEditName", "onShareProfile", "onRankBenefits",
-            "AvatarHolder.set(context, null)", "cameraPermission.launch(android.Manifest.permission.CAMERA)",
-            "AvatarFiles.saveCropped", "viewModel.onDisplayNameChanged(nameValue)",
+            "AvatarHolder.set(context, null)", "viewModel.onDisplayNameChanged(nameValue)",
             "UsernameHolder.set(usernameContext, usernameValue)", "UsernameHolder.isValid(usernameValue)",
         ):
             self.assertIn(event, text)
+        # Поток аватара (галерея, камера, обрезка, видеоаватар) вынесен из
+        # god-файла настроек в свой файл: разрешения и сохранение обрезки
+        # проверяются там, где теперь живут.
+        avatar_flow = source("screens/settings/ProfileAvatarDialogs.kt")
+        for event in (
+            "cameraPermission.launch(android.Manifest.permission.CAMERA)",
+            "AvatarFiles.saveCropped", "AvatarFiles.captureTarget(context)",
+            "AvatarPickerDialog(", "AvatarCropDialog(", "VideoAvatarComposer(",
+        ):
+            self.assertIn(event, avatar_flow)
+        # И экран зовёт именно вынесенный поток, а не держит второй свой.
+        self.assertIn("ProfileAvatarDialogs(onDismiss = { showAvatarPicker = false })", text)
+        self.assertNotIn("videoAvatarPicker", text)
         self.assertIn("SelectionContainer", text)
         self.assertIn("uiState.fingerprint", text)
         self.assertIn("uiState.heartCount", text)

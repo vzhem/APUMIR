@@ -43,7 +43,15 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
-/** Local editor only. onReady hands off a verified export, it does not claim network publication. */
+/**
+ * Local editor only. onReady hands off a verified export, it does not claim network publication.
+ *
+ * Один редактор на два потока: видеоистория (60 секунд) и видеоаватар
+ * (15 секунд, `VideoAvatarComposer`). Возможности у них одинаковые — форма,
+ * обрезка, звук, кадр-постер, подпись и сброс по одному параметру, — поэтому
+ * второй поток не копирует экран, а передаёт свой предел длительности и свои
+ * подписи. Всё, что появляется здесь, появляется сразу в обоих.
+ */
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 internal fun StoryVideoEditor(
@@ -52,6 +60,11 @@ internal fun StoryVideoEditor(
     onReady: (StoryVideoExporter.Exported) -> Unit,
     draft: StoryVideoDraft,
     onDraftChange: (StoryVideoDraft) -> Unit,
+    maxDurationMs: Long = StoryVideoDraft.MAX_DURATION_MS,
+    @androidx.annotation.StringRes titleRes: Int = R.string.story_record_title,
+    @androidx.annotation.StringRes coverLabelRes: Int = R.string.story_record_cover,
+    @androidx.annotation.StringRes resetHintRes: Int = R.string.story_video_reset_hint,
+    @androidx.annotation.StringRes resetDoneBodyRes: Int = R.string.story_video_reset_done_body,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -98,7 +111,7 @@ internal fun StoryVideoEditor(
         ApuSettingsCard(Modifier.fillMaxSize().safeDrawingPadding()) {
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(stringResource(R.string.story_record_title))
+                Text(stringResource(titleRes))
                 StoryVideoShapeSelector(draft.circle, enabled = !busy, onChange = {
                     onDraftChange(draft.copy(circle = it))
                 })
@@ -121,7 +134,7 @@ internal fun StoryVideoEditor(
                         onDraftChange(draft.trim(start, end))
                     })
                 Text(stringResource(R.string.story_record_duration, draft.durationMs / 1000.0))
-                val maxDuration = minOf(StoryVideoDraft.MAX_DURATION_MS, source.durationMs - draft.startMs)
+                val maxDuration = minOf(maxDurationMs, source.durationMs - draft.startMs)
                 if (maxDuration > StoryVideoDraft.MIN_DURATION_MS) {
                     ApuPremiumSlider(value = draft.durationMs.toFloat(), enabled = !busy,
                         valueRange = StoryVideoDraft.MIN_DURATION_MS.toFloat()..maxDuration.toFloat(),
@@ -132,7 +145,7 @@ internal fun StoryVideoEditor(
                     ApuPremiumSwitch(checked = draft.muted, enabled = !busy,
                         onCheckedChange = { onDraftChange(draft.copy(muted = it)) })
                 }
-                Text(stringResource(R.string.story_record_cover, (draft.coverMs - draft.startMs) / 1000.0))
+                Text(stringResource(coverLabelRes, (draft.coverMs - draft.startMs) / 1000.0))
                 ApuPremiumSlider(value = draft.coverMs.toFloat(), enabled = !busy,
                     valueRange = draft.startMs.toFloat()..(draft.endMs - 1).toFloat(),
                     onValueChange = {
@@ -177,7 +190,7 @@ internal fun StoryVideoEditor(
             }
         }
     }
-    if (resetDialog) StoryVideoResetDialog(onDismiss = { resetDialog = false }, onReset = { setting ->
+    if (resetDialog) StoryVideoResetDialog(hintRes = resetHintRes, onDismiss = { resetDialog = false }, onReset = { setting ->
         val changed = draft.reset(setting)
         onDraftChange(changed)
         error = null
@@ -190,7 +203,7 @@ internal fun StoryVideoEditor(
     if (showResetDone) {
         ApuPremiumNoticeDialog(
             title = stringResource(R.string.story_video_reset_done_title),
-            message = stringResource(R.string.story_video_reset_done_body),
+            message = stringResource(resetDoneBodyRes),
             onDismiss = { showResetDone = false },
             icon = androidx.compose.material.icons.Icons.Default.CheckCircle,
         )

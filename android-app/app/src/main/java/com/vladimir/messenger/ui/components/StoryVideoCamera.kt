@@ -126,7 +126,15 @@ private enum class FilterPart(@androidx.annotation.StringRes val labelRes: Int) 
  * Локальный владелец файла: вызывающий получает приватный исходник и обязан удалить его после редактирования.
  */
 @Composable
-internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, onRecorded: (StoryVideoFiles.Source) -> Unit) {
+internal fun StoryVideoCamera(
+    circle: Boolean = false,
+    onDismiss: () -> Unit,
+    onRecorded: (StoryVideoFiles.Source) -> Unit,
+    /** Потолок записи: видеоистория — 60 секунд, видеоаватар — 15. */
+    maxDurationMs: Long = StoryVideoDraft.MAX_DURATION_MS,
+    /** Подпись простоя: «Видеоистория · до 60 секунд» либо «Видеоаватар · до 15 секунд». */
+    @androidx.annotation.StringRes titleRes: Int = R.string.story_record_title,
+) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
@@ -245,7 +253,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
         val backgroundForRecording = storyBackground
         val voiceEffectForRecording = voiceEffect
         try {
-            session.start(audio, onElapsed = { elapsed = it }, onFinished = { result ->
+            session.start(audio, maxDurationMs = maxDurationMs, onElapsed = { elapsed = it }, onFinished = { result ->
                 recording = false
                 stopping = true
                 val file = result.getOrNull()
@@ -377,7 +385,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                     session.close(); dismiss()
                 }
                 Spacer(Modifier.weight(1f))
-                StoryTimerPill(elapsedMs = elapsed, recording = recording, paused = paused)
+                StoryTimerPill(elapsedMs = elapsed, recording = recording, paused = paused, totalMs = maxDurationMs)
                 Spacer(Modifier.weight(1f))
                 if (hasTorch && !front) {
                     StoryCameraIconButton(
@@ -529,7 +537,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                         }
                     }
                     StoryShutterButton(
-                        progress = (elapsed / StoryVideoDraft.MAX_DURATION_MS.toFloat()).coerceIn(0f, 1f),
+                        progress = (elapsed / maxDurationMs.toFloat()).coerceIn(0f, 1f),
                         recording = recording,
                         enabled = if (recording) !stopping else ready && !stopping,
                         onClick = {
@@ -549,7 +557,7 @@ internal fun StoryVideoCamera(circle: Boolean = false, onDismiss: () -> Unit, on
                         stopping -> processing?.let { stringResource(R.string.story_record_applying_filter, (it * 100).toInt()) } ?: stringResource(R.string.story_record_saving)
                         recording -> if (paused) stringResource(R.string.story_record_paused_hint) else stringResource(R.string.story_record_finish_hint)
                         !ready && cameraAllowed -> stringResource(R.string.story_record_preparing)
-                        else -> stringResource(R.string.story_record_title)
+                        else -> stringResource(titleRes)
                     },
                     color = Color.White.copy(alpha = 0.85f),
                     style = MaterialTheme.typography.labelLarge,
@@ -608,8 +616,14 @@ private fun StoryCameraIconButton(
 }
 
 @Composable
-private fun StoryTimerPill(elapsedMs: Long, recording: Boolean, paused: Boolean) {
+private fun StoryTimerPill(
+    elapsedMs: Long,
+    recording: Boolean,
+    paused: Boolean,
+    totalMs: Long = StoryVideoDraft.MAX_DURATION_MS,
+) {
     val seconds = (elapsedMs / 1000L).coerceAtLeast(0L)
+    val totalSeconds = (totalMs / 1000L).coerceAtLeast(1L)
     Row(
         Modifier
             .clip(RoundedCornerShape(50))
@@ -622,14 +636,15 @@ private fun StoryTimerPill(elapsedMs: Long, recording: Boolean, paused: Boolean)
             Spacer(Modifier.width(7.dp))
         }
         Text(
-            "%d:%02d / 1:00".format(seconds / 60, seconds % 60) + if (paused) stringResource(R.string.story_record_paused_suffix) else "",
+            "%d:%02d / %d:%02d".format(seconds / 60, seconds % 60, totalSeconds / 60, totalSeconds % 60) +
+                if (paused) stringResource(R.string.story_record_paused_suffix) else "",
             color = Color.White,
             style = MaterialTheme.typography.labelLarge,
         )
     }
 }
 
-/** Большой затвор: кольцо прогресса по 60 секундам и квадрат «стоп» во время записи. */
+/** Большой затвор: кольцо прогресса до потолка записи и квадрат «стоп» во время неё. */
 @Composable
 private fun StoryShutterButton(progress: Float, recording: Boolean, enabled: Boolean, onClick: () -> Unit) {
     Box(

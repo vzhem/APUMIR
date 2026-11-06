@@ -153,6 +153,11 @@ IDENTITY_HEALTH="$BASE/main/java/com/vladimir/messenger/data/security/IdentityHe
 IDENTITY_HEALTH_TEST="$BASE/test/java/com/vladimir/messenger/data/security/IdentityHealthTest.kt"
 STORY_VIDEO_DRAFT="$BASE/main/java/com/vladimir/messenger/data/story/StoryVideoDraft.kt"
 STORY_VIDEO_DRAFT_TEST="$BASE/test/java/com/vladimir/messenger/data/story/StoryVideoDraftTest.kt"
+# Видеоаватар (запрос владельца 2026-11-06): редактор общий с видеоисторией, а
+# пределы свои (15 секунд, кадр-постер наружу). Правила чистые, поэтому окно
+# аватара и приведение черновика после «сбросить всё» ловятся здесь, на runner.
+VIDEO_AVATAR_POLICY="$BASE/main/java/com/vladimir/messenger/data/profile/VideoAvatarPolicy.kt"
+VIDEO_AVATAR_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/data/profile/VideoAvatarPolicyTest.kt"
 # TextColorPalette в этом окружении не компилируется: ему нужны Compose Color и
 # сгенерированный R.string. Поэтому TextColorWire (он здесь настоящий, его
 # формат и проверяем) собирается с заглушкой палитры, а список id берётся ИЗ
@@ -185,7 +190,7 @@ PYGEN
 "$JAVA" -cp "$OUT/compiler/*:$OUT/runtime/kotlin-stdlib-$KOTLIN.jar" \
     org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
     -no-stdlib -no-reflect -jvm-target 17 -classpath "$CP" -d "$OUT/classes" \
-    "$STORY_VIDEO_DRAFT" "$STORY_VIDEO_DRAFT_TEST" "$MODEL/Message.kt" "$MODEL/MessageStatus.kt" "$MODEL/MessageChannel.kt" "$OBSERVER" "$TEST" "$PIN_POLICY" "$PIN_TEST" "$SPLASH_MATH" "$SPLASH_TEST" "$SETTINGS_LAYOUT" "$SETTINGS_TEST" "$HEART_WIRE" "$HEART_TEST" "$GROUP_PERMS" "$GROUP_PERMS_TEST" \
+    "$STORY_VIDEO_DRAFT" "$STORY_VIDEO_DRAFT_TEST" "$VIDEO_AVATAR_POLICY" "$VIDEO_AVATAR_POLICY_TEST" "$MODEL/Message.kt" "$MODEL/MessageStatus.kt" "$MODEL/MessageChannel.kt" "$OBSERVER" "$TEST" "$PIN_POLICY" "$PIN_TEST" "$SPLASH_MATH" "$SPLASH_TEST" "$SETTINGS_LAYOUT" "$SETTINGS_TEST" "$HEART_WIRE" "$HEART_TEST" "$GROUP_PERMS" "$GROUP_PERMS_TEST" \
     "$SLOW_MODE" "$SLOW_MODE_TEST" "$QUIET_HOURS" "$QUIET_HOURS_TEST" "$POST_MANIFEST" "$BASE/main/java/com/vladimir/messenger/data/group/GroupWallpaper.kt" "$BASE/test/java/com/vladimir/messenger/data/group/GroupWallpaperTest.kt" "$GROUP_WIRE" "$GROUP_SOS" "$SOS_MESSAGE" "$TEXT_COLOR_WIRE" "$STUB_DIR/TextColorPalette.kt" "$GROUP_WIRE_TEST" "$GROUP_WIRE_UPDATE_TEST" \
     "$OP_HEALTH" "$OP_BOUNDED_READ" "$OP_CLEANUP" "$OP_HEALTH_TEST" "$STORY_QUEUE" "$STORY_QUEUE_TEST" "$RUNTIME_HEALTH" "$RUNTIME_HEALTH_TEST" "$DIAG_REPORT" "$UPDATE_DIAG_REPORT" "$RELAY_STORAGE" "$RELAY_STORAGE_TEST" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
     "$STORY_FEEDBACK_WIRE" "$STORY_FEEDBACK_LEDGER" "$STORY_FEEDBACK_OUTBOX" \
@@ -210,6 +215,7 @@ PYGEN
     com.vladimir.messenger.data.heart.HeartWireTest \
     com.vladimir.messenger.data.group.GroupPermissionsTest \
     com.vladimir.messenger.data.story.StoryVideoDraftTest \
+    com.vladimir.messenger.data.profile.VideoAvatarPolicyTest \
     com.vladimir.messenger.data.group.GroupSlowModeTest \
     com.vladimir.messenger.data.group.GroupQuietHoursTest \
     com.vladimir.messenger.data.group.GroupWireTest \

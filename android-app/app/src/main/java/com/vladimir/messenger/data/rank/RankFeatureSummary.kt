@@ -26,6 +26,7 @@ object RankFeatureSummary {
         RankCapability.SEND_DOCUMENT -> "Отправка файлов"
         RankCapability.SHARE_LOCATION -> "Отправка геолокации"
         RankCapability.PUBLISH_STORY -> "Публикация историй"
+        RankCapability.VIDEO_AVATAR -> "Видеоаватар профиля"
         RankCapability.CALL_VOICE -> "Голосовые звонки"
         RankCapability.CALL_VIDEO -> "Видеозвонки"
         RankCapability.CREATE_POLL -> "Создание опросов"
