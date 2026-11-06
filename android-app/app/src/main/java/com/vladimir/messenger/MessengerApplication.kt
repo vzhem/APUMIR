@@ -25,6 +25,9 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
     @javax.inject.Inject lateinit var workerFactory: androidx.hilt.work.HiltWorkerFactory
     @javax.inject.Inject lateinit var obsoleteSameDeviceRegistrationCleanup:
         com.vladimir.messenger.data.security.ObsoleteSameDeviceRegistrationCleanup
+    /** Обмен видеоаватарами с контактами: анонсы, просьбы, повторы. */
+    @javax.inject.Inject lateinit var avatarVideos:
+        com.vladimir.messenger.data.avatavideo.AvatarVideoCoordinator
 
     override val workManagerConfiguration: androidx.work.Configuration
         get() = androidx.work.Configuration.Builder().setWorkerFactory(workerFactory).build()
@@ -80,6 +83,8 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
         com.vladimir.messenger.data.swarm.BrokerSettings.applyToCore(this)
         com.vladimir.messenger.data.pairing.DevicePairingController.attach(this)
         com.vladimir.messenger.data.story.StoryStore.attach(this)
+        // Видеоаватары собеседников: догоняющие просьбы, анонс своего, уборка.
+        avatarVideos.start()
         // Отклики на истории (значки и комментарии) живут своим снимком и
         // поднимаются вместе с лентой: до attach книга откликов пуста.
         com.vladimir.messenger.data.story.StoryFeedbackStore.attach(this)
@@ -124,6 +129,8 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
         }.onFailure { Log.w("MessengerApp", "same-device identity cleanup skipped", it) }
         com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.install(this)
         com.vladimir.messenger.data.diagnostics.RuntimeDiagnostics.install(this)
+        // След последнего падения: рано, чтобы поймать падение любого экрана.
+        com.vladimir.messenger.data.diagnostics.CrashTrace.install(this)
         // р236: черновики сообщений (недописанный текст поля ввода).
         com.vladimir.messenger.data.draft.DraftStore.attach(applicationContext)
         createNotificationChannels()

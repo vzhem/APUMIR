@@ -212,10 +212,11 @@ class FileTransferRouter @Inject constructor(
         keyVault = AndroidTransferKeyVaultAccess(appContext)
         val notifier = FileTransferReceiver.FileChatNotifier(
             { chatId, senderId, messageId, displayName, mediaType, totalBytes, fileSha256 ->
-                if (com.vladimir.messenger.data.story.StoryVideoWire.reserved(displayName)) {
+                if (com.vladimir.messenger.data.story.StoryVideoWire.reserved(displayName) ||
+                    com.vladimir.messenger.data.avatavideo.AvatarVideoWire.reserved(displayName)) {
                     transferDao.getForFile(chatId, fileSha256).firstOrNull {
                         it.direction == "INCOMING" && it.peerNodeId == senderId && it.displayName == displayName && it.state == "COMPLETE"
-                    }?.let { acceptStoryVideo(it) }
+                    }?.let { acceptSpecialMedia(it) }
                     return@FileChatNotifier // Never create a chat card or mirror a story as an attachment.
                 }
                 // Рой APK (docs/UPDATE_SEEDING.md): файл в виртуальное
@@ -444,7 +445,8 @@ class FileTransferRouter @Inject constructor(
             isOnline = { nodeId -> isPeerOnline(nodeId) },
             // Файлы группы (этап 9) на хранение не отдаём: см. FileCustodySender.
             custodyAllowed = { transfer ->
-                !com.vladimir.messenger.data.story.StoryVideoWire.reserved(transfer.displayName) &&
+                !(com.vladimir.messenger.data.story.StoryVideoWire.reserved(transfer.displayName) ||
+                    com.vladimir.messenger.data.avatavideo.AvatarVideoWire.reserved(transfer.displayName)) &&
                     runCatching { !groupFiles.get().isGroupChat(transfer.chatId) }.getOrDefault(true)
             },
         )
@@ -627,26 +629,10 @@ class FileTransferRouter @Inject constructor(
         }
     }
 
-    /** True when the text was a file packet/handshake; the caller must skip chat-text handling. */
-    private suspend fun acceptStoryVideo(row: com.vladimir.messenger.data.local.entity.FileTransferEntity) {
-        val story = com.vladimir.messenger.data.story.StoryStore.active().firstOrNull {
-            com.vladimir.messenger.data.story.StoryVideoWire.matches(it, row.peerNodeId, row.displayName,
-                row.fileSha256, row.totalBytes, System.currentTimeMillis())
-        } ?: return
-        if (com.vladimir.messenger.data.story.StoryVideoStorage.file(appContext, story) != null ||
-            com.vladimir.messenger.data.story.StoryVideoStorage.failure(story) != null) return
-        val file = receivedStore.receivedFile(row.transferId, row.displayName) ?: return
-        try {
-            com.vladimir.messenger.data.story.StoryVideoStorage.install(appContext,
-                story.authorId, story.id, file, checkNotNull(story.video))
-            // A revoke/expiry may have raced the hashing/copy. Never resurrect it.
-            if (com.vladimir.messenger.data.story.StoryStore.active().none { it.id == story.id && it.authorId == story.authorId }) {
-                com.vladimir.messenger.data.story.StoryVideoStorage.remove(appContext, story.authorId, story.id)
-            }
-        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-        catch (failure: Exception) {
-            com.vladimir.messenger.data.story.StoryVideoStorage.noteFailure(story)
-            Log.w(TAG, "Story video validation failed", failure)
+    /** Служебные файлы (видеоистории, видеоаватары) складываются вне чата: см. SpecialMediaInbox. */
+    private suspend fun acceptSpecialMedia(row: com.vladimir.messenger.data.local.entity.FileTransferEntity) {
+        com.vladimir.messenger.data.avatavideo.SpecialMediaInbox.accept(appContext, row) { id, name ->
+            receivedStore.receivedFile(id, name)
         }
     }
 
@@ -822,7 +808,7 @@ class FileTransferRouter @Inject constructor(
                 FileTransferKeyVault.deleteKey(appContext, row.transferId)
             }, completed = { row ->
                 if (row.direction == "OUTGOING") releaseOutgoingChunks(row.transferId)
-                else acceptStoryVideo(row)
+                else acceptSpecialMedia(row)
             }, requestKey = { requestExchangeBinding(it) }) }.onFailure { Log.w(TAG, "Story video maintenance deferred", it) }
             outgoingTransferMutex.lock()
             try {

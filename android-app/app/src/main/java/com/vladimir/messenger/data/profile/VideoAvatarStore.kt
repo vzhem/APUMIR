@@ -70,6 +70,9 @@ object VideoAvatarStore {
         _path.value = active
         _caption.value = if (active == null) "" else caption.take(VideoAvatarPolicy.MAX_CAPTION_CHARS)
         _circle.value = circle
+        // Контакты узнают о новом ролике (или его снятии) сразу, а не к следующему
+        // анонсу: мост к координатору обмена видеоаватарами.
+        com.vladimir.messenger.data.avatavideo.AvatarVideoGossip.onMyVideoChanged(context)
     }
 
     /** Убрать видеоаватар, не трогая обычную картинку. */

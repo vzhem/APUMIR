@@ -10,14 +10,12 @@ import com.vladimir.messenger.R
 // Размер задаёт вызывающий экран через modifier (например, Modifier.size(96.dp)).
 // =============================================================================
 
-import android.net.Uri
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -31,16 +29,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.exoplayer.ExoPlayer
 import com.vladimir.messenger.data.profile.VideoAvatarStore
 import com.vladimir.messenger.ui.theme.AvatarHolder
-import java.io.File
 
 @Composable
 fun MyAvatar(
@@ -110,53 +100,5 @@ fun MyAvatar(
         if (selfVip) {
             VipRing(Modifier.matchParentSize())
         }
-    }
-}
-
-/**
- * Проигрыватель видеоаватара поверх кадра-постера.
- *
- * TextureView, а не VideoView: отдельный слой SurfaceView уходит из-под
- * круглой маски Compose, и квадратное видео торчало бы за круг аватара (та же
- * причина, по которой истории рисуются через `StoryVideoSurface`). Ролик
- * зациклен и выключен по звуку — аватар, а не просмотр; на уходе экрана в фон
- * плеер останавливается и возобновляется при возврате.
- */
-@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-@Composable
-private fun VideoAvatarPlayback(path: String, circle: Boolean) {
-    val context = LocalContext.current
-    val owner = LocalLifecycleOwner.current
-    // Ролик мог не доехать (зеркало, чистка кэша): тогда молча остаётся постер.
-    var broken by remember(path) { mutableStateOf(false) }
-    val player = remember(path) { ExoPlayer.Builder(context).build() }
-    DisposableEffect(player, owner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_STOP -> player.pause()
-                Lifecycle.Event.ON_START -> player.play()
-                else -> Unit
-            }
-        }
-        val listener = object : Player.Listener {
-            override fun onPlayerError(error: PlaybackException) {
-                broken = true
-            }
-        }
-        owner.lifecycle.addObserver(observer)
-        player.addListener(listener)
-        player.repeatMode = Player.REPEAT_MODE_ONE
-        player.volume = 0f
-        player.setMediaItem(MediaItem.fromUri(Uri.fromFile(File(path))))
-        player.prepare()
-        player.playWhenReady = true
-        onDispose {
-            owner.lifecycle.removeObserver(observer)
-            player.removeListener(listener)
-            player.release()
-        }
-    }
-    if (!broken) {
-        StoryVideoSurface(player = player, circle = circle, modifier = Modifier.fillMaxSize())
     }
 }

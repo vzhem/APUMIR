@@ -46,7 +46,28 @@ internal class StoryFaceTracker(
     private var cachedBackground: Bitmap? = null
     private var cachedBackgroundKey = ""
 
-    private val detector: FaceDetector = newStoryFaceDetector()
+    /**
+     * Детектор лица — лениво и с защитой. `FaceDetection.getClient` — внешняя
+     * ML-библиотека, и её отказ обязан выключать фильтры лица, а не ронять
+     * экран записи: именно инициализация ML Kit в конструкторе стояла первой
+     * строкой на пути «Записать видео» и падала на всех телефонах (владелец
+     * 2026-11-06: и видеоаватар, и видеоистории). Так же устроены
+     * [com.vladimir.messenger.data.background.PersonSegmenter] и переводчик —
+     * клиенты ML Kit создаются по первому обращению, а не при старте экрана.
+     */
+    @Volatile
+    private var detector: FaceDetector? = null
+
+    /** false — модуль лица не поднялся: фильтры лица выключаются, запись остаётся. */
+    val detectorAvailable: Boolean
+        get() = detectorOrLoad() != null
+
+    private fun detectorOrLoad(): FaceDetector? = detector ?: synchronized(this) {
+        detector ?: runCatching { newStoryFaceDetector() }
+            .onFailure { android.util.Log.w("StoryFaceTracker", "Face detector unavailable", it) }
+            .getOrNull()
+            .also { detector = it }
+    }
 
     @ExperimentalGetImage
     override fun analyze(image: ImageProxy) {
@@ -67,9 +88,13 @@ internal class StoryFaceTracker(
             return
         }
         val input = InputImage.fromMediaImage(media, image.imageInfo.rotationDegrees)
-        // Результат приходит на главном потоке (addOnSuccessListener без executor),
-        // поэтому состояние Compose можно обновлять прямо из него.
-        detector.process(input)
+        val faceDetector = detectorOrLoad() ?: run {
+            // Модуль лица не поднялся: кадр без фильтров уходит дальше,
+            // экран уже показывает «фильтры лица недоступны».
+            image.close()
+            return
+        }
+        faceDetector.process(input)
             .addOnSuccessListener { faces ->
                 onFrame(StoryFaceFrame(input.width, input.height, faces.map { it.toStoryFace() }))
             }
@@ -106,7 +131,9 @@ internal class StoryFaceTracker(
     }
 
     fun close() {
-        detector.close()
+        // Детектор мог не создаться — закрывать тогда нечего; создавать
+        // его ради закрытия нельзя.
+        synchronized(this) { detector.also { detector = null } }?.close()
     }
 
 }

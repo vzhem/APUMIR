@@ -342,7 +342,7 @@ private fun StoryCommentRow(comment: StoryFeedbackWire.Comment) {
         if (mine) {
             MyAvatar(displayName = name, modifier = Modifier.size(32.dp), size = 32)
         } else {
-            PeerAvatar(name, avatars[comment.actorId], 32.dp)
+            PeerAvatar(name, avatars[comment.actorId], 32.dp, peerId = comment.actorId)
         }
         Column(modifier = Modifier.weight(1f).padding(start = 10.dp)) {
             Text(

@@ -980,7 +980,7 @@ private fun AdminsTab(
                         PeerAvatar(
                             name = admin.displayName.ifBlank { admin.nodeId },
                             avatarB64 = memberAvatars[admin.nodeId],
-                            size = 40.dp,
+                            size = 40.dp, peerId = admin.nodeId,
                         )
                         Spacer(Modifier.width(10.dp))
                         Column(modifier = Modifier.weight(1f)) {
@@ -1168,7 +1168,7 @@ private fun MemberRow(
                     name = member.displayName.ifBlank { member.nodeId },
                     avatarB64 = memberAvatars[member.nodeId],
                     vip = vip,
-                    size = 40.dp,
+                    size = 40.dp, peerId = member.nodeId,
                 )
                 Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
@@ -1269,7 +1269,7 @@ private fun RequestsTab(requests: List<JoinRequestSummary>, onDecide: (String, B
                         PeerAvatar(
                             name = request.displayName.ifBlank { request.nodeId.take(8) },
                             avatarB64 = applicantAvatars[request.nodeId],
-                            size = 44.dp,
+                            size = 44.dp, peerId = request.nodeId,
                         )
                         Spacer(Modifier.width(10.dp))
                         Text(
