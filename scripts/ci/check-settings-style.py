@@ -264,11 +264,23 @@ class SettingsStyleTest(unittest.TestCase):
         text = source("screens/settings/SettingsScreen.kt")
         for event in (
             "onMyQr", "onCopyLink", "onUsername", "onEditName", "onShareProfile", "onRankBenefits",
-            "AvatarHolder.set(context, null)", "cameraPermission.launch(android.Manifest.permission.CAMERA)",
-            "AvatarFiles.saveCropped", "viewModel.onDisplayNameChanged(nameValue)",
+            "AvatarHolder.set(context, null)", "viewModel.onDisplayNameChanged(nameValue)",
             "UsernameHolder.set(usernameContext, usernameValue)", "UsernameHolder.isValid(usernameValue)",
         ):
             self.assertIn(event, text)
+        # Поток аватара (галерея, камера, обрезка, видеоаватар) вынесен из
+        # god-файла настроек в свой файл: разрешения и сохранение обрезки
+        # проверяются там, где теперь живут.
+        avatar_flow = source("screens/settings/ProfileAvatarDialogs.kt")
+        for event in (
+            "cameraPermission.launch(android.Manifest.permission.CAMERA)",
+            "AvatarFiles.saveCropped", "AvatarFiles.captureTarget(context)",
+            "AvatarPickerDialog(", "AvatarCropDialog(", "VideoAvatarComposer(",
+        ):
+            self.assertIn(event, avatar_flow)
+        # И экран зовёт именно вынесенный поток, а не держит второй свой.
+        self.assertIn("ProfileAvatarDialogs(onDismiss = { showAvatarPicker = false })", text)
+        self.assertNotIn("videoAvatarPicker", text)
         self.assertIn("SelectionContainer", text)
         self.assertIn("uiState.fingerprint", text)
         self.assertIn("uiState.heartCount", text)
@@ -491,8 +503,9 @@ class SettingsStyleTest(unittest.TestCase):
         # (владелец 2026-10-07: «чтобы аккаунт VIP должно быть видно везде»).
         self.assertIn("VipRing(Modifier.matchParentSize())", avatar)
         self.assertIn("rememberSelfVip()", avatar)
-        self.assertIn("size = 108", source("screens/settings/SettingsScreen.kt"))
-        self.assertIn("size = 96", source("screens/share/ShareProfileScreen.kt"))
+        settings = source("screens/settings/SettingsScreen.kt")
+        self.assertIn("size = 108, playVideo = true", settings)
+        self.assertIn("size = 96, playVideo = true", source("screens/share/ShareProfileScreen.kt"))
 
     def test_groups_screen_and_create_dialog_use_house_style(self):
         groups = source("screens/groups/GroupsScreen.kt")

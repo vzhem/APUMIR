@@ -71,7 +71,7 @@
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupChatViewModel.kt": 4,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupsViewModel.kt": 2,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/mtproxy/MtProxyViewModel.kt": 1,
-    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsScreen.kt": 3,
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsScreen.kt": 2,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsViewModel.kt": 2,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/update/UpdateViewModel.kt": 1,
     "android-app/app/src/main/java/com/vladimir/messenger/util/AvatarCompress.kt": 1,

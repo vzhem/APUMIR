@@ -406,75 +406,10 @@ private fun ProfileTabContent(
     var showEmojiStatusPicker by remember { mutableStateOf(false) }
     val myEmojiStatus by com.vladimir.messenger.data.profile.EmojiStatusStore.mine
         .collectAsStateWithLifecycle()
-    // Картинка, для которой сейчас выбирают область. null - окна обрезки нет.
-    var avatarToCrop by remember { mutableStateOf<android.graphics.Bitmap?>(null) }
-    // Куда камера положит снимок: URI нужен и при запуске, и при разборе.
-    var pendingPhotoUri by remember { mutableStateOf<android.net.Uri?>(null) }
     // День рождения: дата (по желанию) и галочка «видна друзьям» рядом с ней.
     val myBirthday by com.vladimir.messenger.data.profile.BirthdayStore.mine
         .collectAsStateWithLifecycle()
     var showBirthdayDialog by remember { mutableStateOf(false) }
-
-    val avatarPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) {
-            try {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                )
-            } catch (_: Exception) { /* провайдер не даёт постоянного доступа: читаем разово ниже */ }
-            // Не сохраняем сразу: сперва человек выбирает область.
-            avatarToCrop = com.vladimir.messenger.util.AvatarFiles.readForCrop(context, uri)
-        }
-    }
-
-    // Видеоаватар: выбрать короткое видео; постер из него встанет обычным
-    // аватаром, а в профиле будет играть само видео.
-    val videoAvatarPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.GetContent()
-    ) { uri ->
-        if (uri != null) {
-            val prepared = com.vladimir.messenger.util.AvatarFiles.prepareVideoAvatar(context, uri)
-            prepared.onSuccess { video ->
-                com.vladimir.messenger.util.AvatarFiles.saveCropped(context, video.poster)
-                    ?.let { AvatarHolder.set(context, it) }
-                com.vladimir.messenger.data.profile.VideoAvatarStore.set(context, video.path)
-                android.widget.Toast.makeText(
-                    context, R.string.av_video_set, android.widget.Toast.LENGTH_LONG,
-                ).show()
-            }.onFailure { failure ->
-                android.widget.Toast.makeText(
-                    context,
-                    failure.message ?: context.getString(R.string.av_video_failed),
-                    android.widget.Toast.LENGTH_LONG,
-                ).show()
-            }
-        }
-    }
-
-    val photoTaker = rememberLauncherForActivityResult(
-        ActivityResultContracts.TakePicture()
-    ) { ok ->
-        val shot = pendingPhotoUri
-        if (ok && shot != null) {
-            avatarToCrop = com.vladimir.messenger.util.AvatarFiles.readForCrop(context, shot)
-        }
-        pendingPhotoUri = null
-    }
-
-    // Разрешение спрашиваем только когда человек нажал «Снять фото»: просить
-    // камеру заранее, на всякий случай, - плохая манера.
-    val cameraPermission = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            val target = com.vladimir.messenger.util.AvatarFiles.captureTarget(context)
-            pendingPhotoUri = target
-            photoTaker.launch(target)
-        }
-    }
 
     val profileView = androidx.compose.ui.platform.LocalView.current
     var showFingerprint by remember { mutableStateOf(false) }
@@ -511,7 +446,7 @@ private fun ProfileTabContent(
                                     .border(2.dp, ApuBubbleAccentColor.copy(alpha = 0.38f), CircleShape)
                                     .padding(5.dp),
                             ) {
-                                MyAvatar(displayName = uiState.displayName, modifier = Modifier.fillMaxSize(), size = 108)
+                                MyAvatar(displayName = uiState.displayName, modifier = Modifier.fillMaxSize(), size = 108, playVideo = true)
                             }
                             Box(
                                 modifier = Modifier.align(Alignment.BottomEnd).size(30.dp)
@@ -676,6 +611,7 @@ private fun ProfileTabContent(
                                 }
                             }
                         }
+                        com.vladimir.messenger.ui.components.VideoAvatarCaptionLine()
                         if (avatarUri != null) {
                             Spacer(Modifier.height(6.dp))
                             ApuTextAction(
@@ -693,7 +629,9 @@ private fun ProfileTabContent(
                             ApuTextAction(
                                 label = stringResource(R.string.settings_remove_video_avatar),
                                 onClick = {
-                                    com.vladimir.messenger.data.profile.VideoAvatarStore.set(context, null)
+                                    // Файл удаляется вместе с записью: иначе ролик
+                                    // остаётся в приватной папке навсегда.
+                                    com.vladimir.messenger.data.profile.VideoAvatarInstaller.clear(context)
                                 },
                             )
                         }
@@ -802,38 +740,10 @@ private fun ProfileTabContent(
         )
     }
 
-    // Диалог выбора аватара: стандартный набор из 50 или картинка из галереи.
+    // Выбор аватара целиком: готовые картинки, галерея, камера, обрезка и
+    // видеоаватар (создаётся тем же редактором, что и видеоистории).
     if (showAvatarPicker) {
-        AvatarPickerDialog(
-            context = context,
-            onPickUri = { uri ->
-                AvatarHolder.set(context, uri)
-                showAvatarPicker = false
-            },
-            onPickGallery = {
-                showAvatarPicker = false
-                avatarPicker.launch("image/*")
-            },
-            onPickVideo = {
-                showAvatarPicker = false
-                videoAvatarPicker.launch("video/*")
-            },
-            onTakePhoto = {
-                showAvatarPicker = false
-                val granted = androidx.core.content.ContextCompat.checkSelfPermission(
-                    context,
-                    android.Manifest.permission.CAMERA,
-                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                if (granted) {
-                    val target = com.vladimir.messenger.util.AvatarFiles.captureTarget(context)
-                    pendingPhotoUri = target
-                    photoTaker.launch(target)
-                } else {
-                    cameraPermission.launch(android.Manifest.permission.CAMERA)
-                }
-            },
-            onDismiss = { showAvatarPicker = false },
-        )
+        ProfileAvatarDialogs(onDismiss = { showAvatarPicker = false })
     }
 
     // Эмодзи-статус у профиля: палитра, свой значок, уборка статуса.
@@ -851,18 +761,6 @@ private fun ProfileTabContent(
         )
     }
 
-    // Выбор области: и для снимка с камеры, и для картинки из галереи.
-    avatarToCrop?.let { source ->
-        com.vladimir.messenger.ui.components.AvatarCropDialog(
-            source = source,
-            onConfirm = { cropped ->
-                com.vladimir.messenger.util.AvatarFiles.saveCropped(context, cropped)
-                    ?.let { AvatarHolder.set(context, it) }
-                avatarToCrop = null
-            },
-            onDismiss = { avatarToCrop = null },
-        )
-    }
 }
 
 // =============================================================================

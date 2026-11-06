@@ -125,9 +125,19 @@ internal class StoryVideoRecorder(
         tracker.enabled = on && faceTrackingAvailable
     }
 
-    /** Permissions are requested by the screen; denial of audio permits an explicit silent recording. */
+    /**
+     * Permissions are requested by the screen; denial of audio permits an explicit silent recording.
+     *
+     * [maxDurationMs] — потолок записи: у видеоистории свои 60 секунд, у
+     * видеоаватара 15, поэтому предел приходит от экрана, а не зашит здесь.
+     */
     @android.annotation.SuppressLint("MissingPermission")
-    fun start(withAudio: Boolean, onElapsed: (Long) -> Unit, onFinished: (Result<File>) -> Unit) {
+    fun start(
+        withAudio: Boolean,
+        onElapsed: (Long) -> Unit,
+        onFinished: (Result<File>) -> Unit,
+        maxDurationMs: Long = StoryVideoDraft.MAX_DURATION_MS,
+    ) {
         check(!closed && pendingFile == null)
         require(ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED)
         if (withAudio) require(ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
@@ -136,7 +146,10 @@ internal class StoryVideoRecorder(
         pendingFile = file
         cancelled = false
         try {
-            val options = FileOutputOptions.Builder(file).setDurationLimitMillis(StoryVideoDraft.MAX_DURATION_MS)
+            require(maxDurationMs in StoryVideoDraft.MIN_DURATION_MS..StoryVideoDraft.MAX_DURATION_MS) {
+                "Предел записи вне 1..60 секунд"
+            }
+            val options = FileOutputOptions.Builder(file).setDurationLimitMillis(maxDurationMs)
                 .setFileSizeLimit(StoryVideoFiles.MAX_SOURCE_BYTES).build()
             val pending = active.output.prepareRecording(context, options)
             recording = (if (withAudio) pending.withAudioEnabled() else pending)

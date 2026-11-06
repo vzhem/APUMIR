@@ -28,6 +28,8 @@ import android.util.Log
 import androidx.core.content.FileProvider
 import com.vladimir.messenger.data.profile.Birthday
 import com.vladimir.messenger.data.profile.BirthdayStore
+import com.vladimir.messenger.data.profile.VideoAvatarPolicy
+import com.vladimir.messenger.data.profile.VideoAvatarStore
 import com.vladimir.messenger.ui.theme.AvatarHolder
 import com.vladimir.messenger.ui.theme.ThemeMode
 import com.vladimir.messenger.ui.theme.ThemeModeHolder
@@ -54,11 +56,20 @@ object ProfileMirror {
     const val FIELD_WALL = "wall"
     const val FIELD_BDAY = "bday"
 
+    /**
+     * Видеоаватар: ролик едет тем же resumable каналом, что аватар и обои, но
+     * потолок свой — 24 МБ против 8 МБ у картинки (`VideoAvatarPolicy`).
+     */
+    const val FIELD_VAV = "vav"
+
     private const val PREFS = "apu_profile_mirror"
     private const val MAIN_PREFS = "p2p_prefs"
 
     /** Потолок картинки профиля, гонимой байтами (как у гифок в зеркале). */
     const val IMAGE_MAX_BYTES = 8L * 1024 * 1024
+
+    /** Потолок видеоаватара в зеркале: тот же, что у готового экспорта. */
+    const val VIDEO_MAX_BYTES = VideoAvatarPolicy.MAX_EXPORT_BYTES
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -99,6 +110,18 @@ object ProfileMirror {
         partnerBirthdayDigest = digest.trim()
     }
 
+    /**
+     * Отпечаток видеоаватара партнёра из hello/hb. Пусто — партнёр на старой
+     * сборке: расхождения нет, и снимок из-за него не запрашивается.
+     */
+    @Volatile
+    var partnerVideoDigest: String = ""
+        private set
+
+    fun notePartnerVideoDigest(digest: String) {
+        partnerVideoDigest = digest.trim()
+    }
+
     // ── Снимок профиля ──────────────────────────────────────────────────────
 
     data class State(
@@ -125,11 +148,37 @@ object ProfileMirror {
         /** Exact byte sizes let the resumable profile stream verify its final chunk. */
         val avBytes: Long = 0L,
         val wallBytes: Long = 0L,
+        /**
+         * Видеоаватар: имя файла, отпечаток, подпись из редактора и форма.
+         * Пустой [vavSha] — видеоаватара нет.
+         */
+        val vavName: String = "",
+        val vavSha: String = "",
+        val vavBytes: Long = 0L,
+        val vavCaption: String = "",
+        val vavCircle: Boolean = true,
+        val tVav: Long = 0L,
     ) {
         /** Отпечаток СОДЕРЖИМОГО (метки времени не входят): им сравниваются устройства. */
         fun digest(): String = sha256(
             listOf(name, nick, theme, avSha, wallSha).joinToString("|")
         ).take(32)
+
+        /**
+         * Ключ видеоаватара: файл, подпись и форма. Пусто, когда видеоаватара
+         * нет, — тогда ключ одинаков у новой сборки и у партнёра без видео.
+         */
+        fun videoKey(): String = if (vavSha.isBlank()) "" else
+            "$vavSha|$vavCaption|" + (if (vavCircle) 1 else 0)
+
+        /**
+         * Отпечаток видеоаватара — отдельной строкой («pv» в hello/hb).
+         *
+         * Отдельно от [digest] по той же причине, что и день рождения: старая
+         * сборка про видеоаватар не знает, и общий отпечаток с ним расходился
+         * бы вечно — полный снимок профиля каждые 10 секунд на ровном месте.
+         */
+        fun videoDigest(): String = sha256("vav|" + videoKey()).take(32)
 
         /** Ключ дня рождения для сравнения версий: число, месяц, видимость. */
         fun bdayKey(): String = if (Birthday.isValid(bdayDay, bdayMonth)) {
@@ -154,6 +203,7 @@ object ProfileMirror {
             if (avSha != other.avSha) diff += "аватар"
             if (wallSha != other.wallSha) diff += "обои"
             if (bdayKey() != other.bdayKey()) diff += "день рождения"
+            if (videoKey() != other.videoKey()) diff += "видеоаватар"
             return diff
         }
 
@@ -176,6 +226,12 @@ object ProfileMirror {
             .put("tbday", tBday)
             .put("avb", avBytes)
             .put("walb", wallBytes)
+            .put("vavn", vavName)
+            .put("vavs", vavSha)
+            .put("vavb", vavBytes)
+            .put("vavcap", vavCaption)
+            .put("vavcir", vavCircle)
+            .put("tvav", tVav)
 
         companion object {
             fun fromJson(o: JSONObject): State = State(
@@ -199,6 +255,14 @@ object ProfileMirror {
                 tBday = o.optLong("tbday", 0L),
                 avBytes = o.optLong("avb", 0L),
                 wallBytes = o.optLong("walb", 0L),
+                // Старый партнёр ключей видеоаватара не знает: пустой отпечаток
+                // читается как «нет видео», а не как «убрал видео».
+                vavName = o.optString("vavn", ""),
+                vavSha = o.optString("vavs", ""),
+                vavBytes = o.optLong("vavb", 0L),
+                vavCaption = o.optString("vavcap", ""),
+                vavCircle = o.optBoolean("vavcir", true),
+                tVav = o.optLong("tvav", 0L),
             )
         }
     }
@@ -218,6 +282,8 @@ object ProfileMirror {
         }
         val (avName, avSha) = imageState(app, FIELD_AV)
         val (wallName, wallSha) = imageState(app, FIELD_WALL)
+        val video = VideoAvatarStore.snapshot()
+        val videoFile = video.path?.let(::File)?.takeIf { it.isFile }
         val birthday = BirthdayStore.read(app)
         return State(
             name = main.getString("display_name", "") ?: "",
@@ -238,11 +304,19 @@ object ProfileMirror {
             tBday = upd.getLong("upd_" + FIELD_BDAY, 0L),
             avBytes = imageBytes(app, FIELD_AV, avName),
             wallBytes = imageBytes(app, FIELD_WALL, wallName),
+            vavName = videoFile?.name ?: "",
+            vavSha = videoFile?.let { sha256Of(it) }.orEmpty(),
+            vavBytes = videoFile?.length() ?: 0L,
+            vavCaption = video.caption,
+            vavCircle = video.circle,
+            tVav = upd.getLong("upd_" + FIELD_VAV, 0L),
         )
     }
 
     @Volatile private var cachedDigest: String = ""
     @Volatile private var cachedAt: Long = 0L
+    @Volatile private var cachedVideoDigest: String = ""
+    @Volatile private var cachedVideoAt: Long = 0L
     @Volatile private var cachedBdayDigest: String = ""
     @Volatile private var cachedBdayAt: Long = 0L
 
@@ -266,11 +340,23 @@ object ProfileMirror {
         return cachedBdayDigest
     }
 
+    /** Отпечаток видеоаватара для hello/hb: тот же лёгкий кэш. */
+    fun cachedVideoDigest(context: Context): String {
+        val now = System.currentTimeMillis()
+        if (cachedVideoDigest.isEmpty() || now - cachedVideoAt > 15_000L) {
+            cachedVideoDigest = snapshot(context, localize = false).videoDigest()
+            cachedVideoAt = now
+        }
+        return cachedVideoDigest
+    }
+
     private fun invalidateCache() {
         cachedDigest = ""
         cachedAt = 0L
         cachedBdayDigest = ""
         cachedBdayAt = 0L
+        cachedVideoDigest = ""
+        cachedVideoAt = 0L
     }
 
     // ── Локальные изменения ─────────────────────────────────────────────────
@@ -320,7 +406,7 @@ object ProfileMirror {
         partnerState = incoming
         partnerDigest = incoming.digest()
         val mine = snapshot(app, localize = false)
-        val needBytes = ArrayList<String>(2)
+        val needBytes = ArrayList<String>(3)
         applyingRemote = true
         try {
             // Текст: имя, никнейм, тема.
@@ -358,6 +444,21 @@ object ProfileMirror {
                     needBytes += FIELD_WALL
                 }
             }
+            // Видеоаватар: ролик, подпись и форма — одно поле со своей меткой.
+            // Пустой ключ у партнёра не затирает наш (правило wins(): данные
+            // важнее), поэтому «снял видеоаватар» на втором телефоне не
+            // повторится — так же, как не повторяется снятый аватар.
+            if (incoming.videoKey() != mine.videoKey() &&
+                wins(incoming.tVav, incoming.videoKey(), mine.tVav, mine.videoKey())
+            ) {
+                stamp(app, FIELD_VAV, incoming.tVav)
+                when {
+                    incoming.vavSha.isBlank() -> Unit
+                    // Файл тот же — ехать нечему, обновляем только подпись и форму.
+                    incoming.vavSha == mine.vavSha -> applyRemoteVideoMeta(app, incoming)
+                    else -> needBytes += FIELD_VAV
+                }
+            }
             // День рождения: число, месяц и видимость - одно поле со своей меткой.
             if (wins(incoming.tBday, incoming.bdayKey(), mine.tBday, mine.bdayKey())) {
                 applyBirthday(app, incoming.bdayDay, incoming.bdayMonth, incoming.bdayVisible)
@@ -368,6 +469,17 @@ object ProfileMirror {
         }
         invalidateCache()
         return needBytes
+    }
+
+    /**
+     * Подпись и форма видеоаватара от партнёра, когда сам ролик уже тот же.
+     * Файла на этом устройстве может не быть (его ещё не довезли) — тогда
+     * менять нечего: подпись придёт вместе с роликом.
+     */
+    private fun applyRemoteVideoMeta(context: Context, incoming: State) {
+        val current = VideoAvatarStore.snapshot()
+        if (current.path == null) return
+        VideoAvatarStore.set(context, current.path, incoming.vavCaption, incoming.vavCircle)
     }
 
     /**
@@ -401,7 +513,9 @@ object ProfileMirror {
      */
     fun storeRemoteImage(context: Context, kind: String, name: String, bytes: ByteArray): Boolean {
         val app = context.applicationContext
-        if (bytes.size.toLong() > IMAGE_MAX_BYTES) return false
+        // Видеоаватар приходит только resumable порциями: целым куском его
+        // применять нельзя — 24 МБ в памяти телефона ни к чему.
+        if (kind == FIELD_VAV || bytes.size.toLong() > IMAGE_MAX_BYTES) return false
         if (!isSafeName(name)) return false
         val dir = dirFor(app, kind)
         val file = File(dir, name)
@@ -432,10 +546,10 @@ object ProfileMirror {
 
     /** Bytes already durable in the resumable profile-image staging file. */
     fun remoteImageBytesReceived(context: Context, kind: String, name: String): Long {
-        if (kind != FIELD_AV && kind != FIELD_WALL || !isSafeName(name)) return 0L
+        if (!isTransferKind(kind) || !isSafeName(name)) return 0L
         val part = File(dirFor(context.applicationContext, kind), ".${name}.mirror.part")
         val length = part.takeIf { it.isFile }?.length() ?: 0L
-        if (length > IMAGE_MAX_BYTES) {
+        if (length > capFor(kind)) {
             runCatching { part.delete() }
             return 0L
         }
@@ -459,18 +573,19 @@ object ProfileMirror {
         bytes: ByteArray,
     ): ImageChunkResult {
         val app = context.applicationContext
-        if (kind != FIELD_AV && kind != FIELD_WALL || !isSafeName(name)) {
+        if (!isTransferKind(kind) || !isSafeName(name)) {
             return ImageChunkResult(false, false, 0L)
         }
+        val cap = capFor(kind)
         // expectedBytes == 0 is the compatibility form used by older peers. In that
         // form the final frame defines the length; the SHA-256 check still protects
         // the committed file and the hard cap prevents an unbounded stream.
         val sizeKnown = expectedBytes > 0L
         val finalEmpty = last && sizeKnown && offset == expectedBytes
-        if ((sizeKnown && expectedBytes > IMAGE_MAX_BYTES) || offset < 0L ||
+        if ((sizeKnown && expectedBytes > cap) || offset < 0L ||
             (!finalEmpty && bytes.isEmpty()) ||
             (sizeKnown && (offset > expectedBytes || bytes.size.toLong() > expectedBytes - offset)) ||
-            (!sizeKnown && (offset > IMAGE_MAX_BYTES || bytes.size.toLong() > IMAGE_MAX_BYTES - offset)) ||
+            (!sizeKnown && (offset > cap || bytes.size.toLong() > cap - offset)) ||
             expectedSha.length != 64 || !expectedSha.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
         ) {
             return ImageChunkResult(false, false, remoteImageBytesReceived(app, kind, name))
@@ -487,7 +602,7 @@ object ProfileMirror {
             if (targetLengthMatches && sha256Of(target).equals(expectedSha, ignoreCase = true)) {
                 return ImageChunkResult(true, true, target.length())
             }
-            if (part.isFile && part.length() > IMAGE_MAX_BYTES) {
+            if (part.isFile && part.length() > cap) {
                 runCatching { part.delete() }
             }
             var current = part.takeIf { it.isFile }?.length() ?: 0L
@@ -539,10 +654,9 @@ object ProfileMirror {
                     java.nio.file.StandardCopyOption.REPLACE_EXISTING,
                     java.nio.file.StandardCopyOption.ATOMIC_MOVE,
                 )
-                val uri = fileProviderUri(app, target)
                 applyingRemote = true
                 try {
-                    if (kind == FIELD_AV) AvatarHolder.set(app, uri) else WallpaperHolder.set(app, uri)
+                    applyTransferredFile(app, kind, target)
                 } finally {
                     applyingRemote = false
                 }
@@ -550,6 +664,27 @@ object ProfileMirror {
             }.isSuccess
             return ImageChunkResult(committed, committed, if (committed) expectedBytes else current)
         }
+    }
+
+    /**
+     * Положить принятый файл на место: картинка вешается на холдер по
+     * FileProvider-URI, а видеоаватар — на приватный путь и в [VideoAvatarStore]
+     * вместе с подписью и формой из снимка партнёра.
+     */
+    private fun applyTransferredFile(app: Context, kind: String, target: File) {
+        if (kind == FIELD_VAV) {
+            val remote = partnerState
+            com.vladimir.messenger.util.AvatarFiles.pruneVideos(app, keep = target)
+            VideoAvatarStore.set(
+                app,
+                path = target.absolutePath,
+                caption = remote?.vavCaption.orEmpty(),
+                circle = remote?.vavCircle ?: true,
+            )
+            return
+        }
+        val uri = fileProviderUri(app, target)
+        if (kind == FIELD_AV) AvatarHolder.set(app, uri) else WallpaperHolder.set(app, uri)
     }
 
     private fun readRange(file: File, offset: Long, length: Int): ByteArray? = runCatching {
@@ -563,9 +698,9 @@ object ProfileMirror {
 
     /** Отдать файл картинки профиля (для «reqpbytes»). */
     fun imageFile(context: Context, kind: String, name: String): File? {
-        if (!isSafeName(name)) return null
+        if (!isSafeName(name) || !isTransferKind(kind)) return null
         val file = File(dirFor(context.applicationContext, kind), name)
-        return if (file.isFile && file.length() in 1..IMAGE_MAX_BYTES) file else null
+        return if (file.isFile && file.length() in 1..capFor(kind)) file else null
     }
 
     // ── Диагностика ─────────────────────────────────────────────────────────
@@ -613,8 +748,29 @@ object ProfileMirror {
     }
 
     private fun dirFor(context: Context, kind: String): File = when (kind) {
-        FIELD_AV -> File(context.filesDir, "avatar")
+        FIELD_AV, FIELD_VAV -> File(context.filesDir, "avatar")
         else -> File(context.filesDir, "wallpaper")
+    }
+
+    /** Виды, которые зеркало гоняет байтами: аватар, обои и видеоаватар. */
+    private fun isTransferKind(kind: String): Boolean =
+        kind == FIELD_AV || kind == FIELD_WALL || kind == FIELD_VAV
+
+    /** Потолок размера для вида: у видеоаватара он свой, в 3 раза больше картинки. */
+    private fun capFor(kind: String): Long =
+        if (kind == FIELD_VAV) VIDEO_MAX_BYTES else IMAGE_MAX_BYTES
+
+    /**
+     * Что запросить байтами у партнёра для вида: имя файла, отпечаток и размер.
+     * `null` — у партнёра этого файла нет (или он старый и поля не прислал).
+     */
+    fun transferOf(state: State, kind: String): Triple<String, String, Long>? {
+        val (name, sha, size) = when (kind) {
+            FIELD_AV -> Triple(state.avName, state.avSha, state.avBytes)
+            FIELD_VAV -> Triple(state.vavName, state.vavSha, state.vavBytes)
+            else -> Triple(state.wallName, state.wallSha, state.wallBytes)
+        }
+        return if (name.isBlank() || sha.isBlank()) null else Triple(name, sha, size)
     }
 
     /** Имя и отпечаток канонического файла картинки поля (пусто - картинки нет). */

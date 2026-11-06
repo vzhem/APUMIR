@@ -273,7 +273,10 @@ class BirthdayMirrorContractTest(unittest.TestCase):
         self.assertIn('.put("pb", ProfileMirror.cachedBirthdayDigest(context))', sync)
         self.assertIn('ProfileMirror.notePartnerBirthdayDigest(obj.optString("pb", ""))', sync)
         self.assertIn("pb != ProfileMirror.cachedBirthdayDigest(context)", sync)
-        self.assertIn("if (!profileDiffers && !birthdayDiffers) return", sync)
+        # Условие запроса снимка: день рождения по-прежнему лечит расхождение.
+        # Рядом появился видеоаватар (р253), поэтому строка длиннее прежней.
+        self.assertIn("!birthdayDiffers", sync)
+        self.assertIn("if (!profileDiffers && !birthdayDiffers && !videoDiffers) return", sync)
         # Пустой ответный отпечаток - старая сборка, а не расхождение.
         self.assertIn("pb.isNotBlank()", sync)
 

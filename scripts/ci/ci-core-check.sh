@@ -207,6 +207,7 @@ if python3 scripts/ci/check-chat-startup.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-feature-packs.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-site-publishing.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-story-editor.py >>"$LOG" 2>&1 && \
+   python3 scripts/ci/check-video-avatar.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-story-crop.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-birthday.py >>"$LOG" 2>&1 && \
    python3 scripts/ci/check-mute-notice.py >>"$LOG" 2>&1 && \

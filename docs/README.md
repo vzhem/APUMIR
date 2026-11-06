@@ -87,6 +87,7 @@
 | [`UPDATE_STORAGE.md`](UPDATE_STORAGE.md) | Место обновления и безопасная уборка копий APK |
 | [`UPDATE_NOTIFICATIONS.md`](UPDATE_NOTIFICATIONS.md) | Системные уведомления об обновлении и диагностика запуска |
 | [`VERSION_STATISTICS.md`](VERSION_STATISTICS.md) | Статистика версий у пользователей |
+| [`VIDEO_AVATAR.md`](VIDEO_AVATAR.md) | Видеоаватар профиля: тот же редактор, что у видеоисторий, доступ с третьего ранга |
 | [`VIDEO_STORIES_PLAN.md`](VIDEO_STORIES_PLAN.md) | Видеоистории |
 | [`VOICE_PLAYBACK.md`](VOICE_PLAYBACK.md) | Старт голосовых только по нажатию |
 | [`WALLPAPER_ICONS.md`](WALLPAPER_ICONS.md) | Значки фирменных обоев |

@@ -14,8 +14,13 @@ import androidx.compose.ui.unit.dp
 import com.vladimir.messenger.R
 import com.vladimir.messenger.data.story.StoryVideoDraft
 
+// [hintRes] — пояснение потока: у видеоистории свои 60 секунд, у видеоаватара 15.
 @Composable
-internal fun StoryVideoResetDialog(onDismiss: () -> Unit, onReset: (StoryVideoDraft.Reset) -> Unit) {
+internal fun StoryVideoResetDialog(
+    onDismiss: () -> Unit,
+    onReset: (StoryVideoDraft.Reset) -> Unit,
+    @androidx.annotation.StringRes hintRes: Int = R.string.story_video_reset_hint,
+) {
     ApuPremiumDialog(
         title = stringResource(R.string.story_video_reset),
         onDismiss = onDismiss,
@@ -25,7 +30,7 @@ internal fun StoryVideoResetDialog(onDismiss: () -> Unit, onReset: (StoryVideoDr
     ) {
         Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(stringResource(R.string.story_video_reset_hint))
+            Text(stringResource(hintRes))
             val options = listOf(
                 StoryVideoDraft.Reset.TRIM to R.string.story_video_reset_trim,
                 StoryVideoDraft.Reset.COVER to R.string.story_video_reset_cover,

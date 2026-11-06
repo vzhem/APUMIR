@@ -1448,6 +1448,15 @@
     <string name="av_video_set">Видеоаватар установлен: в профиле он играет, у друзей виден кадр из него</string>
     <string name="av_video_too_long">Нужно видео до 15 секунд — это аватар, а не фильм</string>
     <string name="av_video_failed">Не удалось поставить видеоаватар</string>
+    <string name="av_video_editor_title">Видеоаватар · до 15 секунд</string>
+    <string name="av_video_source_hint">Снимите видео или выберите готовое. Доступно всё, что есть в видеоисториях: передняя и задняя камера, пауза, звук, фонарик, фильтры лица, замена фона, эффекты голоса, обрезка, кадр-постер и подпись.</string>
+    <string name="av_video_trim_hint">Ролик длиннее 15 секунд: в редакторе выберите фрагмент — аватар играет по кругу.</string>
+    <string name="av_video_cover_label">Кадр-постер: %1$s с от начала фрагмента</string>
+    <string name="av_video_install">Поставить видеоаватар</string>
+    <string name="av_video_installing">Ставим видеоаватар…</string>
+    <string name="av_video_result_hint">Видео без звука играет по кругу в вашем профиле. Друзьям и в списках виден выбранный кадр.</string>
+    <string name="av_video_reset_hint">Выберите, что сбросить, или сбросьте всё: первые 15 секунд (либо весь короткий ролик), кадр-постер в начале, исходный звук, пустая подпись и обычный формат. Исходное видео останется.</string>
+    <string name="av_video_reset_done_body">Выбранные параметры видеоаватара возвращены к значениям по умолчанию.</string>
     <string name="settings_remove_video_avatar">Убрать видеоаватар</string>
     <string name="gif_catalog_title">Гифки</string>
     <string name="gif_delete_title">Удалить гифку?</string>

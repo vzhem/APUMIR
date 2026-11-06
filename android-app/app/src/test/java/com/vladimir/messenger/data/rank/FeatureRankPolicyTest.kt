@@ -39,6 +39,9 @@ class FeatureRankPolicyTest {
             RankCapability.SEND_DOCUMENT,
             RankCapability.SHARE_LOCATION,
             RankCapability.PUBLISH_STORY,
+            // Видеоаватар — там же, где истории: это публикация своего кадра
+            // наружу, а статичный аватар остаётся бесплатным.
+            RankCapability.VIDEO_AVATAR,
             RankCapability.CALL_VOICE,
             RankCapability.CALL_VIDEO,
             RankCapability.CREATE_POLL,
@@ -115,6 +118,8 @@ class FeatureRankPolicyTest {
         assertTrue("Голосовые сообщения" !in guest)
         assertTrue("Голосовые звонки" !in guest)
         assertTrue("Публикация историй" !in guest)
+        // Видеоаватар — тоже отправка своего наружу, поэтому гостю закрыт.
+        assertTrue("Видеоаватар профиля" !in guest)
         assertTrue("Отправка видео" !in guest)
         assertTrue("Создание групп" !in guest)
     }
@@ -130,6 +135,7 @@ class FeatureRankPolicyTest {
             "Отправка файлов",
             "Отправка геолокации",
             "Публикация историй",
+            "Видеоаватар профиля",
             "Голосовые звонки",
             "Видеозвонки",
             "Создание опросов",
@@ -158,6 +164,7 @@ class FeatureRankPolicyTest {
     @Test
     fun rankNamesMatchTheSharedRankLadder() {
         assertEquals("Круг друзей", FeatureRankPolicy.rankNameFor(RankCapability.SEND_PHOTO))
+        assertEquals("Круг друзей", FeatureRankPolicy.rankNameFor(RankCapability.VIDEO_AVATAR))
         assertEquals("Проводник", FeatureRankPolicy.rankNameFor(RankCapability.SEND_VIDEO))
         assertEquals("Проводник", FeatureRankPolicy.rankNameFor(RankCapability.CREATE_CHANNEL))
     }

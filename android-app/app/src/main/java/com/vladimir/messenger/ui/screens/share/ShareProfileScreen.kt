@@ -117,7 +117,7 @@ fun ShareProfileScreen(
             }
 
             // Свой аватар: картинка из галереи либо инициалы.
-            MyAvatar(displayName = uiState.displayName, modifier = Modifier.size(96.dp), size = 96)
+            MyAvatar(displayName = uiState.displayName, modifier = Modifier.size(96.dp), size = 96, playVideo = true)
 
             Text(
                 text = uiState.displayName,
