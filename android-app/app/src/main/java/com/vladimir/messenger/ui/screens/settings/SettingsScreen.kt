@@ -412,7 +412,6 @@ private fun ProfileTabContent(
     var showBirthdayDialog by remember { mutableStateOf(false) }
 
     val profileView = androidx.compose.ui.platform.LocalView.current
-    var showFingerprint by remember { mutableStateOf(false) }
     fun profileTap(action: () -> Unit) {
         profileView.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
         action()
@@ -570,27 +569,7 @@ private fun ProfileTabContent(
                             }
                         }
                         Spacer(Modifier.height(14.dp))
-                        ApuTextAction(
-                            label = stringResource(if (showFingerprint) R.string.profile_hide_id else R.string.profile_show_id),
-                            onClick = { showFingerprint = !showFingerprint },
-                        )
-                        if (showFingerprint) {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                                .background(ApuBubbleAccentColor.copy(alpha = 0.04f)).padding(10.dp),
-                        ) {
-                            SelectionContainer {
-                                Text(
-                                    uiState.fingerprint,
-                                    style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
-                                    color = ApuBubbleMutedColor,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            }
-                        }
-                        Spacer(Modifier.height(14.dp))
-                        }
+                        ProfileIdentityBadge(fingerprint = uiState.fingerprint)
                         Spacer(Modifier.height(16.dp))
                         val actions = listOf(
                             Triple(stringResource(R.string.settings_my_qr), Icons.Default.QrCode, onMyQr),

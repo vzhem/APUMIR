@@ -78,10 +78,16 @@ class NetworkMonitor(private val context: Context) {
             }
             if (transport != lastTransport) {
                 lastTransport = transport
-                // Сменилась сеть (Wi-Fi → мобильная, включился VPN): «экономия
-                // трафика» должна сработать сразу, а не после перезапуска.
+                // Сменилась сеть (Wi-Fi → мобильная, включился VPN): сразу применяем
+                // сетевую политику и обновляем объявление живых IPv4/IPv6-адресов рою.
                 callbackScope.launch {
                     com.vladimir.messenger.data.swarm.NetworkPathSettings.applyToCore(context)
+                    com.vladimir.messenger.data.swarm.Ipv6NetworkSettings.applyToCore(context)
+                    if (hasInternet) {
+                        RustBridge.onNetworkAvailable()
+                        RustBridge.triggerGossipDiscovery()
+                        com.vladimir.messenger.data.security.DeviceIdentityGossip.onProfileOrContactsChanged()
+                    }
                 }
                 TransferDiagnostics.record(
                     "net",

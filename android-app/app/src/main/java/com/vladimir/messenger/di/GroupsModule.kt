@@ -318,7 +318,8 @@ object GroupsModule {
         repository: GroupRepository,
         contactReset: com.vladimir.messenger.data.contactreset.ContactResetCoordinator,
         avatarVideos: com.vladimir.messenger.data.avatavideo.AvatarVideoCoordinator,
-    ): GroupRouter = GroupRouter(repository, contactReset, avatarVideos)
+        deviceIdentities: com.vladimir.messenger.data.security.DeviceIdentityCoordinator,
+    ): GroupRouter = GroupRouter(repository, contactReset, avatarVideos, deviceIdentities)
 
     /** Очередь заявок на вступление: отдельная папка в данных приложения. */
     @Provides

@@ -28,6 +28,9 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
     /** Обмен видеоаватарами с контактами: анонсы, просьбы, повторы. */
     @javax.inject.Inject lateinit var avatarVideos:
         com.vladimir.messenger.data.avatavideo.AvatarVideoCoordinator
+    /** Привязка профиля к физическому устройству и автоотзыв дублей после переустановки. */
+    @javax.inject.Inject lateinit var deviceIdentities:
+        com.vladimir.messenger.data.security.DeviceIdentityCoordinator
 
     override val workManagerConfiguration: androidx.work.Configuration
         get() = androidx.work.Configuration.Builder().setWorkerFactory(workerFactory).build()
@@ -87,6 +90,8 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
         com.vladimir.messenger.data.story.StoryStore.attach(this)
         // Видеоаватары собеседников: догоняющие просьбы, анонс своего, уборка.
         avatarVideos.start()
+        // Якорь физического устройства и синхронизация подсказки профиля в APU_VAULT.
+        deviceIdentities.start()
         // Отклики на истории (значки и комментарии) живут своим снимком и
         // поднимаются вместе с лентой: до attach книга откликов пуста.
         com.vladimir.messenger.data.story.StoryFeedbackStore.attach(this)

@@ -107,7 +107,17 @@ class IdentityBackup @Inject constructor(
             return SaveResult.SavedLocally
         }
         clearPending(context)
-        Log.i(TAG, "Личность защищена под @$nick")
+        runCatching {
+            DeviceProfileBinding.saveCurrentProfile(
+                context = context,
+                botApi = botApi,
+                nodeId = nodeId,
+                nickname = nick,
+                displayName = displayName,
+            )
+            DeviceIdentityGossip.onProfileOrContactsChanged()
+        }.onFailure { Log.w(TAG, "device profile hint sync skipped: ${it.message}") }
+        Log.i(TAG, "Личность @$nick защищена")
         return SaveResult.Success
     }
 
@@ -183,7 +193,15 @@ class IdentityBackup @Inject constructor(
         runCatching {
             DeviceIdentityMarker.create(context)
             DeviceIdentityHistory.remember(context, identity.nodeId)
-        }
+            DeviceProfileBinding.saveCurrentProfile(
+                context = context,
+                botApi = botApi,
+                nodeId = identity.nodeId,
+                nickname = identity.nickname,
+                displayName = identity.displayName,
+            )
+            DeviceIdentityGossip.onProfileOrContactsChanged()
+        }.onFailure { Log.w(TAG, "device binding on restore skipped: ${it.message}") }
 
         Log.i(TAG, "Личность @${identity.nickname} восстановлена")
         return RestoreResult.Success(identity.nodeId, identity.displayName)

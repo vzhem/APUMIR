@@ -355,6 +355,43 @@ fun PeerProfileSheet(
                 // техническая ошибка. Оставляем возможность раскрыть его -
                 // адрес нужен, когда разбираются, почему сообщения не идут.
                 if (contactId.isNotBlank()) {
+                    val peerCallsign = remember(contactId) {
+                        com.vladimir.messenger.util.ProfileCallsign.of(contactId)
+                    }
+                    val peerClipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+                    val peerContext = androidx.compose.ui.platform.LocalContext.current
+                    if (!peerCallsign.isNullOrBlank()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(ApuBubbleAccentColor.copy(alpha = 0.09f))
+                                .clickable {
+                                    peerClipboard.setText(androidx.compose.ui.text.AnnotatedString(peerCallsign))
+                                    android.widget.Toast.makeText(
+                                        peerContext,
+                                        peerContext.getString(R.string.dpb_callsign_copied, peerCallsign),
+                                        android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.dpb_callsign_value_tpl, peerCallsign),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = ApuBubbleAccentColor,
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Icon(
+                                Icons.Default.ContentCopy,
+                                contentDescription = stringResource(R.string.action_copy),
+                                tint = ApuBubbleAccentColor,
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                        Spacer(Modifier.height(8.dp))
+                    }
                     var idShown by remember { mutableStateOf(false) }
                     if (!idShown) {
                         ApuTextAction(label = stringResource(R.string.pp_show_addr), onClick = { idShown = true })

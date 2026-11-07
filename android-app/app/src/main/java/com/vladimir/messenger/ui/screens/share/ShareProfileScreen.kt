@@ -31,9 +31,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuPremiumContentButton
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 
@@ -125,6 +128,41 @@ fun ShareProfileScreen(
                 fontWeight = FontWeight.Bold
             )
 
+            val myCallsign = remember(uiState.nodeId) {
+                com.vladimir.messenger.util.ProfileCallsign.of(uiState.nodeId)
+            }
+            if (!myCallsign.isNullOrBlank()) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(ApuBubbleAccentColor.copy(alpha = 0.10f))
+                        .clickable {
+                            clipboardManager.setText(AnnotatedString(myCallsign))
+                            android.widget.Toast.makeText(
+                                context,
+                                context.getString(R.string.dpb_callsign_copied, myCallsign),
+                                android.widget.Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.dpb_callsign_value_tpl, myCallsign),
+                        style = MaterialTheme.typography.titleSmall.copy(fontFamily = FontFamily.Monospace),
+                        fontWeight = FontWeight.Bold,
+                        color = ApuBubbleAccentColor,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Icon(
+                        imageVector = Icons.Default.ContentCopy,
+                        contentDescription = stringResource(R.string.action_copy),
+                        tint = ApuBubbleAccentColor,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+
             Text(
                 text = stringResource(R.string.sp_send_link_hint),
                 style = MaterialTheme.typography.bodyMedium,
@@ -205,8 +243,11 @@ fun ShareProfileScreen(
 
                 ApuPremiumContentButton(
                     onClick = {
+                        val codePart = com.vladimir.messenger.util.ProfileCallsign.of(uiState.nodeId)
+                            ?.let { "\n" + context.getString(R.string.dpb_callsign_value_tpl, it) + "\n" }
+                            .orEmpty()
                         val shareText = """
-                            Добавь меня в APU.
+                            Добавь меня в APU.$codePart
 
                             Если приложение уже установлено, открой ссылку:
                             ${uiState.shareLink}

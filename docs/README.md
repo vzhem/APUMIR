@@ -95,6 +95,7 @@
 | [`MAP_OPENING.md`](MAP_OPENING.md) | Выбор приложения для геопозиций и настройка по умолчанию |
 | [`FLASHLIGHT_ALERTS.md`](FLASHLIGHT_ALERTS.md) | Вспышка фонарика при SOS из группы и входящих сообщениях |
 | [`IPV6_PROXY_SETTINGS.md`](IPV6_PROXY_SETTINGS.md) | Раздел «Настройка IPv6» и рекомендации по покупке IPv6 в настройках сети |
+| [`PROFILE_DEVICE_BINDING.md`](PROFILE_DEVICE_BINDING.md) | Защита от дублей профилей по `ANDROID_ID`, постоянный цифровой код `NNN-NNN` и привязка живых IPv4/IPv6-маршрутов |
 | [`M8_E_F_PREP.md`](M8_E_F_PREP.md) | Подготовительный план M8-E / M8-F |
 | [`NEW_DEVELOPMENT_PC.md`](NEW_DEVELOPMENT_PC.md) | Настройка нового компьютера для разработки |
 

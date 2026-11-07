@@ -16,12 +16,18 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.data.local.dao.NicknameDao
 import com.vladimir.messenger.data.local.entity.NicknameEntity
+import com.vladimir.messenger.data.local.entity.NicknameSuppressionEntity
+import com.vladimir.messenger.data.security.DeviceIdentityGossip
 import com.vladimir.messenger.data.security.DeviceIdentityHistory
+import com.vladimir.messenger.data.security.DeviceProfileAnchor
+import com.vladimir.messenger.data.security.DeviceProfileBinding
 import com.vladimir.messenger.domain.usecase.CreateIdentityUseCase
 import com.vladimir.messenger.domain.usecase.CheckIdentityUseCase
+import com.vladimir.messenger.service.BotApi
 import com.vladimir.messenger.ui.theme.UsernameHolder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,6 +51,9 @@ data class OnboardingUiState(
     val isLoading: Boolean     = false,
     val createdInviteLink: String? = null,
     val fingerprint: String?   = null,
+    val nodeId: String?        = null,
+    /** Прежний профиль, найденный по отпечатку ANDROID_ID этого телефона после переустановки. */
+    val recognizedDeviceProfile: DeviceProfileAnchor.DeviceHintRecord? = null,
     val error: String?         = null,
 ) {
     /**
@@ -79,8 +88,47 @@ class OnboardingViewModel @Inject constructor(
     private val checkIdentityUseCase: CheckIdentityUseCase,
     private val nicknameDao: NicknameDao,
     private val identityBackup: com.vladimir.messenger.data.security.IdentityBackup,
+    private val botApi: BotApi,
     @ApplicationContext private val appContext: Context,
 ) : ViewModel() {
+
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            val found = runCatching {
+                DeviceProfileBinding.discoverPreviousProfile(appContext, botApi)
+            }.onFailure { Log.w("OnboardingVM", "device hint check skipped: ${it.message}") }
+                .getOrNull() ?: return@launch
+            _uiState.update { current ->
+                val untouched = current.displayName.isBlank() &&
+                    current.nickname.isBlank() &&
+                    current.password.isEmpty() &&
+                    current.step == OnboardingStep.EnterName
+                if (untouched && found.nickname.isNotBlank()) {
+                    current.copy(
+                        recognizedDeviceProfile = found,
+                        restoreMode = true,
+                        nickname = found.nickname,
+                    )
+                } else {
+                    current.copy(recognizedDeviceProfile = found)
+                }
+            }
+        }
+    }
+
+    fun onSwitchToRecognizedProfile() {
+        val found = _uiState.value.recognizedDeviceProfile ?: return
+        _uiState.update {
+            it.copy(
+                restoreMode = true,
+                nickname = found.nickname.ifBlank { it.nickname },
+                nameError = null,
+                nicknameError = null,
+                passwordError = null,
+                error = null,
+            )
+        }
+    }
 
     /**
      * Закрепить выбранный человеком @никнейм.
@@ -112,7 +160,7 @@ class OnboardingViewModel @Inject constructor(
     suspend fun isNicknameTaken(nick: String, me: String): Boolean =
         runCatching {
             nicknameDao.byName(nick).any {
-                it.ownerId != me && !DeviceIdentityHistory.wasCreatedOnThisDevice(appContext, it.ownerId)
+                it.ownerId != me && !DeviceProfileBinding.belongsToThisPhysicalDevice(appContext, it.ownerId)
             }
         }.getOrDefault(false)
 
@@ -194,6 +242,7 @@ class OnboardingViewModel @Inject constructor(
                             step = OnboardingStep.ShowInvite,
                             isLoading = false,
                             fingerprint = result.nodeId,
+                            nodeId = result.nodeId,
                             createdInviteLink = com.vladimir.messenger.util.OwnInvite.link(appContext)
                                 ?: "p2p://invite/${result.nodeId}",
                         )
@@ -271,11 +320,41 @@ class OnboardingViewModel @Inject constructor(
                     }
                     // Никнейм человек выбрал сам - он же служит именем для
                     // восстановления, поэтому случайный больше не назначаем.
+                    val previousOwner = state.recognizedDeviceProfile?.nodeId
+                        ?.takeIf { it != identity.nodeId }
                     try {
+                        if (previousOwner != null) {
+                            val oldNick = state.recognizedDeviceProfile.nickname.trim().lowercase()
+                            com.vladimir.messenger.data.security.NicknameRevocationHistory
+                                .revokeOwner(appContext, previousOwner)
+                            if (oldNick.isNotBlank()) {
+                                com.vladimir.messenger.data.security.NicknameRevocationHistory
+                                    .revoke(appContext, previousOwner, oldNick)
+                                nicknameDao.suppress(
+                                    NicknameSuppressionEntity(
+                                        ownerId = previousOwner,
+                                        name = oldNick,
+                                        revokedAtMs = System.currentTimeMillis(),
+                                    ),
+                                )
+                            }
+                            nicknameDao.deleteByOwner(previousOwner)
+                        }
                         claimUsername(identity.nodeId, nick)
                     } catch (e: Exception) {
                         Log.e("OnboardingVM", "username claim failed", e)
                     }
+                    runCatching {
+                        DeviceProfileBinding.saveCurrentProfile(
+                            context = appContext,
+                            botApi = botApi,
+                            nodeId = identity.nodeId,
+                            nickname = nick,
+                            displayName = name,
+                            previousOwnerId = previousOwner,
+                        )
+                        DeviceIdentityGossip.onProfileOrContactsChanged()
+                    }.onFailure { Log.w("OnboardingVM", "device profile save skipped: ${it.message}") }
                     // Запираем личность сразу: если отложить, человек рискует
                     // потерять себя при первой же переустановке. Сбой сети не
                     // должен мешать регистрации - пароль можно задать позже
@@ -307,6 +386,7 @@ class OnboardingViewModel @Inject constructor(
                         isLoading       = false,
                         createdInviteLink = inviteWithNick,
                         fingerprint     = identity.fingerprint,
+                        nodeId          = identity.nodeId,
                     )}
                 }
                 .onFailure { e ->

@@ -178,21 +178,19 @@ class ContactRepository @Inject constructor(
         val clean = username.trim().trimStart('@').trim()
         if (clean.isEmpty() || keepContactId.isBlank()) return emptyList()
 
-        // Equal @names are not ownership proof.  Automatic chat merging is
-        // allowed only when both the incoming live owner and the old contact
-        // are present in this installation's Keystore-backed identity history.
-        // Otherwise the user can inspect the registry and confirm cleanup, but
-        // gossip must never delete a legitimate different owner.
-        if (!DeviceIdentityHistory.wasCreatedOnThisDevice(appContext, keepContactId)) {
-            return emptyList()
-        }
+        // Одинаковый @ник сам по себе не доказывает владельца. Автослияние
+        // разрешено только когда оба узла созданы на этом телефоне (Keystore /
+        // ANDROID_ID) либо оба подтвердили подписью один и тот же якорь устройства.
         val byUsername = contactDao.getContactsByUsername(clean)
         val byDisplayName = contactDao.getContactsByDisplayName(clean)
         return (byUsername + byDisplayName)
             .map { it.id }
             .distinct()
             .filter { it != keepContactId }
-            .filter { DeviceIdentityHistory.wasCreatedOnThisDevice(appContext, it) }
+            .filter {
+                com.vladimir.messenger.data.security.DeviceProfileBinding
+                    .areSameVerifiedDevice(appContext, it, keepContactId)
+            }
     }
 
     /**
@@ -281,10 +279,16 @@ class ContactRepository @Inject constructor(
 
         for ((_, twins) in groups) {
             // A display-name collision is not enough to delete a contact. Only
-            // merge rows whose node ids are both proven by the device ledger;
-            // unrelated people with the same visible name remain untouched.
-            val sameDeviceTwins = twins.filter {
-                DeviceIdentityHistory.wasCreatedOnThisDevice(appContext, it.id)
+            // merge rows whose node ids are proven to belong to the same physical
+            // device (local ledger or verified Ed25519 device anchor).
+            val sameDeviceTwins = twins.filter { candidate ->
+                com.vladimir.messenger.data.security.DeviceProfileBinding
+                    .belongsToThisPhysicalDevice(appContext, candidate.id) ||
+                    twins.any { other ->
+                        other.id != candidate.id &&
+                            com.vladimir.messenger.data.security.DeviceProfileBinding
+                                .areSameVerifiedDevice(appContext, candidate.id, other.id)
+                    }
             }
             if (sameDeviceTwins.size < 2) continue
 

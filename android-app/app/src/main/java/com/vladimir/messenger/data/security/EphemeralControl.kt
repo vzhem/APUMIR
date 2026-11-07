@@ -16,6 +16,8 @@ object EphemeralControl {
         // Анонсы и просьбы видеоаватаров — служебный конверт (avv1), как контакт-
         // сброс: не растят долгий журнал и не теснят сообщения при повторах.
         if (text.startsWith("APUGRP1|avv1|")) return true
+        // Привязка и замена профиля на том же устройстве (dva1) — заменяемый служебный пакет.
+        if (text.startsWith(DeviceProfileAnchor.Wire.PREFIX)) return true
         val parts = text.split('|', limit = 3)
         return parts.size >= 2 && parts[0] in setOf("APUGIF1", "APUSTK1") &&
             parts[1] in setOf("ask", "have", "want", "thumb", "thmb")

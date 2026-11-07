@@ -1370,13 +1370,13 @@
     <!-- Пакет 40: сообщения ключа получателя и гифок (ViewModel) -->
     <string name="cd_key_pending">Ключ получателя ещё не закреплён. Отправил запрос — попробуйте снова через пару минут.</string>
     <string name="cd_gif_not_sent">Гифка не отправлена: %1$s</string>
-    <string name="ac_invite_hint">Вставьте ссылку, которую вам прислал собеседник.</string>
-    <string name="ac_link_placeholder">Вставьте ссылку или ключ</string>
+    <string name="ac_invite_hint">Вставьте ссылку, код профиля 482-915 или @ник собеседника.</string>
+    <string name="ac_link_placeholder">Ссылка, @никнейм или код 482-915</string>
     <string name="ac_name_label">Имя контакта (необязательно)</string>
     <string name="ac_name_placeholder">Например, Анна</string>
-    <string name="ac_find_title">Найти по @никнейму</string>
-    <string name="ac_find_hint">Ищем только имена, которые уже встречались в сети APU.</string>
-    <string name="ac_username_placeholder">@никнейм</string>
+    <string name="ac_find_title">Найти по @никнейму или коду</string>
+    <string name="ac_find_hint">Введите @никнейм или короткий код профиля (например, 482-915).</string>
+    <string name="ac_username_placeholder">@никнейм или 482-915</string>
     <string name="ac_searching">Ищем в сети APU…</string>
     <string name="ac_scan_qr">Сканировать QR-код</string>
     <string name="ac_scan_hint">Быстро добавьте человека рядом с вами</string>
@@ -2560,4 +2560,14 @@
     <string name="ipv6_rec_copy_btn">Скопировать ссылку</string>
     <string name="ipv6_rec_copied">Ссылка скопирована в буфер обмена</string>
     <string name="ipv6_rec_any_provider_note">Рекомендация приведена для удобства: вы можете приобрести IPv6 по ссылке https://ru.shopproxy.net/buy-proxy/ipv6/ или использовать любой другой ресурс, магазин прокси либо собственный сервер, который вам нравится. При покупке выбирайте протокол SOCKS5 (или тариф SOCKS5 + HTTP) — полученные реквизиты сразу подойдут к полям выше.</string>
+    <string name="dpb_callsign_label">Код профиля</string>
+    <string name="dpb_callsign_value_tpl">Код профиля: %1$s</string>
+    <string name="dpb_callsign_short_tpl">Код %1$s</string>
+    <string name="dpb_callsign_copied">Код профиля скопирован: %1$s</string>
+    <string name="dpb_callsign_not_found">Профиль с таким кодом или @ником пока не найден в сети APU</string>
+    <string name="dpb_callsign_multiple">Найдено несколько совпадений — выберите нужного человека ниже</string>
+    <string name="dpb_device_found_title">Узнали ваше устройство</string>
+    <string name="dpb_device_found_restore_tpl">На этом телефоне уже был профиль %1$s (%2$s). Введите свой пароль ниже, чтобы вернуть прежний адрес, контакты и ранг без создания дубля.</string>
+    <string name="dpb_device_found_new_warn_tpl">Внимание: на этом устройстве уже есть профиль %1$s (%2$s). Если создать новый, прежний адрес этого телефона будет заменён.</string>
+    <string name="dpb_device_restore_switch_btn">Вернуть прежний профиль</string>
 </resources>

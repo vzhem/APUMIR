@@ -5,6 +5,8 @@ import com.vladimir.messenger.data.avatavideo.AvatarVideoCoordinator
 import com.vladimir.messenger.data.avatavideo.AvatarVideoWire
 import com.vladimir.messenger.data.contactreset.ContactResetCoordinator
 import com.vladimir.messenger.data.contactreset.ContactResetWire
+import com.vladimir.messenger.data.security.DeviceIdentityCoordinator
+import com.vladimir.messenger.data.security.DeviceProfileAnchor
 
 /**
  * Приём групповых событий из общего потока сообщений.
@@ -21,6 +23,7 @@ class GroupRouter(
     private val repository: GroupRepository,
     private val contactReset: ContactResetCoordinator,
     private val avatarVideos: AvatarVideoCoordinator,
+    private val deviceIdentities: DeviceIdentityCoordinator? = null,
 ) {
 
     suspend fun routeIncoming(
@@ -37,6 +40,9 @@ class GroupRouter(
         // групповой пакет и не показывают служебный текст в чате.
         if (AvatarVideoWire.isPacket(text)) {
             return avatarVideos.receive(senderId, text)
+        }
+        if (DeviceProfileAnchor.Wire.isPacket(text)) {
+            return deviceIdentities?.receive(senderId, text) ?: true
         }
         if (!GroupWire.isGroupPacket(text)) return false
 

@@ -1272,13 +1272,13 @@
     <!-- Пакет 40: сообщения ключа получателя и гифок (ViewModel) -->
     <string name="cd_key_pending">The recipient’s key is not pinned yet. The request was sent — try again in a couple of minutes.</string>
     <string name="cd_gif_not_sent">GIF not sent: %1$s</string>
-    <string name="ac_invite_hint">Paste the link your contact sent you.</string>
-    <string name="ac_link_placeholder">Paste a link or key</string>
+    <string name="ac_invite_hint">Paste a link, profile code 482-915, or @username.</string>
+    <string name="ac_link_placeholder">Link, @username, or code 482-915</string>
     <string name="ac_name_label">Contact name (optional)</string>
     <string name="ac_name_placeholder">For example, Anna</string>
-    <string name="ac_find_title">Find by @username</string>
-    <string name="ac_find_hint">We only search for names that have already appeared on the APU network.</string>
-    <string name="ac_username_placeholder">@username</string>
+    <string name="ac_find_title">Find by @username or code</string>
+    <string name="ac_find_hint">Enter an @username or short profile code (for example, 482-915).</string>
+    <string name="ac_username_placeholder">@username or 482-915</string>
     <string name="ac_searching">Searching the APU network…</string>
     <string name="ac_scan_qr">Scan QR code</string>
     <string name="ac_scan_hint">Quickly add someone next to you</string>
@@ -2544,4 +2544,14 @@ The file is not on this phone</string>
     <string name="ipv6_rec_copy_btn">Copy link</string>
     <string name="ipv6_rec_copied">Link copied to clipboard</string>
     <string name="ipv6_rec_any_provider_note">This suggestion is provided for convenience: you can purchase an IPv6 proxy at https://ru.shopproxy.net/buy-proxy/ipv6/ or use any other provider, proxy store, or self-hosted server you prefer. Choose SOCKS5 (or SOCKS5 + HTTP) when ordering — standard credentials from any service work directly in the fields above.</string>
+    <string name="dpb_callsign_label">Profile code</string>
+    <string name="dpb_callsign_value_tpl">Profile code: %1$s</string>
+    <string name="dpb_callsign_short_tpl">Code %1$s</string>
+    <string name="dpb_callsign_copied">Profile code copied: %1$s</string>
+    <string name="dpb_callsign_not_found">No profile with this code or @username found on the APU network yet</string>
+    <string name="dpb_callsign_multiple">Multiple matches found — choose the right person below</string>
+    <string name="dpb_device_found_title">Device recognized</string>
+    <string name="dpb_device_found_restore_tpl">Profile %1$s (%2$s) was previously active on this phone. Enter your password below to restore your address, contacts, and rank without creating a duplicate.</string>
+    <string name="dpb_device_found_new_warn_tpl">Heads up: profile %1$s (%2$s) already belongs to this device. Creating a new profile will replace the previous address on this phone.</string>
+    <string name="dpb_device_restore_switch_btn">Restore previous profile</string>
 </resources>
