@@ -142,6 +142,7 @@ fun ChatListScreen(
     onGroupAdminClick: (groupId: String) -> Unit = {},
     onChannelClick: (channelId: String) -> Unit = {},
     onCallClick: (contactId: String, contactName: String) -> Unit = { _, _ -> },
+    onVideoCallClick: (contactId: String, contactName: String) -> Unit = { _, _ -> },
     /** «Ключ этого телефона не читается»: открыть восстановление профиля из файла. */
     onRestoreProfileClick: () -> Unit = {},
     /** Экран «Папки с чатами»: создание и порядок папок-вкладок. */
@@ -474,6 +475,7 @@ fun ChatListScreen(
                         onSavedClick = onSavedClick,
                         onAddContactClick = onAddContactClick,
                         onCallClick = onCallClick,
+                        onVideoCallClick = onVideoCallClick,
                         // Плашка «телефон молчит» ведёт в восстановление профиля
                         // из файла: там личность возвращается целиком.
                         onRestoreProfileClick = onRestoreProfileClick,
@@ -1125,6 +1127,7 @@ private fun SectionPage(
     onSavedClick: () -> Unit,
     onAddContactClick: () -> Unit,
     onCallClick: (contactId: String, contactName: String) -> Unit,
+    onVideoCallClick: (contactId: String, contactName: String) -> Unit,
     /** «Ключ этого телефона не читается»: открыть восстановление профиля из файла. */
     onRestoreProfileClick: () -> Unit = {},
     onGroupClick: (groupId: String) -> Unit,
@@ -1413,72 +1416,18 @@ private fun SectionPage(
                                         item.chat.contactId,
                                     )
                                 },
-                                menuActions = listOf(
-                                    BubbleMenuAction(
-                                        title = if (item.chat.isPinned) stringResource(R.string.menu_unpin) else stringResource(R.string.menu_pin),
-                                        icon = Icons.Filled.PushPin,
-                                        onClick = { onTogglePersonalPin(item.chat) },
-                                    ),
-                                    BubbleMenuAction(
-                                        title = stringResource(R.string.menu_open_chat),
-                                        icon = Icons.Default.Forum,
-                                        onClick = {
-                                            onChatClick(
-                                                item.chat.id,
-                                                item.chat.contactName,
-                                                item.chat.contactId,
-                                            )
-                                        },
-                                    ),
-                                    BubbleMenuAction(
-                                        title = stringResource(R.string.menu_call),
-                                        icon = Icons.Default.Call,
-                                        onClick = {
-                                            onCallClick(
-                                                item.chat.contactId,
-                                                item.chat.contactName,
-                                            )
-                                        },
-                                    ),
-                                    BubbleMenuAction(
-                                        title = stringResource(R.string.menu_share_contact),
-                                        icon = Icons.Default.Share,
-                                        onClick = { onShareCard(item.chat) },
-                                    ),
-                                    // р249: архив и «без звука». Оба состояния
-                                    // уезжают на второе устройство кадром
-                                    // зеркала, поэтому пункт показывает то,
-                                    // что будет после нажатия.
-                                    BubbleMenuAction(
-                                        title = if (item.chat.isArchived) stringResource(R.string.menu_unarchive) else stringResource(R.string.menu_archive),
-                                        icon = Icons.Default.Archive,
-                                        onClick = { onTogglePersonalArchive(item.chat) },
-                                    ),
-                                    BubbleMenuAction(
-                                        title = if (item.chat.isMuted()) stringResource(R.string.menu_unmute) else stringResource(R.string.menu_mute),
-                                        icon = if (item.chat.isMuted()) {
-                                            Icons.Default.NotificationsActive
-                                        } else {
-                                            Icons.Default.NotificationsOff
-                                        },
-                                        onClick = { onTogglePersonalMute(item.chat) },
-                                    ),
-                                    BubbleMenuAction(
-                                        title = stringResource(R.string.menu_mark_read),
-                                        icon = Icons.Default.DoneAll,
-                                        onClick = { onMarkChatRead(item.chat.id) },
-                                    ),
-                                    BubbleMenuAction(
-                                        title = stringResource(R.string.menu_clear_chat),
-                                        icon = Icons.Default.CleaningServices,
-                                        onClick = { onClearChat(item.chat) },
-                                    ),
-                                    BubbleMenuAction(
-                                        title = stringResource(R.string.menu_delete_chat),
-                                        icon = Icons.Default.Delete,
-                                        destructive = true,
-                                        onClick = { onDeleteChat(item.chat) },
-                                    ),
+                                menuActions = personalChatMenuActions(
+                                    chat = item.chat,
+                                    onOpenChat = onChatClick,
+                                    onCall = onCallClick,
+                                    onVideoCall = onVideoCallClick,
+                                    onShareContact = onShareCard,
+                                    onTogglePin = onTogglePersonalPin,
+                                    onToggleArchive = onTogglePersonalArchive,
+                                    onToggleMute = onTogglePersonalMute,
+                                    onMarkRead = onMarkChatRead,
+                                    onClear = onClearChat,
+                                    onDelete = onDeleteChat,
                                 ),
                             )
 

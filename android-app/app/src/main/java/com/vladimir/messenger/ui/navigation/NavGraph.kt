@@ -476,6 +476,9 @@ fun MessengerNavGraph(
                 onCallClick = { cId, cName ->
                     navController.navigate(Screen.Call.createOutgoing(cId, cName))
                 },
+                onVideoCallClick = { cId, cName ->
+                    navController.navigate(Screen.Call.createOutgoing(cId, cName, video = true))
+                },
                 // Плашка «ключ этого телефона не читается» ведёт туда, где
                 // личность возвращается целиком: в восстановление профиля из файла.
                 onRestoreProfileClick = {
