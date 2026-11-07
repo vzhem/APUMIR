@@ -306,6 +306,7 @@
     <string name="menu_unmute">Turn on notifications</string>
     <string name="menu_mute">Turn off notifications</string>
     <string name="menu_mark_read">Mark as read</string>
+    <string name="menu_mark_unread">Mark as unread</string>
     <string name="menu_clear_chat">Clear chat</string>
     <string name="menu_delete_chat">Delete chat</string>
     <string name="menu_open_channel">Open channel</string>

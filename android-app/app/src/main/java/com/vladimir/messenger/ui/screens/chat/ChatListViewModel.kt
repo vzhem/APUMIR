@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.vladimir.messenger.domain.model.Chat
 import com.vladimir.messenger.domain.usecase.ObserveNetworkStatusUseCase
 import com.vladimir.messenger.data.group.GroupRole
+import com.vladimir.messenger.data.local.dao.ChatDao
 import com.vladimir.messenger.data.local.dao.GroupDao
 import com.vladimir.messenger.data.local.dao.InboxPinDao
 import com.vladimir.messenger.data.local.dao.InboxPinKind
@@ -155,6 +156,7 @@ data class ChatListUiState(
 @HiltViewModel
 class ChatListViewModel @Inject constructor(
     private val observeNetworkStatusUseCase: ObserveNetworkStatusUseCase,
+    private val chatDao: ChatDao,
     private val groupDao: GroupDao,
     private val inboxPinDao: InboxPinDao,
     private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
@@ -854,9 +856,9 @@ class ChatListViewModel @Inject constructor(
         )
     }
 
-    /** Сбросить счётчик непрочитанных личного чата. */
-    fun markChatRead(chatId: String) {
-        viewModelScope.launch(Dispatchers.IO) { chatRepository.markAsRead(chatId) }
+    /** Переключить прочитанность личного чата из меню списка. */
+    fun toggleChatReadState(chatId: String) {
+        viewModelScope.launch(Dispatchers.IO) { chatDao.toggleReadState(chatId) }
     }
 
     /** Сбросить счётчик непрочитанных группы или канала. */

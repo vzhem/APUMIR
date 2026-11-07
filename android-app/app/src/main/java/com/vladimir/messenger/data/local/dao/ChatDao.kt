@@ -71,6 +71,10 @@ interface ChatDao {
     @Query("UPDATE chats SET unreadCount = 0 WHERE id = :chatId")
     suspend fun markAsRead(chatId: String)
 
+    /** Telegram-style menu action: read chats become unread, unread chats become read. */
+    @Query("UPDATE chats SET unreadCount = CASE WHEN unreadCount > 0 THEN 0 ELSE 1 END WHERE id = :chatId")
+    suspend fun toggleReadState(chatId: String)
+
     // Раунд 150: счётчик непрочитанных личных чатов (на списке чатов бейджа
     // не было - saveIncomingMessage только обновлял lastMessage).
     @Query("UPDATE chats SET unreadCount = unreadCount + 1 WHERE id = :chatId")
