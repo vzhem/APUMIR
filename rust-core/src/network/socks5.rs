@@ -55,9 +55,29 @@ pub(crate) fn greeting_bytes(has_auth: bool) -> Vec<u8> {
     }
 }
 
-/// CONNECT-запрос: VER=5, CMD=1, RSV=0, ATYP=3 (домен), len, host, port BE.
+/// CONNECT-запрос: VER=5, CMD=1, RSV=0, ATYP=1/4 (IP) или ATYP=3 (домен), host, port BE.
 pub(crate) fn connect_request_bytes(target_host: &str, target_port: u16) -> Vec<u8> {
-    let host = target_host.as_bytes();
+    let clean_target = target_host
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']');
+    if let Ok(v4) = clean_target.parse::<std::net::Ipv4Addr>() {
+        let mut out = Vec::with_capacity(10);
+        out.extend_from_slice(&[0x05, 0x01, 0x00, 0x01]);
+        out.extend_from_slice(&v4.octets());
+        out.push((target_port >> 8) as u8);
+        out.push((target_port & 0xff) as u8);
+        return out;
+    }
+    if let Ok(v6) = clean_target.parse::<std::net::Ipv6Addr>() {
+        let mut out = Vec::with_capacity(22);
+        out.extend_from_slice(&[0x05, 0x01, 0x00, 0x04]);
+        out.extend_from_slice(&v6.octets());
+        out.push((target_port >> 8) as u8);
+        out.push((target_port & 0xff) as u8);
+        return out;
+    }
+    let host = clean_target.as_bytes();
     let mut out = Vec::with_capacity(7 + host.len());
     out.push(0x05);
     out.push(0x01);
@@ -114,7 +134,12 @@ pub async fn connect_through(
     target_host: String,
     target_port: u16,
 ) -> std::io::Result<TcpStream> {
-    let mut stream = TcpStream::connect((proxy.host.as_str(), proxy.port)).await?;
+    let clean_host = proxy
+        .host
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']');
+    let mut stream = TcpStream::connect((clean_host, proxy.port)).await?;
 
     let has_auth = !proxy.username.is_empty();
     stream.write_all(&greeting_bytes(has_auth)).await?;
@@ -184,6 +209,14 @@ mod tests {
                 (1883 & 0xff) as u8,
             ]
         );
+        let ipv4_req = connect_request_bytes("185.10.20.30", 1883);
+        assert_eq!(
+            ipv4_req,
+            vec![0x05, 0x01, 0x00, 0x01, 185, 10, 20, 30, (1883 >> 8) as u8, (1883 & 0xff) as u8]
+        );
+        let ipv6_req = connect_request_bytes("[2a00:1fa0::1]", 1883);
+        assert_eq!(ipv6_req[..4], [0x05, 0x01, 0x00, 0x04]);
+        assert_eq!(ipv6_req.len(), 22);
     }
 
     #[test]

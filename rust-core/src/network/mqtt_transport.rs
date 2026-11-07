@@ -739,7 +739,10 @@ impl MqttTransport {
         let own_is_first = brokers.own().is_some();
         // Наш брокер (тот же relay-домен, единый рой) - первый выбор без
         // TCP-проб; публичные перебираем, только если он в часе отказа.
-        let skip_probes = forced_wss || own_allowed;
+        // Исключение: если пользователь явно задал прокси (SOCKS5 / IPv6),
+        // пробуем брокеров через этот прокси, чтобы связь шла через него.
+        let has_proxy = crate::network::socks5::mqtt_socks5_proxy_config().is_some();
+        let skip_probes = (forced_wss || own_allowed) && !has_proxy;
         if !skip_probes {
         for (index, (host, port)) in brokers.candidates().into_iter().enumerate() {
             // Пробуем своего брокера и не больше двух публичных: каждый

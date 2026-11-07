@@ -5,6 +5,7 @@ import android.util.Log
 import com.vladimir.messenger.data.file.FileTransferRankPolicy
 import com.vladimir.messenger.data.referral.ReferralRankStore
 import com.vladimir.messenger.data.repository.MtProxyRepository
+import com.vladimir.messenger.data.swarm.Ipv6NetworkSettings
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -46,6 +47,11 @@ class ProxyAutopilot @Inject constructor(
             .getBoolean("proxy_tunnel_enabled", true)
 
     suspend fun cycle(forceCollect: Boolean = false): CycleSummary {
+        if (Ipv6NetworkSettings.isActive(appContext)) {
+            Ipv6NetworkSettings.applyToCore(appContext)
+            Log.d(TAG, "Cycle skipped: user IPv6 proxy is active")
+            return CycleSummary(0, 0, 0, 0, null, null)
+        }
         if (!com.vladimir.messenger.data.RustBridge.externalTransportAllowed()) {
             return CycleSummary(0, 0, 0, 0, null, null)
         }
@@ -107,6 +113,10 @@ class ProxyAutopilot @Inject constructor(
      * брокера; при сбое прокси движок сам откатывается на прямое соединение до смены.
      */
     private fun applyBestProxyToEngine(best: MtProxyHealthChecker.CheckResult?) {
+        if (Ipv6NetworkSettings.isActive(appContext)) {
+            Ipv6NetworkSettings.applyToCore(appContext)
+            return
+        }
         try {
             val proxy = best?.proxy
             if (proxy != null && proxy.type == com.vladimir.messenger.domain.model.ProxyType.SOCKS5) {

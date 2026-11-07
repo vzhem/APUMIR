@@ -126,6 +126,7 @@ object SettingsResetStore {
     fun resetNetwork(context: Context) {
         context.applicationContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
             .edit().putBoolean("proxy_tunnel_enabled", true).apply()
+        com.vladimir.messenger.data.swarm.Ipv6NetworkSettings.setEnabled(context, false)
     }
 
     /** File/seeding defaults; stored files and transfer history remain. */

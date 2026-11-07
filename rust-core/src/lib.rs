@@ -595,24 +595,38 @@ pub fn clear_identity_signing_seed() {
 /// MQTT-сессии (локальный мост). Некорректные аргументы молча игнорируются —
 /// прежний прокси сохраняется; вызывающая сторона валидирует прокси healthcheck'ом.
 pub fn set_mqtt_socks5_proxy(host: String, port: u16, username: String, password: String) {
-    let host_ok = !host.is_empty()
-        && host.len() <= 253
-        && !host.contains(|c: char| c.is_whitespace())
-        && !host.contains('|');
+    let clean_host = host
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_string();
+    let host_ok = !clean_host.is_empty()
+        && clean_host.len() <= 253
+        && !clean_host.contains(|c: char| c.is_whitespace())
+        && !clean_host.contains('|');
     if !host_ok || port == 0 {
         return;
     }
-    network::socks5::set_mqtt_socks5_proxy_config(network::socks5::Socks5ProxyConfig {
-        host,
+    let next = network::socks5::Socks5ProxyConfig {
+        host: clean_host,
         port,
         username,
         password,
-    });
+    };
+    let changed = network::socks5::mqtt_socks5_proxy_config().as_ref() != Some(&next);
+    network::socks5::set_mqtt_socks5_proxy_config(next);
+    if changed {
+        network::mqtt_transport::note_broker_settings_changed();
+    }
 }
 
 /// «Любая сеть»: убрать SOCKS5-прокси — MQTT снова ходит напрямую.
 pub fn clear_mqtt_socks5_proxy() {
+    let had_proxy = network::socks5::mqtt_socks5_proxy_config().is_some();
     network::socks5::clear_mqtt_socks5_proxy_config();
+    if had_proxy {
+        network::mqtt_transport::note_broker_settings_changed();
+    }
 }
 
 pub fn identity_signing_mode() -> String {

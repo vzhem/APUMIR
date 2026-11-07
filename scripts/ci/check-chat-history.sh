@@ -15,6 +15,7 @@ python3 "$ROOT/scripts/ci/check-chat-header.py"
 python3 "$ROOT/scripts/ci/check-heart-game.py"
 python3 "$ROOT/scripts/ci/check-story-feedback.py"
 python3 "$ROOT/scripts/ci/check-flashlight-alerts.py"
+python3 "$ROOT/scripts/ci/check-ipv6-proxy-settings.py"
 OUT="$ROOT/target/chat-history-check"
 mkdir -p "$OUT/compiler" "$OUT/runtime" "$OUT/classes"
 read -r KOTLIN COROUTINES JUNIT < <(python3 - "$ROOT/android-app/gradle/libs.versions.toml" <<'PY'
@@ -165,6 +166,9 @@ AVATAR_VIDEO_WIRE="$BASE/main/java/com/vladimir/messenger/data/avatavideo/Avatar
 AVATAR_VIDEO_WIRE_TEST="$BASE/test/java/com/vladimir/messenger/data/avatavideo/AvatarVideoWireTest.kt"
 FLASHLIGHT_POLICY="$BASE/main/java/com/vladimir/messenger/data/notification/FlashlightAlertPolicy.kt"
 FLASHLIGHT_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/data/notification/FlashlightAlertPolicyTest.kt"
+IPV6_PROXY_CONFIG="$BASE/main/java/com/vladimir/messenger/data/swarm/Ipv6ProxyConfig.kt"
+IPV6_PROXY_RUNTIME="$BASE/main/java/com/vladimir/messenger/data/swarm/Ipv6ProxyRuntime.kt"
+IPV6_PROXY_TEST="$BASE/test/java/com/vladimir/messenger/data/swarm/Ipv6NetworkProxyTest.kt"
 # TextColorPalette в этом окружении не компилируется: ему нужны Compose Color и
 # сгенерированный R.string. Поэтому TextColorWire (он здесь настоящий, его
 # формат и проверяем) собирается с заглушкой палитры, а список id берётся ИЗ
@@ -209,7 +213,8 @@ PYGEN
     "$STORY_PUBLISH" "$STORY_PUBLISH_TEST" "$RETENTION" "$RETENTION_TEST" \
     "$BIRTHDAY" "$BIRTHDAY_BOOK" "$BIRTHDAY_TEST" "$BIRTHDAY_WIRE_TEST" \
     "$IDENTITY_HEALTH" "$IDENTITY_HEALTH_TEST" \
-    "$FLASHLIGHT_POLICY" "$FLASHLIGHT_POLICY_TEST"
+    "$FLASHLIGHT_POLICY" "$FLASHLIGHT_POLICY_TEST" \
+    "$IPV6_PROXY_CONFIG" "$IPV6_PROXY_RUNTIME" "$IPV6_PROXY_TEST"
 "$JAVA" -cp "$OUT/classes:$CP" org.junit.runner.JUnitCore \
     com.vladimir.messenger.data.group.GroupWallpaperTest \
     com.vladimir.messenger.ui.screens.chat.ChatHistoryObserverTest \
@@ -245,4 +250,5 @@ PYGEN
     com.vladimir.messenger.data.schedule.DeferredDeliveryPolicyTest \
     com.vladimir.messenger.data.schedule.SendTimePolicyTest \
     com.vladimir.messenger.data.file.FileTransferRetentionTest \
-    com.vladimir.messenger.data.notification.FlashlightAlertPolicyTest
+    com.vladimir.messenger.data.notification.FlashlightAlertPolicyTest \
+    com.vladimir.messenger.data.swarm.Ipv6NetworkProxyTest

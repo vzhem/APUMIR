@@ -41,6 +41,7 @@ class NetworkMonitor(private val context: Context) {
                 // Настройки пути доставки зависят от сети (мобильная или нет),
                 // а при старте службы это первый момент, когда ядро уже живо.
                 com.vladimir.messenger.data.swarm.NetworkPathSettings.applyToCore(context)
+                com.vladimir.messenger.data.swarm.Ipv6NetworkSettings.applyToCore(context)
                 RustBridge.onNetworkAvailable()
             }
         }

@@ -81,6 +81,8 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
         // поднимается MQTT-сессия, и опоздавшее значение не применилось бы до
         // перезапуска приложения.
         com.vladimir.messenger.data.swarm.BrokerSettings.applyToCore(this)
+        // Пользовательский IPv6-прокси из раздела «Сеть» — тоже до старта службы.
+        com.vladimir.messenger.data.swarm.Ipv6NetworkSettings.applyToCore(this)
         com.vladimir.messenger.data.pairing.DevicePairingController.attach(this)
         com.vladimir.messenger.data.story.StoryStore.attach(this)
         // Видеоаватары собеседников: догоняющие просьбы, анонс своего, уборка.
