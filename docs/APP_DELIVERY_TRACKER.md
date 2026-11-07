@@ -5,7 +5,8 @@
 
 ## Где живёт работа
 
-- Линия приложения: `main`. Последний опубликованный стабильный релиз — `v11.74.493` (Latest, 2026-11-07T11:02:12Z).
+- Линия приложения: `main`. Последний опубликованный стабильный релиз — `v11.74.494` (Latest, 2026-11-07T15:29:46Z).
+- Кандидат `v11.74.495` (авто-досылка «темы и состав»): код и текст `docs/RELEASE_NOTES_v11.74.495.md` готовы, ветка зелёная; PR в `main`, тег и публикация — только после подтверждения владельцем точного публичного текста (`docs/RELEASE_PUBLICATION_POLICY.md`).
 - Рабочая ветка этой сессии: `arena/eef22e30-apumir`. В `v11.74.493` (PR #126 → `main` `dac7907f`) вошли и выпущены для всех:
   - защита от дублей профилей при переустановке APK через `Settings.Secure.ANDROID_ID` (`DeviceProfileAnchor`, `DeviceProfileBinding`, `DeviceIdentityCoordinator`), распознавание прежнего профиля на старте с отдельным окном подтверждения перед заменой, подписанное схлопывание двойников (`APUGRP1|dva1|`), постоянный 6-значный цифровой код профиля (`NNN-NNN` / `APU-NNN-NNN`, `ProfileCallsign`) в профиле/QR/поиске и мгновенная привязка живых IPv4/IPv6-адресов к `pk_…` (см. раздел ниже и `docs/PROFILE_DEVICE_BINDING.md`).
 - Ранее в `v11.74.492` (PR #124 → `main` `c1aa3db6`) вошли и выпущены для всех:
@@ -25,6 +26,7 @@
   - **кнопка** осталась как «разослать сейчас, не дожидаясь прохода» и показывает подпись «Последняя рассылка: дд.ММ чч:мм» (`admin_resync_last`, ru/en).
 - **Почему не нагружает:** веер на весь состав остался только у осознанного нажатия; автоматика не выходит за порцию в 15 участников и окно в 6 часов, её пакеты идут с паузами через общий бюджет `SwarmBudget`/`PerMemberFanoutDelivery`, а в тени зеркала не отправляется ничего (как в обычной групповой рассылке). Расчёт курсора и отметок окна — без сети и в худшем случае это чтение строк из Room.
 - **Код:** новый `data/group/GroupInfoResync.kt` (логика, бюджет, `PrefsStore`/`MemoryStore`), в `GroupRepository` — тонкая проводка (`onGroupOpened`, `autoResyncMembers`, `autoResyncAllGroups`, `lastResyncAtMs`; прежние тела `requestTopics`, `requestRoster`, `resyncMembers`, `sendTopics`, `sendGroupInfo` переехали в новый класс, файл стал короче). Вкладка «Участники» вынесена из `GroupAdminScreen.kt` в `GroupAdminMembersTab.kt` (правило god-файлов), потолки в `scripts/ci/god-files-baseline.json` опущены.
+- **Релиз:** кандидат `v11.74.495`, публичный текст — `docs/RELEASE_NOTES_v11.74.495.md`.
 - **Проверки:** `check-god-files.py`, `check-silent-catch.py`, `check-hardcoded-strings.py` зелёные локально; JDK/SDK в песочнице нет, поэтому компиляцию проверяли веточные прогоны: `Unit tests (JVM)` [42390925543](https://github.com/vzhem/APUMIR/actions/runs/42390925543) (192 класса, 1528 тестов, 0 падений) и `Build Release APK` [42390281892](https://github.com/vzhem/APUMIR/actions/runs/42390281892), [42390925541](https://github.com/vzhem/APUMIR/actions/runs/42390925541) — оба зелёные, релиз не публиковался (прогон из ветки).
 
 ## Видеозвонок в меню личного чата, 2026-11-07
