@@ -62,6 +62,9 @@ CHAT_DETAIL_VM = (KOTLIN / "ui/screens/chat/ChatDetailViewModel.kt").read_text()
 GROUP_SCREEN = (KOTLIN / "ui/screens/groups/GroupChatScreen.kt").read_text()
 GROUP_VM = (KOTLIN / "ui/screens/groups/GroupChatViewModel.kt").read_text()
 ADMIN_SCREEN = (KOTLIN / "ui/screens/groups/GroupAdminScreen.kt").read_text()
+# Строки участников (аватарка, кольцо и знак VIP) вынесены из админки
+# отдельным файлом по правилу god-файлов; контракт смотрит туда.
+ADMIN_MEMBERS = (KOTLIN / "ui/screens/groups/GroupAdminMembersTab.kt").read_text()
 ADMIN_VM = (KOTLIN / "ui/screens/groups/GroupAdminViewModel.kt").read_text()
 CHANNEL_SCREEN = (KOTLIN / "ui/screens/channels/ChannelScreen.kt").read_text()
 CHANNEL_VM = (KOTLIN / "ui/screens/channels/ChannelViewModel.kt").read_text()
@@ -183,7 +186,7 @@ class PeerRankContractTest(unittest.TestCase):
             ("шапка личного чата", CHAT_DETAIL),
             ("карточка профиля", PROFILE_SHEET),
             ("сообщения группы", GROUP_SCREEN),
-            ("участники группы", ADMIN_SCREEN),
+            ("участники группы", ADMIN_MEMBERS),
             ("посты канала", CHANNEL_SCREEN),
         ):
             self.assertIn("PeerAvatar(", text, name)
@@ -196,7 +199,7 @@ class PeerRankContractTest(unittest.TestCase):
         self.assertIn("rememberSelfVip()", RING)
         self.assertIn("vip = senderVip", GROUP_SCREEN)
         self.assertIn("vip = authorVip", CHANNEL_SCREEN)
-        self.assertIn("vip = member.nodeId.lowercase() in vipNodeIds", ADMIN_SCREEN)
+        self.assertIn("vip = member.nodeId.lowercase() in vipNodeIds", ADMIN_MEMBERS)
         # Порог берётся из политики, второй копии числа «10» у экранов нет.
         # Узел канонизируется перед сверкой: конверт приходит в любом регистре,
         # а set VIP-узлов хранится в нижнем.
