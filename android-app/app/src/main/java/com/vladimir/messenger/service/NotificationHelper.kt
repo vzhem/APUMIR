@@ -11,6 +11,7 @@ import com.vladimir.messenger.MessengerApplication
 import com.vladimir.messenger.R
 import com.vladimir.messenger.data.local.dao.ChatDao
 import com.vladimir.messenger.data.local.dao.GroupDao
+import com.vladimir.messenger.data.notification.FlashlightMessageKind
 import com.vladimir.messenger.data.notification.NotificationMuteScope
 import com.vladimir.messenger.data.notification.NotificationMuteStore
 import com.vladimir.messenger.data.repository.ContactRepository
@@ -28,6 +29,7 @@ class NotificationHelper @Inject constructor(
     private val chatDao: ChatDao,
     private val groupDao: GroupDao,
     private val notificationMuteStore: NotificationMuteStore,
+    private val flashlightBlinker: FlashlightBlinker,
 ) {
     companion object {
         private const val MESSAGE_NOTIFICATION_BASE_ID = 2000
@@ -143,6 +145,14 @@ class NotificationHelper @Inject constructor(
         // Показать notification (ID на основе chatId чтобы группировать)
         val notificationId = MESSAGE_NOTIFICATION_BASE_ID + chatId.hashCode().mod(1000)
         notificationManager.notify(notificationId, notification)
+        flashlightBlinker.blinkForMessage(
+            kind = FlashlightMessageKind.classify(
+                hasGroup = group != null,
+                isChannel = group?.isChannel == true,
+            ),
+            silent = silent,
+            muted = false,
+        )
     }
 
     /**
@@ -160,6 +170,7 @@ class NotificationHelper @Inject constructor(
     ) {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val group = groupDao.getGroupById(chatId)
+        flashlightBlinker.blinkForSos(isGroup = group != null && !group.isChannel)
         val contact = contactRepository.getContactById(senderId)
         val senderName = contact?.displayName
             ?: groupDao.getMember(chatId, senderId)?.displayName?.takeIf { it.isNotBlank() }

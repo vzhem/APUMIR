@@ -5,7 +5,7 @@
     "android-app/app/src/main/java/com/vladimir/messenger/data/call/CallManager.kt": 1893,
     "android-app/app/src/main/java/com/vladimir/messenger/data/diagnostics/DiagnosticsReport.kt": 1491,
     "android-app/app/src/main/java/com/vladimir/messenger/data/file/FileTransferReceiver.kt": 2452,
-    "android-app/app/src/main/java/com/vladimir/messenger/data/file/FileTransferRouter.kt": 1914,
+    "android-app/app/src/main/java/com/vladimir/messenger/data/file/FileTransferRouter.kt": 1900,
     "android-app/app/src/main/java/com/vladimir/messenger/data/group/GroupFileSwarm.kt": 1207,
     "android-app/app/src/main/java/com/vladimir/messenger/data/group/GroupRepository.kt": 5832,
     "android-app/app/src/main/java/com/vladimir/messenger/data/group/GroupWire.kt": 2730,
@@ -23,6 +23,6 @@
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupChatScreen.kt": 2964,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupChatViewModel.kt": 1988,
     "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/groups/GroupsScreen.kt": 1531,
-    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsScreen.kt": 2636
+    "android-app/app/src/main/java/com/vladimir/messenger/ui/screens/settings/SettingsScreen.kt": 2634
   }
 }

@@ -5,6 +5,10 @@
     <!-- Сеть -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Камера и вспышка не обязательны: приложение ставят и на планшеты без
+         вспышки, и на ПК через эмулятор x86_64 (AGENTS.md п. 11). -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
     <!-- «Поделиться координатами»: разрешение спрашиваем только по нажатию кнопки метки -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />

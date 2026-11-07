@@ -50,7 +50,7 @@ cd android-app || exit 1
     --tests '*ShortLinksTest*' --tests '*DiagnosticsReportTest*' --tests '*RelayStorageDiagnosticsTest*' --tests '*RuntimeHealthTest*' --tests '*OperationalHealthTest*' --tests '*StoryDeliveryQueueTest*' --tests '*StoryVideoDraftTest*' --tests '*StoryVideoWireTest*' --tests '*StoryPublishTest*' --tests '*StoryOutboxTest*' --tests '*StoryStoreMergeTest*' --tests '*StoryCropTest*' --tests '*ProfileMirrorBirthdayTest*' --tests '*ProfileMirrorVideoAvatarTest*' --tests '*VideoAvatarPolicyTest*' \
     --tests '*StoryFeedbackWireTest*' --tests '*StoryFeedbackLedgerTest*' --tests '*StoryFeedbackOutboxTest*' \
     --tests '*GroupFileSeederTest*' --tests '*FileTransferWireTest*' --tests '*FileTransferReceiverTest*' --tests '*FileTransferSenderTest*' --tests '*FileTransferChunkStoreTest*' --tests '*TemporaryFileSweepTest*' --tests '*EphemeralControlTest*' \
-    --tests '*SendTimePolicyTest*' --tests '*DeferredWireTest*' --tests '*DeferredDeliveryPolicyTest*'
+    --tests '*SendTimePolicyTest*' --tests '*DeferredWireTest*' --tests '*DeferredDeliveryPolicyTest*' --tests '*FlashlightAlertPolicyTest*' --tests '*Ipv6NetworkProxyTest*'
 TESTS_STATUS=$?
 
 # ---- почему тесты упали: словами в лог, а не «красный шаг без причины» -------

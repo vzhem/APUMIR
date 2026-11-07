@@ -1285,12 +1285,12 @@ private fun SettingsTabContent(
                     }
                 }
             }
-
             }
             if (section == SettingsSection.Notifications) {
             item { SettingsSectionTitle(stringResource(R.string.section_notifications)) }
             // «Как в Telegram»: что мешает письму разбудить телефон (файл рядом).
             item { DeliveryAssuranceCard() }
+            item { FlashlightAlertSettingsCard() }
             // Пауза новых сообщений: приложение целиком или нужный раздел.
             item {
                 SettingsCard {
@@ -1317,7 +1317,6 @@ private fun SettingsTabContent(
                     }
                 }
             }
-
             }
             if (section == SettingsSection.Security) {
             item { SettingsSectionTitle(stringResource(R.string.section_security)) }
@@ -1456,9 +1455,7 @@ private fun SettingsTabContent(
                         },
                     )
                     ApuSettingsDivider()
-                    // Настройка прокси стоит рядом с выключателем прокси, а не
-                    // отдельным разделом: раньше два прокси-пункта жили в разных
-                    // концах экрана.
+                    // Настройка пула прокси стоит рядом с его переключателем.
                     SettingsItem(
                         icon = Icons.Default.Dns,
                         title = stringResource(R.string.settings_proxy_manual),
@@ -1467,6 +1464,7 @@ private fun SettingsTabContent(
                     )
                 }
             }
+            item { Ipv6NetworkSettingsSection() }
 
             // ----------------------------------------------------------------
             // ПЕРЕДАЧА ФАЙЛОВ

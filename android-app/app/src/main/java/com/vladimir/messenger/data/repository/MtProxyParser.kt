@@ -114,6 +114,8 @@ object MtProxyParser {
         var host: String? = null
         var port: Int? = null
         var secret: String? = null
+        var username = ""
+        var password = ""
         var type: String = "MTProto"
 
         for (line in lines) {
@@ -155,10 +157,11 @@ object MtProxyParser {
                     }
                 }
                 key == "username" || key == "user" || key == "логин" -> {
-                    // Для SOCKS5/HTTP — это username
+                    username = value
+                    if (type == "MTProto" && secret.isNullOrEmpty()) type = "SOCKS5"
                 }
                 key == "password" || key == "pass" || key == "пароль" -> {
-                    // Для SOCKS5/HTTP — это password
+                    password = value
                 }
             }
         }
@@ -177,16 +180,32 @@ object MtProxyParser {
                     createEntity(host, port, secret = secret, type = "MTProto")
                 }
             }
-            else -> createEntity(host, port, type = type)
+            else -> createEntity(host, port, username = username, password = password, type = type)
         }
     }
 
     /**
-     * Прямой ввод: host:port:secret (MTProto) или host:port (SOCKS5)
+     * Прямой ввод: host:port:secret (MTProto), host:port:user:pass (SOCKS5) или host:port (SOCKS5)
      */
     private fun parseDirect(input: String, source: String): MtProtoProxyEntity? {
+        if (input.startsWith("[")) {
+            val parsed = com.vladimir.messenger.data.swarm.Ipv6ProxyParser.parseQuickInput(input)
+                ?: return null
+            return createEntity(
+                host = parsed.host,
+                port = parsed.port,
+                username = parsed.username,
+                password = parsed.password,
+                type = if (parsed.protocol == com.vladimir.messenger.data.swarm.Ipv6ProxyProtocol.HTTP) "HTTP" else "SOCKS5",
+            )
+        }
         val parts = input.split(":")
         return when (parts.size) {
+            4 -> {
+                val host = parts[0].trim()
+                val port = parts[1].trim().toIntOrNull() ?: return null
+                createEntity(host, port, username = parts[2].trim(), password = parts[3].trim(), type = "SOCKS5")
+            }
             3 -> {
                 val host = parts[0].trim()
                 val port = parts[1].trim().toIntOrNull() ?: return null

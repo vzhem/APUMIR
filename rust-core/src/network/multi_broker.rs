@@ -78,8 +78,13 @@ pub async fn probe_broker(host: &str, port: u16) -> bool {
     ];
     let handshake = async {
         let io_err = |error: std::io::Error| error.to_string();
-        let mut stream =
-            tokio::net::TcpStream::connect((host, port)).await.map_err(io_err)?;
+        let mut stream = if let Some(proxy) = crate::network::socks5::mqtt_socks5_proxy_config() {
+            crate::network::socks5::connect_through(&proxy, host.to_string(), port)
+                .await
+                .map_err(io_err)?
+        } else {
+            tokio::net::TcpStream::connect((host, port)).await.map_err(io_err)?
+        };
         stream.write_all(CONNECT).await.map_err(io_err)?;
         let mut header = [0u8; 2];
         stream.read_exact(&mut header).await.map_err(io_err)?;

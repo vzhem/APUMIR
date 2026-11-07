@@ -809,7 +809,11 @@ class SettingsViewModel @Inject constructor(
             .edit().putBoolean("proxy_tunnel_enabled", enabled).apply()
         _uiState.update { it.copy(proxyTunnelEnabled = enabled) }
         viewModelScope.launch {
-            if (enabled) {
+            if (com.vladimir.messenger.data.swarm.Ipv6NetworkSettings.isActive(context)) {
+                withContext(Dispatchers.IO) {
+                    com.vladimir.messenger.data.swarm.Ipv6NetworkSettings.applyToCore(context)
+                }
+            } else if (enabled) {
                 runCatching { proxyAutopilot.cycle() }
             } else {
                 withContext(Dispatchers.IO) { RustBridge.clearMqttSocks5Proxy() }
