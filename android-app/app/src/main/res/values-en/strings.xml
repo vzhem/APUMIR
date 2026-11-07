@@ -574,6 +574,7 @@
     <string name="admin_transfer_q">Transfer ownership?</string>
     <string name="admin_transfer">Transfer</string>
     <string name="admin_resync">Resend topics and members</string>
+    <string name="admin_resync_last">Last resend: %1$s</string>
     <string name="admin_search_placeholder">Search members by name or node</string>
     <string name="admin_role_owner">Owner</string>
     <string name="admin_role_member">Member</string>

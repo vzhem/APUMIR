@@ -671,6 +671,7 @@
     <string name="admin_transfer_q">Передать владение?</string>
     <string name="admin_transfer">Передать</string>
     <string name="admin_resync">Разослать темы и состав заново</string>
+    <string name="admin_resync_last">Последняя рассылка: %1$s</string>
     <string name="admin_search_placeholder">Поиск участника по имени или узлу</string>
     <string name="admin_role_owner">Владелец</string>
     <string name="admin_role_member">Участник</string>

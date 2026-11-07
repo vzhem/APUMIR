@@ -145,6 +145,7 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
         scheduleUpdateChecks()
         scheduleBoundedRelayWake()
         scheduleServiceWatchdog()
+        scheduleGroupInfoResync()
         runCatching { com.vladimir.messenger.data.maintenance.AutomaticMaintenance.schedule(this) }
             .onFailure { Log.w("MessengerApp", "Maintenance scheduling deferred", it) }
         // Restore work after a crash between committing a hidden letter and enqueueing its timer.
@@ -274,6 +275,40 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
             )
         } catch (error: Exception) {
             Log.e("MessengerApp", "Failed to schedule M8 bounded relay wake", error)
+        }
+    }
+
+    /**
+     * Досылка «карточка группы, темы и состав» тем, кто её пропустил: кнопка
+     * «Разослать темы и состав заново» больше не требует ручного нажатия.
+     *
+     * Раз в шесть часов и только при сети и не садящейся батарее; сам проход
+     * ограничен бюджетом (`GroupInfoResync`: порция участников, паузы между
+     * пакетами, не чаще раза в шесть часов на группу), поэтому фоновая задача
+     * не превращается в веер на весь состав.
+     */
+    private fun scheduleGroupInfoResync() {
+        try {
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .setRequiresBatteryNotLow(true)
+                .build()
+            val request = PeriodicWorkRequestBuilder<com.vladimir.messenger.worker.GroupInfoResyncWorker>(
+                6L,
+                TimeUnit.HOURS,
+                2L,
+                TimeUnit.HOURS,
+            )
+                .setInitialDelay(30L, TimeUnit.MINUTES)
+                .setConstraints(constraints)
+                .build()
+            WorkManager.getInstance(applicationContext).enqueueUniquePeriodicWork(
+                com.vladimir.messenger.worker.GroupInfoResyncWorker.WORK_NAME,
+                ExistingPeriodicWorkPolicy.KEEP,
+                request,
+            )
+        } catch (error: Exception) {
+            Log.e("MessengerApp", "Failed to schedule group info resync", error)
         }
     }
 

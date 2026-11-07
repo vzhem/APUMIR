@@ -128,12 +128,12 @@ class GroupChatViewModel @Inject constructor(
                 kotlinx.coroutines.delay(300)
             }
         }
-        // Вступивший позже не застал создание тем - просим список у владельца.
-        viewModelScope.launch { groupRepository.requestTopics(groupId) }
-        // Состав также мог быть пропущен в офлайне или прийти частично.
-        // Открытие списка участников запускает тот же адресный repair-path,
-        // поэтому UI не остаётся на старых двух строках до следующего вступления.
-        viewModelScope.launch { groupRepository.requestRoster(groupId) }
+        // Вступивший позже не застал создание тем и состава - просим только
+        // недостающее (пустой список тем, неполный состав малой группы), а
+        // владелец или администратор тут же тихо досылает отстающим
+        // (GroupInfoResync): кнопку «Разослать темы и состав заново» нажимать
+        // больше не нужно, и веера на весь состав при этом нет.
+        viewModelScope.launch { groupRepository.onGroupOpened(groupId) }
         // р237: черновик темы - из хранилища и от партнёрского устройства.
         draftKey = com.vladimir.messenger.data.draft.DraftStore.groupKey(groupId)
         observeDrafts()
