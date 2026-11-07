@@ -538,7 +538,7 @@
     <string name="sos_sending">Sending SOS…</string>
     <string name="sos_wait_seconds">SOS · wait %1$d s</string>
     <string name="sos_confirm_title">Send an SOS signal?</string>
-    <string name="sos_confirm_body">Every group member will immediately receive %1$d alert messages. They will sound even on phones where this group is muted and will wake sleeping phones. Press only if you truly need help.</string>
+    <string name="sos_confirm_body">Every group member will immediately receive %1$d alert messages. They will sound even when this group is muted, blink the flashlight, and wake sleeping phones. Press only if you truly need help.</string>
     <string name="sos_send_action">Send SOS</string>
     <string name="sos_settings_title">Red SOS button</string>
     <string name="sos_settings_hint">One press sends the whole group several alert messages in a row — they sound even when the group is muted. After a press the button is locked for 10 seconds.</string>
@@ -2203,7 +2203,7 @@ The file is not on this phone</string>
     <string name="settings_reset_category_hearts">Hearts</string>
     <string name="settings_reset_category_files">Files and seeding</string>
     <string name="settings_reset_details_chats">Chat folders, personal backgrounds for individual chats, and the app used to open locations.</string>
-    <string name="settings_reset_details_notifications">Notification pauses for the app, chats, groups, channels and topics.</string>
+    <string name="settings_reset_details_notifications">Notification pauses and flashlight alerts for chats, groups, channels, topics and SOS.</string>
     <string name="settings_reset_details_appearance">Theme, text size, wallpaper and tint, text and name colours, reading filter, language, voice speed and voice effect.</string>
     <string name="settings_reset_details_security">Who may send group and channel invitations: the default is everyone.</string>
     <string name="settings_reset_details_network">The proxy tunnel.</string>
@@ -2480,4 +2480,21 @@ The file is not on this phone</string>
     <string name="update_notification_official_text">Version %1$s is available. Tap to download and install.</string>
     <string name="update_notification_peer_text">A neighbor is sharing update %1$s. Tap, then open Settings → Updates.</string>
     <string name="update_notification_compact_text">A compact update package for %1$s is available. Tap, then open Settings → Updates.</string>
+
+    <!-- Flashlight alerts for SOS and messages -->
+    <string name="flashlight_sos_title">Flashlight on group SOS</string>
+    <string name="flashlight_sos_hint">Blink the flashlight on an SOS alert from a group (can be turned off on this device)</string>
+    <string name="flashlight_messages_title">Flashlight for messages</string>
+    <string name="flashlight_messages_dialog_hint">Choose which incoming messages blink the flashlight. Muted chats and silent messages do not trigger the flash.</string>
+    <string name="flashlight_unavailable_hint">This device has no camera flash — flashlight alerts are unavailable.</string>
+    <string name="flashlight_mode_off">Off</string>
+    <string name="flashlight_mode_off_hint">Do not blink the flashlight for regular messages</string>
+    <string name="flashlight_mode_all">All messages</string>
+    <string name="flashlight_mode_all_hint">Personal chats, groups and channels</string>
+    <string name="flashlight_mode_personal">Personal chats only</string>
+    <string name="flashlight_mode_personal_hint">One-on-one direct messages</string>
+    <string name="flashlight_mode_groups">Groups only</string>
+    <string name="flashlight_mode_groups_hint">Regular messages in groups</string>
+    <string name="flashlight_mode_channels">Channels only</string>
+    <string name="flashlight_mode_channels_hint">New posts and discussions in channels</string>
 </resources>

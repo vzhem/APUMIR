@@ -1285,12 +1285,12 @@ private fun SettingsTabContent(
                     }
                 }
             }
-
             }
             if (section == SettingsSection.Notifications) {
             item { SettingsSectionTitle(stringResource(R.string.section_notifications)) }
             // «Как в Telegram»: что мешает письму разбудить телефон (файл рядом).
             item { DeliveryAssuranceCard() }
+            item { FlashlightAlertSettingsCard() }
             // Пауза новых сообщений: приложение целиком или нужный раздел.
             item {
                 SettingsCard {
@@ -1317,7 +1317,6 @@ private fun SettingsTabContent(
                     }
                 }
             }
-
             }
             if (section == SettingsSection.Security) {
             item { SettingsSectionTitle(stringResource(R.string.section_security)) }

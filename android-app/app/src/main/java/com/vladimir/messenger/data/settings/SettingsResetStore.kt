@@ -3,6 +3,7 @@ package com.vladimir.messenger.data.settings
 import android.content.Context
 import com.vladimir.messenger.data.folder.ChatFolderStore
 import com.vladimir.messenger.data.heartgame.HeartGameStore
+import com.vladimir.messenger.data.notification.FlashlightAlertStore
 import com.vladimir.messenger.data.notification.NotificationMuteStore
 import com.vladimir.messenger.data.textcolor.TextColorSettingsStore
 import com.vladimir.messenger.data.translate.TranslationSettings
@@ -76,7 +77,7 @@ object SettingsResetStore {
         for (category in categories) {
             when (category) {
                 SettingsResetCategory.CHATS -> resetChats(context)
-                SettingsResetCategory.NOTIFICATIONS -> notificationMuteStore.resetAll()
+                SettingsResetCategory.NOTIFICATIONS -> resetNotifications(context, notificationMuteStore)
                 SettingsResetCategory.APPEARANCE -> resetAppearance(context)
                 SettingsResetCategory.SECURITY -> resetSecurity(context)
                 SettingsResetCategory.NETWORK -> resetNetwork(context)
@@ -110,9 +111,10 @@ object SettingsResetStore {
         )
     }
 
-    /** All local notification pauses, including topic-specific pauses. */
-    fun resetNotifications(notificationMuteStore: NotificationMuteStore) {
+    /** All local notification pauses and flashlight alerts, including topic-specific pauses. */
+    fun resetNotifications(context: Context, notificationMuteStore: NotificationMuteStore) {
         notificationMuteStore.resetAll()
+        FlashlightAlertStore.reset(context)
     }
 
     /** Safe invitation policy default; identity and security keys remain intact. */

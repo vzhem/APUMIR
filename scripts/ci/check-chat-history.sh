@@ -14,6 +14,7 @@ python3 "$ROOT/scripts/ci/check-story-editor.py"
 python3 "$ROOT/scripts/ci/check-chat-header.py"
 python3 "$ROOT/scripts/ci/check-heart-game.py"
 python3 "$ROOT/scripts/ci/check-story-feedback.py"
+python3 "$ROOT/scripts/ci/check-flashlight-alerts.py"
 OUT="$ROOT/target/chat-history-check"
 mkdir -p "$OUT/compiler" "$OUT/runtime" "$OUT/classes"
 read -r KOTLIN COROUTINES JUNIT < <(python3 - "$ROOT/android-app/gradle/libs.versions.toml" <<'PY'
@@ -162,6 +163,8 @@ VIDEO_AVATAR_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/data/profile/Vi
 # просьба отдать чужой - чистый провод, проверяется здесь же на runner.
 AVATAR_VIDEO_WIRE="$BASE/main/java/com/vladimir/messenger/data/avatavideo/AvatarVideoWire.kt"
 AVATAR_VIDEO_WIRE_TEST="$BASE/test/java/com/vladimir/messenger/data/avatavideo/AvatarVideoWireTest.kt"
+FLASHLIGHT_POLICY="$BASE/main/java/com/vladimir/messenger/data/notification/FlashlightAlertPolicy.kt"
+FLASHLIGHT_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/data/notification/FlashlightAlertPolicyTest.kt"
 # TextColorPalette в этом окружении не компилируется: ему нужны Compose Color и
 # сгенерированный R.string. Поэтому TextColorWire (он здесь настоящий, его
 # формат и проверяем) собирается с заглушкой палитры, а список id берётся ИЗ
@@ -205,7 +208,8 @@ PYGEN
     "$SELF_SEED_POLICY" "$SELF_SEED_POLICY_TEST" "$SEND_TIME_POLICY" "$SEND_TIME_TEST" \
     "$STORY_PUBLISH" "$STORY_PUBLISH_TEST" "$RETENTION" "$RETENTION_TEST" \
     "$BIRTHDAY" "$BIRTHDAY_BOOK" "$BIRTHDAY_TEST" "$BIRTHDAY_WIRE_TEST" \
-    "$IDENTITY_HEALTH" "$IDENTITY_HEALTH_TEST"
+    "$IDENTITY_HEALTH" "$IDENTITY_HEALTH_TEST" \
+    "$FLASHLIGHT_POLICY" "$FLASHLIGHT_POLICY_TEST"
 "$JAVA" -cp "$OUT/classes:$CP" org.junit.runner.JUnitCore \
     com.vladimir.messenger.data.group.GroupWallpaperTest \
     com.vladimir.messenger.ui.screens.chat.ChatHistoryObserverTest \
@@ -240,4 +244,5 @@ PYGEN
     com.vladimir.messenger.data.schedule.DeferredWireTest \
     com.vladimir.messenger.data.schedule.DeferredDeliveryPolicyTest \
     com.vladimir.messenger.data.schedule.SendTimePolicyTest \
-    com.vladimir.messenger.data.file.FileTransferRetentionTest
+    com.vladimir.messenger.data.file.FileTransferRetentionTest \
+    com.vladimir.messenger.data.notification.FlashlightAlertPolicyTest

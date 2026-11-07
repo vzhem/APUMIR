@@ -588,6 +588,7 @@ class MainActivity : ComponentActivity() {
         com.vladimir.messenger.data.profile.EmojiStatusStore.init(this)
         com.vladimir.messenger.data.profile.InvitePrivacyStore.init(this)
         com.vladimir.messenger.data.location.MapAppPreferenceStore.initialize(this)
+        com.vladimir.messenger.data.notification.FlashlightAlertStore.initialize(this)
         setContent {
             val themeMode by ThemeModeHolder.mode.collectAsStateWithLifecycle()
             // Обложка перед входом. Правило - в SplashGate: первый экран

@@ -635,7 +635,7 @@
     <string name="sos_sending">Отправляем SOS…</string>
     <string name="sos_wait_seconds">SOS · подождите %1$d с</string>
     <string name="sos_confirm_title">Отправить сигнал SOS?</string>
-    <string name="sos_confirm_body">Всем участникам группы сразу придёт %1$d тревожных сообщения. Они прозвучат даже на телефонах, где группа без звука, и разбудят спящие телефоны. Нажимайте только если правда нужна помощь.</string>
+    <string name="sos_confirm_body">Всем участникам группы сразу придёт %1$d тревожных сообщения. Они прозвучат даже при выключенном звуке группы, помигают фонариком и разбудят спящие телефоны. Нажимайте только если правда нужна помощь.</string>
     <string name="sos_send_action">Отправить SOS</string>
     <string name="sos_settings_title">Красная кнопка SOS</string>
     <string name="sos_settings_hint">Одно нажатие шлёт всей группе несколько тревожных сообщений подряд — они звучат даже при выключенном звуке группы. После нажатия кнопка недоступна 10 секунд.</string>
@@ -2346,7 +2346,7 @@
     <string name="settings_reset_category_hearts">Сердечки</string>
     <string name="settings_reset_category_files">Файлы и раздача</string>
     <string name="settings_reset_details_chats">Папки чатов, личные обои конкретных чатов и приложение для открытия геопозиций.</string>
-    <string name="settings_reset_details_notifications">Паузы уведомлений приложения, чатов, групп, каналов и тем.</string>
+    <string name="settings_reset_details_notifications">Паузы уведомлений и вспышка фонарика для чатов, групп, каналов, тем и SOS.</string>
     <string name="settings_reset_details_appearance">Тема, размер текста, обои и оттенок, цвета текста и имени, фильтр чтения, язык, скорость голосовых и эффект голоса.</string>
     <string name="settings_reset_details_security">Кто может присылать приглашения в группы и каналы: значение по умолчанию — все.</string>
     <string name="settings_reset_details_network">Туннель прокси.</string>
@@ -2496,4 +2496,21 @@
     <string name="update_notification_official_text">Версия %1$s доступна. Нажмите, чтобы скачать и установить.</string>
     <string name="update_notification_peer_text">Сосед раздаёт обновления %1$s. Нажмите, затем откройте Настройки → Обновления.</string>
     <string name="update_notification_compact_text">Доступен компактный пакет обновления %1$s. Нажмите, затем откройте Настройки → Обновления.</string>
+
+    <!-- Вспышка фонарика при SOS и сообщениях -->
+    <string name="flashlight_sos_title">Фонарик при SOS из группы</string>
+    <string name="flashlight_sos_hint">Моргать фонариком при тревоге SOS в группе (можно выключить на этом устройстве)</string>
+    <string name="flashlight_messages_title">Фонарик для сообщений</string>
+    <string name="flashlight_messages_dialog_hint">Выберите, на какие обычные входящие сообщения должен моргать фонарик. На чаты без звука и тихие сообщения вспышка не срабатывает.</string>
+    <string name="flashlight_unavailable_hint">На этом устройстве нет вспышки камеры — мигание фонариком недоступно.</string>
+    <string name="flashlight_mode_off">Выключено</string>
+    <string name="flashlight_mode_off_hint">Не моргать фонариком на обычные сообщения</string>
+    <string name="flashlight_mode_all">Все сообщения</string>
+    <string name="flashlight_mode_all_hint">Личные чаты, группы и каналы</string>
+    <string name="flashlight_mode_personal">Только личные чаты</string>
+    <string name="flashlight_mode_personal_hint">Сообщения один на один</string>
+    <string name="flashlight_mode_groups">Только группы</string>
+    <string name="flashlight_mode_groups_hint">Обычные сообщения в группах</string>
+    <string name="flashlight_mode_channels">Только каналы</string>
+    <string name="flashlight_mode_channels_hint">Новые публикации и обсуждения в каналах</string>
 </resources>
