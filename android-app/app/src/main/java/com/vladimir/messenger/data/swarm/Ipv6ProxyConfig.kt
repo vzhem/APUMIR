@@ -196,13 +196,24 @@ object Ipv6ProxyParser {
         if (body.isEmpty()) return null
 
         // Формат login:password@host:port (разделяем по последнему '@', если в пароле есть '@').
+        // Если после '@' нет валидного host:port — значит '@' входит в сам пароль формата
+        // ip:port:login:p@ss, поэтому продолжаем позиционный разбор ниже.
         if (body.contains('@')) {
             val atIdx = body.lastIndexOf('@')
             val authPart = body.substring(0, atIdx)
             val endpointPart = body.substring(atIdx + 1)
-            val (host, port) = splitHostAndPort(endpointPart) ?: return null
-            val (user, pass) = splitUserPass(authPart) ?: return null
-            return buildValidated(protocol, host, port, urlDecode(user), urlDecode(pass))
+            val hostPort = splitHostAndPort(endpointPart)
+            val userPass = splitUserPass(authPart)
+            if (hostPort != null && userPass != null) {
+                buildValidated(
+                    protocol = protocol,
+                    rawHost = hostPort.first,
+                    port = hostPort.second,
+                    username = urlDecode(userPass.first),
+                    password = urlDecode(userPass.second),
+                )?.let { return it }
+            }
+            if (trimmed.contains("://")) return null
         }
 
         // Формат с IPv6 в скобках: [2a00:1fa0::1]:1080 или [2a00:1fa0::1]:1080:login:password.
