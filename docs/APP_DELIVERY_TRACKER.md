@@ -38,6 +38,7 @@
 - **Вид не изменился:** та же траектория качания (5 полуволн), те же 16dp размаха, те же повороты 16°/12°, тот же градиент, блики, тёмный кант, «+1» с золотым градиентом, тенью и 10 частицами; поведение нажатия, одноразовость зачёта и работа при выключенных системных анимациях не тронуты.
 - **Контракт:** в `scripts/ci/check-heart-game.py` добавлен тест `test_flight_does_not_recompose_and_heart_is_drawn_from_cache` — запрещает снова читать прогресс в композиции и собирать рисунок сердца в кадре.
 - **Документация:** раздел «Стоимость кадра» в `docs/HEART_GAME.md`.
+- **Проверки:** `check-heart-game.py` (12 тестов), `check-god-files.py`, `check-silent-catch.py`, `check-hardcoded-strings.py`, `check-docs-index.py` — зелёные локально; веточные прогоны [42406428379](https://github.com/vzhem/APUMIR/actions/runs/42406428379) (`Unit tests (JVM)`) и [42406428369](https://github.com/vzhem/APUMIR/actions/runs/42406428369) (`Build Release APK`) — success.
 
 ## Видеозвонок в меню личного чата, 2026-11-07
 
