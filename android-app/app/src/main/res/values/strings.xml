@@ -354,6 +354,7 @@
     <string name="menu_unmute">Включить уведомления</string>
     <string name="menu_mute">Отключить уведомления</string>
     <string name="menu_mark_read">Отметить прочитанным</string>
+    <string name="menu_mark_unread">Отметить непрочитанным</string>
     <string name="menu_clear_chat">Очистить переписку</string>
     <string name="menu_delete_chat">Удалить чат</string>
     <string name="menu_open_channel">Открыть канал</string>

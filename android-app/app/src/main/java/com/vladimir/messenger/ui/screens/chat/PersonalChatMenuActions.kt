@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.Markunread
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Videocam
@@ -34,7 +35,7 @@ internal fun personalChatMenuActions(
     onTogglePin: (Chat) -> Unit,
     onToggleArchive: (Chat) -> Unit,
     onToggleMute: (Chat) -> Unit,
-    onMarkRead: (chatId: String) -> Unit,
+    onToggleReadState: (chatId: String) -> Unit,
     onClear: (Chat) -> Unit,
     onDelete: (Chat) -> Unit,
 ): List<BubbleMenuAction> = listOf(
@@ -75,9 +76,13 @@ internal fun personalChatMenuActions(
         onClick = { onToggleMute(chat) },
     ),
     BubbleMenuAction(
-        title = stringResource(R.string.menu_mark_read),
-        icon = Icons.Default.DoneAll,
-        onClick = { onMarkRead(chat.id) },
+        title = if (chat.unreadCount > 0) {
+            stringResource(R.string.menu_mark_read)
+        } else {
+            stringResource(R.string.menu_mark_unread)
+        },
+        icon = if (chat.unreadCount > 0) Icons.Default.DoneAll else Icons.Default.Markunread,
+        onClick = { onToggleReadState(chat.id) },
     ),
     BubbleMenuAction(
         title = stringResource(R.string.menu_clear_chat),
