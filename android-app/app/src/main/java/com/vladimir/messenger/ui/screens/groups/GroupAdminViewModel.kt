@@ -50,6 +50,12 @@ data class GroupAdminUiState(
     val canManageInvites: Boolean = false,
     /** Картина владения: молчит ли владелец и могу ли я забрать права (наследование). */
     val ownership: GroupRepository.OwnershipState? = null,
+    /**
+     * Подпись «последняя рассылка …» под кнопкой: досылка «темы и состав»
+     * идёт сама, и администратор должен видеть, что она уже была, а не гадать,
+     * нужно ли жать кнопку. null — ещё не рассылали.
+     */
+    val lastResyncLabel: String? = null,
     val error: String? = null,
     val notice: String? = null,
 )
@@ -89,7 +95,27 @@ class GroupAdminViewModel @Inject constructor(
         observeRequests()
         observeInvites()
         observeTopics()
+        // Открытие админки тоже повод для тихой досылки: если срок прохода
+        // истёк, отстающие получат карточку, темы и состав порциями, без
+        // кнопки и без веера на весь состав.
+        viewModelScope.launch {
+            groupRepository.onGroupOpened(groupId)
+            // Проход мог уйти прямо сейчас — подпись обновляем после него.
+            refreshResyncLabel()
+        }
     }
+
+    /** Подпись под кнопкой: когда последний раз уходила досылка участникам. */
+    private fun refreshResyncLabel() {
+        val at = groupRepository.lastResyncAtMs(groupId)
+        _uiState.update { it.copy(lastResyncLabel = resyncLabel(at)) }
+    }
+
+    private fun resyncLabel(atMs: Long): String? = if (atMs <= 0L) null else appContext.getString(
+        R.string.admin_resync_last,
+        java.text.SimpleDateFormat("dd.MM HH:mm", java.util.Locale.getDefault())
+            .format(java.util.Date(atMs)),
+    )
 
     private fun observeGroup() {
         viewModelScope.launch {
@@ -223,6 +249,7 @@ class GroupAdminViewModel @Inject constructor(
             groupRepository.resyncMembers(groupId)
                 .onFailure { e -> _uiState.update { it.copy(error = e.message) } }
                 .onSuccess { count ->
+                    refreshResyncLabel()
                     _uiState.update { it.copy(notice = appContext.getString(R.string.ga_sent_to_members, count)) }
                 }
         }

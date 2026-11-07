@@ -271,6 +271,29 @@ class GroupRepository(
     }
 
     /**
+     * Досылка «карточка + темы + состав»: вынесена в [GroupInfoResync] -
+     * та же кнопка, но работающая сама (адресно по просьбе участника и тихими
+     * проходами с бюджетом). Здесь только проводка; хранилище отметок живёт в
+     * SharedPreferences, а в JVM-тестах (контекста нет) — в памяти.
+     */
+    private val infoResync: GroupInfoResync by lazy {
+        GroupInfoResync(
+            groupDao = groupDao,
+            myNodeId = { myId() },
+            clock = clock,
+            deliver = { groupId, envelope, recipients ->
+                // р229: тень зеркала не рассылает ничего (как в broadcast) -
+                // иначе ответ на принятый кадр уходил бы обратно активному.
+                val shadow = com.vladimir.messenger.data.mirror.MirrorHub.isApplyingFrame() &&
+                    !com.vladimir.messenger.data.mirror.MirrorHub.isActiveDevice()
+                if (!shadow) delivery.deliver(groupId, envelope, recipients)
+            },
+            publishRoster = { groupId -> publishRoster(groupId, adminsChanged = true) },
+            store = appContext?.let { GroupInfoResync.PrefsStore(it) } ?: GroupInfoResync.MemoryStore(),
+        )
+    }
+
+    /**
      * Заявки на вступление: вынесены в [GroupJoinRequests] - аудит 2026-10-26,
      * п. 4.1. Здесь только проводка: очередь, история, время, мой узел, веер
      * доставки и вступление в группу (оно остаётся в репозитории). Ленивая,
@@ -385,9 +408,6 @@ class GroupRepository(
     )
 
     private val pendingRosters = java.util.concurrent.ConcurrentHashMap<String, MutableList<PendingRoster>>()
-
-    /** Повторный запрос состава не чаще одного раза за интервал на группу. */
-    private val rosterRequestedAtMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     /**
      * Когда последний раз рассылали каталог, @имя и аватар.
@@ -3889,7 +3909,11 @@ class GroupRepository(
                 val group = groupDao.getGroupById(packet.groupId) ?: return
                 if (group.ownerId != me) return
                 if (groupDao.getMember(packet.groupId, senderId) == null) return
-                sendTopics(packet.groupId, senderId)
+                // Вместе с темами шлём карточку: просивший мог не получить и её
+                // (пустая группа без названия). Пакет маленький, а один ответ
+                // закрывает сразу обе дыры.
+                infoResync.sendGroupInfo(group, senderId)
+                infoResync.sendTopics(packet.groupId, senderId)
                 Log.i(TAG, "topics sent on request group=${packet.groupId} to=$senderId")
             }
 
@@ -5156,11 +5180,11 @@ class GroupRepository(
         )
         if (slug.isNotBlank()) groupDao.registerInviteUse(slug)
         groupDao.refreshMemberCount(group.id)
-        sendGroupInfo(group, nodeId)
+        infoResync.sendGroupInfo(group, nodeId)
         delivery.deliver(group.id, GroupWire.buildMemberListVisibility(group.id, group.memberListVisible), listOf(nodeId))
         sendWallpaper(group, nodeId)
         delivery.deliver(group.id, GroupWire.buildQuietHours(group.id, group.quietHours), listOf(nodeId))
-        sendTopics(group.id, nodeId)
+        infoResync.sendTopics(group.id, nodeId)
         publishRoster(group.id, newcomer = nodeId)
         // Ключи подписи - новичку канала и большой группы (этап 5): в ответ он
         // предъявит свой, и я буду знать, что он умеет рой.
@@ -5219,53 +5243,46 @@ class GroupRepository(
         Log.i(TAG, "manifests sent group=${group.id} to=$nodeId count=$sent")
     }
 
-    /** Группы, у которых мы уже просили темы в этом запуске приложения. */
-    private val topicsRequested = HashSet<String>()
-
     /**
      * Попросить у владельца или администратора актуальный состав.
      *
-     * Это не только реакция на неизвестное имя: экран чата вызывает метод при
-     * открытии, поэтому телефон, который был офлайн во время вступления,
-     * самовосстанавливает roster. Адрес владельца берём из карточки группы,
-     * а локальные admin-строки добавляем как запасной путь, если владелец
-     * временно недоступен.
+     * Экран чата вызывает метод при открытии, поэтому телефон, который был
+     * офлайн во время вступления, самовосстанавливает roster. Окно частоты и
+     * сам пакет — в [GroupInfoResync.requestRoster].
      */
-    suspend fun requestRoster(groupId: String) {
-        val me = myId() ?: return
-        val group = groupDao.getGroupById(groupId) ?: return
-        val mine = groupDao.getMember(groupId, me) ?: return
-        if (mine.isBanned || group.ownerId == me) return
-        val now = clock()
-        val previous = rosterRequestedAtMs[groupId] ?: 0L
-        if (previous != 0L && now - previous < ROSTER_REQUEST_GAP_MS) return
-        val targets = (
-            listOf(group.ownerId) + groupDao.getAdmins(groupId).map { it.nodeId }
-        ).filter { it.isNotBlank() && it != me }.distinct()
-        if (targets.isEmpty()) return
-        rosterRequestedAtMs[groupId] = now
-        runCatching {
-            delivery.deliver(groupId, GroupWire.buildRosterRequest(groupId), targets)
-        }.onFailure { Log.w(TAG, "roster request failed group=$groupId: ${it.message}") }
-        Log.i(TAG, "roster requested group=$groupId from=${targets.size} source(s)")
+    suspend fun requestRoster(groupId: String) = infoResync.requestRoster(groupId)
+
+    /**
+     * Попросить у владельца список тем (вступивший позже не застал пакеты
+     * `TopicCreated` и видит пустой список). Окно частоты — в
+     * [GroupInfoResync.requestTopics].
+     */
+    suspend fun requestTopics(groupId: String) = infoResync.requestTopics(groupId)
+
+    /**
+     * Открытие группы: адресная просьба о недостающем (для любого участника) и
+     * тихий проход досылки (для владельца и администраторов, не чаще раза в
+     * [GroupInfoResync.Limits.autoPassGapMs]). Оба шага дешёвые: если всё на
+     * месте и срок не истёк, сеть не трогается вовсе.
+     */
+    suspend fun onGroupOpened(groupId: String) {
+        runCatching { infoResync.repairIfIncomplete(groupId) }
+            .onFailure { Log.w(TAG, "info repair skipped group=$groupId: ${it.message}") }
+        autoResyncMembers(groupId)
     }
 
     /**
-     * Попросить у владельца список тем.
-     *
-     * Вызывается при открытии чата группы: вступивший позже не застал пакеты
-     * TopicCreated и видит пустой список тем. Просим не чаще раза запуск на
-     * группу - пакет маленький, а приёмник добавляет только отсутствующие темы.
+     * Тихая досылка карточки, тем и состава очередной порции участников.
+     * Кнопкой это делать не обязательно: проходы идут сами при открытии
+     * группы и по расписанию (см. `GroupInfoResyncWorker`).
      */
-    suspend fun requestTopics(groupId: String) {
-        val me = myId() ?: return
-        val group = groupDao.getGroupById(groupId) ?: return
-        if (group.ownerId == me) return
-        if (groupDao.getMember(groupId, me) == null) return
-        if (!topicsRequested.add(groupId)) return
-        delivery.deliver(groupId, GroupWire.buildTopicsRequest(groupId), listOf(group.ownerId))
-        Log.i(TAG, "topics requested group=$groupId")
-    }
+    suspend fun autoResyncMembers(groupId: String): Int = infoResync.autoPass(groupId)
+
+    /** Фоновый проход по всем группам, где я владелец или администратор. */
+    suspend fun autoResyncAllGroups(): Int = infoResync.autoPassAll()
+
+    /** Когда последний раз уходила досылка (авто или по кнопке); 0 — ещё не было. */
+    fun lastResyncAtMs(groupId: String): Long = infoResync.lastPassAt(groupId)
 
     /**
      * Самолечение после аварии с перезаписью группы.
@@ -5300,65 +5317,14 @@ class GroupRepository(
     }
 
     /**
-     * Разослать участникам карточку группы, темы и состав заново.
-     *
-     * Нужно для тех, кто вступил до появления этих пакетов: темы и состав они
-     * не получили и видят пустую группу. Повторная отправка безопасна - приёмник
-     * добавляет только отсутствующие строки.
+     * Разослать участникам карточку группы, темы и состав заново — «сейчас»,
+     * не дожидаясь тихого прохода. Нужно для тех, кто вступил до появления
+     * этих пакетов: темы и состав они не получили и видят пустую группу.
+     * Повторная отправка безопасна: приёмник добавляет только отсутствующие
+     * строки. Сама досылка живёт в [GroupInfoResync] — там же её бюджет и
+     * отметки о проходах.
      */
-    suspend fun resyncMembers(groupId: String): Result<Int> {
-        val me = myId() ?: return Result.failure(IllegalStateException("Идентичность узла ещё не готова"))
-        val actor = groupDao.getMember(groupId, me)
-            ?: return Result.failure(IllegalStateException("Вы не участник этой группы"))
-        if (!GroupRole.isAdminOrOwner(actor.role)) {
-            return Result.failure(SecurityException("Рассылка доступна только администраторам"))
-        }
-        val group = groupDao.getGroupById(groupId)
-            ?: return Result.failure(IllegalStateException("Группа не найдена"))
-        val others = groupDao.getMembers(groupId).map { it.nodeId }.filter { it != me }
-        others.forEach { id ->
-            sendGroupInfo(group, id)
-            sendTopics(group.id, id)
-        }
-        publishRoster(groupId, adminsChanged = true)
-        Log.i(TAG, "resync sent group=$groupId to=${others.size}")
-        return Result.success(others.size)
-    }
-
-    /**
-     * Темы группы новому участнику. Без них он попадает в пустой чат: темы
-     * создаются пакетом TopicCreated в момент создания, и опоздавший их не видел.
-     */
-    private suspend fun sendTopics(groupId: String, nodeId: String) {
-        val topics = groupDao.getTopics(groupId)
-        if (topics.isEmpty()) return
-        delivery.deliver(
-            groupId,
-            GroupWire.buildTopics(
-                groupId,
-                topics.map { GroupWire.TopicEntry(it.id, it.name, it.iconEmoji) },
-            ),
-            listOf(nodeId),
-        )
-    }
-
-    /** Карточка группы новому участнику: название, описание, владелец, настройки. */
-    private suspend fun sendGroupInfo(group: GroupEntity, nodeId: String) {
-        delivery.deliver(
-            group.id,
-            GroupWire.buildGroupInfo(
-                groupId = group.id,
-                title = group.title,
-                about = group.about,
-                ownerId = group.ownerId,
-                inviteSlug = group.inviteSlug,
-                isPublic = group.isPublic,
-                topicsEnabled = group.topicsEnabled,
-                isChannel = group.isChannel,
-            ),
-            listOf(nodeId),
-        )
-    }
+    suspend fun resyncMembers(groupId: String): Result<Int> = infoResync.resyncAll(groupId)
 
     private suspend fun broadcast(groupId: String, envelope: String, excludeSelf: Boolean): DeliveryReport {
         val me = myId().orEmpty()
@@ -5801,7 +5767,6 @@ companion object {
         /** Рой, этап 2: с такого числа участников владелец шлёт новичку `peers` вместо полного списка. */
         const val ROSTER_LIMIT = 100
         /** Телефон, пропустивший событие вступления, повторно просит состав не чаще этого. */
-        private const val ROSTER_REQUEST_GAP_MS = 30_000L
         /** Рой, этап 2: сколько соседей владелец даёт новичку в `peers`. */
         const val PEERS_SAMPLE = 30
         /** Рой, этап 2: на большом канале владельца спрашивают о недостающем лишь в одном случае из стольких. */
