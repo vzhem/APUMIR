@@ -54,8 +54,12 @@ class DeviceProfileBindingContract(unittest.TestCase):
 
         self.assertIn("DeviceProfileBinding.discoverPreviousProfile(appContext, botApi)", vm)
         self.assertIn("previousOwnerId = previousOwner", vm)
+        self.assertIn("showReplaceConfirmDialog = true", vm)
+        self.assertIn("onConfirmReplaceProfileClicked", vm)
         self.assertIn("DeviceIdentityGossip.onProfileOrContactsChanged()", vm)
         self.assertIn("R.string.dpb_device_found_title", screen)
+        self.assertIn("R.string.dpb_replace_confirm_title", screen)
+        self.assertIn("R.string.dpb_replace_confirm_btn", screen)
         self.assertIn("ProfileCallsign.of(", screen)
 
     def test_callsign_is_visible_and_searchable_with_route_activation(self):
@@ -86,6 +90,9 @@ class DeviceProfileBindingContract(unittest.TestCase):
             "dpb_callsign_short_tpl",
             "dpb_callsign_copied",
             "dpb_device_found_title",
+            "dpb_replace_profile_action",
+            "dpb_replace_confirm_title",
+            "dpb_replace_confirm_btn",
             "dpb_callsign_not_found",
             "dpb_callsign_multiple",
         ):

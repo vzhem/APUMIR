@@ -54,6 +54,8 @@ data class OnboardingUiState(
     val nodeId: String?        = null,
     /** Прежний профиль, найденный по отпечатку ANDROID_ID этого телефона после переустановки. */
     val recognizedDeviceProfile: DeviceProfileAnchor.DeviceHintRecord? = null,
+    /** Диалог подтверждения замены прежнего профиля этого телефона, чтобы исключить случайное нажатие. */
+    val showReplaceConfirmDialog: Boolean = false,
     val error: String?         = null,
 ) {
     /**
@@ -121,6 +123,7 @@ class OnboardingViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 restoreMode = true,
+                showReplaceConfirmDialog = false,
                 nickname = found.nickname.ifBlank { it.nickname },
                 nameError = null,
                 nicknameError = null,
@@ -128,6 +131,15 @@ class OnboardingViewModel @Inject constructor(
                 error = null,
             )
         }
+    }
+
+    fun onDismissReplaceConfirm() {
+        _uiState.update { it.copy(showReplaceConfirmDialog = false) }
+    }
+
+    fun onConfirmReplaceProfileClicked() {
+        _uiState.update { it.copy(showReplaceConfirmDialog = false) }
+        submitCreateProfile(confirmedReplace = true)
     }
 
     /**
@@ -198,6 +210,7 @@ class OnboardingViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 restoreMode = restore,
+                showReplaceConfirmDialog = false,
                 nameError = null,
                 nicknameError = null,
                 passwordError = null,
@@ -266,6 +279,10 @@ class OnboardingViewModel @Inject constructor(
     // Нажата кнопка "Создать профиль"
     // ------------------------------------------------------------------
     fun onCreateProfileClicked() {
+        submitCreateProfile(confirmedReplace = false)
+    }
+
+    private fun submitCreateProfile(confirmedReplace: Boolean) {
         val state = _uiState.value
         val name = state.displayName.trim()
         val nick = state.nickname.trim().trimStart('@')
@@ -291,6 +308,12 @@ class OnboardingViewModel @Inject constructor(
         }
         if (state.password != state.passwordRepeat) {
             _uiState.update { it.copy(passwordError = appContext.getString(R.string.ob_pw_mismatch)) }
+            return
+        }
+        // Защита от случайной перезаписи: если телефон узнал свой прежний профиль,
+        // создание нового возможно только через отдельное окно явного подтверждения.
+        if (state.recognizedDeviceProfile != null && !confirmedReplace) {
+            _uiState.update { it.copy(showReplaceConfirmDialog = true) }
             return
         }
 

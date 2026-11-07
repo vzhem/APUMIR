@@ -2554,4 +2554,8 @@ The file is not on this phone</string>
     <string name="dpb_device_found_restore_tpl">Profile %1$s (%2$s) was previously active on this phone. Enter your password below to restore your address, contacts, and rank without creating a duplicate.</string>
     <string name="dpb_device_found_new_warn_tpl">Heads up: profile %1$s (%2$s) already belongs to this device. Creating a new profile will replace the previous address on this phone.</string>
     <string name="dpb_device_restore_switch_btn">Restore previous profile</string>
+    <string name="dpb_replace_profile_action">Replace previous profile…</string>
+    <string name="dpb_replace_confirm_title">Replace previous profile?</string>
+    <string name="dpb_replace_confirm_body_tpl">This phone already has profile %1$s (%2$s). Creating a new one will supersede this device\'s previous address. To keep your old address, contacts, and rank, return to restore.</string>
+    <string name="dpb_replace_confirm_btn">Yes, replace previous profile</string>
 </resources>

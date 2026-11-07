@@ -47,7 +47,10 @@ import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuPremiumContentButton
 import com.vladimir.messenger.ui.components.ApuPremiumIconTile
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuTabBar
+import com.vladimir.messenger.ui.components.ApuTextAction
+import com.vladimir.messenger.ui.components.ApuGoldInk
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.util.QrCodeGenerator
@@ -106,6 +109,8 @@ fun OnboardingScreen(
                             onRestoreModeChanged    = viewModel::onRestoreModeChanged,
                             onSwitchToRecognized    = viewModel::onSwitchToRecognizedProfile,
                             onCreateClick           = viewModel::onCreateProfileClicked,
+                            onConfirmReplaceCreate  = viewModel::onConfirmReplaceProfileClicked,
+                            onDismissReplaceConfirm = viewModel::onDismissReplaceConfirm,
                             onRestoreClick          = viewModel::onRestoreClicked,
                             onRestoreFromFile       = onRestoreFromFile,
                         )
@@ -138,6 +143,8 @@ private fun EnterNameStep(
     onRestoreModeChanged: (Boolean) -> Unit,
     onSwitchToRecognized: () -> Unit = {},
     onCreateClick: () -> Unit,
+    onConfirmReplaceCreate: () -> Unit = {},
+    onDismissReplaceConfirm: () -> Unit = {},
     onRestoreClick: () -> Unit,
     onRestoreFromFile: () -> Unit = {},
 ) {
@@ -372,8 +379,64 @@ private fun EnterNameStep(
             Icon(Icons.Default.Key, contentDescription = null)
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                if (state.restoreMode) stringResource(R.string.onb_sign_in) else stringResource(R.string.onb_create_profile),
+                when {
+                    state.restoreMode -> stringResource(R.string.onb_sign_in)
+                    state.recognizedDeviceProfile != null -> stringResource(R.string.dpb_replace_profile_action)
+                    else -> stringResource(R.string.onb_create_profile)
+                },
                 style = MaterialTheme.typography.titleMedium,
+            )
+        }
+
+        if (state.showReplaceConfirmDialog && state.recognizedDeviceProfile != null) {
+            val recognized = state.recognizedDeviceProfile
+            val whoLabel = buildString {
+                if (recognized.displayName.isNotBlank()) append(recognized.displayName)
+                if (recognized.nickname.isNotBlank()) {
+                    if (isNotEmpty()) append(" · ")
+                    append("@").append(recognized.nickname)
+                }
+            }.ifBlank { recognized.nodeId.take(16) + "…" }
+            val codeLabel = recognized.callsign.ifBlank {
+                com.vladimir.messenger.util.ProfileCallsign.of(recognized.nodeId).orEmpty()
+            }.let { code ->
+                if (code.isNotBlank()) stringResource(R.string.dpb_callsign_short_tpl, code) else recognized.nodeId.take(12)
+            }
+            ApuSettingsDialog(
+                onDismissRequest = onDismissReplaceConfirm,
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = ApuGoldInk,
+                    )
+                },
+                title = {
+                    Text(
+                        text = stringResource(R.string.dpb_replace_confirm_title),
+                        fontWeight = FontWeight.Bold,
+                    )
+                },
+                text = {
+                    Text(
+                        text = stringResource(R.string.dpb_replace_confirm_body_tpl, whoLabel, codeLabel),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = ApuBubbleMutedColor,
+                    )
+                },
+                dismissButton = {
+                    ApuTextAction(
+                        label = stringResource(R.string.dpb_device_restore_switch_btn),
+                        onClick = onSwitchToRecognized,
+                    )
+                },
+                confirmButton = {
+                    ApuTextAction(
+                        label = stringResource(R.string.dpb_replace_confirm_btn),
+                        onClick = onConfirmReplaceCreate,
+                        danger = true,
+                    )
+                },
             )
         }
 
