@@ -7,6 +7,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -46,6 +47,12 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.roundToInt
 import kotlin.random.Random
+
+/** Качание и поворот: пять полуволн за падение — прежняя траектория сердца. */
+private const val SWAY_WAVES = 5f
+
+/** Размах качания в стороны. */
+private val SWAY_WIDTH = 16.dp
 
 @Composable
 fun HeartGameOverlay(network: HeartGameNetwork) {
@@ -98,20 +105,35 @@ fun HeartGameOverlay(network: HeartGameNetwork) {
     }
     if (!enabled) return
     val current = ticket
-    if (current == null && burst == null) return
+    val burstAt = burst
+    if (current == null && burstAt == null) return
     val catchLabel = stringResource(R.string.heart_game_catch)
     BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
         val side = 88.dp
         val rangeX = (maxWidth - side - 40.dp).coerceAtLeast(0.dp)
         val rangeY = (maxHeight - side).coerceAtLeast(0.dp)
-        val p = burst ?: progress.value
-        val x = 20.dp + rangeX * lane + 16.dp * sin(p * PI.toFloat() * 5)
-        val y = rangeY * p
-        if (current != null && !caught && burst == null) {
-            Box(Modifier.offset { IntOffset(x.roundToPx(), y.roundToPx()) }
+        // Владелец 2026-11-07: «игра сердечки очень сильно нагружает процесс в
+        // момент появления и пока летит сердечко». На кадр анимации не должно
+        // приходиться ничего, кроме перемещения одного узла: прогресс читается
+        // ТОЛЬКО внутри лямбды размещения и внутри блока слоя, поэтому кадр не
+        // пересобирает композицию (раньше здесь считались x/y из
+        // progress.value -> пересборка всего оверлея 60-120 раз в секунду) и не
+        // перестраивает рисунок сердца (см. SculptedHeart).
+        if (current != null && !caught && burstAt == null) {
+            Box(Modifier.offset {
+                    val p = progress.value
+                    // Качание и поворот — то же самое, что было в слое: та же
+                    // траектория, только считается в фазе размещения.
+                    val sway = sin(p * PI.toFloat() * SWAY_WAVES)
+                    IntOffset(
+                        (20.dp + rangeX * lane + SWAY_WIDTH * sway).roundToPx(),
+                        (rangeY * p).roundToPx(),
+                    )
+                }
                 .size(side).graphicsLayer {
-                    rotationZ = 16f * sin(progress.value * PI.toFloat() * 5)
-                    rotationY = 12f * cos(progress.value * PI.toFloat() * 5)
+                    val p = progress.value
+                    rotationZ = 16f * sin(p * PI.toFloat() * SWAY_WAVES)
+                    rotationY = 12f * cos(p * PI.toFloat() * SWAY_WAVES)
                     alpha = (1f - progress.value).coerceIn(0f, 1f)
                 }.testTag("heart-game-drop").semantics { contentDescription = catchLabel }
                 .clickable(enabled = !busy, role = Role.Button) {
@@ -131,31 +153,55 @@ fun HeartGameOverlay(network: HeartGameNetwork) {
                     }
                 }) { SculptedHeart(Modifier.fillMaxSize()) }
         }
-        if (burst != null) {
-            HeartGameBurst(Modifier.offset { IntOffset(x.roundToPx(), y.roundToPx()) }.size(104.dp)) { burst = null }
+        if (burstAt != null) {
+            // Точка вспышки — та, где сердце поймали; значение статичное, поэтому
+            // его можно посчитать в композиции: пересборки на кадре нет.
+            val bx = 20.dp + rangeX * lane + SWAY_WIDTH * sin(burstAt * PI.toFloat() * SWAY_WAVES)
+            val by = rangeY * burstAt
+            HeartGameBurst(Modifier.offset { IntOffset(bx.roundToPx(), by.roundToPx()) }.size(104.dp)) { burst = null }
         }
     }
 }
 
-/** Vector shading, highlights and a darker bevel: crisp at any density, no bitmap asset. */
+/**
+ * Vector shading, highlights and a darker bevel: crisp at any density, no bitmap asset.
+ *
+ * Геометрия, кисть и цвета постоянны, поэтому они собираются один раз на
+ * размер (`drawWithCache`), а не в каждом кадре. Раньше сердце на каждом кадре
+ * полёта заново строило `Path` из четырёх кубических кривых и градиентную
+ * кисть — это и был основной мусор в куче во время падения. Теперь при
+ * движении меняется только слой: сама картинка даже не перерисовывается.
+ */
 @Composable
 internal fun SculptedHeart(modifier: Modifier = Modifier) {
-    Canvas(modifier) {
-        val path = Path().apply {
-            moveTo(50f, 89f)
-            cubicTo(37f, 77f, 8f, 57f, 8f, 33f)
-            cubicTo(8f, 8f, 37f, 5f, 50f, 25f)
-            cubicTo(63f, 5f, 92f, 8f, 92f, 33f)
-            cubicTo(92f, 57f, 63f, 77f, 50f, 89f)
-            close()
+    Spacer(
+        modifier.drawWithCache {
+            val path = Path().apply {
+                moveTo(50f, 89f)
+                cubicTo(37f, 77f, 8f, 57f, 8f, 33f)
+                cubicTo(8f, 8f, 37f, 5f, 50f, 25f)
+                cubicTo(63f, 5f, 92f, 8f, 92f, 33f)
+                cubicTo(92f, 57f, 63f, 77f, 50f, 89f)
+                close()
+            }
+            val edge = Color(0xFF6E123B).copy(alpha = .45f)
+            val fill = Brush.linearGradient(
+                listOf(Color(0xFFFFB7D0), Color(0xFFFF427C), Color(0xFFAC104D)),
+                Offset(18f, 10f),
+                Offset(79f, 91f),
+            )
+            val highlight = Color.White.copy(alpha = .58f)
+            val glint = Color.White.copy(alpha = .18f)
+            onDrawBehind {
+                withTransform({ scale(size.width / 100f, size.height / 100f, Offset.Zero) }) {
+                    withTransform({ translate(0f, 4f) }) { drawPath(path, edge) }
+                    drawPath(path, fill)
+                    drawOval(highlight, Offset(22f, 19f), androidx.compose.ui.geometry.Size(14f, 8f))
+                    drawOval(glint, Offset(63f, 20f), androidx.compose.ui.geometry.Size(10f, 6f))
+                }
+            }
         }
-        withTransform({ scale(size.width / 100f, size.height / 100f, Offset.Zero) }) {
-            withTransform({ translate(0f, 4f) }) { drawPath(path, Color(0xFF6E123B).copy(alpha = .45f)) }
-            drawPath(path, Brush.linearGradient(listOf(Color(0xFFFFB7D0), Color(0xFFFF427C), Color(0xFFAC104D)), Offset(18f, 10f), Offset(79f, 91f)))
-            drawOval(Color.White.copy(alpha = .58f), Offset(22f, 19f), androidx.compose.ui.geometry.Size(14f, 8f))
-            drawOval(Color.White.copy(alpha = .18f), Offset(63f, 20f), androidx.compose.ui.geometry.Size(10f, 6f))
-        }
-    }
+    )
 }
 
 @Composable
@@ -168,10 +214,15 @@ private fun HeartGameBurst(modifier: Modifier, onFinished: () -> Unit) {
     }
     Box(modifier, contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
+            // Цвет и радиус точки — постоянные величины кадра, а не аллокации
+            // на каждую частицу (было 10 копий цвета за кадр).
+            val gold = Color(0xFFFFD76D)
+            val dot = 4.dp.toPx()
+            val progress = t.value
             for (i in 0 until 10) {
                 val angle = i * PI.toFloat() / 5
-                val radius = size.minDimension * (.12f + .42f * t.value)
-                drawCircle(Color(0xFFFFD76D).copy(alpha = 1f - t.value), 4.dp.toPx() * (1f - t.value),
+                val radius = size.minDimension * (.12f + .42f * progress)
+                drawCircle(gold.copy(alpha = 1f - progress), dot * (1f - progress),
                     center + Offset(cos(angle) * radius, sin(angle) * radius))
             }
         }

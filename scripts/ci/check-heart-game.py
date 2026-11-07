@@ -27,6 +27,25 @@ class HeartGameContracts(unittest.TestCase):
             self.assertIn(text, ui)
         self.assertNotIn('pointerInput', ui)  # No full-screen gesture interception.
 
+    def test_flight_does_not_recompose_and_heart_is_drawn_from_cache(self):
+        # Владелец 2026-11-07: «игра сердечки очень сильно нагружает процесс в
+        # момент появления и пока летит сердечко». Кадр анимации не должен
+        # пересобирать композицию: прогресс читается только внутри лямбды
+        # размещения и внутри блока слоя, а рисунок сердца (Path и градиентная
+        # кисть) собирается один раз на размер, а не в каждом кадре.
+        ui = (SRC / 'ui/components/HeartGameOverlay.kt').read_text()
+        self.assertNotIn('val p = burst ?: progress.value', ui,
+                         'прогресс снова читается в композиции: оверлей будет пересобираться каждый кадр')
+        self.assertNotIn('val x = 20.dp + rangeX * lane', ui,
+                         'положение сердца снова считается в композиции')
+        self.assertIn('Box(Modifier.offset {', ui)
+        self.assertIn('val p = progress.value', ui)
+        self.assertIn('SWAY_WAVES', ui)
+        self.assertIn('drawWithCache', ui)
+        self.assertIn('onDrawBehind', ui)
+        self.assertNotIn('Canvas(modifier) {', ui,
+                         'рисунок сердца снова перестраивается в кадре: нужен drawWithCache')
+
     def test_plus_one_keeps_original_size_then_grows_and_floats_up(self):
         ui = (SRC / 'ui/components/HeartGameOverlay.kt').read_text()
         self.assertIn('val scale = 1f + .42f * grow', ui)
