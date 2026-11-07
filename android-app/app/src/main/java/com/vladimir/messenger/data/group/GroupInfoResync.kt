@@ -134,6 +134,8 @@ internal class GroupInfoResync(
     suspend fun autoPass(groupId: String): Int {
         val me = myNodeId() ?: return 0
         val group = groupDao.getGroupById(groupId) ?: return 0
+        // Вышел из группы — досылать нечего и некому: строка истории остаётся.
+        if (group.isLeft) return 0
         val mine = groupDao.getMember(groupId, me) ?: return 0
         if (mine.isBanned || !GroupRole.isAdminOrOwner(mine.role)) return 0
         val now = clock()
@@ -155,6 +157,7 @@ internal class GroupInfoResync(
         val me = myNodeId() ?: return 0
         var sent = 0
         groupDao.getGroups().forEach { group ->
+            if (group.isLeft) return@forEach
             val mine = groupDao.getMember(group.id, me) ?: return@forEach
             if (mine.isBanned || !GroupRole.isAdminOrOwner(mine.role)) return@forEach
             sent += runCatching { autoPass(group.id) }
