@@ -47,7 +47,10 @@ import com.vladimir.messenger.ui.components.ApuBubbleMutedColor
 import com.vladimir.messenger.ui.components.ApuBubbleTextColor
 import com.vladimir.messenger.ui.components.ApuPremiumContentButton
 import com.vladimir.messenger.ui.components.ApuPremiumIconTile
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuTabBar
+import com.vladimir.messenger.ui.components.ApuTextAction
+import com.vladimir.messenger.ui.components.ApuGoldInk
 import com.vladimir.messenger.ui.components.DiagnosticsActionStyle
 import com.vladimir.messenger.ui.components.HintBubble
 import com.vladimir.messenger.util.QrCodeGenerator
@@ -104,7 +107,10 @@ fun OnboardingScreen(
                             onPasswordChanged       = viewModel::onPasswordChanged,
                             onPasswordRepeatChanged = viewModel::onPasswordRepeatChanged,
                             onRestoreModeChanged    = viewModel::onRestoreModeChanged,
+                            onSwitchToRecognized    = viewModel::onSwitchToRecognizedProfile,
                             onCreateClick           = viewModel::onCreateProfileClicked,
+                            onConfirmReplaceCreate  = viewModel::onConfirmReplaceProfileClicked,
+                            onDismissReplaceConfirm = viewModel::onDismissReplaceConfirm,
                             onRestoreClick          = viewModel::onRestoreClicked,
                             onRestoreFromFile       = onRestoreFromFile,
                         )
@@ -114,6 +120,7 @@ fun OnboardingScreen(
                         ShowInviteStep(
                             inviteLink  = uiState.createdInviteLink ?: "",
                             fingerprint = uiState.fingerprint ?: "",
+                            nodeId      = uiState.nodeId ?: uiState.fingerprint ?: "",
                             onFinish    = onProfileCreated,
                             onJoinByInvite = onJoinByInvite,
                         )
@@ -134,7 +141,10 @@ private fun EnterNameStep(
     onPasswordChanged: (String) -> Unit,
     onPasswordRepeatChanged: (String) -> Unit,
     onRestoreModeChanged: (Boolean) -> Unit,
+    onSwitchToRecognized: () -> Unit = {},
     onCreateClick: () -> Unit,
+    onConfirmReplaceCreate: () -> Unit = {},
+    onDismissReplaceConfirm: () -> Unit = {},
     onRestoreClick: () -> Unit,
     onRestoreFromFile: () -> Unit = {},
 ) {
@@ -173,6 +183,64 @@ private fun EnterNameStep(
         )
 
         Spacer(modifier = Modifier.height(20.dp))
+
+        state.recognizedDeviceProfile?.let { recognized ->
+            val whoLabel = buildString {
+                if (recognized.displayName.isNotBlank()) append(recognized.displayName)
+                if (recognized.nickname.isNotBlank()) {
+                    if (isNotEmpty()) append(" · ")
+                    append("@").append(recognized.nickname)
+                }
+            }.ifBlank { recognized.nodeId.take(16) + "…" }
+            val codeLabel = recognized.callsign.ifBlank {
+                com.vladimir.messenger.util.ProfileCallsign.of(recognized.nodeId).orEmpty()
+            }.let { code ->
+                if (code.isNotBlank()) stringResource(R.string.dpb_callsign_short_tpl, code) else recognized.nodeId.take(12)
+            }
+            ApuBubbleCard(modifier = Modifier.fillMaxWidth(), premium = 5.dp) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.VerifiedUser,
+                            contentDescription = null,
+                            tint = ApuBubbleAccentColor,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = stringResource(R.string.dpb_device_found_title),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = ApuBubbleTextColor,
+                        )
+                    }
+                    Text(
+                        text = if (state.restoreMode) {
+                            stringResource(R.string.dpb_device_found_restore_tpl, whoLabel, codeLabel)
+                        } else {
+                            stringResource(R.string.dpb_device_found_new_warn_tpl, whoLabel, codeLabel)
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ApuBubbleMutedColor,
+                    )
+                    if (!state.restoreMode) {
+                        ApuPremiumContentButton(
+                            onClick = onSwitchToRecognized,
+                            style = DiagnosticsActionStyle.QUIET,
+                            modifier = Modifier.fillMaxWidth().height(42.dp),
+                        ) {
+                            Icon(Icons.Default.Restore, contentDescription = null)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(stringResource(R.string.dpb_device_restore_switch_btn))
+                        }
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+        }
 
         HintBubble(modifier = Modifier.fillMaxWidth()) {
             Text(
@@ -311,8 +379,64 @@ private fun EnterNameStep(
             Icon(Icons.Default.Key, contentDescription = null)
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                if (state.restoreMode) stringResource(R.string.onb_sign_in) else stringResource(R.string.onb_create_profile),
+                when {
+                    state.restoreMode -> stringResource(R.string.onb_sign_in)
+                    state.recognizedDeviceProfile != null -> stringResource(R.string.dpb_replace_profile_action)
+                    else -> stringResource(R.string.onb_create_profile)
+                },
                 style = MaterialTheme.typography.titleMedium,
+            )
+        }
+
+        if (state.showReplaceConfirmDialog && state.recognizedDeviceProfile != null) {
+            val recognized = state.recognizedDeviceProfile
+            val whoLabel = buildString {
+                if (recognized.displayName.isNotBlank()) append(recognized.displayName)
+                if (recognized.nickname.isNotBlank()) {
+                    if (isNotEmpty()) append(" · ")
+                    append("@").append(recognized.nickname)
+                }
+            }.ifBlank { recognized.nodeId.take(16) + "…" }
+            val codeLabel = recognized.callsign.ifBlank {
+                com.vladimir.messenger.util.ProfileCallsign.of(recognized.nodeId).orEmpty()
+            }.let { code ->
+                if (code.isNotBlank()) stringResource(R.string.dpb_callsign_short_tpl, code) else recognized.nodeId.take(12)
+            }
+            ApuSettingsDialog(
+                onDismissRequest = onDismissReplaceConfirm,
+                icon = {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = ApuGoldInk,
+                    )
+                },
+                title = {
+                    Text(
+                        text = stringResource(R.string.dpb_replace_confirm_title),
+                        fontWeight = FontWeight.Bold,
+                    )
+                },
+                text = {
+                    Text(
+                        text = stringResource(R.string.dpb_replace_confirm_body_tpl, whoLabel, codeLabel),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = ApuBubbleMutedColor,
+                    )
+                },
+                dismissButton = {
+                    ApuTextAction(
+                        label = stringResource(R.string.dpb_device_restore_switch_btn),
+                        onClick = onSwitchToRecognized,
+                    )
+                },
+                confirmButton = {
+                    ApuTextAction(
+                        label = stringResource(R.string.dpb_replace_confirm_btn),
+                        onClick = onConfirmReplaceCreate,
+                        danger = true,
+                    )
+                },
             )
         }
 
@@ -441,12 +565,18 @@ private fun GeneratingStep() {
 private fun ShowInviteStep(
     inviteLink: String,
     fingerprint: String,
+    nodeId: String = "",
     onFinish: () -> Unit,
     /** Раунд 204: вставить приглашение друга - контакт добавится сам. */
     onJoinByInvite: (String) -> Unit = {},
 ) {
     val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
+    val callsign = remember(nodeId, fingerprint) {
+        com.vladimir.messenger.util.ProfileCallsign.of(nodeId)
+            ?: com.vladimir.messenger.util.ProfileCallsign.of(fingerprint)
+    }
 
     // QR-код из invite-ссылки
     // Тот же генератор, что и в остальном приложении: QR в регистрации должен
@@ -481,7 +611,37 @@ private fun ShowInviteStep(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // Fingerprint ключа
+        // Короткий постоянный цифровой код профиля + технический отпечаток
+        if (!callsign.isNullOrBlank()) {
+            Row(
+                modifier = Modifier
+                    .clickable {
+                        clipboardManager.setText(AnnotatedString(callsign))
+                        android.widget.Toast.makeText(
+                            context,
+                            context.getString(R.string.dpb_callsign_copied, callsign),
+                            android.widget.Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.dpb_callsign_value_tpl, callsign),
+                    style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace),
+                    fontWeight = FontWeight.Bold,
+                    color = ApuBubbleAccentColor,
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Icon(
+                    imageVector = Icons.Default.ContentCopy,
+                    contentDescription = stringResource(R.string.action_copy),
+                    tint = ApuBubbleAccentColor,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+        }
         Text(
             text  = "🔑 $fingerprint",
             style = MaterialTheme.typography.bodySmall.copy(

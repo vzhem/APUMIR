@@ -63,7 +63,7 @@ class ObsoleteSameDeviceRegistrationCleanup @Inject constructor(
             .asSequence()
             .map { it.trim().lowercase() }
             .filter { it.isNotBlank() && it != currentOwnerId }
-            .filter { DeviceIdentityHistory.wasCreatedOnThisDevice(context, it) }
+            .filter { DeviceProfileBinding.belongsToThisPhysicalDevice(context, it) }
             .distinct()
             .toList()
 

@@ -306,6 +306,9 @@ fun AddContactScreen(
                                 }
                                 Spacer(Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
+                                    val entryCallsign = remember(entry.ownerId) {
+                                        com.vladimir.messenger.util.ProfileCallsign.of(entry.ownerId)
+                                    }
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(
                                             text = "@${entry.name}",
@@ -314,6 +317,15 @@ fun AddContactScreen(
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                         )
+                                        if (!entryCallsign.isNullOrBlank()) {
+                                            Spacer(Modifier.width(7.dp))
+                                            Text(
+                                                text = stringResource(R.string.dpb_callsign_short_tpl, entryCallsign),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = ApuBubbleAccentColor,
+                                                fontWeight = FontWeight.SemiBold,
+                                            )
+                                        }
                                         if (isCurrent) {
                                             Spacer(Modifier.width(7.dp))
                                             Text(

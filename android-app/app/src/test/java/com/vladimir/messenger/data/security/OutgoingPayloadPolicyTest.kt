@@ -39,11 +39,20 @@ class OutgoingPayloadPolicyTest {
             FileUdpWire.KIND_UFSEEK, ByteArray(96) { 7 },
             listOf("192.0.2.1" to 4242), ByteArray(FileUdpWire.SESSION_TAG_BYTES) { 1 },
         )
-        for (signal in listOf(hello, reset, "APULAN1|req", "APULAN1|offer|192.0.2.1|1234", udp)) {
+        val dvaBind = DeviceProfileAnchor.Wire.createBind(peer, "a1b2c3d4e5f60718", 1_762_000_000_000L)!!
+        val dvaReplace = DeviceProfileAnchor.Wire.createReplace(
+            oldOwnerId = "pk_${"b".repeat(64)}",
+            newOwnerId = peer,
+            nickname = "vladimir",
+            displayName = "Владимир",
+            androidId = "a1b2c3d4e5f60718",
+            timestampMs = 1_762_000_001_000L,
+        )!!
+        for (signal in listOf(hello, reset, "APULAN1|req", "APULAN1|offer|192.0.2.1|1234", udp, dvaBind, dvaReplace)) {
             assertTrue(OutgoingPayloadPolicy.isPublicControl(signal))
             assertEquals(signal, OutgoingPayloadPolicy.prepare(peer, signal) { error("must not seal bootstrap") })
         }
-        for (private in listOf("Привет", "apu-file1|encoded", "APUGRP1|post|body", "APUGRP1|dir1|broken", "apu-file-hello1|!!!", "APULAN1|private", "APUUDP1|private")) {
+        for (private in listOf("Привет", "apu-file1|encoded", "APUGRP1|post|body", "APUGRP1|dir1|broken", "APUGRP1|dva1|bn|forged", "apu-file-hello1|!!!", "APULAN1|private", "APUUDP1|private")) {
             assertFalse(OutgoingPayloadPolicy.isPublicControl(private))
             assertNull(OutgoingPayloadPolicy.prepare(peer, private) { null })
         }

@@ -23,6 +23,8 @@ object OutgoingPayloadPolicy {
 
     fun isPublicControl(text: String): Boolean = when {
         ContactResetWire.isPacket(text) -> ContactResetWire.parse(text) != null
+        DeviceProfileAnchor.Wire.isPacket(text) ->
+            DeviceProfileAnchor.Wire.parseVerified(text) != null
         FileTransferWire.isHelloText(text) ->
             runCatching { FileTransferWire.decodeHelloBinding(text) }.isSuccess
         isLanSignal(text) -> true

@@ -8,13 +8,16 @@ import com.vladimir.messenger.data.local.dao.NicknameDao
 import com.vladimir.messenger.data.local.entity.NicknameEntity
 import com.vladimir.messenger.data.local.entity.NicknameSuppressionEntity
 import com.vladimir.messenger.data.repository.ChatRepository
+import com.vladimir.messenger.data.security.DeviceIdentityGossip
 import com.vladimir.messenger.data.security.DeviceIdentityHistory
+import com.vladimir.messenger.data.security.DeviceProfileBinding
 import com.vladimir.messenger.data.repository.ContactRepository
 import com.vladimir.messenger.data.referral.ReferralAttributionSender
 import com.vladimir.messenger.data.referral.ReferralWire
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.link.ShortLinks
 import com.vladimir.messenger.util.InviteLinkParser
+import com.vladimir.messenger.util.ProfileCallsign
 import com.vladimir.messenger.util.VerifiedReferralInviteLink
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -82,17 +85,12 @@ class AddContactViewModel @Inject constructor(
             val found = if (clean.isBlank()) {
                 emptyList()
             } else {
-                try {
-                    nicknameDao.search(clean.lowercase())
-                } catch (e: Exception) {
-                    Log.w(TAG, "nickname search failed", e)
-                    emptyList()
-                }
+                searchDirectoryByNickOrCallsign(value, clean)
             }
             val sameDevice = found.asSequence()
                 .map { it.ownerId }
                 .filter { it != current }
-                .filter { DeviceIdentityHistory.wasCreatedOnThisDevice(appContext, it) }
+                .filter { DeviceProfileBinding.belongsToThisPhysicalDevice(appContext, it) }
                 .toSet()
             _uiState.update {
                 it.copy(
@@ -103,6 +101,42 @@ class AddContactViewModel @Inject constructor(
                 )
             }
         }
+    }
+
+    private suspend fun searchDirectoryByNickOrCallsign(
+        rawInput: String,
+        cleanNickQuery: String,
+    ): List<NicknameEntity> {
+        return try {
+            val byNick = nicknameDao.search(cleanNickQuery.lowercase())
+            val byCallsign = if (ProfileCallsign.normalizeQuery(rawInput) != null) {
+                nicknameDao.allVisible().filter { ProfileCallsign.matches(it.ownerId, rawInput) }
+            } else {
+                emptyList()
+            }
+            val combined = (byCallsign + byNick).distinctBy { it.ownerId }
+            val activeIds = combined.map { it.ownerId }.toHashSet()
+            // Скрываем старые адреса, для которых на этом телефоне уже доказана живая замена.
+            combined.filter { entry ->
+                val replacement = DeviceProfileBinding.replacementOf(appContext, entry.ownerId)
+                replacement == null || replacement !in activeIds
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "directory search failed", e)
+            emptyList()
+        }
+    }
+
+    private suspend fun activatePeerRoute(peerId: String) {
+        runCatching { swarmPeerDirectory.invalidate() }
+            .onFailure { Log.w(TAG, "directory invalidate skipped: ${it.message}") }
+        runCatching { RustBridge.setPresenceAudience(swarmPeerDirectory.audienceIds()) }
+            .onFailure { Log.w(TAG, "presence audience refresh skipped: ${it.message}") }
+        runCatching { RustBridge.triggerGossipDiscovery() }
+            .onFailure { Log.w(TAG, "gossip discovery trigger skipped: ${it.message}") }
+        runCatching { fileTransferRouter.announceMyKeyTo(peerId) }
+            .onFailure { Log.w(TAG, "key announce to $peerId skipped: ${it.message}") }
+        DeviceIdentityGossip.announceToPeer(peerId)
     }
 
     fun clearNotice() {
@@ -149,7 +183,7 @@ class AddContactViewModel @Inject constructor(
             val eligible = entries
                 .distinctBy { it.ownerId }
                 .filter { it.ownerId != current }
-                .filter { DeviceIdentityHistory.wasCreatedOnThisDevice(appContext, it.ownerId) }
+                .filter { DeviceProfileBinding.belongsToThisPhysicalDevice(appContext, it.ownerId) }
             if (eligible.isEmpty()) {
                 _uiState.update { it.copy(notice = appContext.getString(R.string.ac_cleanup_nothing)) }
                 return@launch
@@ -221,14 +255,17 @@ class AddContactViewModel @Inject constructor(
             // is an explicit invalidation point so no new message uses the old
             // owner during that window.
             runCatching { swarmPeerDirectory.invalidate() }
-            val query = _uiState.value.nickQuery.trim().removePrefix("@")
-            val refreshed = if (query.isBlank()) emptyList() else runCatching {
-                nicknameDao.search(query.lowercase())
-            }.getOrDefault(emptyList())
+            val rawQuery = _uiState.value.nickQuery
+            val query = rawQuery.trim().removePrefix("@")
+            val refreshed = if (query.isBlank()) {
+                emptyList()
+            } else {
+                searchDirectoryByNickOrCallsign(rawQuery, query)
+            }
             val refreshedSameDevice = refreshed.asSequence()
                 .map { it.ownerId }
                 .filter { it != current }
-                .filter { DeviceIdentityHistory.wasCreatedOnThisDevice(appContext, it) }
+                .filter { DeviceProfileBinding.belongsToThisPhysicalDevice(appContext, it) }
                 .toSet()
             _uiState.update {
                 it.copy(
@@ -258,14 +295,16 @@ class AddContactViewModel @Inject constructor(
         }
         viewModelScope.launch(Dispatchers.IO) {
             _uiState.update { it.copy(isLoading = true, error = null, contactAdded = false) }
+            val chosenName = _uiState.value.displayName.trim().ifBlank { entry.name }
             val result = contactRepository.addContact(
-                displayName = entry.name,
+                displayName = chosenName,
                 fingerprint = entry.ownerId,
                 username = entry.name,
             )
             result
                 .onSuccess { contact ->
                     chatRepository.createChat(entry.ownerId, contact.displayName)
+                    activatePeerRoute(entry.ownerId)
                     _uiState.update { it.copy(isLoading = false, contactAdded = true) }
                 }
                 .onFailure { error ->
@@ -274,6 +313,7 @@ class AddContactViewModel @Inject constructor(
                         if (existing != null) {
                             chatRepository.getOrCreateChat(entry.ownerId, existing.displayName)
                         }
+                        activatePeerRoute(entry.ownerId)
                         _uiState.update { it.copy(isLoading = false, contactAdded = true) }
                     } else {
                         Log.e(TAG, "add by nickname failed", error)
@@ -320,7 +360,59 @@ class AddContactViewModel @Inject constructor(
             }
             return
         }
+        // Если в верхнее поле ввели короткий цифровой код (482-915 / APU-482915) или @никнейм —
+        // сразу ищем человека в роевом реестре и добавляем без требования длинной ссылки.
+        if (InviteLinkParser.parse(pasted) == null &&
+            !pasted.startsWith("pk_", ignoreCase = true) &&
+            !pasted.contains("://") &&
+            (ProfileCallsign.isFullCodeQuery(pasted) || pasted.startsWith("@") ||
+                pasted.all { it.isLetterOrDigit() || it == '_' })
+        ) {
+            resolveAndAddByCodeOrNick(pasted)
+            return
+        }
         addContactFromLink(pasted)
+    }
+
+    private fun resolveAndAddByCodeOrNick(rawQuery: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { it.copy(isLoading = true, error = null) }
+            val current = currentOwnerId()
+            val clean = rawQuery.trim().removePrefix("@")
+            val matches = if (ProfileCallsign.isFullCodeQuery(rawQuery)) {
+                nicknameDao.allVisible().filter { ProfileCallsign.matches(it.ownerId, rawQuery) }
+            } else {
+                nicknameDao.byName(clean.lowercase())
+            }.filter { entry ->
+                entry.ownerId != current &&
+                    !DeviceProfileBinding.belongsToThisPhysicalDevice(appContext, entry.ownerId)
+            }
+            when {
+                matches.size == 1 -> {
+                    _uiState.update { it.copy(isLoading = false, currentOwnerId = current) }
+                    onAddByNicknameClicked(matches.single())
+                }
+                matches.size > 1 -> {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            nickQuery = rawQuery,
+                            nickResults = matches,
+                            currentOwnerId = current,
+                            notice = appContext.getString(R.string.dpb_callsign_multiple),
+                        )
+                    }
+                }
+                else -> {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = appContext.getString(R.string.dpb_callsign_not_found),
+                        )
+                    }
+                }
+            }
+        }
     }
 
     private fun addContactFromLink(raw: String) {
@@ -367,6 +459,7 @@ class AddContactViewModel @Inject constructor(
                     // первом же сообщении (см. ChatRepository.sendMessage).
                     rememberReferral(parsedInvite, fingerprint, chat.id)
                     requestReferralToken(parsedInvite, fingerprint)
+                    activatePeerRoute(fingerprint)
                     _uiState.update { it.copy(isLoading = false, contactAdded = true, inviteLink = "", displayName = "") }
                 }
                 .onFailure { error ->
@@ -408,6 +501,7 @@ class AddContactViewModel @Inject constructor(
                             val existingChat = chatRepository.getOrCreateChat(fingerprint, existing.displayName)
                             rememberReferral(parsedInvite, fingerprint, existingChat.id)
                         }
+                        activatePeerRoute(fingerprint)
                         _uiState.update { it.copy(isLoading = false, contactAdded = true, inviteLink = "", displayName = "") }
                     } else {
                         Log.e(TAG, "Failed to add contact", error)
