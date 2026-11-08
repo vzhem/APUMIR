@@ -28,6 +28,8 @@ import com.vladimir.messenger.ui.theme.UsernameHolder
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -437,15 +439,35 @@ class OnboardingViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
-    /** Найти пригласившего по введённому @никнейму и зафиксировать его nodeId. */
+    private var nicknameLookupJob: Job? = null
+
+    fun onInviterInputChanged() {
+        nicknameLookupJob?.cancel()
+        _uiState.update { it.copy(nickError = null, resolvedInviterId = null) }
+    }
+
+    /** Найти пригласившего в уже известном локальном реестре. */
     fun onJoinByNickname(rawNick: String) {
+        nicknameLookupJob?.cancel()
         val nick = rawNick.trim().trimStart('@').trim().lowercase()
         if (nick.isBlank()) {
             _uiState.update { it.copy(nickError = appContext.getString(R.string.onb_nickname_not_found)) }
             return
         }
-        viewModelScope.launch(Dispatchers.IO) {
-            val found = runCatching { nicknameDao.byName(nick) }.getOrDefault(emptyList())
+        _uiState.update { it.copy(nickError = null, resolvedInviterId = null) }
+        nicknameLookupJob = viewModelScope.launch(Dispatchers.IO) {
+            val entries = try {
+                nicknameDao.byName(nick)
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                Log.w("OnboardingVM", "nickname lookup failed", e)
+                _uiState.update { it.copy(nickError = appContext.getString(R.string.onb_nickname_not_found)) }
+                return@launch
+            }
+            val found = InviterNicknameLookup.candidates(entries, _uiState.value.nodeId) {
+                DeviceProfileBinding.belongsToThisPhysicalDevice(appContext, it)
+            }
+            coroutineContext.ensureActive()
             _uiState.update {
                 when {
                     found.isEmpty() -> it.copy(

@@ -810,7 +810,7 @@
     <string name="onb_start_chatting">Начать общение</string>
     <string name="onb_privacy_body">Пароль не покидает телефон: ключи запираются прямо здесь. Ни телефонного номера, ни почты — только вы и ваши контакты.</string>
     <string name="onb_nickname_hint">Или введите @никнейма друга, который пригласил вас</string>
-    <string name="onb_nickname_not_found">Пользователя с таким никнеймом не найдено в сети</string>
+    <string name="onb_nickname_not_found">Никнейм не найден среди известных контактов. Попросите друга прислать ссылку-приглашение.</string>
     <string name="onb_nickname_multiple">Найдено несколько пользователей с таким никнеймом — уточните ссылку</string>
     <!-- MTProto прокси -->
     <string name="mtproxy_title">MTProto прокси</string>

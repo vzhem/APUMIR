@@ -458,8 +458,8 @@ class AddContactViewModel @Inject constructor(
                     // атрибуцию. Если транспорта нет, отправка повторится на
                     // первом же сообщении (см. ChatRepository.sendMessage).
                     rememberReferral(parsedInvite, fingerprint, chat.id)
-                    requestReferralToken(parsedInvite, fingerprint)
                     activatePeerRoute(fingerprint)
+                    requestReferralToken(parsedInvite, fingerprint)
                     _uiState.update { it.copy(isLoading = false, contactAdded = true, inviteLink = "", displayName = "") }
                 }
                 .onFailure { error ->
@@ -502,6 +502,7 @@ class AddContactViewModel @Inject constructor(
                             rememberReferral(parsedInvite, fingerprint, existingChat.id)
                         }
                         activatePeerRoute(fingerprint)
+                        requestReferralToken(parsedInvite, fingerprint)
                         _uiState.update { it.copy(isLoading = false, contactAdded = true, inviteLink = "", displayName = "") }
                     } else {
                         Log.e(TAG, "Failed to add contact", error)
