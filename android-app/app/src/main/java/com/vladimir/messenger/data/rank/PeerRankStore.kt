@@ -52,7 +52,11 @@ class PeerRankStore @Inject constructor(
         if (id.isBlank() || qualified < 0 || updatedAtMs <= 0) return false
         val updated = dao.updateIfNewer(id, qualified, updatedAtMs)
         if (updated > 0) return true
-        return dao.insertIfAbsent(PeerRankEntity(id, qualified, updatedAtMs)) > 0
+        val inserted = dao.insertIfAbsent(PeerRankEntity(id, qualified, updatedAtMs))
+        if (inserted > 0) return true
+        // Another writer may have inserted a lower rank after our UPDATE.
+        // Reapply the monotonic update instead of losing this observation.
+        return dao.updateIfNewer(id, qualified, updatedAtMs) > 0
     }
 
     companion object {

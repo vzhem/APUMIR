@@ -3029,7 +3029,7 @@ class CoreServerService : Service() {
                             // внутри: не чаще раза в сутки одному).
                             serviceScope.launch {
                                 runCatching {
-                                    if (peerRankStore.qualifiedFor(peerId) == null) { requestPeerRank(peerId) }
+                                    if (!com.vladimir.messenger.data.rank.PeerRankStore.isVipRank(peerRankStore.qualifiedFor(peerId))) { requestPeerRank(peerId) }
                                 }
                             }
                             Log.i(TAG, "🟢 ONLINE: $peerName")

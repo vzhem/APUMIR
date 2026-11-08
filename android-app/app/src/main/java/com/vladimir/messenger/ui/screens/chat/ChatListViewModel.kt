@@ -687,7 +687,7 @@ class ChatListViewModel @Inject constructor(
                         if (budget <= 0) break
                         if (node in asked) continue
                         val known = withContext(Dispatchers.IO) { peerRankStore.qualifiedFor(node) }
-                        if (known != null) continue
+                        if (com.vladimir.messenger.data.rank.PeerRankStore.isVipRank(known)) continue
                         budget--
                         val started = runCatching { peerRankBroadcaster.requestRank(node) }
                             .getOrDefault(false)
