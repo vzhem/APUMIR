@@ -81,10 +81,17 @@ class ChatStartupTest(unittest.TestCase):
         self.assertLess(
             vm.index("private val rankRights"),
             vm.index("init {"),
-            "rankRights must be declared before init: init calls refreshAttachmentRights() synchronously",
+            "rankRights must be declared before the background initialization starts",
         )
         init_block = vm.split("init {", 1)[1].split("}", 1)[0]
         self.assertIn("refreshAttachmentRights()", init_block)
+
+    def test_initial_rank_check_is_off_main_and_fails_closed(self):
+        vm = read("ui/screens/chat/ChatDetailViewModel.kt")
+        self.assertIn("viewModelScope.launch(Dispatchers.IO) { refreshAttachmentRights() }", vm)
+        state = read("ui/screens/chat/ChatDetailUiState.kt")
+        for field in ("canSendAttachments", "canSendVideo", "canCreatePoll", "canCall", "canVideoCall"):
+            self.assertIn(f"val {field}: Boolean = false", state)
 
     def test_database_error_ends_loading_and_can_be_retried(self):
         vm = read("ui/screens/chat/ChatDetailViewModel.kt")

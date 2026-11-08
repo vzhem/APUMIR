@@ -98,7 +98,7 @@ class ChatDetailViewModel @Inject constructor(
 
     private val historyPaging = DirectChatHistoryPaging()
 
-    // До init: init синхронно зовёт refreshAttachmentRights, а свойства Kotlin создаются по порядку объявления.
+    // Создаётся до init: фоновая загрузка прав использует этот объект.
     private val rankRights = RankRights(appContext)
 
     private val historyObserver = ChatHistoryObserver(
@@ -119,7 +119,7 @@ class ChatDetailViewModel @Inject constructor(
     )
 
     init {
-        refreshAttachmentRights()
+        viewModelScope.launch(Dispatchers.IO) { refreshAttachmentRights() }
         observePeerTyping()
         observeDrafts()
         loadMessages()
