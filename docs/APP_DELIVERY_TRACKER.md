@@ -49,6 +49,7 @@
 - **Что стало:** `observeForChat` исключает зарезервированные служебные имена (`apu-story-video-…`, `apu-avatar-video-…`) — карточки передач в чате больше нет, ни у отправителя, ни у получателя, ни в группах/каналах (та же выборка). Строка в `file_transfers` остаётся: по ней живут транспорт, докачка и кольцо принятых байтов вокруг аватара; вложение создаёт только `SpecialMediaInbox` после проверки sha256 и размера.
 - **Контракт:** `scripts/ci/check-video-avatar.py` — новый тест `test_service_clip_transfer_never_shows_up_as_a_chat_file_card` (пункт 11 в шапке), всего 15 тестов.
 - **Документация:** `docs/VIDEO_AVATAR.md`, раздел про приём и хранение.
+- **Проверки:** `check-video-avatar.py` (15 тестов), `check-god-files.py`, `check-silent-catch.py`, `check-hardcoded-strings.py`, `check-docs-index.py` — зелёные; веточные прогоны `Unit tests (JVM)` [42450821447](https://github.com/vzhem/APUMIR/actions/runs/42450821447) и `Build Release APK` [42450821459](https://github.com/vzhem/APUMIR/actions/runs/42450821459) — success (компиляция Room с новой выборкой).
 
 ## Видеозвонок в меню личного чата, 2026-11-07
 
