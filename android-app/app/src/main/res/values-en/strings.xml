@@ -711,6 +711,9 @@
     <string name="onb_add_inviter">Add the person who invited you</string>
     <string name="onb_start_chatting">Start chatting</string>
     <string name="onb_privacy_body">Your password never leaves the phone: the keys are locked right here. No phone number and no email — only you and your contacts.</string>
+    <string name="onb_nickname_hint">Or enter the @nickname of the friend who invited you</string>
+    <string name="onb_nickname_not_found">No user found with that nickname in the network</string>
+    <string name="onb_nickname_multiple">Multiple users found with that nickname — please use the invite link instead</string>
     <!-- MTProto proxy -->
     <string name="mtproxy_title">MTProto proxy</string>
     <string name="mtproxy_actions">Proxy actions</string>
