@@ -176,3 +176,29 @@ git fetch --all --tags        # дальше — обычная синхрони
   [`NEW_DEVELOPMENT_PC.md`](NEW_DEVELOPMENT_PC.md) и [`PC_TRANSFER.md`](PC_TRANSFER.md).
 - **Релизные файлы для раздачи** (APK, пакеты функций) — `-WithReleases`/`--releases`
   либо страница Releases на GitHub.
+
+## Автоматическая полная синхронизация при каждом релизе
+
+При каждом опубликованном релизе на GitHub Actions автоматически собирается один архив
+`apumir-full.bundle` — полная копия проекта: все ветви, все теги, вся история коммитов
+(~94 МБ). Аргумент прикрепляется к релизу как файл вместе с отчётом
+`release-sync-report.txt`. Скачать можно со страницы релиза **без установки Git**.
+
+Развернуть полную копию:
+
+```bash
+git clone apumir-full.bundle APUMIR
+cd APUMIR
+git remote set-url origin https://github.com/vzhem/APUMIR.git
+git fetch --all --tags          # дальше — обычная синхронизация с GitHub
+```
+
+Держите копию актуальной тем же скриптом:
+
+```bash
+bash scripts/sync-project-to-pc.sh --target <путь>   # Linux / Git Bash
+powershell -ExecutionPolicy Bypass -File scripts\sync-project-to-pc.ps1 -Target <путь>  # Windows
+```
+
+Artefact каждого прогона также хранится во вкладке «Artifacts» запуска workflow
+`Full project sync bundle`.
