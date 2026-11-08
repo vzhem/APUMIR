@@ -267,7 +267,7 @@ private fun MyCodePane() {
 
     Column(
         modifier = Modifier
-            .fillMaxSize()
+            .fillMaxWidth()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -292,7 +292,7 @@ private fun MyCodePane() {
             contentDescription = stringResource(R.string.settings_my_qr),
             contentScale = ContentScale.Fit,
             modifier = Modifier
-                .fillMaxWidth()
+                .widthIn(max = 280.dp)
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(18.dp))
                 .background(Color.White)
