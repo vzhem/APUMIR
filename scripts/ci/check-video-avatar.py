@@ -33,6 +33,10 @@
      молча отбрасывал просьбу), кольцо показывает реальные принятые байты
      (12 часов → по часовой), а «Логи» показывают цепочку обмена; повторы не
      теряются до запуска ядра и при смене старой версии (2026-11-06).
+ 11) служебная передача ролика не становится карточкой файла в чате: выборка
+     передач чата исключает зарезервированные имена, а вложение создаёт только
+     `SpecialMediaInbox` (2026-11-07: «загрузка видиоаватарки прописывается в
+     личном чате»).
 
 Запуск:
     python3 scripts/ci/check-video-avatar.py
@@ -244,6 +248,26 @@ class VideoAvatarContract(unittest.TestCase):
         # Установка и уборка видеоаватара публикуют поле второму устройству.
         self.assertIn("ProfileMirror.FIELD_VAV", self.installer)
         self.assertIn("ProfileMirror.noteLocalChange(", self.installer)
+
+    def test_service_clip_transfer_never_shows_up_as_a_chat_file_card(self):
+        # Владелец 2026-11-07: «загрузка видиоаватарки прописывается в личном
+        # чате» — в переписке висела карточка `apu-avatar-video-….mp4` с
+        # «Приём остановился… 0/14». Служебные передачи роликов не должны
+        # попадать в список передач чата: прокачку байтов показывает кольцо
+        # вокруг аватара, а вложением становится только проверенный файл.
+        dao = read(JAVA / "data/local/dao/FileTransferDao.kt")
+        view = dao.index("fun observeForChat")
+        block = dao[max(0, view - 900):view]
+        self.assertIn("NOT LIKE", block, "выборка передач чата снова показывает служебные файлы")
+        self.assertIn("apu-avatar-video-%", block,
+                      "карточка загрузки видеоаватара снова попадёт в личный чат")
+        self.assertIn("apu-story-video-%", block, "ролик истории снова попадёт в чат карточкой файла")
+        # Строка в файловых передачах остаётся: по ней живут транспорт и докачка.
+        self.assertIn("FROM file_transfers WHERE chatId = :chatId", block)
+        # Уведомление и карточка после приёма — по-прежнему через SpecialMediaInbox.
+        router = read(JAVA / "data/file/FileTransferRouter.kt")
+        self.assertIn("AvatarVideoWire.reserved(displayName)", router)
+        self.assertIn("acceptSpecialMedia(it)", router)
 
     def test_policy_is_pure_and_covered_by_the_jvm_gate(self):
         # Чистый файл: без Android его компилирует и гоняет check-chat-history.sh.

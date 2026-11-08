@@ -26,7 +26,24 @@ interface FileTransferDao {
     @Query("SELECT * FROM file_transfers WHERE displayName LIKE 'apu-story-video-%'")
     suspend fun getStoryVideoTransfers(): List<FileTransferEntity>
 
-    @Query("SELECT * FROM file_transfers WHERE chatId = :chatId ORDER BY createdAtMs ASC")
+    /**
+     * Передачи, которые видны в чате как карточки файлов.
+     *
+     * Служебные имена (`apu-story-video-…`, `apu-avatar-video-…`) исключены:
+     * это ролики историй и видеоаватаров, они едут обычной передачей, но
+     * вложением в чате не становятся — их принимает `SpecialMediaInbox`, а
+     * прогресс показывает кольцо вокруг аватара. Владелец 2026-11-07: «загрузка
+     * видиоаватарки прописывается в личном чате» — в переписке висела карточка
+     * `apu-avatar-video-….mp4` с «Приём остановился… 0/14». Строка в
+     * `file_transfers` остаётся (транспорт и докачка живут по ней), в список
+     * чата она просто не попадает.
+     */
+    @Query(
+        "SELECT * FROM file_transfers WHERE chatId = :chatId " +
+            "AND displayName NOT LIKE 'apu-story-video-%' " +
+            "AND displayName NOT LIKE 'apu-avatar-video-%' " +
+            "ORDER BY createdAtMs ASC"
+    )
     fun observeForChat(chatId: String): Flow<List<FileTransferEntity>>
 
     /** Ограниченная выборка служебного чата для отчёта о месте и уборки копий обновления. */
