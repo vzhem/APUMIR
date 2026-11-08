@@ -34,7 +34,7 @@
 
 | Что | Зачем | Как поставить |
 |---|---|---|
-| **Git** | без него проект не скопировать | `winget install Git.Git` (Windows), `sudo apt install git` (Linux) |
+| **Git** | без него проект не скопировать | **проще всего — [GitHub Desktop](https://desktop.github.com/)**: он сам ставит Git и клонирует проект в три клика; из консоли — `winget install Git.Git` (Windows) или `sudo apt install git` (Linux) |
 | **GitHub CLI** (`gh`) | только если нужны релизные APK | `winget install GitHub.cli`, затем `gh auth login` |
 | **Android Studio + JDK 17 + NDK + Rust** | только чтобы собирать проект на этом компьютере | см. [`NEW_DEVELOPMENT_PC.md`](NEW_DEVELOPMENT_PC.md) |
 | ~200 МБ свободного места | клон проекта | плюс место под сборку (несколько ГБ) |
@@ -43,6 +43,14 @@
 входа. Вход нужен только для скачивания релизных файлов через `gh`.
 
 ## Способ 1: скрипт (рекомендую)
+
+> **Если Git на компьютере ещё не стоит:** самый простой путь — установить
+> [GitHub Desktop](https://desktop.github.com/) (в нём Git уже встроен): «Clone
+> repository» → вставить `https://github.com/vzhem/APUMIR.git` → выбрать папку →
+> клон готов, вместе со всеми ветвями, тегами и историей. Из консоли:
+> `winget install Git.Git`, затем откройте терминал заново и проверьте `git --version`.
+> Совсем без Git можно скачать ZIP со страницы репозитория («Code → Download ZIP»),
+> но в нём нет истории, ветвей и тегов — это запасной вариант, а не «всё».
 
 Windows (PowerShell):
 
