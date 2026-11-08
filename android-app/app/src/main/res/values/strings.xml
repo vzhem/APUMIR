@@ -2576,4 +2576,7 @@
     <string name="dpb_replace_confirm_title">Точно заменить прежний профиль?</string>
     <string name="dpb_replace_confirm_body_tpl">На этом телефоне уже закреплён профиль %1$s (%2$s). Если создать новый, прежний адрес этого устройства будет заменён. Чтобы сохранить старый адрес, контакты и ранг — вернитесь к восстановлению.</string>
     <string name="dpb_replace_confirm_btn">Да, заменить прежний профиль</string>
+    <string name="action_confirm">Подтвердить</string>
+    <string name="feature_packs_select_all_confirm_title">Выбрать все функции?</string>
+    <string name="feature_packs_select_all_confirm_body">Все функции начнут скачиваться сразу и займут место на телефоне. Продолжить?</string>
 </resources>

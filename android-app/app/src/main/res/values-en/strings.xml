@@ -2560,4 +2560,7 @@ The file is not on this phone</string>
     <string name="dpb_replace_confirm_title">Replace previous profile?</string>
     <string name="dpb_replace_confirm_body_tpl">This phone already has profile %1$s (%2$s). Creating a new one will supersede this device\'s previous address. To keep your old address, contacts, and rank, return to restore.</string>
     <string name="dpb_replace_confirm_btn">Yes, replace previous profile</string>
+    <string name="action_confirm">Confirm</string>
+    <string name="feature_packs_select_all_confirm_title">Select all functions?</string>
+    <string name="feature_packs_select_all_confirm_body">All functions will start downloading at once and take up space on your phone. Continue?</string>
 </resources>

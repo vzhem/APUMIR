@@ -66,6 +66,7 @@ fun FeaturePacksSettings(viewModel: FeaturePacksViewModel = hiltViewModel()) {
     val context = LocalContext.current
     val abi = remember { FeaturePackStore.deviceAbi() }
     var selected by remember { mutableStateOf(FeaturePackStore.selectedIds(context)) }
+    var confirmAll by remember { mutableStateOf(false) }
     val totalBytes = FeaturePackCatalog.totalBytes(selected, abi)
     val packStates by viewModel.states.collectAsState()
 
@@ -138,11 +139,7 @@ fun FeaturePacksSettings(viewModel: FeaturePacksViewModel = hiltViewModel()) {
                 }
                 ApuTextAction(
                     label = stringResource(R.string.feature_packs_select_all),
-                    onClick = {
-                        FeaturePackStore.selectAll(context)
-                        selected = FeaturePackStore.selectedIds(context)
-                        FeaturePackCatalog.packs.forEach { viewModel.request(it.id) }
-                    },
+                    onClick = { confirmAll = true },
                 )
             }
             if (selected.isNotEmpty()) {
@@ -158,6 +155,33 @@ fun FeaturePacksSettings(viewModel: FeaturePacksViewModel = hiltViewModel()) {
                 color = HintBubbleMutedColor,
             )
         }
+    }
+
+    // «Выбрать всё» не качает сразу: сначала спросим, чтобы не начать случайно.
+    if (confirmAll) {
+        ApuSettingsDialog(
+            onDismissRequest = { confirmAll = false },
+            title = { Text(stringResource(R.string.feature_packs_select_all_confirm_title)) },
+            text = { Text(stringResource(R.string.feature_packs_select_all_confirm_body)) },
+            confirmButton = {
+                ApuTextAction(
+                    label = stringResource(R.string.action_confirm),
+                    danger = true,
+                    onClick = {
+                        FeaturePackStore.selectAll(context)
+                        selected = FeaturePackStore.selectedIds(context)
+                        FeaturePackCatalog.packs.forEach { viewModel.request(it.id) }
+                        confirmAll = false
+                    },
+                )
+            },
+            dismissButton = {
+                ApuTextAction(
+                    label = stringResource(R.string.action_cancel),
+                    onClick = { confirmAll = false },
+                )
+            },
+        )
     }
 }
 
