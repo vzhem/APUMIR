@@ -33,6 +33,7 @@ import com.vladimir.messenger.data.featurepacks.FeaturePackSeeder
 import com.vladimir.messenger.data.featurepacks.FeaturePackStore
 import com.vladimir.messenger.ui.components.ApuPremiumSwitch
 import com.vladimir.messenger.ui.components.ApuSettingsCard
+import com.vladimir.messenger.ui.components.ApuSettingsDialog
 import com.vladimir.messenger.ui.components.ApuTextAction
 import com.vladimir.messenger.ui.components.HintBubbleMutedColor
 import com.vladimir.messenger.ui.components.HintBubbleTextColor
