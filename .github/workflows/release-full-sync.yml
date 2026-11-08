@@ -1,0 +1,66 @@
+name: Full project sync bundle
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch every branch and tag from GitHub
+        run: |
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*' --tags --prune --force
+          echo "branches=$(git branch -r | wc -l)" >> "$GITHUB_ENV"
+          echo "tags=$(git tag | wc -l)" >> "$GITHUB_ENV"
+          echo "commits=$(git rev-list --count --all)" >> "$GITHUB_ENV"
+
+      - name: Create one bundle with the whole project
+        run: git bundle create apumir-full.bundle --all
+
+      - name: Write sync report
+        run: |
+          {
+            echo "APUMIR full sync bundle"
+            echo "date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "release: ${{ github.event.release.tag_name }}"
+            echo "url: ${{ github.event.release.html_url }}"
+            echo "branches: ${{ env.branches }}"
+            echo "tags: ${{ env.tags }}"
+            echo "commits: ${{ env.commits }}"
+            echo "bundle_size: $(du -h apumir-full.bundle | cut -f1)"
+            echo ""
+            echo "How to restore the full copy (no Git needed to download):"
+            echo "  1. Download apumir-full.bundle from this release page."
+            echo "  2. git clone apumir-full.bundle APUMIR"
+            echo "  3. cd APUMIR"
+            echo "  4. git remote set-url origin https://github.com/vzhem/APUMIR.git"
+            echo "  5. git fetch --all --tags        # sync with GitHub later"
+            echo ""
+            echo "Then keep it up to date with scripts/sync-project-to-pc.sh (or .ps1 on Windows)."
+          } > release-sync-report.txt
+          cat release-sync-report.txt
+
+      - name: Attach bundle and report to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          gh release upload "$TAG" apumir-full.bundle release-sync-report.txt --clobber
+
+      - name: Keep bundle as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apumir-full-bundle
+          path: |
+            apumir-full.bundle
+            release-sync-report.txt
