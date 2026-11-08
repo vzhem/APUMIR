@@ -103,7 +103,10 @@ fi
 if [ -d "$TARGET/.git" ]; then
     log ""
     log "[1/5] рабочая копия уже есть — обновляю"
-    if [ -n "$(git -C "$TARGET" status --porcelain 2>/dev/null)" ]; then
+    # SYNC_REPORT.txt от прошлого прогона — служебный файл самого скрипта,
+    # он не должен считаться «чужими правками».
+    DIRTY=$(git -C "$TARGET" status --porcelain 2>/dev/null | grep -v 'SYNC_REPORT\.txt$')
+    if [ -n "$DIRTY" ]; then
         warn "в $TARGET есть незакоммиченные изменения — обновление пропущено, файлы не тронуты"
         warn "закоммитьте/уберите изменения и запустите снова"
     else
@@ -213,6 +216,10 @@ if [ -d "$TARGET/.git" ] && [ "$DRY_RUN" = 0 ]; then
     log "  ветвей: $BRANCHES, тегов: $TAGS, коммитов в истории: $COMMITS"
     log "  текущий коммит: $HEAD_SHA, размер .git: $SIZE"
     [ -n "$MIRROR" ] && [ -d "$MIRROR" ] && log "  зеркало: $(du -sh "$MIRROR" 2>/dev/null | cut -f1)"
+    # Отчёт не должен пачкать рабочую копию: убираем его из проверки «грязного» дерева.
+    if [ -d "$TARGET/.git/info" ]; then
+        printf 'SYNC_REPORT.txt\n' >> "$TARGET/.git/info/exclude"
+    fi
     REPORT="$TARGET/SYNC_REPORT.txt"
     {
         echo "APUMIR sync report"

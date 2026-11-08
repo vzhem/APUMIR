@@ -90,7 +90,9 @@ if ((Test-Path $Target) -and (-not (Test-Path $gitDir)) -and ((Get-ChildItem -Fo
 Say ""
 if (Test-Path $gitDir) {
     Say "[1/5] рабочая копия уже есть — обновляю"
-    $dirty = & git -C $Target status --porcelain
+    # SYNC_REPORT.txt от прошлого прогона — служебный файл самого скрипта,
+    # он не должен считаться «чужими правками».
+    $dirty = (& git -C $Target status --porcelain) | Where-Object { $_ -notmatch "SYNC_REPORT\.txt$" }
     if ($dirty) {
         Warn "в $Target есть незакоммиченные изменения — обновление пропущено, файлы не тронуты"
         Warn "закоммитьте/уберите изменения и запустите снова"
@@ -210,6 +212,11 @@ if ((Test-Path $gitDir) -and (-not $DryRun)) {
         $mirrorBytes = (Get-ChildItem -Recurse -File $Mirror | Measure-Object Length -Sum).Sum
         if (-not $mirrorBytes) { $mirrorBytes = 0 }
         Say ("  зеркало: " + [math]::Round($mirrorBytes / 1MB, 0) + " МБ")
+    }
+    # Отчёт не должен пачкать рабочую копию: убираем его из проверки «грязного» дерева.
+    $exclude = Join-Path $gitDir "info\exclude"
+    if ((Test-Path (Split-Path $exclude)) -and (-not (Select-String -Path $exclude -Pattern "SYNC_REPORT.txt" -Quiet -ErrorAction SilentlyContinue))) {
+        Add-Content -Path $exclude -Value "SYNC_REPORT.txt" -ErrorAction SilentlyContinue
     }
     $report = Join-Path $Target "SYNC_REPORT.txt"
     @(
