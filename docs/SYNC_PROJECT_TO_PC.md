@@ -14,7 +14,7 @@
 |---|---|---|---|
 | Код (`android-app`, `rust-core`, `website`, `tools`, `scripts`) | git | `<цель>` (рабочая копия) | ~70 МБ в рабочем виде |
 | Вся история и **все ветви** (≈92 ветки: `main`, `arena/*`, `archive/*`) | git | `refs/remotes/origin/*` в клоне | входит в `.git` |
-| **Все теги** (658: `v11.74.x`, `v11.16.x` …) | git | `git tag` в клоне | входит в `.git` |
+| **Все теги** (659: `v11.74.x`, `v11.16.x` …) | git | `git tag` в клоне | входит в `.git` |
 | Ключ подписи релиза `android-app/app/p2p-release.jks` | git (в репозитории) | `android-app/app/` | 2,7 КБ |
 | Документы (`docs/`, включая заметки выпусков) | git | `docs/` | ~6 МБ |
 | Релизные APK и `SHA256SUMS.txt` | GitHub Releases | `releases/<тег>/` (по желанию) | ~77 МБ за выпуск |
@@ -89,7 +89,7 @@ bash scripts/sync-project-to-pc.sh --target ~/APUMIR --track-all-branches
 проверяет все объекты и на слабой машине может идти несколько минут, это нормально,
 прервать его не надо. Если времени нет — добавьте `--skip-fsck` (`-SkipFsck`),
 синхронизация от этого не меняется.
-Фактические числа на момент проверки: 92 ветви, 658 тегов, 2700 коммитов.
+Фактические числа на момент проверки: 92 ветви, 659 тегов (включая архивный тег), 2706 коммитов.
 
 Параметры (одинаковые у обоих скриптов):
 
@@ -111,7 +111,7 @@ git clone --no-single-branch https://github.com/vzhem/APUMIR.git APUMIR
 cd APUMIR
 git fetch --tags --prune          # все теги
 git branch -r                     # все ветви (≈92)
-git tag --list | tail -5          # все теги (658)
+git tag --list | tail -5          # все теги (659)
 ```
 
 Точная копия всех ссылок (как на GitHub, без рабочего дерева):
@@ -151,7 +151,7 @@ git fetch --all --tags        # дальше — обычная синхрони
 2. Собрать: `gradlew.bat assembleRelease` или задача `:app:assembleRelease`; Rust-ядро
    собирается скриптами `build-rust.sh` / `build-rust.ps1`.
 3. Проверить, что видно всё: `git -C <цель> branch -r | wc -l` (≈92),
-   `git -C <цель> tag | wc -l` (658), `git -C <цель> log --oneline | head` (свежий коммит `main`).
+   `git -C <цель> tag | wc -l` (659), `git -C <цель> log --oneline | head` (свежий коммит `main`).
 4. Дальше обновление — тем же скриптом (он делает `fetch` + fast-forward, ничего не теряя).
 
 ## Если что-то пошло не так

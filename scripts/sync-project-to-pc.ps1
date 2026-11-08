@@ -39,7 +39,13 @@ param(
     [switch]$DryRun
 )
 
-$ErrorActionPreference = "Stop"
+# git штатно пишет в stderr («Cloning into…», «warning:»), а PowerShell при
+# $ErrorActionPreference = "Stop" считает это фатальной ошибкой. Коды возврата мы
+# проверяем сами, поэтому «Continue» здесь безопаснее и надёжнее.
+$ErrorActionPreference = "Continue"
+# PowerShell 7.4+ иначе считает ненулевой код нативной команды ошибкой и обрывает
+# скрипт (git возвращает 1 в штатных ситуациях, например когда ветви ещё нет).
+$global:PSNativeCommandUseErrorActionPreference = $false
 $started = Get-Date
 
 function Say([string]$text) { Write-Host $text }
@@ -52,8 +58,15 @@ function Invoke-Step {
         Say ("  [dry-run] " + $FilePath + " " + ($Arguments -join " "))
         return
     }
-    & $FilePath @Arguments
-    if ($LASTEXITCODE -ne 0) { Warn ("команда вернула код " + $LASTEXITCODE + ": " + $FilePath + " " + ($Arguments -join " ")) }
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $FilePath @Arguments
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+    if ($code -ne 0) { Warn ("команда вернула код " + $code + ": " + $FilePath + " " + ($Arguments -join " ")) }
 }
 
 function Invoke-StepQuiet {
@@ -62,7 +75,15 @@ function Invoke-StepQuiet {
         Say ("  [dry-run] " + $FilePath + " " + ($Arguments -join " "))
         return
     }
-    & $FilePath @Arguments 2>&1 | Out-Null
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        & $FilePath @Arguments 2>&1 | Out-Null
+        $code = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+    if ($code -ne 0) { Warn ("команда вернула код " + $code + ": " + $FilePath + " " + ($Arguments -join " ")) }
 }
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -92,19 +113,24 @@ if (Test-Path $gitDir) {
     Say "[1/5] рабочая копия уже есть — обновляю"
     # SYNC_REPORT.txt от прошлого прогона — служебный файл самого скрипта,
     # он не должен считаться «чужими правками».
-    $dirty = (& git -C $Target status --porcelain) | Where-Object { $_ -notmatch "SYNC_REPORT\.txt$" }
+    $dirty = (& git -C $Target status --porcelain 2>$null) | Where-Object { $_ -notmatch "SYNC_REPORT\.txt$" }
     if ($dirty) {
         Warn "в $Target есть незакоммиченные изменения — обновление пропущено, файлы не тронуты"
         Warn "закоммитьте/уберите изменения и запустите снова"
     } else {
         Invoke-Step git @("-C", $Target, "fetch", "--all", "--tags", "--prune")
-        $shallowNow = (& git -C $Target rev-parse --is-shallow-repository) -eq "true"
+        $shallowNow = (& git -C $Target rev-parse --is-shallow-repository 2>$null) -eq "true"
         if ($shallowNow -and (-not $Shallow)) {
             Say "  клон был незавершённым — дотягиваю полную историю"
             Invoke-Step git @("-C", $Target, "fetch", "--unshallow", "--tags")
         }
         Invoke-StepQuiet git @("-C", $Target, "checkout", "main")
+        # @{u} — сокращение git для «ветка на которой я»; если upstream не задан,
+        # пробуем origin/main напрямую.
         Invoke-StepQuiet git @("-C", $Target, "merge", "--ff-only", "@{u}")
+        if ($LASTEXITCODE -ne 0) {
+            Invoke-StepQuiet git @("-C", $Target, "merge", "--ff-only", "origin/main")
+        }
     }
 } else {
     Say "[1/5] клонирую проект в $Target"
@@ -124,11 +150,11 @@ if (Test-Path $gitDir) {
     Invoke-StepQuiet git @("-C", $Target, "fetch", "--all", "--tags", "--prune")
     if ($TrackAllBranches -and (-not $DryRun)) {
         Say "  создаю локальные ветви для всех ветвей GitHub (может занять минуту)"
-        $refs = & git -C $Target for-each-ref --format="%(refname:short)" refs/remotes/origin
+        $refs = & git -C $Target for-each-ref --format="%(refname:short)" refs/remotes/origin 2>$null
         foreach ($ref in $refs) {
             if ($ref -eq "origin/HEAD") { continue }
             $name = $ref -replace "^origin/", ""
-            & git -C $Target show-ref --verify --quiet "refs/heads/$name"
+            & git -C $Target show-ref --verify --quiet "refs/heads/$name" 2>$null
             if ($LASTEXITCODE -ne 0) {
                 Invoke-StepQuiet git @("-C", $Target, "branch", "--track", $name, $ref)
             }
@@ -167,6 +193,7 @@ if ($WithReleases -eq "none") {
             if ($LASTEXITCODE -ne 0 -or -not $one) {
                 $one = & gh release list --repo $Repo --limit 1 --json tagName -q ".[0].tagName" 2>$null
             }
+            if ($one -is [array]) { $one = $one[0] }
             if ($one) { $tags = @($one) }
         } else {
             $limit = if ($WithReleases -eq "all") { 1000 } else { [int]$WithReleases }
@@ -196,11 +223,11 @@ Say ""
 Say "[5/5] проверка целостности"
 if ((Test-Path $gitDir) -and (-not $DryRun)) {
     if (-not $SkipFsck) { Invoke-Step git @("-C", $Target, "fsck", "--full", "--no-progress") }
-    $branches = (& git -C $Target for-each-ref --format="%(refname:short)" refs/remotes/origin |
+    $branches = (& git -C $Target for-each-ref --format="%(refname:short)" refs/remotes/origin 2>$null |
         Where-Object { $_ -ne "origin/HEAD" } | Measure-Object).Count
-    $tags = (& git -C $Target tag --list | Measure-Object).Count
-    $commits = (& git -C $Target rev-list --count --all)
-    $head = (& git -C $Target rev-parse --short HEAD)
+    $tags = (& git -C $Target tag --list 2>$null | Measure-Object).Count
+    $commits = (& git -C $Target rev-list --count --all 2>$null)
+    $head = (& git -C $Target rev-parse --short HEAD 2>$null)
     $gitBytes = (Get-ChildItem -Recurse -File $gitDir | Measure-Object Length -Sum).Sum
     if (-not $gitBytes) { $gitBytes = 0 }
     $gitSize = "{0:N0} МБ" -f ($gitBytes / 1MB)

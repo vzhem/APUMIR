@@ -116,7 +116,12 @@ if [ -d "$TARGET/.git" ]; then
             run git -C "$TARGET" fetch --unshallow --tags || warn "не удалось дотянуть историю (нет сети?)"
         fi
         run git -C "$TARGET" checkout main >/dev/null 2>&1 || true
-        run git -C "$TARGET" merge --ff-only "@{u}" >/dev/null 2>&1 || warn "ветка main не обновилась fast-forward (локальные коммиты?)"
+        # @{u} — сокращение git для «ветка на которой я»; если upstream не задан,
+        # пробуем origin/main напрямую.
+        if ! run git -C "$TARGET" merge --ff-only "@{u}" >/dev/null 2>&1; then
+            run git -C "$TARGET" merge --ff-only origin/main >/dev/null 2>&1 || \
+                warn "ветка main не обновилась fast-forward (локальные коммиты?)"
+        fi
     fi
 else
     log ""
