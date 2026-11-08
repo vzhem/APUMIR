@@ -581,8 +581,12 @@ private fun ShowInviteStep(
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
-    val nickError by viewModel.uiState.map { it.nickError }.stateIn(viewModel.viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-    val resolvedInviterId by viewModel.uiState.map { it.resolvedInviterId }.stateIn(viewModel.viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    val nickError by viewModel.uiState.map { it.nickError }
+        .stateIn(viewModel.viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+        .collectAsState(initialValue = null)
+    val resolvedInviterId by viewModel.uiState.map { it.resolvedInviterId }
+        .stateIn(viewModel.viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+        .collectAsState(initialValue = null)
 
     // Найден пригласивший по никнейму — сообщаем об этом экрану онбординга.
     LaunchedEffect(resolvedInviterId) {
