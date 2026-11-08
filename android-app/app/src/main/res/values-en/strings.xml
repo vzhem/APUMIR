@@ -711,6 +711,9 @@
     <string name="onb_add_inviter">Add the person who invited you</string>
     <string name="onb_start_chatting">Start chatting</string>
     <string name="onb_privacy_body">Your password never leaves the phone: the keys are locked right here. No phone number and no email — only you and your contacts.</string>
+    <string name="onb_nickname_hint">Or enter the @nickname of the friend who invited you</string>
+    <string name="onb_nickname_not_found">No user found with that nickname in the network</string>
+    <string name="onb_nickname_multiple">Multiple users found with that nickname — please use the invite link instead</string>
     <!-- MTProto proxy -->
     <string name="mtproxy_title">MTProto proxy</string>
     <string name="mtproxy_actions">Proxy actions</string>
@@ -2560,4 +2563,7 @@ The file is not on this phone</string>
     <string name="dpb_replace_confirm_title">Replace previous profile?</string>
     <string name="dpb_replace_confirm_body_tpl">This phone already has profile %1$s (%2$s). Creating a new one will supersede this device\'s previous address. To keep your old address, contacts, and rank, return to restore.</string>
     <string name="dpb_replace_confirm_btn">Yes, replace previous profile</string>
+    <string name="action_confirm">Confirm</string>
+    <string name="feature_packs_select_all_confirm_title">Select all functions?</string>
+    <string name="feature_packs_select_all_confirm_body">All functions will start downloading at once and take up space on your phone. Continue?</string>
 </resources>

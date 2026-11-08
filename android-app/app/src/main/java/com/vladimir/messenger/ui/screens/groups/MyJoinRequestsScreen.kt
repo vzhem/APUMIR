@@ -254,87 +254,93 @@ private fun JoinRequestCard(
     }
 
     ApuSettingsCard(highlighted = state == JoinState.APPROVED) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            ApuPremiumIconTile(
-                icon = if (request.isChannel) Icons.Filled.Campaign else Icons.Filled.Groups,
-                size = 44.dp,
-            )
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = if (untitled) stringResource(R.string.my_join_untitled) else request.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (untitled) ApuBubbleMutedColor else ApuBubbleTextColor,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+        // Единый отступ от краёв пузыря: текст и иконка не прижимаются к границе карточки.
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ApuPremiumIconTile(
+                    icon = if (request.isChannel) Icons.Filled.Campaign else Icons.Filled.Groups,
+                    size = 44.dp,
                 )
-                Text(
-                    text = members,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ApuBubbleMutedColor,
-                )
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (untitled) stringResource(R.string.my_join_untitled) else request.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (untitled) ApuBubbleMutedColor else ApuBubbleTextColor,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = members,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ApuBubbleMutedColor,
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                StatusPill(state)
             }
-            Spacer(Modifier.width(8.dp))
-            StatusPill(state)
-        }
 
-        Spacer(Modifier.height(14.dp))
-        JoinTimeline(request = request, state = state, locale = locale)
+            Spacer(Modifier.height(14.dp))
+            JoinTimeline(request = request, state = state, locale = locale)
 
-        val details = buildList {
-            if (request.groupCreatedAtMs > 0L) {
-                add(stringResource(R.string.my_join_created, formatJoinTime(request.groupCreatedAtMs, locale)))
+            val details = buildList {
+                if (request.groupCreatedAtMs > 0L) {
+                    add(stringResource(R.string.my_join_created, formatJoinTime(request.groupCreatedAtMs, locale)))
+                }
+                if (request.ownerName.isNotBlank()) {
+                    add(stringResource(R.string.my_join_owner, request.ownerName))
+                }
+                if (request.note.isNotBlank()) {
+                    add(stringResource(R.string.my_join_note, request.note))
+                }
+                if (state == JoinState.SENDING || state == JoinState.RECEIVED) {
+                    if (request.expiresAtMs > 0L) {
+                        add(stringResource(R.string.my_join_retry_until, formatJoinTime(request.expiresAtMs, locale)))
+                    }
+                }
+                if (state == JoinState.EXPIRED) add(stringResource(R.string.my_join_expired_hint))
             }
-            if (request.ownerName.isNotBlank()) {
-                add(stringResource(R.string.my_join_owner, request.ownerName))
-            }
-            if (request.note.isNotBlank()) {
-                add(stringResource(R.string.my_join_note, request.note))
-            }
-            if (state == JoinState.SENDING || state == JoinState.RECEIVED) {
-                if (request.expiresAtMs > 0L) {
-                    add(stringResource(R.string.my_join_retry_until, formatJoinTime(request.expiresAtMs, locale)))
+            if (details.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                details.forEachIndexed { index, line ->
+                    if (index > 0) Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = line,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = ApuBubbleMutedColor,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
             }
-            if (state == JoinState.EXPIRED) add(stringResource(R.string.my_join_expired_hint))
-        }
-        if (details.isNotEmpty()) {
-            Spacer(Modifier.height(10.dp))
-            details.forEach { line ->
-                Text(
-                    text = line,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = ApuBubbleMutedColor,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
 
-        val actions = buildList {
-            if (state == JoinState.APPROVED) {
-                add(Triple(R.string.my_join_open, onOpen, false))
+            val actions = buildList {
+                if (state == JoinState.APPROVED) {
+                    add(Triple(R.string.my_join_open, onOpen, false))
+                }
+                if (state == JoinState.SENDING || state == JoinState.RECEIVED) {
+                    add(Triple(R.string.my_join_resend, onResend, false))
+                }
+                if (state == JoinState.SENDING || state == JoinState.RECEIVED || state == JoinState.EXPIRED) {
+                    add(Triple(R.string.my_join_cancel, onCancel, true))
+                }
             }
-            if (state == JoinState.SENDING || state == JoinState.RECEIVED) {
-                add(Triple(R.string.my_join_resend, onResend, false))
-            }
-            if (state == JoinState.SENDING || state == JoinState.RECEIVED || state == JoinState.EXPIRED) {
-                add(Triple(R.string.my_join_cancel, onCancel, true))
-            }
-        }
-        if (actions.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                actions.forEach { (labelRes, action, danger) ->
-                    ApuTextAction(
-                        label = stringResource(labelRes),
-                        danger = danger,
-                        onClick = action,
-                    )
+            if (actions.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    actions.forEachIndexed { index, (labelRes, action, danger) ->
+                        if (index > 0) Spacer(Modifier.width(8.dp))
+                        ApuTextAction(
+                            label = stringResource(labelRes),
+                            danger = danger,
+                            onClick = action,
+                        )
+                    }
                 }
             }
         }

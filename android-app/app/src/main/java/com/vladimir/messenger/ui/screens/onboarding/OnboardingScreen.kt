@@ -40,6 +40,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuBubbleCard
 import com.vladimir.messenger.ui.components.ApuBubbleField
@@ -62,6 +64,8 @@ fun OnboardingScreen(
     onRestoreFromFile: () -> Unit = {},
     /** Раунд 204: «Вас пригласили?» - друг вставляет ссылку, контакт и ранг сами. */
     onJoinByInvite: (String) -> Unit = {},
+    /** Раунд 207: найден пригласивший по введённому @никнейму — перейти к его контакту. */
+    onNicknameResolved: (String) -> Unit = {},
     viewModel: OnboardingViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -123,6 +127,7 @@ fun OnboardingScreen(
                             nodeId      = uiState.nodeId ?: uiState.fingerprint ?: "",
                             onFinish    = onProfileCreated,
                             onJoinByInvite = onJoinByInvite,
+                            onNicknameResolved = onNicknameResolved,
                         )
                 }
             }
@@ -569,10 +574,26 @@ private fun ShowInviteStep(
     onFinish: () -> Unit,
     /** Раунд 204: вставить приглашение друга - контакт добавится сам. */
     onJoinByInvite: (String) -> Unit = {},
+    /** Раунд 207: найден пригласивший по введённому @никнейму. */
+    onNicknameResolved: (String) -> Unit = {},
+    viewModel: OnboardingViewModel = hiltViewModel(),
 ) {
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
+    val nickError by viewModel.uiState.map { it.nickError }
+        .stateIn(viewModel.viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+        .collectAsState(initialValue = null)
+    val resolvedInviterId by viewModel.uiState.map { it.resolvedInviterId }
+        .stateIn(viewModel.viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+        .collectAsState(initialValue = null)
+
+    // Найден пригласивший по никнейму — сообщаем об этом экрану онбординга.
+    LaunchedEffect(resolvedInviterId) {
+        if (resolvedInviterId != null) {
+            onNicknameResolved(resolvedInviterId)
+        }
+    }
     val callsign = remember(nodeId, fingerprint) {
         com.vladimir.messenger.util.ProfileCallsign.of(nodeId)
             ?: com.vladimir.messenger.util.ProfileCallsign.of(fingerprint)
@@ -714,6 +735,7 @@ private fun ShowInviteStep(
         var joinText by remember { mutableStateOf("") }
         val joinValid = com.vladimir.messenger.util.InviteLinkParser.parse(joinText) != null ||
             com.vladimir.messenger.data.group.GroupInviteLinks.parseTarget(joinText) != null
+        val nicknameValid = joinText.isNotBlank() && !joinValid
         ApuBubbleCard(modifier = Modifier.fillMaxWidth(), premium = 5.dp) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
@@ -736,11 +758,31 @@ private fun ShowInviteStep(
                     minLines = 2,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = stringResource(R.string.onb_nickname_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ApuBubbleMutedColor,
+                )
+                if (nickError != null) {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = nickError,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 Spacer(modifier = Modifier.height(10.dp))
                 ApuPremiumContentButton(
-                    onClick = { onJoinByInvite(joinText) },
+                    onClick = {
+                        if (joinValid) {
+                            onJoinByInvite(joinText)
+                        } else {
+                            viewModel.onJoinByNickname(joinText)
+                        }
+                    },
                     style = DiagnosticsActionStyle.PRIMARY,
-                    enabled = joinValid,
+                    enabled = joinValid || nicknameValid,
                     modifier = Modifier.fillMaxWidth().height(46.dp),
                 ) {
                     Text(stringResource(R.string.onb_add_inviter))

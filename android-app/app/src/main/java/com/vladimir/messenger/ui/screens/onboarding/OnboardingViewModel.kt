@@ -57,6 +57,10 @@ data class OnboardingUiState(
     /** Диалог подтверждения замены прежнего профиля этого телефона, чтобы исключить случайное нажатие. */
     val showReplaceConfirmDialog: Boolean = false,
     val error: String?         = null,
+    /** nodeId пригласившего, найденного по введённому @никнейму. */
+    val resolvedInviterId: String? = null,
+    /** Ошибка при поиске пригласившего по никнейму. */
+    val nickError: String?     = null,
 ) {
     /**
      * Готова ли форма. Экран показывает это подсказками под полями, а не
@@ -431,5 +435,33 @@ class OnboardingViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    /** Найти пригласившего по введённому @никнейму и зафиксировать его nodeId. */
+    fun onJoinByNickname(rawNick: String) {
+        val nick = rawNick.trim().trimStart('@').trim().lowercase()
+        if (nick.isBlank()) {
+            _uiState.update { it.copy(nickError = appContext.getString(R.string.onb_nickname_not_found)) }
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val found = runCatching { nicknameDao.byName(nick) }.getOrDefault(emptyList())
+            _uiState.update {
+                when {
+                    found.isEmpty() -> it.copy(
+                        nickError = appContext.getString(R.string.onb_nickname_not_found),
+                        resolvedInviterId = null,
+                    )
+                    found.size > 1 -> it.copy(
+                        nickError = appContext.getString(R.string.onb_nickname_multiple),
+                        resolvedInviterId = null,
+                    )
+                    else -> it.copy(
+                        nickError = null,
+                        resolvedInviterId = found.first().ownerId,
+                    )
+                }
+            }
+        }
     }
 }

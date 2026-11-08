@@ -845,7 +845,7 @@ private fun SettingsTabContent(
     val muteRevision by viewModel.notificationMuteRevision.collectAsStateWithLifecycle()
     val notificationMuteNowMs = remember(muteRevision) { System.currentTimeMillis() }
     val mqttClipboard = LocalClipboardManager.current
-    // Бегунок справа; каждый раздел помнит свою позицию (см. SettingsScrollMemory).
+    // Бегунок справа: корневое меню помнит позицию скролла, каждый раздел — с верха.
     val settingsScrollState = rememberSettingsScrollState(section?.name ?: SettingsScrollMemory.ROOT)
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(

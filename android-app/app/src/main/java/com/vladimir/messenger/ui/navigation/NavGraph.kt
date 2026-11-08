@@ -403,6 +403,10 @@ fun MessengerNavGraph(
                         navController.navigate(Screen.AddContact.createRoute(android.net.Uri.encode(pasted)))
                     }
                 },
+                onNicknameResolved = { inviterId ->
+                    // Раунд 207: пригласивший найден по @никнейму — открываем его контакт.
+                    navController.navigate(Screen.AddContact.createRoute(android.net.Uri.encode(inviterId)))
+                },
                 onProfileCreated = {
                     // РџРѕСЃР»Рµ СЃРѕР·РґР°РЅРёСЏ РїСЂРѕС„РёР»СЏ в†’ РіР»Р°РІРЅС‹Р№ СЌРєСЂР°РЅ
                     // clearBackStack: РЅРµР»СЊР·СЏ РІРµСЂРЅСѓС‚СЊСЃСЏ РЅР°Р·Р°Рґ Рє РѕРЅР±РѕСЂРґРёРЅРіСѓ

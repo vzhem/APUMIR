@@ -10,12 +10,18 @@ import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.first
 
 /**
- * Список настроек, который помнит, где стоял каждый раздел.
+ * Список настроек: корневое меню помнит позицию скролла, а каждый раздел
+ * открывается всегда с верха.
  *
- * Владелец 2026-10-29: «когда возвращаешься в предыдущее меню, оно не всегда
- * должно быть в верхней части — в каком положении переходил, в такое же и
- * возвращалось». До этого на любую смену раздела стоял `scrollToItem(0)`, и
- * назад человек попадал в начало списка.
+ * Владелец 2026-11-08: «когда заходишь по меню — всегда появляется сверху.
+ * А когда возвращаешься в главное меню — оставь запоминание, где были.
+ * Ну как у топовых мессенджеров».
+ *
+ * Правило:
+ *   - корневое меню (`ROOT`, `section == null`) помнит, где человек оставил
+ *     список, и при возврате из любого раздела показывает ту же строку;
+ *   - любой вложенный раздел («Чаты», «Уведомления» и остальные) при входе
+ *     открывается с верхней позиции, его скролл не запоминается.
  *
  * Здесь только обвязка Compose; само правило «какое меню где стояло» живёт в
  * [SettingsScrollMemory] и проверяется обычным JVM-тестом.
@@ -23,28 +29,33 @@ import kotlinx.coroutines.flow.first
 @Composable
 internal fun rememberSettingsScrollState(menuKey: String): LazyListState {
     val state = rememberLazyListState()
-    val memory = rememberSaveable(
-        saver = listSaver<SettingsScrollMemory, Int>(
-            save = { it.flatten() },
-            restore = { SettingsScrollMemory.fromFlatten(it) },
-        ),
-    ) { SettingsScrollMemory() }
+    val isRoot = menuKey == SettingsScrollMemory.ROOT
+    val memory = if (isRoot) {
+        rememberSaveable(
+            saver = listSaver<SettingsScrollMemory, Int>(
+                save = { it.flatten() },
+                restore = { SettingsScrollMemory.fromFlatten(it) },
+            ),
+        ) { SettingsScrollMemory() }
+    } else null
     val menu = menuKey
 
-    // Позицию запоминаем по ходу прокрутки: тогда неважно, куда человек ушёл —
-    // в раздел, в соседний экран навигации или в другой чат.
-    LaunchedEffect(menu) {
-        snapshotFlow { state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
-            .collect { (index, offset) ->
-                memory.remember(menu, SettingsScrollMemory.Anchor(index, offset))
-            }
+    // Позицию корневого меню запоминаем по ходу прокрутки: тогда при возврате
+    // из любого раздела человек увидит ту же строку, где остановился.
+    if (isRoot) {
+        LaunchedEffect(menu) {
+            snapshotFlow { state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
+                .collect { (index, offset) ->
+                    memory!!.remember(menu, SettingsScrollMemory.Anchor(index, offset))
+                }
+        }
     }
-    // Смена меню — сразу на своё место: возврат туда, где человек был, а новый
-    // раздел начинается сверху (сохранённой позиции у него ещё нет).
+
+    // Смена меню — сразу на своё место: корневое — там, где оставили; вложенное
+    // — с верха списка. Ждём первый замер списка: до него scrollToItem
+    // обрезался бы о ещё не собранные строки нового раздела.
     LaunchedEffect(menu) {
-        val anchor = memory.anchorFor(menu)
-        // Ждём первый замер списка: до него scrollToItem обрезался бы о ещё не
-        // собранные строки нового раздела.
+        val anchor = if (isRoot) memory!!.anchorFor(menu) else SettingsScrollMemory.Anchor.TOP
         snapshotFlow { state.layoutInfo.totalItemsCount }.first { it > 0 }
         state.scrollToItem(anchor.index, anchor.offset)
     }
