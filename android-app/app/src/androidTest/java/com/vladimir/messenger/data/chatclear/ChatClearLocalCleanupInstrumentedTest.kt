@@ -54,6 +54,44 @@ class ChatClearLocalCleanupInstrumentedTest {
         assertFalse(cleanup.apply("missing", listOf("old")))
     }
 
+    @Test fun lostAcknowledgementCanBeRetriedWithoutDeletingNewMessages() = runBlocking {
+        db.chatDao().insertChat(ChatEntity("first", "friend", "Friend"))
+        db.chatDao().insertChat(ChatEntity("other", "other-peer", "Other"))
+        db.messageDao().insertMessage(MessageEntity("old", "first", "friend", "old", 1))
+        db.messageDao().insertMessage(MessageEntity("unrelated", "other", "other-peer", "other", 2))
+        val file = File(ApplicationProvider.getApplicationContext<Context>().noBackupFilesDir, "clear-retry-${UUID.randomUUID()}.sqlite")
+        val tombstones = ChatClearTombstones(ApplicationProvider.getApplicationContext(), file)
+        try {
+            val apply = ChatClearApply(
+                ownerId = { "owner" },
+                chatForPeer = { db.chatDao().getChatByContactId(it)?.id },
+                tombstone = { owner, peer, ids -> tombstones.remember(owner, peer, ids) },
+                cleanup = { chatId, ids -> cleanup.apply(chatId, ids) },
+            )
+            val batch = ChatClearWire.Batch(UUID.randomUUID(), listOf("old", "late"))
+            val packet = ChatClearWire.encode(batch)
+            val first = ChatClearReceiver(apply) { _, _ -> throw IllegalStateException("simulated lost ACK") }
+            var failed = false
+            try { first.receive("friend", true, packet) } catch (_: IllegalStateException) { failed = true }
+            assertTrue(failed)
+            assertNull(db.messageDao().getMessageById("old"))
+            assertTrue(tombstones.contains("owner", "friend", "late"))
+            db.messageDao().insertMessage(MessageEntity("new", "first", "friend", "new", 3))
+            val replies = mutableListOf<String>()
+            val retry = ChatClearReceiver(apply) { _, ack -> replies.add(ack) }
+            assertTrue(retry.receive("friend", true, packet))
+            assertEquals(listOf(ChatClearWire.encodeAck(batch.operation)), replies)
+            assertNotNull(db.messageDao().getMessageById("new"))
+            assertNotNull(db.messageDao().getMessageById("unrelated"))
+            assertFalse(tombstones.contains("owner", "friend", "new"))
+        } finally {
+            tombstones.close()
+            file.delete()
+            File(file.path + "-wal").delete()
+            File(file.path + "-shm").delete()
+        }
+    }
+
     @Test fun authenticatedRequestRecordsLateIdsAndCleansOnlyTheMatchingChat() = runBlocking {
         db.chatDao().insertChat(ChatEntity("first", "friend", "Friend"))
         db.messageDao().insertMessage(MessageEntity("old", "first", "friend", "old", 1))
