@@ -43,4 +43,6 @@ interface MessageReactionDao {
 
     @Query("DELETE FROM message_reactions WHERE chatId = :chatId")
     suspend fun clearChat(chatId: String)
+    @Query("DELETE FROM message_reactions WHERE chatId = :chatId AND messageId IN (:ids)")
+    suspend fun deleteChatMessages(chatId: String, ids: List<String>): Int
 }

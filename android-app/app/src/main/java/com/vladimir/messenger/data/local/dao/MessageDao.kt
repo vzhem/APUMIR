@@ -120,6 +120,9 @@ interface MessageDao {
     )
     suspend fun markReadByIds(messageIds: List<String>): Int
 
+    @Query("DELETE FROM messages WHERE chatId = :chatId AND id IN (:ids)")
+    suspend fun deleteChatMessages(chatId: String, ids: List<String>): Int
+
     @Query("DELETE FROM messages WHERE chatId = :chatId")
     suspend fun deleteMessagesForChat(chatId: String)
 

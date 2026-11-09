@@ -50,4 +50,9 @@ interface DirectPollDao {
             "WHERE direct_polls.chatId = :chatId",
     )
     fun observeChatVotes(chatId: String): Flow<List<DirectPollVoteEntity>>
+    @Query("DELETE FROM direct_poll_votes WHERE pollId IN (SELECT pollId FROM direct_polls WHERE chatId = :chatId AND messageId IN (:ids))")
+    suspend fun deleteVotesForChatMessages(chatId: String, ids: List<String>): Int
+
+    @Query("DELETE FROM direct_polls WHERE chatId = :chatId AND messageId IN (:ids)")
+    suspend fun deleteForChatMessages(chatId: String, ids: List<String>): Int
 }
