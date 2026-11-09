@@ -7,6 +7,8 @@ import javax.inject.Inject
 
 /** Transactional, chat-scoped removal of known message rows and associated chat metadata. */
 internal class ChatClearLocalCleanup @Inject constructor(private val db: AppDatabase) {
+    internal val transferDao get() = db.fileTransferDao()
+
     suspend fun apply(chatId: String, ids: List<String>): Boolean {
         require(chatId.isNotBlank() && ids.size in 1..ChatClearWire.MAX_IDS)
         return db.withTransaction {

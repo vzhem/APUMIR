@@ -18,6 +18,7 @@ internal class ChatClearApplier @Inject constructor(
         chatForPeer = { peer -> chatDao.getChatByContactId(peer)?.id },
         tombstone = { owner, peer, ids -> ChatClearRegistry.store(this.context).remember(owner, peer, ids) },
         cleanup = { chat, ids -> cleanup.apply(chat, ids) },
+        relatedIds = { chat, ids -> ChatClearFileAliases(cleanup.transferDao).relatedIds(chat, ids) },
     )
     override suspend fun apply(peer: String, batch: ChatClearWire.Batch): Boolean = delegate.apply(peer, batch)
 }

@@ -92,7 +92,8 @@ class ChatClearDelivery @Inject constructor(
             require(owner.isNotBlank() && peer.isNotBlank() && owner != peer)
             val limit = ChatClearOutbox.MAX_ENTRIES * ChatClearWire.MAX_IDS + 1
             val ids = (db.messageDao().chatMessageIdsForClear(chatId, limit) +
-                db.fileTransferDao().chatTransferMessageIdsForClear(chatId, limit)).distinct()
+                db.fileTransferDao().chatTransferMessageIdsForClear(chatId, limit) +
+                db.fileTransferDao().chatTransferAliasesForClear(chatId, limit)).distinct()
             require(ids.size < limit) { "Chat clear snapshot exceeds queue capacity" }
             val batches = ChatClearPolicy.batches(ids)
             outbox.enqueue(batches.map { ChatClearOutbox.Entry(owner, peer, chatId, it) })

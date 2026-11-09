@@ -54,6 +54,43 @@ class ChatClearLocalCleanupInstrumentedTest {
         assertFalse(cleanup.apply("missing", listOf("old")))
     }
 
+    @Test fun fileAliasesResolveBothSenderIdsAndRecipientPlaceholdersWithinOneChat() = runBlocking {
+        db.chatDao().insertChat(ChatEntity("first", "friend", "Friend"))
+        db.chatDao().insertChat(ChatEntity("other", "other-peer", "Other"))
+        db.messageDao().insertMessage(MessageEntity("sender-id", "first", "owner", "file", 1, isFromMe = true))
+        db.messageDao().insertMessage(MessageEntity("keep", "other", "owner", "other", 2, isFromMe = true))
+        val firstId = "a".repeat(64)
+        val secondId = "b".repeat(64)
+        val avatarId = "c".repeat(64)
+        val otherId = "d".repeat(64)
+        fun transfer(id: String, message: String, chat: String, name: String) = FileTransferEntity(
+            id, message, chat, "friend", "OUTGOING", name, "text/plain", 1L, 1, 1, "hash", "COMPLETE",
+            createdAtMs = 1, expiresAtMs = 10, updatedAtMs = 1,
+        )
+        db.fileTransferDao().insertTransferIgnore(transfer(firstId, "sender-id", "first", "file.txt"))
+        db.fileTransferDao().insertTransferIgnore(transfer(secondId, "sender-id", "first", "file.txt"))
+        db.fileTransferDao().insertTransferIgnore(transfer(avatarId, "sender-id", "first", "apu-avatar-video-test"))
+        db.fileTransferDao().insertTransferIgnore(transfer(otherId, "keep", "other", "file.txt"))
+        val aliases = db.fileTransferDao().chatTransferAliasesForClear("first", 100).toSet()
+        assertEquals(setOf("file-$firstId", "file-$secondId"), aliases)
+        val remembered = mutableSetOf<String>()
+        val coordinator = ChatClearApply(
+            ownerId = { "owner" },
+            chatForPeer = { db.chatDao().getChatByContactId(it)?.id },
+            tombstone = { _, _, ids -> remembered.addAll(ids); true },
+            cleanup = { chat, ids -> cleanup.apply(chat, ids) },
+            relatedIds = { chat, ids -> ChatClearFileAliases(db.fileTransferDao()).relatedIds(chat, ids) },
+        )
+        assertTrue(coordinator.apply("friend", ChatClearWire.Batch(UUID.randomUUID(), listOf("file-$firstId"))))
+        assertEquals(setOf("sender-id", "file-$firstId", "file-$secondId"), remembered)
+        assertNull(db.messageDao().getMessageById("sender-id"))
+        assertNull(db.fileTransferDao().getTransfer(firstId))
+        assertNull(db.fileTransferDao().getTransfer(secondId))
+        assertNotNull(db.fileTransferDao().getTransfer(avatarId))
+        assertNotNull(db.fileTransferDao().getTransfer(otherId))
+        assertNotNull(db.messageDao().getMessageById("keep"))
+    }
+
     @Test fun lostAcknowledgementCanBeRetriedWithoutDeletingNewMessages() = runBlocking {
         db.chatDao().insertChat(ChatEntity("first", "friend", "Friend"))
         db.chatDao().insertChat(ChatEntity("other", "other-peer", "Other"))

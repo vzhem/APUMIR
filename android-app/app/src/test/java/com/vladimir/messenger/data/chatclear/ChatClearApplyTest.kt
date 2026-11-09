@@ -31,6 +31,32 @@ class ChatClearApplyTest {
         assertFalse(cleaned)
     }
 
+    @Test fun allRelatedFileAliasesAreTombstonedBeforeAnyCleanup() = runTest {
+        val events = mutableListOf<String>()
+        val related = (0..39).map { "alias-$it" }
+        val apply = ChatClearApply(
+            ownerId = { "owner" }, chatForPeer = { "chat" },
+            tombstone = { _, _, ids -> events.add("remember:${ids.size}"); true },
+            cleanup = { _, ids -> events.add("cleanup:${ids.size}"); true },
+            relatedIds = { chat, ids -> assertEquals("chat", chat); assertEquals(batch.ids, ids); related },
+        )
+        assertTrue(apply.apply("friend", batch))
+        assertEquals(listOf("remember:32", "remember:10", "cleanup:32", "cleanup:10"), events)
+    }
+
+    @Test fun failureRecordingRelatedAliasesPreventsAllCleanup() = runTest {
+        var calls = 0
+        var cleaned = false
+        val apply = ChatClearApply(
+            ownerId = { "owner" }, chatForPeer = { "chat" },
+            tombstone = { _, _, _ -> ++calls < 2 },
+            cleanup = { _, _ -> cleaned = true; true },
+            relatedIds = { _, _ -> (0..39).map { "alias-$it" } },
+        )
+        assertFalse(apply.apply("friend", batch))
+        assertFalse(cleaned)
+    }
+
     @Test fun failedCleanupCanBeRetriedWithoutAcknowledgingPrematurely() = runTest {
         val tombstones = mutableSetOf<String>()
         var attempts = 0
