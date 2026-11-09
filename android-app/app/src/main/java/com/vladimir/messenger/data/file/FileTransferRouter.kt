@@ -486,8 +486,6 @@ class FileTransferRouter @Inject constructor(
             receivedStore = receivedStoreLocal,
             pinner = { binding, pinnedAtMs ->
                 val result = peerStore.pinFirstSeen(binding, pinnedAtMs)
-                // Тот же закреплённый ключ шифрует и переписку — отдельного
-                // обмена ключами заводить не нужно.
                 runCatching {
                     com.vladimir.messenger.data.security.MessageSealer
                         .remember(appContext, result.nodeId, binding)
@@ -500,8 +498,6 @@ class FileTransferRouter @Inject constructor(
             transport = switchingTransport,
             ackSink = { transferIdHex, contiguousChunks ->
                 senderLocal.onReceiverAck(transferIdHex, contiguousChunks)
-                // ACK progress immediately opens the next bounded window. The periodic job is
-                // only a restart/offline retry safety net, never a throughput throttle.
                 senderLocal.pumpOnce()
             },
             notifier = notifier,
@@ -591,6 +587,10 @@ class FileTransferRouter @Inject constructor(
                 } else {
                     senderLocal.markBinaryCapable(transferIdHex, maxFramePayload)
                 }
+            },
+            suppressCleared = { peer, chatId, messageId ->
+                chatRepository.getChatByContactId(peer)?.id == chatId &&
+                    com.vladimir.messenger.data.chatclear.ChatClearRegistry.isCleared(appContext, peer, messageId)
             },
             onAuthenticatedDirectFcap = { transferIdHex, from, maxFramePayload ->
                 if (isPeerViaUdp(from)) {

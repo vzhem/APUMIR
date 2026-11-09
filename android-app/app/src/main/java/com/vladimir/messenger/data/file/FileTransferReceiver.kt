@@ -46,10 +46,7 @@ class FileTransferReceiver(
     /** Хранение чужих файлов и приём через хранителя (этап 7 роя); по умолчанию всё отклоняется. */
     private val custody: CustodyPolicy = CustodyPolicy(),
     /**
-     * Куда класть новое предложение (рой, этап 9: файл группы). Участник
-     * группы попросил файл у другого участника, и тот шлёт обычную передачу;
-     * общего чата у них может не быть, а прямой кадр несёт вместо чата метку
-     * `direct`. По умолчанию - «не знаю», и решает транспортный чат.
+     * Куда класть предложение файла группы; по умолчанию решает транспортный чат.
      */
     private val routeOffer: suspend (senderId: String, fileSha256Hex: String) -> OfferRouting = { _, _ -> OfferRouting.Unknown },
     /** Раздача общей копии файла группы (K2): подтверждения, инвентарь и отказы просителей - сидеру. */
@@ -61,9 +58,9 @@ class FileTransferReceiver(
      */
     private val onFcap: suspend (transferIdHex: String, from: String, maxFramePayload: Int) -> Unit =
         { _, _, _ -> },
-    /** FCAP v2 is deliberately separate from [onFcap] so existing JVM callers remain source-compatible. */
     private val onAuthenticatedDirectFcap: suspend (transferIdHex: String, from: String, maxFramePayload: Int) -> Unit =
         { _, _, _ -> },
+    private val suppressCleared: suspend (peer: String, chatId: String, messageId: String) -> Boolean = { _, _, _ -> false },
 ) {
     /**
      * Границы сидера общей копии файла группы (K2, v11.70.25,
@@ -2346,9 +2343,11 @@ class FileTransferReceiver(
         chatId: String,
         now: Long,
     ): FileTransferEntity? {
+        val messageId = FileTransferWire.chatPlaceholderMessageId(manifest.transferIdHex)
+        if (suppressCleared(senderId, chatId, messageId)) return null
         val entity = FileTransferEntity(
             transferId = manifest.transferIdHex,
-            messageId = FileTransferWire.chatPlaceholderMessageId(manifest.transferIdHex),
+            messageId = messageId,
             chatId = chatId,
             peerNodeId = senderId,
             direction = "INCOMING",
@@ -2364,6 +2363,7 @@ class FileTransferReceiver(
             updatedAtMs = now,
         )
         val inserted = if (transferDao.insertNewTransfer(entity)) entity else return null
+        if (suppressCleared(senderId, chatId, messageId)) { transferDao.deleteTransfer(entity.transferId); return null }
         TransferDiagnostics.count(Counters.FILE_STARTED_IN)
         TransferDiagnostics.record(
             "file",

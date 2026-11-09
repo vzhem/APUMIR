@@ -39,6 +39,7 @@ class MessageDeletionRepository @Inject constructor(
     private val chatDao: ChatDao,
     private val reactionDao: MessageReactionDao,
     private val outbox: DeletionOutbox,
+    private val chatClear: com.vladimir.messenger.data.chatclear.ChatClearDelivery,
     private val groupDao: GroupDao,
     /** р252: удалённое сообщение уносит и карточку своего опроса. */
     private val directPollRepository: com.vladimir.messenger.data.directpoll.DirectPollRepository,
@@ -205,7 +206,8 @@ class MessageDeletionRepository @Inject constructor(
      * это конверт удаления (разобран или испорчен) - службу не сохранять
      * его как текст.
      */
-    suspend fun routeIncoming(senderId: String, text: String): Boolean {
+    suspend fun routeIncoming(senderId: String, text: String, authenticated: Boolean = false): Boolean {
+        if (chatClear.routeIncoming(senderId, text, authenticated)) return true
         if (!text.startsWith("$PREFIX|")) return false
         val parts = text.split('|')
         // Раунд 137: подтверждение доставки - отправитель снимает команду

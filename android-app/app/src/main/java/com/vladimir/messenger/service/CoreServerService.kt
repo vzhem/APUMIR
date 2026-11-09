@@ -470,7 +470,7 @@ class CoreServerService : Service() {
         if (routePacket(TAG, "reaction") { reactionRepository.routeIncoming(senderId, text) }) return true
         if (directPolls.incoming(senderId, text)) return true // р252: опрос
         if (routePacket(TAG, "repost") { repostRepository.routeIncoming(senderId, text) }) return true
-        if (routePacket(TAG, "deletion") { messageDeletion.routeIncoming(senderId, text) }) return true
+        if (routePacket(TAG, "deletion") { messageDeletion.routeIncoming(senderId, text, authenticated) }) return true
         if (routePacket(TAG, "edit") { messageEdit.routeIncoming(senderId, text) }) return true
         if (routePacket(TAG, "postViews") { postViews.routeIncoming(senderId, text) }) return true
         if (routePacket(TAG, "hearts") { hearts.routeIncoming(senderId, text) }) return true
@@ -1883,7 +1883,7 @@ class CoreServerService : Service() {
             Log.i(TAG, "Mirror envelope: repost from ${senderId.takeLast(8)} applied")
             return true
         }
-        if (routePacket(TAG, "deletion") { messageDeletion.routeIncoming(senderId, text) }) {
+        if (routePacket(TAG, "deletion") { messageDeletion.routeIncoming(senderId, text, authenticated = false) }) {
             Log.i(TAG, "Mirror envelope: deletion from ${senderId.takeLast(8)} applied")
             return true
         }
@@ -2744,7 +2744,7 @@ class CoreServerService : Service() {
                     // Раунд 135: «удали у всех» в личном чате - конверт
                     // APUDEL1 разбирается до сохранения, в переписку ему
                     // дороги нет (как у реакций).
-                    if (messageDeletion.routeIncoming(senderId, text)) {
+                    if (messageDeletion.routeIncoming(senderId, text, sealed && MessageSealer.openedByExpectedSender(rawText, senderId))) {
                         try {
                             RustBridge.sendDeliveryAck(messageId, senderId)
                         } catch (e: Exception) {
