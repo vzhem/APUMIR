@@ -65,5 +65,7 @@ internal class ChatClearFileJournal(context: Context, private val file: File = F
 
     @Synchronized fun close() = helper.close()
 
-    companion object { private const val MAX_TOTAL = 1_000_000 }
+    companion object {
+        private const val MAX_TOTAL = 1_000_000
+    }
 }
