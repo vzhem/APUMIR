@@ -179,6 +179,7 @@ class MessageDeletionRepository @Inject constructor(
      * поэтому это не [routeIncoming].
      */
     suspend fun applyMirrorOutgoing(peerId: String, text: String): Boolean {
+        if (chatClear.applyMirrorOutgoing(peerId, text)) return true
         if (!text.startsWith("$PREFIX|")) return false
         val parts = text.split('|')
         if (parts.size != 4) return true
@@ -206,6 +207,9 @@ class MessageDeletionRepository @Inject constructor(
      * это конверт удаления (разобран или испорчен) - службу не сохранять
      * его как текст.
      */
+    suspend fun routeMirrorIncoming(senderId: String, text: String): Boolean =
+        chatClear.routeMirrorIncoming(senderId, text) || routeIncoming(senderId, text)
+
     suspend fun routeIncoming(senderId: String, text: String, authenticated: Boolean = false): Boolean {
         if (chatClear.routeIncoming(senderId, text, authenticated)) return true
         if (!text.startsWith("$PREFIX|")) return false

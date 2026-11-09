@@ -2567,7 +2567,7 @@ The file is not on this phone</string>
     <string name="feature_packs_select_all_confirm_title">Select all functions?</string>
     <string name="feature_packs_select_all_confirm_body">All functions will start downloading at once and take up space on your phone. Continue?</string>
     <string name="chat_clear_also_peer">Also for the other person</string>
-    <string name="chat_clear_peer_limit">Only messages and files already known to this device are included. They disappear for the other person after delivery; they need an updated version. Messages not received here may remain.</string>
+    <string name="chat_clear_peer_limit">Only messages and files already known to this device are included. They disappear for the other person after delivery; they need an updated version. Messages not received here and copies on other devices may remain.</string>
     <string name="chat_clear_peer_queued">Clear request queued. It will take effect for the other person after delivery.</string>
     <string name="chat_clear_peer_empty">There are no messages on this device to include in the request.</string>
     <string name="chat_clear_peer_error">Could not queue the clear request. Please try again.</string>

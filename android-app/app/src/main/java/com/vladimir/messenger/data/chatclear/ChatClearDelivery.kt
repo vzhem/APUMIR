@@ -36,6 +36,22 @@ class ChatClearDelivery @Inject constructor(
             protocol.receive(peer, authenticated, text)
         }
 
+    /** Mirror frames are authenticated by the paired-device channel; never ACK a peer from the mirror. */
+    internal suspend fun routeMirrorIncoming(peer: String, text: String): Boolean {
+        if (!ChatClearWire.isControl(text)) return false
+        val ack = ChatClearWire.decodeAck(text)
+        if (ack != null) outbox.acknowledge(true, com.vladimir.messenger.data.schedule.DeferredInboxStore.owner(appContext), peer, ack)
+        else ChatClearWire.decode(text)?.let { apply.apply(peer, it) }
+        return true
+    }
+
+    /** Apply an owner's outgoing operation on the other paired device, without a network ACK. */
+    internal suspend fun applyMirrorOutgoing(peer: String, text: String): Boolean {
+        if (!ChatClearWire.isControl(text)) return false
+        ChatClearWire.decode(text)?.let { apply.apply(peer, it) }
+        return true
+    }
+
     /**
      * Prepare an exact snapshot. This is not exposed in the UI yet: IDs absent
      * locally and mirror synchronization still require a complete protocol.
@@ -74,7 +90,11 @@ class ChatClearDelivery @Inject constructor(
                 if (!apply.apply(entry.peer, entry.batch)) continue
                 val text = ChatClearWire.encode(entry.batch)
                 val wireId = entry.batch.operation.toString()
-                RustBridge.retryMessage(wireId, chat.id, entry.peer, text) || RustBridge.sendMessage(wireId, chat.id, entry.peer, text)
+                val mirrored = com.vladimir.messenger.data.mirror.MirrorHub.deliverAction(entry.peer, "", chat.id, text)
+                if (!mirrored) {
+                    com.vladimir.messenger.data.mirror.MirrorHub.publishOwnAction(entry.peer, "", chat.id, text)
+                    RustBridge.retryMessage(wireId, chat.id, entry.peer, text) || RustBridge.sendMessage(wireId, chat.id, entry.peer, text)
+                }
             }
         } finally { mutex.unlock() }
     }
