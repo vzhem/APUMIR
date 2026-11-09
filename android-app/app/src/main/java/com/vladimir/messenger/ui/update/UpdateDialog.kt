@@ -67,6 +67,12 @@ fun UpdateDialog(
                     )
                 }
 
+                Text(
+                    stringResource(R.string.upd_site_priority_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = ApuBubbleMutedColor,
+                )
+
                 if (isDownloading) {
                     Text(
                         stringResource(R.string.upd_downloading),

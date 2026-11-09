@@ -87,14 +87,18 @@ class UpdateNotifier @Inject constructor(
         val raw = prefs().getString(KEY_OFFICIAL_RELEASE, null) ?: return null
         val release = runCatching {
             val json = JSONObject(raw)
+            val savedUrl = json.getString("downloadUrl")
             UpdateChecker.ReleaseInfo(
                 version = json.getString("version"),
-                downloadUrl = json.getString("downloadUrl"),
+                downloadUrl = savedUrl,
                 releaseNotes = json.optString("releaseNotes", ""),
                 publishedAt = json.optString("publishedAt", ""),
                 patchUrl = json.optString("patchUrl", "").ifBlank { null },
                 patchFrom = json.optString("patchFrom", "").ifBlank { null },
                 apkSha256 = json.optString("apkSha256", "").ifBlank { null },
+                // Old cards do not say whether relay metadata was fresh. Recheck
+                // them on the download tap before choosing the site or a fallback.
+                allowSiteMirror = json.optBoolean("allowSiteMirror", false),
             )
         }.getOrElse { error ->
             Log.w(TAG, "Saved release is malformed: ${error.message}")
@@ -134,6 +138,7 @@ class UpdateNotifier @Inject constructor(
             .put("patchUrl", release.patchUrl.orEmpty())
             .put("patchFrom", release.patchFrom.orEmpty())
             .put("apkSha256", release.apkSha256.orEmpty())
+            .put("allowSiteMirror", release.allowSiteMirror)
         prefs().edit().putString(KEY_OFFICIAL_RELEASE, json.toString()).apply()
         UpdateDiagnosticsStore.recordPendingOfficial(context, release.version)
     }

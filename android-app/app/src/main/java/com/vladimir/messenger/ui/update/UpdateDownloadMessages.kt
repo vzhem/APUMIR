@@ -14,6 +14,7 @@ import com.vladimir.messenger.service.UpdateChecker
 object UpdateDownloadMessages {
 
     fun forError(context: Context, error: Throwable): String = when (error) {
+        is UpdateChecker.UpdateMetadataUnavailableException -> context.getString(R.string.upd_fresh_check_unavailable)
         is UpdateChecker.UpdateDownloadBlockedException ->
             if (error.inFlight) {
                 context.getString(R.string.upd_download_already_running)

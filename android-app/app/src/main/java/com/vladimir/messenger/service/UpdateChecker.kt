@@ -35,9 +35,6 @@ class UpdateChecker @Inject constructor(
         private const val TAG = "UpdateChecker"
         private const val GITHUB_API = "https://api.github.com/repos"
         private const val HTTP_TIMEOUT = 10000
-        private const val SITE_METADATA_TIMEOUT = 5000
-        private const val SITE_APK_METADATA_URL = "https://apu.clan.su/downloads/latest.json"
-        private const val SITE_APK_URL = "https://apu.clan.su/downloads/app-release.apk"
         
         // TODO: заменить на реальные значения
         private const val GITHUB_USER = "vzhem"
@@ -88,9 +85,9 @@ class UpdateChecker @Inject constructor(
         private const val MANUAL_DOWNLOAD_WINDOW_MS = 90L * 60_000L
         private const val MANUAL_WINDOW_PREFS = "update_manual_window"
         private const val KEY_MANUAL_WINDOW_UNTIL = "until_wall_ms"
-        private const val OFFICIAL_DOWNLOAD_PREFS = "update_official_download"
-        private const val KEY_OFFICIAL_DOWNLOAD_ID = "download_id"
-        private const val KEY_OFFICIAL_DOWNLOAD_VERSION = "version"
+        private const val OFFICIAL_DOWNLOAD_PREFS = OfficialUpdateDownloads.PREFS
+        private const val KEY_OFFICIAL_DOWNLOAD_ID = OfficialUpdateDownloads.KEY_ID
+        private const val KEY_OFFICIAL_DOWNLOAD_VERSION = OfficialUpdateDownloads.KEY_VERSION
     }
 
     /**
@@ -105,6 +102,9 @@ class UpdateChecker @Inject constructor(
     @Volatile var askSwarmForUpdate: (suspend () -> Int)? = null
 
     @Volatile private var scannedInCurrentSwarmWindow = false
+    private val officialDownloads = OfficialUpdateDownloads(context) {
+        extendManualWindow(MANUAL_DOWNLOAD_WINDOW_MS)
+    }
 
     /**
      * До какого момента (настенные часы) ручная кнопка разрешила внешний канал.
@@ -162,41 +162,44 @@ class UpdateChecker @Inject constructor(
      * enqueued on a valid fallback path, cancel it when the direct swarm
      * returns; do not mistake a one-time permission check for supervision. */
     fun suspendExternalDownloadsForSwarm() {
-        if (RustBridge.externalTransportAllowed()) {
-            scannedInCurrentSwarmWindow = false
-            return
-        }
-        // Окно ручной кнопки: загрузку запросил человек, и не сносим её
-        // из-под него - иначе «Скачать» на телефоне с соседом обрывалось бы
-        // через 2.5 с после нажатия.
-        if (manualWindowActive()) return
-        if (scannedInCurrentSwarmWindow) return
-        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager ?: return
-        runCatching {
-            val active = DownloadManager.STATUS_PENDING or DownloadManager.STATUS_RUNNING or
-                DownloadManager.STATUS_PAUSED
-            val ids = ArrayList<Long>()
-            val activeCursor = manager.query(DownloadManager.Query().setFilterByStatus(active))
-                ?: return@runCatching
-            activeCursor.use { cursor ->
-                val idColumn = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)
-                val titleColumn = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
-                while (cursor.moveToNext()) {
-                    val title = if (titleColumn >= 0) cursor.getString(titleColumn).orEmpty() else ""
-                    // Query is scoped to our app, but it may also own a user-
-                    // initiated unrelated download: cancel only APU updates.
-                    if (title.startsWith("APU v")) ids += cursor.getLong(idColumn)
+        synchronized(officialDownloads.lock) {
+            if (RustBridge.externalTransportAllowed()) {
+                scannedInCurrentSwarmWindow = false
+                return
+            }
+            // Окно ручной кнопки: загрузку запросил человек, и не сносим её
+            // из-под него - иначе «Скачать» на телефоне с соседом обрывалось бы
+            // через 2.5 с после нажатия.
+            if (manualWindowActive()) return
+            if (scannedInCurrentSwarmWindow) return
+            val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager ?: return
+            runCatching {
+                val active = DownloadManager.STATUS_PENDING or DownloadManager.STATUS_RUNNING or
+                    DownloadManager.STATUS_PAUSED
+                val ids = ArrayList<Long>()
+                val activeCursor = manager.query(DownloadManager.Query().setFilterByStatus(active))
+                    ?: return@runCatching
+                activeCursor.use { cursor ->
+                    val idColumn = cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_ID)
+                    val titleColumn = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
+                    while (cursor.moveToNext()) {
+                        val title = if (titleColumn >= 0) cursor.getString(titleColumn).orEmpty() else ""
+                        // Query is scoped to our app, but it may also own a user-
+                        // initiated unrelated download: cancel only APU updates.
+                        if (title.startsWith("APU v")) ids += cursor.getLong(idColumn)
+                    }
                 }
-            }
-            for (id in ids) {
-                manager.remove(id)
-                Log.i(TAG, "Official download $id cancelled: direct swarm/search available")
-            }
-            scannedInCurrentSwarmWindow = true
-        }.onFailure { Log.w(TAG, "DownloadManager swarm barrier failed: ${it.message}") }
+                for (id in ids) {
+                    manager.remove(id)
+                    Log.i(TAG, "Official download $id cancelled: direct swarm/search available")
+                }
+                scannedInCurrentSwarmWindow = true
+            }.onFailure { Log.w(TAG, "DownloadManager swarm barrier failed: ${it.message}") }
+        }
     }
 
     fun downloadSucceeded(downloadId: Long): Boolean = runCatching {
+        if (!officialDownloads.mayExposeCompleted(downloadId)) return@runCatching false
         val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         manager.query(DownloadManager.Query().setFilterById(downloadId))?.use { cursor ->
             cursor.moveToFirst() && cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS)) ==
@@ -229,6 +232,8 @@ class UpdateChecker @Inject constructor(
         val patchFrom: String? = null,
         /** SHA-256 релизного APK (из GitHub digest) - сверка собранного. */
         val apkSha256: String? = null,
+        /** Legacy saved cards must refresh release metadata before selecting a source. */
+        val allowSiteMirror: Boolean = true,
     )
 
     /** Завершённая загрузка APK: наш файл обновления из DownloadManager. */
@@ -246,8 +251,9 @@ class UpdateChecker @Inject constructor(
         val downloadedBytes: Long,
         val totalBytes: Long,
         val reason: Int,
+        val source: String? = null,
     ) {
-        val isActive: Boolean get() = status == "pending" || status == "running" || status == "paused"
+        val isActive: Boolean get() = status in setOf("starting", "pending", "running", "paused", "retrying", "verifying")
         val isFailed: Boolean get() = status == "failed"
         val isSuccessful: Boolean get() = status == "successful"
         val percent: Int get() = if (totalBytes > 0L) {
@@ -278,6 +284,7 @@ class UpdateChecker @Inject constructor(
                     val isApk = mime == "application/vnd.android.package-archive" ||
                         title.startsWith("APU v")
                     if (!isApk) continue
+                    if (!officialDownloads.mayExposeCompleted(it.getLong(idIdx))) continue
                     if (uriIdx < 0) continue
                     val localUri = it.getString(uriIdx) ?: continue
                     val file = runCatching { File(java.net.URI(localUri)) }
@@ -442,7 +449,8 @@ class UpdateChecker @Inject constructor(
             val oldCanonicalName = "P2P-Messenger-$latestVersion.apk"
             var canonicalUrl: String? = null
             var legacyUrl: String? = null
-            var apkSha256: String? = null
+            var canonicalSha256: String? = null
+            var legacySha256: String? = null
             var patchUrl: String? = null
             var patchFrom: String? = null
             for (i in 0 until assets.length()) {
@@ -452,15 +460,11 @@ class UpdateChecker @Inject constructor(
                     name.equals(canonicalName, ignoreCase = true) ||
                         name.equals(oldCanonicalName, ignoreCase = true) -> {
                         canonicalUrl = asset.optString("browser_download_url", "").takeIf { it.isNotBlank() }
-                        apkSha256 = asset.optString("digest", "")
-                            .removePrefix("sha256:").takeIf { it.length == 64 }
+                        canonicalSha256 = normalizedUpdateSha256(asset.optString("digest", ""))
                     }
                     name.equals("app-release.apk", ignoreCase = true) -> {
                         legacyUrl = asset.optString("browser_download_url", "").takeIf { it.isNotBlank() }
-                        if (apkSha256 == null) {
-                            apkSha256 = asset.optString("digest", "")
-                                .removePrefix("sha256:").takeIf { it.length == 64 }
-                        }
+                        legacySha256 = normalizedUpdateSha256(asset.optString("digest", ""))
                     }
                     name.startsWith("patch-") && name.endsWith(".bspatch") -> {
                         // patch-11.74.27-to-11.74.28.bspatch
@@ -490,7 +494,9 @@ class UpdateChecker @Inject constructor(
                 publishedAt = json.optString("published_at", ""),
                 patchUrl = patchUrl,
                 patchFrom = patchFrom,
-                apkSha256 = apkSha256,
+                // Site and relay publish app-release.apk, not necessarily the
+                // similarly named canonical asset from older releases.
+                apkSha256 = if (legacyUrl != null) legacySha256 else canonicalSha256,
             )
             preferUcozApkIfCurrent(release)
         } catch (error: Exception) {
@@ -504,59 +510,16 @@ class UpdateChecker @Inject constructor(
         }
     }
 
-    /**
-     * Prefer the static uCoz APK only when the sidecar exactly matches the
-     * authoritative release version and, when available, its published SHA-256.
-     * A missing or stale sidecar leaves the existing relay/GitHub fallback URL
-     * untouched. The APK itself is never probed or downloaded just to check its
-     * version, so stale copies are rejected before installation begins.
-     */
-    private fun preferUcozApkIfCurrent(
-        release: ReleaseInfo,
-        allowSiteMirror: Boolean = true,
-    ): ReleaseInfo {
-        if (!allowSiteMirror || !externalReleaseAllowedNow()) return release
-        var connection: HttpURLConnection? = null
-        return try {
-            val metadataUrl = "$SITE_APK_METADATA_URL?nocache=${System.currentTimeMillis()}"
-            val currentConnection = URL(metadataUrl).openConnection() as HttpURLConnection
-            connection = currentConnection
-            currentConnection.apply {
-                requestMethod = "GET"
-                setRequestProperty("Accept", "application/json")
-                setRequestProperty("Cache-Control", "no-cache, no-store")
-                setRequestProperty("Pragma", "no-cache")
-                setRequestProperty("User-Agent", "APU-Update-Checker")
-                connectTimeout = SITE_METADATA_TIMEOUT
-                readTimeout = SITE_METADATA_TIMEOUT
-                useCaches = false
-            }
-            if (currentConnection.responseCode != HttpURLConnection.HTTP_OK) {
-                Log.i(TAG, "uCoz APK metadata unavailable; keeping relay fallback")
-                return release
-            }
-            val metadata = BufferedReader(InputStreamReader(currentConnection.inputStream)).use { it.readText() }
-            val json = JSONObject(metadata)
-            val siteVersion = json.optString("version", "").trim()
-            val siteSha256 = json.optString("sha256", "").takeIf { it.isNotBlank() }
-            if (!siteApkMatchesLatest(siteVersion, release.version, siteSha256, release.apkSha256)) {
-                Log.i(TAG, "uCoz APK copy is stale or mismatched; keeping relay fallback")
-                return release
-            }
-            Log.i(TAG, "uCoz APK matches the latest release; selecting site download")
-            release.copy(
-                downloadUrl = SITE_APK_URL,
-                // A site APK is the preferred full artifact. Do not bypass it
-                // with the GitHub delta patch optimization.
-                patchUrl = null,
-                patchFrom = null,
-            )
-        } catch (error: Exception) {
-            Log.i(TAG, "uCoz APK metadata check failed; keeping relay fallback (${error.javaClass.simpleName})")
-            release
-        } finally {
-            connection?.disconnect()
-        }
+    /** The sidecar is rechecked again when the person actually starts the download. */
+    private fun preferUcozApkIfCurrent(release: ReleaseInfo): ReleaseInfo {
+        if (UpdateSiteMirror.currentCopy(release, externalReleaseAllowedNow()) == null) return release
+        Log.i(TAG, "uCoz APK matches the release; selecting the site")
+        return release.copy(
+            downloadUrl = UpdateSiteMirror.APK_URL,
+            // A site-only hash describes that copy, not every fallback source.
+            patchUrl = null,
+            patchFrom = null,
+        )
     }
 
     /**
@@ -575,6 +538,13 @@ class UpdateChecker @Inject constructor(
             val metadataStale = json.optBoolean("metadata_stale", false)
             if (latestVersion.isBlank()) {
                 UpdateDiagnosticsStore.markSource(trace, "relay", "invalid_response")
+                return@withContext null
+            }
+            if (!canUseRelayMetadata(metadataStale)) {
+                // /update/apk serves the newest release, but a stale tag could
+                // otherwise send our pinned fallback back to an old release.
+                Log.w(TAG, "Relay release metadata is stale; waiting for a fresh check")
+                UpdateDiagnosticsStore.markSource(trace, "relay", "unavailable", latestVersion)
                 return@withContext null
             }
             if (!isVersionNewer(currentVersion, latestVersion)) {
@@ -599,7 +569,6 @@ class UpdateChecker @Inject constructor(
                     publishedAt = json.optString("published_at", ""),
                     apkSha256 = digest,
                 ),
-                allowSiteMirror = !metadataStale,
             )
         } catch (error: Exception) {
             Log.d(TAG, "Relay update check failed: ${error.message}")
@@ -616,7 +585,16 @@ class UpdateChecker @Inject constructor(
      * Скачать APK через DownloadManager.
      * @return ID загрузки
      */
-    fun downloadApk(releaseInfo: ReleaseInfo, preferOfficial: Boolean = false): Long {
+    suspend fun downloadApk(releaseInfo: ReleaseInfo, preferOfficial: Boolean = false): Long {
+        // A notification saved by an older app has no freshness marker. Refresh
+        // it rather than trusting a cached old tag or silently skipping the site.
+        val confirmed = if (preferOfficial && !releaseInfo.allowSiteMirror) {
+            checkForUpdate(currentAppVersion(), manual = true) ?: throw UpdateMetadataUnavailableException()
+        } else releaseInfo
+        return downloadApkConfirmed(confirmed, preferOfficial)
+    }
+
+    private fun downloadApkConfirmed(releaseInfo: ReleaseInfo, preferOfficial: Boolean): Long = synchronized(officialDownloads.lock) {
         // Одна загрузка на версию: окно обновления, «Настройки → Обновления» и
         // любой другой вход спрашивают разрешение у одного замка. Раньше сторож
         // жил только внутри одного экрана, и повторные нажатия ставили в
@@ -638,7 +616,7 @@ class UpdateChecker @Inject constructor(
                 )
         }
         try {
-            return enqueueApk(releaseInfo, preferOfficial)
+            return@synchronized enqueueApk(releaseInfo, preferOfficial)
         } catch (error: Throwable) {
             // Задача не встала — замок не должен держать кнопку пятнадцать минут.
             UpdateDownloadGate.lost(releaseInfo.version)
@@ -675,60 +653,93 @@ class UpdateChecker @Inject constructor(
      * DownloadManager человек может смахнуть, а загрузка (или её отказ)
      * остаётся: карточка в «Обновлениях» показывает ход и даёт отмену/повтор.
      */
-    fun officialDownloadState(): OfficialDownloadState? = runCatching {
-        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
-            ?: return@runCatching null
-        val prefs = context.getSharedPreferences(OFFICIAL_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
-        var id = prefs.getLong(KEY_OFFICIAL_DOWNLOAD_ID, -1L)
-        if (id < 0L) id = activeOfficialDownloadId(manager) ?: -1L
-        if (id < 0L) return@runCatching null
-        manager.query(DownloadManager.Query().setFilterById(id))?.use { cursor ->
-            if (!cursor.moveToFirst()) {
-                UpdateDownloadGate.lost(prefs.getString(KEY_OFFICIAL_DOWNLOAD_VERSION, "").orEmpty())
-                return@runCatching null
+    fun officialDownloadState(): OfficialDownloadState? = synchronized(officialDownloads.lock) {
+        runCatching {
+            val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+                ?: return@runCatching null
+            val prefs = context.getSharedPreferences(OFFICIAL_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
+            val startingVersion = officialDownloads.startingVersion()
+            if (startingVersion != null) {
+                val id = OfficialUpdateDownloads.RECOVER_START_ID
+                return@runCatching OfficialDownloadState(
+                    id, ApkUpdate.normalize(startingVersion), "starting", 0L, -1L, 0,
+                    officialDownloads.sourceFor(id),
+                )
             }
-            val titleIdx = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
-            val title = if (titleIdx >= 0) cursor.getString(titleIdx).orEmpty() else ""
-            if (!title.startsWith("APU v")) return@runCatching null
-            val status = when (cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))) {
-                DownloadManager.STATUS_PENDING -> "pending"
-                DownloadManager.STATUS_RUNNING -> "running"
-                DownloadManager.STATUS_PAUSED -> "paused"
-                DownloadManager.STATUS_SUCCESSFUL -> "successful"
-                DownloadManager.STATUS_FAILED -> "failed"
-                else -> "unknown"
+            val failureVersion = officialDownloads.terminalFailureVersion()
+            if (failureVersion != null) {
+                return@runCatching OfficialDownloadState(
+                    -1L, ApkUpdate.normalize(failureVersion), "failed", 0L, -1L, 0,
+                )
             }
-            val version = title.removePrefix("APU v")
-            if (status == "failed") UpdateDownloadGate.lost(version)
-            if (status == "successful") UpdateDownloadGate.finished(version)
-            OfficialDownloadState(
-                downloadId = id,
-                version = version,
-                status = status,
-                downloadedBytes = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)),
-                totalBytes = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)),
-                reason = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON)),
-            )
+            var id = prefs.getLong(KEY_OFFICIAL_DOWNLOAD_ID, -1L)
+            if (id < 0L) id = activeOfficialDownloadId(manager) ?: -1L
+            if (id < 0L) return@runCatching null
+            manager.query(DownloadManager.Query().setFilterById(id))?.use { cursor ->
+                if (!cursor.moveToFirst()) {
+                    val savedVersion = prefs.getString(KEY_OFFICIAL_DOWNLOAD_VERSION, "").orEmpty()
+                    if (officialDownloads.transitionPending(id)) {
+                        return@runCatching OfficialDownloadState(
+                            id, ApkUpdate.normalize(savedVersion), "retrying", 0L, -1L, 0,
+                            officialDownloads.sourceFor(id),
+                        )
+                    }
+                    UpdateDownloadGate.lost(savedVersion)
+                    return@runCatching null
+                }
+                val titleIdx = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE)
+                val title = if (titleIdx >= 0) cursor.getString(titleIdx).orEmpty() else ""
+                if (!title.startsWith("APU v")) return@runCatching null
+                val rawStatus = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+                val reason = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_REASON))
+                val status = officialDownloads.displayStatus(id, rawStatus, reason) ?: when (rawStatus) {
+                    DownloadManager.STATUS_PENDING -> "pending"
+                    DownloadManager.STATUS_RUNNING -> "running"
+                    DownloadManager.STATUS_PAUSED -> "paused"
+                    DownloadManager.STATUS_SUCCESSFUL -> "successful"
+                    DownloadManager.STATUS_FAILED -> "failed"
+                    else -> "unknown"
+                }
+                val version = title.removePrefix("APU v")
+                // The gate was acquired with the original tag, usually with a v prefix.
+                val gateVersion = prefs.getString(KEY_OFFICIAL_DOWNLOAD_VERSION, version).orEmpty()
+                if (status == "failed") UpdateDownloadGate.lost(gateVersion)
+                if (status == "successful") UpdateDownloadGate.finished(gateVersion)
+                OfficialDownloadState(
+                    downloadId = id,
+                    version = version,
+                    status = status,
+                    downloadedBytes = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR)),
+                    totalBytes = cursor.getLong(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES)),
+                    reason = reason,
+                    source = officialDownloads.sourceFor(id),
+                )
+            }
+        }.getOrElse {
+            Log.w(TAG, "official download state query failed: ${it.message}")
+            null
         }
-    }.getOrElse {
-        Log.w(TAG, "official download state query failed: ${it.message}")
-        null
     }
 
+    /** A monitor or a completion broadcast advances only the currently tracked job. */
+    internal fun reconcileOfficialDownload(downloadId: Long): OfficialDownloadResult =
+        officialDownloads.reconcile(downloadId)
+
     /** Отменить официальную загрузку и сразу освободить замок повторного нажатия. */
-    fun cancelOfficialDownload(): Boolean = runCatching {
-        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
-            ?: return@runCatching false
-        val prefs = context.getSharedPreferences(OFFICIAL_DOWNLOAD_PREFS, Context.MODE_PRIVATE)
-        val state = officialDownloadState()
-        val id = state?.downloadId ?: prefs.getLong(KEY_OFFICIAL_DOWNLOAD_ID, -1L)
-        if (id >= 0L) manager.remove(id)
-        UpdateDownloadGate.lost(state?.version ?: prefs.getString(KEY_OFFICIAL_DOWNLOAD_VERSION, "").orEmpty())
-        prefs.edit().remove(KEY_OFFICIAL_DOWNLOAD_ID).remove(KEY_OFFICIAL_DOWNLOAD_VERSION).apply()
-        true
-    }.getOrElse {
-        Log.w(TAG, "official download cancel failed: ${it.message}")
-        false
+    fun cancelOfficialDownload(): Boolean = synchronized(officialDownloads.lock) {
+        runCatching {
+            val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
+                ?: return@runCatching false
+            val state = officialDownloadState()
+            val (savedId, savedVersion) = officialDownloads.clearForCancellation()
+            val id = if (savedId >= 0L) savedId else state?.downloadId ?: -1L
+            if (id >= 0L) manager.remove(id)
+            UpdateDownloadGate.lost(savedVersion.ifBlank { state?.version.orEmpty() })
+            true
+        }.getOrElse {
+            Log.w(TAG, "official download cancel failed: ${it.message}")
+            false
+        }
     }
 
     private fun activeOfficialDownloadId(manager: DownloadManager): Long? {
@@ -745,6 +756,7 @@ class UpdateChecker @Inject constructor(
     }
 
     fun hasActiveUpdateDownload(): Boolean = runCatching {
+        if (officialDownloads.blocksNewDownload()) return@runCatching true
         val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as? DownloadManager
             ?: return@runCatching false
         val active = DownloadManager.STATUS_PENDING or DownloadManager.STATUS_RUNNING or
@@ -775,6 +787,14 @@ class UpdateChecker @Inject constructor(
         // (цикл 2.5 с в CoreServerService). Сюда попадают только нажатия
         // человека - все вызовы этого метода идут из кнопок.
         extendManualWindow(MANUAL_DOWNLOAD_WINDOW_MS)
+        if (preferOfficial) {
+            // A saved notification may be hours old. Never trust its cached URL:
+            // check the sidecar at the moment the user actually starts download.
+            val site = UpdateSiteMirror.currentCopy(releaseInfo, externalReleaseAllowedNow())
+            val id = officialDownloads.start(releaseInfo, site)
+            scannedInCurrentSwarmWindow = false
+            return id
+        }
         // Раунд 132: если мой телефон ровно той версии, от которой сделан
         // дифф-патч, - качаем РАЗНИЦУ (в разы меньше APK), собираем полный
         // файл у себя, сверяем sha256 релиза и сразу запускаем установку.
@@ -814,10 +834,7 @@ class UpdateChecker @Inject constructor(
         }
         val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val downloadId = downloadManager.enqueue(request)
-        context.getSharedPreferences(OFFICIAL_DOWNLOAD_PREFS, Context.MODE_PRIVATE).edit()
-            .putLong(KEY_OFFICIAL_DOWNLOAD_ID, downloadId)
-            .putString(KEY_OFFICIAL_DOWNLOAD_VERSION, releaseInfo.version)
-            .apply()
+        officialDownloads.rememberLegacy(downloadId, releaseInfo.version)
         scannedInCurrentSwarmWindow = false
         // A signed neighbour may have answered between permission and enqueue.
         if (!externalReleaseAllowedNow()) {
@@ -840,10 +857,16 @@ class UpdateChecker @Inject constructor(
         "update download blocked: inFlight=$inFlight remainingMs=$remainingMs",
     )
 
+    class UpdateMetadataUnavailableException : IllegalStateException("fresh update metadata unavailable")
+
         /**
      * Установить скачанный APK через FileProvider.
      */
     fun installApk(downloadId: Long) {
+        if (!officialDownloads.mayExposeCompleted(downloadId)) {
+            Log.w(TAG, "Refusing to install an unverified update")
+            return
+        }
         try {
             val downloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             

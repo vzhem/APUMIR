@@ -142,6 +142,8 @@ class MessengerApplication : Application(), coil.ImageLoaderFactory, androidx.wo
         com.vladimir.messenger.data.draft.DraftStore.attach(applicationContext)
         createNotificationChannels()
         com.vladimir.messenger.service.UpdateNotifier(applicationContext).ensureChannel()
+        // Recover a user-requested APK if DownloadManager finished while our process was gone.
+        com.vladimir.messenger.worker.OfficialUpdateMonitor.restore(applicationContext)
         scheduleUpdateChecks()
         scheduleBoundedRelayWake()
         scheduleServiceWatchdog()

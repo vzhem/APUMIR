@@ -1492,6 +1492,8 @@
     <string name="gc_gif_not_downloaded">Гифка не скачалась</string>
     <string name="gc_gif_not_saved">Гифка не сохранилась</string>
     <string name="upd_available">Доступно обновление</string>
+    <string name="upd_site_priority_hint">Сначала попробуем скачать с apu.clan.su; если сайт недоступен или копия устарела, используем запасные источники.</string>
+    <string name="upd_fresh_check_unavailable">Не удалось проверить актуальную версию. Проверьте сеть и повторите попытку.</string>
     <string name="upd_whats_new">Что нового:</string>
     <string name="upd_downloading">Скачивание обновления…</string>
     <string name="upd_later">Позже</string>
@@ -1500,6 +1502,7 @@
     <string name="upd_download_started">Скачивание началось. Дождитесь окончания — второе нажатие не нужно. Готовый файл появится в «Настройки → Обновления».</string>
     <string name="upd_download_already_running">Обновление уже скачивается — второй файл не нужен. Готовое появится в «Настройки → Обновления».</string>
     <string name="upd_download_wait_tpl">Скачивание уже началось. Повторно нажать можно через %1$d с.</string>
+    <string name="upd_download_source_tpl">Скачивание обновления APU · %1$s</string>
     <string name="upd_downloading_short">Скачивается…</string>
     <string name="ucd_title">Имя занято</string>
     <string name="ucd_rules">Латинские буквы, цифры и подчёркивание.</string>
@@ -2477,21 +2480,27 @@
     <string name="call_background_failed">Фон не применился: %1$s</string>
     <string name="call_background_preparing">Фон подготавливается…</string>
     <string name="st_download_request_accepted">Запрос на скачивание принят. Начинаю — повторно нажимать не нужно.</string>
-    <string name="st_official_starting">Начинаю скачивание с официального сайта…</string>
-    <string name="st_official_started">Скачивание с официального сайта началось</string>
+    <string name="st_official_starting">Начинаю скачивание обновления…</string>
+    <string name="st_official_started">Скачивание обновления началось</string>
     <string name="st_neighbor_starting">Начинаю скачивание у соседей…</string>
     <string name="st_neighbor_started">Скачивание у соседей началось</string>
     <string name="st_download_no_second_tap">Повторное нажатие не нужно. Готовый файл сам появится в «Обновлениях».</string>
     <string name="st_update_already_downloading">Обновление уже скачивается. Дождитесь окончания или остановите приём.</string>
     <string name="st_neighbor_offer_gone">Сосед больше не раздаёт эту версию. Нажмите «Проверить новую версию».</string>
-    <string name="st_official_download_failed">Не удалось скачать обновление с официального сайта. Попробуйте ещё раз.</string>
-    <string name="st_official_download_cancelled">Загрузка с официального сайта остановлена.</string>
+    <string name="st_official_download_failed">Не удалось скачать обновление. Проверьте сеть и место на устройстве, затем попробуйте снова.</string>
+    <string name="st_official_download_cancelled">Загрузка обновления остановлена.</string>
     <string name="st_official_switching_from_neighbors">Останавливаю приём у соседей и начинаю загрузку с официального сайта.</string>
-    <string name="st_official_progress_title">Загрузка с сайта v%1$s</string>
+    <string name="st_official_progress_title">Загрузка обновления v%1$s</string>
     <string name="st_official_progress_tpl">%1$s из %2$s · %3$d%%</string>
     <string name="st_official_progress_unknown_tpl">Скачано %1$s; размер пока неизвестен</string>
     <string name="st_official_paused">Загрузка приостановлена системой (сеть или ожидание). Можно отменить и запустить снова.</string>
-    <string name="st_official_cancel_download">Остановить загрузку с сайта</string>
+    <string name="st_official_cancel_download">Остановить загрузку обновления</string>
+    <string name="st_official_trying_fallback">Источник недоступен — переходим к запасному…</string>
+    <string name="st_official_verifying">Проверяем скачанный файл…</string>
+    <string name="st_official_source_site">apu.clan.su</string>
+    <string name="st_official_source_relay">Резервный сервер</string>
+    <string name="st_official_source_github">GitHub</string>
+    <string name="st_official_source_detail_tpl">%1$s · %2$s</string>
     <string name="st_official_retry_download">Повторить загрузку с сайта</string>
 
     <!-- Системные уведомления об обновлении APU -->

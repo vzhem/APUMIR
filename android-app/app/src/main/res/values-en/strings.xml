@@ -1375,6 +1375,8 @@
     <string name="gc_gif_not_downloaded">The GIF did not download</string>
     <string name="gc_gif_not_saved">The GIF was not saved</string>
     <string name="upd_available">Update available</string>
+    <string name="upd_site_priority_hint">We try apu.clan.su first. If the site is unavailable or its copy is outdated, we use backup sources.</string>
+    <string name="upd_fresh_check_unavailable">Could not check the current version. Check your network and try again.</string>
     <string name="upd_whats_new">What’s new:</string>
     <string name="upd_downloading">Downloading the update…</string>
     <string name="upd_later">Later</string>
@@ -1383,6 +1385,7 @@
     <string name="upd_download_started">Download started. Please wait for it to finish — no second tap is needed. The finished file will appear under “Settings → Updates”.</string>
     <string name="upd_download_already_running">The update is already downloading — a second file is not needed. The finished one will appear under “Settings → Updates”.</string>
     <string name="upd_download_wait_tpl">The download has already started. You can tap again in %1$d s.</string>
+    <string name="upd_download_source_tpl">Downloading the APU update · %1$s</string>
     <string name="upd_downloading_short">Downloading…</string>
     <string name="ucd_title">Name is taken</string>
     <string name="ucd_rules">Latin letters, digits and underscores.</string>
@@ -2461,21 +2464,27 @@ The file is not on this phone</string>
     <string name="st_official_check_download_hint">Check for a fresh version and download it if it is newer than the installed one</string>
     <string name="st_official_already_requested">This version is already downloading or downloaded. Check the downloads and ready updates.</string>
     <string name="st_download_request_accepted">Download request accepted. Starting — no second tap is needed.</string>
-    <string name="st_official_starting">Starting download from the official site…</string>
-    <string name="st_official_started">Download from the official site has started</string>
+    <string name="st_official_starting">Starting the update download…</string>
+    <string name="st_official_started">The update download has started</string>
     <string name="st_neighbor_starting">Starting download from neighbors…</string>
     <string name="st_neighbor_started">Download from neighbors has started</string>
     <string name="st_download_no_second_tap">No second tap is needed. The finished file will appear under “Updates” by itself.</string>
     <string name="st_update_already_downloading">An update is already downloading. Wait for it to finish or stop the transfer.</string>
     <string name="st_neighbor_offer_gone">The neighbor is no longer sharing this version. Tap “Check for a new version”.</string>
-    <string name="st_official_download_failed">Could not download the update from the official site. Please try again.</string>
-    <string name="st_official_download_cancelled">The official-site download was stopped.</string>
+    <string name="st_official_download_failed">Could not download the update. Check the network and available device storage, then try again.</string>
+    <string name="st_official_download_cancelled">The update download was stopped.</string>
     <string name="st_official_switching_from_neighbors">Stopping the neighbor receive and starting the official-site download.</string>
-    <string name="st_official_progress_title">Downloading from the site v%1$s</string>
+    <string name="st_official_progress_title">Downloading update v%1$s</string>
     <string name="st_official_progress_tpl">%1$s of %2$s · %3$d%%</string>
     <string name="st_official_progress_unknown_tpl">%1$s downloaded; total size is not known yet</string>
     <string name="st_official_paused">The system paused the download (network or waiting). You can cancel it and start again.</string>
-    <string name="st_official_cancel_download">Stop the site download</string>
+    <string name="st_official_cancel_download">Stop the update download</string>
+    <string name="st_official_trying_fallback">The source is unavailable — switching to a backup…</string>
+    <string name="st_official_verifying">Verifying the downloaded file…</string>
+    <string name="st_official_source_site">apu.clan.su</string>
+    <string name="st_official_source_relay">Backup server</string>
+    <string name="st_official_source_github">GitHub</string>
+    <string name="st_official_source_detail_tpl">%1$s · %2$s</string>
     <string name="st_official_retry_download">Retry the site download</string>
 
     <!-- APU update notifications -->

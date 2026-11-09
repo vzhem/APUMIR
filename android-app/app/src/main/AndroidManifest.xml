@@ -279,6 +279,16 @@
             </intent-filter>
         </receiver>
 
+        <!-- DownloadManager is a separate system app. The receiver only accepts
+             our tracked download id and verifies its actual status in a worker. -->
+        <receiver
+            android:name=".worker.OfficialUpdateDownloadReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
+            </intent-filter>
+        </receiver>
+
         <!-- FileProvider для установки APK -->
         <provider
             android:name="androidx.core.content.FileProvider"

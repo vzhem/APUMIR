@@ -14,11 +14,16 @@ internal fun siteApkMatchesLatest(
     latestSha256: String?,
 ): Boolean {
     if (!ApkUpdate.isSame(siteVersion, latestVersion)) return false
+    val siteSha = normalizedUpdateSha256(siteSha256)
+    if (!siteSha256.isNullOrBlank() && siteSha == null) return false
     val expectedSha = normalizedUpdateSha256(latestSha256) ?: return latestSha256.isNullOrBlank()
-    return normalizedUpdateSha256(siteSha256) == expectedSha
+    return siteSha == expectedSha
 }
 
-private fun normalizedUpdateSha256(value: String?): String? {
+/** A relay cache explicitly marked stale cannot identify the current release. */
+internal fun canUseRelayMetadata(metadataStale: Boolean): Boolean = !metadataStale
+
+internal fun normalizedUpdateSha256(value: String?): String? {
     val raw = value?.trim().orEmpty()
     val digest = (if (raw.startsWith("sha256:", ignoreCase = true)) raw.substringAfter(':') else raw)
         .lowercase()

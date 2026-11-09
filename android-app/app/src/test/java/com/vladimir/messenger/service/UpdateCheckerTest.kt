@@ -73,6 +73,14 @@ class UpdateCheckerTest {
             ),
         )
         assertFalse(siteApkMatchesLatest("latest", "v11.74.477", releaseSha, releaseSha))
+        // A present but malformed hash must not be treated as an absent hash.
+        assertFalse(siteApkMatchesLatest("v11.74.477", "v11.74.477", "not-a-sha256", null))
+    }
+
+    @Test
+    fun `a stale relay cache cannot confirm the current release`() {
+        assertTrue(canUseRelayMetadata(metadataStale = false))
+        assertFalse(canUseRelayMetadata(metadataStale = true))
     }
 
     @Test

@@ -77,6 +77,7 @@ interface MainActivityEntryPoint {
     fun botApi(): BotApi
     fun contactRepository(): ContactRepository
     fun updateChecker(): UpdateChecker
+    fun apkSeeder(): com.vladimir.messenger.data.update.ApkSeeder
     fun updateNotifier(): UpdateNotifier
     fun linkShortener(): LinkShortener
     /** Рассылка своего ранга собеседникам (знак VIP у имени). */
@@ -696,7 +697,14 @@ class MainActivity : ComponentActivity() {
                                 val checker = entryPoint.updateChecker()
                                 lifecycleScope.launch {
                                     val attempt = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                                        runCatching { checker.downloadApk(currentUpdate) }
+                                        runCatching {
+                                            // An explicit update tap prefers the site, even if a
+                                            // neighbour is already offering/receiving the update.
+                                            val seeder = entryPoint.apkSeeder()
+                                            seeder.cancelDownload()
+                                            seeder.cancelPatchDownload()
+                                            checker.downloadApk(currentUpdate, preferOfficial = true)
+                                        }
                                     }
                                     attempt.onSuccess { id ->
                                         updateRelease = null

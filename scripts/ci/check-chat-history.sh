@@ -119,6 +119,11 @@ DIAG_MQTT_TEST="$BASE/test/java/com/vladimir/messenger/data/diagnostics/MqttLink
 APK_UPDATE="$BASE/main/java/com/vladimir/messenger/data/update/ApkUpdate.kt"
 UPDATE_POLICY="$BASE/main/java/com/vladimir/messenger/service/UpdateCheckPolicy.kt"
 UPDATE_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/service/UpdateCheckerTest.kt"
+# Порядок источников и обработка повторных/отложенных событий загрузки.
+OFFICIAL_UPDATE_POLICY="$BASE/main/java/com/vladimir/messenger/service/OfficialUpdatePolicy.kt"
+OFFICIAL_UPDATE_POLICY_TEST="$BASE/test/java/com/vladimir/messenger/service/OfficialUpdatePolicyTest.kt"
+COMPLETED_APK_ADOPTION="$BASE/main/java/com/vladimir/messenger/data/update/CompletedApkAdoption.kt"
+COMPLETED_APK_ADOPTION_TEST="$BASE/test/java/com/vladimir/messenger/data/update/CompletedApkAdoptionTest.kt"
 # Fail-closed личных сообщений и безопасный cooldown тяжёлого самосева:
 # чистые Kotlin-правила проверяются тем же runner без Android SDK.
 CALL_WIRE="$BASE/main/java/com/vladimir/messenger/data/call/CallWire.kt"
@@ -210,7 +215,7 @@ PYGEN
     "$OP_HEALTH" "$OP_BOUNDED_READ" "$OP_CLEANUP" "$OP_HEALTH_TEST" "$STORY_QUEUE" "$STORY_QUEUE_TEST" "$RUNTIME_HEALTH" "$RUNTIME_HEALTH_TEST" "$DIAG_REPORT" "$UPDATE_DIAG_REPORT" "$RELAY_STORAGE" "$RELAY_STORAGE_TEST" "$DIAG_MQTT" "$DIAG_REPORT_TEST" "$DIAG_MQTT_TEST" \
     "$STORY_FEEDBACK_WIRE" "$STORY_FEEDBACK_LEDGER" "$STORY_FEEDBACK_OUTBOX" \
     "$STORY_FEEDBACK_WIRE_TEST" "$STORY_FEEDBACK_LEDGER_TEST" "$STORY_FEEDBACK_OUTBOX_TEST" \
-    "$APK_UPDATE" "$UPDATE_POLICY" "$UPDATE_POLICY_TEST" \
+    "$APK_UPDATE" "$UPDATE_POLICY" "$UPDATE_POLICY_TEST" "$OFFICIAL_UPDATE_POLICY" "$OFFICIAL_UPDATE_POLICY_TEST" "$COMPLETED_APK_ADOPTION" "$COMPLETED_APK_ADOPTION_TEST" \
     "$CALL_WIRE" "$FILE_CODEC" "$FILE_WIRE" "$FILE_UDP" "$SEALED_WIRE" "$OUTGOING_POLICY" "$OUTGOING_POLICY_TEST" "$CONTACT_RESET_WIRE" \
     "$DEFERRED_WIRE" "$DEFERRED_POLICY" "$DEFERRED_WIRE_TEST" "$DEFERRED_POLICY_TEST" \
     "$SELF_SEED_POLICY" "$SELF_SEED_POLICY_TEST" "$SEND_TIME_POLICY" "$SEND_TIME_TEST" \
@@ -249,6 +254,8 @@ PYGEN
     com.vladimir.messenger.data.story.StoryFeedbackOutboxTest \
     com.vladimir.messenger.data.diagnostics.MqttLinkTextTest \
     com.vladimir.messenger.service.UpdateCheckerTest \
+    com.vladimir.messenger.service.OfficialUpdatePolicyTest \
+    com.vladimir.messenger.data.update.CompletedApkAdoptionTest \
     com.vladimir.messenger.data.security.OutgoingPayloadPolicyTest \
     com.vladimir.messenger.data.update.SelfSeedRetryPolicyTest \
     com.vladimir.messenger.data.schedule.DeferredWireTest \
@@ -258,3 +265,6 @@ PYGEN
     com.vladimir.messenger.data.notification.FlashlightAlertPolicyTest \
     com.vladimir.messenger.data.swarm.Ipv6NetworkProxyTest \
     com.vladimir.messenger.data.security.ProfileCallsignAndDeviceAnchorTest
+
+# Изолированная симуляция DownloadManager компилируется в отдельном скрипте.
+bash "$ROOT/scripts/ci/check-update-download-sim.sh" "$JAVA" "$CP" "$OUT" "$KOTLIN"

@@ -195,5 +195,53 @@ class UpdateDownloadRecoveryTest(unittest.TestCase):
         self.assertIn("stalledIncomingRowIsDroppedBeforeAskingAnotherSeed", test)
 
 
+class SiteFirstUpdateTest(unittest.TestCase):
+    """Явное скачивание: сначала актуальный сайт, затем запасные источники."""
+
+    def setUp(self):
+        self.checker = read(JAVA / "service/UpdateChecker.kt")
+        self.downloads = read(JAVA / "service/OfficialUpdateDownloads.kt")
+        self.policy = read(JAVA / "service/OfficialUpdatePolicy.kt")
+        self.mirror = read(JAVA / "service/UpdateSiteMirror.kt")
+        self.worker = read(JAVA / "worker/OfficialUpdateMonitorWorker.kt")
+
+    def test_update_dialog_and_settings_choose_the_official_coordinator(self):
+        for name in ("MainActivity.kt", "ui/update/UpdateViewModel.kt", "ui/screens/settings/SettingsViewModel.kt"):
+            self.assertRegex(read(JAVA / name), r"downloadApk\([^\n]*preferOfficial\s*=\s*true")
+        self.assertIn("UpdateSiteMirror.currentCopy(releaseInfo", self.checker)
+        self.assertIn("officialDownloads.start(releaseInfo, site)", self.checker)
+
+    def test_stale_metadata_cannot_turn_into_a_pinned_old_apk(self):
+        self.assertIn("!canUseRelayMetadata(metadataStale)", self.checker)
+        self.assertIn("siteApkMatchesLatest(", self.mirror)
+        self.assertIn('json.optBoolean("allowSiteMirror", false)', read(JAVA / "service/UpdateNotifier.kt"))
+        self.assertIn("checkForUpdate(currentAppVersion(), manual = true)", self.checker)
+        self.assertIn("pinnedGithubApkUrl(attempt.version)", self.policy)
+
+    def test_managed_files_wait_for_validation_and_survive_restart(self):
+        self.assertIn("officialDownloads.mayExposeCompleted", self.checker)
+        self.assertIn("getPackageArchiveInfo", self.downloads)
+        self.assertIn("ApkUpdate.sha256OfFile", self.downloads)
+        self.assertIn("KEY_START_AFTER_ID", self.downloads)
+        self.assertIn("matchesReplacement(manager(), id, pending, source)", self.downloads)
+        self.assertIn("OfficialUpdateMonitor.restore", read(JAVA / "MessengerApplication.kt"))
+        self.assertIn("reconcileOfficialDownload", self.worker)
+        self.assertIn("OfficialUpdateDownloadReceiver", read(ROOT / "android-app/app/src/main/AndroidManifest.xml"))
+
+    def test_executable_switching_simulation_is_in_ci(self):
+        script = read(ROOT / "scripts/ci/check-chat-history.sh")
+        self.assertIn("check-update-download-sim.sh", script)
+        harness = read(ROOT / "scripts/ci/update-download-sim/DownloadHarness.kt")
+        self.assertIn("interruptedInitialEnqueue()", harness)
+        self.assertIn("interruptedSwitchAndCancellation()", harness)
+        self.assertIn("duplicateEventsAreSerialized()", harness)
+
+    def test_site_hint_and_fallback_status_are_localized(self):
+        for folder in ("values", "values-en"):
+            strings = read(RES / folder / "strings.xml")
+            for key in ("upd_site_priority_hint", "upd_fresh_check_unavailable", "st_official_trying_fallback", "st_official_verifying"):
+                self.assertIn(f'name="{key}"', strings)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
