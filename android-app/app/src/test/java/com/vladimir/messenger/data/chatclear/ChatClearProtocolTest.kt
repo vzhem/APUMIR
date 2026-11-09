@@ -18,12 +18,15 @@ class ChatClearProtocolTest {
         val applied = mutableSetOf<String>()
         val replies = mutableListOf<String>()
         val receiver = ChatClearProtocol(
-            ChatClearOutbox(temporary.root.resolve("receiver")),
-            { "receiver" },
+            { _, _, _ -> },
             { _, request -> applied.addAll(request.ids); true },
             { _, response -> replies.add(response) },
         )
-        val sender = ChatClearProtocol(outbox, { "owner" }, { _, _ -> false }, { _, _ -> })
+        val acknowledgements = ChatClearAcknowledgements(outbox, { "owner" }) { true }
+        val sender = ChatClearProtocol(
+            { peer, authenticated, operation -> acknowledgements.receive(peer, authenticated, operation) },
+            { _, _ -> false }, { _, _ -> },
+        )
         val packet = ChatClearWire.encode(outbox.pending().single().batch)
         assertTrue(receiver.receive("owner", true, packet))
         assertTrue(receiver.receive("owner", true, packet)) // retry is safe to apply twice

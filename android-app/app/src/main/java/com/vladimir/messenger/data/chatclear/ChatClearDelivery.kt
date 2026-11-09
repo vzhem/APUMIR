@@ -27,7 +27,20 @@ class ChatClearDelivery @Inject constructor(
     private var nextMirrorSyncAt = 0L
     private val outbox = ChatClearOutbox(File(context.noBackupFilesDir, "chat_clear_outbox.v1"))
     private val apply = ChatClearApplier(context, chatDao, ChatClearLocalCleanup(db))
-    private val protocol = ChatClearProtocol(outbox, { com.vladimir.messenger.data.schedule.DeferredInboxStore.owner(context) }, apply) { peer, ack ->
+    private val acknowledgements = ChatClearAcknowledgements(
+        outbox,
+        { com.vladimir.messenger.data.schedule.DeferredInboxStore.owner(appContext) },
+    ) { entry ->
+        val chat = chatDao.getChatById(entry.chat)
+        chat?.contactId == entry.peer && chatDao.getChatByContactId(entry.peer)?.id == entry.chat &&
+            apply.apply(entry.peer, entry.batch)
+    }
+    private suspend fun acknowledge(peer: String, authenticated: Boolean, operation: UUID) {
+        mutex.lock()
+        try { acknowledgements.receive(peer, authenticated, operation) }
+        finally { mutex.unlock() }
+    }
+    private val protocol = ChatClearProtocol(::acknowledge, apply) { peer, ack ->
         val chat = chatDao.getChatByContactId(peer) ?: return@ChatClearProtocol
         val id = UUID.nameUUIDFromBytes("apu-clear-ack:$peer:$ack".toByteArray(Charsets.UTF_8)).toString()
         RustBridge.sendMessage(id, chat.id, peer, ack)
@@ -43,7 +56,7 @@ class ChatClearDelivery @Inject constructor(
     internal suspend fun routeMirrorIncoming(peer: String, text: String): Boolean {
         if (!ChatClearWire.isControl(text)) return false
         val ack = ChatClearWire.decodeAck(text)
-        if (ack != null) outbox.acknowledge(true, com.vladimir.messenger.data.schedule.DeferredInboxStore.owner(appContext), peer, ack)
+        if (ack != null) acknowledge(peer, true, ack)
         else ChatClearWire.decode(text)?.let { apply.apply(peer, it) }
         return true
     }
