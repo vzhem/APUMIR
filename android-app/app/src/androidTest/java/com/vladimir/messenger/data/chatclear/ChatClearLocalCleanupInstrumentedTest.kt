@@ -72,6 +72,21 @@ class ChatClearLocalCleanupInstrumentedTest {
         assertNull(db.fileTransferDao().getTransfer("transfer"))
     }
 
+    @Test fun journalFailurePreventsPrivateAndDatabaseDeletion() = runBlocking {
+        db.chatDao().insertChat(ChatEntity("chat", "friend", "Friend"))
+        db.messageDao().insertMessage(MessageEntity("id", "chat", "friend", "file", 1))
+        db.fileTransferDao().insertTransferIgnore(FileTransferEntity(
+            "transfer", "id", "chat", "friend", "INCOMING", "file.txt", "text/plain", 1L, 1, 1,
+            "hash", "COMPLETE", createdAtMs = 1, expiresAtMs = 10, updatedAtMs = 1,
+        ))
+        var touched = false
+        val guarded = ChatClearLocalCleanup(db, rememberFiles = { _, _ -> false }) { touched = true; true }
+        assertFalse(guarded.apply("chat", listOf("id")))
+        assertFalse(touched)
+        assertNotNull(db.messageDao().getMessageById("id"))
+        assertNotNull(db.fileTransferDao().getTransfer("transfer"))
+    }
+
     @Test fun concurrentTransferChangeForcesRetryBeforeRemovingRows() = runBlocking {
         db.chatDao().insertChat(ChatEntity("chat", "friend", "Friend"))
         db.messageDao().insertMessage(MessageEntity("id", "chat", "friend", "file", 1))
@@ -107,7 +122,7 @@ class ChatClearLocalCleanupInstrumentedTest {
                 transferId, "id", "chat", "friend", "INCOMING", "file.txt", "text/plain", 1L, 1, 1,
                 "hash", "COMPLETE", createdAtMs = 1, expiresAtMs = 10, updatedAtMs = 1,
             ))
-            assertTrue(ChatClearLocalCleanup(context, db).apply("chat", listOf("id")))
+            assertTrue(ChatClearLocalCleanup(db) { ChatClearPrivateFileCleaner(context).remove(it) }.apply("chat", listOf("id")))
             assertFalse(chunks.exists())
             assertFalse(received.exists())
             assertFalse(preview.exists())
@@ -115,6 +130,41 @@ class ChatClearLocalCleanupInstrumentedTest {
             assertNull(db.fileTransferDao().getTransfer(transferId))
         } finally {
             chunks.deleteRecursively(); received.deleteRecursively(); preview.delete(); independent.delete()
+        }
+    }
+
+    @Test fun durableFileSweepRemovesLateCopiesButNotAReusedTransferId() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = context.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+        val hadOwner = prefs.contains("node_id")
+        val oldOwner = prefs.getString("node_id", null)
+        val journalFile = File(context.noBackupFilesDir, "clear-sweep-${UUID.randomUUID()}.sqlite")
+        val journal = ChatClearFileJournal(context, journalFile)
+        val first = "a" + UUID.randomUUID().toString().replace("-", "").substring(1)
+        val second = "b" + UUID.randomUUID().toString().replace("-", "").substring(1)
+        val firstDir = File(context.noBackupFilesDir, "file_received/v1/$first")
+        val secondDir = File(context.noBackupFilesDir, "file_received/v1/$second")
+        try {
+            prefs.edit().putString("node_id", "owner").commit()
+            db.chatDao().insertChat(ChatEntity("chat", "friend", "Friend"))
+            db.chatDao().insertChat(ChatEntity("other", "other-peer", "Other"))
+            fun row(id: String, chat: String, peer: String) = FileTransferEntity(
+                id, "id-$id", chat, peer, "INCOMING", "file.txt", "text/plain", 1L, 1, 1,
+                "hash", "COMPLETE", createdAtMs = 1, expiresAtMs = 10, updatedAtMs = 1,
+            )
+            assertTrue(journal.remember("owner", "friend", "chat", listOf(row(first, "chat", "friend"), row(second, "chat", "friend"))))
+            db.fileTransferDao().insertTransferIgnore(row(second, "other", "other-peer"))
+            firstDir.mkdirs(); secondDir.mkdirs()
+            File(firstDir, "late").writeText("late")
+            File(secondDir, "unrelated").writeText("unrelated")
+            ChatClearFileSweep(context, db, journal).run("owner", 1L)
+            assertFalse(firstDir.exists())
+            assertTrue(File(secondDir, "unrelated").isFile)
+        } finally {
+            if (hadOwner) prefs.edit().putString("node_id", oldOwner).commit() else prefs.edit().remove("node_id").commit()
+            journal.close()
+            journalFile.delete(); File(journalFile.path + "-wal").delete(); File(journalFile.path + "-shm").delete()
+            firstDir.deleteRecursively(); secondDir.deleteRecursively()
         }
     }
 

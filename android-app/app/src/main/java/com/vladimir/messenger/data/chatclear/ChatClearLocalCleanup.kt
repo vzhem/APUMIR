@@ -4,26 +4,38 @@ import androidx.room.withTransaction
 import com.vladimir.messenger.data.local.AppDatabase
 import com.vladimir.messenger.util.ChatPreviews
 import android.content.Context
+import com.vladimir.messenger.data.local.entity.ChatEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
+import com.vladimir.messenger.data.schedule.DeferredInboxStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 
 /** Transactional, chat-scoped removal of known message rows and associated chat metadata. */
 internal class ChatClearLocalCleanup(
     private val db: AppDatabase,
+    private val rememberFiles: (ChatEntity, List<FileTransferEntity>) -> Boolean = { _, _ -> true },
     private val removePrivateFiles: (FileTransferEntity) -> Boolean,
 ) {
     @Inject constructor(@ApplicationContext context: Context, db: AppDatabase) :
-        this(db, ChatClearPrivateFileCleaner(context)::remove)
+        this(context, db, ChatClearFileJournal(context))
+
+    internal constructor(context: Context, db: AppDatabase, journal: ChatClearFileJournal) : this(
+        db,
+        { chat, rows -> journal.remember(DeferredInboxStore.owner(context), chat.contactId, chat.id, rows) },
+        ChatClearPrivateFileCleaner(context)::remove,
+    )
 
     internal val transferDao get() = db.fileTransferDao()
 
     suspend fun apply(chatId: String, ids: List<String>): Boolean {
         require(chatId.isNotBlank() && ids.size in 1..ChatClearWire.MAX_IDS)
-        if (db.chatDao().getChatById(chatId) == null) return false
+        val chat = db.chatDao().getChatById(chatId) ?: return false
         val limit = ChatClearOutbox.MAX_ENTRIES * ChatClearWire.MAX_IDS + 1
         val rows = transferDao.chatTransfersForMessageIds(chatId, ids, limit)
         if (rows.size >= limit) return false
+        // Record first: after Room rows are removed, in-flight writers may still
+        // recreate a private file and the journal must be able to clean it again.
+        if (!rememberFiles(chat, rows)) return false
         // Keep rows until private data is removed, so a crash or filesystem error
         // leaves the information needed for an idempotent retry.
         for (row in rows) if (!removePrivateFiles(row)) return false

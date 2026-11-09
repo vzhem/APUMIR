@@ -15,8 +15,9 @@ internal class ChatClearPrivateFileCleaner(context: Context) {
     private val chunks = FileTransferChunkStore.forApplication(this.context)
     private val received = ReceivedFileStore(File(this.context.noBackupFilesDir, "file_received/v1"))
 
-    fun remove(transfer: FileTransferEntity): Boolean {
-        val id = transfer.transferId
+    fun remove(transfer: FileTransferEntity): Boolean = removeId(transfer.transferId)
+
+    fun removeId(id: String): Boolean {
         FileTransferWire.requireValidTransferId(id)
         if (!chunks.deleteTransfer(id)) return false
         if (!received.deleteTransfer(id)) return false

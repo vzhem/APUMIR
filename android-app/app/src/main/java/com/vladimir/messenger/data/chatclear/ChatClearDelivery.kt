@@ -25,7 +25,9 @@ class ChatClearDelivery @Inject constructor(
     private val mirrorReplay = ChatClearMirrorReplay<ChatClearTombstones.Cursor>()
     private var nextMirrorSyncAt = 0L
     private val outbox = ChatClearOutbox(File(context.noBackupFilesDir, "chat_clear_outbox.v1"))
-    private val apply = ChatClearApplier(context, chatDao, ChatClearLocalCleanup(context, db))
+    private val fileJournal = ChatClearFileJournal(context)
+    private val fileSweep = ChatClearFileSweep(context, db, fileJournal)
+    private val apply = ChatClearApplier(context, chatDao, ChatClearLocalCleanup(context, db, fileJournal))
     private val fileMetaGuard = ChatClearFileMetaGuard(
         { peer, id -> ChatClearRegistry.isCleared(appContext, peer, id) },
         { peer, batch -> apply.apply(peer, batch) },
@@ -128,6 +130,9 @@ class ChatClearDelivery @Inject constructor(
             val owner = com.vladimir.messenger.data.schedule.DeferredInboxStore.owner(appContext)
             if (owner.isBlank()) return@withContext
             val now = android.os.SystemClock.elapsedRealtime()
+            try { fileSweep.run(owner, now) }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (error: Exception) { android.util.Log.w("ChatClearDelivery", "Private file cleanup retry failed", error) }
             ChatClearPumpPolicy.mirrorThenDeliver(
                 mirror = { syncMirrorTombstones(owner, now) },
                 recordFailure = { android.util.Log.w("ChatClearDelivery", "Mirror sync failed; continuing peer delivery", it) },
