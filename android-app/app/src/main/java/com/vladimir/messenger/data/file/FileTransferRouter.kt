@@ -40,6 +40,7 @@ class FileTransferRouter @Inject constructor(
     private val peerStore: FileExchangePeerStore,
     private val chatRepository: ChatRepository,
     private val mirrorFileMetaApplier: MirrorFileMetaApplier,
+    private val clearSenderGuard: com.vladimir.messenger.data.chatclear.ChatClearSenderGuard,
     private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
     /**
      * Файлы группы роем (этап 9). Через Provider: рой сам зависит от этого
@@ -415,9 +416,7 @@ class FileTransferRouter @Inject constructor(
             chunkStore = chunkStore,
             transport = switchingTransport,
             ownBindingProvider = { FileExchangeKeyStore.publicBinding(appContext) },
-            // Наблюдения для рейтинга узлов: скорость прямой отдачи и то,
-            // дошло ли вообще. Узел, который стабильно берёт данные быстро,
-            // поднимется в очереди на отправку.
+            prepareClearGuard = clearSenderGuard::prepare,
             onDirectSend = { peerId, bytes, millis, ok ->
                 runCatching {
                     com.vladimir.messenger.data.peer.PeerRatingStore
