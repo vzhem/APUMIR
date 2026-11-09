@@ -12,6 +12,8 @@ import com.vladimir.messenger.data.local.entity.DirectPollEntity
 import com.vladimir.messenger.data.local.entity.DirectPollVoteEntity
 import com.vladimir.messenger.data.local.entity.FileTransferEntity
 import kotlinx.coroutines.runBlocking
+import java.io.File
+import java.util.UUID
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
@@ -50,5 +52,35 @@ class ChatClearLocalCleanupInstrumentedTest {
         assertEquals("new", db.chatDao().getChatById("first")?.lastMessage)
         assertTrue(cleanup.apply("first", listOf("old")))
         assertFalse(cleanup.apply("missing", listOf("old")))
+    }
+
+    @Test fun authenticatedRequestRecordsLateIdsAndCleansOnlyTheMatchingChat() = runBlocking {
+        db.chatDao().insertChat(ChatEntity("first", "friend", "Friend"))
+        db.messageDao().insertMessage(MessageEntity("old", "first", "friend", "old", 1))
+        val file = File(ApplicationProvider.getApplicationContext<Context>().noBackupFilesDir, "clear-apply-${UUID.randomUUID()}.sqlite")
+        val tombstones = ChatClearTombstones(ApplicationProvider.getApplicationContext(), file)
+        try {
+            val apply = ChatClearApply(
+                ownerId = { "owner" },
+                chatForPeer = { db.chatDao().getChatByContactId(it)?.id },
+                tombstone = { owner, peer, ids -> tombstones.remember(owner, peer, ids) },
+                cleanup = { chatId, ids -> cleanup.apply(chatId, ids) },
+            )
+            val batch = ChatClearWire.Batch(UUID.randomUUID(), listOf("old", "late"))
+            val replies = mutableListOf<String>()
+            val receiver = ChatClearReceiver(apply) { _, ack -> replies.add(ack) }
+            receiver.receive("friend", false, ChatClearWire.encode(batch))
+            assertNotNull(db.messageDao().getMessageById("old"))
+            receiver.receive("friend", true, ChatClearWire.encode(batch))
+            assertNull(db.messageDao().getMessageById("old"))
+            assertTrue(tombstones.contains("owner", "friend", "late"))
+            assertFalse(tombstones.contains("owner", "other", "late"))
+            assertEquals(listOf(ChatClearWire.encodeAck(batch.operation)), replies)
+        } finally {
+            tombstones.close()
+            file.delete()
+            File(file.path + "-wal").delete()
+            File(file.path + "-shm").delete()
+        }
     }
 }
