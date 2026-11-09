@@ -108,22 +108,26 @@ class ChatClearDelivery @Inject constructor(
         try {
             val owner = com.vladimir.messenger.data.schedule.DeferredInboxStore.owner(appContext)
             if (owner.isBlank()) return@withContext
-            val now = System.currentTimeMillis()
-            syncMirrorTombstones(owner, now)
-            val pending = outbox.pending()
-            val pendingIds = pending.mapTo(HashSet()) { it.batch.operation }
-            lastAttempts.keys.retainAll(pendingIds)
-            for (entry in pending.asSequence().filter { it.owner == owner && now - (lastAttempts[it.batch.operation] ?: 0L) >= RETRY_MS }.take(8)) {
-                lastAttempts[entry.batch.operation] = now
-                val chat = chatDao.getChatById(entry.chat) ?: continue
-                if (chat.contactId != entry.peer || chatDao.getChatByContactId(entry.peer)?.id != entry.chat) continue
-                if (!apply.apply(entry.peer, entry.batch)) continue
-                val text = ChatClearWire.encode(entry.batch)
-                val wireId = entry.batch.operation.toString()
-                val mirrored = com.vladimir.messenger.data.mirror.MirrorHub.deliverAction(entry.peer, "", chat.id, text)
-                if (!mirrored) {
-                    com.vladimir.messenger.data.mirror.MirrorHub.publishOwnAction(entry.peer, "", chat.id, text)
-                    RustBridge.retryMessage(wireId, chat.id, entry.peer, text) || RustBridge.sendMessage(wireId, chat.id, entry.peer, text)
+            val now = android.os.SystemClock.elapsedRealtime()
+            ChatClearPumpPolicy.mirrorThenDeliver(
+                mirror = { syncMirrorTombstones(owner, now) },
+                recordFailure = { android.util.Log.w("ChatClearDelivery", "Mirror sync failed; continuing peer delivery", it) },
+            ) {
+                val pending = outbox.pending()
+                val pendingIds = pending.mapTo(HashSet()) { it.batch.operation }
+                lastAttempts.keys.retainAll(pendingIds)
+                for (entry in pending.asSequence().filter { it.owner == owner && ChatClearPumpPolicy.due(now, lastAttempts[it.batch.operation], RETRY_MS) }.take(8)) {
+                    lastAttempts[entry.batch.operation] = now
+                    val chat = chatDao.getChatById(entry.chat) ?: continue
+                    if (chat.contactId != entry.peer || chatDao.getChatByContactId(entry.peer)?.id != entry.chat) continue
+                    if (!apply.apply(entry.peer, entry.batch)) continue
+                    val text = ChatClearWire.encode(entry.batch)
+                    val wireId = entry.batch.operation.toString()
+                    val mirrored = com.vladimir.messenger.data.mirror.MirrorHub.deliverAction(entry.peer, "", chat.id, text)
+                    if (!mirrored) {
+                        com.vladimir.messenger.data.mirror.MirrorHub.publishOwnAction(entry.peer, "", chat.id, text)
+                        RustBridge.retryMessage(wireId, chat.id, entry.peer, text) || RustBridge.sendMessage(wireId, chat.id, entry.peer, text)
+                    }
                 }
             }
         } finally { mutex.unlock() }
