@@ -22,7 +22,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class ChatClearLocalCleanupInstrumentedTest {
     private val db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext<Context>(), AppDatabase::class.java).build()
-    private val cleanup = ChatClearLocalCleanup(db)
+    private val cleanup = ChatClearLocalCleanup(db) { true }
     @After fun close() = db.close()
 
     @Test fun onlyRequestedChatAndIdsAreRemovedAndPreviewIsRecomputed() = runBlocking {
@@ -52,6 +52,70 @@ class ChatClearLocalCleanupInstrumentedTest {
         assertEquals("new", db.chatDao().getChatById("first")?.lastMessage)
         assertTrue(cleanup.apply("first", listOf("old")))
         assertFalse(cleanup.apply("missing", listOf("old")))
+    }
+
+    @Test fun privateFileFailureKeepsDatabaseRowsForRetry() = runBlocking {
+        db.chatDao().insertChat(ChatEntity("chat", "friend", "Friend"))
+        db.messageDao().insertMessage(MessageEntity("id", "chat", "friend", "file", 1))
+        db.fileTransferDao().insertTransferIgnore(FileTransferEntity(
+            "transfer", "id", "chat", "friend", "INCOMING", "file.txt", "text/plain", 1L, 1, 1,
+            "hash", "COMPLETE", createdAtMs = 1, expiresAtMs = 10, updatedAtMs = 1,
+        ))
+        var filesAvailable = false
+        val guarded = ChatClearLocalCleanup(db) { filesAvailable }
+        assertFalse(guarded.apply("chat", listOf("id")))
+        assertNotNull(db.messageDao().getMessageById("id"))
+        assertNotNull(db.fileTransferDao().getTransfer("transfer"))
+        filesAvailable = true
+        assertTrue(guarded.apply("chat", listOf("id")))
+        assertNull(db.messageDao().getMessageById("id"))
+        assertNull(db.fileTransferDao().getTransfer("transfer"))
+    }
+
+    @Test fun concurrentTransferChangeForcesRetryBeforeRemovingRows() = runBlocking {
+        db.chatDao().insertChat(ChatEntity("chat", "friend", "Friend"))
+        db.messageDao().insertMessage(MessageEntity("id", "chat", "friend", "file", 1))
+        db.fileTransferDao().insertTransferIgnore(FileTransferEntity(
+            "transfer", "id", "chat", "friend", "INCOMING", "file.txt", "text/plain", 1L, 1, 1,
+            "hash", "TRANSFERRING", createdAtMs = 1, expiresAtMs = 10, updatedAtMs = 1,
+        ))
+        val guarded = ChatClearLocalCleanup(db) {
+            db.openHelper.writableDatabase.execSQL("UPDATE file_transfers SET updatedAtMs=2 WHERE transferId='transfer'")
+            true
+        }
+        assertFalse(guarded.apply("chat", listOf("id")))
+        assertNotNull(db.messageDao().getMessageById("id"))
+        assertNotNull(db.fileTransferDao().getTransfer("transfer"))
+    }
+
+    @Test fun privateCopiesAreRemovedButIndependentFilesAreKept() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val transferId = UUID.randomUUID().toString().replace("-", "")
+        val chunks = File(context.noBackupFilesDir, "file_transfers/v1/$transferId")
+        val received = File(context.noBackupFilesDir, "file_received/v1/$transferId")
+        val preview = File(context.noBackupFilesDir, "file_preview/v1/$transferId.jpg")
+        val independent = File(context.noBackupFilesDir, "independent-$transferId")
+        chunks.mkdirs(); received.mkdirs(); preview.parentFile!!.mkdirs()
+        File(chunks, "encrypted").writeText("encrypted")
+        File(received, "copy.txt").writeText("copy")
+        preview.writeText("preview")
+        independent.writeText("user copy")
+        try {
+            db.chatDao().insertChat(ChatEntity("chat", "friend", "Friend"))
+            db.messageDao().insertMessage(MessageEntity("id", "chat", "friend", "file", 1))
+            db.fileTransferDao().insertTransferIgnore(FileTransferEntity(
+                transferId, "id", "chat", "friend", "INCOMING", "file.txt", "text/plain", 1L, 1, 1,
+                "hash", "COMPLETE", createdAtMs = 1, expiresAtMs = 10, updatedAtMs = 1,
+            ))
+            assertTrue(ChatClearLocalCleanup(context, db).apply("chat", listOf("id")))
+            assertFalse(chunks.exists())
+            assertFalse(received.exists())
+            assertFalse(preview.exists())
+            assertEquals("user copy", independent.readText())
+            assertNull(db.fileTransferDao().getTransfer(transferId))
+        } finally {
+            chunks.deleteRecursively(); received.deleteRecursively(); preview.delete(); independent.delete()
+        }
     }
 
     @Test fun fileAliasesResolveBothSenderIdsAndRecipientPlaceholdersWithinOneChat() = runBlocking {
