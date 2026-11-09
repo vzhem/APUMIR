@@ -431,7 +431,7 @@ class CoreServerService : Service() {
 
         // р227: этот путь (запасной, через облачный релей) - второй вход
         // служебных конвертов; зеркалу их отдаём так же, как основной путь.
-        mirror?.publishEnvelope(senderId, chatId, messageId, text)
+        if (!com.vladimir.messenger.data.chatclear.ChatClearWire.isControl(text) || authenticated) mirror?.publishEnvelope(senderId, chatId, messageId, text)
 
         // Раунд 141: каждый страж в защитной обёртке - если какой-то
         // роутер упал на обычном письме, письмо ДОЛЖНО доехать до чата
@@ -470,7 +470,7 @@ class CoreServerService : Service() {
         if (routePacket(TAG, "reaction") { reactionRepository.routeIncoming(senderId, text) }) return true
         if (directPolls.incoming(senderId, text)) return true // р252: опрос
         if (routePacket(TAG, "repost") { repostRepository.routeIncoming(senderId, text) }) return true
-        if (routePacket(TAG, "deletion") { messageDeletion.routeIncoming(senderId, text) }) return true
+        if (routePacket(TAG, "deletion") { messageDeletion.routeIncoming(senderId, text, authenticated) }) return true
         if (routePacket(TAG, "edit") { messageEdit.routeIncoming(senderId, text) }) return true
         if (routePacket(TAG, "postViews") { postViews.routeIncoming(senderId, text) }) return true
         if (routePacket(TAG, "hearts") { hearts.routeIncoming(senderId, text) }) return true
@@ -1883,7 +1883,7 @@ class CoreServerService : Service() {
             Log.i(TAG, "Mirror envelope: repost from ${senderId.takeLast(8)} applied")
             return true
         }
-        if (routePacket(TAG, "deletion") { messageDeletion.routeIncoming(senderId, text) }) {
+        if (routePacket(TAG, "deletion") { messageDeletion.routeMirrorIncoming(senderId, text) }) {
             Log.i(TAG, "Mirror envelope: deletion from ${senderId.takeLast(8)} applied")
             return true
         }
@@ -2639,7 +2639,7 @@ class CoreServerService : Service() {
                     // партнёру-зеркалу: тот применит его у себя теми же
                     // разборщиками. Тексты сюда не попадают - у них свой путь
                     // (publishIncoming), двойников не будет.
-                    mirror?.publishEnvelope(senderId, chatId, messageId, text)
+                    if (!com.vladimir.messenger.data.chatclear.ChatClearWire.isControl(text) || (sealed && MessageSealer.openedByExpectedSender(rawText, senderId))) mirror?.publishEnvelope(senderId, chatId, messageId, text)
 
                     // F3: file packets ride the same durable transport but must never be stored
                     // as chat text. Relay cleanup still happens through the per-message ACK below.
@@ -2744,7 +2744,7 @@ class CoreServerService : Service() {
                     // Раунд 135: «удали у всех» в личном чате - конверт
                     // APUDEL1 разбирается до сохранения, в переписку ему
                     // дороги нет (как у реакций).
-                    if (messageDeletion.routeIncoming(senderId, text)) {
+                    if (messageDeletion.routeIncoming(senderId, text, sealed && MessageSealer.openedByExpectedSender(rawText, senderId))) {
                         try {
                             RustBridge.sendDeliveryAck(messageId, senderId)
                         } catch (e: Exception) {
@@ -3029,7 +3029,7 @@ class CoreServerService : Service() {
                             // внутри: не чаще раза в сутки одному).
                             serviceScope.launch {
                                 runCatching {
-                                    if (peerRankStore.qualifiedFor(peerId) == null) { requestPeerRank(peerId) }
+                                    if (!com.vladimir.messenger.data.rank.PeerRankStore.isVipRank(peerRankStore.qualifiedFor(peerId))) { requestPeerRank(peerId) }
                                 }
                             }
                             Log.i(TAG, "🟢 ONLINE: $peerName")

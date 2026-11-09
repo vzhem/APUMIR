@@ -60,6 +60,7 @@ class FileTransferReceiverTest {
         routeOffer: suspend (String, String) -> FileTransferReceiver.OfferRouting = { _, _ -> FileTransferReceiver.OfferRouting.Unknown },
         onFcap: (suspend (String, String, Int) -> Unit)? = null,
         onAuthenticatedFcap: (suspend (String, String, Int) -> Unit)? = null,
+        suppressCleared: suspend (String, String, String) -> Boolean = { _, _, _ -> false },
     ) = FileTransferReceiver(
         transferDao = dao,
         chunkStore = chunkStore,
@@ -75,6 +76,7 @@ class FileTransferReceiverTest {
         routeOffer = routeOffer,
         onFcap = onFcap ?: { _, _, _ -> },
         onAuthenticatedDirectFcap = onAuthenticatedFcap ?: { _, _, _ -> },
+        suppressCleared = suppressCleared,
     )
 
     /** K3: бинарный диапазон куска через то же «окно», что у ядра (событие). */
@@ -273,6 +275,58 @@ class FileTransferReceiverTest {
             FakeFileCryptoGateway.fakeEncrypt(firstChunk),
             chunkStore.readEncryptedChunk(transferIdHex, 0L),
         )
+    }
+
+    @Test
+    fun clearedFileOfferIsNotRecreated() = runTest {
+        val seen = mutableListOf<Triple<String, String, String>>()
+        val receiver = receiver(suppressCleared = { peer, chat, id ->
+            seen.add(Triple(peer, chat, id)); true
+        })
+        deliver(receiver, offerTexts())
+        assertNull(dao.getTransfer(transferIdHex))
+        assertEquals(Triple(senderId, chatId, "file-$transferIdHex"), seen.first())
+    }
+
+    @Test
+    fun fileClearRacingOfferInsertionDoesNotLeaveCard() = runTest {
+        var calls = 0
+        val receiver = receiver(suppressCleared = { _, _, _ -> ++calls > 1 })
+        deliver(receiver, offerTexts())
+        assertTrue(calls >= 2)
+        assertNull(dao.getTransfer(transferIdHex))
+    }
+
+    @Test
+    fun clearedExistingTransferIgnoresRepeatedOfferAndChunks() = runTest {
+        var cleared = false
+        val receiver = receiver(suppressCleared = { peer, chat, id ->
+            cleared && peer == senderId && chat == chatId && id == "file-$transferIdHex"
+        })
+        deliver(receiver, offerTexts())
+        assertNotNull(dao.getTransfer(transferIdHex))
+        val previousResponses = transportSends.size
+        cleared = true
+        deliver(receiver, offerTexts())
+        val firstChunk = plaintext.copyOfRange(0, chunkSize)
+        deliver(receiver, chunkTexts(0, firstChunk))
+        binaryChunk(receiver, 0, 0, FakeFileCryptoGateway.fakeEncrypt(firstChunk))
+        assertTrue(chunkStore.storedChunkIndices(transferIdHex).isEmpty())
+        assertEquals(0L, dao.getTransfer(transferIdHex)!!.completedChunks)
+        assertEquals(previousResponses, transportSends.size)
+    }
+
+    @Test
+    fun clearRacingChunkWriteRemovesTheChunk() = runTest {
+        var checkDuringChunk = false
+        val receiver = receiver(suppressCleared = { _, _, _ ->
+            checkDuringChunk && chunkStore.storedChunkIndices(transferIdHex).isNotEmpty()
+        })
+        deliver(receiver, offerTexts())
+        checkDuringChunk = true
+        deliver(receiver, chunkTexts(0, plaintext.copyOfRange(0, chunkSize)))
+        assertTrue(chunkStore.storedChunkIndices(transferIdHex).isEmpty())
+        assertTrue(dao.getChunks(transferIdHex).isEmpty())
     }
 
     @Test

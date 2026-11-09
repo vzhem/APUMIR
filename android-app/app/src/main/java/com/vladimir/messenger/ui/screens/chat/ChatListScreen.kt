@@ -789,22 +789,9 @@ fun ChatListScreen(
         }
     }
 
-    // Подтверждение очистки переписки.
     confirmClearChat?.let { chat ->
-        ApuPremiumDialog(
-            title = stringResource(R.string.chat_clear_q),
-            onDismiss = { confirmClearChat = null },
-            confirmLabel = stringResource(R.string.chat_clear),
-            onConfirm = {
-                viewModel.clearChatHistory(chat.id)
-                confirmClearChat = null
-            },
-        ) {
-            Text(
-                stringResource(R.string.chat_clear_body, chat.contactName),
-                style = MaterialTheme.typography.bodyMedium,
-                color = ApuBubbleTextColor,
-            )
+        ChatClearDialog(chat, onDismiss = { confirmClearChat = null }) { both ->
+            viewModel.clearChatHistory(chat.id, both); confirmClearChat = null
         }
     }
 

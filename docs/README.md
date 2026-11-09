@@ -41,6 +41,7 @@
 | [`CALLS_BOOTSTRAP.md`](CALLS_BOOTSTRAP.md) | Звонки между абонентами |
 | [`CHANNEL_SWARM_DESIGN.md`](CHANNEL_SWARM_DESIGN.md) | Раздача постов канала роем |
 | [`CHAT_OPENING.md`](CHAT_OPENING.md) | Открытие личного чата без ожидания сети |
+| [`CHAT_CLEAR_AGREEMENT_DESIGN.md`](CHAT_CLEAR_AGREEMENT_DESIGN.md) | Проект согласованной очистки чата; пока не включён |
 | [`CONVERSATION_WALLPAPERS.md`](CONVERSATION_WALLPAPERS.md) | Фон отдельного чата |
 | [`CONTACT_DIRECTORY_RESET.md`](CONTACT_DIRECTORY_RESET.md) | Однократная очистка справочника контактов |
 | [`CORE_ROADMAP.md`](CORE_ROADMAP.md) | План развития ядра |

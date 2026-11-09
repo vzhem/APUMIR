@@ -29,6 +29,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -72,6 +73,7 @@ class ChatDetailViewModel @Inject constructor(
 
     /** р235: собеседник личного чата - ему уходит «печатает…». */
     @Volatile private var peerId: String = ""
+    private val rankPeerId = MutableStateFlow("")
 
     /** р235: когда последний раз отправляли «печатает» (не чаще раза в 2.5 с). */
     @Volatile private var lastTypingSentAt = 0L
@@ -98,7 +100,7 @@ class ChatDetailViewModel @Inject constructor(
 
     private val historyPaging = DirectChatHistoryPaging()
 
-    // До init: init синхронно зовёт refreshAttachmentRights, а свойства Kotlin создаются по порядку объявления.
+    // Создаётся до init: фоновая загрузка прав использует этот объект.
     private val rankRights = RankRights(appContext)
 
     private val historyObserver = ChatHistoryObserver(
@@ -119,7 +121,7 @@ class ChatDetailViewModel @Inject constructor(
     )
 
     init {
-        refreshAttachmentRights()
+        viewModelScope.launch(Dispatchers.IO) { refreshAttachmentRights() }
         observePeerTyping()
         observeDrafts()
         loadMessages()
@@ -321,12 +323,12 @@ class ChatDetailViewModel @Inject constructor(
      * никем не обновлялся, а peer_discovered писал только в таблицу contacts.
      * Слушаем строку чата в БД — peer_discovered/peer_lost её же и обновляют.
      */
-    /** Ранг собеседника не знаем - попросить адресно, чтобы значок VIP не ждал рассылку. */
+    /** Обновляем неизвестный или ещё не VIP ранг с ограничением частоты. */
     private fun requestPeerRankIfUnknown(peer: String) {
         if (peer.isBlank()) return
         viewModelScope.launch {
             runCatching {
-                if (peerRankStore.qualifiedFor(peer) == null) {
+                if (!com.vladimir.messenger.data.rank.PeerRankStore.isVipRank(peerRankStore.qualifiedFor(peer))) {
                     peerRankBroadcaster.requestRank(peer)
                 }
             }
@@ -334,19 +336,17 @@ class ChatDetailViewModel @Inject constructor(
     }
 
     private fun observeContactPresence() {
-        // Знак VIP и золотое кольцо у имени собеседника обновляем на лету: ранг
-        // может приехать в любой момент конвертом APURANK1, а экран уже открыт.
+        // Ранг и адрес поступают независимо; оба обновляют знак VIP.
         viewModelScope.launch {
-            peerRankStore.vipNodeIds.collect { vipIds ->
-                val peer = peerId.lowercase()
+            observeChatPeerVip(rankPeerId, peerRankStore.vipNodeIds).collectLatest { (peer, vipIds) ->
                 requestPeerRankIfUnknown(peer)
-                val knownRank = runCatching { peerRankStore.qualifiedFor(peer) }.getOrNull()
+                val knownRank = readChatPeerRank(peerRankStore, peer)
                 _uiState.update { it.copy(peerRankQualified = knownRank) }
                 // В переписке с собственным узлом собеседника нет: кольцо решает
                 // МОЙ ранг (он же виден в профиле и на главной). Свой ранг лежит
                 // в настройках, поэтому читаем его в фоне, а не на главном потоке.
                 val selfVip = withContext(Dispatchers.IO) {
-                    isSelfChat(_uiState.value.messages, peerId) && ownVip()
+                    isSelfChat(_uiState.value.messages, peer) && ownVip()
                 }
                 _uiState.update {
                     it.copy(
@@ -370,7 +370,7 @@ class ChatDetailViewModel @Inject constructor(
                         contactDao.getContactById(chat.contactId)?.username.orEmpty()
                     }.getOrDefault("")
                     // р235: адрес собеседника нужен для «печатает…».
-                    if (chat.contactId.isNotBlank()) peerId = chat.contactId
+                    if (chat.contactId.isNotBlank()) { peerId = chat.contactId; rankPeerId.value = chat.contactId }
                     // р241/р243: свой ли это узел, решает загрузка переписки:
                     // она сравнивает адрес собеседника со «своим» адресом из
                     // уже полученных сообщений (recipientId). Ядро здесь не

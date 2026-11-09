@@ -810,7 +810,7 @@
     <string name="onb_start_chatting">Начать общение</string>
     <string name="onb_privacy_body">Пароль не покидает телефон: ключи запираются прямо здесь. Ни телефонного номера, ни почты — только вы и ваши контакты.</string>
     <string name="onb_nickname_hint">Или введите @никнейма друга, который пригласил вас</string>
-    <string name="onb_nickname_not_found">Пользователя с таким никнеймом не найдено в сети</string>
+    <string name="onb_nickname_not_found">Никнейм не найден среди известных контактов. Попросите друга прислать ссылку-приглашение.</string>
     <string name="onb_nickname_multiple">Найдено несколько пользователей с таким никнеймом — уточните ссылку</string>
     <!-- MTProto прокси -->
     <string name="mtproxy_title">MTProto прокси</string>
@@ -2582,4 +2582,9 @@
     <string name="action_confirm">Подтвердить</string>
     <string name="feature_packs_select_all_confirm_title">Выбрать все функции?</string>
     <string name="feature_packs_select_all_confirm_body">Все функции начнут скачиваться сразу и займут место на телефоне. Продолжить?</string>
+    <string name="chat_clear_also_peer">Также у собеседника</string>
+    <string name="chat_clear_peer_limit">Удалятся только сообщения и файлы, уже известные этому устройству. У собеседника они исчезнут после доставки запроса; ему нужна обновлённая версия. Не полученные здесь сообщения и копии на других устройствах могут остаться.</string>
+    <string name="chat_clear_peer_queued">Запрос на очистку поставлен в очередь. У собеседника он выполнится после доставки.</string>
+    <string name="chat_clear_peer_empty">На этом устройстве нет сообщений для отправки запроса.</string>
+    <string name="chat_clear_peer_error">Не удалось поставить очистку в очередь. Попробуйте ещё раз.</string>
 </resources>

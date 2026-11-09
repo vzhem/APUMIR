@@ -39,6 +39,7 @@ class MessageDeletionRepository @Inject constructor(
     private val chatDao: ChatDao,
     private val reactionDao: MessageReactionDao,
     private val outbox: DeletionOutbox,
+    private val chatClear: com.vladimir.messenger.data.chatclear.ChatClearDelivery,
     private val groupDao: GroupDao,
     /** р252: удалённое сообщение уносит и карточку своего опроса. */
     private val directPollRepository: com.vladimir.messenger.data.directpoll.DirectPollRepository,
@@ -178,6 +179,7 @@ class MessageDeletionRepository @Inject constructor(
      * поэтому это не [routeIncoming].
      */
     suspend fun applyMirrorOutgoing(peerId: String, text: String): Boolean {
+        if (chatClear.applyMirrorOutgoing(peerId, text)) return true
         if (!text.startsWith("$PREFIX|")) return false
         val parts = text.split('|')
         if (parts.size != 4) return true
@@ -205,7 +207,11 @@ class MessageDeletionRepository @Inject constructor(
      * это конверт удаления (разобран или испорчен) - службу не сохранять
      * его как текст.
      */
-    suspend fun routeIncoming(senderId: String, text: String): Boolean {
+    suspend fun routeMirrorIncoming(senderId: String, text: String): Boolean =
+        chatClear.routeMirrorIncoming(senderId, text) || routeIncoming(senderId, text)
+
+    suspend fun routeIncoming(senderId: String, text: String, authenticated: Boolean = false): Boolean {
+        if (chatClear.routeIncoming(senderId, text, authenticated)) return true
         if (!text.startsWith("$PREFIX|")) return false
         val parts = text.split('|')
         // Раунд 137: подтверждение доставки - отправитель снимает команду
@@ -257,6 +263,9 @@ class MessageDeletionRepository @Inject constructor(
      * живёт до ack собеседника.
      */
     suspend fun pump() {
+        try { chatClear.pump() }
+        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (error: Exception) { Log.w(TAG, "Chat clear retry failed", error) }
         val now = System.currentTimeMillis()
         val due = outbox.due(now, RETRY_INTERVAL_MS, TTL_MS)
             .filter { it.kind == DeletionOutbox.KIND_DIRECT }

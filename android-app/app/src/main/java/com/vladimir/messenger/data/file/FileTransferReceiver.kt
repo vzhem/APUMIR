@@ -46,10 +46,7 @@ class FileTransferReceiver(
     /** Хранение чужих файлов и приём через хранителя (этап 7 роя); по умолчанию всё отклоняется. */
     private val custody: CustodyPolicy = CustodyPolicy(),
     /**
-     * Куда класть новое предложение (рой, этап 9: файл группы). Участник
-     * группы попросил файл у другого участника, и тот шлёт обычную передачу;
-     * общего чата у них может не быть, а прямой кадр несёт вместо чата метку
-     * `direct`. По умолчанию - «не знаю», и решает транспортный чат.
+     * Куда класть предложение файла группы; по умолчанию решает транспортный чат.
      */
     private val routeOffer: suspend (senderId: String, fileSha256Hex: String) -> OfferRouting = { _, _ -> OfferRouting.Unknown },
     /** Раздача общей копии файла группы (K2): подтверждения, инвентарь и отказы просителей - сидеру. */
@@ -61,10 +58,12 @@ class FileTransferReceiver(
      */
     private val onFcap: suspend (transferIdHex: String, from: String, maxFramePayload: Int) -> Unit =
         { _, _, _ -> },
-    /** FCAP v2 is deliberately separate from [onFcap] so existing JVM callers remain source-compatible. */
     private val onAuthenticatedDirectFcap: suspend (transferIdHex: String, from: String, maxFramePayload: Int) -> Unit =
         { _, _, _ -> },
+    private val suppressCleared: suspend (peer: String, chatId: String, messageId: String) -> Boolean = { _, _, _ -> false },
 ) {
+    private val incomingTransferWriter = IncomingFileTransferWriter(transferDao, suppressCleared)
+
     /**
      * Границы сидера общей копии файла группы (K2, v11.70.25,
      * [GroupFileSeeder]). Строка `OUTGOING`/`SEEDING` - не передача одному
@@ -649,6 +648,10 @@ class FileTransferReceiver(
                 return
             }
         }
+        if (incomingTransferWriter.suppressOffer(senderId, targetChatId, transferIdHex, groupOffer, manifest.displayName)) {
+            bufferedChunks.remove(transferIdHex)?.values?.forEach { it.fill(0) }
+            return
+        }
         // Раунд 120: тот же файл от того же собеседника в тот же чат уже
         // приходил и проверен (COMPLETE) - повторную передачу не качаем.
         // Новый transferId получает копию проверенного plaintext и сразу
@@ -680,7 +683,7 @@ class FileTransferReceiver(
             // в первичную (самую раннюю) - гифка собирается из частей от
             // нескольких телефонов. Победителя и уборку см. resolveParallel.
         }
-        val transfer = existing ?: insertIncomingTransfer(manifest, senderId, targetChatId, now) ?: return
+        val transfer = existing ?: incomingTransferWriter.insert(manifest, senderId, targetChatId, now) ?: return
         if (transfer.custodianNodeId.isNotBlank()) directFromOrigin.add(transferIdHex)
         // Раньше отказывались, теперь берём (первый сид пропал): куски снова нужны.
         declined.remove(transferIdHex)
@@ -884,6 +887,7 @@ class FileTransferReceiver(
         ciphertext: ByteArray,
     ) {
         val transfer = transferDao.getTransfer(transferIdHex)
+        if (transfer != null && incomingTransferWriter.suppress(transfer)) return
         val manifestBytes = chunkStore.readManifest(transferIdHex)
         if (transfer == null || manifestBytes == null) {
             if (declined.containsKey(transferIdHex)) return
@@ -977,6 +981,7 @@ class FileTransferReceiver(
         ciphertext: ByteArray,
     ) {
         val transfer = transferDao.getTransfer(transferIdHex) ?: return
+        if (incomingTransferWriter.suppress(transfer)) return
         if (transfer.state == "COMPLETE") {
             // Отправитель не получил итогового подтверждения и шлёт снова:
             // повторяем его (id детерминирован, сеть отсеет дубли), иначе
@@ -1056,6 +1061,7 @@ class FileTransferReceiver(
             }
             existing?.fill(0)
         }
+        if (incomingTransferWriter.suppress(transfer)) return
         val stored = try {
             chunkStore.storeEncryptedChunk(
                 transferIdHex,
@@ -1077,6 +1083,11 @@ class FileTransferReceiver(
             ) {
                 advance(transfer, newState = transfer.state, errorCode = ERROR_NO_SPACE)
             }
+            return
+        }
+        if (incomingTransferWriter.suppress(transfer)) {
+            check(chunkStore.deleteEncryptedChunk(transferIdHex, chunkIndex)) { "Cannot remove cleared file chunk" }
+            transferDao.deleteChunk(transferIdHex, chunkIndex)
             return
         }
         val inserted = transferDao.insertChunkIgnore(
@@ -1154,7 +1165,7 @@ class FileTransferReceiver(
         now: Long,
     ): Boolean {
         val transferIdHex = manifest.transferIdHex
-        if (insertIncomingTransfer(manifest, senderId, chatId, now) == null) return false
+        if (incomingTransferWriter.insert(manifest, senderId, chatId, now) == null) return false
         try {
             chunkStore.storeManifest(transferIdHex, offer.manifest)
             chunkStore.storeKeyEnvelope(transferIdHex, offer.keyEnvelope)
@@ -1431,6 +1442,7 @@ class FileTransferReceiver(
         // Re-fetch: the row may have advanced (e.g. VERIFYING) since the caller loaded it, and
         // the monotonic Room guard must never see regressed progress numbers.
         val fresh = transferDao.getTransfer(transferIdHex) ?: return
+        if (incomingTransferWriter.suppress(fresh)) return
         val manifestBytes = chunkStore.readManifest(transferIdHex) ?: return
         if (fresh.state == "COMPLETE") {
             // Повторное предложение/кусок после потерянного итогового ACK:
@@ -1448,6 +1460,7 @@ class FileTransferReceiver(
             manifest.displayName,
             manifest.fileSize.toLong(),
         )
+        var checkingClear = false
         try {
             keyVault.withExistingKey(transferIdHex) { fileKey ->
                 for (chunkIndex in 0L until manifest.chunkCount.toLong()) {
@@ -1469,7 +1482,18 @@ class FileTransferReceiver(
             if (digest.digest().toHex() != manifest.fileSha256Hex) {
                 throw IllegalStateException("Whole-file SHA-256 mismatch")
             }
+            checkingClear = true
+            val clearedBeforeCommit = incomingTransferWriter.suppress(fresh)
+            checkingClear = false
+            if (clearedBeforeCommit) { writer.abort(); return }
             writer.commit()
+            checkingClear = true
+            val clearedAfterCommit = incomingTransferWriter.suppress(fresh)
+            checkingClear = false
+            if (clearedAfterCommit) {
+                check(receivedStore.deleteTransfer(transferIdHex)) { "Cannot remove cleared received file" }
+                return
+            }
             check(advance(fresh, newState = "COMPLETE") == 1) {
                 "Cannot persist verified file completion"
             }
@@ -1513,6 +1537,7 @@ class FileTransferReceiver(
         } catch (error: Exception) {
             // abort() is a no-op after a successful commit (Writer guards its finished state).
             writer.abort()
+            if (checkingClear || error is kotlinx.coroutines.CancellationException) throw error
             // Кусок, не прошедший проверку подлинности (например, записанный
             // версией без проверки при приёме), - не приговор файлу:
             // выбрасываем битые куски, возвращаем передачу в TRANSFERRING и
@@ -1941,7 +1966,7 @@ class FileTransferReceiver(
         } catch (pinError: Exception) {
             refuse("pinned exchange key changed for $originId (${pinError.message})"); return
         }
-        if (existing == null && insertIncomingTransfer(manifest, originId, chatId, now) == null) return
+        if (existing == null && incomingTransferWriter.insert(manifest, originId, chatId, now) == null) return
         // Несколько хранителей (этап 8): каждый, кто представился, - в список;
         // подтверждения и инвентарь пойдут всем (не больше MAX_HOLDERS).
         val knownHolders = FileCustodyPdu.holders(existing?.custodianNodeId ?: "")
@@ -2340,38 +2365,6 @@ class FileTransferReceiver(
         custody.onRecipientWant(transferIdHex, senderId, contiguousChunks, want.seq, want.ranges)
     }
 
-    private suspend fun insertIncomingTransfer(
-        manifest: FileTransferManifestFfi,
-        senderId: String,
-        chatId: String,
-        now: Long,
-    ): FileTransferEntity? {
-        val entity = FileTransferEntity(
-            transferId = manifest.transferIdHex,
-            messageId = FileTransferWire.chatPlaceholderMessageId(manifest.transferIdHex),
-            chatId = chatId,
-            peerNodeId = senderId,
-            direction = "INCOMING",
-            displayName = manifest.displayName,
-            mediaType = manifest.mediaType,
-            totalBytes = manifest.fileSize.toLong(),
-            chunkSize = manifest.chunkSize.toInt(),
-            chunkCount = manifest.chunkCount.toLong(),
-            fileSha256 = manifest.fileSha256Hex,
-            state = "OFFERED",
-            createdAtMs = now,
-            expiresAtMs = manifest.expiresAtMs,
-            updatedAtMs = now,
-        )
-        val inserted = if (transferDao.insertNewTransfer(entity)) entity else return null
-        TransferDiagnostics.count(Counters.FILE_STARTED_IN)
-        TransferDiagnostics.record(
-            "file",
-            "входящий файл: ${DiagnosticsReport.formatBytes(entity.totalBytes)} " +
-                "(${entity.mediaType}), кусков ${entity.chunkCount}",
-        )
-        return inserted
-    }
 
     private suspend fun advance(
         transfer: FileTransferEntity,

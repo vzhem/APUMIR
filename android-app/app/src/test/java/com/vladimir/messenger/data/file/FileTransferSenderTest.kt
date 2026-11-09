@@ -117,6 +117,43 @@ class FileTransferSenderTest {
     }
 
     @Test
+    fun clearingDuringTextTransferStopsSubsequentPackets() = runTest {
+        dao.insertNewTransfer(entity(chunkCount = 2, chunkSize = 1024, totalBytes = 2048))
+        stage(chunkCount = 2, chunkSize = 1024, lastChunkBytes = 1024)
+        var cleared = false
+        val packets = mutableListOf<String>()
+        val sender = FileTransferSender(
+            transferDao = dao, chunkStore = chunkStore,
+            transport = PacketTransport { id, _, _, _ -> packets.add(id); cleared = true; true },
+            ownBindingProvider = { binding.copyOf() }, nowMs = { now },
+            prepareClearGuard = { { cleared } },
+        )
+        val summary = sender.pumpOnce()
+        assertEquals(1, packets.size)
+        assertEquals(0, summary.failures)
+        assertEquals("PREPARED", dao.getTransfer(transferIdHex)?.state)
+    }
+
+    @Test
+    fun clearingDuringBinaryTransferStopsFollowingFrames() = runTest {
+        dao.insertNewTransfer(entity(chunkCount = 1, chunkSize = 4096, totalBytes = 4096))
+        stage(chunkCount = 1, chunkSize = 4096, lastChunkBytes = 4096)
+        var cleared = false
+        var frames = 0
+        val sender = FileTransferSender(
+            transferDao = dao, chunkStore = chunkStore, transport = transport,
+            ownBindingProvider = { binding.copyOf() }, nowMs = { now },
+            binaryTransport = { _, _, _, _, _, _ -> frames++; cleared = true; true },
+            prepareClearGuard = { { cleared } },
+        )
+        sender.markBinaryCapable(transferIdHex, 512)
+        val summary = sender.pumpOnce()
+        assertEquals(1, frames)
+        assertEquals(0, summary.failures)
+        assertEquals("PREPARED", dao.getTransfer(transferIdHex)?.state)
+    }
+
+    @Test
     fun firstPumpSendsOfferAndAllWindowChunksThenSent() = runTest {
         dao.insertNewTransfer(entity(chunkCount = 3, chunkSize = 1024, totalBytes = 2500))
         stage(chunkCount = 3, chunkSize = 1024, lastChunkBytes = 452)

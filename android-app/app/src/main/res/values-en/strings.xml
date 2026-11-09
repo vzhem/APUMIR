@@ -712,7 +712,7 @@
     <string name="onb_start_chatting">Start chatting</string>
     <string name="onb_privacy_body">Your password never leaves the phone: the keys are locked right here. No phone number and no email — only you and your contacts.</string>
     <string name="onb_nickname_hint">Or enter the @nickname of the friend who invited you</string>
-    <string name="onb_nickname_not_found">No user found with that nickname in the network</string>
+    <string name="onb_nickname_not_found">Nickname not found in the known directory. Ask your friend for an invite link.</string>
     <string name="onb_nickname_multiple">Multiple users found with that nickname — please use the invite link instead</string>
     <!-- MTProto proxy -->
     <string name="mtproxy_title">MTProto proxy</string>
@@ -2566,4 +2566,9 @@ The file is not on this phone</string>
     <string name="action_confirm">Confirm</string>
     <string name="feature_packs_select_all_confirm_title">Select all functions?</string>
     <string name="feature_packs_select_all_confirm_body">All functions will start downloading at once and take up space on your phone. Continue?</string>
+    <string name="chat_clear_also_peer">Also for the other person</string>
+    <string name="chat_clear_peer_limit">Only messages and files already known to this device are included. They disappear for the other person after delivery; they need an updated version. Messages not received here and copies on other devices may remain.</string>
+    <string name="chat_clear_peer_queued">Clear request queued. It will take effect for the other person after delivery.</string>
+    <string name="chat_clear_peer_empty">There are no messages on this device to include in the request.</string>
+    <string name="chat_clear_peer_error">Could not queue the clear request. Please try again.</string>
 </resources>

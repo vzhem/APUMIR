@@ -97,7 +97,11 @@ fun ChatDetailScreen(
 
     val scheduledAll by com.vladimir.messenger.data.schedule.ScheduledSendStore.items.collectAsStateWithLifecycle()
     val storeContext = androidx.compose.ui.platform.LocalContext.current
-    remember(Unit) { com.vladimir.messenger.data.schedule.ScheduledSendStore.load(storeContext) }
+    LaunchedEffect(storeContext) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.vladimir.messenger.data.schedule.ScheduledSendStore.load(storeContext)
+        }
+    }
     val textColorRevision by com.vladimir.messenger.data.textcolor.TextColorSettingsStore.revision
         .collectAsStateWithLifecycle()
     LaunchedEffect(Unit) {
@@ -257,9 +261,6 @@ fun ChatDetailScreen(
         pendingSave?.let { transfer -> savePicker.launch(transfer.displayName) }
     }
 
-    ChatLatestMessageScrollEffect(
-        listState, uiState.scrollToBottom, uiState.messages.size, viewModel::onScrolledToBottom,
-    )
     ChatHistoryPagingEffect(listState, viewModel::loadOlderMessages)
 
     // SnackBar для ошибок
@@ -551,49 +552,8 @@ fun ChatDetailScreen(
                 }
 
                 else -> {
-                    val transfersByMessageId = remember(uiState.transfers) {
-                        uiState.transfers.associateBy { it.messageId }
-                    }
-                    val chatRows = remember(uiState.messages, uiState.transfers) {
-                        val knownMessageIds = uiState.messages.map { it.id }.toSet()
-                        // Раунд 123: одну гифку может везти несколько телефонов
-                        // (просьба уходит троим). Показываем только первичную
-                        // (самую раннюю) полосу - без трёх одинаковых пузырей.
-                        val shadowed = uiState.transfers
-                            .filter { it.direction == "INCOMING" && it.state != "COMPLETE" }
-                            .groupBy { it.fileSha256 }
-                            .flatMap { (_, group) ->
-                                group.sortedBy { it.createdAtMs }.drop(1).map { it.transferId }
-                            }
-                            .toSet()
-                        val rows = uiState.messages.map { message ->
-                            ChatRow(
-                                key = message.id,
-                                message = message,
-                                transfer = transfersByMessageId[message.id],
-                                orderMs = message.timestamp,
-                            )
-                        } + uiState.transfers
-                            .filter {
-                                it.direction == "INCOMING" &&
-                                    it.state != "COMPLETE" &&
-                                    it.messageId !in knownMessageIds &&
-                                    it.transferId !in shadowed &&
-                                    // Раунд 128/170: гифки и стикеры ходят ТИХО -
-                                    // служебную передачу байтов в ленте не показываем.
-                                    !it.mediaType.equals("image/gif", ignoreCase = true) &&
-                                    !it.displayName.startsWith(com.vladimir.messenger.data.file.STICKER_FILE_PREFIX)
-                            }
-                            .map { transfer ->
-                                ChatRow(
-                                    key = "t-${transfer.transferId}",
-                                    message = null,
-                                    transfer = transfer,
-                                    orderMs = transfer.createdAtMs,
-                                )
-                            }
-                        rows.sortedBy { it.orderMs }
-                    }
+                    val rowsSnapshot = rememberChatRows(chatId, uiState.messages, uiState.transfers)
+                    val chatRows = rowsSnapshot?.rows.orEmpty()
                     // Раунд 173: закреплённые сообщения личного чата; тап -
                     // лента прыгает к самому сообщению.
                     // Раунд 246: закреп и лента живут в Column. Раньше оба были
@@ -679,6 +639,11 @@ fun ChatDetailScreen(
                             (row.message?.content ?: "").contains(searchQuery.trim(), ignoreCase = true)
                         }
                     }
+                    ChatLatestMessageScrollEffect(
+                        listState, uiState.scrollToBottom,
+                        if (rowsSnapshot?.messages === uiState.messages && rowsSnapshot?.transfers === uiState.transfers) shownRows.size else 0,
+                        viewModel::onScrolledToBottom,
+                    )
                     if (searchOpen) {
                         ApuFormTextField(
                             value = searchQuery,

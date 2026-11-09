@@ -711,8 +711,6 @@ class ChatRepository @Inject constructor(
             textColorOverride = row.textColor,
             senderNameColorOverride = row.senderNameColor,
         )
-        // Не сохранено (служебный пакет, дубликат, запрещённое приглашение) -
-        // пустая пара: вызывающий не покажет уведомление.
         if (!saved) return Pair("", "")
         return Pair(chat.id, chat.contactName)
     }
@@ -727,7 +725,6 @@ class ChatRepository @Inject constructor(
             DeliveryAckWire.messageId(row.content)?.let { markOutgoingMessageDelivered(it) }
             return
         }
-        // id чатов на устройствах разные - чат ищем по узлу получателя.
         val chat: Chat = if (row.recipientId.isNotBlank()) {
             getChatByContactId(row.recipientId)
                 ?: getOrCreateChat(row.recipientId, row.contactName.ifBlank { com.vladimir.messenger.util.NodeIds.autoName(row.recipientId) })
@@ -735,7 +732,7 @@ class ChatRepository @Inject constructor(
             val entity = chatDao.getChatById(row.chatId) ?: return
             Chat(id = entity.id, contactId = entity.contactId, contactName = entity.contactName)
         }
-        // Статус уважаем чужой: эхо может принести и QUEUED_OFFLINE.
+        if (com.vladimir.messenger.data.chatclear.ChatClearRegistry.isCleared(context, chat.contactId, row.id)) return
         val mirrorStatus = when (row.status) {
             MessageStatus.SENT.name,
             MessageStatus.QUEUED_OFFLINE.name,
@@ -771,6 +768,9 @@ class ChatRepository @Inject constructor(
                 senderNameColor = row.senderNameColor,
             )
         )
+        if (com.vladimir.messenger.data.chatclear.ChatClearRegistry.isCleared(context, chat.contactId, row.id)) {
+            messageDao.deleteByIdAndChat(row.id, chat.id); return
+        }
         chatDao.updateLastMessage(chat.id, com.vladimir.messenger.util.ChatPreviews.human(row.content) ?: row.content, row.timestamp)
     }
 
@@ -813,7 +813,7 @@ class ChatRepository @Inject constructor(
         if (receivedNameColor.isNotBlank()) {
             TextColorSettingsStore.rememberPeerNameColor(context, senderId, receivedNameColor)
         }
-        if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId)) return false
+        if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId) || com.vladimir.messenger.data.chatclear.ChatClearRegistry.isCleared(context, senderId, messageId)) return false
         // История: пакет контакта сохраняем в ленту историй, в переписку не пускаем.
         if (com.vladimir.messenger.data.story.StoryStore.isStoryPacket(cleanContent)) {
             if (cleanContent.toByteArray(Charsets.UTF_8).size > 16 * 1024) return false
@@ -873,7 +873,7 @@ class ChatRepository @Inject constructor(
         )
         // A due-time fallback may race the local hidden-inbox reveal.
         if (messageDao.insertMessageIgnore(entity) == -1L) return false
-        if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId)) {
+        if (com.vladimir.messenger.data.schedule.DeferredInboxStore.isCancelled(context, senderId, messageId) || com.vladimir.messenger.data.chatclear.ChatClearRegistry.isCleared(context, senderId, messageId)) {
             messageDao.deleteByIdChatAndSender(messageId, chatId, senderId)
             return false
         }

@@ -67,20 +67,20 @@ data class ChatDetailUiState(
     val pendingSave: com.vladimir.messenger.data.file.PendingFileExport? = null,
     /** Non-null asks the screen to open Android's system picker for an explicit file retry. */
     val pendingRetryFilePickerId: String? = null,
-    /** Ранг ещё не открыл вложения: кнопка объяснит это сразу, а не после выбора файла. */
-    val canSendAttachments: Boolean = true,
+    /** До фоновой проверки ранга действия закрыты: права нельзя обойти на первом кадре. */
+    val canSendAttachments: Boolean = false,
     val attachmentsLockedHint: String = "",
     /** Отправка только фото/файлов/голоса/GIF/стикеров, видео ещё закрыто («Проводник», 10). */
-    val canSendVideo: Boolean = true,
+    val canSendVideo: Boolean = false,
     val videoLockedHint: String = "",
     /** р252: опросы открываются с «Круга друзей» (3); голосовать можно всегда. */
-    val canCreatePoll: Boolean = true,
+    val canCreatePoll: Boolean = false,
     val pollLockedHint: String = "",
     /** Карточки опросов этого чата: ключ - id сообщения с вопросом. */
     val polls: Map<String, com.vladimir.messenger.data.group.PollSummary> = emptyMap(),
     /** Звонки и видеозвонки открываются с «Круга друзей» (3). */
-    val canCall: Boolean = true,
-    val canVideoCall: Boolean = true,
+    val canCall: Boolean = false,
+    val canVideoCall: Boolean = false,
     val callLockedHint: String = "",
     /** Каталог GIF (наш сервер): гифки, курсор «ещё», состояние. */
     val gifItems: List<com.vladimir.messenger.data.gif.GifItem> = emptyList(),

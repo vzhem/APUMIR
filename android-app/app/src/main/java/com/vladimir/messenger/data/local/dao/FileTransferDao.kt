@@ -217,6 +217,22 @@ interface FileTransferDao {
     )
     suspend fun getExpiredIncomplete(nowMs: Long, limit: Int): List<FileTransferEntity>
 
+    @Query("SELECT DISTINCT messageId FROM file_transfers WHERE chatId = :chatId AND displayName NOT LIKE 'apu-story-video-%' AND displayName NOT LIKE 'apu-avatar-video-%' LIMIT :limit")
+    suspend fun chatTransferMessageIdsForClear(chatId: String, limit: Int): List<String>
+
+    /** The recipient's file placeholder is derived from the transfer ID, not the sender's message ID. */
+    @Query("SELECT DISTINCT 'file-' || transferId FROM file_transfers WHERE chatId = :chatId AND displayName NOT LIKE 'apu-story-video-%' AND displayName NOT LIKE 'apu-avatar-video-%' LIMIT :limit")
+    suspend fun chatTransferAliasesForClear(chatId: String, limit: Int): List<String>
+
+    @Query("SELECT * FROM file_transfers WHERE chatId = :chatId AND (messageId IN (:ids) OR ('file-' || transferId) IN (:ids)) AND displayName NOT LIKE 'apu-story-video-%' AND displayName NOT LIKE 'apu-avatar-video-%' LIMIT :limit")
+    suspend fun chatTransfersForClear(chatId: String, ids: List<String>, limit: Int): List<FileTransferEntity>
+
+    @Query("SELECT * FROM file_transfers WHERE chatId = :chatId AND messageId IN (:ids) AND displayName NOT LIKE 'apu-story-video-%' AND displayName NOT LIKE 'apu-avatar-video-%' LIMIT :limit")
+    suspend fun chatTransfersForMessageIds(chatId: String, ids: List<String>, limit: Int): List<FileTransferEntity>
+
+    @Query("DELETE FROM file_transfers WHERE chatId = :chatId AND messageId IN (:ids) AND displayName NOT LIKE 'apu-story-video-%' AND displayName NOT LIKE 'apu-avatar-video-%'")
+    suspend fun deleteChatMessageTransfers(chatId: String, ids: List<String>): Int
+
     @Query("DELETE FROM file_transfers WHERE transferId = :transferId")
     suspend fun deleteTransfer(transferId: String): Int
 

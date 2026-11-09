@@ -46,9 +46,12 @@ class FileTransferSender(
      * ([markBinaryCapable]); иначе куски идут текстовыми фрагментами.
      */
     private val binaryTransport: ((String, String, Long, Int, Int, ByteArray) -> Boolean)? = null,
+    /** Resolve chat scope once; the returned check is repeated immediately before each packet. */
+    private val prepareClearGuard: suspend (FileTransferEntity) -> (() -> Boolean) = { { false } },
 ) {
     /** Ни прямой канал, ни брокер не приняли кадр — передача ждёт следующего цикла. */
     class RecipientOfflineException(val transferId: String) : Exception("Recipient offline")
+    private class ClearedTransferException : Exception("Transfer cleared")
 
     data class PumpSummary(
         val transfersPumped: Int,
@@ -151,7 +154,9 @@ class FileTransferSender(
             if (result.isFailure) {
                 val error = result.exceptionOrNull()
                 if (error is java.net.SocketTimeoutException || error is java.util.concurrent.TimeoutException) OperationalDiagnostics.tracker.count(OperationalCounter.FILE_TIMEOUT)
-                if (error is RecipientOfflineException) {
+                if (error is ClearedTransferException) {
+                    Log.i(TAG, "Cleared file transfer stopped")
+                } else if (error is RecipientOfflineException) {
                     OperationalDiagnostics.tracker.count(OperationalCounter.FILE_WAIT_ATTEMPTS)
                     // Файл уже у хранителя: получатель заберёт у него, а мы
                     // лишь изредка пробуем напрямую - состояние остаётся
@@ -175,6 +180,8 @@ class FileTransferSender(
 
     private suspend fun pumpTransfer(transfer: FileTransferEntity): Int {
         val transferIdHex = transfer.transferId
+        val cleared = prepareClearGuard(transfer)
+        if (cleared()) throw ClearedTransferException()
         val manifestBytes = chunkStore.readManifest(transferIdHex)
             ?: throw IllegalStateException("Manifest missing for $transferIdHex")
         val keyEnvelope = chunkStore.readKeyEnvelope(transferIdHex)
@@ -191,6 +198,7 @@ class FileTransferSender(
             payload = FileOfferPdu.encode(manifestBytes, keyEnvelope, ownBinding),
             messageIdFor = { fragment -> FileTransferWire.offerMessageId(transferIdHex, fragment) },
             transfer = transfer,
+            cleared = cleared,
         )
 
         // 2) Windowed chunks beyond the receiver-confirmed contiguous prefix.
@@ -226,12 +234,13 @@ class FileTransferSender(
         }
         val windowEnd = minOf(transfer.chunkCount, acked + windowChunks)
         for (chunkIndex in acked until windowEnd) {
+            if (cleared()) throw ClearedTransferException()
             val ciphertext = chunkStore.readEncryptedChunk(transferIdHex, chunkIndex)
                 ?: throw IllegalStateException("Chunk $chunkIndex missing for $transferIdHex")
             try {
                 sentPackets += if (useBinary) {
                     try {
-                        sendBinaryChunk(transfer, transferIdHex, chunkIndex, ciphertext)
+                        sendBinaryChunk(transfer, transferIdHex, chunkIndex, ciphertext, cleared)
                     } catch (_: RecipientOfflineException) {
                         // Прямой кадр оборвался: тот же кусок — текстовым путём
                         // (LAN / брокер). Иначе фото зависает на половине, а
@@ -245,6 +254,7 @@ class FileTransferSender(
                                 FileTransferWire.chunkMessageId(transferIdHex, chunkIndex, fragment)
                             },
                             transfer = transfer,
+                            cleared = cleared,
                         )
                     }
                 } else {
@@ -257,6 +267,7 @@ class FileTransferSender(
                             FileTransferWire.chunkMessageId(transferIdHex, chunkIndex, fragment)
                         },
                         transfer = transfer,
+                        cleared = cleared,
                     )
                 }
             } finally {
@@ -264,6 +275,7 @@ class FileTransferSender(
             }
         }
 
+        if (cleared()) throw ClearedTransferException()
         val targetState = if (windowEnd >= transfer.chunkCount) "SENT" else "TRANSFERRING"
         if (transfer.state != targetState || targetState == "TRANSFERRING") {
             advance(transfer, newState = targetState, errorCode = transfer.errorCode)
@@ -278,10 +290,12 @@ class FileTransferSender(
         payload: ByteArray,
         messageIdFor: (Int) -> String,
         transfer: FileTransferEntity,
+        cleared: () -> Boolean,
     ): Int {
         val transferId = hexToBytes(transferIdHex)
         val fragments = FileTransferPacketCodec.fragment(type, transferId, itemIndex, payload)
         for ((fragmentIndex, encodedFragment) in fragments.withIndex()) {
+            if (cleared()) throw ClearedTransferException()
             val text = FileTransferWire.encodeEncodedPacket(encodedFragment)
             // Сначала прямой путь (LAN/UDP/QUIC). Если его нет — durable
             // брокер: иначе при пропавшем «в сети» фото остаётся на 3/6,
@@ -300,6 +314,7 @@ class FileTransferSender(
                 }
             }
             if (!delivered) {
+                if (cleared()) throw ClearedTransferException()
                 delivered = transport.send(
                     messageIdFor(fragmentIndex),
                     transfer.chatId,
@@ -330,6 +345,7 @@ class FileTransferSender(
         transferIdHex: String,
         chunkIndex: Long,
         ciphertext: ByteArray,
+        cleared: () -> Boolean,
     ): Int {
         val transport = checkNotNull(binaryTransport) { "binary transport unset" }
         val capability = binaryCapable[transferIdHex]
@@ -351,6 +367,7 @@ class FileTransferSender(
         try {
             var offset = 0
             while (offset < ciphertext.size) {
+                if (cleared()) throw ClearedTransferException()
                 val end = minOf(ciphertext.size, offset + maxRange)
                 val range = ciphertext.copyOfRange(offset, end)
                 val delivered = runCatching {

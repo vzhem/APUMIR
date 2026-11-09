@@ -125,6 +125,18 @@ class ChatStyleTest(unittest.TestCase):
         group_chat = source("screens/groups/GroupChatScreen.kt")
         self.assertGreaterEqual(group_chat.count(".apuPremiumThread("), 3)
 
+    def test_video_hangup_stays_above_preview_and_respects_system_insets(self):
+        call = source("screens/call/CallScreen.kt")
+        overlay = call.index("VideoCallHangup(")
+        self.assertGreater(overlay, call.index("CallLocalPreview("))
+        self.assertIn("if (state.video && inCall)", call)
+        self.assertIn("navigationBarsPadding()", call[overlay:overlay + 400])
+        self.assertIn("viewModel.hangupOrReject(); onLeaveCall()", call[overlay:overlay + 400])
+        self.assertEqual(3, call.count("if (!state.video) RoundCallButton("))
+        button = source("screens/call/VideoCallHangup.kt")
+        self.assertIn("Icons.Default.CallEnd", button)
+        self.assertIn("Role.Button", button)
+
     def test_no_stock_text_buttons_left_in_the_ui(self):
         """Во всём интерфейсе не осталось плоских Material-кнопок.
 

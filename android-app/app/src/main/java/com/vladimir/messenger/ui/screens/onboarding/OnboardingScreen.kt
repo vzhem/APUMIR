@@ -40,8 +40,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.stateIn
-import kotlinx.coroutines.flow.SharingStarted
 import com.vladimir.messenger.ui.components.ApuBubbleAccentColor
 import com.vladimir.messenger.ui.components.ApuBubbleCard
 import com.vladimir.messenger.ui.components.ApuBubbleField
@@ -581,16 +579,14 @@ private fun ShowInviteStep(
     val clipboardManager = LocalClipboardManager.current
     val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
-    val nickError by viewModel.uiState.map { it.nickError }
-        .stateIn(viewModel.viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-        .collectAsState(initialValue = null)
-    val resolvedInviterId by viewModel.uiState.map { it.resolvedInviterId }
-        .stateIn(viewModel.viewModelScope, SharingStarted.WhileSubscribed(5000), null)
-        .collectAsState(initialValue = null)
+    val inviteState by viewModel.uiState.collectAsStateWithLifecycle()
+    val nickError = inviteState.nickError
+    val resolvedInviterId = inviteState.resolvedInviterId
 
     // Найден пригласивший по никнейму — сообщаем об этом экрану онбординга.
     LaunchedEffect(resolvedInviterId) {
         if (resolvedInviterId != null) {
+            viewModel.onInviterInputChanged()
             onNicknameResolved(resolvedInviterId)
         }
     }
@@ -753,7 +749,7 @@ private fun ShowInviteStep(
                 Spacer(modifier = Modifier.height(10.dp))
                 ApuBubbleField(
                     value = joinText,
-                    onValueChange = { joinText = it },
+                    onValueChange = { joinText = it; viewModel.onInviterInputChanged() },
                     label = { Text(stringResource(R.string.onb_link_or_message)) },
                     minLines = 2,
                     modifier = Modifier.fillMaxWidth(),

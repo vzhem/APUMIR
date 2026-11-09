@@ -182,6 +182,32 @@ class FakeFileTransferDao : FileTransferDao {
             .sortedBy { it.expiresAtMs }
             .take(limit)
 
+    override suspend fun chatTransferMessageIdsForClear(chatId: String, limit: Int): List<String> =
+        transfers.values.filter { it.chatId == chatId && !it.displayName.startsWith("apu-story-video-", true) && !it.displayName.startsWith("apu-avatar-video-", true) }
+            .map { it.messageId }.distinct().take(limit)
+
+    override suspend fun chatTransferAliasesForClear(chatId: String, limit: Int): List<String> =
+        transfers.values.filter { it.chatId == chatId && !it.displayName.startsWith("apu-story-video-", true) && !it.displayName.startsWith("apu-avatar-video-", true) }
+            .map { "file-${it.transferId}" }.distinct().take(limit)
+
+    override suspend fun chatTransfersForClear(chatId: String, ids: List<String>, limit: Int): List<FileTransferEntity> =
+        transfers.values.filter { it.chatId == chatId && (it.messageId in ids || "file-${it.transferId}" in ids) &&
+            !it.displayName.startsWith("apu-story-video-", true) && !it.displayName.startsWith("apu-avatar-video-", true) }.take(limit)
+
+    override suspend fun chatTransfersForMessageIds(chatId: String, ids: List<String>, limit: Int): List<FileTransferEntity> =
+        transfers.values.filter { it.chatId == chatId && it.messageId in ids &&
+            !it.displayName.startsWith("apu-story-video-", true) && !it.displayName.startsWith("apu-avatar-video-", true) }.take(limit)
+
+    override suspend fun deleteChatMessageTransfers(chatId: String, ids: List<String>): Int {
+        val matching = transfers.values.filter {
+            it.chatId == chatId && it.messageId in ids &&
+                !it.displayName.startsWith("apu-story-video-", ignoreCase = true) &&
+                !it.displayName.startsWith("apu-avatar-video-", ignoreCase = true)
+        }.map { it.transferId }
+        matching.forEach { deleteTransfer(it) }
+        return matching.size
+    }
+
     override suspend fun deleteTransfer(transferId: String): Int {
         chunks.keys.filter { it.first == transferId }.forEach(chunks::remove)
         return if (transfers.remove(transferId) != null) 1 else 0

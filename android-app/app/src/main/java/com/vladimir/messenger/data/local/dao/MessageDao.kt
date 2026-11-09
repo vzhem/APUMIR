@@ -120,6 +120,12 @@ interface MessageDao {
     )
     suspend fun markReadByIds(messageIds: List<String>): Int
 
+    @Query("SELECT id FROM messages WHERE chatId = :chatId ORDER BY timestamp, id LIMIT :limit")
+    suspend fun chatMessageIdsForClear(chatId: String, limit: Int): List<String>
+
+    @Query("DELETE FROM messages WHERE chatId = :chatId AND id IN (:ids)")
+    suspend fun deleteChatMessages(chatId: String, ids: List<String>): Int
+
     @Query("DELETE FROM messages WHERE chatId = :chatId")
     suspend fun deleteMessagesForChat(chatId: String)
 

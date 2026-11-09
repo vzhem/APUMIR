@@ -348,10 +348,12 @@ class DiagnosticsContractsTest(unittest.TestCase):
         for path, marker in (
             ("data/file/OutgoingFilePreparationService.kt", "FileTransferRetention.ttlMs(inspected.mediaType, inspected.sizeBytes)"),
             ("data/file/FileTransferReceiver.kt", "FileTransferRetention.ttlMs(manifest.mediaType, manifest.fileSize.toLong())"),
-            ("data/file/FileTransferRouter.kt", "FileTransferRetention.ttlMs(mime, size)"),
+            ("data/file/MirrorFileMetaApplier.kt", "FileTransferRetention.ttlMs(mime, size)"),
         ):
             with self.subTest(path=path):
                 self.assertIn(marker, source(MAIN / path))
+
+        self.assertIn("mirrorFileMetaApplier.apply(meta)", source(MAIN / "data/file/FileTransferRouter.kt"))
 
         # Уборка: просроченные незавершённые строки уходят вместе с кусками,
         # копии на диске без живой строки — тоже.

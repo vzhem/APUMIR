@@ -1704,10 +1704,7 @@ class MirrorChannel(
     }
 
     /**
-     * р228: действие с тени -> активному. Шлёт только тень и только при
-     * живом партнёре: своей сети у неё нет. Активный отправит конверт
-     * собеседнику или участникам группы своей сессией и применит действие
-     * у себя.
+     * Действие партнёру: localOnly не передаётся собеседнику.
      *
      * @param peerId собеседник личного чата (пусто для группового действия)
      * @param groupId группа/канал (пусто для личного действия)
@@ -1718,8 +1715,9 @@ class MirrorChannel(
         groupId: String,
         chatId: String,
         text: String,
+        localOnly: Boolean = false,
     ): Boolean {
-        if (engineUp) return false
+        if (engineUp && !localOnly) return false
         if (!canCarryOutgoing()) return false
         if (text.isEmpty() || text.length > MAX_ENVELOPE_CHARS) return false
         if (peerId.isBlank() && groupId.isBlank()) return false
@@ -1727,7 +1725,7 @@ class MirrorChannel(
             .put("p", peerId)
             .put("g", groupId)
             .put("c", chatId)
-            .put("t", text)
+            .put("t", text).put("localOnly", localOnly)
         val sealed = sealPayload(body) ?: return false
         return sendJson(JSONObject().put("t", "ev").put("k", "outenv").put("d", sealed))
     }
@@ -3398,7 +3396,7 @@ class MirrorChannel(
                             text = text,
                         )
                     }
-                    if (engineUp) {
+                    if (engineUp && !body.optBoolean("localOnly", false)) {
                         bridge.onActionToPeers(
                             peerId = body.optString("p"),
                             groupId = body.optString("g"),

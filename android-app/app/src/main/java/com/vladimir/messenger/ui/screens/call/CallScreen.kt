@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -420,7 +421,7 @@ fun CallScreen(
                     },
                 )
 
-                Spacer(modifier = Modifier.height(72.dp))
+                Spacer(modifier = Modifier.height(if (state.video && inCall) 108.dp else 72.dp))
             }
         }
         if (showVoiceEffects) {
@@ -472,6 +473,14 @@ fun CallScreen(
                 }
             }
         }
+        // Last child: never hidden behind the local-camera preview or remote video.
+        if (state.video && inCall) {
+            VideoCallHangup(
+                phase = state.phase,
+                onClick = { viewModel.hangupOrReject(); onLeaveCall() },
+                modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 8.dp),
+            )
+        }
     }
 }
 
@@ -495,7 +504,7 @@ private fun CallButtons(
     ) {
         when (state.phase) {
             CallStateMachine.Phase.INCOMING -> {
-                RoundCallButton(
+                if (!state.video) RoundCallButton(
                     background = MaterialTheme.colorScheme.error,
                     description = stringResource(R.string.call_decline),
                     onClick = onRed,
@@ -522,7 +531,7 @@ private fun CallButtons(
                     ) {
                         MuteCallButton(state, onMute)
                         if (state.video && !state.screenSharing) CameraCallButton(state, onCamera)
-                        RoundCallButton(
+                        if (!state.video) RoundCallButton(
                             background = MaterialTheme.colorScheme.error,
                             description = stringResource(R.string.call_end),
                             onClick = onRed,
@@ -590,7 +599,7 @@ private fun CallButtons(
                         onClick = onVoiceEffect,
                     )
                     SpeakerCallButton(state, onSpeaker)
-                    RoundCallButton(
+                    if (!state.video) RoundCallButton(
                         background = MaterialTheme.colorScheme.error,
                         description = stringResource(R.string.call_cancel),
                         onClick = onRed,
