@@ -14,7 +14,7 @@ import java.util.UUID
 internal class ChatClearOutbox(private val file: File) {
     data class Entry(val peer: String, val chat: String, val batch: ChatClearWire.Batch)
 
-    @Synchronized fun enqueue(entries: List<Entry>) {
+    fun enqueue(entries: List<Entry>) = synchronized(lock) {
         val current = load().toMutableList()
         require(entries.all { it.peer.isNotBlank() && it.chat.isNotBlank() && it.peer.length <= 512 && it.chat.length <= 512 })
         val all = current + entries
@@ -23,15 +23,15 @@ internal class ChatClearOutbox(private val file: File) {
         write(all)
     }
 
-    @Synchronized fun acknowledge(authenticated: Boolean, peer: String, operation: UUID): Boolean {
-        if (!authenticated || peer.isBlank()) return false
+    fun acknowledge(authenticated: Boolean, peer: String, operation: UUID): Boolean = synchronized(lock) {
+        if (!authenticated || peer.isBlank()) return@synchronized false
         val current = load()
         val matching = current.any { it.peer == peer && it.batch.operation == operation }
         if (matching) write(current.filterNot { it.peer == peer && it.batch.operation == operation })
-        return matching
+        matching
     }
 
-    @Synchronized fun pending(): List<Entry> = load()
+    fun pending(): List<Entry> = synchronized(lock) { load() }
 
     private fun load(): List<Entry> {
         if (!file.exists()) return emptyList()
@@ -78,6 +78,7 @@ internal class ChatClearOutbox(private val file: File) {
     }
 
     companion object {
+        private val lock = Any()
         private const val MAGIC = 0x41504331
         const val MAX_ENTRIES = 2048
         private const val MAX_FILE_BYTES = 20L * 1024 * 1024

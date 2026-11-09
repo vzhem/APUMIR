@@ -24,6 +24,21 @@ class ChatClearOutboxTest {
         assertTrue(ChatClearOutbox(file).pending().isEmpty())
     }
 
+    @Test fun separateHandlesDoNotLoseConcurrentEnqueues() {
+        val file = temporary.root.resolve("outbox")
+        val first = ChatClearOutbox(file)
+        val second = ChatClearOutbox(file)
+        val tasks = (1..40).map { n ->
+            Thread {
+                val queue = if (n % 2 == 0) first else second
+                queue.enqueue(listOf(ChatClearOutbox.Entry("peer", "chat", ChatClearWire.Batch(UUID.randomUUID(), listOf("id-$n")))))
+            }
+        }
+        tasks.forEach { it.start() }
+        tasks.forEach { it.join() }
+        assertEquals(40, first.pending().size)
+    }
+
     @Test fun corruptQueueFailsClosedRatherThanLosingRequests() {
         val file = temporary.root.resolve("outbox")
         file.writeText("corrupt")
