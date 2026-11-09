@@ -91,6 +91,41 @@ class ChatClearLocalCleanupInstrumentedTest {
         assertNotNull(db.messageDao().getMessageById("keep"))
     }
 
+    @Test fun mirrorFileInsertedDuringClearIsRemovedByPostInsertionGuard() = runBlocking {
+        db.chatDao().insertChat(ChatEntity("chat", "friend", "Friend"))
+        val file = File(ApplicationProvider.getApplicationContext<Context>().noBackupFilesDir, "clear-mirror-file-${UUID.randomUUID()}.sqlite")
+        val tombstones = ChatClearTombstones(ApplicationProvider.getApplicationContext(), file)
+        val transferId = "e".repeat(64)
+        try {
+            val coordinator = ChatClearApply(
+                ownerId = { "owner" }, chatForPeer = { db.chatDao().getChatByContactId(it)?.id },
+                tombstone = { owner, peer, ids -> tombstones.remember(owner, peer, ids) },
+                cleanup = { chat, ids -> cleanup.apply(chat, ids) },
+                relatedIds = { chat, ids -> ChatClearFileAliases(db.fileTransferDao()).relatedIds(chat, ids) },
+            )
+            val guard = ChatClearFileMetaGuard(
+                { peer, id -> tombstones.contains("owner", peer, id) },
+                { peer, batch -> coordinator.apply(peer, batch) },
+            )
+            assertFalse(guard.suppress("friend", "", "file.txt", "sender-id", transferId))
+            assertTrue(tombstones.remember("owner", "friend", listOf("file-$transferId")))
+            db.fileTransferDao().insertTransferIgnore(FileTransferEntity(
+                transferId, "sender-id", "chat", "friend", "OUTGOING", "file.txt", "text/plain", 1L, 1, 1,
+                "hash", "COMPLETE", createdAtMs = 1, expiresAtMs = 10, updatedAtMs = 1,
+            ))
+            db.messageDao().insertMessage(MessageEntity("sender-id", "chat", "owner", "file", 1, isFromMe = true))
+            assertTrue(guard.suppress("friend", "", "file.txt", "sender-id", transferId))
+            assertNull(db.fileTransferDao().getTransfer(transferId))
+            assertNull(db.messageDao().getMessageById("sender-id"))
+            assertTrue(tombstones.contains("owner", "friend", "sender-id"))
+        } finally {
+            tombstones.close()
+            file.delete()
+            File(file.path + "-wal").delete()
+            File(file.path + "-shm").delete()
+        }
+    }
+
     @Test fun lostAcknowledgementCanBeRetriedWithoutDeletingNewMessages() = runBlocking {
         db.chatDao().insertChat(ChatEntity("first", "friend", "Friend"))
         db.chatDao().insertChat(ChatEntity("other", "other-peer", "Other"))

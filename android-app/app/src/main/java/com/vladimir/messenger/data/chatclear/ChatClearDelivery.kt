@@ -26,6 +26,13 @@ class ChatClearDelivery @Inject constructor(
     private var nextMirrorSyncAt = 0L
     private val outbox = ChatClearOutbox(File(context.noBackupFilesDir, "chat_clear_outbox.v1"))
     private val apply = ChatClearApplier(context, chatDao, ChatClearLocalCleanup(db))
+    private val fileMetaGuard = ChatClearFileMetaGuard(
+        { peer, id -> ChatClearRegistry.isCleared(appContext, peer, id) },
+        { peer, batch -> apply.apply(peer, batch) },
+    )
+    internal suspend fun suppressMirrorFile(peer: String, groupId: String, name: String, messageId: String, transferId: String): Boolean =
+        fileMetaGuard.suppress(peer, groupId, name, messageId, transferId)
+
     private val acknowledgements = ChatClearAcknowledgements(
         outbox,
         { com.vladimir.messenger.data.schedule.DeferredInboxStore.owner(appContext) },
