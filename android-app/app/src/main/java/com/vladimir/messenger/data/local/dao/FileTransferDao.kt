@@ -217,6 +217,9 @@ interface FileTransferDao {
     )
     suspend fun getExpiredIncomplete(nowMs: Long, limit: Int): List<FileTransferEntity>
 
+    @Query("SELECT DISTINCT messageId FROM file_transfers WHERE chatId = :chatId AND displayName NOT LIKE 'apu-story-video-%' AND displayName NOT LIKE 'apu-avatar-video-%' LIMIT :limit")
+    suspend fun chatTransferMessageIdsForClear(chatId: String, limit: Int): List<String>
+
     @Query("DELETE FROM file_transfers WHERE chatId = :chatId AND messageId IN (:ids) AND displayName NOT LIKE 'apu-story-video-%' AND displayName NOT LIKE 'apu-avatar-video-%'")
     suspend fun deleteChatMessageTransfers(chatId: String, ids: List<String>): Int
 

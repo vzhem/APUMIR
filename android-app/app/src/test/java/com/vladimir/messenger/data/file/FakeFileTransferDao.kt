@@ -182,6 +182,10 @@ class FakeFileTransferDao : FileTransferDao {
             .sortedBy { it.expiresAtMs }
             .take(limit)
 
+    override suspend fun chatTransferMessageIdsForClear(chatId: String, limit: Int): List<String> =
+        transfers.values.filter { it.chatId == chatId && !it.displayName.startsWith("apu-story-video-", true) && !it.displayName.startsWith("apu-avatar-video-", true) }
+            .map { it.messageId }.distinct().take(limit)
+
     override suspend fun deleteChatMessageTransfers(chatId: String, ids: List<String>): Int {
         val matching = transfers.values.filter {
             it.chatId == chatId && it.messageId in ids &&

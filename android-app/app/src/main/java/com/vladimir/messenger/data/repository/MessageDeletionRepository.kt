@@ -259,6 +259,7 @@ class MessageDeletionRepository @Inject constructor(
      * живёт до ack собеседника.
      */
     suspend fun pump() {
+        chatClear.pump()
         val now = System.currentTimeMillis()
         val due = outbox.due(now, RETRY_INTERVAL_MS, TTL_MS)
             .filter { it.kind == DeletionOutbox.KIND_DIRECT }
