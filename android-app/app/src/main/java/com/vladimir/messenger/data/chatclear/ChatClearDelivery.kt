@@ -70,7 +70,8 @@ class ChatClearDelivery @Inject constructor(
             for (entry in pending.asSequence().filter { it.owner == owner && now - (lastAttempts[it.batch.operation] ?: 0L) >= RETRY_MS }.take(8)) {
                 lastAttempts[entry.batch.operation] = now
                 val chat = chatDao.getChatById(entry.chat) ?: continue
-                if (chat.contactId != entry.peer || !apply.apply(entry.peer, entry.batch)) continue
+                if (chat.contactId != entry.peer || chatDao.getChatByContactId(entry.peer)?.id != entry.chat) continue
+                if (!apply.apply(entry.peer, entry.batch)) continue
                 val text = ChatClearWire.encode(entry.batch)
                 val wireId = entry.batch.operation.toString()
                 RustBridge.retryMessage(wireId, chat.id, entry.peer, text) || RustBridge.sendMessage(wireId, chat.id, entry.peer, text)

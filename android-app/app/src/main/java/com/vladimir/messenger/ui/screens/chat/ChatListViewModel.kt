@@ -160,6 +160,7 @@ class ChatListViewModel @Inject constructor(
     private val groupDao: GroupDao,
     private val inboxPinDao: InboxPinDao,
     private val chatRepository: com.vladimir.messenger.data.repository.ChatRepository,
+    private val chatClear: com.vladimir.messenger.data.chatclear.ChatClearDelivery,
     private val contactRepository: com.vladimir.messenger.data.repository.ContactRepository,
     private val groupRepository: com.vladimir.messenger.data.group.GroupRepository,
     @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
@@ -802,8 +803,8 @@ class ChatListViewModel @Inject constructor(
     }
 
     /** Очистить переписку, сам чат остаётся. */
-    fun clearChatHistory(chatId: String) {
-        viewModelScope.launch(Dispatchers.IO) { chatRepository.clearHistory(chatId) }
+    fun clearChatHistory(chatId: String, both: Boolean = false) {
+        viewModelScope.launch(Dispatchers.IO) { clearChatAction(appContext, chatRepository, chatClear, chatId, both) }
     }
 
     // ── р249: архив и «без звука» ──────────────────────────────────────────
