@@ -6,7 +6,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import java.io.File
 
-/** Durable identity- and peer-scoped suppression of late copies. Not wired into message ingestion yet. */
+/** Durable identity- and peer-scoped suppression of late copies. */
 internal class ChatClearTombstones(context: Context, file: File = File(context.noBackupFilesDir, "chat_clear.sqlite")) {
     private val helper = object : SQLiteOpenHelper(context.applicationContext, file.absolutePath, null, 1) {
         override fun onCreate(db: SQLiteDatabase) {
@@ -46,6 +46,19 @@ internal class ChatClearTombstones(context: Context, file: File = File(context.n
         helper.readableDatabase.rawQuery(
             "SELECT 1 FROM cleared WHERE owner=? AND peer=? AND message_id=? LIMIT 1", arrayOf(owner, peer, id),
         ).use { it.moveToFirst() }
+
+    data class Cursor(val peer: String, val messageId: String)
+
+    /** Stable keyset pagination; no timestamps or shared clock are required. */
+    @Synchronized fun page(owner: String, after: Cursor?, limit: Int = ChatClearWire.MAX_IDS): List<Cursor> {
+        require(owner.isNotBlank() && limit in 1..ChatClearWire.MAX_IDS)
+        val where = if (after == null) "owner=?" else "owner=? AND (peer>? OR (peer=? AND message_id>?))"
+        val args = if (after == null) arrayOf(owner) else arrayOf(owner, after.peer, after.peer, after.messageId)
+        return helper.readableDatabase.query("cleared", arrayOf("peer", "message_id"), where, args, null, null,
+            "peer ASC, message_id ASC", limit.toString()).use { cursor ->
+            buildList { while (cursor.moveToNext()) add(Cursor(cursor.getString(0), cursor.getString(1))) }
+        }
+    }
 
     @Synchronized fun close() = helper.close()
 

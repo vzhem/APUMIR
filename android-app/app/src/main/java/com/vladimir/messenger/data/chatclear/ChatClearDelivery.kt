@@ -22,6 +22,9 @@ class ChatClearDelivery @Inject constructor(
     private val appContext = context.applicationContext
     private val mutex = kotlinx.coroutines.sync.Mutex()
     private val lastAttempts = mutableMapOf<UUID, Long>()
+    private var mirrorCursor: ChatClearTombstones.Cursor? = null
+    private var mirrorOwner = ""
+    private var nextMirrorSyncAt = 0L
     private val outbox = ChatClearOutbox(File(context.noBackupFilesDir, "chat_clear_outbox.v1"))
     private val apply = ChatClearApplier(context, chatDao, ChatClearLocalCleanup(db))
     private val protocol = ChatClearProtocol(outbox, { com.vladimir.messenger.data.schedule.DeferredInboxStore.owner(context) }, apply) { peer, ack ->
@@ -93,6 +96,7 @@ class ChatClearDelivery @Inject constructor(
             val owner = com.vladimir.messenger.data.schedule.DeferredInboxStore.owner(appContext)
             if (owner.isBlank()) return@withContext
             val now = System.currentTimeMillis()
+            syncMirrorTombstones(owner, now)
             val pending = outbox.pending()
             val pendingIds = pending.mapTo(HashSet()) { it.batch.operation }
             lastAttempts.keys.retainAll(pendingIds)
@@ -112,5 +116,28 @@ class ChatClearDelivery @Inject constructor(
         } finally { mutex.unlock() }
     }
 
-    companion object { private const val RETRY_MS = 10L * 60 * 1000 }
+    /** Bounded periodic full replay, including after the paired device reconnects. */
+    private suspend fun syncMirrorTombstones(owner: String, now: Long) {
+        if (mirrorOwner != owner) { mirrorOwner = owner; mirrorCursor = null; nextMirrorSyncAt = 0L }
+        if (now < nextMirrorSyncAt || !File(appContext.noBackupFilesDir, "chat_clear.sqlite").exists()) return
+        nextMirrorSyncAt = now + MIRROR_INTERVAL_MS
+        val channel = com.vladimir.messenger.data.mirror.MirrorHub.routeOutgoing() ?: return
+        val store = ChatClearRegistry.store(appContext)
+        val rows = store.page(owner, mirrorCursor)
+        if (rows.isEmpty()) { mirrorCursor = null; nextMirrorSyncAt = now + MIRROR_CYCLE_MS; return }
+        val peer = rows.first().peer
+        val samePeer = rows.takeWhile { it.peer == peer }
+        val ids = samePeer.map { it.messageId }
+        val batch = ChatClearWire.Batch(UUID.randomUUID(), ids)
+        val chatId = chatDao.getChatByContactId(peer)?.id.orEmpty()
+        if (channel.publishOutgoingEnvelope(peer, "", chatId, ChatClearWire.encode(batch), localOnly = true)) {
+            mirrorCursor = samePeer.last()
+        }
+    }
+
+    companion object {
+        private const val RETRY_MS = 10L * 60 * 1000
+        private const val MIRROR_INTERVAL_MS = 30_000L
+        private const val MIRROR_CYCLE_MS = 15L * 60 * 1000
+    }
 }
