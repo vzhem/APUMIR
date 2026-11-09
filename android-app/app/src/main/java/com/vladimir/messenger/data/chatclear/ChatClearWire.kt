@@ -7,6 +7,7 @@ import java.util.UUID
 internal object ChatClearWire {
     private const val PREFIX = "APUDEL1|clear2|"
     private const val ACK_PREFIX = "APUDEL1|clearack2|"
+    private const val MIRROR_ACK_PREFIX = "APUDEL1|mirrorclearack2|"
     const val MAX_IDS = 32
     private const val MAX_ID_BYTES = 128
     private const val MAX_PACKET_CHARS = 8192
@@ -50,7 +51,13 @@ internal object ChatClearWire {
     fun decodeAck(text: String): UUID? =
         if (text.startsWith(ACK_PREFIX)) parseUuid(text.removePrefix(ACK_PREFIX)) else null
 
-    fun isControl(text: String): Boolean = text.startsWith(PREFIX) || text.startsWith(ACK_PREFIX)
+    fun encodeMirrorAck(operation: UUID): String = "$MIRROR_ACK_PREFIX$operation"
+
+    fun decodeMirrorAck(text: String): UUID? =
+        if (text.startsWith(MIRROR_ACK_PREFIX)) parseUuid(text.removePrefix(MIRROR_ACK_PREFIX)) else null
+
+    fun isControl(text: String): Boolean =
+        text.startsWith(PREFIX) || text.startsWith(ACK_PREFIX) || text.startsWith(MIRROR_ACK_PREFIX)
 
     private fun parseUuid(raw: String): UUID? {
         val value = try { UUID.fromString(raw) } catch (_: IllegalArgumentException) { return null }

@@ -22,8 +22,7 @@ class ChatClearDelivery @Inject constructor(
     private val appContext = context.applicationContext
     private val mutex = kotlinx.coroutines.sync.Mutex()
     private val lastAttempts = mutableMapOf<UUID, Long>()
-    private var mirrorCursor: ChatClearTombstones.Cursor? = null
-    private var mirrorOwner = ""
+    private val mirrorReplay = ChatClearMirrorReplay<ChatClearTombstones.Cursor>()
     private var nextMirrorSyncAt = 0L
     private val outbox = ChatClearOutbox(File(context.noBackupFilesDir, "chat_clear_outbox.v1"))
     private val apply = ChatClearApplier(context, chatDao, ChatClearLocalCleanup(db))
@@ -64,14 +63,26 @@ class ChatClearDelivery @Inject constructor(
     /** Apply an owner's outgoing operation on the other paired device, without a network ACK. */
     internal suspend fun applyMirrorOutgoing(peer: String, text: String): Boolean {
         if (!ChatClearWire.isControl(text)) return false
-        ChatClearWire.decode(text)?.let { apply.apply(peer, it) }
+        val ack = ChatClearWire.decodeMirrorAck(text)
+        if (ack != null) {
+            mutex.lock()
+            try {
+                val owner = com.vladimir.messenger.data.schedule.DeferredInboxStore.owner(appContext)
+                if (mirrorReplay.acknowledge(owner, peer, ack)) nextMirrorSyncAt = 0L
+            } finally { mutex.unlock() }
+        } else {
+            val batch = ChatClearWire.decode(text)
+            if (batch != null && apply.apply(peer, batch)) {
+                // Sent only over the paired channel. A lost receipt causes an idempotent retry.
+                com.vladimir.messenger.data.mirror.MirrorHub.routeOutgoing()?.publishOutgoingEnvelope(
+                    peer, "", "", ChatClearWire.encodeMirrorAck(batch.operation), localOnly = true,
+                )
+            }
+        }
         return true
     }
 
-    /**
-     * Prepare an exact snapshot. This is not exposed in the UI yet: IDs absent
-     * locally and mirror synchronization still require a complete protocol.
-     */
+    /** Snapshot of locally known IDs; it cannot include history visible only to the peer. */
     internal suspend fun enqueueSnapshot(chatId: String): Int = withContext(Dispatchers.IO) {
         mutex.lock()
         try {
@@ -135,21 +146,24 @@ class ChatClearDelivery @Inject constructor(
 
     /** Bounded periodic full replay, including after the paired device reconnects. */
     private suspend fun syncMirrorTombstones(owner: String, now: Long) {
-        if (mirrorOwner != owner) { mirrorOwner = owner; mirrorCursor = null; nextMirrorSyncAt = 0L }
+        if (mirrorReplay.selectOwner(owner)) nextMirrorSyncAt = 0L
         if (now < nextMirrorSyncAt || !File(appContext.noBackupFilesDir, "chat_clear.sqlite").exists()) return
         nextMirrorSyncAt = now + MIRROR_INTERVAL_MS
         val channel = com.vladimir.messenger.data.mirror.MirrorHub.routeOutgoing() ?: return
-        val store = ChatClearRegistry.store(appContext)
-        val rows = store.page(owner, mirrorCursor)
-        if (rows.isEmpty()) { mirrorCursor = null; nextMirrorSyncAt = now + MIRROR_CYCLE_MS; return }
-        val peer = rows.first().peer
-        val samePeer = rows.takeWhile { it.peer == peer }
-        val ids = samePeer.map { it.messageId }
-        val batch = ChatClearWire.Batch(UUID.randomUUID(), ids)
-        val chatId = chatDao.getChatByContactId(peer)?.id.orEmpty()
-        if (channel.publishOutgoingEnvelope(peer, "", chatId, ChatClearWire.encode(batch), localOnly = true)) {
-            mirrorCursor = samePeer.last()
+        var pending = mirrorReplay.pending
+        if (pending == null) {
+            val rows = ChatClearRegistry.store(appContext).page(owner, mirrorReplay.cursor)
+            if (rows.isEmpty()) { mirrorReplay.restartCycle(); nextMirrorSyncAt = now + MIRROR_CYCLE_MS; return }
+            val peer = rows.first().peer
+            val samePeer = rows.takeWhile { it.peer == peer }
+            val batch = ChatClearWire.Batch(UUID.randomUUID(), samePeer.map { it.messageId })
+            mirrorReplay.stage(peer, batch, samePeer.last())
+            pending = checkNotNull(mirrorReplay.pending)
         }
+        val chatId = chatDao.getChatByContactId(pending.peer)?.id.orEmpty()
+        // Sending is not an application receipt. Keep the same operation until
+        // the paired device confirms durable tombstones and local cleanup.
+        channel.publishOutgoingEnvelope(pending.peer, "", chatId, ChatClearWire.encode(pending.batch), localOnly = true)
     }
 
     companion object {

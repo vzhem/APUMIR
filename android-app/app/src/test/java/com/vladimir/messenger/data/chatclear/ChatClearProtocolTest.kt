@@ -32,6 +32,8 @@ class ChatClearProtocolTest {
         assertTrue(receiver.receive("owner", true, packet)) // retry is safe to apply twice
         assertEquals(setOf("old", "old-file"), applied)
         assertEquals(1, outbox.pending().size)
+        sender.receive("friend", true, ChatClearWire.encodeMirrorAck(batch.operation))
+        assertEquals(1, outbox.pending().size) // paired-device receipt is never a peer ACK
         sender.receive("attacker", true, replies.first())
         sender.receive("friend", false, replies.first())
         assertEquals(1, outbox.pending().size)
