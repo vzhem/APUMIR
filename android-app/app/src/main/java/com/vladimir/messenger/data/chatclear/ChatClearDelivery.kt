@@ -96,15 +96,11 @@ class ChatClearDelivery @Inject constructor(
         mutex.lock()
         try {
             val owner = com.vladimir.messenger.data.schedule.DeferredInboxStore.owner(appContext)
-            val chat = chatDao.getChatById(chatId) ?: error("Chat not found")
-            val peer = chat.contactId
-            require(owner.isNotBlank() && peer.isNotBlank() && owner != peer)
-            val limit = ChatClearOutbox.MAX_ENTRIES * ChatClearWire.MAX_IDS + 1
-            val ids = (db.messageDao().chatMessageIdsForClear(chatId, limit) +
-                db.fileTransferDao().chatTransferMessageIdsForClear(chatId, limit) +
-                db.fileTransferDao().chatTransferAliasesForClear(chatId, limit)).distinct()
-            require(ids.size < limit) { "Chat clear snapshot exceeds queue capacity" }
-            val batches = ChatClearPolicy.batches(ids)
+            require(owner.isNotBlank())
+            val snapshot = ChatClearSnapshot(db).capture(chatId)
+            val peer = snapshot.peer
+            require(owner != peer && owner == com.vladimir.messenger.data.schedule.DeferredInboxStore.owner(appContext))
+            val batches = ChatClearPolicy.batches(snapshot.ids)
             outbox.enqueue(batches.map { ChatClearOutbox.Entry(owner, peer, chatId, it) })
             // Queue is durable before local mutation. If the process dies here,
             // the pump repeats this idempotent work before sending each batch.
