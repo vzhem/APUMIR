@@ -263,7 +263,9 @@ class MessageDeletionRepository @Inject constructor(
      * живёт до ack собеседника.
      */
     suspend fun pump() {
-        chatClear.pump()
+        try { chatClear.pump() }
+        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (error: Exception) { Log.w(TAG, "Chat clear retry failed", error) }
         val now = System.currentTimeMillis()
         val due = outbox.due(now, RETRY_INTERVAL_MS, TTL_MS)
             .filter { it.kind == DeletionOutbox.KIND_DIRECT }

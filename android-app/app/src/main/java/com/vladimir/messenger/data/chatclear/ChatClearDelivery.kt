@@ -69,6 +69,19 @@ class ChatClearDelivery @Inject constructor(
             require(ids.size < limit) { "Chat clear snapshot exceeds queue capacity" }
             val batches = ChatClearPolicy.batches(ids)
             outbox.enqueue(batches.map { ChatClearOutbox.Entry(owner, peer, chatId, it) })
+            // Queue is durable before local mutation. If the process dies here,
+            // the pump repeats this idempotent work before sending each batch.
+            if (chatDao.getChatByContactId(peer)?.id == chatId) {
+                for (batch in batches) {
+                    try {
+                        if (!apply.apply(peer, batch)) break
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (error: Exception) {
+                        android.util.Log.w("ChatClearDelivery", "Queued local cleanup will be retried", error)
+                        break
+                    }
+                }
+            }
             batches.size
         } finally { mutex.unlock() }
     }
