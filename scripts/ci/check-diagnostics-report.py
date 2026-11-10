@@ -1200,12 +1200,14 @@ class DiagnosticsContractsTest(unittest.TestCase):
         ровно как строку в «Логах».
         """
         transport = source(ROOT / "rust-core/src/network/mqtt_transport.rs")
+        transport_tests = source(ROOT / "rust-core/src/network/mqtt_transport_tests.rs")
+        self.assertIn('#[path = "mqtt_transport_tests.rs"]', transport)
         self.assertIn("pub(crate) const MAX_MQTT_PACKET_BYTES: usize = 64 * 1024;", transport)
         # Предел обязан быть не меньше того, что очередь пересылки обещает
         # принять и хранить: иначе запись лежит и не может быть отдана.
         self.assertIn(
             "MAX_MQTT_PACKET_BYTES >= crate::network::relay_queue::MAX_MESH_RELAY_ENVELOPE_BYTES",
-            transport,
+            transport_tests,
         )
         # Ставится в ОБЕИХ постоянных сессиях, и проверяется до сети.
         self.assertEqual(transport.count("set_max_packet_size(MAX_MQTT_PACKET_BYTES, MAX_MQTT_PACKET_BYTES)"), 2)
@@ -1224,7 +1226,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "fn our_limit_refuses_oversize_publish_before_the_network()",
         ):
             with self.subTest(test=test):
-                self.assertIn(test, transport)
+                self.assertIn(test, transport_tests)
         # Остальные сессии (наблюдатель вторичного брокера и разовая отправка
         # квитанции) живут мимо постоянного соединения — предел нужен и им.
         observer = source(ROOT / "rust-core/src/network/mqtt_secondary_observer.rs")

@@ -164,10 +164,15 @@ impl AddressBook {
                     Ok(file) => {
                         if file.v == BOOK_VERSION {
                             let now_ms = crate::storage::models::now_ms();
-                            for entry in file.entries {
+                            for mut entry in file.entries {
                                 if now_ms.saturating_sub(entry.seen) > ENTRY_TTL_MS {
                                     continue;
                                 }
+                                // Clock rollback or an old corrupt cache makes the
+                                // age unknown, not a reason to block new routes.
+                                // Keep it only as a volatile hint: flush's normal
+                                // TTL pruning will not persist an unknown age.
+                                if entry.seen > now_ms { entry.seen = 0; }
                                 entries.insert(entry.id.clone(), entry);
                             }
                             // Histories from disk are hints only: even a recent timestamp is
@@ -312,8 +317,13 @@ impl AddressBook {
 
     /// Timestamp snapshot used for discovery ranking. It is not proof that a peer is online.
     pub fn observations(&self) -> HashMap<String, (SocketAddr, i64)> {
-        self.entries.lock().unwrap().iter().filter_map(|(id, entry)| {
-            entry.addr.parse::<SocketAddr>().ok().map(|addr| (id.clone(), (addr, entry.seen)))
+        let entries = self.entries.lock().unwrap();
+        // Sample under the same lock as writes. A concurrent newer write must
+        // not look like a clock rollback merely because this reader waited.
+        let now = crate::storage::models::now_ms();
+        entries.iter().filter_map(|(id, entry)| {
+            let seen = if entry.seen > now { 0 } else { entry.seen };
+            entry.addr.parse::<SocketAddr>().ok().map(|addr| (id.clone(), (addr, seen)))
         }).collect()
     }
 
@@ -443,14 +453,20 @@ impl AddressBook {
         if node_id.is_empty() {
             return None;
         }
-        let now_ms = crate::storage::models::now_ms();
-        let observed_at_ms = observed_at_ms.max(0).min(now_ms);
-        if now_ms.saturating_sub(observed_at_ms) > ENTRY_TTL_MS { return None; }
+        let now_ms;
         let changed;
         {
             let mut entries = self.entries.lock().unwrap();
+            // Sample after acquiring the write lock so an ordinary concurrent
+            // newer observation is not mistaken for a future clock rollback.
+            now_ms = crate::storage::models::now_ms();
+            let observed_at_ms = observed_at_ms.max(0).min(now_ms);
+            if now_ms.saturating_sub(observed_at_ms) > ENTRY_TTL_MS { return None; }
             match entries.get_mut(node_id) {
                 Some(old) => {
+                    // When the local clock went backwards, the saved future
+                    // timestamp cannot be ordered against current observations.
+                    if old.seen > now_ms { old.seen = 0; }
                     // A retained announcement or forwarded lease must not
                     // replace an address observed more recently.
                     if observed_at_ms < old.seen { return None; }
@@ -571,6 +587,35 @@ mod tests {
         let reloaded = AddressBook::open(Some(path.clone()));
         assert!(reloaded.seed_addrs().contains_key(&next));
         assert!(book.merge_backup_json("{bad-json").is_err());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn future_cached_route_is_a_hint_and_cannot_block_fresh_observations() {
+        let path = tmp_path("future_cached_route");
+        let _ = fs::remove_file(&path);
+        let now = crate::storage::models::now_ms();
+        let id = format!("pk_{}", "a".repeat(64));
+        let old: SocketAddr = "10.0.0.1:443".parse().unwrap();
+        let new: SocketAddr = "10.0.0.2:443".parse().unwrap();
+        fs::write(&path, serde_json::json!({
+            "v": BOOK_VERSION,
+            "entries": [{"id": id.clone(), "addr": old.to_string(), "seen": now + 60_000}]
+        }).to_string()).unwrap();
+        let book = AddressBook::open(Some(path.clone()));
+        assert_eq!(book.observations()[&id], (old, 0));
+        // Unknown-age hints are useful during this process but not immortal
+        // across clean shutdowns; normal TTL pruning drops them on flush.
+        book.flush();
+        assert!(!AddressBook::open(Some(path.clone())).observations().contains_key(&id));
+        assert!(book.record_if_fresh(&id, new, now - 1_000));
+        assert_eq!(book.observations()[&id], (new, now - 1_000));
+
+        // The clock may also move backwards while the engine is running.
+        book.entries.lock().unwrap().get_mut(&id).unwrap().seen = now + 60_000;
+        assert_eq!(book.observations()[&id], (new, 0));
+        assert!(book.record_if_fresh(&id, old, now - 500));
+        assert_eq!(book.observations()[&id], (old, now - 500));
         let _ = fs::remove_file(path);
     }
 

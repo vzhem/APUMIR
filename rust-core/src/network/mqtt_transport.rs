@@ -16,6 +16,8 @@ use crate::network::mqtt_dedup::MqttDuplicateFilter;
 use crate::network::mqtt_fanout::{
     MqttBrokerId, MqttBrokerSet, MqttFanoutOutcome, RetainedBrokerTargetLedger,
 };
+#[cfg(feature = "mqtt-dual-broker")]
+use crate::network::mqtt_topology::{prefer_shared_public, secondary_path, SecondaryPath};
 use crate::network::mqtt_liveness::{
     assess_mqtt_liveness, mqtt_restart_reason, MqttLivenessAssessment, MqttLivenessProbe,
     MqttRestartReason,
@@ -288,13 +290,9 @@ const SECONDARY_BROKER_HOST: &str = "broker.emqx.io";
 #[cfg(feature = "mqtt-dual-broker")]
 const SECONDARY_BROKER_PORT: u16 = 1883;
 
-/// WSS-мост через наш relay-домен (белый список мобильных сетей, задача
-/// владельца 2026-09-18). «Жёсткая» сеть пускает только HTTPS-443 на
-/// разрешённые хосты: наш workers.dev там есть, TCP-1883 иностранных
-/// брокеров — нет. Когда НИ ОДИН TCP-кандидат не ответил на пробу,
-/// подключаемся сюда по WebSocket+TLS: Cloudflare-мост (/mqtt в
-/// tools/worker/p2p_relay_worker.js) доводит поток до настоящих брокеров.
-/// На обычной сети ветка не выполняется: кто-то из TCP отвечает раньше.
+/// WSS broker on the relay domain. It is an independent MQTT broker, not a
+/// bridge to the public TCP brokers. A common reachable broker is required
+/// on both devices; TLS-443 does not guarantee access through every network.
 // Адрес для MqttOptions при WSS-транспорте - ПОЛНЫЙ URL: rumqttc сам
 // достаёт из него домен и порт (split_url), путь остаётся на мосту.
 const WSS_BRIDGE_URL: &str = "wss://p2p-relay.apuchat.workers.dev/mqtt";
@@ -420,6 +418,36 @@ fn mesh_cleanup_receipt_topic(msg_id: &str) -> Result<String, String> {
     Ok(format!("p2pm2/receipt/cleanup/{}", mesh_receipt_key(msg_id)?))
 }
 
+#[cfg(feature = "mqtt-dual-broker")]
+#[derive(Clone)]
+struct CachedPresence {
+    payload: String,
+    display_name: String,
+    sent_at_ms: i64,
+}
+
+#[cfg(feature = "mqtt-dual-broker")]
+impl CachedPresence {
+    fn replay_at(&self, node_id: &str, now_ms: i64) -> Option<String> {
+        if now_ms <= 0 { return None; }
+        if crate::network::presence_scope::is_live_observation(self.sent_at_ms, now_ms) {
+            Some(self.payload.clone())
+        } else {
+            // Reconnection proves this local process is alive, but an old
+            // public address is not a fresh observation. Publish without one.
+            Some(presence_payload(node_id, &self.display_name, None, false, now_ms))
+        }
+    }
+}
+
+fn presence_payload(
+    node_id: &str, display_name: &str, public_addr: Option<&str>, is_relay: bool, now_ms: i64,
+) -> String {
+    format!("{}|{}|{}|{}|{}|{}", node_id, display_name, public_addr.unwrap_or(""),
+        if is_relay { "relay" } else { "client" },
+        crate::config::defaults::PRESENCE_VERSION, now_ms)
+}
+
 pub struct MqttTransport {
     client: AsyncClient,
     eventloop: Option<EventLoop>,
@@ -444,6 +472,8 @@ pub struct MqttTransport {
     secondary_liveness: Arc<MqttLivenessProbe>,
     #[cfg(feature = "mqtt-dual-broker")]
     secondary_ready: Arc<AtomicBool>,
+    #[cfg(feature = "mqtt-dual-broker")]
+    last_presence: StdMutex<Option<CachedPresence>>,
     /// Поколение настроек брокера, с которым эта сессия создана (см.
     /// `BROKER_SETTINGS_GENERATION`).
     broker_generation: u64,
@@ -744,7 +774,14 @@ impl MqttTransport {
         let has_proxy = crate::network::socks5::mqtt_socks5_proxy_config().is_some();
         let skip_probes = (forced_wss || own_allowed) && !has_proxy;
         if !skip_probes {
-        for (index, (host, port)) in brokers.candidates().into_iter().enumerate() {
+        #[allow(unused_mut)]
+        let mut candidates = brokers.candidates();
+        #[cfg(feature = "mqtt-dual-broker")]
+        prefer_shared_public(
+            &mut candidates, (SECONDARY_BROKER_HOST, SECONDARY_BROKER_PORT),
+            own_is_first, has_proxy, ephemeral_client_id,
+        );
+        for (index, (host, port)) in candidates.into_iter().enumerate() {
             // Пробуем своего брокера и не больше двух публичных: каждый
             // молчащий адрес - это ещё BROKER_PROBE_TIMEOUT ожидания на старте.
             if index >= 3 {
@@ -763,13 +800,9 @@ impl MqttTransport {
             }
         }
         }
-        // Никто не ответил: если это обычная сеть с временно молчащими
-        // брокерами, остаёмся на публичном по умолчанию; но чаще это
-        // «жёсткая» мобильная сеть с белым списком - TCP-1883 туда не
-        // проходит вовсе. Тогда идём через WSS-мост нашего relay-домена:
-        // TLS-443 к workers.dev белый список пускает, а мост на Cloudflare
-        // доводит поток до настоящих брокеров; rumqttc переподключается
-        // сам, так что возвращение прямых брокеров видно только в логах.
+        // If no TCP candidate answered, use the independent WSS broker.
+        // Unlike a forwarding bridge, it cannot exchange MQTT topics with
+        // the public brokers; both devices need at least one common endpoint.
         let mut wss_bridge = false;
         let (chosen_host, chosen_port) = match chosen {
             Some(pair) => pair,
@@ -860,7 +893,17 @@ impl MqttTransport {
             } else {
                 format!("p2pm_emqx_{suffix}")
             };
-            let (secondary_host, secondary_port) = if wss_bridge {
+            // When ordinary TCP fallback already selected the old public
+            // secondary, replace its duplicate connection with WSS. Preserve
+            // the old distinct TCP secondary, proxy, custom and pairing paths.
+            // WSS-primary sessions do not gain a new plaintext public broker.
+            let primary_is_shared_public = !wss_bridge
+                && chosen_host.eq_ignore_ascii_case(SECONDARY_BROKER_HOST)
+                && chosen_port == SECONDARY_BROKER_PORT;
+            let secondary_wss = secondary_path(
+                wss_bridge, primary_is_shared_public, own_is_first, has_proxy, ephemeral_client_id,
+            ) == SecondaryPath::Wss;
+            let (secondary_host, secondary_port) = if secondary_wss {
                 (WSS_BRIDGE_URL.to_string(), WSS_BRIDGE_PORT)
             } else {
                 socks5_bridge_endpoint(SECONDARY_BROKER_HOST, SECONDARY_BROKER_PORT)
@@ -872,13 +915,13 @@ impl MqttTransport {
             };
             let mut secondary_options =
                 MqttOptions::new(secondary_client_id, &secondary_host, secondary_port);
-            if wss_bridge {
+            if secondary_wss {
                 match wss_bridge_transport() {
                     Some(transport) => {
                         secondary_options.set_transport(transport);
-                        tracing::info!("MQTT: restricted network, secondary via WSS bridge {}:{}", secondary_host, secondary_port);
+                        tracing::info!("MQTT: secondary via WSS broker {}:{}", secondary_host, secondary_port);
                     }
-                    None => tracing::warn!("MQTT: secondary WSS bridge chosen but TLS setup failed; plain TCP as before"),
+                    None => tracing::warn!("MQTT: secondary WSS chosen but TLS setup failed"),
                 }
             }
             secondary_options.set_keep_alive(Duration::from_secs(60));
@@ -894,11 +937,12 @@ impl MqttTransport {
             }
             let (secondary_client, mut secondary_eventloop) =
                 AsyncClient::new(secondary_options, MQTT_CLIENT_REQUEST_BUFFER);
-            if wss_bridge {
+            if secondary_wss {
                 secondary_eventloop.set_network_options(wss_bridge_network_options());
             }
             tracing::info!(
-                "MQTT SECONDARY STATUS: broker=emqx state=starting mode=dual_publish max_fanout=2"
+                "MQTT SECONDARY STATUS: broker=secondary transport={} state=starting mode=dual_publish max_fanout=2",
+                if secondary_wss { "wss" } else { "public_tcp" }
             );
             (
                 secondary_client,
@@ -934,6 +978,8 @@ impl MqttTransport {
             secondary_liveness,
             #[cfg(feature = "mqtt-dual-broker")]
             secondary_ready,
+            #[cfg(feature = "mqtt-dual-broker")]
+            last_presence: StdMutex::new(None),
             ephemeral: ephemeral_client_id,
             node_id: node_id.to_string(),
             peers: Arc::new(Mutex::new(Vec::new())),
@@ -1050,17 +1096,17 @@ impl MqttTransport {
             self.record_request_result(&result);
             match result {
                 Ok(()) => queued = queued.union(MqttBrokerSet::PRIMARY),
-                Err(error) => failures.push(format!("hivemq={error}")),
+                Err(error) => failures.push(format!("primary={error}")),
             }
         }
         if let Some(result) = secondary_result {
             self.record_secondary_request_result(&result);
             match result {
                 Ok(()) => queued = queued.union(MqttBrokerSet::SECONDARY),
-                Err(error) => failures.push(format!("emqx={error}")),
+                Err(error) => failures.push(format!("secondary={error}")),
             }
         } else if secondary_requested {
-            failures.push("emqx=not_ready".to_string());
+            failures.push("secondary=not_ready".to_string());
         }
 
         let outcome = MqttFanoutOutcome::new(targets, queued);
@@ -1131,15 +1177,33 @@ impl MqttTransport {
         result.map_err(|error| error.to_string())
     }
 
+    /// A broker can become ready after the initial announcement or reconnect
+    /// independently. Preserve a fresh observation's time; if it is old,
+    /// announce the connected process without re-advertising its old address.
+    #[cfg(feature = "mqtt-dual-broker")]
+    async fn refresh_presence(&self, target: MqttBrokerSet) {
+        let cached = self.last_presence.lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+        let Some(cached) = cached else { return; };
+        let Some(payload) = cached.replay_at(&self.node_id, crate::storage::models::now_ms()) else { return; };
+        let topic = format!("p2pm2/presence/{}", self.node_id);
+        if let Err(error) = self.enqueue_publish_to_targets(
+            "presence reconnect refresh", &topic, QoS::AtLeastOnce, true,
+            payload.into_bytes(), target, false,
+        ).await {
+            tracing::warn!("MQTT: presence reconnect refresh request failed: {}", error);
+        }
+    }
+
     #[cfg(feature = "mqtt-dual-broker")]
     fn record_secondary_request_result<T>(&self, result: &Result<T, MqttRequestError>) {
         if let Err(error) = result {
             if error.is_timeout() {
                 self.secondary_liveness.mark_request_timeout();
-                tracing::warn!("MQTT SECONDARY REQUEST TIMEOUT: broker=emqx {}", error);
+                tracing::warn!("MQTT SECONDARY REQUEST TIMEOUT: broker=secondary {}", error);
             } else {
                 self.secondary_liveness.mark_request_error();
-                tracing::warn!("MQTT SECONDARY REQUEST ERROR: broker=emqx {}", error);
+                tracing::warn!("MQTT SECONDARY REQUEST ERROR: broker=secondary {}", error);
             }
         }
     }
@@ -1151,13 +1215,15 @@ impl MqttTransport {
         // читают первые четыре и не ломаются. Версия позволяет отбрасывать
         // сведения от слишком старых узлов, отметка времени - протухшие
         // объявления, которые брокер хранит вечно.
-        let payload = format!("{}|{}|{}|{}|{}|{}",
-            self.node_id, display_name,
-            public_addr.unwrap_or(""),
-            if is_relay { "relay" } else { "client" },
-            crate::config::defaults::PRESENCE_VERSION,
-            crate::storage::models::now_ms()
+        let sent_at_ms = crate::storage::models::now_ms();
+        let payload = presence_payload(
+            &self.node_id, display_name, public_addr, is_relay, sent_at_ms,
         );
+        #[cfg(feature = "mqtt-dual-broker")]
+        if !self.ephemeral {
+            *self.last_presence.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                Some(CachedPresence { payload: payload.clone(), display_name: display_name.to_string(), sent_at_ms });
+        }
         let topic = format!("p2pm2/presence/{}", self.node_id);
         self.enqueue_publish(
             "presence publish",
@@ -1220,7 +1286,7 @@ impl MqttTransport {
                                 secondary_liveness.mark_loss_intolerant_backpressure();
                             if should_log_bounded_counter(total_waits) {
                                 tracing::warn!(
-                                    "MQTT SECONDARY BACKPRESSURE: broker=emqx total={} pending={} capacity={}",
+                                    "MQTT SECONDARY BACKPRESSURE: broker=secondary total={} pending={} capacity={}",
                                     total_waits,
                                     pending,
                                     secondary_shared_state.loss_intolerant_inbox.capacity()
@@ -1248,7 +1314,7 @@ impl MqttTransport {
                             let topic = publish.topic;
                             let payload = publish.payload;
                             if let Err(reason) = forward_incoming_publish(
-                                "emqx",
+                                "secondary",
                                 topic,
                                 payload.as_ref(),
                                 inbox_permit,
@@ -1260,7 +1326,7 @@ impl MqttTransport {
                             {
                                 secondary_ready.store(false, Ordering::Release);
                                 tracing::error!(
-                                    "MQTT SECONDARY STATUS: broker=emqx state=stopped reason={}",
+                                    "MQTT SECONDARY STATUS: broker=secondary state=stopped reason={}",
                                     reason
                                 );
                                 break;
@@ -1279,14 +1345,14 @@ impl MqttTransport {
                                 .is_err()
                             {
                                 tracing::error!(
-                                    "MQTT SECONDARY STATUS: broker=emqx state=stopped reason=notification_channel_closed"
+                                    "MQTT SECONDARY STATUS: broker=secondary state=stopped reason=notification_channel_closed"
                                 );
                                 break;
                             }
                             secondary_liveness.mark_notification_forwarded();
                             let snapshot = secondary_liveness.snapshot();
                             tracing::info!(
-                                "MQTT SECONDARY STATUS: broker=emqx state=connected connacks={} polls={}/{} poll_errors={} mode=dual_publish max_fanout=2",
+                                "MQTT SECONDARY STATUS: broker=secondary state=connected connacks={} polls={}/{} poll_errors={} mode=dual_publish max_fanout=2",
                                 snapshot.connacks,
                                 snapshot.polls_completed,
                                 snapshot.polls_started,
@@ -1298,11 +1364,11 @@ impl MqttTransport {
                         }
                         Err(error) => {
                             secondary_ready.store(false, Ordering::Release);
-                            mqtt_link_set_error(format!("вторичный (emqx): {}", error));
+                            mqtt_link_set_error(format!("вторичный: {}", error));
                             secondary_liveness.mark_poll_error();
                             secondary_liveness.mark_backoff();
                             tracing::warn!(
-                                "MQTT SECONDARY STATUS: broker=emqx state=backoff retry_in={}s error={}",
+                                "MQTT SECONDARY STATUS: broker=secondary state=backoff retry_in={}s error={}",
                                 reconnect_backoff_secs,
                                 error
                             );
@@ -1413,7 +1479,7 @@ impl MqttTransport {
                         let topic = publish.topic;
                         let payload = publish.payload;
                         if let Err(reason) = forward_incoming_publish(
-                            "hivemq",
+                            "primary",
                             topic,
                             payload.as_ref(),
                             inbox_permit,
@@ -1967,7 +2033,10 @@ impl MqttTransport {
                     {
                         Ok(_) => {
                             #[cfg(feature = "mqtt-dual-broker")]
-                            self.primary_ready.store(true, Ordering::Release);
+                            {
+                                self.primary_ready.store(true, Ordering::Release);
+                                self.refresh_presence(MqttBrokerSet::PRIMARY).await;
+                            }
                             tracing::info!(
                                 "MQTT: connection restored; subscription requested for p2pm2/# (node={})",
                                 self.node_id
@@ -1995,12 +2064,13 @@ impl MqttTransport {
                     Ok(()) => {
                         self.secondary_ready.store(true, Ordering::Release);
                         tracing::info!(
-                            "MQTT SECONDARY READY: broker=emqx ConnAck=true subscription_request=true mode=dual_publish max_fanout=2"
+                            "MQTT SECONDARY READY: broker=secondary ConnAck=true subscription_request=true mode=dual_publish max_fanout=2"
                         );
+                        self.refresh_presence(MqttBrokerSet::SECONDARY).await;
                     }
                     Err(error) => {
                         tracing::warn!(
-                            "MQTT SECONDARY STATUS: broker=emqx state=degraded subscription_request=false error={}",
+                            "MQTT SECONDARY STATUS: broker=secondary state=degraded subscription_request=false error={}",
                             error
                         );
                     }
@@ -2049,133 +2119,10 @@ pub struct MqttEvent {
     pub payload: String,
 }
 
+#[cfg(all(test, feature = "mqtt-dual-broker"))]
+#[path = "mqtt_transport_local_tests.rs"]
+mod local_tests;
+
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reconnect_backoff_grows_then_holds_at_the_cap() {
-        // Тот же ряд, что был до правки (1, 2, 4, 8, 16, 30, 30…): правка
-        // только собрала число в `network::timing`, поведение не изменилось.
-        let mut secs = 1u64;
-        let mut seen = vec![secs];
-        for _ in 0..8 {
-            secs = next_reconnect_backoff(secs);
-            seen.push(secs);
-        }
-        assert_eq!(seen, vec![1, 2, 4, 8, 16, 30, 30, 30, 30]);
-        // И ни одна пауза не выходит за потолок.
-        assert!(seen.iter().all(|value| *value <= MQTT_RECONNECT_BACKOFF_MAX_SECS));
-    }
-
-    /// Наш предел обязан покрывать то, что очередь пересылки пообещала
-    /// хранить: иначе запись лежит в очереди и «ждёт получателя» вечно, потому
-    /// что транспорт физически не может её отдать.
-    #[test]
-    fn mqtt_packet_limit_covers_the_relay_queue_promise() {
-        assert!(
-            MAX_MQTT_PACKET_BYTES >= crate::network::relay_queue::MAX_MESH_RELAY_ENVELOPE_BYTES,
-            "предел пакета {} меньше того, что принимает очередь ({})",
-            MAX_MQTT_PACKET_BYTES,
-            crate::network::relay_queue::MAX_MESH_RELAY_ENVELOPE_BYTES
-        );
-    }
-
-    /// Умолчание rumqttc (10 240 байт) не наш случай, и это не мелочь: наш
-    /// САМЫЙ БОЛЬШОЙ законный пакет (кусок истории 16 КиБ) больше него после
-    /// двух base64 — именно поэтому истории «ждали получателя», а отчёт это
-    /// показывал как отказ брокера.
-    #[test]
-    fn largest_story_packet_fits_our_limit_but_not_the_client_default() {
-        // Кусок истории: JSON до 16 КиБ (StoryStore.encodePackets).
-        let story_packet = 16 * 1024usize;
-        // SealedWire: base64 шифротекста (тело + 16 байт тега GCM) плюс
-        // base64 конверта ключа (203 + подпись 200 байт с запасом) и IV.
-        let ciphertext_b64 = (story_packet + 16).div_ceil(3) * 4;
-        let sealed_wire = 10 + (700usize).div_ceil(3) * 4 + 16 + ciphertext_b64 + 2;
-        // Relay-конверт: ещё один base64 поверх всей запечатанной строки плюс
-        // служебные поля (msg_id, получатель, источник, область, ttl, hop).
-        let relay_payload = (sealed_wire + 2).div_ceil(3) * 4 + 210;
-        let packet = publish_packet_size("p2pm2/msg/pk_0123456789abcdef0123456789abcdef", relay_payload);
-
-        assert!(
-            packet > 10 * 1024,
-            "пакет обязан быть больше умолчания rumqttc, иначе проверять нечего: {packet}"
-        );
-        assert!(
-            packet <= MAX_MQTT_PACKET_BYTES,
-            "самый большой наш пакет {packet} не влезает в предел {}",
-            MAX_MQTT_PACKET_BYTES
-        );
-    }
-
-    /// Размер пакета считается по всему пакету (заголовок, тема, тело) — так же,
-    /// как его считает rumqttc, иначе проверка предела разошлась бы с клиентом.
-    #[test]
-    fn publish_packet_size_counts_header_topic_and_payload() {
-        assert_eq!(publish_packet_size("", 0), 4); // 1 + 1 + (2 + 0 + 0)
-        assert_eq!(publish_packet_size("ab", 3), 9); // 1 + 1 + (2 + 2 + 3)
-        // 128 байт remaining: длина занимает уже два байта.
-        assert_eq!(publish_packet_size("", 126), 131);
-    }
-
-    /// Предел проверяется ДО сети: и на границе, и за ней.
-    #[test]
-    fn our_limit_refuses_oversize_publish_before_the_network() {
-        let topic = "p2pm2/msg/pk_0123456789abcdef0123456789abcdef";
-        // Мелкий пакет и пакет с килобайтным запасом проходят.
-        assert!(publish_fits_our_limit("relay publish", topic, 1024));
-        assert!(publish_fits_our_limit(
-            "relay publish",
-            topic,
-            MAX_MQTT_PACKET_BYTES - 1024
-        ));
-        // А ровно предел в ТЕЛЕ — уже нет: к телу добавляются тема и заголовок,
-        // именно на этом и разошлась бы проверка «по длине тела».
-        assert!(!publish_fits_our_limit(
-            "relay publish",
-            topic,
-            MAX_MQTT_PACKET_BYTES
-        ));
-    }
-
-    #[test]
-    fn r4_broker_set_is_exactly_hivemq_then_emqx() {
-        assert_eq!(
-            MQTT_BROKERS,
-            &[("broker.hivemq.com", 1883), ("broker.emqx.io", 1883)]
-        );
-    }
-
-    #[test]
-    fn receipt_topic_is_unique_and_does_not_embed_message_id() {
-        let first = mesh_receipt_topic("pk_origin", "message/with+#wildcards").unwrap();
-        let same = mesh_receipt_topic("pk_origin", "message/with+#wildcards").unwrap();
-        let second = mesh_receipt_topic("pk_origin", "another-message").unwrap();
-
-        assert_eq!(first, same);
-        assert_ne!(first, second);
-        assert!(first.starts_with("p2pm2/msg/pk_origin/receipt/"));
-        assert!(!first.contains("message/with+#wildcards"));
-        assert_eq!(first.rsplit('/').next().unwrap().len(), 64);
-    }
-
-    #[test]
-    fn cleanup_receipt_topic_is_shared_non_origin_path() {
-        let topic = mesh_cleanup_receipt_topic("message/with+#wildcards").unwrap();
-        assert!(topic.starts_with("p2pm2/receipt/cleanup/"));
-        assert_eq!(topic, mesh_cleanup_receipt_topic("message/with+#wildcards").unwrap());
-        assert!(!topic.contains("message/with+#wildcards"));
-        assert!(mesh_cleanup_receipt_topic("").is_err());
-        assert!(mesh_cleanup_receipt_topic(&"m".repeat(257)).is_err());
-    }
-
-    #[test]
-    fn receipt_topic_rejects_unsafe_origin_and_unbounded_message_id() {
-        assert!(mesh_receipt_topic("pk_origin/other", "m1").is_err());
-        assert!(mesh_receipt_topic("pk_origin+", "m1").is_err());
-        assert!(mesh_receipt_topic("pk_origin", "").is_err());
-        assert!(mesh_receipt_topic("pk_origin", &"m".repeat(257)).is_err());
-    }
-}
-
+#[path = "mqtt_transport_tests.rs"]
+mod tests;

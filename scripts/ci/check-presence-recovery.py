@@ -115,6 +115,19 @@ class PresenceWiring(unittest.TestCase):
         receiver = section(keep, "class EmergencyKeepAliveReceiver", "object EmergencyKeepAlive")
         self.assertNotIn("invalidateLastAlive()", receiver)
 
+    def test_network_monitor_uses_default_network_and_serialized_actions(self):
+        monitor = read(APP, "service/NetworkMonitor.kt")
+        self.assertIn("registerDefaultNetworkCallback(networkCallback)", monitor)
+        self.assertNotIn("registerNetworkCallback(request", monitor)
+        self.assertIn("DefaultNetworkState<Network>()", monitor)
+        self.assertIn("DefaultNetworkActions(callbackScope", monitor)
+        self.assertIn("currentCoroutineContext().ensureActive()", monitor)
+        self.assertIn("actions.stop()", monitor)
+        worker = read(APP, "service/DefaultNetworkActions.kt")
+        self.assertIn("Channel.CONFLATED", worker)
+        self.assertIn("for (action in pending)", worker)
+        self.assertIn("recordFailure(error)", worker)
+
     def test_dispatch_is_separate_bounded_and_mdns_round_is_not_persistent(self):
         dispatch = read(RUST, "network/presence_dispatch.rs")
         for marker in ("fn spawn_periodic(", "MAX_OWN_PER_ROUND", "PARALLEL_SENDS: usize = 4",

@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
-import android.net.NetworkRequest
 import android.util.Log
 import com.vladimir.messenger.data.RustBridge
 import com.vladimir.messenger.data.diagnostics.Counters
@@ -13,60 +12,83 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 
-/**
- * NetworkMonitor — слушает изменения сети и уведомляет Rust-ядро.
- */
+/** Listens to the app's default network, not every simultaneously available network. */
 class NetworkMonitor(private val context: Context) {
 
     private val TAG = "NetworkMonitor"
-
-    /** Тип сети для журнала: пишем только смену, а не каждый колбэк возможностей. */
-    @Volatile
-    private var lastTransport: String? = null
+    private val state = DefaultNetworkState<Network>()
     @Volatile private var lastCapabilitiesSignature: String? = null
     private val callbackScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // A single worker serializes resets; if it is busy, only the most recent
+    // pending state matters. Stopping prevents queued transitions from running.
+    private val actions = DefaultNetworkActions(callbackScope, { action ->
+        currentCoroutineContext().ensureActive()
+        when (action) {
+            DefaultNetworkState.Action.AVAILABLE -> {
+                com.vladimir.messenger.data.swarm.NetworkPathSettings.applyToCore(context)
+                currentCoroutineContext().ensureActive()
+                com.vladimir.messenger.data.swarm.Ipv6NetworkSettings.applyToCore(context)
+                currentCoroutineContext().ensureActive()
+                RustBridge.onNetworkAvailable()
+                currentCoroutineContext().ensureActive()
+                RustBridge.triggerGossipDiscovery()
+                currentCoroutineContext().ensureActive()
+                com.vladimir.messenger.data.security.DeviceIdentityGossip.onProfileOrContactsChanged()
+            }
+            DefaultNetworkState.Action.LOST -> RustBridge.onNetworkLost()
+            else -> Unit
+        }
+    }, { error -> Log.w(TAG, "Could not apply network transition", error) })
 
     private val connectivityManager =
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
-
         override fun onAvailable(network: Network) {
-            Log.i(TAG, "Network available")
-            TransferDiagnostics.count(Counters.NETWORK_CHANGES)
-            TransferDiagnostics.record("net", "сеть появилась")
-            callbackScope.launch {
-                // Настройки пути доставки зависят от сети (мобильная или нет),
-                // а при старте службы это первый момент, когда ядро уже живо.
-                com.vladimir.messenger.data.swarm.NetworkPathSettings.applyToCore(context)
-                com.vladimir.messenger.data.swarm.Ipv6NetworkSettings.applyToCore(context)
-                RustBridge.onNetworkAvailable()
-            }
+            // On Android 8+ the capabilities callback follows this one. Wait
+            // for it rather than querying a potentially stale system snapshot.
+            state.available(network)
         }
 
         override fun onLost(network: Network) {
-            Log.i(TAG, "Network lost")
-            TransferDiagnostics.count(Counters.NETWORK_CHANGES)
-            TransferDiagnostics.recordWarning("net", "потеряна доступная сеть; активная сеть может быть другой")
-            callbackScope.launch { RustBridge.onNetworkLost() }
+            when (state.lost(network)) {
+                DefaultNetworkState.Action.LOST -> {
+                    lastCapabilitiesSignature = null
+                    Log.i(TAG, "Default network lost")
+                    TransferDiagnostics.count(Counters.NETWORK_CHANGES)
+                    TransferDiagnostics.recordWarning("net", "потеряна активная сеть")
+                    actions.submit(DefaultNetworkState.Action.LOST)
+                }
+                else -> Unit // The old default may be lost after a replacement appeared.
+            }
         }
 
-        override fun onCapabilitiesChanged(
-            network: Network,
-            caps: NetworkCapabilities
-        ) {
+        override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
             val hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            val isVpn = caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
             val isWifi = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
             val isMobile = caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
-            // Only fixed capability/transport changes, never addresses or network IDs.
-            // These callbacks cover all matching networks, not just the active one.
+            val isEthernet = caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+            val isBluetooth = caps.hasTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH)
+            // Track underlying transports even while VPN remains the default:
+            // mobile-to-Wi-Fi under the tunnel may change the usable route.
+            val route = (if (isVpn) 1 else 0) or (if (isWifi) 2 else 0) or
+                (if (isMobile) 4 else 0) or (if (isEthernet) 8 else 0) or
+                (if (isBluetooth) 16 else 0)
+            val metered = !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+            val action = state.capabilities(network, hasInternet, route, metered)
+            if (action == DefaultNetworkState.Action.IGNORE) return
+
+            // Only fixed capabilities/transport names are recorded: no addresses,
+            // SSIDs or network identifiers enter the safe diagnostics report.
             val transport = when {
-                caps.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> "VPN"
+                isVpn -> "VPN"
                 isWifi -> "Wi-Fi"
                 isMobile -> "мобильная сеть"
-                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
+                isEthernet -> "Ethernet"
                 else -> "другая"
             }
             val validated = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
@@ -76,40 +98,38 @@ class NetworkMonitor(private val context: Context) {
                 lastCapabilitiesSignature = signature
                 TransferDiagnostics.record("net", "возможности сети: $transport, internet=$hasInternet, validated=$validated, captive_portal=$portal")
             }
-            if (transport != lastTransport) {
-                lastTransport = transport
-                // Сменилась сеть (Wi-Fi → мобильная, включился VPN): сразу применяем
-                // сетевую политику и обновляем объявление живых IPv4/IPv6-адресов рою.
-                callbackScope.launch {
-                    com.vladimir.messenger.data.swarm.NetworkPathSettings.applyToCore(context)
-                    com.vladimir.messenger.data.swarm.Ipv6NetworkSettings.applyToCore(context)
-                    if (hasInternet) {
-                        RustBridge.onNetworkAvailable()
-                        RustBridge.triggerGossipDiscovery()
-                        com.vladimir.messenger.data.security.DeviceIdentityGossip.onProfileOrContactsChanged()
-                    }
+            when (action) {
+                DefaultNetworkState.Action.AVAILABLE -> {
+                    Log.i(TAG, "Default network available or changed")
+                    TransferDiagnostics.count(Counters.NETWORK_CHANGES)
+                    TransferDiagnostics.record("net", "сеть: $transport")
+                    actions.submit(action)
                 }
-                TransferDiagnostics.record(
-                    "net",
-                    "сеть: $transport" + if (!hasInternet) ", без интернета" else "",
-                )
+                DefaultNetworkState.Action.LOST -> {
+                    Log.i(TAG, "Default network has no internet capability")
+                    TransferDiagnostics.count(Counters.NETWORK_CHANGES)
+                    TransferDiagnostics.recordWarning("net", "активная сеть без интернета")
+                    actions.submit(action)
+                }
+                else -> Unit
             }
         }
     }
 
     fun start() {
-        val request = NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .build()
         try {
-            connectivityManager.registerNetworkCallback(request, networkCallback)
+            // minSdk is 26; default callback is available since Android 7.
+            connectivityManager.registerDefaultNetworkCallback(networkCallback)
             Log.i(TAG, "NetworkMonitor started")
         } catch (ex: Exception) {
-            Log.e(TAG, "Failed to register network callback", ex)
+            Log.e(TAG, "Failed to register default network callback", ex)
         }
     }
 
     fun stop() {
+        // Reject queued callbacks immediately; an already running blocking
+        // call cannot be interrupted, but must not continue into later calls.
+        actions.stop()
         callbackScope.cancel()
         try {
             connectivityManager.unregisterNetworkCallback(networkCallback)
