@@ -1312,10 +1312,12 @@ fn event_to_ffi(e: CoreEvent) -> CoreEventFfi {
             peer_id,
             display_name,
             is_local,
+            observed_at_ms,
         } => {
             ffi.peer_id = Some(peer_id);
             ffi.display_name = Some(display_name);
             ffi.is_local = Some(is_local);
+            ffi.timestamp = Some(observed_at_ms);
         }
         CoreEvent::PeerLost { peer_id } => {
             ffi.peer_id = Some(peer_id);
@@ -1390,6 +1392,18 @@ pub enum CoreError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presence_ffi_keeps_original_observation_timestamp() {
+        let event = event_to_ffi(CoreEvent::PeerDiscovered {
+            peer_id: "pk_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+            display_name: "Alice".into(),
+            is_local: false,
+            observed_at_ms: 1_234_567,
+        });
+        assert_eq!(event.event_type, "peer_discovered");
+        assert_eq!(event.timestamp, Some(1_234_567));
+    }
 
     #[test]
     fn file_transfer_functional_ffi_round_trip() {

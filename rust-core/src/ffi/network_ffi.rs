@@ -177,6 +177,25 @@ impl NetworkManagerFfi {
             .insert(info.peer_id.clone(), info);
     }
 
+    /// Keep the observation time of retained presence and preserve newer/direct
+    /// information already learned by another transport.
+    pub fn observe_peer_at(&self, peer_id: &str, display_name: &str, seen_at_ms: i64) {
+        let mut peers = self.peers.lock().unwrap();
+        match peers.get_mut(peer_id) {
+            Some(peer) => {
+                if seen_at_ms >= peer.last_seen_ms {
+                    peer.last_seen_ms = seen_at_ms;
+                    peer.display_name = display_name.to_string();
+                }
+            }
+            None => {
+                let mut peer = PeerInfo::new(peer_id.to_string(), display_name.to_string());
+                peer.last_seen_ms = seen_at_ms;
+                peers.insert(peer_id.to_string(), peer);
+            }
+        }
+    }
+
     /// Удалить peer
     pub fn remove_peer(&self, peer_id: &str) {
         self.peers.lock().unwrap().remove(peer_id);

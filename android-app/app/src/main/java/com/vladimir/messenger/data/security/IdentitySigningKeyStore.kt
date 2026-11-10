@@ -49,6 +49,15 @@ object IdentitySigningKeyStore {
     private const val MAX_REFERRAL_TOKEN_BYTES = 512
     private val AAD = "apu-identity-signing-seed-v1".toByteArray(Charsets.US_ASCII)
 
+    // Protected by this object's monitor, shared with RustBridge startup. Record
+    // the route as soon as native installation succeeds, even if a later
+    // diagnostics/binding check fails: the Rust global already changed.
+    private var installedRoutingId: String? = null
+
+    @Synchronized
+    internal fun matchesInstalledRoute(expected: String?): Boolean =
+        ExistingRoutingIdentity.matchesInstalled(expected, installedRoutingId)
+
     enum class Mode {
         ABSENT,
         READY,
@@ -77,6 +86,12 @@ object IdentitySigningKeyStore {
             Log.w(TAG, "Signing sidecar disabled: invalid legacy routing ID")
             return null
         }
+        // Engine initialization uses the same monitor; no other profile can
+        // start between this check and installing the process-global sidecar.
+        if (!com.vladimir.messenger.data.RustBridge.signingRouteCompatible(legacyRoutingNodeId)) {
+            Log.e(TAG, "Signing sidecar rejected: running engine uses another route")
+            return null
+        }
         return try {
             withSeed(context) { seed ->
                 installIdentitySigningSeed(
@@ -84,6 +99,7 @@ object IdentitySigningKeyStore {
                     legacyRoutingNodeId,
                     seed,
                 )
+                installedRoutingId = legacyRoutingNodeId
             }
             val mode = identitySigningMode()
             val publicKey = identitySigningPublicKeyHex()

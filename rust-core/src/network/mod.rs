@@ -48,6 +48,8 @@ pub mod helper_delivery;
 pub mod helper_quality;
 pub mod helper_policy;
 pub mod presence;
+pub mod presence_dispatch;
+pub mod presence_observation;
 pub mod presence_scope;
 pub mod quic_client;
 pub mod relay;

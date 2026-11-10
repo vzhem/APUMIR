@@ -126,20 +126,32 @@ class CoreServerService : Service() {
     private var eventPollingJob: Job? = null
     private var filePumpJob: Job? = null
     private var lastNotificationText: String = ""
-    private val knownPeers = mutableMapOf<String, Long>()  // peerId -> lastSeenMs
-    private val PEER_DEDUP_MS = 30000L  // 60 сек дедупликация
-
-    /**
-     * Heartbeat-присутствие: ядро шлёт peer_discovered ~каждые 30 с по MQTT
-     * (и ~каждые 15 с по mDNS в LAN), а peer_lost практически НЕ генерирует —
-     * самолётный режим у собеседника никакого события не даёт. Поэтому «в сети»
-     * = «живая метка свежее TTL»: который peers мы зажгли, тех сами и гасятся.
-     */
-    private val onlineMarked = java.util.Collections.synchronizedSet(mutableSetOf<String>())
-    // Ядро объявляет о себе раз в минуту (было раз в 30 секунд): «пропал» = три
-    // пропуска подряд = 200 секунд. Уборка реже: она будит процесс, спешить некуда.
-    private val PRESENCE_TTL_MS = 200_000L    // ~3 пропущенных MQTT-пульса
-    private val PRESENCE_SWEEP_MS = 60_000L
+    private val presence by lazy {
+        PresenceRecovery(
+            resetContacts = { contactRepository.setAllOffline() },
+            resetChats = { chatRepository.setAllContactsOffline() },
+            onReset = { fileTransferRouter.clearOnlinePeers() },
+            updateContact = { id, online, seen -> contactRepository.updatePresence(id, online, seen) },
+            updateChats = { peer, id, online ->
+                chatRepository.updateContactOnlineStatus(peer, online)
+                if (id != peer) chatRepository.updateContactOnlineStatus(id, online)
+            },
+            onOnline = { peer, seen ->
+                // Start immediately under PresenceRecovery's lock: the router's
+                // in-memory mark happens before a competing offline transition.
+                serviceScope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+                    try { fileTransferRouter.markOnline(peer, seen) }
+                    catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (error: Exception) { Log.w(TAG, "custody presence failed", error) }
+                }
+            },
+            onOffline = { peer, expired ->
+                fileTransferRouter.markOffline(peer)
+                if (expired) com.vladimir.messenger.data.peer.PeerRatingStore.recordMiss(applicationContext, peer)
+            },
+            recordFailure = { phase, error -> Log.w(TAG, "Presence $phase failed", error) },
+        )
+    }
     private val INITIAL_FILE_PUMP_DELAY_MS = 5000L
     /** Boot-time readiness only: a failed key unlock cannot be diagnosed as a peer-key change. */
     @Volatile private var localCryptoReadyAtStartup = false
@@ -651,17 +663,9 @@ class CoreServerService : Service() {
         // РЕГИСТРАЦИЯ В CLOUDFLARE WORKER REGISTRY
         // (независимо от наличия telegram_bot_token)
         // ================================================================
+        presence.start(serviceScope)
         serviceScope.launch {
             try {
-                // Холодный старт: peer_lost не доезжал, пока нас не было —
-                // гасим устаревшие «в сети», живых тут же включит peer_discovered.
-                try {
-                    contactRepository.setAllOffline()
-                    chatRepository.setAllContactsOffline()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Presence reset failed: ${e.message}")
-                }
-                startPresenceReaper()
                 // Ждём пока RustBridge инициализируется
                 var attempts = 0
                 while (RustBridge.nodeId() == null && attempts < 30) {
@@ -780,6 +784,18 @@ class CoreServerService : Service() {
         if (!identityReady) {
             Log.i(TAG, "CoreServerService deferred: local identity is not ready")
             CoreStatus.report("Ожидание создания identity")
+            CoreStatus.markReady()
+            stopServiceSafely()
+            return START_NOT_STICKY
+        }
+        val routing = com.vladimir.messenger.data.security.ExistingRoutingIdentity.resolve(
+            prefs.getString("node_id", null), prefs.getString("public_key", null),
+            prefs.getString("existing_public_key", null), prefs.getString("existing_private_key", null),
+        )
+        if (routing == null) {
+            Log.e(TAG, "Existing routing identity is missing or inconsistent; refusing to replace it")
+            TransferDiagnostics.recordWarning("core", "сохранённый адрес личности отсутствует или не совпадает; новый не создаётся")
+            CoreStatus.report("Ядро в ограниченном режиме")
             CoreStatus.markReady()
             stopServiceSafely()
             return START_NOT_STICKY
@@ -917,10 +933,10 @@ class CoreServerService : Service() {
         if (displayName == "Anonymous" && prefs.getBoolean("identity_created", false)) {
             displayName = prefs.getString("display_name", "Anonymous") ?: "Anonymous"
         }
-        val existingPubKey = prefs.getString("existing_public_key", null)
-        val existingPrivKey = prefs.getString("existing_private_key", null)
+        val existingPubKey = routing.nodeId
+        val existingPrivKey = routing.legacyPrivateKey
 
-        Log.i(TAG, "Starting engine: displayName=$displayName existingKey=${existingPubKey?.take(16)}")
+        Log.i(TAG, "Starting engine: displayName=$displayName existingKey=${existingPubKey.take(16)} legacyPlaceholder=${routing.usedPlaceholder}")
 
         serviceScope.launch {
             // Раунд 263: честный статус для сплэша - этап подготовки ключей.
@@ -929,8 +945,6 @@ class CoreServerService : Service() {
             // signing sidecar устанавливается до engine start и пока используется
             // только diagnostics/future signed features.
             val legacyRoutingId = existingPubKey
-                ?: prefs.getString("node_id", null)
-                .orEmpty()
             // The signed identity is captured ONCE when Rust starts. Give its Keystore unlock
             // priority over relay custody and address-book restoration on a cold KeyMint;
             // competing operations previously had the same 4s deadline and could leave the
@@ -1090,19 +1104,16 @@ class CoreServerService : Service() {
                 // Раунд 263: ядро поднято - сплэш может отпустить человека.
                 CoreStatus.markReady()
 
-                // Азбука адресов (docs/ADDRESS_BOOK.md): засевать «свои»,
-                // чтобы в первую же минуту после старта личное presence
-                // стукнуло к сохранённым адресам, а онлайн-соседи ответили
-                // presence со СВЕЖИМ адресом — файл актуализируется.
-                serviceScope.launch {
-                    runCatching {
+                PresenceAudienceObserver.start(
+                    serviceScope, contactRepository.observeContacts(),
+                    refresh = {
+                        swarmPeerDirectory.invalidate()
                         val ids = swarmPeerDirectory.audienceIds()
-                        RustBridge.setPresenceAudience(ids)
-                        Log.i(TAG, "Presence audience seeded: ${ids.size} ids")
-                    }.onFailure {
-                        Log.w(TAG, "Presence audience seed failed: ${it.message}")
-                    }
-                }
+                        RustBridge.setPresenceAudienceOrThrow(ids)
+                        Log.i(TAG, "Presence audience refreshed: ${ids.size} ids")
+                    },
+                    recordFailure = { Log.w(TAG, "Presence audience refresh failed", it) },
+                )
 
                 // Раунд 121: свой каталог гифок - разослать и спросить чужие
                 // (тротлимб внутри; при старте уходит после подключения).
@@ -1381,7 +1392,7 @@ class CoreServerService : Service() {
                         .putString("public_key", nodeId)
                         .putString("node_id", nodeId)
                         .putString("existing_public_key", nodeId)
-                        .putString("existing_private_key", nodeId)
+                        .putString("existing_private_key", existingPrivKey)
                         .apply()
                 }
 
@@ -2961,60 +2972,38 @@ class CoreServerService : Service() {
                 val peerId = event.peerId ?: return
                 if (!peerId.startsWith("pk_")) return  // Skip mDNS duplicates
                 val peerName = event.displayName?.takeIf { it.isNotBlank() } ?: "Anonymous"
-                val now = System.currentTimeMillis()
-                // Рейтинг узлов: отмечаем, что он был на месте. Из таких
-                // наблюдений и складывается «кому слать в первую очередь».
-                runCatching {
-                    com.vladimir.messenger.data.peer.PeerRatingStore.recordSighting(
-                        context = applicationContext,
-                        peerId = peerId,
-                        address = event.status,
-                        nowMs = now,
-                    )
-                }
-                val lastSeen = knownPeers[peerId] ?: 0L
-                knownPeers[peerId] = now  // свежесть ДО дедупа: пульс = жизнь
-                val lightTouch = now - lastSeen < PEER_DEDUP_MS
-                // Хранение у третьего телефона (этап 7 роя): маршрутизатор
-                // файлов ведёт свой список «кто в сети» - по нему выбирается
-                // хранитель и отдаётся хранимое появившемуся получателю.
-                serviceScope.launch {
-                    // Раунд 180 (аудит-2): регистр «кто онлайн» для файлов -
-                    // только на «тяжёлом» пульсе (раз в 30 с), а не на каждый
-                    // пульс: при живой сети это были десятки лишних записей
-                    // в минуту без какой-нибудь пользы.
-                    if (!lightTouch) {
-                        runCatching { fileTransferRouter.markOnline(peerId) }
-                            .onFailure { Log.w(TAG, "custody presence failed: ${it.message}") }
-                    }
-                    // Файл группы, который я жду, а его сид только что появился:
-                    // спросить сразу, не дожидаясь очередного круга (этап 9).
-                    if (!lightTouch) {
-                        runCatching { groupFiles.onPeerOnline(peerId) }
-                            .onFailure { Log.w(TAG, "group file presence failed: ${it.message}") }
-                        // Обновление, которое я жду, может раздавать именно
-                        // этот узел: спросить сразу, не дожидаясь круга.
-                        runCatching { apkSeeder.onPeerOnline(peerId) }
-                            .onFailure { Log.w(TAG, "apk seeder presence failed: ${it.message}") }
-                    }
-                }
-
-                // Обновляем только СУЩЕСТВУЮЩИЕ контакты (НЕ создаём новые автоматически)
                 try {
                     val existing = contactRepository.getContactByFingerprint(peerId)
-                    if (existing != null) {
-                        // «В сети» — при КАЖДОМ живом пульсе (переходы дёшевы).
-                        // Точный момент последнего пульса запоминаем при первом
-                        // появлении и затем не чаще тяжёлого круга (30 с):
-                        // контактам есть что показать после ухода абонента, а
-                        // база не получает запись на каждый MQTT-пульс.
-                        val becameOnline = onlineMarked.add(peerId)
-                        if (becameOnline || !lightTouch) {
-                            contactRepository.updatePresence(peerId, true, now)
+                    val observation = presence.observe(peerId, existing?.id, event.timestamp) ?: return
+                    val lightTouch = observation.lightTouch
+                    // Рейтинг отражает исходное время принятого наблюдения, а не время доставки.
+                    runCatching {
+                        com.vladimir.messenger.data.peer.PeerRatingStore.recordSighting(
+                            context = applicationContext,
+                            peerId = peerId,
+                            address = event.status,
+                            nowMs = observation.seenAtMs,
+                        )
+                    }
+                    // Хранение у третьего телефона (этап 7 роя): маршрутизатор
+                    // файлов ведёт свой список «кто в сети» - по нему выбирается
+                    // хранитель и отдаётся хранимое появившемуся получателю.
+                    serviceScope.launch {
+                        // Файл группы, который я жду, а его сид только что появился:
+                        // спросить сразу, не дожидаясь очередного круга (этап 9).
+                        if (!lightTouch) {
+                            runCatching { groupFiles.onPeerOnline(peerId) }
+                                .onFailure { Log.w(TAG, "group file presence failed: ${it.message}") }
+                            // Обновление, которое я жду, может раздавать именно
+                            // этот узел: спросить сразу, не дожидаясь круга.
+                            runCatching { apkSeeder.onPeerOnline(peerId) }
+                                .onFailure { Log.w(TAG, "apk seeder presence failed: ${it.message}") }
                         }
-                        if (becameOnline) {
-                            // И в чаты: шапка лички и точка в списке читают таблицу chats
-                            try { chatRepository.updateContactOnlineStatus(peerId, true) } catch (e: Exception) { Log.w(TAG, "presence online failed for ${peerId.takeLast(8)}: ${e.message}") }
+                    }
+
+                    // Обновляем только СУЩЕСТВУЮЩИЕ контакты (НЕ создаём новые автоматически)
+                    if (existing != null) {
+                        if (observation.becameOnline) {
                             // Новенький в сети: точечно синхронизируем сердечки (с антиспамом в HeartSyncPolicy).
                             serviceScope.launch {
                                 try {
@@ -3134,6 +3123,8 @@ class CoreServerService : Service() {
                         if (!lightTouch) Log.i(TAG, "ℹ Peer не в контактах: $peerName ($peerId) — нужен invite link")
                         if (lightTouch) return
                     }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
                 } catch (e: Exception) {
                     Log.e(TAG, "Update contact failed", e)
                 }
@@ -3143,14 +3134,9 @@ class CoreServerService : Service() {
             "peer_lost" -> {
                 val peerId = event.peerId ?: return
                 Log.i(TAG, "Peer lost: $peerId")
-                onlineMarked.remove(peerId)
-                // Берём время последнего живого пульса до очистки памяти, а
-                // не момент, когда транспорт заметил разрыв: так «был(а)»
-                // остаётся временем, когда контакт действительно видели.
-                val lastSeenAtMs = knownPeers.remove(peerId) ?: System.currentTimeMillis()
-                fileTransferRouter.markOffline(peerId)
-                try { contactRepository.updatePresence(peerId, false, lastSeenAtMs) } catch (e: Exception) { Log.w(TAG, "presence offline failed: ${e.message}") }
-                try { chatRepository.updateContactOnlineStatus(peerId, false) } catch (e: Exception) { Log.w(TAG, "chat online flag failed: ${e.message}") }
+                try { presence.lost(peerId) }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (e: Exception) { Log.w(TAG, "Presence lost failed", e) }
             }
 
             "network_status_changed" -> {
@@ -3222,37 +3208,6 @@ class CoreServerService : Service() {
             .setPriority(NotificationCompat.PRIORITY_MIN)
             .setShowWhen(false)
             .build()
-    }
-
-    /**
-     * Караул присутствия: метка онлайна без свежих пульсов дольше TTL → «не в сети».
-     * Самолётный режим у Жени = пульсы пропали, события peer_lost ядро не даёт.
-     */
-    private fun startPresenceReaper() {
-        serviceScope.launch {
-            while (true) {
-                kotlinx.coroutines.delay(PRESENCE_SWEEP_MS)
-                val now = System.currentTimeMillis()
-                val staleIds = synchronized(onlineMarked) {
-                    onlineMarked.filter { pid ->
-                        now - (knownPeers[pid] ?: 0L) > PRESENCE_TTL_MS
-                    }
-                }
-                for (pid in staleIds) {
-                    onlineMarked.remove(pid)
-                    val lastSeenAtMs = knownPeers.remove(pid) ?: now
-                    fileTransferRouter.markOffline(pid)
-                    // Пропущенный круг - минус к доступности в рейтинге.
-                    runCatching {
-                        com.vladimir.messenger.data.peer.PeerRatingStore
-                            .recordMiss(applicationContext, pid)
-                    }
-                    Log.i(TAG, "⚫ OFFLINE (TTL): $pid")
-                    try { contactRepository.updatePresence(pid, false, lastSeenAtMs) } catch (e: Exception) { Log.w(TAG, "presence TTL-offline failed: ${e.message}") }
-                    try { chatRepository.updateContactOnlineStatus(pid, false) } catch (e: Exception) { Log.w(TAG, "chat TTL-offline flag failed: ${e.message}") }
-                }
-            }
-        }
     }
 
     /**

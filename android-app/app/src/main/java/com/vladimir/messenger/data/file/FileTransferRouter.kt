@@ -930,8 +930,8 @@ class FileTransferRouter @Inject constructor(
     }
 
     /** Пульс присутствия: узел в сети. Будит выдачу хранимых для него файлов. */
-    suspend fun markOnline(nodeId: String) {
-        val first = onlinePeers.put(nodeId, System.currentTimeMillis()) == null
+    suspend fun markOnline(nodeId: String, seenAtMs: Long) {
+        val first = onlinePeers.put(nodeId, seenAtMs) == null
         if (first && RustBridge.isRunning()) {
             val held = runCatching { transferDao.getCustodyForRecipient(nodeId, System.currentTimeMillis()) }
                 .getOrDefault(emptyList())
@@ -943,9 +943,8 @@ class FileTransferRouter @Inject constructor(
         }
     }
 
-    fun markOffline(nodeId: String) {
-        onlinePeers.remove(nodeId)
-    }
+    fun markOffline(nodeId: String) { onlinePeers.remove(nodeId) }
+    fun clearOnlinePeers() { onlinePeers.clear() }
 
     private fun isPeerOnline(nodeId: String): Boolean {
         val seen = onlinePeers[nodeId] ?: return false

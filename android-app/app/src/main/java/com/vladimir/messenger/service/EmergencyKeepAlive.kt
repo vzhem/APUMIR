@@ -47,6 +47,9 @@ class EmergencyKeepAliveReceiver : BroadcastReceiver() {
             return
         }
         OperationalDiagnostics.tracker.count(OperationalCounter.DELIVERY_WAKE_ALARM)
+        // Wake decisions use a process-local heartbeat: an old APK's persisted
+        // timestamp is ignored, while a service started earlier in this new
+        // process (e.g. by Application.onCreate) is not mistakenly cleared.
         // Короткий карман бодрости: дать связи и помпам докрутиться, пока
         // система не усыпила процесс обратно.
         runCatching {
@@ -59,7 +62,7 @@ class EmergencyKeepAliveReceiver : BroadcastReceiver() {
         }
         val status = DeliveryAssurance.status(context)
         val now = System.currentTimeMillis()
-        if (!DeliveryWakePolicy.shouldWakeNow(status.conditions, status.lastAliveMs, now)) {
+        if (!DeliveryWakePolicy.shouldWakeNow(status.conditions, DeliveryAssurance.currentProcessLastAliveMs(), now)) {
             // Служба жива (метка свежая) — поднимать второй экземпляр незачем.
             // Но следующий сторож обязателен: будильник одноразовый.
             Log.i(TAG, "wake skipped: service is alive, next watchdog scheduled")
@@ -115,6 +118,7 @@ class EmergencyKeepAliveReceiver : BroadcastReceiver() {
             action == EmergencyKeepAlive.ACTION_PUMP ||
                 action == ACTION_BOOT ||
                 action == ACTION_PACKAGE_REPLACED
+
     }
 }
 
@@ -135,7 +139,7 @@ object EmergencyKeepAlive {
      * пробуждение по будильнику (см. [scheduleWatchdog]).
      */
     fun onServiceStarted(context: Context) {
-        DeliveryAssurance.markAlive(context)
+        DeliveryAssurance.serviceStarted(context)
         refusals(context, 0)
         scheduleWatchdog(context)
     }
@@ -146,8 +150,18 @@ object EmergencyKeepAlive {
      * хватало — раньше следующая попытка была через час.
      */
     fun onServiceStopped(context: Context, intentional: Boolean) {
+        // Otherwise the two-minute alarm mistakes the stopped service for a
+        // live one for up to 45 minutes and silently skips the fast restart.
+        DeliveryAssurance.invalidateLastAlive()
         if (!DeliveryAssurance.isEnabled(context)) {
             cancel(context)
+            return
+        }
+        val pendingRefusals = refusals(context, -1)
+        if (pendingRefusals > 0) {
+            // onDestroy after a foreground refusal must not replace its retry
+            // ladder with the ordinary two-minute service-gone alarm.
+            applyPlan(context, DeliveryWakePolicy.afterRefusal(DeliveryAssurance.conditions(context), pendingRefusals))
             return
         }
         if (intentional) {
@@ -173,6 +187,8 @@ object EmergencyKeepAlive {
      * Здесь настойчивость оправдана — письма ждут.
      */
     fun onServiceRefused(context: Context) {
+        // The retry ladder must not be suppressed by a pre-failure heartbeat.
+        DeliveryAssurance.invalidateLastAlive()
         if (!DeliveryAssurance.isEnabled(context)) {
             cancel(context)
             return

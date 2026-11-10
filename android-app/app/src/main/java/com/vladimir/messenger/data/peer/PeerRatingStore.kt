@@ -243,8 +243,8 @@ object PeerRatingStore {
             val clean = address?.trim().orEmpty()
             old.copy(
                 sightings = old.sightings + 1,
-                lastSeenMs = nowMs,
-                lastAddress = if (clean.isNotBlank()) clean else old.lastAddress,
+                lastSeenMs = maxOf(old.lastSeenMs, nowMs),
+                lastAddress = if (clean.isNotBlank() && nowMs >= old.lastSeenMs) clean else old.lastAddress,
                 // Прямой адрес - свойство узла: если он однажды был виден
                 // напрямую, признак сохраняем, иначе он мигал бы от круга к
                 // кругу вместе с качеством связи.

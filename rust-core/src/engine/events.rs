@@ -26,6 +26,8 @@ pub enum CoreEvent {
         peer_id: String,
         display_name: String,
         is_local: bool,
+        /// Original observation time, so queued/retained events cannot renew themselves.
+        observed_at_ms: i64,
     },
 
     /// Peer отключился
@@ -294,7 +296,8 @@ mod tests {
             CoreEvent::PeerDiscovered {
                 peer_id: "p1".into(),
                 display_name: "Alice".into(),
-                is_local: true
+                is_local: true,
+                observed_at_ms: 1,
             }
             .event_type(),
             "peer_discovered"
@@ -331,7 +334,8 @@ mod tests {
         assert!(CoreEvent::PeerDiscovered {
             peer_id: "p1".into(),
             display_name: "A".into(),
-            is_local: false
+            is_local: false,
+            observed_at_ms: 1,
         }
         .is_network());
         assert!(CoreEvent::PeerLost {
@@ -505,6 +509,7 @@ mod tests {
             peer_id: format!("pk_peer{n:04}"),
             display_name: format!("Peer {n}"),
             is_local: false,
+            observed_at_ms: 1,
         }
     }
 

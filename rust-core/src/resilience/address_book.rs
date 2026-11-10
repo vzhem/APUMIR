@@ -430,22 +430,35 @@ impl AddressBook {
     /// Preserve the observation time when learning somebody else's signed address. Repeated
     /// forwarding must not turn a yesterday-address into a freshly seen/online subscriber.
     pub fn record_observed_at(&self, node_id: &str, addr: SocketAddr, observed_at_ms: i64) -> bool {
+        self.upsert_observation(node_id, addr, observed_at_ms).unwrap_or(false)
+    }
+
+    /// Like record_observed_at, but reports acceptance even for an unchanged address.
+    /// Callers can use this to keep the in-memory route consistent with the book.
+    pub fn record_if_fresh(&self, node_id: &str, addr: SocketAddr, observed_at_ms: i64) -> bool {
+        self.upsert_observation(node_id, addr, observed_at_ms).is_some()
+    }
+
+    fn upsert_observation(&self, node_id: &str, addr: SocketAddr, observed_at_ms: i64) -> Option<bool> {
         if node_id.is_empty() {
-            return false;
+            return None;
         }
         let now_ms = crate::storage::models::now_ms();
         let observed_at_ms = observed_at_ms.max(0).min(now_ms);
-        if now_ms.saturating_sub(observed_at_ms) > ENTRY_TTL_MS { return false; }
+        if now_ms.saturating_sub(observed_at_ms) > ENTRY_TTL_MS { return None; }
         let changed;
         {
             let mut entries = self.entries.lock().unwrap();
             match entries.get_mut(node_id) {
                 Some(old) => {
+                    // A retained announcement or forwarded lease must not
+                    // replace an address observed more recently.
+                    if observed_at_ms < old.seen { return None; }
                     changed = old.addr != addr.to_string();
                     if changed {
                         old.addr = addr.to_string();
                     }
-                    old.seen = if changed { observed_at_ms } else { old.seen.max(observed_at_ms) };
+                    old.seen = observed_at_ms;
                 }
                 None => {
                     entries.insert(
@@ -464,7 +477,7 @@ impl AddressBook {
         // Троттлинг: не чаще раза в SAVE_DEBOUNCE_MS (flush при stop
         // всё равно добьёт хвост).
         self.save_if_due(now_ms);
-        changed
+        Some(changed)
     }
 
     fn save_if_due(&self, now_ms: i64) {

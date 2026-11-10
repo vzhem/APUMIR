@@ -104,6 +104,8 @@ jobs:
           python3 scripts/ci/check-initial-sync-contract.py
           python3 scripts/ci/check-launcher-icon.py
           python3 scripts/ci/check-delivery-cadence.py
+          python3 scripts/ci/check-emergency-keepalive.py
+          python3 scripts/ci/check-presence-recovery.py
           python3 scripts/ci/check-ui-return-contracts.py
           python3 scripts/ci/check-update-storage.py
           python3 scripts/ci/check-profile-background.py
@@ -149,7 +151,7 @@ jobs:
         working-directory: ./rust-core
         run: |
           set -o pipefail
-          for suite in helper_policy helper_quality helper_delivery peer_assistance peer_exchange direct_transport mqtt_fanout; do
+          for suite in helper_policy helper_quality helper_delivery peer_assistance peer_exchange direct_transport mqtt_fanout presence_scope presence_observation presence_dispatch swarm_first; do
             LOG="$RUNNER_TEMP/helper-$suite.log"
             if ! RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --features mqtt-dual-broker --lib "network::$suite::tests" > "$LOG" 2>&1; then
               tail -150 "$LOG"
@@ -165,6 +167,23 @@ jobs:
               exit 1
             fi
             tail -25 "$LOG"
+            grep -Eq '^test result: ok\. [1-9][0-9]* passed' "$LOG" || { echo "::error::No tests ran for $suite"; exit 1; }
+            grep '^test result:' "$LOG" >> "$GITHUB_STEP_SUMMARY"
+          done
+          # Presence crossing real engine/FFI and mDNS round boundaries.
+          for test in \
+            network::mdns::tests::browse_round_never_replays_an_old_node_without_a_resolution \
+            engine::core::tests::direct_personal_presence_emits_each_fresh_observation_but_not_stale_or_future \
+            engine::core::tests::invite_is_only_an_address_hint_not_online_presence \
+            tests::presence_ffi_keeps_original_observation_timestamp \
+            resilience::address_book::tests; do
+            LOG="$RUNNER_TEMP/presence-${test//::/-}.log"
+            if ! RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --features mqtt-dual-broker --lib "$test" > "$LOG" 2>&1; then
+              tail -150 "$LOG"
+              exit 1
+            fi
+            tail -25 "$LOG"
+            grep -Eq '^test result: ok\. [1-9][0-9]* passed' "$LOG" || { echo "::error::No tests ran for $test"; exit 1; }
             grep '^test result:' "$LOG" >> "$GITHUB_STEP_SUMMARY"
           done
           # STUN fallback is pure/deterministic; don't depend on public DNS or live servers.

@@ -5,6 +5,8 @@ import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.vladimir.messenger.data.RustBridge
+import com.vladimir.messenger.data.security.DeviceIdentityMarker
+import com.vladimir.messenger.data.security.ExistingRoutingIdentity
 import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import com.vladimir.messenger.data.security.RelayAtRestMasterKey
 import java.io.File
@@ -26,17 +28,28 @@ class RelayWakeWorker(
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val prefs = applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        if (!prefs.getBoolean(KEY_IDENTITY_CREATED, false)) {
-            Log.i(TAG, "M8 wake skipped: identity is not created")
+        if (!prefs.getBoolean(KEY_IDENTITY_CREATED, false) || !DeviceIdentityMarker.isPresent(applicationContext)) {
+            Log.i(TAG, "M8 wake skipped: local identity is not ready")
             return@withContext Result.success()
         }
-
+        val routing = ExistingRoutingIdentity.resolve(
+            prefs.getString("node_id", null), prefs.getString("public_key", null),
+            prefs.getString(KEY_EXISTING_PUBLIC_KEY, null), prefs.getString(KEY_EXISTING_PRIVATE_KEY, null),
+        )
+        if (routing == null) {
+            Log.e(TAG, "M8 wake skipped: saved routing identity is missing or inconsistent")
+            return@withContext Result.failure()
+        }
         val displayName = prefs.getString(KEY_DISPLAY_NAME, "Anonymous") ?: "Anonymous"
-        val publicKey = prefs.getString(KEY_EXISTING_PUBLIC_KEY, null)
-        val privateKey = prefs.getString(KEY_EXISTING_PRIVATE_KEY, null)
+        val publicKey = routing.nodeId
+        val privateKey = routing.legacyPrivateKey
         val relayDbPath = File(applicationContext.filesDir, RELAY_DB_NAME).absolutePath
 
         try {
+            if (RustBridge.isRunning() && !ExistingRoutingIdentity.matchesRunning(publicKey, RustBridge.nodeId())) {
+                Log.e(TAG, "M8 wake skipped: running engine identity does not match saved identity")
+                return@withContext Result.failure()
+            }
             val signing = IdentitySigningKeyStore.installIntoCore(
                 applicationContext,
                 publicKey.orEmpty(),
@@ -49,6 +62,7 @@ class RelayWakeWorker(
                 relayDbPath = relayDbPath,
                 activeWindowMillis = ACTIVE_WINDOW_MS,
             )
+            if (wake.custodyMode == "identity_mismatch") return@withContext Result.failure()
             Log.i(
                 TAG,
                 "M8 wake complete: signing=${signing?.mode ?: "legacy-only"} " +

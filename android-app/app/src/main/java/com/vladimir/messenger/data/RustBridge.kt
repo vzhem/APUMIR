@@ -5,6 +5,7 @@ import android.util.Log
 import com.vladimir.messenger.data.receipt.DeliveryAckWire
 import com.vladimir.messenger.data.security.MessageSealer
 import com.vladimir.messenger.data.security.OutgoingPayloadPolicy
+import com.vladimir.messenger.data.security.IdentitySigningKeyStore
 import kotlinx.coroutines.launch
 import uniffi.p2p_core.ChatFfi
 import uniffi.p2p_core.CoreEventFfi
@@ -215,8 +216,27 @@ object RustBridge {
         }
     }
 
-    /** Must run on [lifecycleExecutor], so engine startup is serialized with shutdown. */
+    /**
+     * Called by IdentitySigningKeyStore while holding its monitor. A non-null
+     * handle with an unreadable identity fails closed rather than being replaced.
+     */
+    internal fun signingRouteCompatible(expected: String): Boolean {
+        val current = engine ?: return true
+        val actual = runCatching { current.nodeId() }.getOrNull()
+        return com.vladimir.messenger.data.security.ExistingRoutingIdentity.matchesRunning(expected, actual)
+    }
+
+    /** Startup shares the sidecar monitor as well as [lifecycleExecutor]. */
     private fun initializeLocked(
+        displayName: String,
+        existingPublicKey: String?,
+        existingPrivateKey: String?,
+        relayDbPath: String?,
+    ): Boolean = synchronized(IdentitySigningKeyStore) {
+        initializeWithSigningLock(displayName, existingPublicKey, existingPrivateKey, relayDbPath)
+    }
+
+    private fun initializeWithSigningLock(
         displayName: String,
         existingPublicKey: String?,
         existingPrivateKey: String?,
@@ -224,13 +244,26 @@ object RustBridge {
     ): Boolean {
         val current = engine
         if (current != null) {
-            if (runCatching { current.isRunning() }.getOrDefault(false)) {
+            val running = try { current.isRunning() } catch (error: Exception) {
+                Log.e(TAG, "Cannot determine existing engine state; refusing a second engine", error)
+                return false
+            }
+            if (running) {
                 engineRunning = true
+                val actual = runCatching { current.nodeId() }.getOrNull()
+                if (!com.vladimir.messenger.data.security.ExistingRoutingIdentity.matchesRunning(existingPublicKey, actual)) {
+                    Log.e(TAG, "Running engine has a different routing identity; refusing to reuse it")
+                    return false
+                }
                 Log.w(TAG, "Engine already initialized")
                 return true
             }
             engine = null
             engineRunning = false
+        }
+        if (!IdentitySigningKeyStore.matchesInstalledRoute(existingPublicKey)) {
+            Log.e(TAG, "Installed signing sidecar does not match the requested routing identity")
+            return false
         }
 
         return try {
@@ -269,12 +302,19 @@ object RustBridge {
             applyPathPolicy(e)
             val ok = e.start()
             if (ok) {
+                val actual = runCatching { e.nodeId() }.getOrNull()
+                if (!com.vladimir.messenger.data.security.ExistingRoutingIdentity.matchesRunning(existingPublicKey, actual)) {
+                    Log.e(TAG, "Started engine has a different routing identity; stopping it")
+                    runCatching { e.stop() }.onFailure { Log.w(TAG, "Mismatched engine stop failed", it) }
+                    engineRunning = false
+                    return false
+                }
                 engine = e
                 shadowNodeId = null
                 engineRunning = true
                 cachedNetworkStatus = "offline"
                 cachedConnectedPeers = 0L
-                cachedNodeId = runCatching { e.nodeId() }.getOrNull()
+                cachedNodeId = actual
                 cachedPublicKey = runCatching { e.publicKey() }.getOrNull()
                 Log.i(TAG, "Engine started. NodeId: $cachedNodeId")
                 // Diagnostics must not turn a successfully-started engine into a failed startup.
@@ -368,12 +408,18 @@ object RustBridge {
                 val current = engine
                 if (current != null && runCatching { current.isRunning() }.getOrDefault(false)) {
                     engineRunning = true
-                    RelayWakeResult(
-                        engineStartedByWorker = false,
-                        gossipTriggered = triggerGossipDiscovery(),
-                        custodyMode = relayCustodyMode(),
-                        quarantineCount = relayQuarantineCount(),
-                    )
+                    val actual = runCatching { current.nodeId() }.getOrNull()
+                    if (!com.vladimir.messenger.data.security.ExistingRoutingIdentity.matchesRunning(existingPublicKey, actual)) {
+                        Log.e(TAG, "Relay wake rejected a running engine with a different routing identity")
+                        RelayWakeResult(false, false, "identity_mismatch", 0L)
+                    } else {
+                        RelayWakeResult(
+                            engineStartedByWorker = false,
+                            gossipTriggered = triggerGossipDiscovery(),
+                            custodyMode = relayCustodyMode(),
+                            quarantineCount = relayQuarantineCount(),
+                        )
+                    }
                 } else if (!initializeLocked(
                         displayName,
                         existingPublicKey,
@@ -645,16 +691,19 @@ object RustBridge {
      * актуализируется. Возвращает сколько движок реально удержал (лимит
      * 256); ошибка или отсутствие движка — 0.
      */
-    fun setPresenceAudience(ids: List<String>): UInt {
-        if (ids.isEmpty()) return 0u
-        return try {
-            val taken = engine?.setPresenceAudience(ids) ?: 0u
-            android.util.Log.i(TAG, "Presence audience: ${ids.size} passed, $taken kept")
-            taken
-        } catch (e: Exception) {
-            android.util.Log.w(TAG, "setPresenceAudience failed: ${e.message}")
-            0u
-        }
+    fun setPresenceAudience(ids: List<String>): UInt = try {
+        setPresenceAudienceOrThrow(ids)
+    } catch (e: Exception) {
+        android.util.Log.w(TAG, "setPresenceAudience failed: ${e.message}")
+        0u
+    }
+
+    /** The service's retry loop must distinguish a real empty audience from failure. */
+    internal fun setPresenceAudienceOrThrow(ids: List<String>): UInt {
+        val current = checkNotNull(engine) { "engine is unavailable" }
+        val taken = current.setPresenceAudience(ids)
+        android.util.Log.i(TAG, "Presence audience: ${ids.size} passed, $taken kept")
+        return taken
     }
 
     /** Owner-decrypted backup enters the live core without racing its disk writer. */

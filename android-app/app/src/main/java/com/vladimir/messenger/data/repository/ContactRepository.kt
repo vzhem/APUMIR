@@ -91,8 +91,8 @@ class ContactRepository @Inject constructor(
     }
 
     /**
-     * Наблюдение presence от собственного транспорта. Это не время, которое
-     * собеседник заявил сам, а честная локальная отметка «видели в сети».
+     * Исходное время: локальное для живого обмена или дата legacy presence,
+     * ограниченная локальными часами и TTL; не уменьшает сохранённую метку.
      */
     suspend fun updatePresence(contactId: String, isOnline: Boolean, seenAtMs: Long) {
         contactDao.updatePresence(contactId, isOnline, seenAtMs)
