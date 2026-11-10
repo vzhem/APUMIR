@@ -51,6 +51,7 @@ release-key.jks
 
 # Cloudflare worker node_modules
 cloudflare-worker/node_modules/
+tools/worker/push/node_modules/
 
 # OS files
 Thumbs.db

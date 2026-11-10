@@ -56,6 +56,7 @@ pub mod handshake;
 pub mod identity;
 pub mod kdf;
 pub mod keys;
+pub mod push_capability;
 pub mod keystore;
 pub mod ratchet;
 pub mod referral;

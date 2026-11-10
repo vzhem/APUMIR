@@ -179,6 +179,7 @@ jobs:
             network::mqtt_transport::mqtt_reconnect::tests \
             engine::core::foreground_recovery::tests \
             engine::core::broker_settings::tests \
+            crypto::push_capability::tests \
             network::mdns::tests::browse_round_never_replays_an_old_node_without_a_resolution \
             engine::core::tests::direct_personal_presence_emits_each_fresh_observation_but_not_stale_or_future \
             engine::core::tests::invite_is_only_an_address_hint_not_online_presence \
