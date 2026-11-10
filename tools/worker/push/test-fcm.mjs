@@ -18,11 +18,14 @@ test("provider 404 does not revoke a token unless FCM explicitly says UNREGISTER
   const client = new FcmV1(env, async (url) => {
     if (url.includes("oauth2.googleapis.com")) { oauthCalls++; return Response.json({ access_token: "access", expires_in: 3600 }); }
     if (mode === "plain404") return Response.json({ error: { message: "bad project" } }, { status: 404 });
-    if (mode === "unregistered") return Response.json({ error: { details: [{ errorCode: "UNREGISTERED" }] } }, { status: 404 });
+    if (mode === "wrong-type") return Response.json({ error: { details: [{ "@type": "unrelated", errorCode: "UNREGISTERED" }] } }, { status: 404 });
+    if (mode === "unregistered") return Response.json({ error: { details: [{ "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError", errorCode: "UNREGISTERED" }] } }, { status: 404 });
     if (mode === "unauthorised") return new Response("", { status: 401 });
     return new Response("", { status: 500 });
   });
   assert.ok(fcmConfigured(env));
+  assert.equal(await client.send(token, route), "retry");
+  mode = "wrong-type";
   assert.equal(await client.send(token, route), "retry");
   mode = "unregistered";
   assert.equal(await client.send(token, route), "unregistered");

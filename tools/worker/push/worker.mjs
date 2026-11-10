@@ -3,6 +3,7 @@
 // See docs/REMOTE_PUSH_DESIGN.md before enabling it.
 import { fcmConfigured, FcmV1 } from "./fcm.mjs";
 import { rateIdentity, routeFor, shardFor, validRegistration, validWake, verifyRegistration } from "./protocol.mjs";
+import { WakeQueue } from "./wake-queue.mjs";
 
 const MAX_BODY_BYTES = 8192;
 const REGISTER_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -18,9 +19,13 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), {
 });
 const accepted = () => json({ accepted: true }, 202);
 
-function configured(env) {
-  return env.PUSH_ENABLED === "true" && env.PUSH_SHARDS && fcmConfigured(env) &&
+function serviceEnabled(env) {
+  return env.PUSH_ENABLED === "true" && fcmConfigured(env) &&
     typeof env.PUSH_RATE_KEY === "string" && env.PUSH_RATE_KEY.length >= 32;
+}
+
+function configured(env) {
+  return serviceEnabled(env) && env.PUSH_SHARDS;
 }
 
 /** Read incrementally; Content-Length is not trusted, and the cap is on bytes. */
@@ -89,6 +94,7 @@ export default {
 export class PushShard {
   constructor(state, env) {
     this.state = state;
+    this.env = env;
     this.sql = state.storage.sql;
     this.provider = new FcmV1(env);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS registrations (
@@ -102,6 +108,7 @@ export class PushShard {
       bucket TEXT PRIMARY KEY, count INTEGER NOT NULL, expires_at INTEGER NOT NULL
     )`);
     this.sql.exec("CREATE INDEX IF NOT EXISTS push_rate_expiry ON rate_limits(expires_at)");
+    this.wakes = new WakeQueue(this);
   }
 
   rows(query, ...args) { return this.sql.exec(query, ...args).toArray(); }
@@ -112,6 +119,7 @@ export class PushShard {
   cleanup(now) {
     this.sql.exec("DELETE FROM registrations WHERE rowid IN (SELECT rowid FROM registrations WHERE expires_at <= ? LIMIT 128)", now);
     this.sql.exec("DELETE FROM rate_limits WHERE rowid IN (SELECT rowid FROM rate_limits WHERE expires_at <= ? LIMIT 128)", now);
+    this.wakes.cleanup(now);
   }
 
   consume(bucket, limit, duration, now) {
@@ -127,20 +135,32 @@ export class PushShard {
   }
 
   async ensureAlarm() {
-    if ((await this.state.storage.getAlarm()) === null) await this.state.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
+    await this.wakes.locked(async () => {
+      if ((await this.state.storage.getAlarm()) === null) await this.state.storage.setAlarm(Date.now() + ALARM_INTERVAL_MS);
+    });
   }
 
   async alarm() {
     const now = Date.now();
-    this.state.storage.transactionSync(() => this.cleanup(now));
-    if (this.count("SELECT count(*) AS n FROM registrations") || this.count("SELECT count(*) AS n FROM rate_limits")) {
-      const expired = this.count("SELECT count(*) AS n FROM registrations WHERE expires_at <= ?", now) ||
-        this.count("SELECT count(*) AS n FROM rate_limits WHERE expires_at <= ?", now);
-      await this.state.storage.setAlarm(now + (expired ? 60_000 : ALARM_INTERVAL_MS));
+    if (!serviceEnabled(this.env)) {
+      // The kill switch also applies to previously queued alarms. Keep bounded
+      // expiry housekeeping, but do not send or spin on an already-due wake.
+      this.state.storage.transactionSync(() => this.cleanup(now));
+      await this.wakes.reschedule({ suspended: true });
+      return;
     }
+    // Install a crash-recovery alarm before touching pending rows. Each
+    // provider attempt releases its lease transactionally when it finishes.
+    await this.wakes.mutate(now, (current) => {
+      this.cleanup(current);
+      this.wakes.cleanupDueOrphans(current);
+    });
+    await this.wakes.runDue(Date.now());
+    await this.wakes.reschedule();
   }
 
   async fetch(request) {
+    if (!serviceEnabled(this.env)) return json({ error: "push unavailable" }, 503);
     const path = new URL(request.url).pathname;
     if (request.method !== "POST" || !["/v1/registration", "/v1/wake"].includes(path)) return json({ error: "not found" }, 404);
     let body;
@@ -179,30 +199,14 @@ export class PushShard {
       const token = body.action === "register" ? body.token : null;
       this.sql.exec(`INSERT OR REPLACE INTO registrations(route, owner, device, token, sequence, expires_at)
         VALUES (?, ?, ?, ?, ?, ?)`, route, body.owner, body.device, token, body.sequence, expires);
+      if (body.action === "revoke") this.wakes.discard(route, body.device);
       return 204;
     });
     return status === 204 ? new Response(null, { status: 204, headers: { "cache-control": "no-store" } }) : json({ error: status === 409 ? "stale operation" : "rate limited" }, status);
   }
 
   async wake(owner, route, now) {
-    const targets = this.state.storage.transactionSync(() => {
-      const rows = this.rows("SELECT device, token, sequence FROM registrations WHERE route = ? AND owner = ? AND token IS NOT NULL AND expires_at > ? LIMIT ?", route, owner, now, MAX_DEVICES_PER_ROUTE);
-      // An unknown capability must not consume another receiver's wake budget.
-      if (!rows.length) return [];
-      if (!this.consume("wake-route:" + route, 1, 30_000, now) ||
-          !this.consume("wake-owner:" + owner, 12, 60_000, now)) return [];
-      return rows;
-    });
-    await Promise.all(targets.map(async (target) => {
-      const result = await this.provider.send(target.token, route);
-      if (result === "unregistered") {
-        // A delayed response must not delete a token that rotated while the
-        // provider request was in flight; retain sequence as a replay tombstone.
-        this.sql.exec(`UPDATE registrations SET token = NULL, expires_at = ?
-          WHERE route = ? AND device = ? AND sequence = ? AND token = ?`,
-        Date.now() + TOMBSTONE_MS, route, target.device, target.sequence, target.token);
-      }
-    }));
+    await this.wakes.enqueue(owner, route, now);
     // Same response whether the route exists, is rate limited, or FCM failed.
     // A signal acceptance is not evidence that a message reached a device.
     return accepted();

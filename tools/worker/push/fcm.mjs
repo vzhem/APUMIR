@@ -112,13 +112,14 @@ export class FcmV1 {
       // UNREGISTERED error is proof that this particular token can be retired.
       if (response.status === 404) {
         const body = await boundedJson(response);
-        if (Array.isArray(body?.error?.details) && body.error.details.some((detail) => detail?.errorCode === "UNREGISTERED")) {
+        if (Array.isArray(body?.error?.details) && body.error.details.some((detail) =>
+          detail?.["@type"] === "type.googleapis.com/google.firebase.fcm.v1.FcmError" && detail.errorCode === "UNREGISTERED")) {
           return "unregistered";
         }
       }
       return "retry";
     } catch (_) {
-      // Transient provider failures are retried by a future bounded wake, and
+      // A transient provider failure is retained by the bounded wake queue;
       // credentials, tokens and provider response bodies must never be logged.
       return "retry";
     }
