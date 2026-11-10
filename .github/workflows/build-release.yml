@@ -106,6 +106,7 @@ jobs:
           python3 scripts/ci/check-delivery-cadence.py
           python3 scripts/ci/check-emergency-keepalive.py
           python3 scripts/ci/check-presence-recovery.py
+          python3 scripts/ci/check-ipv6-proxy-settings.py
           python3 scripts/ci/check-ui-return-contracts.py
           python3 scripts/ci/check-update-storage.py
           python3 scripts/ci/check-profile-background.py
@@ -176,6 +177,7 @@ jobs:
             network::mqtt_transport::mqtt_connection::tests \
             network::mqtt_transport::mqtt_reconnect::tests \
             engine::core::foreground_recovery::tests \
+            engine::core::broker_settings::tests \
             network::mdns::tests::browse_round_never_replays_an_old_node_without_a_resolution \
             engine::core::tests::direct_personal_presence_emits_each_fresh_observation_but_not_stale_or_future \
             engine::core::tests::invite_is_only_an_address_hint_not_online_presence \
@@ -200,7 +202,7 @@ jobs:
           done
           # The single-broker build has a distinct ConnAck path. Compile and
           # exercise it too; neither a compile error nor a zero-test run passes.
-          for test in network::mqtt_transport::mqtt_connection::tests network::mqtt_transport::mqtt_reconnect::tests engine::core::foreground_recovery::tests; do
+          for test in network::mqtt_transport::mqtt_connection::tests network::mqtt_transport::mqtt_reconnect::tests engine::core::foreground_recovery::tests engine::core::broker_settings::tests; do
             LOG="$RUNNER_TEMP/single-${test//::/-}.log"
             if ! RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --lib "$test" > "$LOG" 2>&1; then
               tail -150 "$LOG"

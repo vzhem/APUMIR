@@ -66,6 +66,8 @@ use crate::network::adaptive_polling::AdaptivePolling;
 use crate::network::swarm_first::SwarmFirstPolicy;
 use crate::resilience::AddressBook;
 
+#[path = "broker_settings.rs"]
+mod broker_settings;
 #[path = "foreground_recovery.rs"]
 mod foreground_recovery;
 
@@ -6373,38 +6375,7 @@ impl P2PCore {
     /// Встраивать можно до `start()`: адрес читается, когда поднимается
     /// MQTT-сессия. `true` - адрес принят (`host:port`, можно с `mqtt://`).
     pub fn set_own_broker(&mut self, text: String) -> bool {
-        let parsed =
-            crate::network::multi_broker::parse_broker_endpoint(&text);
-        match parsed {
-            Some((host, port)) => {
-                self.config.own_broker = Some(format!("{}:{}", host, port));
-                if let Ok(mut slot) = self.own_broker_shared.lock() {
-                    *slot = Some((host.clone(), port));
-                }
-                tracing::info!("MQTT OWN BROKER: задан {}:{}", host, port);
-                // Живая сессия создана со старым адресом: пусть пересоздастся
-                // сама, без перезапуска приложения (см. `restart_reason`).
-                crate::network::mqtt_transport::note_broker_settings_changed();
-                true
-            }
-            None => {
-                // Пустая строка - это «выключить свой брокер», а не ошибка.
-                if text.trim().is_empty() {
-                    self.config.own_broker = None;
-                    if let Ok(mut slot) = self.own_broker_shared.lock() {
-                        *slot = None;
-                    }
-                    tracing::info!("MQTT OWN BROKER: выключен, только публичные");
-                    crate::network::mqtt_transport::note_broker_settings_changed();
-                    return true;
-                }
-                tracing::warn!(
-                    "MQTT OWN BROKER: адрес {:?} не разобран, оставляю как было",
-                    text
-                );
-                false
-            }
-        }
+        self.set_own_broker_with(text, crate::network::mqtt_transport::note_broker_settings_changed)
     }
 
     /// Проверить, отвечает ли брокер по этому адресу СЕЙЧАС.

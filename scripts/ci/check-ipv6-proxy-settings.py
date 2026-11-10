@@ -79,10 +79,21 @@ class Ipv6ProxySettingsContract(unittest.TestCase):
         self.assertIn("!has_proxy", mqtt_rs)
         self.assertIn("Ipv6Addr", socks_rs)
 
+    def test_proxy_reapplication_does_not_masquerade_as_a_network_change(self):
+        settings = read(JAVA / "data/swarm/Ipv6NetworkSettings.kt")
+        runtime = read(JAVA / "data/swarm/Ipv6ProxyRuntime.kt")
+        self.assertIn("RustBridge.onForegroundRecovery()", settings)
+        self.assertNotIn("RustBridge.onNetworkAvailable()", settings)
+        self.assertIn("if (changed) sink.wakeNetwork()", runtime)
+        self.assertIn("if (changed || !reuseBridge) sink.wakeNetwork()", runtime)
+        self.assertIn("sink.setSocks5Proxy(config.host, config.port", runtime)
+
     def test_unit_test_file_exists(self):
         test_src = read(TEST / "data/swarm/Ipv6NetworkProxyTest.kt")
         self.assertIn("httpConnectBridgeTunnelsSocks5TrafficWithProxyAuthorization", test_src)
         self.assertIn("parsesAllCommonShopFormatsIncludingIpv6AndComplexPasswords", test_src)
+        self.assertIn("reapplyingSocksProxyKeepsConnectionsButStillSetsTheNativeProxy", test_src)
+        self.assertIn("reapplyingHttpProxyReusesBridgeWithoutWakingConnections", test_src)
 
 
 if __name__ == "__main__":
