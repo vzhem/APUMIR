@@ -91,7 +91,11 @@ url=""; out=""
 while (($#)); do case "$1" in --retry|--connect-timeout|--max-time|--max-filesize) shift 2;; -o) out="$2";shift 2;; https://*) url="$1";shift;; *) shift;; esac; done
 cp "$MOCK_ROOT/site/${url##*/}" "$out"
 ''')
-        self.command(self.tools / 'aapt', "echo \"package: name='com.vladimir.messenger' versionCode='1002003' versionName='v1.2.3'\"\n")
+        self.command(self.tools / 'aapt', """
+package=com.vladimir.messenger
+[[ "${MOCK_BAD_PACKAGE:-}" != yes ]] || package=wrong.package
+echo "package: name='$package' versionCode='1002003' versionName='v1.2.3' platformBuildVersionName='15' platformBuildVersionCode='35' compileSdkVersion='35' compileSdkVersionCodename='15'"
+""")
         self.command(self.tools / 'apksigner', '''
 if [[ "${MOCK_BAD_SIGNER:-}" = yes && "${*: -1}" = */current/* ]]; then
  printf 'Signer #1 certificate SHA-256 digest: %064d\\n' 1
@@ -147,6 +151,9 @@ else printf 'Signer #1 certificate SHA-256 digest: %064d\\n' 0; fi
     def test_changed_reviewed_notes_rejected(self):
         (self.root / 'docs' / f'RELEASE_NOTES_{TAG}.md').write_text('Different notes\n')
         self.assertNotEqual(self.run_check().returncode, 0)
+
+    def test_wrong_package_rejected_even_with_aapt_suffix_fields(self):
+        self.assertNotEqual(self.run_check(MOCK_BAD_PACKAGE='yes').returncode, 0)
 
     def test_missing_emulator_abi_rejected(self):
         path = self.current / 'app-release.apk'

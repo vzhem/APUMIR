@@ -64,7 +64,7 @@ for apk in app-release.apk app-full.apk; do
 import re,sys,zipfile
 from pathlib import Path
 badging=Path(sys.argv[1]).read_text().splitlines()[0]
-fields=dict(re.findall(r"(name|versionCode|versionName)='([^']*)'",badging))
+fields=dict(re.findall(r"(?:^|\s)(name|versionCode|versionName)='([^']*)'",badging))
 assert fields.get('name')=='com.vladimir.messenger', badging
 assert fields.get('versionName')==sys.argv[3], badging
 assert fields.get('versionCode')==sys.argv[4], badging
