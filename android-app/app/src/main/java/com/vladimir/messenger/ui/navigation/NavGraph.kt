@@ -40,8 +40,6 @@ import com.vladimir.messenger.ui.screens.chat.ChatListScreen
 import com.vladimir.messenger.ui.screens.chat.ChatDetailScreen
 import com.vladimir.messenger.ui.screens.contacts.AddContactScreen
 import com.vladimir.messenger.ui.components.ApuMainTabBar
-import com.vladimir.messenger.ui.components.ChatWallpaper
-import androidx.compose.foundation.layout.fillMaxSize
 import com.vladimir.messenger.ui.components.ApuTab
 import com.vladimir.messenger.ui.components.ApuTabActions
 import com.vladimir.messenger.ui.screens.contacts.ContactsScreen
@@ -353,13 +351,15 @@ fun MessengerNavGraph(
     // переходами экранов просвечивал ДЕФОЛТНЫЙ белый фон окна. Обои APU
     // под NavHost - постоянная подложка: на каком бы кадре слайда ни
     // остановилась анимация, снизу всегда свой фон, а не белый.
-    androidx.compose.foundation.layout.Box(
-        modifier = androidx.compose.ui.Modifier.fillMaxSize(),
-    ) {
-    ChatWallpaper()
+    CallAwareNavContainer(
+        phase = callUiState.phase,
+        onCallScreen = currentBackStack?.destination?.route == Screen.Call.route,
+        onReturn = { navController.navigate(Screen.Call.incoming) { launchSingleTop = true } },
+    ) { navModifier ->
     NavHost(
         navController    = navController,
         startDestination = startDestination,
+        modifier = navModifier,
         // РЎС‚Р°РЅРґР°СЂС‚РЅС‹Рµ Р°РЅРёРјР°С†РёРё: РІС…РѕРґ/РІС‹С…РѕРґ С‡РµСЂРµР· slide + fade
         enterTransition = {
             slideIntoContainer(
@@ -749,7 +749,7 @@ fun MessengerNavGraph(
                 bottomBar = {
                     // «Избранное» больше не кнопка панели, поэтому ни один
                     // раздел здесь не подсвечен - панель работает как переход.
-                    ApuMainTabBar(ApuTab.Chats, mainTabActions(navController))
+                    ApuMainTabBar(null, mainTabActions(navController))
                 },
                 onBackClick = { navController.popBackStack() },
                 // Возврат к оригиналу: личный чат, тема группы или лента канала.
@@ -966,9 +966,8 @@ fun MessengerNavGraph(
         ) {
             GroupAdminScreen(
                 onBackClick = { navController.popBackStack() },
-                onLeftGroup = {
-                    navController.popBackStack(Screen.Groups.route, inclusive = false)
-                },
+                // Управление могло быть открыто прямо из чатов или уведомления.
+                onLeftGroup = { returnAfterLeavingCommunity(navController) },
             )
         }
 

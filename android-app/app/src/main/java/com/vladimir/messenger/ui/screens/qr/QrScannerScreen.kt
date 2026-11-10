@@ -1,5 +1,7 @@
 package com.vladimir.messenger.ui.screens.qr
 
+import com.vladimir.messenger.ui.components.ApuBackButton
+
 import com.vladimir.messenger.ui.components.ApuSegmentedControl
 
 import androidx.compose.ui.res.stringResource
@@ -23,7 +25,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -92,11 +93,7 @@ fun QrScannerScreen(
                     scrolledContainerColor = Color.Transparent,
                     ),
                     title = { Text(stringResource(R.string.qr_title)) },
-                    navigationIcon = {
-                        IconButton(onClick = onBackClick) {
-                            Icon(Icons.Default.ArrowBack, stringResource(R.string.action_back))
-                        }
-                    },
+                    navigationIcon = { ApuBackButton(onClick = onBackClick) },
                 )
             },
         ) { paddingValues ->

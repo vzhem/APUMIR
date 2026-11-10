@@ -274,6 +274,7 @@
     <string name="menu_open_chat">Open chat</string>
     <string name="menu_call">Call</string>
     <string name="menu_video_call">Video call</string>
+    <string name="call_return_to_call">Call in progress — return</string>
     <string name="call_flip_camera">Switch camera</string>
     <string name="call_camera_off">Turn camera off</string>
         <string name="call_share_screen">Share screen</string>

@@ -39,7 +39,8 @@ data class ApuTabActions(
  */
 @Composable
 fun ApuMainTabBar(
-    current: ApuTab,
+    /** null на экране вне пяти разделов (например, в «Избранном»). */
+    current: ApuTab?,
     actions: ApuTabActions,
     modifier: Modifier = Modifier,
     /** Непрочитанные чаты: значок на кнопке «Чаты». */

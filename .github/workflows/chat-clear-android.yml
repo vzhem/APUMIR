@@ -1,4 +1,4 @@
-name: Chat clear Android storage tests
+name: Android storage and navigation tests
 
 on:
   push:
@@ -44,20 +44,20 @@ jobs:
       - name: Enable emulator acceleration
         run: |
           if [ -e /dev/kvm ]; then sudo chmod a+rw /dev/kvm; fi
-      - name: Run chat clear SQLite and Room tests
+      - name: Check navigation-report guard
+        run: python3 scripts/ci/test-android-navigation-results.py
+      - name: Run storage and navigation tests on the emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
           arch: x86_64
           target: google_apis
           disable-animations: true
-          script: cd android-app && chmod +x gradlew && ./gradlew :app:connectedDebugAndroidTest --no-daemon -Pandroid.testInstrumentationRunnerArguments.package=com.vladimir.messenger.data.chatclear
-      - name: Upload Android test report
+          script: bash scripts/ci/run-android-navigation-tests.sh
+      - name: Upload Android test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: chat-clear-android-report
-          path: |
-            android-app/app/build/reports/androidTests/connected
-            android-app/app/build/outputs/androidTest-results/connected
+          name: android-storage-navigation-reports
+          path: target/android-test-reports
           if-no-files-found: warn

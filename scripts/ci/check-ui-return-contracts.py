@@ -256,5 +256,119 @@ class SiteFirstUpdateTest(unittest.TestCase):
                 self.assertIn(f'name="{key}"', strings)
 
 
+class VisibleMenuReturnTest(unittest.TestCase):
+    """Static wiring checks complement, not replace, the emulator UI tests."""
+
+    def setUp(self):
+        self.nav = read(JAVA / "ui/navigation/NavGraph.kt")
+
+    def test_return_button_is_localized_and_has_a_48dp_target(self):
+        button = read(JAVA / "ui/components/ApuBackButton.kt")
+        self.assertIn("stringResource(R.string.action_back)", button)
+        self.assertIn("size = 48.dp", button)
+        for folder in ("values", "values-en"):
+            strings = read(RES / folder / "strings.xml")
+            self.assertIn('name="action_back"', strings)
+            self.assertIn('name="call_return_to_call"', strings)
+
+    def test_menu_routes_keep_a_visible_back_control(self):
+        screens = (
+            "call/CallScreen.kt", "channels/ChannelScreen.kt", "chat/ChatFoldersScreen.kt",
+            "contacts/AddContactScreen.kt", "contacts/ContactsScreen.kt", "contacts/RenameContactScreen.kt",
+            "devices/DevicesScreenScaffold.kt", "feedback/FeedbackScreen.kt", "groups/GroupChatScreen.kt",
+            "groups/GroupsScreen.kt", "groups/MyJoinRequestsScreen.kt", "mtproxy/MtProxyListScreen.kt",
+            "qr/QrScannerScreen.kt", "saved/SavedScreen.kt", "settings/IdentityBackupScreen.kt",
+            "settings/PeerRatingScreen.kt", "settings/ProfileBackupScreen.kt", "settings/RankBenefitsScreen.kt",
+            "settings/SettingsScreen.kt", "share/ShareProfileScreen.kt", "support/SupportScreen.kt",
+        )
+        for path in screens:
+            with self.subTest(screen=path):
+                self.assertIn("ApuBackButton(", read(JAVA / "ui/screens" / path))
+        # The conversation and group-admin headers already have visible back controls.
+        self.assertIn("ApuHeaderIconBubble(onClick = onBack", read(JAVA / "ui/components/ConversationHeader.kt"))
+        self.assertIn("ApuTextAction(label = stringResource(R.string.action_back), onClick = onBackClick)",
+                      read(JAVA / "ui/screens/groups/GroupAdminScreen.kt"))
+
+    def test_devices_header_is_outside_the_scrolling_pairing_content(self):
+        screen = read(JAVA / "ui/screens/devices/DevicesScreen.kt")
+        scaffold = read(JAVA / "ui/screens/devices/DevicesScreenScaffold.kt")
+        self.assertIn("DevicesScreenScaffold(onBackClick = onBackClick)", screen)
+        self.assertLess(scaffold.index("navigationIcon = { ApuBackButton"), scaffold.index("verticalScroll("))
+        self.assertIn("onScanClick = { navController.navigate(Screen.DevicePairScan.route) }", self.nav)
+        device_scan = self.nav.split("composable(route = Screen.DevicePairScan.route)", 1)[1]
+        self.assertIn("onBackClick = { navController.popBackStack() }", device_scan)
+
+    def test_folder_editor_and_settings_close_inner_state_first(self):
+        folders = read(JAVA / "ui/screens/chat/ChatFoldersScreen.kt")
+        settings = read(JAVA / "ui/screens/settings/SettingsScreen.kt")
+        action = read(JAVA / "ui/screens/settings/SettingsBackAction.kt")
+        self.assertIn("BackHandler(enabled = editorOpen) { closeEditor() }", folders)
+        self.assertIn("onBack = closeEditor", folders)
+        self.assertIn("modifier = Modifier.swipeBack(onBack = onBack)", folders)
+        self.assertIn("settingsBackAction(settingsSection != null && !showProfile", settings)
+        self.assertIn(".swipeBack(onBack = goBack)", settings)
+        self.assertIn("ApuBackButton(onClick = goBack)", settings)
+        self.assertIn("BackHandler(enabled = sectionOpen, onBack = back)", action)
+        state = read(JAVA / "ui/screens/settings/SettingsScrollState.kt")
+        self.assertIn("val state = key(menuKey) { rememberLazyListState() }", state)
+        self.assertIn("if (restored.value)", state)
+        self.assertLess(state.index("state.scrollToItem(anchor.index, anchor.offset)"),
+                        state.index("snapshotFlow { state.firstVisibleItemIndex"))
+
+    def test_invite_and_input_windows_have_an_explicit_exit(self):
+        for path in ("chat/ChatListInviteChoiceDialog.kt", "groups/CommunityInviteChoiceDialog.kt"):
+            dialog = read(JAVA / "ui/screens" / path)
+            self.assertIn("dismissLabel = stringResource(R.string.action_cancel)", dialog)
+            self.assertIn("onDismiss = onDismiss", dialog)
+            self.assertIn("verticalScroll(rememberScrollState())", dialog)
+        self.assertIn("ChatListInviteChoiceDialog(", read(JAVA / "ui/screens/chat/ChatListScreen.kt"))
+        self.assertIn("CommunityInviteChoiceDialog(", read(JAVA / "ui/screens/groups/GroupsScreen.kt"))
+        panel = read(JAVA / "ui/components/InputPanelDialog.kt")
+        self.assertIn("contentDescription = stringResource(R.string.action_close)", panel)
+        self.assertIn("onClick = onDismiss", panel)
+        self.assertIn("size = 48.dp", panel)
+
+    def test_call_and_community_return_paths_cannot_strand_users(self):
+        call = read(JAVA / "ui/screens/call/CallScreen.kt")
+        banner = read(JAVA / "ui/navigation/OngoingCallBanner.kt")
+        self.assertIn("onClick = onLeaveCall", call)
+        self.assertIn("if (viewModel.uiState.value.screenSharing) viewModel.setScreenSharing(false)", call)
+        self.assertIn("CallAwareNavContainer(", self.nav)
+        self.assertIn("onReturn = { navController.navigate(Screen.Call.incoming)", self.nav)
+        self.assertIn("phase != CallStateMachine.Phase.IDLE", banner)
+        self.assertIn("phase != CallStateMachine.Phase.ENDED", banner)
+        self.assertIn("content(if (showBanner) body.consumeWindowInsets(WindowInsets.statusBars) else body)", banner)
+        self.assertIn("if (peerId.isBlank()) return", read(JAVA / "ui/screens/call/CallViewModel.kt"))
+        self.assertIn("onLeftGroup = { returnAfterLeavingCommunity(navController) }", self.nav)
+        community = read(JAVA / "ui/navigation/CommunityNavigation.kt")
+        for route in ("Screen.Groups.route", "Screen.ChatList.route", "Screen.Onboarding.route"):
+            self.assertIn("popBackStack(" + route, community)
+        self.assertIn("popUpTo(navController.graph.id)", community)
+        saved = self.nav.split("composable(route = Screen.Saved.route)", 1)[1].split("composable(", 1)[0]
+        self.assertIn("ApuMainTabBar(null, mainTabActions(navController))", saved)
+
+    def test_instrumented_tests_really_run_at_both_screen_sizes(self):
+        workflow = read(ROOT / ".github/workflows/chat-clear-android.yml")
+        runner = read(ROOT / "scripts/ci/run-android-navigation-tests.sh")
+        guard = read(ROOT / "scripts/ci/check-android-navigation-results.py")
+        self.assertIn("bash scripts/ci/run-android-navigation-tests.sh", workflow)
+        self.assertIn("com.vladimir.messenger.data.chatclear", runner)
+        self.assertIn("com.vladimir.messenger.ui.navigation", runner)
+        self.assertIn("run_navigation normal", runner)
+        self.assertIn("run_navigation compact-large-text", runner)
+        self.assertIn("adb shell wm size 360x640", runner)
+        self.assertIn("adb shell settings put system font_scale 1.4", runner)
+        self.assertIn("check-android-navigation-results.py", runner)
+        for name in ("BackButtons", "SettingsNavigation", "FolderReturn", "MenuDialogs", "CallAndCommunityNavigation"):
+            self.assertIn(name + "InstrumentedTest", guard)
+            test_path = (ROOT / "android-app/app/src/androidTest/java/com/vladimir/messenger/ui/navigation" /
+                         (name + "InstrumentedTest.kt"))
+            self.assertTrue(test_path.is_file())
+            cases = re.findall(r"@Test\s+fun\s+(\w+)\(", read(test_path))
+            self.assertTrue(cases, f"{test_path} has no tests")
+            for case in cases:
+                self.assertIn(f'"{case}"', guard)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -3,7 +3,11 @@ package com.vladimir.messenger.ui.screens.settings
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshotFlow
@@ -28,36 +32,44 @@ import kotlinx.coroutines.flow.first
  */
 @Composable
 internal fun rememberSettingsScrollState(menuKey: String): LazyListState {
-    val state = rememberLazyListState()
+    // У каждого входа в раздел новый список: данные и замер предыдущего списка
+    // не могут преждевременно обрезать позицию при возврате в длинный корень.
+    val state = key(menuKey) { rememberLazyListState() }
+    val restored = remember(state) { mutableStateOf(false) }
     val isRoot = menuKey == SettingsScrollMemory.ROOT
-    val memory = if (isRoot) {
-        rememberSaveable(
-            saver = listSaver<SettingsScrollMemory, Int>(
-                save = { it.flatten() },
-                restore = { SettingsScrollMemory.fromFlatten(it) },
-            ),
-        ) { SettingsScrollMemory() }
-    } else null
-    val menu = menuKey
-
-    // Позицию корневого меню запоминаем по ходу прокрутки: тогда при возврате
-    // из любого раздела человек увидит ту же строку, где остановился.
+    // Память живёт и пока открыт подраздел. Условный rememberSaveable раньше
+    // удалял её из композиции при входе в раздел и терял корневую позицию.
+    val memory = rememberSaveable(
+        saver = listSaver<SettingsScrollMemory, Int>(
+            save = { it.flatten() },
+            restore = { SettingsScrollMemory.fromFlatten(it) },
+        ),
+    ) { SettingsScrollMemory() }
     if (isRoot) {
-        LaunchedEffect(menu) {
-            snapshotFlow { state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
-                .collect { (index, offset) ->
-                    memory!!.remember(menu, SettingsScrollMemory.Anchor(index, offset))
+        DisposableEffect(state) {
+            onDispose {
+                // Последний кадр сохраняется до отмены наблюдателя, но не
+                // заменяет прежнюю позицию, если восстановление ещё не началось.
+                if (restored.value) {
+                    memory.remember(menuKey, SettingsScrollMemory.Anchor(state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset))
                 }
+            }
         }
     }
 
-    // Смена меню — сразу на своё место: корневое — там, где оставили; вложенное
-    // — с верха списка. Ждём первый замер списка: до него scrollToItem
-    // обрезался бы о ещё не собранные строки нового раздела.
-    LaunchedEffect(menu) {
-        val anchor = if (isRoot) memory!!.anchorFor(menu) else SettingsScrollMemory.Anchor.TOP
+    LaunchedEffect(menuKey, state) {
+        val anchor = if (isRoot) memory.anchorFor(menuKey) else SettingsScrollMemory.Anchor.TOP
         snapshotFlow { state.layoutInfo.totalItemsCount }.first { it > 0 }
         state.scrollToItem(anchor.index, anchor.offset)
+        restored.value = true
+        // Сначала восстановить, потом наблюдать: иначе первый snapshotFlow
+        // перезаписал бы сохранённую позицию начальной строкой нового списка.
+        if (isRoot) {
+            snapshotFlow { state.firstVisibleItemIndex to state.firstVisibleItemScrollOffset }
+                .collect { (index, offset) ->
+                    memory.remember(menuKey, SettingsScrollMemory.Anchor(index, offset))
+                }
+        }
     }
     return state
 }

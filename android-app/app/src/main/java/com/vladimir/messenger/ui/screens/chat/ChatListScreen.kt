@@ -552,41 +552,16 @@ fun ChatListScreen(
     }
 
     inviteChoice?.let { group ->
-        val what = if (group.isChannel) stringResource(R.string.word_channel_acc) else stringResource(R.string.word_group_acc)
-        ApuPremiumDialog(
-            title = stringResource(R.string.invite_title, what),
+        ChatListInviteChoiceDialog(
+            isChannel = group.isChannel,
             onDismiss = { inviteChoice = null },
-            dismissLabel = null,
-        ) {
-                // Раунд 160: действия - тремя пузырями друг под другом
-                // (владелец: «три горизонтальных пузыря ... с нашей
-                // цветовой гаммой») вместо сжатых текстовых кнопок.
-                Column {
-                    Text(
-                        stringResource(R.string.grp_qr_hint)
-                    )
-                    Spacer(Modifier.height(14.dp))
-                    InviteActionBubble(stringResource(R.string.groups_show_qr), filled = true) {
-                        val chosen = group
-                        inviteChoice = null
-                        viewModel.prepareQrGroupInvite(chosen.id) { title, link ->
-                            qrInvite = title to link
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    InviteActionBubble(stringResource(R.string.groups_send_link), filled = true) {
-                        val chosen = group
-                        inviteChoice = null
-                        groupLinkShare = chosen
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    InviteActionBubble(stringResource(R.string.contacts_send_in_apu), filled = true) {
-                        val chosen = group
-                        inviteChoice = null
-                        inviteApu = chosen
-                    }
-                }
-        }
+            onShowQr = {
+                inviteChoice = null
+                viewModel.prepareQrGroupInvite(group.id) { title, link -> qrInvite = title to link }
+            },
+            onSendLink = { inviteChoice = null; groupLinkShare = group },
+            onSendInApu = { inviteChoice = null; inviteApu = group },
+        )
     }
 
     // Раунд 158: «Отправить в APU» - выбираем адресатов галочками (до
@@ -1047,42 +1022,6 @@ private fun ApuConnectByLinkDialog(
         }
     }
 }
-
-/**
- * Раунд 160: пузырь-кнопка диалога приглашения в гамме APU: золотая
- * заливка (главное действие) либо светлый пузырь с золотой рамкой.
- */
-@Composable
-private fun InviteActionBubble(
-    label: String,
-    filled: Boolean = false,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(
-                if (filled) MaterialTheme.colorScheme.primary
-                else Color.White.copy(alpha = 0.85f)
-            )
-            .border(
-                1.dp,
-                MaterialTheme.colorScheme.primary.copy(alpha = if (filled) 1f else 0.4f),
-                RoundedCornerShape(18.dp),
-            )
-            .clickable(onClick = onClick)
-            .padding(vertical = 10.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            label,
-            fontWeight = FontWeight.Bold,
-            color = if (filled) Color.White else MaterialTheme.colorScheme.primary,
-        )
-    }
-}
-
 
 /**
  * Одна страница листалки: список выбранного раздела либо объяснение пустоты.
