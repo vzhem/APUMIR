@@ -7,6 +7,7 @@ from pathlib import Path
 CLASS = "com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest"
 OUTBOX_CLASS = "com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest"
 PUSH_CLASS = "com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest"
+REGISTRATION_CLASS = "com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest"
 FIREBASE_CLASS = "com.vladimir.messenger.data.push.FirebaseClientConfigurationInstrumentedTest"
 EXPECTED_NOTIFICATION = {
     "migrationFortyToFortyOnePreservesHistoryAndRoomValidatesSchema",
@@ -36,6 +37,14 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, OUTBOX_CLASS: {
     "corruptedCiphertextAndMissingKeystoreKeyFailClosed",
     "quotaDoesNotEvictOrRearmTheFirstPeer",
     "conflictingConcurrentOffersHaveExactlyOneWinnerAcrossInstances",
+}, REGISTRATION_CLASS: {
+    "reservationIsEncryptedAndSurvivesReopen",
+    "concurrentReservationsNeverReuseASequenceAcrossInstances",
+    "bindingChangesAndWrongNodesCannotOverwriteExistingState",
+    "delayedRegistrationResponseCannotConfirmANewerAttempt",
+    "revocationAndRotationSurviveRestartWithoutLosingTheOldSequence",
+    "corruptionOrMissingKeystoreKeyNeverSilentlyResetsState",
+    "quotaAndFailedEntropyDoNotEvictOrCreateARegistration",
 }, FIREBASE_CLASS: {
     "configuredSdkHasAutoInitDisabledWithoutTokenRequest",
     "wakeCryptoFfiRejectsInvalidInputWithoutStartingPush",
