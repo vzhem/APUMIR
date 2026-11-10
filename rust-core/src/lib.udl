@@ -334,6 +334,11 @@ interface P2PCoreHandle {
         bytes ciphertext_range
     );
 
+    // Bounded current-own IDs let Android repair cleanup after a crash.
+    sequence<string> own_relay_message_ids();
+    // After Android commits the outgoing app ACK, release only our relay copy.
+    boolean confirm_message_delivered(string message_id);
+
     void receive_message(
         string message_id,
         string chat_id,

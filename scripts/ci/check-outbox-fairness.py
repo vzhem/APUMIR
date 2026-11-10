@@ -65,7 +65,7 @@ class OutboxFairnessContract(unittest.TestCase):
         report = (ROOT / "scripts/ci/check-android-notification-results.py").read_text()
         self.assertIn("OutboxFairnessInstrumentedTest", runner)
         self.assertIn("OutboxFairnessInstrumentedTest", report)
-        for name in ("actualRoomQueueReachesLaterRecipientPastManyBlockedRows", "aBadOldestMessageDoesNotHideLaterMessagesInTheSameRoomChat", "growingRoomQueueEndsScanAndRetriesBlockedChat", "discoveryQueryIsContactScopedAndBoundedAcrossChats", "initialFailureCannotUndoConcurrentSuccessOrAck", "roomKeysetPaginationKeepsAllEqualTimestampIds"):
+        for name in ("actualRoomQueueReachesLaterRecipientPastManyBlockedRows", "aBadOldestMessageDoesNotHideLaterMessagesInTheSameRoomChat", "growingRoomQueueEndsScanAndRetriesBlockedChat", "discoveryQueryIsContactScopedAndBoundedAcrossChats", "initialFailureCannotUndoConcurrentSuccessOrAck", "roomKeysetPaginationKeepsAllEqualTimestampIds", "unconfirmedPersonalTextRetriesSameIdAndStopsAfterRoomAck", "unconfirmedPumpSkipsGroupsDeferredMediaAndServicesAndRespectsMirror", "roomReconciliationRepairsCommittedAckAfterRestartWithoutTouchingOtherRows", "ackDuringLateNativeSendReconcilesTheNewlyRetainedCopy"):
             self.assertIn(f"fun {name}(", test)
             self.assertIn(f'"{name}"', report)
 

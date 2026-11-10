@@ -79,6 +79,19 @@ class FairOutboxScanTest {
         assertEquals(2, counts)
     }
 
+    @Test fun ineligibleHistoryDoesNotSpendTheNetworkAttemptBudget() = runBlocking {
+        val rows = listOf(Item("service1", 1, "c1"), Item("service2", 2, "c2"), Item("text", 3, "c3"))
+        val tried = mutableListOf<String>()
+        val scan = FairOutboxScan<Item>(maxAttemptsPerCycle = 1)
+        val progress = scan.run(20, { rows.size }, loader(rows), eligible = { !it.id.startsWith("service") }) {
+            tried += it.id
+            true
+        }
+        assertEquals(listOf("text"), tried)
+        assertEquals(1, progress.attempted)
+        assertFalse(progress.moreToScan)
+    }
+
     @Test fun emptyScanDoesNotLoadAndNewRowsCanStartTheNextScan() = runBlocking {
         val rows = mutableListOf<Item>()
         val scan = FairOutboxScan<Item>()

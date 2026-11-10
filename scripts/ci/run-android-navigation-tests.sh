@@ -30,11 +30,11 @@ if [ "$storage_status" -ne 0 ]; then
     echo "::error::Android storage tests failed (Gradle exit $storage_status)"
 fi
 
-# Exercise the real Room upgrade, notification/restore and outbox fairness; do not
-# accept a green Gradle task which silently skipped the new acceptance cases.
+# Exercise Room upgrade, notification/restore, outbox fairness and experimental
+# push storage; never accept a green task that silently skipped acceptance cases.
 clear_report
 ./gradlew :app:connectedDebugAndroidTest --no-daemon \
-    -Pandroid.testInstrumentationRunnerArguments.class=com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest,com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest \
+    -Pandroid.testInstrumentationRunnerArguments.class=com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest,com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest,com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest \
     2>&1 | tee "$reports/notification.log"
 notification_gradle=${PIPESTATUS[0]}
 python3 "$root/scripts/ci/check-android-notification-results.py" \

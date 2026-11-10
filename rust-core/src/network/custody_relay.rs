@@ -28,6 +28,7 @@
 //! одно и то же сообщение дважды.
 
 use std::collections::{HashMap, VecDeque};
+use std::time::{Duration, Instant};
 use std::sync::Mutex;
 
 use crate::network::wire::{self, MeshEnvelope};
@@ -57,6 +58,26 @@ pub const MAX_DELIVERIES_PER_TICK: usize = 8;
 
 /// Сколько идентификаторов уже отданных сообщений помним.
 pub const MAX_DELIVERED_MEMORY: usize = 512;
+/// An EventBus admission is not a durable inbox commit: suppress only a burst.
+const DELIVERY_RETRY_AFTER: Duration = Duration::from_secs(5);
+/// Retry an unconfirmed held copy quickly, then back off to limit battery and
+/// traffic. The separate attempt clock does not suppress incoming events.
+const HELD_RETRY_INITIAL: Duration = Duration::from_secs(10);
+const HELD_RETRY_MAX_SECS: u64 = 5 * 60;
+
+#[derive(Clone, Copy)]
+struct HeldAttempt {
+    last: Instant,
+    attempts: u8,
+}
+
+impl HeldAttempt {
+    fn due(self, now: Instant) -> bool {
+        let shift = self.attempts.saturating_sub(1).min(8) as u32;
+        let seconds = HELD_RETRY_INITIAL.as_secs().saturating_mul(1u64 << shift).min(HELD_RETRY_MAX_SECS);
+        now.saturating_duration_since(self.last) >= Duration::from_secs(seconds)
+    }
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // КАДРЫ
@@ -215,9 +236,10 @@ pub struct CustodyHold {
     /// Кадры, которые надо отправить (ответы `ack`, отдача `deliver`):
     /// приёмник кадров только готовит их, отправляет поток presence.
     outbound: Mutex<Vec<(String, Vec<u8>)>>,
-    /// Что уже отдали получателю: защита от второго показа того же сообщения,
-    /// когда его держал не только этот узел.
-    delivered: Mutex<VecDeque<String>>,
+    /// Incoming burst suppression, separate from the held-copy retry clock.
+    delivered: Mutex<VecDeque<(String, Instant)>>,
+    /// Bounded by held entries and removed together with them.
+    attempts: Mutex<HashMap<String, HeldAttempt>>,
 }
 
 impl CustodyHold {
@@ -226,6 +248,7 @@ impl CustodyHold {
             held: Mutex::new(Vec::new()),
             outbound: Mutex::new(Vec::new()),
             delivered: Mutex::new(VecDeque::new()),
+            attempts: Mutex::new(HashMap::new()),
         }
     }
 
@@ -272,6 +295,7 @@ impl CustodyHold {
         let mut held = self.held.lock().unwrap();
         let before = held.len();
         held.retain(|known| known.msg_id != msg_id);
+        if held.len() != before { self.attempts.lock().unwrap().remove(msg_id); }
         held.len() != before
     }
 
@@ -280,6 +304,9 @@ impl CustodyHold {
         let mut held = self.held.lock().unwrap();
         let before = held.len();
         held.retain(|known| known.expires_at_ms > now_ms);
+        if held.len() != before {
+            self.attempts.lock().unwrap().retain(|id, _| held.iter().any(|item| &item.msg_id == id));
+        }
         before - held.len()
     }
 
@@ -292,6 +319,27 @@ impl CustodyHold {
             .take(limit.min(MAX_DELIVERIES_PER_TICK))
             .cloned()
             .collect()
+    }
+
+    /// Reserve due items in least-recent-attempted order. A retrying first
+    /// page can never hide later copies for the same recipient.
+    pub fn take_due_for_recipient(&self, recipient: &str, limit: usize) -> Vec<HeldEnvelope> {
+        self.take_due_at(recipient, limit, Instant::now())
+    }
+
+    fn take_due_at(&self, recipient: &str, limit: usize, now: Instant) -> Vec<HeldEnvelope> {
+        // All methods that take both locks use this order.
+        let held = self.held.lock().unwrap();
+        let mut attempts = self.attempts.lock().unwrap();
+        let mut due: Vec<&HeldEnvelope> = held.iter().filter(|item| {
+            item.recipient == recipient && attempts.get(&item.msg_id).is_none_or(|state| state.due(now))
+        }).collect();
+        due.sort_by_key(|item| attempts.get(&item.msg_id).map(|state| state.last));
+        due.into_iter().take(limit.min(MAX_DELIVERIES_PER_TICK)).map(|item| {
+            let count = attempts.get(&item.msg_id).map_or(1, |state| state.attempts.saturating_add(1));
+            attempts.insert(item.msg_id.clone(), HeldAttempt { last: now, attempts: count });
+            item.clone()
+        }).collect()
     }
 
     /// Список получателей, для которых что-то держим.
@@ -328,17 +376,24 @@ impl CustodyHold {
         self.outbound.lock().unwrap().len()
     }
 
-    /// Отметить, что сообщение отдано. `false` - оно уже отдавалось (дубль от
-    /// второго хранителя): получателю его показывать не нужно.
+    /// Suppress a short duplicate burst, not all retries in this process. An
+    /// EventBus admission or a failed stream is not a durable Room commit.
     pub fn note_delivered(&self, msg_id: &str) -> bool {
+        self.note_delivered_at(msg_id, Instant::now())
+    }
+
+    fn note_delivered_at(&self, msg_id: &str, now: Instant) -> bool {
         let mut delivered = self.delivered.lock().unwrap();
-        if delivered.iter().any(|known| known == msg_id) {
-            return false;
+        if let Some(index) = delivered.iter().position(|(known, _)| known == msg_id) {
+            if now.saturating_duration_since(delivered[index].1) < DELIVERY_RETRY_AFTER {
+                return false;
+            }
+            delivered.remove(index);
         }
         if delivered.len() >= MAX_DELIVERED_MEMORY {
             delivered.pop_front();
         }
-        delivered.push_back(msg_id.to_string());
+        delivered.push_back((msg_id.to_string(), now));
         true
     }
 }
@@ -366,16 +421,27 @@ pub struct OfferTask {
     pub expires_at_ms: i64,
 }
 
+/// Short bounded history survives completion of an offer task so the origin
+/// can later send a drop hint only after the app commits its delivery ACK.
+const MAX_OFFER_HISTORY: usize = 512;
+struct OfferedPeer {
+    msg_id: String,
+    peer: String,
+    expires_at_ms: i64,
+}
+
 /// Очередь предложений на стороне отправителя.
 #[derive(Default)]
 pub struct CustodyOffers {
     tasks: Mutex<VecDeque<OfferTask>>,
+    history: Mutex<VecDeque<OfferedPeer>>,
 }
 
 impl CustodyOffers {
     pub fn new() -> Self {
         Self {
             tasks: Mutex::new(VecDeque::new()),
+            history: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -410,6 +476,7 @@ impl CustodyOffers {
     /// модуль только решает, кого ещё не спрашивали и хватает ли копий.
     pub fn next_offers(&self, candidates: &[String]) -> Vec<(String, String, String)> {
         let mut tasks = self.tasks.lock().unwrap();
+        let mut history = self.history.lock().unwrap();
         let mut planned: Vec<(String, String, String)> = Vec::new();
         for task in tasks.iter_mut() {
             if task.accepted >= MAX_CUSTODY_PEERS || planned.len() >= MAX_OFFERS_PER_TICK {
@@ -426,6 +493,14 @@ impl CustodyOffers {
                     continue;
                 }
                 task.offered_to.push(peer.clone());
+                // A planned peer may refuse or be unreachable; a later drop is
+                // harmless. Bound history even across completed tasks.
+                if !history.iter().any(|item| item.msg_id == task.msg_id && item.peer == *peer) {
+                    if history.len() >= MAX_OFFER_HISTORY { history.pop_front(); }
+                    history.push_back(OfferedPeer {
+                        msg_id: task.msg_id.clone(), peer: peer.clone(), expires_at_ms: task.expires_at_ms,
+                    });
+                }
                 planned.push((task.msg_id.clone(), task.envelope.clone(), peer.clone()));
             }
         }
@@ -450,6 +525,19 @@ impl CustodyOffers {
         done
     }
 
+    /// Return peers only after the origin's Room status has been committed.
+    /// Extracting the list is independent of the normal offer task lifecycle.
+    pub fn take_offered_peers(&self, msg_id: &str) -> Vec<String> {
+        let mut history = self.history.lock().unwrap();
+        let mut peers = Vec::new();
+        history.retain(|item| {
+            if item.msg_id != msg_id { return true; }
+            if !peers.contains(&item.peer) { peers.push(item.peer.clone()); }
+            false
+        });
+        peers
+    }
+
     /// Сообщение доставлено (или протухло) - задачу убираем.
     pub fn remove(&self, msg_id: &str) -> bool {
         let mut tasks = self.tasks.lock().unwrap();
@@ -462,6 +550,7 @@ impl CustodyOffers {
         let mut tasks = self.tasks.lock().unwrap();
         let before = tasks.len();
         tasks.retain(|task| task.expires_at_ms > now_ms);
+        self.history.lock().unwrap().retain(|item| item.expires_at_ms > now_ms);
         before - tasks.len()
     }
 
@@ -595,6 +684,66 @@ mod tests {
         // Первый раз - показываем, второй (копия от второго хранителя) - нет.
         assert!(hold.note_delivered("m1"));
         assert!(!hold.note_delivered("m1"));
+    }
+
+    #[test]
+    fn received_event_burst_can_retry_after_a_failed_or_lost_room_commit() {
+        let hold = CustodyHold::new();
+        let now = Instant::now();
+        assert!(hold.note_delivered_at("m1", now));
+        assert!(!hold.note_delivered_at("m1", now + Duration::from_secs(4)));
+        assert!(hold.note_delivered_at("m1", now + Duration::from_secs(5)));
+        assert!(CustodyHold::new().note_delivered_at("m1", now), "restart must permit a retry");
+    }
+
+    #[test]
+    fn held_stream_success_keeps_copy_and_retries_with_bounded_backoff() {
+        let hold = CustodyHold::new();
+        let item = held_from_envelope(&envelope("m1", "pk_recv", "pk_orig", 3600), 1_000).unwrap();
+        hold.hold(item, true);
+        let now = Instant::now();
+        assert_eq!(hold.take_due_at("pk_recv", 8, now).len(), 1);
+        // A successful transport write is deliberately NOT a remove or drop.
+        assert!(hold.contains("m1"));
+        assert!(hold.take_due_at("pk_recv", 8, now + Duration::from_secs(9)).is_empty());
+        assert_eq!(hold.take_due_at("pk_recv", 8, now + Duration::from_secs(10)).len(), 1);
+        assert!(hold.take_due_at("pk_recv", 8, now + Duration::from_secs(29)).is_empty());
+        assert_eq!(hold.take_due_at("pk_recv", 8, now + Duration::from_secs(30)).len(), 1);
+        assert!(hold.remove("m1"));
+        assert!(hold.attempts.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn later_held_copies_are_not_starved_when_the_first_page_is_due_again() {
+        let hold = CustodyHold::new();
+        for n in 0..MAX_HOLD_PER_RECIPIENT {
+            let item = held_from_envelope(&envelope(&format!("m{n:02}"), "pk_recv", "pk_orig", 3600), 1_000).unwrap();
+            assert_eq!(hold.hold(item, true), CustodyAck::Accepted);
+        }
+        let now = Instant::now();
+        let first = hold.take_due_at("pk_recv", 8, now);
+        // Even if a slow first page took ten seconds, never-tried copies win.
+        let second = hold.take_due_at("pk_recv", 8, now + Duration::from_secs(10));
+        assert_eq!(first.len(), 8);
+        assert_eq!(second.len(), 8);
+        assert!(first.iter().all(|a| second.iter().all(|b| a.msg_id != b.msg_id)));
+        assert_eq!(hold.held_len(), 16);
+        assert_eq!(hold.purge_expired(4_000_000), 16);
+        assert!(hold.attempts.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn confirmed_origin_can_drop_peers_even_after_offer_task_completes() {
+        let offers = CustodyOffers::new();
+        let item = held_from_envelope(&envelope("m1", "pk_recv", "pk_orig", 3600), 1_000).unwrap();
+        assert!(offers.enqueue(item));
+        let peers = vec!["pk_1".into(), "pk_2".into()];
+        assert_eq!(offers.next_offers(&peers).len(), 2);
+        assert!(!offers.note_ack("m1", CustodyAck::Accepted));
+        assert!(offers.note_ack("m1", CustodyAck::Accepted));
+        assert_eq!(offers.pending_len(), 0);
+        assert_eq!(offers.take_offered_peers("m1"), peers);
+        assert!(offers.take_offered_peers("m1").is_empty());
     }
 
     #[test]

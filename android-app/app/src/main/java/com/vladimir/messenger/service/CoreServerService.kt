@@ -68,7 +68,7 @@ class CoreServerService : Service() {
 
     /** Досылка офлайн-очереди своим ритмом: коротким шагом, пока есть что слать. */
     private val chatOutboxPump: ChatOutboxPump by lazy {
-        ChatOutboxPump(appDatabase.messageDao(), chatRepository, coreWorkWakeLock)
+        ChatOutboxPump(appDatabase.messageDao(), appDatabase.chatDao(), chatRepository, coreWorkWakeLock)
     }
     @Inject lateinit var contactRepository: ContactRepository
     @Inject lateinit var mtProxyRepository: MtProxyRepository
@@ -319,7 +319,7 @@ class CoreServerService : Service() {
      */
     private suspend fun markMessageDelivered(messageId: String): Boolean {
         deferredDelivery.noteTransportAck(messageId)
-        return chatRepository.markOutgoingMessageDelivered(messageId)
+        return applyOutgoingDeliveryAck(messageId, chatRepository::markOutgoingMessageDelivered, appDatabase.messageDao()::getMessageById, RustBridge::confirmMessageDelivered)
     }
 
     /**
@@ -1215,6 +1215,7 @@ class CoreServerService : Service() {
 
                             is RelayEnvelope.Parsed.Message -> {
                                 val messageId = parsed.messageId
+                                var acknowledge = false // Only a stored text or an explicitly handled service packet.
                                 // Дедупликация: сообщение уже в БД
                                 val existingMsg = chatRepository.getMessageById(messageId)
                                 if (existingMsg != null) {
@@ -1226,12 +1227,10 @@ class CoreServerService : Service() {
                                         DeliveryAckWire.messageId(existingMsg.content)?.let {
                                             markMessageDelivered(it)
                                         }
-                                    } else {
-                                        // р243: дубликат - это повтор от отправителя,
-                                        // который нашей галочки не увидел. Молчание
-                                        // здесь и было причиной «висит одна галочка»:
-                                        // подтверждение отправляем ЗАНОВО.
-                                        runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
+                                    } else if (!existingMsg.isFromMe && existingMsg.senderId == senderId) {
+                                        // Only the same sender's persisted row can re-ACK a duplicate.
+                                        acknowledge = true
+                                        runCatching { RustBridge.sendDeliveryAck(messageId, senderId, roomCommitted = true) }
                                     }
                                 } else {
                                     // ШИФРОВАНИЕ: это второй, независимый путь приёма. Без
@@ -1285,6 +1284,7 @@ class CoreServerService : Service() {
                                             // Never generate an ACK-of-ACK. RelayEnvelope's own
                                             // custody receipt below remains a separate protocol.
                                             if (!isDeliveryAck) {
+                                                acknowledge = true
                                                 try {
                                                     RustBridge.sendDeliveryAck(messageId, senderId)
                                                 } catch (e: Exception) {
@@ -1295,7 +1295,7 @@ class CoreServerService : Service() {
                                             val contact = contactRepository.getContactById(senderId)
                                             val contactName = contact?.displayName ?: senderId.take(16)
                                             val chat = chatRepository.getOrCreateChat(senderId, contactName)
-                                            chatRepository.saveIncomingMessage(
+                                            val saved = chatRepository.saveIncomingMessage(
                                                 chatId = chat.id,
                                                 senderId = senderId,
                                                 messageId = messageId,
@@ -1303,6 +1303,7 @@ class CoreServerService : Service() {
                                                 timestamp = parsed.timestamp,
                                                 channel = MessageChannel.CF,
                                             )
+                                            acknowledge = storedIncomingText(messageId, senderId, chat.id, saved, appDatabase.messageDao()::getMessageById)
                                             Log.i(TAG, "CF message handled for chat ${chat.id} msgId=$messageId")
                                             if (chatRepository.isInviteBlocked(senderId, cfContent)) {
                                                 runCatching { sendInviteReject(senderId, cfContent) }
@@ -1323,9 +1324,8 @@ class CoreServerService : Service() {
                                         }
                                     }
                                 }
-                                // G1 fix: отправить ACK обратно отправителю через relay
-                                // (отправитель узнаёт о доставке, даже если был офлайн в момент приёма).
-                                try {
+                                // A failed decrypt, rejected text, or ACK-of-ACK is not delivery.
+                                if (acknowledge) try {
                                     val ack = RelayEnvelope.buildAck(messageId, RustBridge.nodeId() ?: "")
                                     cloudflareRelay?.sendMessage(senderId, ack)
                                     Log.i(TAG, "📤 CF ACK sent to $senderId for msgId=$messageId")
@@ -2827,8 +2827,7 @@ class CoreServerService : Service() {
                     
                     // Отправить ACK отправителю
                     try {
-                        RustBridge.sendDeliveryAck(messageId, senderId)
-                        Log.i(TAG, "📤 Delivery ACK sent for msgId=$messageId")
+                        if (storedIncomingText(messageId, senderId, chat.id, incomingSaved, appDatabase.messageDao()::getMessageById)) { RustBridge.sendDeliveryAck(messageId, senderId, roomCommitted = true); Log.i(TAG, "📤 Delivery ACK queued for msgId=$messageId") } else Log.w(TAG, "Incoming text not stored; ACK withheld for msgId=$messageId")
                     } catch (e: Exception) {
                         Log.w(TAG, "⚠ ACK send failed: ${e.message}")
                     }

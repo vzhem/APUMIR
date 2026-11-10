@@ -50,6 +50,7 @@ internal class FairOutboxScan<T>(private val maxAttemptsPerCycle: Int = 4) {
         pageSize: Int,
         countAtStart: suspend () -> Int,
         load: suspend (OutboxPosition?, Int) -> List<OutboxCandidate<T>>,
+        eligible: suspend (T) -> Boolean = { true },
         attempt: suspend (T) -> Boolean,
     ): OutboxProgress = lock.withLock {
         require(maxAttemptsPerCycle > 0)
@@ -68,7 +69,10 @@ internal class FairOutboxScan<T>(private val maxAttemptsPerCycle: Int = 4) {
         var attempted = 0
         var sent = 0
         for (candidate in page) {
-            if (candidate.destination in failed) {
+            if (!eligible(candidate.value)) {
+                // Visit, but do not spend a network-attempt budget on an
+                // ineligible historical/service row.
+            } else if (candidate.destination in failed) {
                 // The next scan can rotate only when there really is a later
                 // queued row; a chat with one row retries normally.
                 hasFollowing.add(candidate.destination)

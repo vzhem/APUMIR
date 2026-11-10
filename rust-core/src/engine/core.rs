@@ -99,6 +99,7 @@ enum MqttOutboundCommand {
         recipient: String,
         envelope: String,
         message_id: String,
+        legacy_redelivery: bool,
     },
     /// Подтверждение доставки автору сообщения.
     ///
@@ -109,6 +110,7 @@ enum MqttOutboundCommand {
     DeliveryAck {
         recipient: String,
         message_id: String,
+        room_committed: bool,
     },
     /// Немедленно объявить себя и запросить presence остальных (кнопка
     /// «Собрать данные об абонентах»). Обычный цикл делает это раз в минуту.
@@ -353,25 +355,6 @@ fn remember_bounded_id(
     let owned = id.to_string();
     entries.insert(owned.clone());
     order.push_back(owned);
-}
-
-fn remember_bounded_delivery(
-    entries: &mut HashMap<String, String>,
-    order: &mut VecDeque<String>,
-    msg_id: &str,
-    origin: &str,
-    capacity: usize,
-) {
-    if capacity == 0 || entries.contains_key(msg_id) {
-        return;
-    }
-    while order.len() >= capacity {
-        if let Some(oldest) = order.pop_front() {
-            entries.remove(&oldest);
-        }
-    }
-    entries.insert(msg_id.to_string(), origin.to_string());
-    order.push_back(msg_id.to_string());
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2599,10 +2582,9 @@ impl P2PCore {
                 hold.purge_expired(now_ms);
                 offers.purge_expired(now_ms);
 
-                // Копии, которые держим, отдаём тем получателям, кто сейчас
-                // в сети. Отдали - копию убираем и говорим автору, что
-                // искать хранителей дальше не нужно.
-                let mut delivered_items = 0usize;
+                // QUIC stream admission is not a Room commit. Keep the bounded
+                // copy until a drop hint or TTL, retrying with backoff.
+                let mut offered_items = 0usize;
                 for recipient in hold.recipients() {
                     let addr = {
                         let addrs = peer_addrs.lock().unwrap();
@@ -2611,27 +2593,20 @@ impl P2PCore {
                     let Some(addr) = addr else {
                         continue;
                     };
-                    for item in hold.take_for_recipient(&recipient, 8) {
-                        if !hold.note_delivered(&item.msg_id) {
-                            continue;
-                        }
+                    for item in hold.take_due_for_recipient(&recipient, 8) {
                         if transport.send_blocking(
                             &recipient,
                             Some(addr),
                             deliver_payload(&item.envelope).into_bytes(),
                         ) {
-                            delivered_items += 1;
-                            hold.remove(&item.msg_id);
-                            if item.origin.starts_with("pk_") {
-                                hold.queue_outbound(&item.origin, drop_payload(&item.msg_id));
-                            }
+                            offered_items += 1;
                         }
                     }
                 }
-                if delivered_items > 0 {
+                if offered_items > 0 {
                     tracing::info!(
-                        "CUSTODY K5: {} held message(s) delivered to their recipients",
-                        delivered_items
+                        "CUSTODY K5: {} held message(s) offered on a stream; awaiting app delivery",
+                        offered_items
                     );
                 }
 
@@ -2805,6 +2780,19 @@ impl P2PCore {
             &msg.msg_id, &msg.recipient, &msg.origin_sender, &msg.chat_scope,
             ttl_secs, msg.hop_count, &msg.e2e_payload,
         );
+        (wire.len() <= MAX_MESH_RELAY_ENVELOPE_BYTES).then_some(wire)
+    }
+
+    /// N-1-compatible direct-format retry of a retained own ciphertext. It is
+    /// live-only, and expiry/metadata are checked again when the command drains.
+    fn own_legacy_retry_wire(msg: &RelayMessage, now_ms: i64) -> Option<String> {
+        if msg.is_expired_at(now_ms) || msg.remaining_ttl_secs_at(now_ms) == 0
+            || !msg.origin_sender.starts_with("pk_")
+            || !crate::network::relay_queue::valid_metadata_atom(&msg.msg_id, crate::network::relay_queue::MAX_MESSAGE_ID_BYTES)
+            || !crate::network::relay_queue::valid_metadata_atom(&msg.chat_scope, crate::network::relay_queue::MAX_CHAT_SCOPE_BYTES)
+        { return None; }
+        let text = std::str::from_utf8(&msg.e2e_payload).ok()?;
+        let wire = format!("{}|{}|{}|{}", msg.origin_sender, msg.msg_id, msg.chat_scope, text);
         (wire.len() <= MAX_MESH_RELAY_ENVELOPE_BYTES).then_some(wire)
     }
 
@@ -3064,8 +3052,7 @@ impl P2PCore {
         const MAX_DELIVERED_MESH_RELAY_IDS: usize = 4_096;
         let mut seen_mesh_relay_ids: HashSet<String> = HashSet::new();
         let mut seen_mesh_relay_order: VecDeque<String> = VecDeque::new();
-        let mut delivered_mesh_relay_origins: HashMap<String, String> = HashMap::new();
-        let mut delivered_mesh_relay_order: VecDeque<String> = VecDeque::new();
+        let mut local_mesh_deliveries = super::mesh_delivery::LocalMeshDeliveries::new(MAX_DELIVERED_MESH_RELAY_IDS);
         // Messages retained while the broker was asleep are reoffered only
         // after fallback resumes, once per MQTT generation (bounded pages).
         let mut published_own_in_generation = HashSet::new();
@@ -3152,19 +3139,27 @@ impl P2PCore {
                     Some(command) => Ok(command),
                     None => outbound_rx.try_recv(),
                 };
+                // The policy can change while draining. Preserve a taken ACK
+                // across the paused generation rather than publishing early or
+                // losing an unrepeatable command.
+                if !policy.transport_fallback_allowed(crate::storage::models::now_ms()) {
+                    if let Ok(command) = command { pending_outbound = Some(command); }
+                    break;
+                }
                 match command {
                     Ok(MqttOutboundCommand::MeshRelay {
-                        recipient, envelope, message_id,
+                        recipient, envelope, message_id, legacy_redelivery,
                     }) => {
-                        if !policy.transport_fallback_allowed(crate::storage::models::now_ms()) {
-                            continue;
-                        }
+                        // The just-taken command was checked against the
+                        // fallback policy above. Dropping it on a second check
+                        // here would lose it when that policy changes.
                         // Commands can sit behind direct search or a paused
                         // session. Never publish their stale relative TTL.
-                        let refreshed = relay_queue.as_ref()
+                        let retained = relay_queue.as_ref()
                             .and_then(|q| q.own_message(&message_id))
-                            .filter(|m| m.origin_sender == node_id && m.recipient == recipient)
-                            .and_then(|m| Self::own_fallback_wire(&m, crate::storage::models::now_ms()));
+                            .filter(|m| m.origin_sender == node_id && m.recipient == recipient);
+                        let refreshed = retained.as_ref()
+                            .and_then(|m| Self::own_fallback_wire(m, crate::storage::models::now_ms()));
                         let wire = refreshed.or_else(|| {
                             message_id.starts_with("ppres-").then_some(envelope)
                         });
@@ -3185,10 +3180,23 @@ impl P2PCore {
                                 message_id, recipient, error
                             ),
                         }
+                        // N-1's mesh dedup can suppress a repeated relay event
+                        // indefinitely, including after an app ACK was lost.
+                        // The old direct-format packet reaches its Room dedup
+                        // and makes it send that ACK again. Only use the same
+                        // retained ciphertext, on an existing retry, live-only.
+                        if legacy_redelivery {
+                            if let Some(raw) = retained.as_ref().and_then(|m| Self::own_legacy_retry_wire(m, crate::storage::models::now_ms())) {
+                                if let Err(error) = transport.send_mesh_relay(&recipient, &raw).await {
+                                    tracing::warn!("MESH origin: compatible retry publish failed: {}", error);
+                                }
+                            }
+                        }
                     },
                     Ok(MqttOutboundCommand::DeliveryAck {
                         recipient,
                         message_id,
+                        room_committed,
                     }) => {
                         let payload = format!("ack|{}", message_id);
                         // send_mesh_relay, а НЕ send_message: второй публикует
@@ -3208,6 +3216,26 @@ impl P2PCore {
                                 recipient,
                                 error
                             ),
+                        }
+                        // Only an explicit Android handling ACK can cause a
+                        // legacy mesh receipt. The sender and recipient must
+                        // match the mesh event observed by this session; an ACK
+                        // for a direct-only message needs no mesh cleanup.
+                        if room_committed && local_mesh_deliveries.knows_sender(&message_id, &recipient)
+                            && crate::network::relay_queue::valid_metadata_atom(&message_id, crate::network::relay_queue::MAX_MESSAGE_ID_BYTES)
+                        {
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                            let receipt = crate::network::wire::build_receipt(&message_id, &node_id, now.as_secs());
+                            match transport.send_mesh_receipt(&recipient, &message_id, &receipt).await {
+                                Ok(()) => {
+                                    tracing::info!("MESH receipt: {} sent automatically to unique origin topic after app ACK", message_id);
+                                    if let Err(error) = transport.send_mesh_cleanup_receipt(&message_id, &receipt).await {
+                                        tracing::warn!("MESH receipt: cleanup fanout failed: {}", error);
+                                    }
+                                }
+                                Err(error) => tracing::warn!("MESH receipt: origin publish failed: {}", error),
+                            }
                         }
                     }
                     Ok(command @ (MqttOutboundCommand::AnnounceNow | MqttOutboundCommand::AnnounceAfterIdle)) => {
@@ -3640,52 +3668,10 @@ impl P2PCore {
                                 message_id: mid.to_string(),
                             });
 
-                            // Владелец 2026-10-07 (отчёт v11.74.199: «своё ждёт
-                            // получателя=1000» при «сигналов=0» и постоянных
-                            // «delivery ACK received»). Подтверждение доставки
-                            // ОБЯЗАНО снимать запись с удержания — иначе каждая
-                            // доставленная строка навсегда остаётся в резерве
-                            // «своих» и однажды вытеснит недоставленное.
-                            // Раньше это делал только mesh receipt; прямой
-                            // MQTT-ACK лишь зажигал галочку.
-                            // Чужую ретрансляцию подтверждают не нам: её не
-                            // трогаем ни в RAM, ни в durable.
-                            let ack_is_foreign = relay_queue
-                                .as_ref()
-                                .and_then(|q| q.is_own(mid))
-                                == Some(false);
-                            if let Some(ref q) = relay_queue {
-                                if q.remove_delivered_own(mid) {
-                                    tracing::info!(
-                                        "MQTT: delivery ACK снял {} с удержания (своё доставлено)",
-                                        mid
-                                    );
-                                }
-                            }
-                            // Durable-копия — по образцу receipt: снимаем и
-                            // ставим tombstone, чтобы после перезапуска запись
-                            // не «ожила» и снова не заняла резерв.
-                            if !ack_is_foreign {
-                                if let Some(ref custody) = relay_custody {
-                                    let now_durable =
-                                        crate::network::relay_queue::utc_now_ms();
-                                    match custody
-                                        .store
-                                        .remove_encrypted_and_tombstone(mid, now_durable)
-                                    {
-                                        Ok(true) => tracing::info!(
-                                            "MQTT: delivery ACK removed durable custody for {}",
-                                            mid
-                                        ),
-                                        Ok(false) => {}
-                                        Err(e) => tracing::warn!(
-                                            "MQTT: durable cleanup failed for {}: {}",
-                                            mid,
-                                            e
-                                        ),
-                                    }
-                                }
-                            }
+                            // Android must commit the outgoing status first. It
+                            // calls confirm_message_delivered afterwards; doing
+                            // relay cleanup here could lose the retry on a crash.
+
                         }
                     } else if evt.payload.starts_with("relay|") {
                         // M3(a): relay-конверт. Gossip будет добавлен отдельным шагом
@@ -3703,136 +3689,30 @@ impl P2PCore {
                                 if msg_id.is_empty() || recipient.is_empty() || origin.is_empty() {
                                     tracing::warn!("MESH relay: missing required metadata, dropped");
                                 } else if recipient == node_id {
-                                    // M3(c.2-r3): одно msg_id показываем локальному recipient
-                                    // не больше раза. Повтор от того же origin получает новый
-                                    // receipt (для cleanup relay), но не второе UI-событие.
-                                    let previous_origin = delivered_mesh_relay_origins
-                                        .get(&msg_id)
-                                        .cloned();
-                                    let should_send_receipt = match previous_origin {
-                                        Some(ref known_origin) if known_origin == &origin => {
-                                            tracing::info!(
-                                                "MESH relay: duplicate local delivery {} suppressed",
-                                                msg_id
-                                            );
-                                            true
-                                        }
-                                        Some(known_origin) => {
-                                            tracing::warn!(
-                                                "MESH relay: conflicting origin for {}, dropped ({} != {})",
-                                                msg_id,
-                                                origin,
-                                                known_origin
-                                            );
-                                            false
-                                        }
-                                        None => match String::from_utf8(e2e_payload) {
-                                            Ok(text) => {
-                                                // Раунд 119: durable tombstone БОЛЬШЕ НЕ
-                                                // подавляет UI-доставку. Раньше: доставка ->
-                                                // tombstone -> процесс убит (например,
-                                                // ОБНОВЛЕНИЕ ПРИЛОЖЕНИЯ) до того, как Kotlin
-                                                // сохранил сообщение -> повторная доставка
-                                                // подавлялась tombstone-ом, receipt уходил,
-                                                // отправитель ставил «доставлено» ->
-                                                // сообщение пропадало навсегда. Теперь
-                                                // UI-событие шлём ВСЕГДА: дубль уже
-                                                // сохранённого отфильтрует Room по msg_id
-                                                // (messageExists + повторный ACK), а
-                                                // незасохранённое сообщение наконец дойдёт.
-                                                // Tombstone остаётся книгой учёта для
-                                                // cleanup чужих custody-копий.
-                                                let now = std::time::SystemTime::now()
-                                                    .duration_since(std::time::UNIX_EPOCH)
-                                                    .unwrap_or_default();
+                                    // A queued EventBus event is NOT a committed Room row. Do not
+                                    // send a receipt or tombstone here. The Android handler sends
+                                    // its app ACK only after handling the event; that ACK now also
+                                    // drives legacy mesh receipt/cleanup. A failed handler or lost
+                                    // process can therefore receive the same ID again.
+                                    match String::from_utf8(e2e_payload) {
+                                        Ok(text) => match local_mesh_deliveries.admit(&msg_id, &origin, std::time::Instant::now()) {
+                                            super::mesh_delivery::Admission::Dispatch => {
                                                 events.emit(CoreEvent::MessageReceived {
-                                                    message_id: msg_id.clone(),
+                                                    message_id: msg_id,
                                                     chat_id: chat_scope,
-                                                    sender_id: origin.clone(),
+                                                    sender_id: origin,
                                                     text,
-                                                    timestamp: now.as_millis() as i64,
+                                                    timestamp: crate::storage::models::now_ms(),
                                                 });
-                                                remember_bounded_delivery(
-                                                    &mut delivered_mesh_relay_origins,
-                                                    &mut delivered_mesh_relay_order,
-                                                    &msg_id,
-                                                    &origin,
-                                                    MAX_DELIVERED_MESH_RELAY_IDS,
-                                                );
-                                                // M8-B/D: tombstone остаётся книгой учёта
-                                                // доставки (cleanup чужих custody-копий и
-                                                // запрет повторного хранения), но UI-доставку
-                                                // он больше не блокирует.
-                                                if let Some(ref custody) = relay_custody {
-                                                    if !crate::network::relay_queue::message_kind(&msg_id, "", b"").is_transient() {
-                                                    let now_durable =
-                                                        crate::network::relay_queue::utc_now_ms();
-                                                    if let Err(e) =
-                                                        custody.store.record_tombstone(&msg_id, now_durable)
-                                                    {
-                                                        tracing::warn!(
-                                                            "MESH relay: durable tombstone failed for {}: {}",
-                                                            msg_id,
-                                                            e
-                                                        );
-                                                    }
-                                                }
-                                                }
-                                                tracing::info!(
-                                                    "MESH relay: {} delivered to local recipient",
-                                                    msg_id
-                                                );
-                                                true
                                             }
-                                            Err(_) => {
-                                                tracing::warn!(
-                                                    "MESH relay: payload for {} is not valid UTF-8, dropped",
-                                                    msg_id
-                                                );
-                                                false
+                                            super::mesh_delivery::Admission::Suppress => {
+                                                tracing::trace!("MESH relay: local duplicate burst suppressed");
+                                            }
+                                            super::mesh_delivery::Admission::ConflictingOrigin => {
+                                                tracing::warn!("MESH relay: conflicting origin for local message, dropped");
                                             }
                                         },
-                                    };
-
-                                    if should_send_receipt {
-                                        let now = std::time::SystemTime::now()
-                                            .duration_since(std::time::UNIX_EPOCH)
-                                            .unwrap_or_default();
-                                        let receipt = crate::network::wire::build_receipt(
-                                            &msg_id,
-                                            &node_id,
-                                            now.as_secs(),
-                                        );
-                                        match transport
-                                            .send_mesh_receipt(&origin, &msg_id, &receipt)
-                                            .await
-                                        {
-                                            Ok(_) => {
-                                                tracing::info!(
-                                                    "MESH receipt: {} sent automatically to unique origin topic",
-                                                    msg_id
-                                                );
-                                                match transport
-                                                    .send_mesh_cleanup_receipt(&msg_id, &receipt)
-                                                    .await
-                                                {
-                                                    Ok(_) => tracing::info!(
-                                                        "MESH receipt: {} cleanup fanout queued for relay nodes",
-                                                        msg_id
-                                                    ),
-                                                    Err(e) => tracing::warn!(
-                                                        "MESH receipt: cleanup fanout failed for {}: {}",
-                                                        msg_id,
-                                                        e
-                                                    ),
-                                                }
-                                            }
-                                            Err(e) => tracing::warn!(
-                                                "MESH receipt: failed to send {}: {}",
-                                                msg_id,
-                                                e
-                                            ),
-                                        }
+                                        Err(_) => tracing::warn!("MESH relay: invalid UTF-8 payload, dropped"),
                                     }
                                 } else if let Some(ref q) = relay_queue {
                                     // КРИТИЧНО: contains ОБЯЗАТЕЛЕН перед каждым enqueue.
@@ -3974,96 +3854,18 @@ impl P2PCore {
                             _ => tracing::warn!("MESH relay: malformed envelope dropped"),
                         }
                     } else if evt.payload.starts_with("receipt|") {
-                        // M3(b): receipt удаляет доставленное сообщение только если msg_id
-                        // и recipient совпадают с записью в RelayQueue. Подпись добавит M7.
+                        // N-1 recipients may emit this before the event reaches
+                        // Room. Never mark delivered or remove any relay copy on
+                        // this legacy signal. Clear only our exact retained
+                        // topic to avoid permanent broker litter; retries wait
+                        // for the independent app ACK.
                         match crate::network::wire::parse(&evt.payload) {
-                            Some(MeshEnvelope::Receipt {
-                                msg_id,
-                                recipient,
-                                ts,
-                            }) => {
-                                let is_own_retained_receipt = !msg_id.is_empty()
-                                    && !recipient.is_empty()
-                                    && transport.is_own_mesh_receipt_topic(&evt.topic, &msg_id);
-
-                                if msg_id.is_empty() || recipient.is_empty() {
-                                    tracing::warn!("MESH receipt: missing metadata, dropped");
-                                } else if let Some(ref q) = relay_queue {
-                                    let stored_message = q
-                                        .for_recipient(&recipient)
-                                        .into_iter()
-                                        .find(|message| message.msg_id == msg_id);
-
-                                    if let Some(message) = stored_message {
-                                        let is_origin = message.origin_sender == node_id;
-                                        if q.remove(&msg_id) {
-                                            tracing::info!(
-                                                "MESH receipt: removed {} for {} at {}",
-                                                msg_id,
-                                                recipient,
-                                                ts
-                                            );
-
-                                            if is_origin {
-                                                events.emit(CoreEvent::MessageDelivered {
-                                                    message_id: msg_id.clone(),
-                                                });
-                                                tracing::info!(
-                                                    "MESH receipt: {} delivered at origin",
-                                                    msg_id
-                                                );
-                                            }
-                                        }
-                                    } else {
-                                        // Повторный/чужой receipt безопасно игнорируется.
-                                        tracing::trace!(
-                                            "MESH receipt: unknown {} for {}, ignored",
-                                            msg_id,
-                                            recipient
-                                        );
-                                    }
-                                } else {
-                                    tracing::warn!(
-                                        "MESH receipt: queue unavailable, dropped {}",
-                                        msg_id
-                                    );
-                                }
-
-                                // M8-B/C: receipt авторитетен независимо от RAM-копии: durable
-                                // encrypted custody удаляется и tombstone-ится даже если запись
-                                // после restart осталась только в SQLite (RAM о ней не знает).
-                                if !msg_id.is_empty() && !recipient.is_empty() {
-                                    if let Some(ref custody) = relay_custody {
-                                        let now_durable =
-                                            crate::network::relay_queue::utc_now_ms();
-                                        match custody.store.remove_encrypted_and_tombstone(&msg_id, now_durable) {
-                                            Ok(true) => tracing::info!(
-                                                "MESH receipt: durable custody removed for {}",
-                                                msg_id
-                                            ),
-                                            Ok(false) => {}
-                                            Err(e) => tracing::warn!(
-                                                "MESH receipt: durable cleanup failed for {}: {}",
-                                                msg_id,
-                                                e
-                                            ),
-                                        }
-                                    }
-                                }
-
-                                // Удаляет retained receipt только его локальный origin и
-                                // только с topic, чей SHA-256 key совпал с msg_id.
-                                if is_own_retained_receipt {
-                                    match transport.clear_own_mesh_receipt(&msg_id).await {
-                                        Ok(_) => tracing::info!(
-                                            "MESH receipt: cleared retained topic for {}",
-                                            msg_id
-                                        ),
-                                        Err(e) => tracing::warn!(
-                                            "MESH receipt: failed to clear retained topic for {}: {}",
-                                            msg_id,
-                                            e
-                                        ),
+                            Some(MeshEnvelope::Receipt { msg_id, recipient, .. }) => {
+                                if !msg_id.is_empty() && !recipient.is_empty()
+                                    && transport.is_own_mesh_receipt_topic(&evt.topic, &msg_id)
+                                {
+                                    if let Err(error) = transport.clear_own_mesh_receipt(&msg_id).await {
+                                        tracing::warn!("MESH receipt: retained topic cleanup failed: {}", error);
                                     }
                                 }
                             }
@@ -4731,27 +4533,37 @@ impl P2PCore {
         // группы или контакт): ему адресованный presence, а не общий эфир.
         self.presence_scope
             .add_own(to_node_id, self.node_id_str.as_deref());
+        // Queue app ACKs even during the bounded direct-search window. The
+        // persistent session drains them only when fallback is allowed, so
+        // this does not open an external connection early or discard the ACK.
+        let ack = payload.strip_prefix("ack-room|").map(|id| (id, true))
+            .or_else(|| payload.strip_prefix("ack|").map(|id| (id, false)));
+        if let Some((message_id, room_committed)) = ack {
+            let message_id = message_id.trim();
+            if !crate::network::relay_queue::valid_metadata_atom(message_id, crate::network::relay_queue::MAX_MESSAGE_ID_BYTES) {
+                return false;
+            }
+            if let Some(sender) = self.mqtt_outbound_tx.as_ref() {
+                if sender.try_send(MqttOutboundCommand::DeliveryAck {
+                    recipient: to_node_id.to_string(),
+                    message_id: message_id.to_string(),
+                    room_committed,
+                }).is_ok() {
+                    return true;
+                }
+                tracing::warn!("ACK: persistent queue unavailable, considering one-shot publish");
+            }
+        }
         if !self.external_transport_allowed() {
             self.peer_exchange.wake();
             tracing::debug!("MQTT one-shot: deferred while the bounded direct-search window is active");
             return false;
         }
-        if let Some(message_id) = payload.strip_prefix("ack|") {
-            if let Some(sender) = self.mqtt_outbound_tx.as_ref() {
-                let queued = sender
-                    .try_send(MqttOutboundCommand::DeliveryAck {
-                        recipient: to_node_id.to_string(),
-                        message_id: message_id.trim().to_string(),
-                    })
-                    .is_ok();
-                if queued {
-                    return true;
-                }
-                // Очередь переполнена или закрыта - падаем на разовый путь ниже.
-                tracing::warn!("ACK: persistent queue unavailable, using one-shot publish");
-            }
+        // The internal marker never goes on the wire, including fallback.
+        match ack {
+            Some((message_id, _)) => self.send_message_mqtt_oneshot(to_node_id, &format!("ack|{}", message_id.trim())),
+            None => self.send_message_mqtt_oneshot(to_node_id, payload),
         }
-        self.send_message_mqtt_oneshot(to_node_id, payload)
     }
 
     fn send_message_mqtt_oneshot(&self, to_node_id: &str, payload: &str) -> bool {
@@ -5777,6 +5589,7 @@ impl P2PCore {
                         // clone: конверт нужен и повторной досылке ниже.
                         envelope: prepared.envelope.clone(),
                         message_id: message_id.clone(),
+                        legacy_redelivery: false,
                     }) {
                         Ok(()) => tracing::info!(
                             "MESH origin: offline relay command accepted {} for {}",
@@ -5813,6 +5626,7 @@ impl P2PCore {
                                 recipient: recipient_id.clone(),
                                 envelope: prepared.envelope.clone(),
                                 message_id: message_id.clone(),
+                                legacy_redelivery: true,
                             })
                             .is_ok();
                         tracing::info!(
@@ -5847,6 +5661,7 @@ impl P2PCore {
                 recipient: recipient_id.clone(),
                 envelope: ppres,
                 message_id: format!("ppres-{}", message_id),
+                legacy_redelivery: false,
             })
             .is_ok();
             tracing::info!(
@@ -5870,6 +5685,31 @@ impl P2PCore {
         });
         direct_send_ok
     }
+    /// Bounded snapshot for reconciling a Room ACK committed before a crash.
+    /// Only IDs of this origin's current in-memory relay entries are returned.
+    pub fn own_relay_message_ids(&self) -> Vec<String> {
+        self.relay_queue.as_ref().map_or_else(Vec::new, |q| q.own_message_ids())
+    }
+
+    /// Android calls this only after its outgoing delivery status is committed.
+    /// Legacy mesh receipts alone never enter this cleanup path.
+    pub fn confirm_message_delivered(&self, message_id: &str) -> bool {
+        let Some(node_id) = self.node_id() else { return false; };
+        let removed = super::mesh_cleanup::confirmed_local(
+            self.relay_queue.as_deref(), self.relay_custody.as_deref(), &node_id, message_id,
+        );
+        // K5 holders may have accepted a transport stream without the app
+        // storing it. Drop hints are sent only after the outgoing Room commit.
+        let peers = self.custody_offers.take_offered_peers(message_id);
+        self.custody_offers.remove(message_id);
+        for peer in &peers {
+            if !self.custody_hold.queue_outbound(peer, drop_payload(message_id)) {
+                tracing::warn!("CUSTODY K5: drop hint queue full; held copy expires normally");
+            }
+        }
+        removed || !peers.is_empty()
+    }
+
     /// Прямая отправка через общий QUIC-endpoint (K1).
     ///
     /// До v11.70.24 здесь на КАЖДОЕ сообщение создавался новый endpoint
@@ -6540,6 +6380,20 @@ mod tests {
     }
 
     #[test]
+    fn legacy_redelivery_uses_the_same_ciphertext_and_never_extends_expiry() {
+        let now = crate::network::relay_queue::utc_now_ms();
+        let mut msg = RelayMessage::new_at_ms(now, "id".into(), "pk_b".into(), "pk_a".into(), "chat".into(), b"APUSEAL1|cipher".to_vec());
+        let wire = P2PCore::own_legacy_retry_wire(&msg, now).unwrap();
+        assert_eq!(wire, "pk_a|id|chat|APUSEAL1|cipher");
+        assert!(P2PCore::own_legacy_retry_wire(&msg, msg.expires_at_ms).is_none());
+        msg.chat_scope = "bad|scope".into();
+        assert!(P2PCore::own_legacy_retry_wire(&msg, now).is_none());
+        msg.chat_scope = "chat".into();
+        msg.e2e_payload = vec![0xff];
+        assert!(P2PCore::own_legacy_retry_wire(&msg, now).is_none());
+    }
+
+    #[test]
     fn bounded_id_cache_evicts_oldest() {
         let mut entries = HashSet::new();
         let mut order = VecDeque::new();
@@ -6550,25 +6404,6 @@ mod tests {
         assert!(!entries.contains("m1"));
         assert!(entries.contains("m2"));
         assert!(entries.contains("m3"));
-        assert_eq!(order.len(), 2);
-    }
-
-    #[test]
-    fn bounded_delivery_cache_keeps_first_origin_and_evicts_oldest() {
-        let mut entries = HashMap::new();
-        let mut order = VecDeque::new();
-        remember_bounded_delivery(&mut entries, &mut order, "m1", "pk_a", 2);
-        remember_bounded_delivery(&mut entries, &mut order, "m1", "pk_attacker", 2);
-
-        assert_eq!(entries.get("m1").map(String::as_str), Some("pk_a"));
-        assert_eq!(order.len(), 1);
-
-        remember_bounded_delivery(&mut entries, &mut order, "m2", "pk_b", 2);
-        remember_bounded_delivery(&mut entries, &mut order, "m3", "pk_c", 2);
-
-        assert!(!entries.contains_key("m1"));
-        assert_eq!(entries.get("m2").map(String::as_str), Some("pk_b"));
-        assert_eq!(entries.get("m3").map(String::as_str), Some("pk_c"));
         assert_eq!(order.len(), 2);
     }
 

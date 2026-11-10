@@ -55,15 +55,16 @@ class NotificationArrivalInstrumentedTest {
         // supports DROP COLUMN; production migrations only use ADD COLUMN.
         SQLiteDatabase.openDatabase(context.getDatabasePath(databaseName).path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
             db.execSQL("DROP INDEX index_messages_notification_pending")
+            db.execSQL("DROP INDEX index_messages_outbox_status_order")
             db.execSQL("ALTER TABLE messages DROP COLUMN notificationPending")
             db.version = 40
         }
         val migrated = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
-            .addMigrations(AppDatabase.MIGRATION_40_41)
+            .addMigrations(AppDatabase.MIGRATION_40_41, AppDatabase.MIGRATION_41_42)
             .build()
         try {
             val sql = migrated.openHelper.writableDatabase // Room validates the complete migrated schema
-            assertEquals(41, sql.version)
+            assertEquals(42, sql.version)
             val legacy = migrated.messageDao().getMessageById("legacy")!!
             assertEquals("body-legacy", legacy.content)
             assertEquals(123L, legacy.timestamp)
@@ -77,6 +78,37 @@ class NotificationArrivalInstrumentedTest {
         } finally {
             migrated.close()
         }
+    }
+
+    @Test fun migrationFortyOneToFortyTwoPreservesRowsAndIndexesSentRetries() = runBlocking {
+        context.deleteDatabase(databaseName)
+        val original = Room.databaseBuilder(context, AppDatabase::class.java, databaseName).build()
+        original.messageDao().insertMessage(row("sent", 123L).copy(isFromMe = true, status = "SENT"))
+        original.messageDao().insertMessage(row("delivered", 124L).copy(isFromMe = true, status = "DELIVERED"))
+        original.close()
+        // Return the fresh schema to its genuine v41 index layout.
+        SQLiteDatabase.openDatabase(context.getDatabasePath(databaseName).path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("DROP INDEX index_messages_outbox_status_order")
+            db.version = 41
+        }
+        val migrated = Room.databaseBuilder(context, AppDatabase::class.java, databaseName)
+            .addMigrations(AppDatabase.MIGRATION_41_42).build()
+        try {
+            val sql = migrated.openHelper.writableDatabase
+            assertEquals(42, sql.version)
+            assertEquals("body-sent", migrated.messageDao().getMessageById("sent")!!.content)
+            assertEquals("DELIVERED", migrated.messageDao().getMessageById("delivered")!!.status)
+            sql.query("PRAGMA index_info(`index_messages_outbox_status_order`)").use { cursor ->
+                val names = mutableListOf<String>()
+                while (cursor.moveToNext()) names += cursor.getString(cursor.getColumnIndexOrThrow("name"))
+                assertEquals(listOf("isFromMe", "status", "timestamp", "id"), names)
+            }
+            sql.query("EXPLAIN QUERY PLAN SELECT id FROM messages WHERE isFromMe = 1 AND status = 'SENT' ORDER BY timestamp, id").use { cursor ->
+                val details = mutableListOf<String>()
+                while (cursor.moveToNext()) details += cursor.getString(cursor.getColumnIndexOrThrow("detail"))
+                assertTrue(details.any { it.contains("index_messages_outbox_status_order") })
+            }
+        } finally { migrated.close() }
     }
 
     @Test fun delayedArrivalsAreClaimedOnceAndSurviveRestartWithoutRearmingDuplicates() = runBlocking {

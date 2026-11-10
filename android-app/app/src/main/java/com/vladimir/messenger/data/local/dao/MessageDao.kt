@@ -103,6 +103,10 @@ interface MessageDao {
     )
     suspend fun markOutgoingFileRequeued(messageId: String): Int
 
+    /** Only terminal outgoing rows may release locally held relay copies after restart. */
+    @Query("SELECT id FROM messages WHERE id IN (:messageIds) AND isFromMe = 1 AND status IN ('DELIVERED', 'READ')")
+    suspend fun terminalOutgoingIds(messageIds: List<String>): List<String>
+
     /** A delivery ACK can update only an outgoing message, and must not downgrade READ. */
     @Query(
         "UPDATE messages SET status = 'DELIVERED' WHERE id = :messageId " +
@@ -155,6 +159,40 @@ interface MessageDao {
      */
     @Query("SELECT content FROM messages ORDER BY timestamp DESC LIMIT :limit")
     suspend fun recentContents(limit: Int): List<String>
+
+    /** Personal text sent to a transport is not yet confirmed by the recipient's app. */
+    @Query(
+        "SELECT COUNT(*) FROM messages m INNER JOIN chats c ON c.id = m.chatId " +
+            "WHERE m.isFromMe = 1 AND m.status = 'SENT' AND m.channel <> 'GROUP' " +
+            "AND (m.recipientId GLOB 'pk_*' OR (m.recipientId = '' AND c.contactId GLOB 'pk_*')) " +
+            "AND NOT EXISTS (SELECT 1 FROM groups g WHERE g.id = m.chatId) " +
+            "AND m.id NOT GLOB 'deferred_*' AND m.content NOT GLOB 'APUGIFREF1|*' " +
+            "AND (m.topicId IS NULL OR m.topicId = '')"
+    )
+    suspend fun countUnconfirmedPersonalSent(): Int
+
+    @Query(
+        "SELECT m.* FROM messages m INNER JOIN chats c ON c.id = m.chatId " +
+            "WHERE m.isFromMe = 1 AND m.status = 'SENT' AND m.channel <> 'GROUP' " +
+            "AND (m.recipientId GLOB 'pk_*' OR (m.recipientId = '' AND c.contactId GLOB 'pk_*')) " +
+            "AND NOT EXISTS (SELECT 1 FROM groups g WHERE g.id = m.chatId) " +
+            "AND m.id NOT GLOB 'deferred_*' AND m.content NOT GLOB 'APUGIFREF1|*' " +
+            "AND (m.topicId IS NULL OR m.topicId = '') " +
+            "ORDER BY m.timestamp ASC, m.id ASC LIMIT :limit"
+    )
+    suspend fun getUnconfirmedPersonalSent(limit: Int): List<MessageEntity>
+
+    @Query(
+        "SELECT m.* FROM messages m INNER JOIN chats c ON c.id = m.chatId " +
+            "WHERE m.isFromMe = 1 AND m.status = 'SENT' AND m.channel <> 'GROUP' " +
+            "AND (m.recipientId GLOB 'pk_*' OR (m.recipientId = '' AND c.contactId GLOB 'pk_*')) " +
+            "AND NOT EXISTS (SELECT 1 FROM groups g WHERE g.id = m.chatId) " +
+            "AND m.id NOT GLOB 'deferred_*' AND m.content NOT GLOB 'APUGIFREF1|*' " +
+            "AND (m.topicId IS NULL OR m.topicId = '') AND m.timestamp >= :afterTimestamp " +
+            "AND (m.timestamp > :afterTimestamp OR (m.timestamp = :afterTimestamp AND m.id > :afterId)) " +
+            "ORDER BY m.timestamp ASC, m.id ASC LIMIT :limit"
+    )
+    suspend fun getUnconfirmedPersonalSentAfter(afterTimestamp: Long, afterId: String, limit: Int): List<MessageEntity>
 
     /** Keyset pagination prevents an unreachable oldest message from starving later chats. */
     @Query("SELECT * FROM messages WHERE isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE') ORDER BY timestamp ASC, id ASC LIMIT :limit")

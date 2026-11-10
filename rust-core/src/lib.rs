@@ -400,6 +400,19 @@ impl P2PCoreHandle {
         core.retry_message(message_id, chat_id, recipient_id, text)
     }
 
+    pub fn own_relay_message_ids(&self) -> Vec<String> {
+        self.inner.read().unwrap().own_relay_message_ids()
+    }
+
+    pub fn confirm_message_delivered(&self, message_id: String) -> bool {
+        // Serialize with already admitted attempts for this message. Room has
+        // committed the ACK before this call; this only frees our relay copy.
+        let core = self.inner.read().unwrap();
+        let gate = self.send_gates.for_message(&message_id);
+        let _message_attempt = gate.lock().unwrap();
+        core.confirm_message_delivered(&message_id)
+    }
+
     pub fn receive_message(
         &self,
         message_id: String,

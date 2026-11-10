@@ -11,6 +11,7 @@ import androidx.room.PrimaryKey
         Index(value = ["chatId", "timestamp"], name = "index_messages_chatId_timestamp"),
         Index(value = ["isFromMe", "timestamp"], name = "index_messages_isFromMe_timestamp"),
         Index(value = ["isFromMe", "notificationPending"], name = "index_messages_notification_pending"),
+        Index(value = ["isFromMe", "status", "timestamp", "id"], name = "index_messages_outbox_status_order"),
     ],
 )
 data class MessageEntity(

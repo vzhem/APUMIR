@@ -25,10 +25,13 @@ class NotificationArrivalContract(unittest.TestCase):
         self.assertIn('val notificationPending: Boolean = false', entity)
         self.assertIn('@ColumnInfo(defaultValue = "0")', entity)
         self.assertIn('index_messages_notification_pending', entity)
-        self.assertIn('APP_DATABASE_VERSION = 41', database)
+        self.assertIn('APP_DATABASE_VERSION = 42', database)
         self.assertIn('object : Migration(40, 41)', database)
         self.assertIn('ADD COLUMN `notificationPending` INTEGER NOT NULL DEFAULT 0', database)
+        self.assertIn('object : Migration(41, 42)', database)
+        self.assertIn('index_messages_outbox_status_order', entity)
         self.assertIn('AppDatabase.MIGRATION_40_41', source("di/AppModule.kt"))
+        self.assertIn('AppDatabase.MIGRATION_41_42', source("di/AppModule.kt"))
 
     def test_queue_and_atomic_claim_do_not_depend_on_sender_timestamp(self):
         dao = source("data/local/dao/MessageDao.kt")
@@ -99,6 +102,7 @@ class NotificationArrivalContract(unittest.TestCase):
         runner = (ROOT / 'scripts/ci/run-android-navigation-tests.sh').read_text()
         guard = (ROOT / 'scripts/ci/check-android-notification-results.py').read_text()
         for method in ('migrationFortyToFortyOnePreservesHistoryAndRoomValidatesSchema',
+                       'migrationFortyOneToFortyTwoPreservesRowsAndIndexesSentRetries',
                        'delayedArrivalsAreClaimedOnceAndSurviveRestartWithoutRearmingDuplicates',
                        'boundedQueueContinuesAfterFirstBatchIsClaimed',
                        'mirrorSnapshotsNeverExportOrApplyLocalNotificationWork',

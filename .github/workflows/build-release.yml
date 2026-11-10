@@ -238,7 +238,7 @@ jobs:
         working-directory: ./rust-core
         run: |
           set -o pipefail
-          for suite in engine::events::tests engine::send_gates::tests engine::mqtt_cadence::tests network::mqtt_overflow::tests network::mqtt_wait::tests network::direct_priority::tests handle_tests; do
+          for suite in engine::events::tests engine::send_gates::tests engine::mqtt_cadence::tests engine::mesh_delivery::tests engine::mesh_cleanup::tests engine::core::tests::legacy_redelivery_uses_the_same_ciphertext_and_never_extends_expiry network::custody_relay::tests network::relay_queue::tests network::wire::tests storage::relay_store::tests network::mqtt_overflow::tests network::mqtt_wait::tests network::direct_priority::tests handle_tests; do
             LOG="$RUNNER_TEMP/priority-${suite//::/-}.log"
             RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --features mqtt-dual-broker --lib "$suite" 2>&1 | tee "$LOG"
             grep -Eq '^test result: ok\. [1-9][0-9]* passed' "$LOG" || { echo "::error::No tests ran for $suite"; exit 1; }

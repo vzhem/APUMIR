@@ -1387,25 +1387,11 @@ class ChatRepository @Inject constructor(
         }
     }
 
-    private suspend fun sendViaRust(messageId: String, chatId: String, peerId: String, content: String): Boolean =
-        withContext(Dispatchers.IO) {
-            OperationalDiagnostics.tracker.attempt(messageId)
-            RustBridge.sendMessage(messageId, chatId, peerId, content).also {
-                OperationalDiagnostics.tracker.transportResult(messageId, it)
-            }
-        }
-
-    private suspend fun sendViaRustRetry(
-        messageId: String,
-        chatId: String,
-        peerId: String,
-        content: String,
-    ): Boolean = withContext(Dispatchers.IO) {
-        OperationalDiagnostics.tracker.attempt(messageId)
-        RustBridge.retryMessage(messageId, chatId, peerId, content).also {
-            OperationalDiagnostics.tracker.transportResult(messageId, it)
-        }
-    }
+    private val networkOutboxSender by lazy { NetworkOutboxSender(messageDao) }
+    internal suspend fun sendViaRust(messageId: String, chatId: String, peerId: String, content: String): Boolean =
+        networkOutboxSender.send(messageId, chatId, peerId, content)
+    private suspend fun sendViaRustRetry(messageId: String, chatId: String, peerId: String, content: String): Boolean =
+        networkOutboxSender.send(messageId, chatId, peerId, content, manual = true)
 
     /** Observe all messages for callers that explicitly need a full-table stream. */
     fun observeAllMessages(): Flow<List<Message>> =

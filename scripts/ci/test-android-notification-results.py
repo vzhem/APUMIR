@@ -35,6 +35,8 @@ class NotificationResultsTest(unittest.TestCase):
         self.assertEqual(1, self.run_report(self.all_cases()[1:]))
         missing_outbox = [case for case in self.all_cases() if case[0] != checker.OUTBOX_CLASS]
         self.assertEqual(1, self.run_report(missing_outbox))
+        missing_push = [case for case in self.all_cases() if case[0] != checker.PUSH_CLASS]
+        self.assertEqual(1, self.run_report(missing_push))
 
     def test_skipped_and_failed_cases_fail(self):
         for tag in ("skipped", "failure", "error"):

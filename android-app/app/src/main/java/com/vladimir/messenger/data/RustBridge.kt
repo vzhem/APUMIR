@@ -1114,31 +1114,54 @@ object RustBridge {
      * показывал «Приложение не отвечает» и грелся. Отправителю всё равно, на
      * какой миллисекунде ушло подтверждение, поэтому ждать здесь нечего.
      */
-    fun sendDeliveryAck(messageId: String, recipientId: String): Boolean {
+    /** Snapshot and cleanup are bound to the same engine lifetime. */
+    internal fun relayCustodySnapshot(): com.vladimir.messenger.data.repository.CustodySnapshot? {
+        val captured = engine ?: return null
+        return try {
+            com.vladimir.messenger.data.repository.CustodySnapshot(captured.ownRelayMessageIds()) { id ->
+                scheduleRelayConfirmation(captured, id)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Relay reconciliation snapshot failed: ${e.javaClass.simpleName}")
+            null
+        }
+    }
+
+    /** Room has committed an outgoing delivery ACK; release native relay custody off the UI thread. */
+    fun confirmMessageDelivered(messageId: String) {
+        val captured = engine ?: return
+        scheduleRelayConfirmation(captured, messageId)
+    }
+
+    private fun scheduleRelayConfirmation(captured: P2pCoreHandle, messageId: String) {
         ackScope.launch {
             try {
-                // р243: ДВА пути, а не один.
-                //
-                // Раньше подтверждение уходило только через брокера (MQTT),
-                // а сообщения едут прямым каналом. Если брокер недоступен -
-                // сообщение доходило, а вторая галочка не появлялась никогда:
-                // ровно жалоба владельца «дошло, а двух синих галочек нет».
-                //
-                // Прямой канал брокера не требует, поэтому сначала он.
-                val payload = "ack|$messageId"
-                // sendDirectPayload seals this ACK when the sender pin is known
-                // and falls back to the reserved raw form only when bootstrap
-                // is still missing; ordinary payloads never get that fallback.
-                val direct = runCatching { sendDirectPayload(recipientId, payload) }
-                    .getOrDefault(false)
-                if (direct) {
-                    Log.i(TAG, "direct delivery ACK sent for $messageId")
-                }
-                // Очередь брокера - запасной путь: она хранит подтверждение
-                // до востребования, поэтому дубликат безвреден.
-                engine?.sendMessageMqtt(recipientId, payload)
+                if (engine === captured) captured.confirmMessageDelivered(messageId)
             } catch (e: Exception) {
-                android.util.Log.w("RustBridge", "sendDeliveryAck failed: ${e.message}")
+                Log.w(TAG, "Confirmed relay cleanup failed: ${e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    fun sendDeliveryAck(messageId: String, recipientId: String, roomCommitted: Boolean = false): Boolean {
+        // Direct QUIC and the persistent MQTT command run independently: a
+        // slow direct dial must not delay an already connected broker. Both
+        // use the existing compatible ACK; duplicate ACKs are idempotent.
+        val payload = "ack|$messageId"
+        ackScope.launch {
+            try {
+                if (sendDirectPayload(recipientId, payload)) Log.i(TAG, "direct delivery ACK sent for $messageId")
+            } catch (e: Exception) {
+                Log.w(TAG, "direct delivery ACK failed: ${e.message}")
+            }
+        }
+        ackScope.launch {
+            try {
+                // The marker is internal to Rust; the legacy on-wire ACK stays
+                // unchanged. Only a verified Room row permits a legacy mesh receipt.
+                engine?.sendMessageMqtt(recipientId, if (roomCommitted) "ack-room|$messageId" else payload)
+            } catch (e: Exception) {
+                Log.w(TAG, "MQTT delivery ACK failed: ${e.message}")
             }
         }
         return true
