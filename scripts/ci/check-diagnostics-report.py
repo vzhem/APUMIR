@@ -822,15 +822,32 @@ class DiagnosticsContractsTest(unittest.TestCase):
             "stats.total > 0 || stats.own_capacity_evictions > 0",
             "вытеснено-своих={}",
             "MAX_TOTAL + MAX_OWN_TOTAL",
-            # Владелец 2026-10-07 (отчёт v11.74.199): «своё ждёт получателя=1000»
-            # при «сигналов=0» и постоянных «delivery ACK received». Прямое
-            # подтверждение доставки обязано снимать запись с удержания — иначе
-            # резерв «своих» не разгружается никогда (снимал только receipt).
-            "remove_delivered_own(mid)",
-            "MQTT: delivery ACK снял",
+            # Подтверждённый Android ACK всё ещё освобождает свой резерв.
+            "super::mesh_cleanup::confirmed_local(",
         ):
             with self.subTest(marker=marker):
                 self.assertTrue(marker in core, f"нет маркера {marker} в core.rs")
+        # Владелец 2026-10-07: «своё ждёт получателя=1000». Очистка нужна,
+        # но теперь только ПОСЛЕ фиксации ACK в Room: удаление из raw MQTT
+        # обработчика до транзакции могло потерять повтор при сбое процесса.
+        ack = core[core.index('if let Some(rest) = evt.payload.strip_prefix("ack|")'):
+                   core.index('} else if evt.payload.starts_with("relay|")')]
+        self.assertIn("CoreEvent::MessageDelivered", ack)
+        self.assertNotIn("remove_delivered_own", ack)
+        self.assertNotIn("remove_encrypted", ack)
+        cleanup = source(ROOT / "rust-core/src/engine/mesh_cleanup.rs")
+        self.assertIn("q.remove_delivered_own(message_id)", cleanup)
+        self.assertIn("remove_encrypted_own(", cleanup)
+        store = source(ROOT / "rust-core/src/storage/relay_store.rs")
+        self.assertIn("record.origin_sender != local_node", store)
+        coordinator = source(MAIN / "service/DeliveryReceiptCoordinator.kt")
+        self.assertLess(coordinator.index("val changed = update(messageId)"),
+                        coordinator.index("if (alreadyCommitted) release(messageId)"))
+        service = source(MAIN / "service/CoreServerService.kt")
+        self.assertIn("applyOutgoingDeliveryAck(messageId", service)
+        self.assertIn("RustBridge::confirmMessageDelivered", service)
+        bridge = source(MAIN / "data/RustBridge.kt")
+        self.assertIn("captured.confirmMessageDelivered(messageId)", bridge)
 
     def test_service_signals_do_not_take_the_correspondence_reserve(self):
         """Владелец 2026-10-07: «своё ждёт получателя=1000», а внутри — сигналы.
