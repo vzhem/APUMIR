@@ -3003,23 +3003,11 @@ impl P2PCore {
             ).await;
         }
 
-        // Event loop: один оборот примерно раз в секунду (poll_event ждёт не
-        // дольше секунды). Счётчик оборотов задаёт периодические задачи.
-        let mut tick: u32 = 0;
-        /// Как часто объявляем о себе и убираем пропавших.
-        ///
-        /// Было 30 секунд. Presence - это публикация в общий эфир, её получают
-        /// ВСЕ телефоны сети, поэтому цена не «один пакет», а «один пакет
-        /// умножить на всех». Минута даёт ту же живость списка (потеря
-        /// фиксируется по трём пропускам подряд), но вдвое меньше трафика.
-        const PRESENCE_EVERY_TICKS: u32 = 60;
-        /// Как часто пересказываем сети список знакомых узлов.
-        ///
-        /// Было тоже 30 секунд, и это была самая дорогая рассылка: до 30 имён
-        /// в общий эфир, который читают все. Состав знакомых меняется редко,
-        /// поэтому раз в пять минут достаточно, а трафика в десять раз меньше.
-        const GOSSIP_EVERY_TICKS: u32 = 300;
-        let mut gossip_tick: u32 = 0;
+        // Message and command bursts must not accelerate public presence or
+        // gossip. Timers are monotonic, rather than counting loop iterations.
+        let mut cadence = super::mqtt_cadence::MqttCadence::new(std::time::Instant::now());
+        // A command selected while waiting is handled at the next bounded drain.
+        let mut pending_outbound: Option<MqttOutboundCommand> = None;
         // === GOSSIP PROTOCOL: peer exchange state ===
         // Значение: имя, когда видели, подтверждён ли узел ЛИЧНО.
         // «Лично» = его собственный presence, mDNS или входящее соединение.
@@ -3142,7 +3130,7 @@ impl P2PCore {
                     }
                 };
                 session_restart_backoff_secs = 1;
-                tick = 0;
+                cadence.reset_presence(std::time::Instant::now());
                 published_own_in_generation.clear();
                 own_reoffer_cursor = 0;
                 last_own_reoffer_at = std::time::Instant::now()
@@ -3160,7 +3148,11 @@ impl P2PCore {
             // persistent transport. `try_send` on the producer side never claims SENT; local
             // RelayQueue ownership remains the durability/retry source until a receipt arrives.
             for _ in 0..32 {
-                match outbound_rx.try_recv() {
+                let command = match pending_outbound.take() {
+                    Some(command) => Ok(command),
+                    None => outbound_rx.try_recv(),
+                };
+                match command {
                     Ok(MqttOutboundCommand::MeshRelay {
                         recipient, envelope, message_id,
                     }) => {
@@ -3279,7 +3271,14 @@ impl P2PCore {
                 }
             }
 
-            let polled_event = transport.poll_event().await;
+            let polled_event = match transport.poll_event_or(outbound_rx.recv()).await {
+                crate::network::mqtt_transport::MqttPoll::Event(event) => event,
+                crate::network::mqtt_transport::MqttPoll::Wake(Some(command)) => {
+                    pending_outbound = Some(command);
+                    None
+                }
+                crate::network::mqtt_transport::MqttPoll::Wake(None) => return,
+            };
 
             // Never discard an event already handed to core. If a terminal/stalled condition is
             // observed together with one final event, process it now and restart next iteration.
@@ -3335,7 +3334,7 @@ impl P2PCore {
 
                     session_generation = next_generation;
                     session_restart_backoff_secs = 1;
-                    tick = 0;
+                    cadence.reset_presence(std::time::Instant::now());
                     published_own_in_generation.clear();
                     own_reoffer_cursor = 0;
                     last_own_reoffer_at = std::time::Instant::now()
@@ -4353,10 +4352,7 @@ impl P2PCore {
                     }
                 }
             }
-            tick += 1;
-            gossip_tick += 1;
-            if tick >= PRESENCE_EVERY_TICKS {
-                tick = 0;
+            if cadence.take_presence(std::time::Instant::now()) {
 
                 // Релейная очередь: убираем просроченное не только на чужой
                 // сводке (gossip), но и по минутному таймеру. Иначе истёкшие
@@ -4526,10 +4522,9 @@ impl P2PCore {
                 }
                 // === GOSSIP: broadcast known peers to the network ===
                 // Реже, чем presence: список знакомых меняется медленно.
-                if gossip_tick < GOSSIP_EVERY_TICKS {
+                if !cadence.take_gossip(std::time::Instant::now()) {
                     continue;
                 }
-                gossip_tick = 0;
                 if !known_peers.is_empty() {
                     let ts = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
@@ -6303,7 +6298,7 @@ impl P2PCore {
     /// нужно ждать доставки.
     #[allow(clippy::too_many_arguments)]
     pub fn offer_file_chunk_for_custody(
-        &mut self,
+        &self,
         recipient_id: String,
         transfer_id_hex: String,
         chunk_index: u64,

@@ -449,7 +449,10 @@ object RustBridge {
         }
     }
 
-    /** Main-thread reads are cache-only; a native state check can wait on the engine mutex. */
+    /** Event consumers must not wait for an unrelated native lifecycle or network call. */
+    fun isRunningCached(): Boolean = engineRunning && engine != null
+
+    /** Main-thread reads are cache-only; a native state check can wait on the engine lock. */
     fun isRunning(): Boolean {
         if (isMainThread()) return engineRunning
         val current = engine
@@ -903,6 +906,22 @@ object RustBridge {
             0L
         }
     }
+
+    // The event pump catches and logs native failures itself; do not turn an
+    // immediate FFI error into a busy loop. Each poll removes just one event.
+    fun awaitMainEvent(timeoutMs: Long): Boolean {
+        if (rejectMainThreadCall("awaitMainEvent")) return false
+        return engine?.awaitMainEvent(timeoutMs.coerceAtLeast(0L).toULong()) ?: false
+    }
+
+    fun pollMainEvent(preferInteractive: Boolean): CoreEventFfi? = engine?.pollMainEvent(preferInteractive)
+
+    fun awaitFileEvent(timeoutMs: Long): Boolean {
+        if (rejectMainThreadCall("awaitFileEvent")) return false
+        return engine?.awaitFileEvent(timeoutMs.coerceAtLeast(0L).toULong()) ?: false
+    }
+
+    fun pollFileEvent(): CoreEventFfi? = engine?.pollFileEvent()
 
     /** M8-C: честный режим relay custody ("durable-encrypted" / "ram-only" / "disabled"). */
     fun relayCustodyMode(): String = try {

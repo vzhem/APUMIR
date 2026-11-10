@@ -462,3 +462,82 @@ async fn copies_arriving_from_two_independent_local_brokers_are_deduplicated() {
     }).await.expect("second broker copy was not deduplicated");
     assert!(recipient.shared_state.loss_intolerant_inbox.pop().is_none());
 }
+
+#[tokio::test]
+async fn waiting_transport_wakes_for_loss_intolerant_delivery_without_one_second_poll() {
+    let unused = "127.0.0.1:9".parse().unwrap();
+    let mut transport = local_transport("pk_waiter", unused, unused);
+    let inbox = Arc::clone(&transport.shared_state.loss_intolerant_inbox);
+    let producer = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        inbox.push_owned_bounded(MqttEvent {
+            topic: "p2pm2/msg/pk_waiter".into(), payload: "sealed-message".into(),
+        }).await;
+    });
+    let event = timeout(Duration::from_millis(700), transport.poll_event()).await
+        .expect("delivery should wake the transport without its one-second timeout")
+        .expect("delivery must be returned");
+    assert_eq!(event.payload, "sealed-message");
+    producer.await.unwrap();
+}
+
+#[tokio::test]
+async fn outbound_wakes_wait_and_leaves_concurrent_inbox_delivery_available() {
+    let unused = "127.0.0.1:9".parse().unwrap();
+    let mut transport = local_transport("pk_waiter", unused, unused);
+    let (send, mut receive) = mpsc::channel(1);
+    let producer = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        send.send("outbound").await.unwrap();
+    });
+    let result = timeout(Duration::from_millis(700), transport.poll_event_or(receive.recv()))
+        .await.expect("outbound command must wake the transport");
+    assert!(matches!(result, MqttPoll::Wake(Some("outbound"))));
+    producer.await.unwrap();
+
+    transport.shared_state.loss_intolerant_inbox.push_owned(MqttEvent {
+        topic: "p2pm2/msg/pk_waiter".into(), payload: "still-here".into(),
+    });
+    assert_eq!(transport.poll_event().await.unwrap().payload, "still-here");
+}
+
+#[tokio::test]
+async fn command_cannot_cancel_a_connack_after_it_has_been_dequeued() {
+    let broker = TestBroker::start().await;
+    let mut transport = local_transport("pk_waiter", broker.addr, broker.addr);
+    // Keep the client request queue full until the control notification has
+    // been selected. No event loop runs yet to drain these requests.
+    for _ in 0..MQTT_CLIENT_REQUEST_BUFFER {
+        timeout(Duration::from_secs(1), transport.client.publish(
+            "test/fill", QoS::AtMostOnce, false, Vec::<u8>::new(),
+        )).await.expect("test request queue filled too early").unwrap();
+    }
+    let mut eventloop = transport.eventloop.take().unwrap();
+    let token = transport.primary_connection.connected();
+    transport.event_tx.as_ref().unwrap().send(MqttNotification::ConnectionAcknowledged(token))
+        .await.unwrap();
+    let (send_command, mut command) = oneshot::channel();
+    let driver;
+    {
+        let polling = transport.poll_event_or(&mut command);
+        tokio::pin!(polling);
+        assert!(timeout(Duration::from_millis(75), polling.as_mut()).await.is_err(),
+            "subscription must be blocked on the full client queue");
+        send_command.send("wake").unwrap();
+        assert!(timeout(Duration::from_millis(75), polling.as_mut()).await.is_err(),
+            "a newly ready command must not cancel an already dequeued ConnAck");
+        driver = tokio::spawn(async move {
+            loop {
+                if eventloop.poll().await.is_err() { break; }
+            }
+        });
+        let result = timeout(Duration::from_secs(5), polling.as_mut()).await
+            .expect("subscription should finish when the request queue drains");
+        assert!(matches!(result, MqttPoll::Event(None)));
+    }
+    assert!(transport.primary_connection.is_ready());
+    let result = timeout(Duration::from_millis(700), transport.poll_event_or(&mut command)).await
+        .expect("the queued command must remain available");
+    assert!(matches!(result, MqttPoll::Wake(Ok("wake"))));
+    driver.abort();
+}

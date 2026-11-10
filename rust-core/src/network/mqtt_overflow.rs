@@ -7,7 +7,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore};
 
 /// Slots kept free from best-effort traffic. Loss-intolerant publishes use their own core-owned
 /// inbox; this reserve keeps reconnect/control notifications out of refreshable FIFO saturation.
@@ -27,6 +27,7 @@ pub(crate) struct LossIntolerantInbox<T> {
     entries: Mutex<VecDeque<(T, OwnedSemaphorePermit)>>,
     capacity: usize,
     capacity_slots: Arc<Semaphore>,
+    ready: Notify,
 }
 
 impl<T> LossIntolerantInbox<T> {
@@ -36,6 +37,7 @@ impl<T> LossIntolerantInbox<T> {
             entries: Mutex::new(VecDeque::with_capacity(capacity)),
             capacity,
             capacity_slots: Arc::new(Semaphore::new(capacity)),
+            ready: Notify::new(),
         }
     }
 
@@ -60,7 +62,16 @@ impl<T> LossIntolerantInbox<T> {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         entries.push_back((item, permit));
-        entries.len()
+        let pending = entries.len();
+        drop(entries);
+        // One core consumer drains this shared inbox across MQTT session changes.
+        // notify_one stores a permit if the producer wins the race to sleep.
+        self.ready.notify_one();
+        pending
+    }
+
+    pub(crate) async fn notified(&self) {
+        self.ready.notified().await;
     }
 
     pub(crate) async fn push_owned_bounded(&self, item: T) -> usize {

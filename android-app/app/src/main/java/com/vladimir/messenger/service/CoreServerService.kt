@@ -2154,46 +2154,31 @@ class CoreServerService : Service() {
 
         startIncomingNotifications(recipientId)
 
-        eventPollingJob = serviceScope.launch {
-            Log.i(TAG, "Event wait started (condvar, no idle polling)")
-            var lastStatusRefreshAtMs = 0L
-            while (isActive) {
-                if (!RustBridge.isRunning()) {
-                    delay(1_000L)
-                    continue
+        eventPollingJob = CoreEventLoops(
+            isRunning = RustBridge::isRunningCached,
+            await = { lane, timeout -> when (lane) {
+                CoreEventLoops.Lane.Main -> RustBridge.awaitMainEvent(timeout)
+                CoreEventLoops.Lane.File -> RustBridge.awaitFileEvent(timeout)
+            } },
+            poll = { lane, prefer -> when (lane) {
+                CoreEventLoops.Lane.Main -> RustBridge.pollMainEvent(prefer)
+                CoreEventLoops.Lane.File -> RustBridge.pollFileEvent()
+            } },
+            isInteractive = { event: CoreEventFfi -> event.eventType == "message_received" || event.eventType == "delivery_ack" },
+            process = { event -> coreWorkWakeLock.withLock {
+                RuntimeDiagnostics.measure(DiagnosticOperation.CORE_EVENTS) {
+                    DeliveryCadence.touch()
+                    handleEvent(event)
                 }
-                // Спим на условной переменной Rust: событие будит сразу,
-                // таймаут лишь изредка обновляет статус. CPU в простое не крутится.
-                RustBridge.awaitEvents(DeliveryCadence.eventWaitMs())
-                val lease = coreWorkWakeLock.acquire()
-                var hadError = false
-                try {
-                    RuntimeDiagnostics.measure(DiagnosticOperation.CORE_EVENTS) {
-                        val events = RustBridge.drainEvents()
-                        if (events.isNotEmpty()) DeliveryCadence.touch()
-                        events.forEach { event -> handleEvent(event) }
-                    }
-                } catch (ex: Exception) {
-                    Log.e(TAG, "Event polling error", ex)
-                    hadError = true
-                } finally {
-                    lease.close()
-                }
-                val statusNowMs = android.os.SystemClock.elapsedRealtime()
-                if (statusNowMs - lastStatusRefreshAtMs >= POLL_INTERVAL_MS) {
-                    lastStatusRefreshAtMs = statusNowMs
-                    runCatching { DeliveryAssurance.markAlive(applicationContext) }
-                    try {
-                        val status = RustBridge.networkStatus()
-                        val peers = RustBridge.connectedPeers()
-                        updateNotification(notificationText(status, peers))
-                    } catch (ex: Exception) {
-                        Log.e(TAG, "Status polling error", ex)
-                    }
-                }
-                if (hadError) delay(1_000L)
-            }
-        }
+            } },
+            refreshStatus = {
+                runCatching { DeliveryAssurance.markAlive(applicationContext) }
+                updateNotification(notificationText(RustBridge.networkStatus(), RustBridge.connectedPeers()))
+            },
+            recordFailure = { where, error -> Log.e(TAG, "$where failed", error) },
+            waitMs = DeliveryCadence::eventWaitMs,
+            statusIntervalMs = POLL_INTERVAL_MS,
+        ).start(serviceScope)
 
         // F3: periodic safety-net pump — resumes PREPARED/TRANSFERRING transfers after restart
         // and keeps multi-day offline retries alive. Live ACKs open the next bounded window
@@ -3114,7 +3099,7 @@ class CoreServerService : Service() {
     /** «1 собеседник», «2 собеседника», «5 собеседников» — в `PeersWord.kt`. */
     private fun peersWord(peers: Long): String = com.vladimir.messenger.service.peersWord(peers)
 
-    private fun updateNotification(status: String) {
+    @Synchronized private fun updateNotification(status: String) {
         if (status == lastNotificationText) return
         lastNotificationText = status
         val notification = buildNotification(status)

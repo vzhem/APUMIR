@@ -358,6 +358,10 @@ interface P2PCoreHandle {
     sequence<CoreEventFfi> drain_events();
     u64 pending_events();
     u64 await_events(u64 timeout_ms);
+    boolean await_main_event(u64 timeout_ms);
+    CoreEventFfi? poll_main_event(boolean prefer_interactive);
+    boolean await_file_event(u64 timeout_ms);
+    CoreEventFfi? poll_file_event();
 
     // M8-C slice 3: честный режим relay custody и размер карантина (диагностика).
     string relay_custody_mode();

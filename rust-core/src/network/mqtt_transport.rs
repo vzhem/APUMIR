@@ -2002,17 +2002,46 @@ impl MqttTransport {
     }
 
     pub async fn poll_event(&mut self) -> Option<MqttEvent> {
-        // Delivery-bearing events always bypass refreshable FIFO traffic and remain owned by this
-        // core-level inbox across a transport/session replacement.
-        if let Some((event, remaining)) = self.shared_state.loss_intolerant_inbox.pop() {
-            self.liveness.mark_loss_intolerant_drained(remaining);
-            return Some(event);
+        match self.poll_event_or(std::future::pending::<()>()).await {
+            MqttPoll::Event(event) => event,
+            MqttPoll::Wake(()) => unreachable!("pending future never resolves"),
         }
-        if let Some(event) = self.initial_messages.pop_front() { return Some(event); }
+    }
 
-        match tokio::time::timeout(Duration::from_secs(1), self.event_rx.recv()).await {
-            Ok(Some(MqttNotification::Message(event))) => Some(event),
-            Ok(Some(MqttNotification::ConnectionAcknowledged(token))) => {
+    /// Wait for an inbox event, ordinary notification or a caller-supplied command.
+    /// The select is limited to cancellation-safe receives. Once a ConnAck has
+    /// been taken, its subscription is finished below before returning; a later
+    /// command cannot cancel that control notification halfway through.
+    pub(crate) async fn poll_event_or<T>(
+        &mut self,
+        wake: impl std::future::Future<Output = T>,
+    ) -> MqttPoll<T> {
+        let inbox = Arc::clone(&self.shared_state.loss_intolerant_inbox);
+        if let Some((event, remaining)) = inbox.pop() {
+            self.liveness.mark_loss_intolerant_drained(remaining);
+            return MqttPoll::Event(Some(event));
+        }
+        if let Some(event) = self.initial_messages.pop_front() {
+            return MqttPoll::Event(Some(event));
+        }
+
+        let notification = match super::mqtt_wait::wait(
+            &inbox, &mut self.event_rx, wake, Duration::from_secs(1),
+        ).await {
+            super::mqtt_wait::MqttWait::Delivery(event, remaining) => {
+                self.liveness.mark_loss_intolerant_drained(remaining);
+                return MqttPoll::Event(Some(event));
+            }
+            super::mqtt_wait::MqttWait::Notification(notification) => notification,
+            super::mqtt_wait::MqttWait::Wake(output) => return MqttPoll::Wake(output),
+            super::mqtt_wait::MqttWait::Timeout | super::mqtt_wait::MqttWait::Spurious => {
+                return MqttPoll::Event(None);
+            }
+        };
+
+        let event = match notification {
+            Some(MqttNotification::Message(event)) => Some(event),
+            Some(MqttNotification::ConnectionAcknowledged(token)) => {
                 // ConnAck can be queued before a disconnect or replacement.
                 if self.primary_connection.is_current(token) {
                     match self.enqueue_subscribe(
@@ -2031,7 +2060,7 @@ impl MqttTransport {
                 None
             }
             #[cfg(feature = "mqtt-dual-broker")]
-            Ok(Some(MqttNotification::SecondaryConnectionAcknowledged(token))) => {
+            Some(MqttNotification::SecondaryConnectionAcknowledged(token)) => {
                 if self.secondary_connection.is_current(token) {
                     match self.enqueue_secondary_subscribe().await {
                         Ok(()) if self.secondary_connection.mark_ready(token) => {
@@ -2044,15 +2073,15 @@ impl MqttTransport {
                 }
                 None
             }
-            Ok(None) => {
+            None => {
                 if !self.notification_channel_closed {
                     tracing::error!("MQTT LIVENESS: core notification channel closed");
                     self.notification_channel_closed = true;
                 }
                 None
             }
-            Err(_) => None,
-        }
+        };
+        MqttPoll::Event(event)
     }
 
     pub fn peers(&self) -> Arc<Mutex<Vec<PeerInfo>>> { Arc::clone(&self.peers) }
@@ -2078,6 +2107,12 @@ impl Drop for MqttTransport {
             }
         }
     }
+}
+
+/// An ordinary transport result or the caller's independently queued command.
+pub(crate) enum MqttPoll<T> {
+    Event(Option<MqttEvent>),
+    Wake(T),
 }
 
 #[derive(Debug)]

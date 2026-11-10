@@ -234,10 +234,16 @@ jobs:
             grep '^test result:' "$LOG" >> "$GITHUB_STEP_SUMMARY"
           done
 
-      - name: Test event bus condvar wait (no idle polling)
+      - name: Test event priority, send serialization and engine lifecycle
         working-directory: ./rust-core
         run: |
-          RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --features mqtt-dual-broker --lib engine::events::tests
+          set -o pipefail
+          for suite in engine::events::tests engine::send_gates::tests engine::mqtt_cadence::tests network::mqtt_overflow::tests network::mqtt_wait::tests network::direct_priority::tests handle_tests; do
+            LOG="$RUNNER_TEMP/priority-${suite//::/-}.log"
+            RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --features mqtt-dual-broker --lib "$suite" 2>&1 | tee "$LOG"
+            grep -Eq '^test result: ok\. [1-9][0-9]* passed' "$LOG" || { echo "::error::No tests ran for $suite"; exit 1; }
+            grep '^test result:' "$LOG" >> "$GITHUB_STEP_SUMMARY"
+          done
 
       - name: Install cargo-ndk
         run: cargo install --locked cargo-ndk

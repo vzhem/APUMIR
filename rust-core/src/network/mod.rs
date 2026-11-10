@@ -22,6 +22,7 @@ pub mod connection_manager;
 pub mod custody_relay;
 pub mod connection_pool;
 pub mod dht;
+pub(crate) mod direct_priority;
 pub mod direct_transport;
 pub mod dual_stack;
 pub mod fallback_chain;
@@ -132,6 +133,7 @@ pub mod mqtt_fanout;
 pub mod mqtt_topology;
 pub mod mqtt_liveness;
 pub mod mqtt_overflow;
+pub(crate) mod mqtt_wait;
 #[cfg(feature = "mqtt-secondary-observe")]
 pub mod mqtt_secondary_observer;
 pub mod mqtt_transport;
