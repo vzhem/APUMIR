@@ -134,5 +134,7 @@ class SettingsNavigationInstrumentedTest {
         // A newly opened section still starts at the top.
         compose.onNodeWithText("Open network").performClick()
         compose.onNodeWithText("Network-0").assertIsDisplayed()
+        compose.onNodeWithContentDescription(text(R.string.action_back)).performClick()
+        compose.onNodeWithText("root-18").assertIsDisplayed()
     }
 }

@@ -46,15 +46,15 @@ class SettingsReturnPositionTest(unittest.TestCase):
         self.assertIn('"Notifications"', self.memory)
         self.assertIn('"Updates"', self.memory)
 
-    def test_position_survives_rotation_and_process_death(self):
-        self.assertIn("rememberSaveable(", self.state)
-        self.assertIn("listSaver<SettingsScrollMemory, Int>", self.state)
-        self.assertIn("fun flatten(): List<Int>", self.memory)
-        self.assertIn("fun fromFlatten(flat: List<Int>)", self.memory)
+    def test_position_uses_the_saveable_lazy_list_state(self):
+        # rememberLazyListState uses LazyListState.Saver and remains in the
+        # composition even while the section's independent state is active.
+        self.assertIn("val root = rememberLazyListState()", self.state)
+        self.assertIn("return if (menuKey == SettingsScrollMemory.ROOT) root else section", self.state)
 
-    def test_restore_waits_for_the_list_to_be_measured(self):
-        self.assertIn("snapshotFlow { state.layoutInfo.totalItemsCount }.first { it > 0 }", self.state)
-        self.assertIn("state.scrollToItem(anchor.index, anchor.offset)", self.state)
+    def test_sections_cannot_clamp_or_save_the_root_scroll_state(self):
+        self.assertIn("val section = key(menuKey) { remember { LazyListState() } }", self.state)
+        self.assertNotIn("scrollToItem(", self.state)
 
     def test_menu_keys_match_the_section_enum(self):
         enum_body = self.screen.split("enum class SettingsSection", 1)[1].split("}", 1)[0]
@@ -310,10 +310,9 @@ class VisibleMenuReturnTest(unittest.TestCase):
         self.assertIn("ApuBackButton(onClick = goBack)", settings)
         self.assertIn("BackHandler(enabled = sectionOpen, onBack = back)", action)
         state = read(JAVA / "ui/screens/settings/SettingsScrollState.kt")
-        self.assertIn("val state = key(menuKey) { rememberLazyListState() }", state)
-        self.assertIn("if (restored.value)", state)
-        self.assertLess(state.index("state.scrollToItem(anchor.index, anchor.offset)"),
-                        state.index("snapshotFlow { state.firstVisibleItemIndex"))
+        self.assertIn("val root = rememberLazyListState()", state)
+        self.assertIn("val section = key(menuKey) { remember { LazyListState() } }", state)
+        self.assertIn("return if (menuKey == SettingsScrollMemory.ROOT) root else section", state)
 
     def test_invite_and_input_windows_have_an_explicit_exit(self):
         for path in ("chat/ChatListInviteChoiceDialog.kt", "groups/CommunityInviteChoiceDialog.kt"):
