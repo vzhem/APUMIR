@@ -1290,9 +1290,8 @@ class ChatRepository @Inject constructor(
      * пустой старый убираем.
      */
     suspend fun absorbChatOf(oldContactId: String, newContactId: String) {
-        if (oldContactId.isBlank() || newContactId.isBlank()) return
-        if (oldContactId == newContactId) return
-        val target = chatDao.getChatByContactId(newContactId) ?: return
+        require(oldContactId.isNotBlank() && newContactId.isNotBlank() && oldContactId != newContactId)
+        val target = checkNotNull(chatDao.getChatByContactId(newContactId)) { "Cannot move history without a destination chat" }
         for (chat in chatDao.getChatsByContactId(oldContactId)) {
             chatDao.moveMessages(chat.id, target.id)
             chatDao.deleteChatById(chat.id)

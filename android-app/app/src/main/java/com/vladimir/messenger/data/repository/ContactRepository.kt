@@ -278,46 +278,37 @@ class ContactRepository @Inject constructor(
             .groupBy { it.displayName.trim().lowercase() }
 
         for ((_, twins) in groups) {
-            // A display-name collision is not enough to delete a contact. Only
-            // merge rows whose node ids are proven to belong to the same physical
-            // device (local ledger or verified Ed25519 device anchor).
-            val sameDeviceTwins = twins.filter { candidate ->
+            // A name finds candidates; it cannot join separate verified device
+            // groups, including two different people who share the same name.
+            val byId = twins.associateBy { it.id }
+            val verified = VerifiedContactGroups.partition(twins.map { it.id }) { a, b ->
                 com.vladimir.messenger.data.security.DeviceProfileBinding
-                    .belongsToThisPhysicalDevice(appContext, candidate.id) ||
-                    twins.any { other ->
-                        other.id != candidate.id &&
-                            com.vladimir.messenger.data.security.DeviceProfileBinding
-                                .areSameVerifiedDevice(appContext, candidate.id, other.id)
-                    }
+                    .areSameVerifiedDevice(appContext, a, b)
             }
-            if (sameDeviceTwins.size < 2) continue
-
-            // Текущий профиль всегда побеждает старый адрес; если текущего
-            // среди контактов нет, выбираем запись с живой историей.
-            val currentId = appContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
-                .getString("node_id", null)
-            val keep = sameDeviceTwins.maxByOrNull { twin ->
-                val currentBonus = if (twin.id == currentId) 1_000_000 else 0
-                currentBonus + runCatching { chatRepository.chatCountOf(twin.id) }.getOrDefault(0)
-            } ?: continue
-            // Перенос истории возможен только в существующий чат, поэтому у
-            // выжившей записи он должен быть. Если чата нет - создаём, иначе
-            // переписка двойника осталась бы висеть сиротой.
-            runCatching { chatRepository.getOrCreateChat(keep.id, keep.displayName) }
-
-            for (dup in sameDeviceTwins) {
-                if (dup.id == keep.id) continue
-                runCatching {
-                    // Переписку не теряем - переносим на живую запись.
-                    chatRepository.absorbChatOf(dup.id, keep.id)
-                    // Подчищаем всё, что могло остаться от двойника: иначе в
-                    // списке останется чат, пишущий на мёртвый адрес.
-                    chatRepository.deleteChatsOf(dup.id)
-                    contactDao.deleteContact(dup)
-                    Log.i("ContactRepository", "двойник склеен по имени")
+            for (ids in verified) {
+                val sameDeviceTwins = ids.mapNotNull { byId[it] }
+                val currentId = appContext.getSharedPreferences("p2p_prefs", Context.MODE_PRIVATE)
+                    .getString("node_id", null)
+                val keep = sameDeviceTwins.maxByOrNull { twin ->
+                    val currentBonus = if (twin.id == currentId) 1_000_000 else 0
+                    currentBonus + runCatching { chatRepository.chatCountOf(twin.id) }.getOrDefault(0)
+                } ?: continue
+                // Never delete old history if creating the destination failed.
+                val destinationReady = runCatching { chatRepository.getOrCreateChat(keep.id, keep.displayName) }
+                    .onFailure { Log.w("ContactRepository", "verified merge destination unavailable", it) }
+                    .isSuccess
+                if (!destinationReady) continue
+                for (dup in sameDeviceTwins) {
+                    if (dup.id == keep.id) continue
+                    runCatching {
+                        chatRepository.absorbChatOf(dup.id, keep.id)
+                        contactDao.deleteContact(dup)
+                        Log.i("ContactRepository", "подтверждённый двойник склеен")
+                    }.onFailure { Log.w("ContactRepository", "verified contact merge failed", it) }
                 }
+                runCatching { chatRepository.mergeDuplicateChats(keep.id) }
+                    .onFailure { Log.w("ContactRepository", "verified chat merge failed", it) }
             }
-            runCatching { chatRepository.mergeDuplicateChats(keep.id) }
         }
     }
 

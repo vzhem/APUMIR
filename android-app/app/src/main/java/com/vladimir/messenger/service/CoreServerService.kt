@@ -3089,24 +3089,17 @@ class CoreServerService : Service() {
                             }
                         }
                     } else if (contactRepository.isRealName(peerName)) {
-                        // Переустановка приложения выдаёт узлу НОВЫЙ адрес, а
-                        // человек остаётся прежним. Раньше такой узел просто
-                        // игнорировался: старая запись висела с мёртвым адресом,
-                        // имя не обновлялось, сообщения уходили в пустоту - и
-                        // это выглядело как «имя не приходит» и «связь в одну
-                        // сторону». Presence несёт настоящее имя, поэтому
-                        // переселяем прежнюю запись на новый адрес вместе с
-                        // перепиской. Заглушки («Contact ab12») не трогаем:
-                        // по ним человека не опознать.
+                        // Имя только находит кандидатов: findStaleTwins требует
+                        // подтверждения одной и той же физической личности.
                         val twins = runCatching {
                             contactRepository.findStaleTwins(peerName, peerId)
                         }.getOrDefault(emptyList())
                         if (twins.isNotEmpty()) {
                             runCatching {
-                                // addContact вернёт ошибку «уже есть», если
-                                // запись успели создать параллельно - это не
-                                // помеха переносу, поэтому результат не проверяем.
-                                if (contactRepository.addContact(peerName, peerId, automatic = true).exceptionOrNull()?.message == ContactRepository.RESET_DEFERRED) return@runCatching
+                                val error = contactRepository.addContact(peerName, peerId, automatic = true).exceptionOrNull()
+                                if (error?.message == ContactRepository.RESET_DEFERRED) return@runCatching
+                                // Only a real concurrent insert may excuse an add failure.
+                                if (error != null && contactRepository.getContactByFingerprint(peerId) == null) throw error
                                 chatRepository.getOrCreateChat(peerId, peerName)
                                 for (old in twins) {
                                     chatRepository.absorbChatOf(old, peerId)
