@@ -99,7 +99,7 @@ else printf 'Signer #1 certificate SHA-256 digest: %064d\\n' 0; fi
 ''')
         self.env = os.environ.copy()
         self.env.update(MOCK_ROOT=str(self.mock), ANDROID_HOME=str(self.mock / 'sdk'),
-                        GITHUB_REPOSITORY='example/repo', APU_RELEASE_TAG=TAG,
+                        GITHUB_REPOSITORY='example/repo', APU_RELEASE_TAG=TAG, APU_VERIFY_STAGE='public',
                         PATH=str(self.bin) + os.pathsep + self.env.get('PATH', ''))
 
     def command(self, path, body):
@@ -124,9 +124,12 @@ else printf 'Signer #1 certificate SHA-256 digest: %064d\\n' 0; fi
         self.candidate.update(draft=True, prerelease=True, published_at=None)
         self.metadata(self.old, self.candidate)
         (self.site / 'latest.json').unlink()  # draft verification must not read the site
-        result = self.run_check()
+        result = self.run_check(APU_VERIFY_STAGE='draft')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('not published by this check', result.stdout)
+
+    def test_requested_stage_must_match_release(self):
+        self.assertNotEqual(self.run_check(APU_VERIFY_STAGE='draft').returncode, 0)
 
     def test_signer_mismatch_rejected(self):
         self.assertNotEqual(self.run_check(MOCK_BAD_SIGNER='yes').returncode, 0)

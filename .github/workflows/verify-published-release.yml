@@ -1,72 +1,47 @@
 name: Verify release assets and site
 
-# Read-only verification; a draft is checked without publishing it. Once the
-# same tag is public and the site has finished uploading, rerun the check.
+# Nothing here publishes or modifies a release. GitHub hides drafts from a
+# read-only token, so only the explicitly requested draft job gets write access.
 on:
   push:
     branches:
       - 'arena/**'
     paths:
       - '.github/workflows/verify-published-release.yml'
+      - '.github/workflows/verify-release-impl.yml'
       - 'scripts/release/verify-published-release.sh'
       - 'scripts/release/test-verify-published-release.py'
       - 'docs/APP_DELIVERY_TRACKER.md'
   workflow_dispatch:
     inputs:
+      stage:
+        description: 'Verify a draft or a published stable release'
+        required: true
+        type: choice
+        default: public
+        options:
+          - draft
+          - public
       tag:
-        description: 'Release tag to verify (empty: nearest tag on this branch)'
+        description: 'Release tag (empty: nearest tag on this branch)'
         required: false
         type: string
 
-permissions:
-  contents: read
-
 jobs:
-  verify:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[verify-publication]')
-    runs-on: ubuntu-latest
-    timeout-minutes: 35
-    steps:
-      - name: Checkout full history
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+  draft:
+    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-publication-draft]')) || (github.event_name == 'workflow_dispatch' && inputs.stage == 'draft')
+    permissions:
+      contents: write
+    uses: ./.github/workflows/verify-release-impl.yml
+    with:
+      stage: draft
+      tag: ${{ inputs.tag }}
 
-      - name: Test verification policy offline
-        run: python3 scripts/release/test-verify-published-release.py
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          packages: platform-tools
-
-      - name: Install APK verification tools
-        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "build-tools;35.0.0" > /dev/null'
-
-      - name: Verify APKs, signatures, checksums and published site
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APU_RELEASE_TAG: ${{ inputs.tag }}
-        run: |
-          LOG="$RUNNER_TEMP/release-verification.log"
-          if bash scripts/release/verify-published-release.sh > "$LOG" 2>&1; then
-            cat "$LOG"
-          else
-            # The raw Actions log may be inaccessible to an API-only reviewer.
-            # Preserve useful errors without exposing temporary signed URLs.
-            python3 - "$LOG" <<'PY'
-          from pathlib import Path
-          import re, sys
-          text = '\n'.join(Path(sys.argv[1]).read_text(errors='replace').splitlines()[-50:])
-          text = re.sub(r'https?://[^\s]+', '<redacted-url>', text)[-6000:]
-          text = text.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-          print(f'::error title=Release verification failed::{text}')
-          PY
-            exit 1
-          fi
+  public:
+    if: (github.event_name == 'push' && contains(github.event.head_commit.message, '[verify-publication-public]')) || (github.event_name == 'workflow_dispatch' && inputs.stage == 'public')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/verify-release-impl.yml
+    with:
+      stage: public
+      tag: ${{ inputs.tag }}

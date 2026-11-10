@@ -35,6 +35,8 @@ else:
         and r.get('published_at') and r['published_at']<=current['published_at']]
  assert older, 'No previous stable release to compare signatures with'
  previous=max(older,key=lambda r:r['published_at'])['tag_name']; stage='public'
+expected_stage=os.environ.get('APU_VERIFY_STAGE', '')
+assert not expected_stage or expected_stage==stage, f'Expected {expected_stage} release, found {stage}'
 notes=Path(f'docs/RELEASE_NOTES_{tag}.md').read_text(encoding='utf-8')
 assert current['body']==notes, 'Release notes differ from the reviewed source'
 assets={a['name']:a for a in current['assets']}; assert len(assets)==len(current['assets'])
