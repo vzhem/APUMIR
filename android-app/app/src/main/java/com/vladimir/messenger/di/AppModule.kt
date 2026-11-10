@@ -68,6 +68,7 @@ object AppModule {
                 AppDatabase.MIGRATION_37_38,
                 AppDatabase.MIGRATION_38_39,
                 AppDatabase.MIGRATION_39_40,
+                AppDatabase.MIGRATION_40_41,
             )
             // Никакого fallbackToDestructiveMigration(): он молча удаляет все
             // таблицы, если миграции не нашлось, — для мессенджера это тихая

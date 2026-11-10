@@ -105,6 +105,7 @@ jobs:
           python3 scripts/ci/check-launcher-icon.py
           python3 scripts/ci/check-delivery-cadence.py
           python3 scripts/ci/check-emergency-keepalive.py
+          python3 scripts/ci/check-notification-arrival.py
           python3 scripts/ci/check-presence-recovery.py
           python3 scripts/ci/check-ipv6-proxy-settings.py
           python3 scripts/ci/check-ui-return-contracts.py
@@ -181,6 +182,7 @@ jobs:
             network::mdns::tests::browse_round_never_replays_an_old_node_without_a_resolution \
             engine::core::tests::direct_personal_presence_emits_each_fresh_observation_but_not_stale_or_future \
             engine::core::tests::invite_is_only_an_address_hint_not_online_presence \
+            engine::core::tests::tcp_delivery_emits_a_real_millisecond_timestamp \
             tests::presence_ffi_keeps_original_observation_timestamp \
             resilience::address_book::tests; do
             LOG="$RUNNER_TEMP/presence-${test//::/-}.log"

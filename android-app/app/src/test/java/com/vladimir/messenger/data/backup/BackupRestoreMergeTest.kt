@@ -38,6 +38,17 @@ class BackupRestoreMergeTest {
     }
 
     @Test
+    fun `device local notification work is not imported from a backup`() {
+        val columns = arrayOf(column("id"), column("notificationPending", "INTEGER", notNull = true, hasDefault = true))
+        val step = inserts(BackupRestoreMerge.plan(listOf(table("messages", *columns)), listOf(table("messages", *columns))))
+            .getValue("messages")
+        assertEquals(
+            "INSERT OR IGNORE INTO \"messages\" (\"id\") SELECT copy.\"id\" FROM copy.\"messages\"",
+            step.sql,
+        )
+    }
+
+    @Test
     fun `column with its own default is left to sqlite`() {
         val live = listOf(
             table("messages", column("id"), column("state", notNull = true, hasDefault = true)),

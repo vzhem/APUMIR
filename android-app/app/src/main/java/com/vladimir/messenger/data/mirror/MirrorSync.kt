@@ -834,7 +834,7 @@ class MirrorChannel(
          * р230: принятый файл завершился - показать его и на партнёрском
          * устройстве (строка передачи + карточка в чате).
          */
-        suspend fun onFileMeta(meta: JSONObject): Boolean
+        suspend fun onFileMeta(meta: JSONObject, notify: Boolean): Boolean
         /** р230: кусок файла от партнёра - сложить в приёмник at its durable offset. */
         suspend fun onFileChunk(
             transferId: String,
@@ -3117,7 +3117,7 @@ class MirrorChannel(
                     }
                     for (i in 0 until rows.length()) {
                         val meta = rows.optJSONObject(i) ?: continue
-                        val applied = MirrorHub.duringApply { bridge.onFileMeta(meta) }
+                        val applied = MirrorHub.duringApply { bridge.onFileMeta(meta, notify = false) }
                         if (applied) {
                             val id = meta.optString("id")
                             if (id.isNotBlank()) {
@@ -3154,7 +3154,7 @@ class MirrorChannel(
                 // и здесь и попросить байты.
                 val meta = openPayload(wire) ?: return
                 scope.launch {
-                    val applied = MirrorHub.duringApply { bridge.onFileMeta(meta) }
+                    val applied = MirrorHub.duringApply { bridge.onFileMeta(meta, notify = true) }
                     if (applied) {
                         requestFileBytes(
                             transferId = meta.optString("id"),

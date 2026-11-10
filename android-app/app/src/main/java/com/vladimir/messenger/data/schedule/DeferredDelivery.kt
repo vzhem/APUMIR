@@ -298,7 +298,7 @@ class DeferredDelivery @Inject constructor(
                 chatId = letter.groupId
             } else {
                 val chat = chats.getOrCreateChat(entry.sender, NodeIds.autoName(entry.sender))
-                chats.saveIncomingMessage(chat.id, entry.sender, letter.id, letter.text, System.currentTimeMillis())
+                chats.saveIncomingMessage(chat.id, entry.sender, letter.id, letter.text, System.currentTimeMillis(), notifyArrival = false)
                 chatId = chat.id
             }
             val row = chats.getMessageById(letter.id)

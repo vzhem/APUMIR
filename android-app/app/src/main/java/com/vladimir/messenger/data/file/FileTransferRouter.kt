@@ -1324,7 +1324,7 @@ class FileTransferRouter @Inject constructor(
      * в чате, найденном по собеседнику: идентификаторы чатов на устройствах
      * разные.
      */
-    suspend fun applyMirrorFileMeta(meta: org.json.JSONObject): Boolean = mirrorFileMetaApplier.apply(meta)
+    suspend fun applyMirrorFileMeta(meta: org.json.JSONObject, notify: Boolean): Boolean = mirrorFileMetaApplier.apply(meta, notify)
 
     /**
      * р249: передачи, у которых на ЭТОМ устройстве нет байтов.

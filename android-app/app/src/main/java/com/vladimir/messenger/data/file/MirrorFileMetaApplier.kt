@@ -17,7 +17,7 @@ class MirrorFileMetaApplier @Inject constructor(
     private val chatClear: ChatClearDelivery,
 ) {
     companion object { private const val TAG = "MirrorFileMeta" }
-    suspend fun apply(meta: org.json.JSONObject): Boolean =
+    suspend fun apply(meta: org.json.JSONObject, notify: Boolean): Boolean =
         kotlinx.coroutines.withContext(Dispatchers.IO) {
         val transferId = meta.optString("id")
         val peer = meta.optString("peer")
@@ -96,6 +96,7 @@ class MirrorFileMetaApplier @Inject constructor(
                     content = content,
                     timestamp = timestamp,
                     recipientId = RustBridge.nodeId() ?: "",
+                    notifyArrival = notify,
                 )
             }
         }

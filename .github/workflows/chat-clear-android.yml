@@ -77,8 +77,10 @@ jobs:
       - name: Enable emulator acceleration
         run: |
           if [ -e /dev/kvm ]; then sudo chmod a+rw /dev/kvm; fi
-      - name: Check navigation-report guard
-        run: python3 scripts/ci/test-android-navigation-results.py
+      - name: Check emulator-report guards
+        run: |
+          python3 scripts/ci/test-android-navigation-results.py
+          python3 scripts/ci/test-android-notification-results.py
       - name: Run storage and navigation tests on the emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:

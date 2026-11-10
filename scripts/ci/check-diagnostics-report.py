@@ -352,7 +352,7 @@ class DiagnosticsContractsTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertIn(marker, source(MAIN / path))
 
-        self.assertIn("mirrorFileMetaApplier.apply(meta)", source(MAIN / "data/file/FileTransferRouter.kt"))
+        self.assertIn("mirrorFileMetaApplier.apply(meta, notify)", source(MAIN / "data/file/FileTransferRouter.kt"))
 
         # Уборка: просроченные незавершённые строки уходят вместе с кусками,
         # копии на диске без живой строки — тоже.

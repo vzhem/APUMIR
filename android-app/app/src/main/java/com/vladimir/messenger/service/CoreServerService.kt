@@ -166,10 +166,6 @@ class CoreServerService : Service() {
     private val stickerAskHandledAt = mutableMapOf<String, Long>()
     private val stickerWantServedAt = mutableMapOf<String, Long>()
 
-    // Keep only ids in the rolling notification look-back window; Room's query is likewise
-    // bounded to two minutes and indexed by (isFromMe, timestamp).
-    private val notifiedMessageIds = java.util.concurrent.ConcurrentHashMap<String, Long>()
-
     /**
      * Служебные конверты каталога гифок: ask/have/want. Разбираются до
      * сохранения в чат (как реакции), поэтому «мусорных» строк в переписке
@@ -1403,7 +1399,7 @@ class CoreServerService : Service() {
                 )
 
                 updateNotification("Сеть APU работает")
-                startEventPolling()
+                startEventPolling(nodeId ?: legacyRoutingId)
             } else {
                 updateNotification("Не удалось подключиться")
                 TransferDiagnostics.count(Counters.CORE_FAILURES)
@@ -1432,6 +1428,7 @@ class CoreServerService : Service() {
         // конверты не применялись бы (проверка «я участник»).
         runCatching { RustBridge.setShadowNodeId(nodeId) }
         updateNotification("APU: сеть ведёт другое устройство (зеркало)")
+        startIncomingNotifications(nodeId)
         startMirrorChannel(nodeId = nodeId, engineUp = false)
     }
 
@@ -1467,39 +1464,8 @@ class CoreServerService : Service() {
             row: com.vladimir.messenger.data.mirror.MirrorRow,
             notify: Boolean,
         ) {
-            val (chatId, name) = chatRepository.applyMirrorIncoming(row)
-            // Пустой chatId = сообщение не сохранено (в т.ч. запрещённое
-            // приглашение): уведомления быть не должно.
-            if (chatId.isBlank()) return
-            if (notify) {
-                // SOS и на зеркальном устройстве - тревога, а не обычное
-                // уведомление: паузы звука её не касаются.
-                if (com.vladimir.messenger.util.SosMessage.isSos(row.content)) {
-                    runCatching {
-                        notificationHelper.showSosNotification(
-                            chatId, row.senderId, null,
-                            messageId = row.id,
-                        )
-                    }
-                    return
-                }
-                // р249: у чата на паузе не показываем сообщение в шторке.
-                if (runCatching { chatRepository.isChatMuted(chatId) }.getOrDefault(false)) {
-                    Log.i(TAG, "notification suppressed: чат без звука (зеркало)")
-                    return
-                }
-                runCatching {
-                    notificationHelper.showMessageNotification(
-                        chatId,
-                        row.senderId,
-                        com.vladimir.messenger.util.ChatPreviews.human(row.content) ?: "Сообщение",
-                        true,
-                        null,
-                        quiet = com.vladimir.messenger.util.QuietMessage.isQuiet(row.content),
-                        messageId = row.id,
-                    )
-                }
-            }
+            // Live rows use the same one-shot queue; catch-up rows are history.
+            chatRepository.applyMirrorIncoming(row, notify)
         }
 
         override suspend fun applySent(row: com.vladimir.messenger.data.mirror.MirrorRow) {
@@ -1532,8 +1498,8 @@ class CoreServerService : Service() {
             mirrorApplyRead(peerId, groupId, topicId)
         }
 
-        override suspend fun onFileMeta(meta: org.json.JSONObject): Boolean =
-            runCatching { fileTransferRouter.applyMirrorFileMeta(meta) }
+        override suspend fun onFileMeta(meta: org.json.JSONObject, notify: Boolean): Boolean =
+            runCatching { fileTransferRouter.applyMirrorFileMeta(meta, notify) }
                 .onFailure { Log.w(TAG, "Mirror file meta failed: ${it.message}") }
                 .getOrDefault(false)
 
@@ -2154,7 +2120,7 @@ class CoreServerService : Service() {
         super.onDestroy()
     }
 
-    /** Человек смахнул приложение из задач: подъём через две минуты, как в Telegram. */
+    /** Смахивание из задач: запланировать локальную попытку восстановления. */
     override fun onTaskRemoved(rootIntent: Intent?) {
         ServiceLifecycleHooks.onTaskRemoved(applicationContext)
         super.onTaskRemoved(rootIntent)
@@ -2162,19 +2128,20 @@ class CoreServerService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    /**
-     * р249: уведомления этой переписки выключены - личный чат это или группа.
-     *
-     * Уведомление не создаётся вообще: пауза скрывает сообщение из шторки.
-     * Срок живёт в базе, поэтому пауза снимается сама, без таймера.
-     */
-    private suspend fun isMutedForNotifications(chatId: String): Boolean {
-        if (chatId.isBlank()) return false
-        if (runCatching { chatRepository.isChatMuted(chatId) }.getOrDefault(false)) return true
-        return runCatching { groupRepository.isGroupMuted(chatId) }.getOrDefault(false)
+    private fun startIncomingNotifications(recipientId: String) {
+        serviceScope.launch {
+            while (isActive) {
+                try {
+                    IncomingMessageNotifications(applicationContext, appDatabase.messageDao(), notificationHelper)
+                        .observe(recipientId)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (error: Exception) { Log.w(TAG, "Notification observer failed", error) }
+                delay(30_000L)
+            }
+        }
     }
 
-    private fun startEventPolling() {
+    private fun startEventPolling(recipientId: String) {
         
         serviceScope.launch {
             while (isActive) {
@@ -2185,83 +2152,7 @@ class CoreServerService : Service() {
             }
         }
 
-        // Observer for incoming messages → show notifications
-        serviceScope.launch {
-            Log.i(TAG, "Starting message observer for notifications")
-            chatRepository.observeRecentIncomingMessages()
-                .collect { messages ->
-                    Log.d(TAG, "Message observer received ${messages.size} recent incoming messages")
-                    // A rolling two-minute window catches delayed messages after process restart
-                    // without accumulating every message seen since this foreground service began.
-                    val cutoff = System.currentTimeMillis() - 120_000L
-                    notifiedMessageIds.entries.forEach { (id, timestamp) ->
-                        if (timestamp < cutoff) notifiedMessageIds.remove(id, timestamp)
-                    }
-                    val recentIncoming = messages.filter {
-                        !it.isFromMe &&
-                            !com.vladimir.messenger.data.schedule.DeferredInboxStore.owns(applicationContext, it.id) &&
-                            it.timestamp >= cutoff &&
-                            notifiedMessageIds.putIfAbsent(it.id, it.timestamp) == null &&
-                            !com.vladimir.messenger.util.InlineImage.isPart(it.content) &&
-                            // Раунд 156: конверты роя (стикеры/миниатюры) -
-                            // служебные, не звоним (владелец).
-                            !com.vladimir.messenger.util.ChatPreviews.isServiceEnvelope(it.content)
-                    }
-                    for (msg in recentIncoming) {
-                        try {
-                            // SOS из группы: тревога не знает пауз звука -
-                            // активно оповещаем отдельным громким путём,
-                            // даже если группа у получателя без звука.
-                            if (com.vladimir.messenger.util.SosMessage.isSos(msg.content)) {
-                                runCatching {
-                                    notificationHelper.showSosNotification(
-                                        msg.chatId, msg.senderId,
-                                        msg.topicId?.takeIf { it.isNotBlank() },
-                                        messageId = msg.id,
-                                    )
-                                }.onFailure { Log.w(TAG, "SOS notification failed: ${it.message}") }
-                                continue
-                            }
-                            // р249: «без звука» - ни уведомления, ни звука.
-                            // Проверяем и личный чат, и группу: у сообщения
-                            // один chatId, а чем он окажется - решаем по базе
-                            // (два дешёвых запроса по первичному ключу).
-                            if (isMutedForNotifications(msg.chatId)) {
-                                Log.i(TAG, "notification suppressed: без звука ${msg.chatId.take(12)}")
-                                continue
-                            }
-                            // Тема/пост, где написано сообщение: тап открывает
-                            // именно его. Вызов позиционный: именованные
-                            // аргументы + значение по умолчанию ловили
-                            // фантомную «Argument type mismatch» в K2.
-                            val topicId = msg.topicId?.takeIf { it.isNotBlank() }
-                            // Раунд 131: ссылка на гифку - в уведомлении
-                            // аккуратное «🖼 Гифка», а не служебная строка.
-                            val text = if (
-                                com.vladimir.messenger.data.gif.GifLibrary.isGifRef(msg.content)
-                            ) {
-                                "🖼 Гифка"
-                            } else {
-                                // Раунд 156: стикер-конверты и прочие служебные
-                                // строки - человеческими подписями.
-                                com.vladimir.messenger.util.ChatPreviews
-                                    .human(
-                                        com.vladimir.messenger.util.InlineImage
-                                            .stripImage(msg.content).ifBlank { "Фото" }
-                                    )
-                                    ?.take(200) ?: "Фото"
-                            }
-                            notificationHelper.showMessageNotification(
-                                msg.chatId, msg.senderId, text, true, topicId,
-                                quiet = com.vladimir.messenger.util.QuietMessage.isQuiet(msg.content),
-                                messageId = msg.id,
-                            )
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Failed to show notification: ${e.message}")
-                        }
-                    }
-                }
-        }
+        startIncomingNotifications(recipientId)
 
         eventPollingJob = serviceScope.launch {
             Log.i(TAG, "Event wait started (condvar, no idle polling)")

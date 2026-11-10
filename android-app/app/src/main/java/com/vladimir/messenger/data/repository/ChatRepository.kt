@@ -690,7 +690,7 @@ class ChatRepository @Inject constructor(
      * Входящее с зеркала. @return (chatId, имя чата) - для уведомления.
      * Чат ищется по узлу отправителя: id чатов на устройствах разные.
      */
-    suspend fun applyMirrorIncoming(row: MirrorRow): Pair<String, String> {
+    suspend fun applyMirrorIncoming(row: MirrorRow, notify: Boolean): Pair<String, String> {
         // р239: служебный пакет с партнёра тоже не сообщение.
         if (com.vladimir.messenger.util.ChatPreviews.isServicePacket(row.content)) {
             DeliveryAckWire.messageId(row.content)?.let { markOutgoingMessageDelivered(it) }
@@ -709,7 +709,7 @@ class ChatRepository @Inject constructor(
             channel = MessageChannel.UNKNOWN,
             recipientId = row.recipientId,
             textColorOverride = row.textColor,
-            senderNameColorOverride = row.senderNameColor,
+            senderNameColorOverride = row.senderNameColor, notifyArrival = notify,
         )
         if (!saved) return Pair("", "")
         return Pair(chat.id, chat.contactName)
@@ -804,7 +804,7 @@ class ChatRepository @Inject constructor(
         channel: MessageChannel = MessageChannel.UNKNOWN,
         recipientId: String = "",
         textColorOverride: String = "",
-        senderNameColorOverride: String = "",
+        senderNameColorOverride: String = "", notifyArrival: Boolean = true,
     ): Boolean {
         val styled = TextColorWire.decode(content)
         val cleanContent = styled?.text ?: content
@@ -864,7 +864,7 @@ class ChatRepository @Inject constructor(
             chatId = chatId,
             senderId = senderId,
             content = cleanContent,
-            timestamp = timestamp,
+            timestamp = timestamp, notificationPending = notifyArrival,
             isFromMe = false,
             status = MessageStatus.DELIVERED.name,
             recipientId = recipientId,
@@ -943,7 +943,7 @@ class ChatRepository @Inject constructor(
             chatId = chat.id,
             senderId = senderId,
             content = text,
-            timestamp = now,
+            timestamp = now, notificationPending = true,
             isFromMe = false,
             status = MessageStatus.DELIVERED.name,
             recipientId = "",
@@ -1217,7 +1217,7 @@ class ChatRepository @Inject constructor(
             chatId = chatId,
             senderId = senderId,
             content = content,
-            timestamp = timestamp,
+            timestamp = timestamp, notificationPending = true,
             isFromMe = false,
             status = "RECEIVED",
             channel = MessageChannel.STORE_FORWARD.name,
@@ -1587,20 +1587,5 @@ class ChatRepository @Inject constructor(
                 .map { it.toDomain() }
                 .toList()
         }.flowOn(Dispatchers.Default)
-
-    /**
-     * A rolling, bounded stream for service notifications. It queries only the last two minutes
-     * instead of re-reading and logging the complete message database after each insert.
-     */
-    fun observeRecentIncomingMessages(): Flow<List<Message>> =
-        messageDao.observeRecentIncomingWindow()
-            .map { entities ->
-                val myNodeId = RustBridge.nodeId().orEmpty()
-                entities.asSequence()
-                    .filter { it.recipientId == myNodeId || it.recipientId.isBlank() }
-                    .map { it.toDomain() }
-                    .toList()
-            }
-            .flowOn(Dispatchers.Default)
 
 }

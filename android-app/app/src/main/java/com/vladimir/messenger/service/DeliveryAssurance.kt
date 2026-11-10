@@ -76,8 +76,8 @@ object DeliveryAssurance {
                 if (enabled && !exactAlarmsAllowed) add(Item.EXACT_ALARMS)
             }
 
-        /** Всё ли готово, чтобы письмо будило телефон без задержки в час. */
-        val onTime: Boolean
+        /** Only checked settings, not a promise about delivery or wake timing. */
+        val settingsReady: Boolean
             get() = enabled && notificationsAllowed && batteryUnrestricted && exactAlarmsAllowed
     }
 

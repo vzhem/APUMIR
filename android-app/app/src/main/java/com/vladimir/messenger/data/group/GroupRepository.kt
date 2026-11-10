@@ -3061,11 +3061,8 @@ class GroupRepository(
                 if (isDeferredCancelled(senderId, localId)) return
                 if (messageDao.messageExists(localId)) return
                 val now = clock()
-                // Досылка старого поста: отправитель пересылает чужой пост, автор
-                // и время указаны в конверте. Верим владельцу канала - и любому
-                // участнику, если у нас есть проверенный манифест этого поста и
-                // текст сходится с хэшем (рой). Кусок или пост, чей манифест ещё
-                // не доехал, ждёт в буфере, а не отбрасывается.
+                // Досылку чужого поста принимаем от владельца или по проверенному
+                // манифесту; при отсутствии манифеста ждём в буфере.
                 var relayed = packet.authorId.isNotBlank() && senderId == group.ownerId
                 var verifiedBy: PostManifest? = null
                 // Комментарий большого канала (этап 4) досылает и администратор
@@ -3128,6 +3125,9 @@ class GroupRepository(
                         senderId = authorId,
                         content = packet.text,
                         timestamp = sentAt,
+                        notificationPending = com.vladimir.messenger.data.notification.NotificationArrivalPolicy.groupMessage(
+                            isMine, isPart, relayed, swarmGroup, sentAt, now, FRESH_POST_MS,
+                        ),
                         status = if (isMine) "SENT" else "RECEIVED",
                         isFromMe = isMine,
                         channel = "GROUP",

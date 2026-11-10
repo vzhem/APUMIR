@@ -63,7 +63,7 @@ import com.vladimir.messenger.data.local.dao.DirectPollDao
  * (`data/backup`): копию с более новой базой восстанавливать нельзя, со старой -
  * миграции ниже доведут сами.
  */
-const val APP_DATABASE_VERSION = 40
+const val APP_DATABASE_VERSION = 41
 
 @Database(
     entities = [
@@ -127,6 +127,14 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun directPollDao(): DirectPollDao
 
     companion object {
+        /** Existing history is not new arrival work. */
+        val MIGRATION_40_41 = object : Migration(40, 41) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `messages` ADD COLUMN `notificationPending` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_messages_notification_pending` ON `messages` (`isFromMe`, `notificationPending`)")
+            }
+        }
+
         /**
          * One-time address-book reset (owner request 2026-11-01).
          * Only the visible contact directory is cleared. Chats, messages,

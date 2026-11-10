@@ -192,7 +192,7 @@ class DeliveryWakeContract(unittest.TestCase):
                       "карточка не подключена к разделу «Уведомления»")
         for name in ("status", "setEnabled", "openSystemSettings"):
             self.assertIn("fun " + name, self.assurance)
-        for name in ("blocking", "onTime", "lastAliveMs"):
+        for name in ("blocking", "settingsReady", "lastAliveMs"):
             self.assertIn(name, self.assurance, "состояние для экрана неполное: " + name)
 
     def test_strings_exist_in_both_languages(self):

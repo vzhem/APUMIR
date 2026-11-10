@@ -95,7 +95,7 @@ object BackupRestoreMerge {
                 continue
             }
             val available = source.columns.associateBy { it.name }
-            val targets = table.columns.filter { !isInternal(it.name) }
+            val targets = table.columns.filter { !isInternal(it.name) && !(table.name == "messages" && it.name == "notificationPending") }
             if (available.isEmpty()) {
                 steps += Step.Skip(table.name, "в копии нет колонок")
                 continue

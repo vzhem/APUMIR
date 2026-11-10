@@ -10,6 +10,7 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["chatId", "timestamp"], name = "index_messages_chatId_timestamp"),
         Index(value = ["isFromMe", "timestamp"], name = "index_messages_isFromMe_timestamp"),
+        Index(value = ["isFromMe", "notificationPending"], name = "index_messages_notification_pending"),
     ],
 )
 data class MessageEntity(
@@ -61,4 +62,7 @@ data class MessageEntity(
     /** Palette id selected for the author's display name. */
     @ColumnInfo(defaultValue = "''")
     val senderNameColor: String = "",
+    /** Local one-shot notification work; never copied from history or another device. */
+    @ColumnInfo(defaultValue = "0")
+    val notificationPending: Boolean = false,
 )

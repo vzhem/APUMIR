@@ -35,24 +35,7 @@ import com.vladimir.messenger.ui.components.ApuSettingsDivider
 import com.vladimir.messenger.ui.components.ApuSettingsItem
 import com.vladimir.messenger.ui.components.ApuTextAction
 
-/**
- * «Уведомления приходят вовремя» — то же, что у Telegram экран «Фоновое
- * соединение»: одно место, где видно, какие системные разрешения мешают
- * письму разбудить телефон, и куда нажать, чтобы это исправить.
- *
- * Почему так, а не «просто галочка». На Android письмо после убийства
- * приложения доставляет не сам мессенджер, а система — но только если ей
- * разрешено: уведомления включены, приложение не в оптимизации батареи,
- * будильники точные, на части прошивок ещё и автозапуск разрешён. Раньше
- * человек узнавал об этом, только не получая сообщений, и причин было
- * не видно. Здесь каждая причина названа и ведёт в свой системный экран.
- *
- * Заголовка раздела здесь нет намеренно: карточка стоит первой в разделе
- * «Уведомления», и второй золотой заголовок подряд читался бы как дубль.
- *
- * Компонент живёт в отдельном файле: `SettingsScreen.kt` уже за потолком
- * god-файла (AGENTS.md п. 8), поэтому туда добавлен только вызов.
- */
+/** Background-recovery settings; Android and network timing cannot be guaranteed. */
 @Composable
 fun DeliveryAssuranceCard(modifier: Modifier = Modifier) {
     val context = LocalContext.current
@@ -87,13 +70,13 @@ fun DeliveryAssuranceCard(modifier: Modifier = Modifier) {
                 color = ApuBubbleMutedColor,
             )
             Text(
-                text = if (status.onTime) {
-                    stringResource(R.string.delivery_state_ready)
-                } else {
-                    stringResource(R.string.delivery_state_needs, status.blocking.size)
+                text = when {
+                    !status.enabled -> stringResource(R.string.delivery_state_disabled)
+                    status.settingsReady -> stringResource(R.string.delivery_state_ready)
+                    else -> stringResource(R.string.delivery_state_needs, status.blocking.size)
                 },
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (status.onTime) ApuBubbleMutedColor else MaterialTheme.colorScheme.error,
+                color = if (!status.enabled || status.settingsReady) ApuBubbleMutedColor else MaterialTheme.colorScheme.error,
             )
         }
         ApuSettingsDivider()

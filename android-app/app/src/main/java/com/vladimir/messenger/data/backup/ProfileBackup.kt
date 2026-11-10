@@ -621,6 +621,7 @@ class ProfileBackup @Inject constructor(
             val manifest = BackupManifest.decode(File(root, BackupLayout.MANIFEST).readText())
                 ?: throw IOException("staged manifest unreadable")
             if (manifest.dbVersion > APP_DATABASE_VERSION) throw IOException("staged backup is newer than app")
+            BackupNotificationState.clearFromStaged(File(root, BackupLayout.DB))
 
             // Секреты читаем ДО первой записи. Файл секрета в копии мог быть
             // испорчен, и тогда копию применять нельзя: иначе база и настройки

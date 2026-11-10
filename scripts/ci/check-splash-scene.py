@@ -91,8 +91,11 @@ class SplashSceneTest(unittest.TestCase):
         )
         self.assertIn("SplashSchedule.gate.onScreenCreated(", main)
         self.assertIn("val showSplash by splashWanted", main)
-        self.assertNotIn("onForeground(", main)
-        self.assertNotIn("onBackground(", main)
+        # Network recovery also has onForeground/onBackground hooks; forbid
+        # replaying the *splash*, not unrelated lifecycle maintenance.
+        lifecycle = main[main.index("override fun onStart()"):main.index("override fun onCreate(")]
+        self.assertNotIn("splashWanted", lifecycle)
+        self.assertNotIn("SplashSchedule", lifecycle)
         self.assertNotIn("addObserver", main)
         gate = source("SplashSchedule.kt")
         self.assertIn("fun onScreenCreated(nowMillis: Long): Boolean", gate)

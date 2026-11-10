@@ -161,13 +161,16 @@ interface MessageDao {
     @Query("SELECT * FROM messages ORDER BY timestamp DESC")
     fun observeAll(): Flow<List<MessageEntity>>
 
-    /** A rolling two-minute window; Room re-evaluates SQLite's clock on message-table invalidation. */
+    /** Newly inserted local work, irrespective of the sender's clock or delivery delay. */
     @Query(
-        "SELECT * FROM messages WHERE isFromMe = 0 AND " +
-            "timestamp >= (CAST(strftime('%s', 'now') AS INTEGER) * 1000 - 120000) " +
-            "ORDER BY timestamp DESC, id DESC LIMIT 512"
+        "SELECT * FROM messages WHERE isFromMe = 0 AND notificationPending = 1 " +
+            "AND (recipientId = :recipientId OR recipientId = '') ORDER BY rowid ASC LIMIT 512"
     )
-    fun observeRecentIncomingWindow(): Flow<List<MessageEntity>>
+    fun observePendingNotifications(recipientId: String): Flow<List<MessageEntity>>
+
+    /** Claim before posting: a service/process restart cannot re-alert an already claimed row. */
+    @Query("UPDATE messages SET notificationPending = 0 WHERE id = :id AND notificationPending = 1 AND isFromMe = 0")
+    suspend fun claimPendingNotification(id: String): Int
 
     // ── Группы и темы (v8) ──────────────────────────────────────────────────
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND topicId = :topicId ORDER BY timestamp ASC, id ASC")

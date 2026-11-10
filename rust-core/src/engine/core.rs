@@ -2161,8 +2161,6 @@ impl P2PCore {
         _network: Arc<NetworkManagerFfi>,
         port: u16,
     ) {
-        use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
         // Dual-stack с откатом на IPv4: в сети только-v6 слушатель истории на
         // `0.0.0.0` был недостижим для соседей.
         let listener = match crate::network::dual_stack::bind_tcp_dual(port).await {
@@ -2176,6 +2174,13 @@ impl P2PCore {
             }
         };
 
+        Self::run_tcp_connections(events, listener).await;
+    }
+
+    // Kept separate from binding so the real accept/read/emit path is testable
+    // on an ephemeral loopback port, without racing to reserve a port first.
+    async fn run_tcp_connections(events: Arc<EventBus>, listener: tokio::net::TcpListener) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
         loop {
             match listener.accept().await {
                 Ok((mut stream, peer)) => {
@@ -2193,10 +2198,7 @@ impl P2PCore {
                                     let parts: Vec<&str> = text.splitn(4, '|').collect();
                                     // Страж отправителя - см. QUIC-приёмник выше.
                                     if parts.len() == 4 && parts[0].starts_with("pk_") {
-                                        let ts = std::time::SystemTime::now()
-                                            .duration_since(std::time::UNIX_EPOCH)
-                                            .unwrap_or_default()
-                                            .as_secs() as i64;
+                                        let ts = crate::storage::models::now_ms();
                                         ev.emit(CoreEvent::MessageReceived {
                                             message_id: parts[1].to_string(),
                                             chat_id: parts[2].to_string(),
@@ -6487,6 +6489,35 @@ mod tests {
         let mut e = make_engine();
         e.start();
         e
+    }
+
+    #[tokio::test]
+    async fn tcp_delivery_emits_a_real_millisecond_timestamp() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::time::{timeout, Duration};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let events = Arc::new(EventBus::with_defaults());
+        let server = tokio::spawn(P2PCore::run_tcp_connections(Arc::clone(&events), listener));
+        let before = crate::storage::models::now_ms();
+        let mut client = timeout(Duration::from_secs(5), tokio::net::TcpStream::connect(address))
+            .await.unwrap().unwrap();
+        client.write_all(b"pk_friend|tcp-test|chat|hello").await.unwrap();
+        let mut ack = [0u8; 3];
+        timeout(Duration::from_secs(5), client.read_exact(&mut ack)).await.unwrap().unwrap();
+        let after = crate::storage::models::now_ms();
+        assert_eq!(&ack, b"ACK");
+        match events.poll().expect("listener must emit the message before ACK") {
+            CoreEvent::MessageReceived { message_id, chat_id, sender_id, text, timestamp } => {
+                assert_eq!((message_id.as_str(), chat_id.as_str(), sender_id.as_str(), text.as_str()),
+                    ("tcp-test", "chat", "pk_friend", "hello"));
+                assert!(timestamp >= before && timestamp <= after,
+                    "TCP timestamp must be local epoch milliseconds: {timestamp}, expected {before}..={after}");
+            }
+            other => panic!("expected TCP message, got {other:?}"),
+        }
+        server.abort();
     }
 
     #[test]
