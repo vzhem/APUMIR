@@ -50,12 +50,14 @@ def main() -> int:
         return 2
     result_dir, log, status = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
     seen = {name: set() for name in EXPECTED}
-    errors = []
+    report_errors = []
+    case_errors = []
+    missing_cases = []
     for path in sorted(result_dir.rglob("*.xml")):
         try:
             root = ET.parse(path).getroot()
         except ET.ParseError as exc:
-            errors.append(f"Invalid Android test report {path}: {exc}")
+            report_errors.append(f"Invalid Android test report {path}: {exc}")
             continue
         for case in root.iter("testcase"):
             classname = case.get("classname", "")
@@ -69,19 +71,27 @@ def main() -> int:
             for tag in ("failure", "error", "skipped"):
                 for bad in case.findall(tag):
                     message = (bad.get("message") or bad.text or tag).strip()
-                    errors.append(f"{name}.{case_name}: {tag}: {message}")
+                    case_errors.append(f"{name}.{case_name}: {tag}: {message[:1000]}")
     for name, expected in EXPECTED.items():
         for missing in sorted(expected - seen[name]):
-            errors.append(f"{name}.{missing}: expected test did not execute")
+            missing_cases.append(f"{name}.{missing}: expected test did not execute")
     if status:
         lines = log.read_text(encoding="utf-8", errors="replace").splitlines() if log.exists() else []
-        compiler = [line for line in lines if line.startswith("e: ") or "What went wrong:" in line]
-        errors.append(f"Navigation Gradle task exited {status}. " + "\n".join((compiler or lines[-30:])[-20:]))
-    for error in errors:
-        annotation("error", error)
+        compiler = [line for line in lines if line.startswith("e: ")]
+        tail = [line for line in lines[-45:] if not line.startswith("w: ")]
+        # GitHub caps annotations per step. Put the cause first; a long list
+        # of missing test names must not hide a compiler error or task failure.
+        diagnostic = "\n".join((compiler[-20:] + tail[-20:]))
+        annotation("error", f"Navigation Gradle task exited {status}.\n{diagnostic}")
+    if case_errors:
+        annotation("error", "Android navigation failures:\n" + "\n".join(case_errors))
+    if report_errors:
+        annotation("error", "\n".join(report_errors))
+    if missing_cases:
+        annotation("error", "\n".join(missing_cases))
     summary = ", ".join(f"{name}={len(seen[name] & expected)}/{len(expected)}" for name, expected in EXPECTED.items())
     annotation("notice", f"Android navigation tests: {summary}")
-    return 1 if errors else 0
+    return 1 if status or case_errors or report_errors or missing_cases else 0
 
 
 if __name__ == "__main__":
