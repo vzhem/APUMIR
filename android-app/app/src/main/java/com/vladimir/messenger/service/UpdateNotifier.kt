@@ -96,8 +96,8 @@ class UpdateNotifier @Inject constructor(
                 patchUrl = json.optString("patchUrl", "").ifBlank { null },
                 patchFrom = json.optString("patchFrom", "").ifBlank { null },
                 apkSha256 = json.optString("apkSha256", "").ifBlank { null },
-                // Old cards do not say whether relay metadata was fresh. Recheck
-                // them on the download tap before choosing the site or a fallback.
+                // All cards are refreshed on the download tap. Keep the legacy
+                // flag for compatibility with saved cards from older versions.
                 allowSiteMirror = json.optBoolean("allowSiteMirror", false),
             )
         }.getOrElse { error ->

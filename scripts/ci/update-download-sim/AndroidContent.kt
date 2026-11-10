@@ -1,5 +1,8 @@
 package android.content
+import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.net.Uri
+import java.io.File
 open class Context {
     companion object { const val DOWNLOAD_SERVICE = "download"; const val MODE_PRIVATE = 0 }
     open fun getSystemService(name: String): Any? = null
@@ -7,6 +10,19 @@ open class Context {
     open fun getString(id: Int, vararg args: Any): String = "Update · ${args.firstOrNull()}"
     open val packageManager: PackageManager get() = error("not implemented")
     open val packageName: String get() = "com.vladimir.messenger"
+    open val applicationInfo: ApplicationInfo get() = ApplicationInfo()
+    open val cacheDir: File get() = File(".")
+    open fun startActivity(intent: Intent) {}
+}
+class Intent(val action: String) {
+    companion object {
+        const val ACTION_VIEW = "android.intent.action.VIEW"
+        const val FLAG_ACTIVITY_NEW_TASK = 0x10000000
+        const val FLAG_GRANT_READ_URI_PERMISSION = 0x1
+    }
+    var flags: Int = 0
+    fun setDataAndType(uri: Uri, type: String): Intent = this
+    fun addFlags(value: Int): Intent { flags = flags or value; return this }
 }
 interface SharedPreferences {
     fun getLong(key: String, defValue: Long): Long

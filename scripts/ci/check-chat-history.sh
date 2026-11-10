@@ -266,5 +266,6 @@ PYGEN
     com.vladimir.messenger.data.swarm.Ipv6NetworkProxyTest \
     com.vladimir.messenger.data.security.ProfileCallsignAndDeviceAnchorTest
 
-# Изолированная симуляция DownloadManager компилируется в отдельном скрипте.
+# Изолированные симуляции компилируются в отдельных classpath со своими заглушками.
 bash "$ROOT/scripts/ci/check-update-download-sim.sh" "$JAVA" "$CP" "$OUT" "$KOTLIN"
+bash "$ROOT/scripts/ci/check-update-check-sim.sh" "$JAVA" "$CP" "$OUT" "$KOTLIN"

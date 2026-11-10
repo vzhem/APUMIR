@@ -212,10 +212,18 @@ class SiteFirstUpdateTest(unittest.TestCase):
         self.assertIn("officialDownloads.start(releaseInfo, site)", self.checker)
 
     def test_stale_metadata_cannot_turn_into_a_pinned_old_apk(self):
-        self.assertIn("!canUseRelayMetadata(metadataStale)", self.checker)
+        self.assertIn("!canUseRelayMetadata(metadataStale, response.cacheHeader)", self.checker)
+        self.assertIn('conn.getHeaderField("X-Apu-Cache")', self.checker)
+        self.assertIn('setRequestProperty("Cache-Control", "no-cache, no-store")', self.checker)
+        self.assertIn('/update/latest?nocache=', self.checker)
+        self.assertIn('/releases/latest?nocache=', self.checker)
         self.assertIn("siteApkMatchesLatest(", self.mirror)
         self.assertIn('json.optBoolean("allowSiteMirror", false)', read(JAVA / "service/UpdateNotifier.kt"))
-        self.assertIn("checkForUpdate(currentAppVersion(), manual = true)", self.checker)
+        download = self.checker.split("suspend fun downloadApk(", 1)[1].split("private fun downloadApkConfirmed", 1)[0]
+        self.assertIn("if (preferOfficial) {", download)
+        self.assertIn("confirmOfficialDownloadRelease(releaseInfo", download)
+        self.assertIn("checkForUpdate(currentAppVersion(), manual = true)", download)
+        self.assertNotIn("!releaseInfo.allowSiteMirror", download)
         self.assertIn("pinnedGithubApkUrl(attempt.version)", self.policy)
 
     def test_managed_files_wait_for_validation_and_survive_restart(self):
@@ -231,10 +239,15 @@ class SiteFirstUpdateTest(unittest.TestCase):
     def test_executable_switching_simulation_is_in_ci(self):
         script = read(ROOT / "scripts/ci/check-chat-history.sh")
         self.assertIn("check-update-download-sim.sh", script)
+        self.assertIn("check-update-check-sim.sh", script)
         harness = read(ROOT / "scripts/ci/update-download-sim/DownloadHarness.kt")
         self.assertIn("interruptedInitialEnqueue()", harness)
         self.assertIn("interruptedSwitchAndCancellation()", harness)
         self.assertIn("duplicateEventsAreSerialized()", harness)
+        freshness = read(ROOT / "scripts/ci/update-check-sim/CheckHarness.kt")
+        self.assertIn("checker.downloadApk(card(marker), preferOfficial = true)", freshness)
+        self.assertIn('staleRelayRejected("stale", "absent")', freshness)
+        self.assertIn("pinnedGithubApkUrl(NEW)", freshness)
 
     def test_site_hint_and_fallback_status_are_localized(self):
         for folder in ("values", "values-en"):

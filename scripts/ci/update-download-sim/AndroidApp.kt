@@ -10,13 +10,17 @@ open class DownloadManager {
         const val ERROR_DEVICE_NOT_FOUND=1007; const val ERROR_CANNOT_RESUME=1008; const val ERROR_FILE_ALREADY_EXISTS=1009
         const val COLUMN_ID="_id"; const val COLUMN_TITLE="title"; const val COLUMN_URI="uri"; const val COLUMN_STATUS="status"
         const val COLUMN_DESCRIPTION="description"; const val COLUMN_REASON="reason"; const val COLUMN_LOCAL_URI="local_uri"
+        const val COLUMN_MEDIA_TYPE="media_type"; const val COLUMN_BYTES_DOWNLOADED_SO_FAR="bytes_so_far"
+        const val COLUMN_TOTAL_SIZE_BYTES="total_size"
     }
     open fun enqueue(request: Request): Long = error("not implemented")
     open fun query(query: Query): Cursor? = error("not implemented")
     open fun remove(vararg ids: Long): Int = error("not implemented")
     class Query {
         var ids: LongArray? = null
+        var statuses: Int? = null
         fun setFilterById(vararg id: Long): Query { ids=id; return this }
+        fun setFilterByStatus(value: Int): Query { statuses=value; return this }
     }
     class Request(val uri: Uri) {
         companion object { const val VISIBILITY_VISIBLE_NOTIFY_COMPLETED = 1 }

@@ -20,8 +20,27 @@ internal fun siteApkMatchesLatest(
     return siteSha == expectedSha
 }
 
-/** A relay cache explicitly marked stale cannot identify the current release. */
-internal fun canUseRelayMetadata(metadataStale: Boolean): Boolean = !metadataStale
+/**
+ * The deployed relay may predate the JSON marker, but already reports an
+ * unconfirmed KV fallback as X-Apu-Cache: stale. Either signal must reject it.
+ */
+internal fun canUseRelayMetadata(metadataStale: Boolean, cacheHeader: String? = null): Boolean =
+    !metadataStale && !cacheHeader?.trim().equals("stale", ignoreCase = true)
+
+/**
+ * A displayed card is only a snapshot. On every explicit download tap, obtain
+ * a fresh official release and use its complete metadata, not the snapshot's
+ * URL/hash. If verification failed or regressed, never pin an older APK.
+ */
+internal suspend fun <T> confirmOfficialDownloadRelease(
+    displayed: T,
+    versionOf: (T) -> String,
+    refresh: suspend () -> T?,
+): T? {
+    val latest = refresh() ?: return null
+    val comparison = ApkUpdate.compareVersions(versionOf(latest), versionOf(displayed)) ?: return null
+    return latest.takeIf { comparison >= 0 }
+}
 
 internal fun normalizedUpdateSha256(value: String?): String? {
     val raw = value?.trim().orEmpty()

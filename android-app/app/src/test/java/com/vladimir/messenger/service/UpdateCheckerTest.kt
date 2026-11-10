@@ -5,6 +5,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.runBlocking
 
 class UpdateCheckerTest {
 
@@ -80,7 +81,41 @@ class UpdateCheckerTest {
     @Test
     fun `a stale relay cache cannot confirm the current release`() {
         assertTrue(canUseRelayMetadata(metadataStale = false))
+        assertTrue(canUseRelayMetadata(metadataStale = false, cacheHeader = "redirect"))
         assertFalse(canUseRelayMetadata(metadataStale = true))
+        // The currently deployed, older relay marks a stale KV response in the
+        // header, without the newer metadata_stale JSON field.
+        assertFalse(canUseRelayMetadata(metadataStale = false, cacheHeader = " StAlE "))
+        assertFalse(canUseRelayMetadata(metadataStale = true, cacheHeader = "redirect"))
+    }
+
+    private data class Card(val version: String, val sha256: String, val savedMarker: Boolean)
+
+    @Test
+    fun `every displayed card is refreshed and uses the new release metadata`() = runBlocking {
+        val latest = Card("v11.74.502", "new-hash", true)
+        for (savedMarker in listOf(true, false)) {
+            val displayed = Card("v11.74.501", "old-hash", savedMarker)
+            var calls = 0
+            val result = confirmOfficialDownloadRelease(displayed, Card::version) {
+                calls++
+                latest
+            }
+            assertEquals(1, calls)
+            assertEquals(latest, result)
+        }
+        // Even a card displaying the current version may carry stale hash/URL.
+        val sameVersion = Card("11.74.502", "old-hash", true)
+        assertEquals(latest, confirmOfficialDownloadRelease(sameVersion, Card::version) { latest })
+    }
+
+    @Test
+    fun `unavailable or regressed metadata never authorizes a stale download`() = runBlocking {
+        val displayed = Card("v11.74.502", "displayed", true)
+        assertNull(confirmOfficialDownloadRelease(displayed, Card::version) { null })
+        assertNull(confirmOfficialDownloadRelease(displayed, Card::version) { Card("v11.74.501", "old", true) })
+        assertNull(confirmOfficialDownloadRelease(displayed, Card::version) { Card("latest", "bad", true) })
+        assertNull(confirmOfficialDownloadRelease(Card("latest", "bad", false), Card::version) { displayed })
     }
 
     @Test

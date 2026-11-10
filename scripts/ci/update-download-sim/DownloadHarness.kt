@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.database.Cursor
 import com.vladimir.messenger.data.update.ApkUpdate
 import com.vladimir.messenger.worker.OfficialUpdateMonitor
+import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.nio.file.Files
 import java.util.zip.ZipEntry
@@ -259,8 +260,39 @@ private fun finalBadFileAndEnqueueFailureAreVisible() {
         expect(failedCtl.terminalFailureVersion() == "v11.74.501", "enqueue failure lost status")
     } finally { file.delete() }
 }
+private fun staleCardsUseRefreshedRelease() = runBlocking {
+    val oldSha = "a".repeat(64); val newSha = "b".repeat(64)
+    val latest = release(newSha).copy(version = "v11.74.502")
+    for (marker in listOf(true, false)) {
+        // The site and saved card may agree with each other yet both be stale.
+        val saved = release(oldSha).copy(allowSiteMirror = marker)
+        var calls = 0
+        val confirmed = confirmOfficialDownloadRelease(saved, { it.version }) { calls++; latest }
+            ?: error("fresh release was not accepted")
+        expect(calls == 1 && confirmed == latest, "cached card escaped the fresh check")
+        expect(!siteApkMatchesLatest(saved.version, confirmed.version, oldSha, confirmed.apkSha256),
+            "matching old card and old site were accepted as latest")
+        val staleSite = FakeContext(); val staleCtl = newController(staleSite)
+        val relay = staleCtl.start(confirmed, null)
+        expect(staleSite.dm.entries[relay]!!.url.endsWith("/update/apk"), "stale site must be skipped")
+        staleSite.dm.entries[relay]!!.apply { status = DownloadManager.STATUS_FAILED; reason = 503 }
+        staleCtl.reconcile(relay)
+        expect(staleSite.dm.entries[currentId(staleSite)]!!.url == pinnedGithubApkUrl(latest.version),
+            "fallback was pinned to the stale card")
+
+        val freshSite = FakeContext(); val freshCtl = newController(freshSite)
+        expect(siteApkMatchesLatest(latest.version, confirmed.version, newSha, confirmed.apkSha256), "fresh site rejected")
+        val siteId = freshCtl.start(confirmed, UpdateSiteMirror.Match(newSha))
+        expect(freshSite.dm.entries[siteId]!!.url == UpdateSiteMirror.APK_URL, "fresh site was not selected first")
+    }
+    val noMetadata = FakeContext()
+    val unavailable = confirmOfficialDownloadRelease(release(oldSha), { it.version }) { null }
+    if (unavailable != null) newController(noMetadata).start(unavailable, UpdateSiteMirror.Match(oldSha))
+    expect(noMetadata.dm.entries.isEmpty(), "unconfirmed saved card started an APK")
+}
 fun main() {
     siteThenFallbackAndStaleEvents(); missingSiteAndLocalErrors(); verifiedAndCorruptFiles()
     interruptedSwitchAndCancellation(); interruptedInitialEnqueue(); duplicateEventsAreSerialized(); finalBadFileAndEnqueueFailureAreVisible()
-    println("Official update DownloadManager simulation: 7 scenarios passed")
+    staleCardsUseRefreshedRelease()
+    println("Official update DownloadManager simulation: 8 scenarios passed")
 }

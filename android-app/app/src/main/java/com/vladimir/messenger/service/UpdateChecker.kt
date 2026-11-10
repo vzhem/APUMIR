@@ -232,7 +232,7 @@ class UpdateChecker @Inject constructor(
         val patchFrom: String? = null,
         /** SHA-256 релизного APK (из GitHub digest) - сверка собранного. */
         val apkSha256: String? = null,
-        /** Legacy saved cards must refresh release metadata before selecting a source. */
+        /** Legacy cards may opt out of site selection until metadata is refreshed. */
         val allowSiteMirror: Boolean = true,
     )
 
@@ -420,9 +420,9 @@ class UpdateChecker @Inject constructor(
     ): ReleaseInfo? = withContext(Dispatchers.IO) {
         try {
             Log.i(TAG, "Checking for updates. Current: $currentVersion")
-            val url = "$GITHUB_API/$GITHUB_USER/$GITHUB_REPO/releases/latest"
+            val url = "$GITHUB_API/$GITHUB_USER/$GITHUB_REPO/releases/latest?nocache=${System.currentTimeMillis()}"
             val response = httpGet(url, trace, "github") ?: return@withContext null
-            val json = JSONObject(response)
+            val json = JSONObject(response.body)
             val latestVersion = json.optString("tag_name", "").trim()
             if (latestVersion.isBlank()) {
                 UpdateDiagnosticsStore.markSource(trace, "github", "invalid_response")
@@ -531,16 +531,16 @@ class UpdateChecker @Inject constructor(
         trace: UpdateDiagnosticsStore.CheckTrace,
     ): ReleaseInfo? = withContext(Dispatchers.IO) {
         try {
-            val response = httpGet("$RELAY_BASE/update/latest", trace, "relay")
+            val response = httpGet("$RELAY_BASE/update/latest?nocache=${System.currentTimeMillis()}", trace, "relay")
                 ?: return@withContext null
-            val json = JSONObject(response)
+            val json = JSONObject(response.body)
             val latestVersion = json.optString("tag_name", "").trim()
             val metadataStale = json.optBoolean("metadata_stale", false)
             if (latestVersion.isBlank()) {
                 UpdateDiagnosticsStore.markSource(trace, "relay", "invalid_response")
                 return@withContext null
             }
-            if (!canUseRelayMetadata(metadataStale)) {
+            if (!canUseRelayMetadata(metadataStale, response.cacheHeader)) {
                 // /update/apk serves the newest release, but a stale tag could
                 // otherwise send our pinned fallback back to an old release.
                 Log.w(TAG, "Relay release metadata is stale; waiting for a fresh check")
@@ -586,10 +586,12 @@ class UpdateChecker @Inject constructor(
      * @return ID загрузки
      */
     suspend fun downloadApk(releaseInfo: ReleaseInfo, preferOfficial: Boolean = false): Long {
-        // A notification saved by an older app has no freshness marker. Refresh
-        // it rather than trusting a cached old tag or silently skipping the site.
-        val confirmed = if (preferOfficial && !releaseInfo.allowSiteMirror) {
-            checkForUpdate(currentAppVersion(), manual = true) ?: throw UpdateMetadataUnavailableException()
+        // Any displayed card can be hours or days old, even with a true saved
+        // marker. Refresh the complete official release on every explicit tap.
+        val confirmed = if (preferOfficial) {
+            confirmOfficialDownloadRelease(releaseInfo, { it.version }) {
+                checkForUpdate(currentAppVersion(), manual = true)
+            } ?: throw UpdateMetadataUnavailableException()
         } else releaseInfo
         return downloadApkConfirmed(confirmed, preferOfficial)
     }
@@ -1043,11 +1045,13 @@ class UpdateChecker @Inject constructor(
         }
     }
 
+    private data class UpdateHttpResponse(val body: String, val cacheHeader: String?)
+
     private fun httpGet(
         url: String,
         trace: UpdateDiagnosticsStore.CheckTrace,
         source: String,
-    ): String? {
+    ): UpdateHttpResponse? {
         // Тот же тормоз, что и в checkForUpdate, но на самом запросе: без него
         // ручная кнопка «открыла бы» канал и всё равно получила отказ здесь -
         // ровно то «обновлений нет», на которое жаловался владелец.
@@ -1060,6 +1064,9 @@ class UpdateChecker @Inject constructor(
                 requestMethod = "GET"
                 setRequestProperty("Accept", "application/vnd.github.v3+json")
                 setRequestProperty("User-Agent", "APU-Update-Checker")
+                setRequestProperty("Cache-Control", "no-cache, no-store")
+                setRequestProperty("Pragma", "no-cache")
+                useCaches = false
                 connectTimeout = HTTP_TIMEOUT
                 readTimeout = HTTP_TIMEOUT
             }
@@ -1076,7 +1083,8 @@ class UpdateChecker @Inject constructor(
                 Log.w(TAG, "HTTP GET $url returned $code")
                 return null
             }
-            BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
+            val body = BufferedReader(InputStreamReader(conn.inputStream)).use { it.readText() }
+            UpdateHttpResponse(body, conn.getHeaderField("X-Apu-Cache"))
         } catch (error: Exception) {
             UpdateDiagnosticsStore.markNetworkFailure(trace, source)
             Log.d(TAG, "Update endpoint unavailable: ${error.message}")
