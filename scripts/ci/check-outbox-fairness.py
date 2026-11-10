@@ -25,10 +25,14 @@ class OutboxFairnessContract(unittest.TestCase):
         self.assertIn("failed[candidate.destination] = candidate.position", scan)
         self.assertIn("resumeAfter = failed.filterKeys", scan)
         self.assertIn("maxAttemptsPerCycle: Int = 4", scan)
+        self.assertIn("countAtStart().coerceAtLeast(0)", scan)
+        self.assertIn("remaining = remaining!! - 1", scan)
+        self.assertIn("remaining!! > 0", scan)
         self.assertIn("position = null", scan)
         self.assertIn("failed.clear()", scan)
         self.assertIn("lock.withLock", scan)
         adapter = self.text("data/repository/QueuedOutboxPump.kt")
+        self.assertIn("countAtStart = { messages.queuedOfflineCount() }", adapter)
         self.assertIn("updateOutgoingRetryResult", adapter)
         self.assertIn("getQueuedOfflineMessagesAfter", adapter)
 
@@ -46,7 +50,7 @@ class OutboxFairnessContract(unittest.TestCase):
         report = (ROOT / "scripts/ci/check-android-notification-results.py").read_text()
         self.assertIn("OutboxFairnessInstrumentedTest", runner)
         self.assertIn("OutboxFairnessInstrumentedTest", report)
-        for name in ("actualRoomQueueReachesLaterRecipientPastManyBlockedRows", "aBadOldestMessageDoesNotHideLaterMessagesInTheSameRoomChat", "roomKeysetPaginationKeepsAllEqualTimestampIds"):
+        for name in ("actualRoomQueueReachesLaterRecipientPastManyBlockedRows", "aBadOldestMessageDoesNotHideLaterMessagesInTheSameRoomChat", "growingRoomQueueEndsScanAndRetriesBlockedChat", "roomKeysetPaginationKeepsAllEqualTimestampIds"):
             self.assertIn(f"fun {name}(", test)
             self.assertIn(f'"{name}"', report)
 

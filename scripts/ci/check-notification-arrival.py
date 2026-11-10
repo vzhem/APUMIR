@@ -103,6 +103,7 @@ class NotificationArrivalContract(unittest.TestCase):
                        'boundedQueueContinuesAfterFirstBatchIsClaimed',
                        'mirrorSnapshotsNeverExportOrApplyLocalNotificationWork',
                        'backupMergeDoesNotImportPendingWorkOrClearLiveWork',
+                       'backupMergeRollsBackEveryTableWhenAnInsertFails',
                        'stagedBackupSanitizerReadsWalAndLeavesTheOriginalUntouched'):
             self.assertIn(method, test)
             self.assertIn(method, guard)

@@ -19,6 +19,7 @@ internal class QueuedOutboxPump(
 
     suspend fun pump(pageSize: Int): OutboxProgress = scan.run(
         pageSize = pageSize,
+        countAtStart = { messages.queuedOfflineCount() },
         load = { position, size ->
             val page = if (position == null) messages.getQueuedOfflineMessages(size)
                 else messages.getQueuedOfflineMessagesAfter(position.timestamp, position.id, size)

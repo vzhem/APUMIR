@@ -32,22 +32,33 @@ internal data class OutboxProgress(val sent: Int, val attempted: Int, val moreTo
  * failing row. A page and a handful of network attempts bound each cycle. When
  * a chat has multiple queued rows, rotate past its failed row on the next scan
  * so a permanently bad message cannot hide all later messages in that chat.
+ * The number of rows observed at the start caps visits during that scan, so a
+ * continuously growing queue cannot suppress retries forever. This is a visit
+ * budget, not a database snapshot: concurrent inserts/deletes can change which
+ * rows are visited, and anything missed will be considered on the next scan.
  * The cursor need not survive a process restart: the messages themselves do.
  */
 internal class FairOutboxScan<T>(private val maxAttemptsPerCycle: Int = 4) {
     private val lock = Mutex()
     private var position: OutboxPosition? = null
+    private var remaining: Int? = null
     private var resumeAfter = emptyMap<String, OutboxPosition>()
     private val failed = mutableMapOf<String, OutboxPosition>()
     private val hasFollowing = mutableSetOf<String>()
 
     suspend fun run(
         pageSize: Int,
+        countAtStart: suspend () -> Int,
         load: suspend (OutboxPosition?, Int) -> List<OutboxCandidate<T>>,
         attempt: suspend (T) -> Boolean,
     ): OutboxProgress = lock.withLock {
         require(maxAttemptsPerCycle > 0)
-        val size = pageSize.coerceIn(1, 128)
+        if (remaining == null) remaining = countAtStart().coerceAtLeast(0)
+        val size = minOf(pageSize.coerceIn(1, 128), remaining!!)
+        if (size == 0) {
+            finishScan()
+            return@withLock OutboxProgress(0, 0, false)
+        }
         val page = load(position, size)
         if (page.isEmpty()) {
             finishScan()
@@ -74,9 +85,10 @@ internal class FairOutboxScan<T>(private val maxAttemptsPerCycle: Int = 4) {
                 }
             }
             position = candidate.position
+            remaining = remaining!! - 1
             processed++
         }
-        val more = processed < page.size || page.size == size
+        val more = remaining!! > 0 && (processed < page.size || page.size == size)
         if (!more) finishScan()
         OutboxProgress(sent, attempted, more)
     }
@@ -84,6 +96,7 @@ internal class FairOutboxScan<T>(private val maxAttemptsPerCycle: Int = 4) {
     private fun finishScan() {
         resumeAfter = failed.filterKeys { it in hasFollowing }
         position = null
+        remaining = null
         failed.clear()
         hasFollowing.clear()
     }

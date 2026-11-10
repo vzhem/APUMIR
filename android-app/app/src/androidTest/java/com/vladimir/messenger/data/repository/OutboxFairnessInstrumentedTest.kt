@@ -91,6 +91,45 @@ class OutboxFairnessInstrumentedTest {
         }
     }
 
+    @Test fun growingRoomQueueEndsScanAndRetriesBlockedChat() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        try {
+            val chats = db.chatDao()
+            val messages = db.messageDao()
+            chats.insertChat(ChatEntity(id = "offline", contactId = "pk_offline", contactName = "Offline"))
+            chats.insertChat(ChatEntity(id = "online", contactId = "pk_online", contactName = "Online"))
+            suspend fun add(id: String, timestamp: Long, chat: String) {
+                messages.insertMessageIgnore(MessageEntity(
+                    id = id, chatId = chat, senderId = "self", content = "body", timestamp = timestamp,
+                    isFromMe = true, status = "QUEUED_OFFLINE", recipientId = "pk_$chat",
+                ))
+            }
+            add("a", 1, "offline")
+            add("b", 2, "offline")
+            add("z", 3, "online")
+            val tried = mutableListOf<String>()
+            val pump = QueuedOutboxPump(messages, chats) { id, _, peer, _ ->
+                tried += id
+                peer == "pk_online"
+            }
+            var cycles = 0
+            do {
+                val progress = pump.pump(1)
+                add("new$cycles", 100L + cycles, "offline")
+                cycles++
+                assertTrue("a scan must terminate while rows are appended", cycles < 10)
+            } while (progress.moreToScan)
+            assertEquals(3, cycles)
+            assertEquals(listOf("a", "z"), tried)
+            repeat(2) { pump.pump(1) }
+            assertEquals(listOf("a", "z", "b"), tried)
+            assertEquals("QUEUED_OFFLINE", messages.getMessageById("a")!!.status)
+            assertEquals("SENT", messages.getMessageById("z")!!.status)
+        } finally {
+            db.close()
+        }
+    }
+
     @Test fun roomKeysetPaginationKeepsAllEqualTimestampIds() = runBlocking {
         val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
         try {

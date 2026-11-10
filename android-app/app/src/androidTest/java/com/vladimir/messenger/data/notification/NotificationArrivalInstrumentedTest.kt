@@ -164,13 +164,51 @@ class NotificationArrivalInstrumentedTest {
         }
         create(live, "live")
         create(copy, "history")
-        assertTrue(BackupRestoreMerge.merge(live, copy).merged)
+        SQLiteDatabase.openDatabase(copy.path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
+            db.execSQL("INSERT INTO messages VALUES ('live', 'older copy', 0)")
+        }
+        val first = BackupRestoreMerge.merge(live, copy)
+        assertTrue(first.reason, first.merged)
+        assertEquals(1, first.insertedRows)
+        val repeated = BackupRestoreMerge.merge(live, copy)
+        assertTrue(repeated.reason, repeated.merged)
+        assertEquals(0, repeated.insertedRows)
         SQLiteDatabase.openDatabase(live.path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
             db.rawQuery("SELECT id, content, notificationPending FROM messages ORDER BY id", null).use { c ->
                 assertTrue(c.moveToFirst())
                 assertEquals("history", c.getString(0)); assertEquals("preserved", c.getString(1)); assertEquals(0, c.getInt(2))
                 assertTrue(c.moveToNext())
                 assertEquals("live", c.getString(0)); assertEquals("preserved", c.getString(1)); assertEquals(1, c.getInt(2))
+            }
+        }
+    }
+
+    @Test fun backupMergeRollsBackEveryTableWhenAnInsertFails() {
+        val live = temporary("rollback-live")
+        val copy = temporary("rollback-copy")
+        listOf(live, copy).forEach { file ->
+            SQLiteDatabase.openOrCreateDatabase(file, null).use { db ->
+                // Insertion order makes the successful table precede the failing one.
+                db.execSQL("CREATE TABLE first_table (id TEXT PRIMARY KEY)")
+                db.execSQL("CREATE TABLE last_table (id TEXT PRIMARY KEY)")
+                if (file == copy) {
+                    db.execSQL("INSERT INTO first_table VALUES ('history')")
+                    db.execSQL("INSERT INTO last_table VALUES ('rejected')")
+                } else {
+                    db.execSQL("INSERT INTO first_table VALUES ('live')")
+                    db.execSQL("CREATE TRIGGER refuse_restore BEFORE INSERT ON last_table BEGIN SELECT RAISE(ABORT, 'blocked'); END")
+                }
+            }
+        }
+        val outcome = BackupRestoreMerge.merge(live, copy)
+        assertFalse(outcome.merged)
+        assertFalse(outcome.changed)
+        assertTrue(outcome.reason.isNotBlank())
+        SQLiteDatabase.openDatabase(live.path, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+            db.rawQuery("SELECT id FROM first_table ORDER BY id", null).use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("live", cursor.getString(0))
+                assertFalse(cursor.moveToNext())
             }
         }
     }

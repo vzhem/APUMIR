@@ -12,11 +12,13 @@ EXPECTED_NOTIFICATION = {
     "boundedQueueContinuesAfterFirstBatchIsClaimed",
     "mirrorSnapshotsNeverExportOrApplyLocalNotificationWork",
     "backupMergeDoesNotImportPendingWorkOrClearLiveWork",
+    "backupMergeRollsBackEveryTableWhenAnInsertFails",
     "stagedBackupSanitizerReadsWalAndLeavesTheOriginalUntouched",
 }
 EXPECTED = {CLASS: EXPECTED_NOTIFICATION, OUTBOX_CLASS: {
     "actualRoomQueueReachesLaterRecipientPastManyBlockedRows",
     "aBadOldestMessageDoesNotHideLaterMessagesInTheSameRoomChat",
+    "growingRoomQueueEndsScanAndRetriesBlockedChat",
     "roomKeysetPaginationKeepsAllEqualTimestampIds",
 }}
 
