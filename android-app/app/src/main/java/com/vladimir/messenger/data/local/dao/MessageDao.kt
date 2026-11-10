@@ -83,6 +83,13 @@ interface MessageDao {
     )
     suspend fun updateOutgoingRetryResult(messageId: String, status: String, channel: String): Int
 
+    /** A failed first send must not undo a successful concurrent retry or an ACK. */
+    @Query(
+        "UPDATE messages SET status = 'QUEUED_OFFLINE', channel = 'STORE_FORWARD' WHERE id = :messageId " +
+            "AND isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE')"
+    )
+    suspend fun queueAfterInitialSendFailure(messageId: String): Int
+
     /** User may retry an expired/cancelled file, but delivered file rows stay terminal. */
     @Query(
         "UPDATE messages SET status = 'FILE_EXPIRED' WHERE id = :messageId " +
@@ -132,8 +139,14 @@ interface MessageDao {
     @Query("SELECT * FROM messages WHERE id = :messageId")
     suspend fun getMessageById(messageId: String): MessageEntity?
 
-    @Query("SELECT * FROM messages WHERE isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE') ORDER BY timestamp ASC")
-    suspend fun getPendingOutgoingMessages(): List<MessageEntity>
+    /** Start with this contact's chats and their existing index, not the global outbox. */
+    @Query(
+        "SELECT m.* FROM chats c CROSS JOIN messages m INDEXED BY index_messages_chatId_timestamp " +
+            "WHERE c.contactId = :peerId AND m.chatId = c.id AND m.isFromMe = 1 " +
+            "AND m.status IN ('PENDING', 'QUEUED_OFFLINE') " +
+            "ORDER BY m.timestamp ASC, m.id ASC LIMIT :limit"
+    )
+    suspend fun getRetryableOutgoingForPeer(peerId: String, limit: Int): List<MessageEntity>
 
     /**
      * р245: содержимое последних строк переписки - для насоса медиа. По нему
@@ -144,22 +157,22 @@ interface MessageDao {
     suspend fun recentContents(limit: Int): List<String>
 
     /** Keyset pagination prevents an unreachable oldest message from starving later chats. */
-    @Query("SELECT * FROM messages WHERE isFromMe = 1 AND status = 'QUEUED_OFFLINE' ORDER BY timestamp ASC, id ASC LIMIT :limit")
-    suspend fun getQueuedOfflineMessages(limit: Int): List<MessageEntity>
+    @Query("SELECT * FROM messages WHERE isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE') ORDER BY timestamp ASC, id ASC LIMIT :limit")
+    suspend fun getRetryableOutgoingMessages(limit: Int): List<MessageEntity>
 
     @Query(
-        "SELECT * FROM messages WHERE isFromMe = 1 AND status = 'QUEUED_OFFLINE' " +
+        "SELECT * FROM messages WHERE isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE') " +
             "AND timestamp >= :afterTimestamp AND (timestamp > :afterTimestamp OR " +
             "(timestamp = :afterTimestamp AND id > :afterId)) " +
             "ORDER BY timestamp ASC, id ASC LIMIT :limit"
     )
-    suspend fun getQueuedOfflineMessagesAfter(afterTimestamp: Long, afterId: String, limit: Int): List<MessageEntity>
+    suspend fun getRetryableOutgoingMessagesAfter(afterTimestamp: Long, afterId: String, limit: Int): List<MessageEntity>
 
     @Query("SELECT * FROM messages WHERE chatId = :chatId AND isFromMe = 1 ORDER BY timestamp DESC LIMIT :limit")
     suspend fun getRecentOutgoingMessagesForChat(chatId: String, limit: Int): List<MessageEntity>
 
 
-    @Query("SELECT * FROM messages WHERE chatId = :chatId AND isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE', 'SENT') ORDER BY timestamp DESC LIMIT :limit")
+    @Query("SELECT * FROM messages WHERE chatId = :chatId AND isFromMe = 1 AND status IN ('PENDING', 'QUEUED_OFFLINE', 'SENT') ORDER BY timestamp DESC, id DESC LIMIT :limit")
     suspend fun getUnconfirmedOutgoingMessages(chatId: String, limit: Int): List<MessageEntity>
 
     @Query("UPDATE messages SET channel = :channel WHERE id = :messageId")

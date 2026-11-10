@@ -49,7 +49,7 @@ class ChatOutboxPump(
                 var sent = 0
                 var moreToScan = false
                 try {
-                    queued = messageDao.queuedOfflineCount()
+                    queued = messageDao.countPendingOutgoing()
                     if (queued > 0) {
                         val progress = if (wakeLock != null) {
                             wakeLock.withLock { chatRepository.pumpQueuedOffline() }

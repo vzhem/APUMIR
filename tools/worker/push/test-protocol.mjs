@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { generateKeyPairSync, randomBytes, sign } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import { bytesFromHex, hexFromBytes, registrationPayload, routeFor, shardFor, validRegistration, validWake, verifyRegistration } from "./protocol.mjs";
 
 function identity() {
@@ -18,6 +19,16 @@ async function signed(keys, changes = {}) {
   return value;
 }
 
+test("isolated deployment configuration stays disabled by default", async () => {
+  const config = await readFile(new URL("./wrangler.toml", import.meta.url), "utf8");
+  assert.match(config, /^name\s*=\s*"apu-push-wake-experimental"\s*$/m);
+  assert.match(config, /^PUSH_ENABLED\s*=\s*"false"\s*$/m);
+  assert.equal((config.match(/^PUSH_ENABLED\s*=/gm) || []).length, 1);
+  assert.match(config, /^class_name\s*=\s*"PushShard"\s*$/m);
+  assert.match(config, /^new_sqlite_classes\s*=\s*\["PushShard"\]\s*$/m);
+  assert.doesNotMatch(config, /^name\s*=\s*"p2p-relay"\s*$/m);
+});
+
 test("route has a shared deterministic vector and is bound to owner and capability", async () => {
   const owner = "00".repeat(32);
   const cap = "01".repeat(32);
@@ -31,6 +42,25 @@ test("route has a shared deterministic vector and is bound to owner and capabili
   assert.notEqual(await routeFor(owner, "02".repeat(32)), await routeFor(owner, cap));
   assert.equal(await shardFor(owner), await shardFor(owner));
   assert.ok((await shardFor(owner)) < 64);
+});
+
+test("registration accepts the independent Rust and Node Ed25519 vector", async () => {
+  const key = createPrivateKey({
+    key: Buffer.concat([Buffer.from("302e020100300506032b657004220420", "hex"), Buffer.alloc(32, 2)]),
+    format: "der", type: "pkcs8",
+  });
+  const owner = createPublicKey(key).export({ format: "der", type: "spki" }).subarray(-32).toString("hex");
+  const value = {
+    action: "register", owner,
+    capability: "e684e7708138f2e247613a7784c120d6154816a7bd1d88a54c53f155d8e9617a",
+    device: "56".repeat(16), sequence: 17, issuedAt: 1_700_000_000,
+    token: "fcm-test-token-abcdefghijklmnop",
+    signature: "51d08645a428e7615aaf8cec4d606f9c2a0b65f98a3703844cd0a10156ba10c67971f74b6ee86a90374c37343bd714b82f18560c0b8c389e8297ae1ef178af03",
+  };
+  assert.equal(owner, "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394");
+  assert.equal(sign(null, await registrationPayload(value), key).toString("hex"), value.signature);
+  assert.ok(validRegistration(value, value.issuedAt));
+  assert.ok(await verifyRegistration(value));
 });
 
 test("registration signature binds receiver, capability, device, sequence, time and token", async () => {

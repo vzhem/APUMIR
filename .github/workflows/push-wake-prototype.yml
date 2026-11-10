@@ -29,3 +29,7 @@ jobs:
         run: npm ci --prefix tools/worker/push --no-audit --no-fund
       - name: Exercise Worker and SQLite with fake FCM
         run: npm test --prefix tools/worker/push
+      - name: Check isolated disabled deployment bundle without deploying
+        env:
+          WRANGLER_SEND_METRICS: 'false'
+        run: npm run check:bundle --prefix tools/worker/push

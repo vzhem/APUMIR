@@ -56,10 +56,10 @@ class DeliveryCadenceContractTest(unittest.TestCase):
         self.assertNotIn("chatQueueCycle", self.service)
         self.assertIn("chatOutboxPump.start(serviceScope)", self.service)
         self.assertIn("OutboxCadence.nextDelayMs(", self.pump)
-        self.assertIn("messageDao.queuedOfflineCount()", self.pump)
+        self.assertIn("messageDao.countPendingOutgoing()", self.pump)
         dao = read(ROOT / "android-app/app/src/main/java/com/vladimir/messenger/data/local/dao/MessageDao.kt")
-        self.assertIn("suspend fun queuedOfflineCount(): Int", dao)
-        self.assertIn("WHERE isFromMe = 1 AND status = 'QUEUED_OFFLINE'\")", dao)
+        self.assertIn("suspend fun countPendingOutgoing(): Int", dao)
+        self.assertIn("AND status IN ('PENDING', 'QUEUED_OFFLINE')", dao)
 
     def test_idle_pumps_back_off_and_wake_lock_is_bounded(self):
         idle = read(SERVICE / "ServiceIdleCadence.kt")

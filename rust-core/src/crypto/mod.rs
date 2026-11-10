@@ -57,6 +57,7 @@ pub mod identity;
 pub mod kdf;
 pub mod keys;
 pub mod push_capability;
+pub mod push_registration;
 pub mod keystore;
 pub mod ratchet;
 pub mod referral;

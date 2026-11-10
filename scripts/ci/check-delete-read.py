@@ -159,7 +159,7 @@ class DeleteReadTest(unittest.TestCase):
         PENDING — то есть почти ноль, когда очередь ядра стояла полной
         («своё ждёт получателя=1000» в том же отчёте). Сообщение, отданное ядру,
         но не подтверждённое получателем, — такое же «ещё не ушло». Список
-        обязан совпадать с помпой досылки (`getPendingOutgoingMessages`).
+        обязан совпадать с помпой досылки (`getRetryableOutgoingMessages`).
         """
         sql = dao_query("countPendingOutgoing")
         self.insert("PENDING", own=True, message_id="pending")

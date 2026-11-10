@@ -4,9 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "test": "node --test test-*.mjs"
+    "test": "node --test test-*.mjs",
+    "check:bundle": "wrangler deploy --dry-run --outdir ../../../target/push-dry-run"
   },
   "devDependencies": {
-    "miniflare": "3.20250718.2"
+    "miniflare": "3.20250718.2",
+    "wrangler": "4.159.0"
   }
 }

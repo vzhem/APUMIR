@@ -9,7 +9,7 @@ import com.vladimir.messenger.domain.model.MessageChannel
 import com.vladimir.messenger.domain.model.MessageStatus
 import kotlinx.coroutines.CancellationException
 
-/** Room-backed, bounded fair scan of the phone-owned outgoing queue. */
+/** Room-backed, bounded fair scan of PENDING and phone-owned QUEUED_OFFLINE messages. */
 internal class QueuedOutboxPump(
     private val messages: MessageDao,
     private val chats: ChatDao,
@@ -19,10 +19,10 @@ internal class QueuedOutboxPump(
 
     suspend fun pump(pageSize: Int): OutboxProgress = scan.run(
         pageSize = pageSize,
-        countAtStart = { messages.queuedOfflineCount() },
+        countAtStart = { messages.countPendingOutgoing() },
         load = { position, size ->
-            val page = if (position == null) messages.getQueuedOfflineMessages(size)
-                else messages.getQueuedOfflineMessagesAfter(position.timestamp, position.id, size)
+            val page = if (position == null) messages.getRetryableOutgoingMessages(size)
+                else messages.getRetryableOutgoingMessagesAfter(position.timestamp, position.id, size)
             page.map { row ->
                 OutboxCandidate(OutboxPosition(row.timestamp, row.id), row.chatId, row)
             }
@@ -30,8 +30,8 @@ internal class QueuedOutboxPump(
         attempt = { row ->
             try {
                 val chat = chats.getChatById(row.chatId)
-                val peer = chat?.contactId.orEmpty()
-                if (peer.isBlank()) {
+                val peer = chat?.contactId.orEmpty().ifBlank { row.recipientId }
+                if (peer.isBlank() || !peer.startsWith("pk_")) {
                     false
                 } else {
                     val delivered = send(

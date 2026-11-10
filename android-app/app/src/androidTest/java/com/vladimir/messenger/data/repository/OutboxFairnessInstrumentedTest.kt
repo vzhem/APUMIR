@@ -28,7 +28,8 @@ class OutboxFairnessInstrumentedTest {
             repeat(515) {
                 messages.insertMessageIgnore(MessageEntity(
                     id = "a%04d".format(it), chatId = "offline", senderId = "self", content = "body",
-                    timestamp = 42, isFromMe = true, status = "QUEUED_OFFLINE", recipientId = "pk_offline",
+                    timestamp = 42, isFromMe = true,
+                    status = if (it % 2 == 0) "PENDING" else "QUEUED_OFFLINE", recipientId = "pk_offline",
                 ))
             }
             messages.insertMessageIgnore(MessageEntity(
@@ -51,9 +52,9 @@ class OutboxFairnessInstrumentedTest {
                 assertTrue("scan must finish", cycles < 40)
             } while (progress.moreToScan)
             assertEquals(listOf("a0000", "z"), tried)
-            assertEquals("QUEUED_OFFLINE", messages.getMessageById("a0000")!!.status)
+            assertEquals("PENDING", messages.getMessageById("a0000")!!.status)
             assertEquals("DELIVERED", messages.getMessageById("z")!!.status)
-            assertEquals(515, messages.queuedOfflineCount())
+            assertEquals(515, messages.countPendingOutgoing())
         } finally {
             db.close()
         }
@@ -130,6 +131,62 @@ class OutboxFairnessInstrumentedTest {
         }
     }
 
+    @Test fun discoveryQueryIsContactScopedAndBoundedAcrossChats() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        try {
+            val chats = db.chatDao()
+            val messages = db.messageDao()
+            chats.insertChat(ChatEntity(id = "other", contactId = "pk_other", contactName = "Other"))
+            chats.insertChat(ChatEntity(id = "peer1", contactId = "pk_peer", contactName = "Peer"))
+            chats.insertChat(ChatEntity(id = "peer2", contactId = "pk_peer", contactName = "Peer"))
+            repeat(100) { i ->
+                messages.insertMessageIgnore(MessageEntity(
+                    id = "other%03d".format(i), chatId = "other", senderId = "self", content = "private",
+                    timestamp = 1, isFromMe = true, status = "PENDING", recipientId = "pk_other",
+                ))
+            }
+            repeat(25) { i ->
+                messages.insertMessageIgnore(MessageEntity(
+                    id = "peer%03d".format(i), chatId = if (i % 2 == 0) "peer1" else "peer2",
+                    senderId = "self", content = "private", timestamp = 2, isFromMe = true,
+                    status = if (i % 2 == 0) "PENDING" else "QUEUED_OFFLINE", recipientId = "pk_peer",
+                ))
+            }
+            messages.insertMessageIgnore(MessageEntity(
+                id = "not-retryable", chatId = "peer1", senderId = "self", content = "private",
+                timestamp = 0, isFromMe = true, status = "SENT", recipientId = "pk_peer",
+            ))
+            val selected = messages.getRetryableOutgoingForPeer("pk_peer", 20)
+            assertEquals((0 until 20).map { "peer%03d".format(it) }, selected.map { it.id })
+            assertTrue(messages.getRetryableOutgoingForPeer("pk_unknown", 20).isEmpty())
+        } finally {
+            db.close()
+        }
+    }
+
+    @Test fun initialFailureCannotUndoConcurrentSuccessOrAck() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
+        try {
+            val messages = db.messageDao()
+            listOf("success", "ack", "queued").forEach { id ->
+                messages.insertMessageIgnore(MessageEntity(
+                    id = id, chatId = "chat", senderId = "self", content = "private",
+                    timestamp = 1, isFromMe = true, status = "PENDING", recipientId = "pk_peer",
+                ))
+            }
+            assertEquals(1, messages.updateOutgoingRetryResult("success", "SENT", "LOCAL"))
+            assertEquals(1, messages.markOutgoingMessageDelivered("ack"))
+            assertEquals(0, messages.queueAfterInitialSendFailure("success"))
+            assertEquals(0, messages.queueAfterInitialSendFailure("ack"))
+            assertEquals(1, messages.queueAfterInitialSendFailure("queued"))
+            assertEquals("SENT", messages.getMessageById("success")!!.status)
+            assertEquals("DELIVERED", messages.getMessageById("ack")!!.status)
+            assertEquals("QUEUED_OFFLINE", messages.getMessageById("queued")!!.status)
+        } finally {
+            db.close()
+        }
+    }
+
     @Test fun roomKeysetPaginationKeepsAllEqualTimestampIds() = runBlocking {
         val db = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).build()
         try {
@@ -140,11 +197,11 @@ class OutboxFairnessInstrumentedTest {
                     timestamp = 123, isFromMe = true, status = "QUEUED_OFFLINE",
                 ))
             }
-            val first = messages.getQueuedOfflineMessages(2)
+            val first = messages.getRetryableOutgoingMessages(2)
             assertEquals(listOf("a", "b"), first.map { it.id })
-            val second = messages.getQueuedOfflineMessagesAfter(first.last().timestamp, first.last().id, 2)
+            val second = messages.getRetryableOutgoingMessagesAfter(first.last().timestamp, first.last().id, 2)
             assertEquals(listOf("c", "d"), second.map { it.id })
-            val third = messages.getQueuedOfflineMessagesAfter(second.last().timestamp, second.last().id, 2)
+            val third = messages.getRetryableOutgoingMessagesAfter(second.last().timestamp, second.last().id, 2)
             assertEquals(listOf("e"), third.map { it.id })
             assertFalse(third.isEmpty())
         } finally {

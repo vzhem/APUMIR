@@ -19,6 +19,8 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, OUTBOX_CLASS: {
     "actualRoomQueueReachesLaterRecipientPastManyBlockedRows",
     "aBadOldestMessageDoesNotHideLaterMessagesInTheSameRoomChat",
     "growingRoomQueueEndsScanAndRetriesBlockedChat",
+    "discoveryQueryIsContactScopedAndBoundedAcrossChats",
+    "initialFailureCannotUndoConcurrentSuccessOrAck",
     "roomKeysetPaginationKeepsAllEqualTimestampIds",
 }}
 

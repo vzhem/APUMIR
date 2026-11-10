@@ -14,7 +14,7 @@ class OutboxFairnessContract(unittest.TestCase):
 
     def test_room_uses_ordered_indexed_keyset(self):
         dao = self.text("data/local/dao/MessageDao.kt")
-        self.assertIn("getQueuedOfflineMessagesAfter", dao)
+        self.assertIn("getRetryableOutgoingMessagesAfter", dao)
         self.assertIn("timestamp >= :afterTimestamp", dao)
         self.assertIn("timestamp = :afterTimestamp AND id > :afterId", dao)
         self.assertIn("ORDER BY timestamp ASC, id ASC LIMIT :limit", dao)
@@ -32,9 +32,24 @@ class OutboxFairnessContract(unittest.TestCase):
         self.assertIn("failed.clear()", scan)
         self.assertIn("lock.withLock", scan)
         adapter = self.text("data/repository/QueuedOutboxPump.kt")
-        self.assertIn("countAtStart = { messages.queuedOfflineCount() }", adapter)
+        self.assertIn("countAtStart = { messages.countPendingOutgoing() }", adapter)
         self.assertIn("updateOutgoingRetryResult", adapter)
-        self.assertIn("getQueuedOfflineMessagesAfter", adapter)
+        self.assertIn("getRetryableOutgoingMessagesAfter", adapter)
+
+    def test_peer_retry_is_bounded_and_does_not_log_message_content(self):
+        repo = self.text("data/repository/ChatRepository.kt")
+        dao = self.text("data/local/dao/MessageDao.kt")
+        peer = self.text("data/repository/PeerOutboxRetry.kt")
+        self.assertNotIn("getPendingOutgoingMessages()", repo)
+        self.assertNotIn("content=${msg.content.take", repo)
+        self.assertIn("getRetryableOutgoingForPeer(peer, limit)", repo)
+        self.assertIn("c.contactId = :peerId", dao)
+        self.assertIn("m.timestamp ASC, m.id ASC LIMIT :limit", dao)
+        self.assertIn("PENDING_LIMIT = 20", peer)
+        self.assertIn("TOTAL_LIMIT = 50", peer)
+        self.assertIn("catch (cancelled: CancellationException)", peer)
+        self.assertIn("queueAfterInitialSendFailure(messageId)", repo)
+        self.assertIn("status IN ('PENDING', 'QUEUED_OFFLINE')", dao)
 
     def test_unfinished_scan_does_not_wait_for_failure_backoff(self):
         cadence = self.text("service/DeliveryCadence.kt")
@@ -50,7 +65,7 @@ class OutboxFairnessContract(unittest.TestCase):
         report = (ROOT / "scripts/ci/check-android-notification-results.py").read_text()
         self.assertIn("OutboxFairnessInstrumentedTest", runner)
         self.assertIn("OutboxFairnessInstrumentedTest", report)
-        for name in ("actualRoomQueueReachesLaterRecipientPastManyBlockedRows", "aBadOldestMessageDoesNotHideLaterMessagesInTheSameRoomChat", "growingRoomQueueEndsScanAndRetriesBlockedChat", "roomKeysetPaginationKeepsAllEqualTimestampIds"):
+        for name in ("actualRoomQueueReachesLaterRecipientPastManyBlockedRows", "aBadOldestMessageDoesNotHideLaterMessagesInTheSameRoomChat", "growingRoomQueueEndsScanAndRetriesBlockedChat", "discoveryQueryIsContactScopedAndBoundedAcrossChats", "initialFailureCannotUndoConcurrentSuccessOrAck", "roomKeysetPaginationKeepsAllEqualTimestampIds"):
             self.assertIn(f"fun {name}(", test)
             self.assertIn(f'"{name}"', report)
 

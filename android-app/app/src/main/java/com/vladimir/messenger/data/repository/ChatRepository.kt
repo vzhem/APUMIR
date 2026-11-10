@@ -42,12 +42,6 @@ class ChatRepository @Inject constructor(
     private val referralAttribution: com.vladimir.messenger.data.referral.ReferralAttributionSender,
     private val contactDao: com.vladimir.messenger.data.local.dao.ContactDao,
 ) {
-    // Защита от повторного FULL SYNC в течение 30 секунд
-    private val lastFullSyncTime = mutableMapOf<String, Long>()
-    // Полная досылка неподтверждённого - вещь дорогая (до 50 сообщений разом),
-    // поэтому одному собеседнику не чаще раза в 5 минут.
-    private val FULL_SYNC_COOLDOWN_MS = 300_000L
-
     companion object {
         /** р249: ключ кадра флагов - личный чат (узел собеседника). */
         const val CHAT_FLAG_PERSONAL = "p"
@@ -290,14 +284,12 @@ class ChatRepository @Inject constructor(
                 // Rust may also retain the compatible relay in its bounded mesh queue. Until a
                 // recipient receipt arrives this is queued, never SENT. Keep the update guarded
                 // for the same early-ACK race as the direct-success path.
-                messageDao.updateOutgoingRetryResult(
-                    messageId,
-                    MessageStatus.QUEUED_OFFLINE.name,
-                    MessageChannel.STORE_FORWARD.name,
-                )
-                Log.i(TAG, "Message queued offline in phone-owned mesh: $messageId")
-                com.vladimir.messenger.data.diagnostics.TransferDiagnostics
-                    .noteMessageQueuedOffline()
+                if (messageDao.queueAfterInitialSendFailure(messageId) > 0) {
+                    Log.i(TAG, "Message queued offline in phone-owned mesh: $messageId")
+                    com.vladimir.messenger.data.diagnostics.TransferDiagnostics.noteMessageQueuedOffline()
+                } else {
+                    Log.i(TAG, "Initial send finished after the row had already advanced")
+                }
             }
 
             // р226: отразить отправленное на зеркале второго устройства.
@@ -308,7 +300,10 @@ class ChatRepository @Inject constructor(
                     content = content,
                     ts = timestamp,
                     recipientId = actualRecipientId,
-                    status = if (sentDirectly) MessageStatus.SENT.name else MessageStatus.QUEUED_OFFLINE.name,
+                    // A concurrent retry or ACK may have advanced the row while
+                    // the original send was in flight; mirror the stored state.
+                    status = messageDao.getMessageById(messageId)?.status
+                        ?: if (sentDirectly) MessageStatus.SENT.name else MessageStatus.QUEUED_OFFLINE.name,
                     replyToId = reply?.messageId.orEmpty(),
                     replyAuthor = reply?.author.orEmpty(),
                     replyText = reply?.let { DirectReplyWire.preview(it.text) }.orEmpty(),
@@ -486,121 +481,30 @@ class ChatRepository @Inject constructor(
     private val queuedOutbox by lazy { QueuedOutboxPump(messageDao, chatDao, ::sendViaRust) }
     internal suspend fun pumpQueuedOffline(limit: Int = 20): OutboxProgress = queuedOutbox.pump(limit)
 
-    suspend fun retryPendingMessagesForPeer(peerId: String): Int {
-        var retried = 0
-
-        // ШАГ 1: Классический retry PENDING (если такие есть)
-        try {
-            val pending = messageDao.getPendingOutgoingMessages()
-            Log.i(TAG, "🔍 retryPending: found ${pending.size} PENDING messages total")
-            for (msg in pending) {
-                val chat = chatDao.getChatById(msg.chatId) ?: continue
-                if (chat.contactId != peerId) continue
-
-                Log.i(TAG, "  📤 retry PENDING msg=${msg.id.take(8)} content=${msg.content.take(20)}")
-                val sent = sendViaRust(
-                    msg.id,
-                    msg.chatId,
-                    peerId,
-                    TextColorWire.wrap(msg.content, msg.textColor, msg.senderNameColor),
-                )
-                Log.i(TAG, "  📤 retry result: sent=$sent")
-
-                if (sent) {
-                    messageDao.updateOutgoingRetryResult(
-                        msg.id,
-                        MessageStatus.SENT.name,
-                        MessageChannel.LOCAL.name,
-                    )
-                    retried++
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ retryPending step 1 failed: ${e.message}", e)
-        }
-
-        // ШАГ 2: FULL SYNC - отправить последние 50 сообщений этому peer
-        try {
-            // Проверка паузы: не досылать всё подряд одному и тому же собеседнику чаще, чем раз в 5 минут.
-            val now = System.currentTimeMillis()
-            val lastSync = lastFullSyncTime[peerId] ?: 0L
-            val timeSinceLastSync = now - lastSync
-            if (timeSinceLastSync < FULL_SYNC_COOLDOWN_MS) {
-                Log.i(TAG, "⏱ FULL SYNC: cooldown активен для peer=$peerId (прошло ${timeSinceLastSync}ms из ${FULL_SYNC_COOLDOWN_MS}ms)")
-                return retried
-            }
-            lastFullSyncTime[peerId] = now
-            
-            Log.i(TAG, "🔍 FULL SYNC: ищем чат для peer=$peerId")
-            val chat = chatDao.getChatByContactId(peerId)
-            if (chat != null) {
-                Log.i(TAG, "✅ Найден чат: id=${chat.id}")
-                val recentMessages = messageDao.getUnconfirmedOutgoingMessages(chat.id, 50)
-                Log.i(TAG, "🔄 FULL SYNC: found ${recentMessages.size} unconfirmed (PENDING/SENT) messages")
-                
-                for (msg in recentMessages) {
-                    try {
-                        Log.i(TAG, "  🚀 sync msg=${msg.id.take(8)} content=${msg.content.take(20)}")
-                        val sent = sendViaRust(
-                            msg.id,
-                            msg.chatId,
-                            peerId,
-                            TextColorWire.wrap(msg.content, msg.textColor, msg.senderNameColor),
-                        )
-                        Log.i(TAG, "  📤 sync sent=$sent")
-                        if (sent) retried++
-                    } catch (e: Exception) {
-                        Log.e(TAG, "  ❌ sync failed: ${e.message}", e)
-                    }
-                }
-            } else {
-                Log.w(TAG, "⚠ No chat found for peer=$peerId")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "❌ FULL SYNC step 2 failed: ${e.message}", e)
-        }
-
-        Log.i(TAG, "✅ Synced $retried messages with peer=$peerId")
-        return retried
+    private val peerOutbox by lazy {
+        PeerOutboxRetry(
+            loadPending = { peer, limit -> messageDao.getRetryableOutgoingForPeer(peer, limit) },
+            loadRecent = { peer, limit ->
+                chatDao.getChatByContactId(peer)?.let { messageDao.getUnconfirmedOutgoingMessages(it.id, limit) }
+                    ?: emptyList()
+            },
+            send = ::sendViaRust,
+            markSent = { id ->
+                messageDao.updateOutgoingRetryResult(id, MessageStatus.SENT.name, MessageChannel.LOCAL.name)
+                Unit
+            },
+            recordFailure = { Log.w(TAG, "Peer outbox retry failed") },
+        )
     }
+
+    suspend fun retryPendingMessagesForPeer(peerId: String): Int = peerOutbox.retry(peerId)
 
     suspend fun updateContactName(contactId: String, name: String) {
         chatDao.updateContactName(contactId, name)
     }
 
-    suspend fun retryAllPendingMessages(): Int {
-        val pending = messageDao.getPendingOutgoingMessages()
-        var retried = 0
-
-        for (msg in pending) {
-            val chat = chatDao.getChatById(msg.chatId) ?: continue
-            val peerId = chat.contactId
-            if (peerId.isBlank()) continue
-
-            val sent = sendViaRust(
-                msg.id,
-                msg.chatId,
-                peerId,
-                TextColorWire.wrap(msg.content, msg.textColor, msg.senderNameColor),
-            )
-            Log.i(TAG, "retryAllPendingMessages peer=$peerId msg=${msg.id} sent=$sent")
-
-            if (sent) {
-                messageDao.updateOutgoingRetryResult(
-                    msg.id,
-                    MessageStatus.SENT.name,
-                    MessageChannel.LOCAL.name,
-                )
-                retried++
-            }
-        }
-
-        if (retried > 0) {
-            Log.i(TAG, "Retried $retried pending messages total")
-        }
-
-        return retried
-    }
+    /** The common fair scanner also covers discovery/network-connect retries. */
+    suspend fun retryAllPendingMessages(): Int = queuedOutbox.pump(20).sent
 
     // ── р226: живое зеркало устройств одной личности ────────────────────────
 
@@ -925,41 +829,8 @@ class ChatRepository @Inject constructor(
         }
     }
 
-    /**
-     * р242: досылка НЕДООТПРАВЛЕННОГО (PENDING) без опоры на события сети.
-     *
-     * Раньше досылка шла только по событию «увидели собеседника». Если событие
-     * пропущено (перезапуск движка, смена роли зеркала, тихий реконнект), строка
-     * так и висела «в ожидании» — со стороны это выглядит как «сообщение не
-     * дошло». Теперь раз в минуту проходим по всем PENDING и пробуем снова.
-     * Ошибки глушим: движка нет - просто попробуем в следующий раз.
-     */
-    suspend fun pumpPendingOutgoing(): Int {
-        val pending = runCatching { messageDao.getPendingOutgoingMessages() }.getOrDefault(emptyList())
-        if (pending.isEmpty()) return 0
-        var sent = 0
-        for (msg in pending) {
-            val chat = runCatching { chatDao.getChatById(msg.chatId) }.getOrNull() ?: continue
-            val peer = chat.contactId.ifBlank { msg.recipientId }
-            if (peer.isBlank() || !peer.startsWith("pk_")) continue
-            val ok = runCatching {
-                sendViaRust(msg.id, msg.chatId, peer, TextColorWire.wrap(msg.content, msg.textColor, msg.senderNameColor))
-            }
-                .getOrDefault(false)
-            if (ok) {
-                runCatching {
-                    messageDao.updateOutgoingRetryResult(
-                        msg.id,
-                        MessageStatus.SENT.name,
-                        MessageChannel.LOCAL.name,
-                    )
-                }
-                sent++
-            }
-        }
-        if (sent > 0) Log.i(TAG, "pending pump: отправлено $sent из ${pending.size}")
-        return sent
-    }
+    /** The regular outbox already retries both PENDING and QUEUED_OFFLINE fairly. */
+    suspend fun pumpPendingOutgoing(): Int = queuedOutbox.pump(20).sent
 
     /**
      * р239: убрать из переписки служебные пакеты «печатает…», которые успели

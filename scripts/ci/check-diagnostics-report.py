@@ -1280,14 +1280,15 @@ class DiagnosticsContractsTest(unittest.TestCase):
         query = dao.split("SELECT COUNT(*) FROM messages WHERE isFromMe = 1", 1)[1].split(")", 1)[0]
         self.assertIn("'PENDING'", query)
         self.assertIn("'QUEUED_OFFLINE'", query)
-        # Тот же список, что у помпы досылки (`getPendingOutgoingMessages`):
-        # иначе «ещё не ушло» на экране и то, что реально досылается, разойдутся.
+        # Тот же список, что у fair-помпы (`getRetryableOutgoingMessages`):
+        # иначе «ещё не ушло» на экране и реально досылаемое разойдутся.
         pump = dao.split(
             "@Query(\"SELECT * FROM messages WHERE isFromMe = 1 AND status IN "
-            "('PENDING', 'QUEUED_OFFLINE') ORDER BY timestamp ASC\")",
+            "('PENDING', 'QUEUED_OFFLINE') ORDER BY timestamp ASC, id ASC LIMIT :limit\")",
             1,
         )
         self.assertEqual(len(pump), 2, "помпа досылки обязана брать оба состояния")
+        self.assertIn("suspend fun getRetryableOutgoingMessages(limit: Int)", pump[1])
 
 
 if __name__ == "__main__":
