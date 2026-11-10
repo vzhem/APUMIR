@@ -34,7 +34,7 @@ fi
 # push storage; never accept a green task that silently skipped acceptance cases.
 clear_report
 ./gradlew :app:connectedDebugAndroidTest --no-daemon \
-    -Pandroid.testInstrumentationRunnerArguments.class=com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest,com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest,com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest,com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest,com.vladimir.messenger.data.push.FirebaseClientConfigurationInstrumentedTest \
+    -Pandroid.testInstrumentationRunnerArguments.class=com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest,com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest,com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest,com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest,com.vladimir.messenger.data.push.PushWakeIntegrationInstrumentedTest,com.vladimir.messenger.data.push.FirebaseClientConfigurationInstrumentedTest \
     2>&1 | tee "$reports/notification.log"
 notification_gradle=${PIPESTATUS[0]}
 python3 "$root/scripts/ci/check-android-notification-results.py" \

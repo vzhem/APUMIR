@@ -39,6 +39,8 @@ class NotificationResultsTest(unittest.TestCase):
         self.assertEqual(1, self.run_report(missing_push))
         missing_registration = [case for case in self.all_cases() if case[0] != checker.REGISTRATION_CLASS]
         self.assertEqual(1, self.run_report(missing_registration))
+        missing_integration = [case for case in self.all_cases() if case[0] != checker.PUSH_INTEGRATION_CLASS]
+        self.assertEqual(1, self.run_report(missing_integration))
         missing_firebase = [case for case in self.all_cases() if case[0] != checker.FIREBASE_CLASS]
         self.assertEqual(1, self.run_report(missing_firebase))
 

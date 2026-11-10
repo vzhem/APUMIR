@@ -1,5 +1,6 @@
 package com.vladimir.messenger.data.push
 
+import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import androidx.test.core.app.ApplicationProvider
@@ -34,6 +35,8 @@ class PushRegistrationStoreInstrumentedTest {
     private val changedPeer = byteArrayOf(4, 5, 7)
     private val other = byteArrayOf(7, 8, 9)
     private val tokenHash = "ab".repeat(32)
+    private val route = "12".repeat(32)
+    private val otherRoute = "34".repeat(32)
     private lateinit var context: Context
     private lateinit var dbFile: File
     private lateinit var alias: String
@@ -132,17 +135,17 @@ class PushRegistrationStoreInstrumentedTest {
         val journal = store()
         val first = ready(journal.reserve(participants(), 1000))
         val second = ready(journal.reserve(participants(), 1001))
-        assertEquals(PushRegistrationStore.Result.Rejected, journal.registered(participants(), first.sequence, tokenHash, 1002))
+        assertEquals(PushRegistrationStore.Result.Rejected, journal.registered(participants(), first.sequence, tokenHash, 1002, route))
         assertNull(ready(journal.read(participants())).announcement())
-        val accepted = ready(journal.registered(participants(), second.sequence, tokenHash, 1003))
+        val accepted = ready(journal.registered(participants(), second.sequence, tokenHash, 1003, route))
         assertNotNull(accepted.announcement())
-        assertEquals(PushRegistrationStore.Result.Rejected, journal.registered(participants(), second.sequence, tokenHash, 1004))
+        assertEquals(PushRegistrationStore.Result.Rejected, journal.registered(participants(), second.sequence, tokenHash, 1004, route))
     }
 
     @Test fun revocationAndRotationSurviveRestartWithoutLosingTheOldSequence() {
         val journal = store()
         val attempt = ready(journal.reserve(participants(), 1000))
-        ready(journal.registered(participants(), attempt.sequence, tokenHash, 1001))
+        ready(journal.registered(participants(), attempt.sequence, tokenHash, 1001, route))
         val revoking = ready(journal.beginRevocation(participants()))
         assertEquals(1001L, revoking.generation)
         assertEquals(PushRegistrationStore.Result.Rejected, journal.revoked(participants(), attempt.sequence))
@@ -179,6 +182,104 @@ class PushRegistrationStoreInstrumentedTest {
         assertEquals(PushRegistrationStore.Result.Unavailable, fresh.read(participants()))
         assertEquals(PushRegistrationStore.Result.Unavailable, fresh.reserve(participants(), 1003))
         assertFalse(KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.containsAlias(alias))
+    }
+
+    @Test fun routeIndexIsEncryptedAndRemovedAsSoonAsRevocationBegins() {
+        val journal = store()
+        val attempt = ready(journal.reserve(participants(), 1000))
+        assertEquals(PushRegistrationStore.RouteResult.Missing, journal.findRoute(route))
+        assertEquals(PushRegistrationStore.Result.Rejected, journal.registered(participants(), attempt.sequence, tokenHash, 1001, "BAD"))
+        val registered = ready(journal.registered(participants(), attempt.sequence, tokenHash, 1001, route))
+        val indexed = journal.findRoute(route) as PushRegistrationStore.RouteResult.Found
+        assertEquals(localId, indexed.localId)
+        assertEquals(peerId, indexed.peerId)
+        assertEquals(registered.generation, indexed.generation)
+        assertFalse(indexed.toString().contains(localId))
+        assertEquals(PushRegistrationStore.RouteResult.Unavailable, journal.findRoute("BAD"))
+        val bytes = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+            db.rawQuery("SELECT address FROM registrations WHERE route=?", arrayOf(route)).use { cursor ->
+                assertTrue(cursor.moveToFirst()); cursor.getBlob(0)
+            }
+        }
+        val ciphertext = bytes.toString(Charsets.ISO_8859_1)
+        assertFalse(ciphertext.contains(localId))
+        assertFalse(ciphertext.contains(peerId))
+        assertFalse(ciphertext.contains("APUPADDR1"))
+        journal.close()
+        val reopened = store()
+        assertEquals(peerId, (reopened.findRoute(route) as PushRegistrationStore.RouteResult.Found).peerId)
+        ready(reopened.beginRevocation(participants()))
+        assertEquals(PushRegistrationStore.RouteResult.Missing, reopened.findRoute(route))
+        val revoke = ready(reopened.reserve(participants(), 1002))
+        ready(reopened.revoked(participants(), revoke.sequence))
+        assertEquals(PushRegistrationStore.RouteResult.Missing, reopened.findRoute(route))
+    }
+
+    @Test fun collidingRouteNeverEvictsAnotherRegistrationOrConfirmsTheWrongPeer() {
+        val journal = store()
+        val first = ready(journal.reserve(participants(), 1000))
+        val secondParticipant = participants(peerBinding = other, id = otherId)
+        val second = ready(journal.reserve(secondParticipant, 1000))
+        ready(journal.registered(participants(), first.sequence, tokenHash, 1001, route))
+        assertEquals(PushRegistrationStore.Result.Unavailable,
+            journal.registered(secondParticipant, second.sequence, tokenHash, 1001, route))
+        assertEquals(peerId, (journal.findRoute(route) as PushRegistrationStore.RouteResult.Found).peerId)
+        val stillReserved = ready(journal.read(secondParticipant))
+        assertEquals(second.sequence, stillReserved.sequence)
+        assertEquals(PushRegistrationState.Reservation.REGISTER, stillReserved.reservation)
+        assertNull(stillReserved.announcement())
+        ready(journal.registered(secondParticipant, second.sequence, tokenHash, 1002, otherRoute))
+        assertEquals(peerId, (journal.findRoute(route) as PushRegistrationStore.RouteResult.Found).peerId)
+        assertEquals(otherId, (journal.findRoute(otherRoute) as PushRegistrationStore.RouteResult.Found).peerId)
+    }
+
+    @Test fun damagedRouteIndexCannotBeUsedOrSilentlyReplaced() {
+        val journal = store()
+        val attempt = ready(journal.reserve(participants(), 1000))
+        ready(journal.registered(participants(), attempt.sequence, tokenHash, 1001, route))
+        journal.close()
+        SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READWRITE).use {
+            it.execSQL("UPDATE registrations SET address = zeroblob(40)")
+        }
+        val reopened = store()
+        assertEquals(PushRegistrationStore.RouteResult.Unavailable, reopened.findRoute(route))
+        assertEquals(PushRegistrationStore.Result.Unavailable, reopened.read(participants()))
+        assertEquals(PushRegistrationStore.Result.Unavailable, reopened.reserve(participants(), 1002))
+    }
+
+    @Test fun versionOneMigrationPreservesCountersButRequiresAConfirmedRoute() {
+        val journal = store()
+        val attempt = ready(journal.reserve(participants(), 1000))
+        val accepted = ready(journal.registered(participants(), attempt.sequence, tokenHash, 1001, route))
+        ready(journal.announced(participants(), accepted.generation))
+        journal.close()
+        val oldRow = SQLiteDatabase.openDatabase(dbFile.absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+            db.rawQuery("SELECT record_key, payload FROM registrations", null).use { cursor ->
+                assertTrue(cursor.moveToFirst()); cursor.getString(0)!! to cursor.getBlob(1)
+            }
+        }
+        context.deleteDatabase(dbFile.absolutePath)
+        SQLiteDatabase.openOrCreateDatabase(dbFile, null).use { db ->
+            db.execSQL("CREATE TABLE registrations (record_key TEXT PRIMARY KEY NOT NULL, payload BLOB NOT NULL)")
+            val values = ContentValues().apply { put("record_key", oldRow.first); put("payload", oldRow.second) }
+            assertTrue(db.insertOrThrow("registrations", null, values) != -1L)
+            db.version = 1
+        }
+        val migrated = store()
+        val state = ready(migrated.read(participants()))
+        assertEquals(attempt.sequence, state.sequence)
+        assertEquals(attempt.epochHex, state.epochHex)
+        assertEquals(attempt.deviceHex, state.deviceHex)
+        assertEquals(0L, state.registeredAtMs)
+        assertEquals(0L, state.announcedGeneration)
+        assertNull(state.tokenFingerprint)
+        assertNull(state.announcement())
+        assertEquals(PushRegistrationStore.RouteResult.Missing, migrated.findRoute(route))
+        val retry = ready(migrated.reserve(participants(), 1002))
+        assertEquals(attempt.sequence + 1, retry.sequence)
+        val confirmed = ready(migrated.registered(participants(), retry.sequence, tokenHash, 1003, route))
+        assertNotNull(confirmed.announcement())
+        assertEquals(peerId, (migrated.findRoute(route) as PushRegistrationStore.RouteResult.Found).peerId)
     }
 
     @Test fun quotaAndFailedEntropyDoNotEvictOrCreateARegistration() {

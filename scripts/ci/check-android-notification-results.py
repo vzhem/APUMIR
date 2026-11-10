@@ -8,6 +8,7 @@ CLASS = "com.vladimir.messenger.data.notification.NotificationArrivalInstrumente
 OUTBOX_CLASS = "com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest"
 PUSH_CLASS = "com.vladimir.messenger.data.push.PushEpochStoreInstrumentedTest"
 REGISTRATION_CLASS = "com.vladimir.messenger.data.push.PushRegistrationStoreInstrumentedTest"
+PUSH_INTEGRATION_CLASS = "com.vladimir.messenger.data.push.PushWakeIntegrationInstrumentedTest"
 FIREBASE_CLASS = "com.vladimir.messenger.data.push.FirebaseClientConfigurationInstrumentedTest"
 EXPECTED_NOTIFICATION = {
     "migrationFortyToFortyOnePreservesHistoryAndRoomValidatesSchema",
@@ -44,7 +45,13 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, OUTBOX_CLASS: {
     "delayedRegistrationResponseCannotConfirmANewerAttempt",
     "revocationAndRotationSurviveRestartWithoutLosingTheOldSequence",
     "corruptionOrMissingKeystoreKeyNeverSilentlyResetsState",
+    "routeIndexIsEncryptedAndRemovedAsSoonAsRevocationBegins",
+    "collidingRouteNeverEvictsAnotherRegistrationOrConfirmsTheWrongPeer",
+    "damagedRouteIndexCannotBeUsedOrSilentlyReplaced",
+    "versionOneMigrationPreservesCountersButRequiresAConfirmedRoute",
     "quotaAndFailedEntropyDoNotEvictOrCreateARegistration",
+}, PUSH_INTEGRATION_CLASS: {
+    "realFfiAndDeviceJournalsMatchWorkerVectorsWithoutProviderNetwork",
 }, FIREBASE_CLASS: {
     "configuredSdkHasAutoInitDisabledWithoutTokenRequest",
     "wakeCryptoFfiRejectsInvalidInputWithoutStartingPush",

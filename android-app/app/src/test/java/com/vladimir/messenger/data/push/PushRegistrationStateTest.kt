@@ -78,6 +78,21 @@ class PushRegistrationStateTest {
         assertNull(refreshing.registered(attempt.sequence, tokenHash, 1001))
     }
 
+    @Test fun migrationToRouteIndexRequiresReregistrationWithoutResettingSequence() {
+        val attempt = fresh().reserve()!!
+        val accepted = attempt.registered(attempt.sequence, tokenHash, 1000)!!
+        val previouslyAnnounced = accepted.announced(accepted.generation)!!
+        val migrated = reread(previouslyAnnounced.requireReregistration())
+        assertEquals(attempt.sequence, migrated.sequence)
+        assertEquals(epoch, migrated.epochHex)
+        assertEquals(device, migrated.deviceHex)
+        assertEquals(0L, migrated.registeredAtMs)
+        assertEquals(0L, migrated.announcedGeneration)
+        assertNull(migrated.tokenFingerprint)
+        assertNull(migrated.announcement())
+        assertEquals(attempt.sequence + 1, migrated.reserve()!!.sequence)
+    }
+
     @Test fun invalidOrNoncanonicalStateFailsClosed() {
         val wire = fresh().encode()
         val malformed = listOf(

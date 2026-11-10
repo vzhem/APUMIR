@@ -59,6 +59,10 @@ internal object PushRegistrationState {
                 HASH.matches(tokenHash) && tokenHash.any { it != '0' } && nowMs in 1..MAX_NUMBER
             ) changed(reservation = Reservation.NONE, registeredAtMs = nowMs, tokenFingerprint = tokenHash) else null
 
+        /** Legacy records without a route index must be registered again before offering an epoch. */
+        fun requireReregistration(): State =
+            changed(registeredAtMs = 0, tokenFingerprint = null, announcedGeneration = 0)
+
         /** Start revocation without deleting the old capability or sequence. */
         fun beginRevocation(): State? = if (phase == Phase.ACTIVE && generation < MAX_NUMBER) {
             changed(
