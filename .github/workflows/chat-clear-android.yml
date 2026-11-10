@@ -15,16 +15,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  android-storage:
+  inspect-report:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[inspect-android:')
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       # Manual workflow_dispatch is not available to the repository integration.
       # A numeric marker in a push can expose an earlier report without printing
       # signed artifact URLs; this is read-only and normally skipped.
-      - name: Inspect an earlier Android report when requested
-        if: github.event_name == 'push' && contains(github.event.head_commit.message, '[inspect-android:')
+      - name: Inspect earlier Android report
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REQUEST: ${{ github.event.head_commit.message }}
@@ -35,7 +35,9 @@ jobs:
           python3 - "$RUNNER_TEMP/previous-android" <<'PY'
           from pathlib import Path
           import re, sys
-          for path in sorted(Path(sys.argv[1]).rglob('navigation-*.log')):
+          paths = sorted(Path(sys.argv[1]).rglob('navigation-*.log'))
+          assert paths, 'No saved navigation logs in the requested artifact'
+          for path in paths:
               lines = path.read_text(errors='replace').splitlines()
               important = [line for line in lines if line.startswith('e: ')]
               tail = [line for line in lines[-80:] if not line.startswith('w: ')]
@@ -45,6 +47,11 @@ jobs:
                   part = text[i:i+3000].replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
                   print(f'::notice title=Previous {path.name} part {i//3000+1}::{part}')
           PY
+  android-storage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
