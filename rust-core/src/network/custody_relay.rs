@@ -747,6 +747,50 @@ mod tests {
     }
 
     #[test]
+    fn simulated_holder_retries_lost_event_and_drops_only_after_origin_commit() {
+        // Protocol-level simulation only: no network, Android or real Room.
+        let now = Instant::now();
+        let wire = envelope("m1", "pk_recv", "pk_orig", 3600);
+        let origin = CustodyOffers::new();
+        let holder = CustodyHold::new();
+        let recipient = CustodyHold::new();
+        assert!(origin.enqueue(held_from_envelope(&wire, 1_000).unwrap()));
+        let planned = origin.next_offers(&["pk_holder".into()]);
+        assert_eq!(planned.len(), 1);
+        let offer = offer_payload(&planned[0].1);
+        let held = parse_envelope_frame(&offer, CUSTODY_OFFER_PREFIX, 1_000).unwrap();
+        let accepted = holder.hold(held, true);
+        assert_eq!(accepted, CustodyAck::Accepted);
+        let (message_id, status) = parse_ack(&ack_payload("m1", accepted)).unwrap();
+        origin.note_ack(&message_id, status);
+
+        let first = holder.take_due_at("pk_recv", 8, now).remove(0);
+        let delivery = deliver_payload(&first.envelope);
+        let delivered = parse_envelope_frame(&delivery, CUSTODY_DELIVER_PREFIX, 1_001).unwrap();
+        assert_eq!(delivered_message(&delivered.envelope).unwrap().0, "m1");
+        assert!(recipient.note_delivered_at("m1", now));
+        // Assume the event is lost before Room commits. The holder still has
+        // the only copy and a transport write cannot generate a drop hint.
+        assert!(holder.contains("m1"));
+        assert!(holder.take_due_at("pk_recv", 8, now + Duration::from_secs(9)).is_empty());
+        let retry = holder.take_due_at("pk_recv", 8, now + Duration::from_secs(10)).remove(0);
+        assert_eq!(retry.envelope, first.envelope);
+        assert!(recipient.note_delivered_at("m1", now + Duration::from_secs(10)));
+        assert!(holder.contains("m1"));
+
+        // Model an app ACK committed at the origin; only then extract peers
+        // and send a bounded, best-effort legacy drop hint.
+        let peers = origin.take_offered_peers("m1");
+        assert_eq!(peers, vec!["pk_holder".to_string()]);
+        let outbound = CustodyHold::new();
+        assert!(outbound.queue_outbound(&peers[0], drop_payload("m1")));
+        let frames = outbound.take_outbound(8);
+        let hint = String::from_utf8(frames[0].1.clone()).unwrap();
+        assert!(holder.remove(&parse_drop(&hint).unwrap()));
+        assert!(!holder.contains("m1"));
+    }
+
+    #[test]
     fn offers_stop_after_two_accepted_copies() {
         let offers = CustodyOffers::new();
         let item = held_from_envelope(&envelope("m1", "pk_recv", "pk_orig", 3600), 1_000).unwrap();

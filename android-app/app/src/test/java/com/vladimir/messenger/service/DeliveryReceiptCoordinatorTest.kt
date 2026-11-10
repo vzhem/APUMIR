@@ -26,6 +26,19 @@ class DeliveryReceiptCoordinatorTest {
         assertFalse(storedIncomingText("m1", "pk_sender", "chat", false) { row(chat = "other") })
     }
 
+    @Test fun meshReceiptNeedsStoredTextAndOpenedSenderMatchButLegacyAckRemains() = runBlocking {
+        val flags = mutableListOf<Boolean>()
+        var checks = 0
+        fun matched(result: Boolean): () -> Boolean = { checks++; result }
+        assertFalse(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", false, { null }, matched(true), flags::add))
+        assertFalse(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", false, { row(sender = "pk_other") }, matched(true), flags::add))
+        assertEquals(0, checks)
+        assertTrue(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", true, { null }, matched(false), flags::add))
+        assertTrue(acknowledgeStoredIncomingText("m1", "pk_sender", "chat", false, { row() }, matched(true), flags::add))
+        assertEquals(listOf(false, true), flags)
+        assertEquals(2, checks)
+    }
+
     @Test fun nativeCleanupFollowsCommitAndDuplicateAckRepairsCrashWindow() = runBlocking {
         val released = mutableListOf<String>()
         var lookups = 0

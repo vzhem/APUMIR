@@ -1228,9 +1228,9 @@ class CoreServerService : Service() {
                                             markMessageDelivered(it)
                                         }
                                     } else if (!existingMsg.isFromMe && existingMsg.senderId == senderId) {
-                                        // Only the same sender's persisted row can re-ACK a duplicate.
+                                        // This path has not opened the duplicate envelope: re-ACK the row, but do not issue a mesh cleanup receipt.
                                         acknowledge = true
-                                        runCatching { RustBridge.sendDeliveryAck(messageId, senderId, roomCommitted = true) }
+                                        runCatching { RustBridge.sendDeliveryAck(messageId, senderId) }
                                     }
                                 } else {
                                     // ШИФРОВАНИЕ: это второй, независимый путь приёма. Без
@@ -2827,7 +2827,7 @@ class CoreServerService : Service() {
                     
                     // Отправить ACK отправителю
                     try {
-                        if (storedIncomingText(messageId, senderId, chat.id, incomingSaved, appDatabase.messageDao()::getMessageById)) { RustBridge.sendDeliveryAck(messageId, senderId, roomCommitted = true); Log.i(TAG, "📤 Delivery ACK queued for msgId=$messageId") } else Log.w(TAG, "Incoming text not stored; ACK withheld for msgId=$messageId")
+                        if (acknowledgeStoredIncomingText(messageId, senderId, chat.id, incomingSaved, appDatabase.messageDao()::getMessageById, { sealed && MessageSealer.openedByExpectedSender(rawText, senderId) }) { verified -> RustBridge.sendDeliveryAck(messageId, senderId, roomCommitted = verified) }) { Log.i(TAG, "📤 Delivery ACK queued for msgId=$messageId") } else Log.w(TAG, "Incoming text not stored; ACK withheld for msgId=$messageId")
                     } catch (e: Exception) {
                         Log.w(TAG, "⚠ ACK send failed: ${e.message}")
                     }

@@ -20,6 +20,26 @@ internal suspend fun storedIncomingText(
 }
 
 /**
+ * The legacy mesh receipt may clean copies on old peers, so an existing row is
+ * not enough: the just-opened envelope must also match its claimed sender.
+ * This is only a node-ID check, not proof against an unpinned legacy identity.
+ * Ordinary compatible ACKs remain available for an unsealed/legacy message.
+ */
+internal suspend fun acknowledgeStoredIncomingText(
+    messageId: String,
+    senderId: String,
+    chatId: String,
+    inserted: Boolean,
+    load: suspend (String) -> MessageEntity?,
+    openedByExpectedSender: () -> Boolean,
+    sendAck: (Boolean) -> Unit,
+): Boolean {
+    if (!storedIncomingText(messageId, senderId, chatId, inserted, load)) return false
+    sendAck(openedByExpectedSender())
+    return true
+}
+
+/**
  * Only release native origin custody after Room committed an outgoing ACK.
  * Retry cleanup for a duplicate ACK after a crash between the Room commit and
  * native cleanup, without changing diagnostics or downgrading READ.

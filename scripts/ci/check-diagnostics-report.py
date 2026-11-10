@@ -846,6 +846,18 @@ class DiagnosticsContractsTest(unittest.TestCase):
         service = source(MAIN / "service/CoreServerService.kt")
         self.assertIn("applyOutgoingDeliveryAck(messageId", service)
         self.assertIn("RustBridge::confirmMessageDelivered", service)
+        self.assertIn("acknowledgeStoredIncomingText(messageId", service)
+        self.assertIn("sealed && MessageSealer.openedByExpectedSender(rawText, senderId)", service)
+        self.assertLess(coordinator.index("if (!storedIncomingText("), coordinator.index("sendAck(openedByExpectedSender())"))
+        # Neither a merely recognized group packet nor an unopened CF
+        # duplicate proves a durable personal message/sender match.
+        group = service[service.rindex("if (groupRouter.routeIncoming(senderId, chatId, messageId, text))"):
+                        service.rindex("// Реакции на сообщения:")]
+        self.assertIn("RustBridge.sendDeliveryAck(messageId, senderId)", group)
+        self.assertNotIn("roomCommitted = true", group)
+        cf = service[service.index("// This path has not opened the duplicate envelope"):
+                     service.index("// ШИФРОВАНИЕ: это второй, независимый путь приёма")]
+        self.assertNotIn("roomCommitted = true", cf)
         bridge = source(MAIN / "data/RustBridge.kt")
         self.assertIn("captured.confirmMessageDelivered(messageId)", bridge)
 

@@ -1158,7 +1158,8 @@ object RustBridge {
         ackScope.launch {
             try {
                 // The marker is internal to Rust; the legacy on-wire ACK stays
-                // unchanged. Only a verified Room row permits a legacy mesh receipt.
+                // unchanged. Its caller must have stored the row and matched
+                // the opened sender node; that is not a verified contact pin.
                 engine?.sendMessageMqtt(recipientId, if (roomCommitted) "ack-room|$messageId" else payload)
             } catch (e: Exception) {
                 Log.w(TAG, "MQTT delivery ACK failed: ${e.message}")
