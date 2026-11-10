@@ -8,6 +8,7 @@
 
 use sha2::{Digest, Sha256};
 use std::io::Write;
+use zeroize::Zeroizing;
 
 use crate::crypto::signing_identity::{installed_signing_identity, SignedFileExchangeBindingV1};
 
@@ -67,7 +68,7 @@ pub fn sign_push_registration(
 
     let mut owner = [0u8; 32];
     owner.copy_from_slice(identity.public_key());
-    let mut payload = Vec::with_capacity(300);
+    let mut payload = Zeroizing::new(Vec::with_capacity(300));
     payload.extend_from_slice(DOMAIN);
     payload.extend_from_slice(match action {
         PushRegistrationAction::Register => b"register\n" as &[u8],
@@ -84,7 +85,7 @@ pub fn sign_push_registration(
     append_hex(&mut payload, &Sha256::digest(token.as_bytes()));
     payload.push(b'\n');
     let signed = identity.sign_security_payload(&payload);
-    payload.fill(0); // best effort; see REMOTE_PUSH_DESIGN.md on memory erasure
+    // Zeroizing clears this copy on success, error and unwind; other copies may remain.
     let signature: [u8; 64] = signed.as_slice().try_into().map_err(|_| "push signing failed")?;
     Ok(SignedPushRegistration { owner_signing_public_key: owner, signature })
 }

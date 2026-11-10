@@ -101,6 +101,17 @@ namespace p2p_core {
     [Throws=CoreError]
     bytes open_file_key_envelope(bytes envelope, bytes recipient_exchange_binding, bytes recipient_x25519_secret, bytes manifest);
 
+    // Disabled wake-prototype crypto seam. Derivation returns 32 receiver public
+    // key bytes followed by 32 secret capability bytes; the caller MUST supply
+    // the previously pinned peer binding, revalidate identity/pin before any
+    // network effect, and wipe its own copies. This does not register or send.
+    [Throws=CoreError]
+    bytes derive_push_wake_material(bytes local_binding, bytes pinned_peer_binding, bytes local_exchange_secret, bytes epoch, boolean local_is_sender);
+    // Returns 32 owner-public-key bytes followed by 64 signature bytes. Revoke
+    // requires an empty token. Both calls zeroize their owned sensitive input.
+    [Throws=CoreError]
+    bytes sign_push_wake_registration(bytes local_binding, bytes capability, bytes device, u64 sequence, u64 issued_at_seconds, bytes token, boolean revoke);
+
     // F1 bounded functional crypto seam. File keys are borrowed for one call and wiped in Rust;
     // callers must keep them transient until the device-bound transfer key vault is wired.
     [Throws=CoreError]

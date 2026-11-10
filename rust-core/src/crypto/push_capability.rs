@@ -10,6 +10,7 @@
 
 use hkdf::Hkdf;
 use sha2::{Digest, Sha256};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::crypto::keys::X25519KeyPair;
 use crate::crypto::signing_identity::{
@@ -22,8 +23,8 @@ const EPOCH_BYTES: usize = 16;
 const CAPABILITY_BYTES: usize = 32;
 
 /// No Debug/Clone: callers must keep the capability out of logs and backups.
-/// Drop clears this instance on a best-effort basis; compiler optimizations and
-/// caller-made copies mean this is not a secure-erasure guarantee.
+/// Drop uses zeroize for this instance; caller-made copies and other runtime
+/// buffers still prevent a complete secure-erasure guarantee.
 pub struct PushCapability {
     pub capability: [u8; CAPABILITY_BYTES],
     pub receiver_signing_public_key: [u8; 32],
@@ -31,7 +32,7 @@ pub struct PushCapability {
 
 impl Drop for PushCapability {
     fn drop(&mut self) {
-        self.capability.fill(0);
+        self.capability.zeroize();
     }
 }
 
@@ -68,10 +69,9 @@ pub fn derive_push_capability(
     if exchange.public_key().0 != local.x25519_public_key {
         return Err("local exchange secret does not match binding");
     }
-    let mut shared = exchange.diffie_hellman(&peer.x25519_public_key)
-        .map_err(|_| "invalid peer exchange key")?;
+    let mut shared = Zeroizing::new(exchange.diffie_hellman(&peer.x25519_public_key)
+        .map_err(|_| "invalid peer exchange key")?);
     if shared.iter().all(|byte| *byte == 0) {
-        shared.fill(0);
         return Err("invalid all-zero shared secret");
     }
     let (sender_bytes, receiver_bytes, receiver_key) = if local_is_sender {
@@ -86,7 +86,7 @@ pub fn derive_push_capability(
     salt.update(epoch);
     let salt = salt.finalize();
     let hkdf = Hkdf::<Sha256>::new(Some(&salt), &shared);
-    shared.fill(0);
+    shared.zeroize();
     let mut capability = [0u8; CAPABILITY_BYTES];
     hkdf.expand(CAPABILITY_INFO, &mut capability).map_err(|_| "push key derivation failed")?;
     if capability.iter().all(|byte| *byte == 0) {

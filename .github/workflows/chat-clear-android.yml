@@ -81,6 +81,14 @@ jobs:
         run: |
           python3 scripts/ci/test-android-navigation-results.py
           python3 scripts/ci/test-android-notification-results.py
+      # An intentionally fake Firebase project exercises the actual Gradle
+      # plugin, resources and disabled SDK on the emulator without a token or
+      # access to the owner's project.
+      - name: Prepare offline Firebase configuration for emulator tests
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/install-firebase-client-config.py --fake
+          echo "ORG_GRADLE_PROJECT_apuFirebaseClient=true" >> "$GITHUB_ENV"
       - name: Run storage and navigation tests on the emulator
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -89,6 +97,9 @@ jobs:
           target: google_apis
           disable-animations: true
           script: bash scripts/ci/run-android-navigation-tests.sh
+      - name: Remove offline Firebase configuration
+        if: always()
+        run: rm -f android-app/app/google-services.json
       - name: Upload Android test reports
         if: always()
         uses: actions/upload-artifact@v4

@@ -8,12 +8,16 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 
 SCRIPT = Path(__file__).with_name("check-firebase-client-config.py")
 spec = importlib.util.spec_from_file_location("firebase_client_config", SCRIPT)
 validator = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(validator)
+install_spec = importlib.util.spec_from_file_location("firebase_config_installer", SCRIPT.with_name("install-firebase-client-config.py"))
+installer = importlib.util.module_from_spec(install_spec)
+install_spec.loader.exec_module(installer)
 
 
 def fixture():
@@ -104,6 +108,27 @@ class FirebaseConfigValidationTest(unittest.TestCase):
         value = fixture()
         value["client"] *= validator.MAX_CLIENTS + 1
         self.assertEqual("invalid", self.check(value))
+
+    def test_installer_is_exclusive_private_and_rejects_invalid_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "google-services.json"
+            self.assertFalse(installer.write_config('{"private_key":"not-a-client"}', path))
+            self.assertFalse(path.exists())
+            raw = installer.fake_configuration()
+            self.assertTrue(installer.write_config(raw, path))
+            self.assertEqual("valid", validator.validate(path.read_text()))
+            self.assertEqual(0o600, path.stat().st_mode & 0o777)
+            self.assertFalse(installer.write_config(json.dumps(fixture()), path))
+            self.assertEqual(raw, path.read_text(), "never overwrite an existing file")
+
+    def test_installer_refuses_a_symlink(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "target"
+            target.write_text("original")
+            path = Path(tmp) / "google-services.json"
+            path.symlink_to(target)
+            self.assertFalse(installer.write_config(installer.fake_configuration(), path))
+            self.assertEqual("original", target.read_text())
 
 
 if __name__ == "__main__":

@@ -57,6 +57,17 @@ jobs:
           # The lineage gate below must be able to walk back to the last stable tag.
           fetch-depth: 0
 
+      # Only the public Android client config is placed in the build workspace.
+      # It is structurally validated first; a service-account key is rejected.
+      # SDK auto-init stays disabled until the wake protocol is ready.
+      - name: Prepare Firebase Android client configuration
+        env:
+          APU_FIREBASE_ANDROID_CONFIG: ${{ secrets.APU_FIREBASE_ANDROID_CONFIG }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/install-firebase-client-config.py
+          echo "ORG_GRADLE_PROJECT_apuFirebaseClient=true" >> "$GITHUB_ENV"
+
       # Prevent a tag from rebuilding a branch that silently forked before the
       # latest public release (the v330-from-v206 failure mode). Compare with
       # GitHub's latest published stable release, not `main`, which may lag.
@@ -181,6 +192,7 @@ jobs:
             engine::core::broker_settings::tests \
             crypto::push_capability::tests \
             crypto::push_registration::tests \
+            push_ffi::tests \
             network::mdns::tests::browse_round_never_replays_an_old_node_without_a_resolution \
             engine::core::tests::direct_personal_presence_emits_each_fresh_observation_but_not_stale_or_future \
             engine::core::tests::invite_is_only_an_address_hint_not_online_presence \
@@ -665,3 +677,7 @@ jobs:
             android-app/app/src/main/jniLibs/armeabi-v7a/libp2p_core.so
           git commit -m "ci: uniffi bindings + core rebuilt for ${GITHUB_REF#refs/tags/}"
           git push origin HEAD:main || echo "::warning::push to main failed - take the bindings from the core-bindings artifact of this run"
+
+      - name: Remove temporary Firebase client configuration
+        if: always()
+        run: rm -f android-app/app/google-services.json
