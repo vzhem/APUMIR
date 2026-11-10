@@ -47,14 +47,17 @@ class ChatOutboxPump(
             while (isActive) {
                 var queued = 0
                 var sent = 0
+                var moreToScan = false
                 try {
                     queued = messageDao.queuedOfflineCount()
                     if (queued > 0) {
-                        sent = if (wakeLock != null) {
+                        val progress = if (wakeLock != null) {
                             wakeLock.withLock { chatRepository.pumpQueuedOffline() }
                         } else {
                             chatRepository.pumpQueuedOffline()
                         }
+                        sent = progress.sent
+                        moreToScan = progress.moreToScan
                         DeliveryCadence.touch()
                     }
                 } catch (cancelled: CancellationException) {
@@ -62,13 +65,14 @@ class ChatOutboxPump(
                 } catch (error: Exception) {
                     Log.w(TAG, "Outbox pump cycle failed: ${error.message}")
                 }
-                failures = OutboxCadence.nextFailures(failures, sent)
+                failures = OutboxCadence.nextFailures(failures, sent, moreToScan)
                 delay(
                     OutboxCadence.nextDelayMs(
                         hasQueued = queued > 0,
                         sent = sent,
                         failures = failures,
                         onScreen = DeliveryCadence.isForeground(),
+                        moreToScan = moreToScan,
                     ),
                 )
             }

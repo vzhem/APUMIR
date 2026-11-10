@@ -30,11 +30,11 @@ if [ "$storage_status" -ne 0 ]; then
     echo "::error::Android storage tests failed (Gradle exit $storage_status)"
 fi
 
-# Exercise Room's real v40→v41 upgrade and delivery/restore behaviour; do not
+# Exercise the real Room upgrade, notification/restore and outbox fairness; do not
 # accept a green Gradle task which silently skipped the new acceptance cases.
 clear_report
 ./gradlew :app:connectedDebugAndroidTest --no-daemon \
-    -Pandroid.testInstrumentationRunnerArguments.class=com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest \
+    -Pandroid.testInstrumentationRunnerArguments.class=com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest,com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest \
     2>&1 | tee "$reports/notification.log"
 notification_gradle=${PIPESTATUS[0]}
 python3 "$root/scripts/ci/check-android-notification-results.py" \

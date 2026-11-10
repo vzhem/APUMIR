@@ -5,7 +5,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 CLASS = "com.vladimir.messenger.data.notification.NotificationArrivalInstrumentedTest"
-EXPECTED = {
+OUTBOX_CLASS = "com.vladimir.messenger.data.repository.OutboxFairnessInstrumentedTest"
+EXPECTED_NOTIFICATION = {
     "migrationFortyToFortyOnePreservesHistoryAndRoomValidatesSchema",
     "delayedArrivalsAreClaimedOnceAndSurviveRestartWithoutRearmingDuplicates",
     "boundedQueueContinuesAfterFirstBatchIsClaimed",
@@ -13,6 +14,11 @@ EXPECTED = {
     "backupMergeDoesNotImportPendingWorkOrClearLiveWork",
     "stagedBackupSanitizerReadsWalAndLeavesTheOriginalUntouched",
 }
+EXPECTED = {CLASS: EXPECTED_NOTIFICATION, OUTBOX_CLASS: {
+    "actualRoomQueueReachesLaterRecipientPastManyBlockedRows",
+    "aBadOldestMessageDoesNotHideLaterMessagesInTheSameRoomChat",
+    "roomKeysetPaginationKeepsAllEqualTimestampIds",
+}}
 
 
 def check(results: Path, log: Path, status: int) -> int:
@@ -25,10 +31,11 @@ def check(results: Path, log: Path, status: int) -> int:
             errors.append(f"Invalid test report {report}: {error}")
             continue
         for case in root.iter("testcase"):
-            if case.get("classname", "").split("$")[0] != CLASS:
+            classname = case.get("classname", "").split("$")[0]
+            if classname not in EXPECTED:
                 continue
             name = case.get("name", "")
-            seen.add(name)
+            seen.add((classname, name))
             for tag in ("failure", "error", "skipped"):
                 for bad in case.findall(tag):
                     detail = (bad.get("message") or bad.text or tag).strip()[:1000]
@@ -37,11 +44,12 @@ def check(results: Path, log: Path, status: int) -> int:
         lines = log.read_text(encoding="utf-8", errors="replace").splitlines() if log.exists() else []
         important = [line for line in lines if line.startswith("e: ")]
         errors.insert(0, f"Gradle exited {status}: " + " | ".join((important[-10:] + lines[-10:]))[:2000])
-    errors += [f"Expected test did not execute: {name}" for name in sorted(EXPECTED - seen)]
+    expected = {(classname, name) for classname, names in EXPECTED.items() for name in names}
+    errors += [f"Expected test did not execute: {classname}.{name}" for classname, name in sorted(expected - seen)]
     for error in errors:
         safe = error.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
         print(f"::error::{safe}")
-    print(f"::notice::Android notification tests: {len(seen & EXPECTED)}/{len(EXPECTED)}")
+    print(f"::notice::Android notification and outbox tests: {len(seen & expected)}/{len(expected)}")
     return 1 if errors else 0
 
 

@@ -95,13 +95,22 @@ object OutboxCadence {
      * @param failures сколько кругов подряд ничего не ушло
      * @param onScreen приложение на экране
      */
-    fun nextDelayMs(hasQueued: Boolean, sent: Int, failures: Int, onScreen: Boolean): Long {
+    fun nextDelayMs(
+        hasQueued: Boolean, sent: Int, failures: Int, onScreen: Boolean, moreToScan: Boolean = false,
+    ): Long {
         if (!hasQueued) return EMPTY_CHECK_MS
         if (sent > 0) return DRAIN_MS
+        // Back off only after a complete unsuccessful sweep, not in the middle
+        // of examining other recipients behind an unavailable oldest chat.
+        if (moreToScan) return if (onScreen) DRAIN_MS else 5_000L
         val ladder = if (onScreen) FOREGROUND_LADDER_MS else BACKGROUND_LADDER_MS
         return ladder[failures.coerceIn(0, ladder.lastIndex)]
     }
 
     /** Счётчик неудач: успех сбрасывает лестницу в начало. */
-    fun nextFailures(current: Int, sent: Int): Int = if (sent > 0) 0 else (current + 1).coerceAtMost(64)
+    fun nextFailures(current: Int, sent: Int, moreToScan: Boolean = false): Int = when {
+        sent > 0 -> 0
+        moreToScan -> current
+        else -> (current + 1).coerceAtMost(64)
+    }
 }

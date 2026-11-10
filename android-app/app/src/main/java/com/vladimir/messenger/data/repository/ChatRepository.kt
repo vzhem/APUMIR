@@ -482,49 +482,9 @@ class ChatRepository @Inject constructor(
         return Result.success(updated.toDomain())
     }
 
-    /**
-     * Раунд 179: мягкий слив офлайн-очереди БЕЗ привязки к presence.
-     * Раньше досыл запускался только «тяжёлым» пульсом обнаружения, а при
-     * живой связи пульсы чаще 30 с считались лёгкими и пропусками - очередь
-     * могла висеть, пока связь не мигнёт. Теперь служебный насос раз в
-     * минуту пробует отправить до [limit] хвостов; пустая очередь - один
-     * дешёвый индексный запрос, нагрузки почти нет. Дубли у получателя
-     * сняты дедупликацией по id сообщения.
-     */
-    suspend fun pumpQueuedOffline(limit: Int = 20): Int {
-        var sent = 0
-        try {
-            val queued = messageDao.getQueuedOfflineMessages(limit)
-            for (msg in queued) {
-                val chat = chatDao.getChatById(msg.chatId) ?: continue
-                val peer = chat.contactId
-                if (peer.isBlank()) continue
-                val ok = try {
-                    sendViaRust(msg.id, msg.chatId, peer, TextColorWire.wrap(msg.content, msg.textColor, msg.senderNameColor))
-                } catch (_: Exception) {
-                    false
-                }
-                if (ok) {
-                    // The ACK may arrive before this callback returns.
-                    messageDao.updateOutgoingRetryResult(
-                        msg.id,
-                        MessageStatus.SENT.name,
-                        MessageChannel.LOCAL.name,
-                    )
-                    sent++
-                } else {
-                    // Раунд 182 (аудит-3): первая же неудача - скорее всего
-                    // адресат ещё недоступен, а попытка стоит до ~10 с.
-                    // Остаток очереди - следующая минута, вместо десятков
-                    // попыток подряд.
-                    break
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "pumpQueuedOffline failed: " + e.message)
-        }
-        return sent
-    }
+    /** Fair, bounded traversal continues past unavailable destinations. */
+    private val queuedOutbox by lazy { QueuedOutboxPump(messageDao, chatDao, ::sendViaRust) }
+    internal suspend fun pumpQueuedOffline(limit: Int = 20): OutboxProgress = queuedOutbox.pump(limit)
 
     suspend fun retryPendingMessagesForPeer(peerId: String): Int {
         var retried = 0

@@ -17,27 +17,33 @@ class NotificationResultsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             xml = "<testsuite>" + "".join(
-                f'<testcase classname="{checker.CLASS}" name="{name}">{inside}</testcase>'
-                for name, inside in cases
+                f'<testcase classname="{classname}" name="{name}">{inside}</testcase>'
+                for classname, name, inside in cases
             ) + "</testsuite>"
             (root / "result.xml").write_text(xml)
             (root / "gradle.log").write_text("e: example compiler error\n")
             with contextlib.redirect_stdout(io.StringIO()):
                 return checker.check(root, root / "gradle.log", status)
 
+    def all_cases(self):
+        return [(classname, name, "") for classname, names in checker.EXPECTED.items() for name in names]
+
     def test_success_requires_every_case(self):
-        self.assertEqual(0, self.run_report([(name, "") for name in checker.EXPECTED]))
+        self.assertEqual(0, self.run_report(self.all_cases()))
 
     def test_missing_case_fails(self):
-        self.assertEqual(1, self.run_report([(name, "") for name in list(checker.EXPECTED)[1:]]))
+        self.assertEqual(1, self.run_report(self.all_cases()[1:]))
+        missing_outbox = [case for case in self.all_cases() if case[0] != checker.OUTBOX_CLASS]
+        self.assertEqual(1, self.run_report(missing_outbox))
 
     def test_skipped_and_failed_cases_fail(self):
         for tag in ("skipped", "failure", "error"):
-            cases = [(name, f"<{tag}/>") if i == 0 else (name, "") for i, name in enumerate(checker.EXPECTED)]
+            cases = [(classname, name, f"<{tag}/>") if i == 0 else (classname, name, "")
+                     for i, (classname, name, _) in enumerate(self.all_cases())]
             self.assertEqual(1, self.run_report(cases))
 
     def test_gradle_failure_fails_even_with_complete_reports(self):
-        self.assertEqual(1, self.run_report([(name, "") for name in checker.EXPECTED], status=1))
+        self.assertEqual(1, self.run_report(self.all_cases(), status=1))
 
 
 if __name__ == "__main__":
