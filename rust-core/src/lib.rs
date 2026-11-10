@@ -356,6 +356,10 @@ impl P2PCoreHandle {
         self.inner.lock().unwrap().trigger_gossip_discovery()
     }
 
+    pub fn on_foreground_recovery(&self) -> bool {
+        self.inner.lock().unwrap().on_foreground_recovery()
+    }
+
     pub fn on_network_available(&self) {
         self.inner.lock().unwrap().on_network_available()
     }

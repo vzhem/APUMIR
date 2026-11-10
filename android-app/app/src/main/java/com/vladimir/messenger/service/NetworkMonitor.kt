@@ -39,6 +39,8 @@ class NetworkMonitor(private val context: Context) {
                 com.vladimir.messenger.data.security.DeviceIdentityGossip.onProfileOrContactsChanged()
             }
             DefaultNetworkState.Action.LOST -> RustBridge.onNetworkLost()
+            DefaultNetworkState.Action.POLICY ->
+                com.vladimir.messenger.data.swarm.NetworkPathSettings.applyToCore(context)
             else -> Unit
         }
     }, { error -> Log.w(TAG, "Could not apply network transition", error) })
@@ -109,6 +111,10 @@ class NetworkMonitor(private val context: Context) {
                     Log.i(TAG, "Default network has no internet capability")
                     TransferDiagnostics.count(Counters.NETWORK_CHANGES)
                     TransferDiagnostics.recordWarning("net", "активная сеть без интернета")
+                    actions.submit(action)
+                }
+                DefaultNetworkState.Action.POLICY -> {
+                    Log.i(TAG, "Default network metering changed; refreshing policy only")
                     actions.submit(action)
                 }
                 else -> Unit

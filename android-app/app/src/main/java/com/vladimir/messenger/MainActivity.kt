@@ -522,10 +522,12 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         com.vladimir.messenger.service.DeliveryCadence.setForeground(true)
+        com.vladimir.messenger.service.ForegroundRecovery.onForeground(lifecycleScope)
     }
 
     override fun onStop() {
         com.vladimir.messenger.service.DeliveryCadence.setForeground(false)
+        com.vladimir.messenger.service.ForegroundRecovery.onBackground()
         super.onStop()
     }
 

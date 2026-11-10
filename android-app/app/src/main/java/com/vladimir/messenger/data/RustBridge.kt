@@ -684,6 +684,13 @@ object RustBridge {
         }
     }
 
+    fun onForegroundRecovery(): Boolean = try {
+        engine?.onForegroundRecovery() ?: false
+    } catch (e: Exception) {
+        Log.w(TAG, "onForegroundRecovery failed: ${e.message}")
+        false
+    }
+
     /**
      * K4-1 / docs/ADDRESS_BOOK.md: «свои» для личного presence. Движок в
      * первую же минуту стучит этим узлам сохранённым адресам, а

@@ -635,7 +635,7 @@ class CoreServerService : Service() {
         // CPU бодрствует только на время работы (события/файлы/звонок), а не
         // постоянно. Multicast Wi-Fi держим лишь пока приложение на экране.
         multicastGate = CoreMulticastLock(applicationContext).also {
-            it.sync(DeliveryCadence.isForeground())
+            it.start(serviceScope)
         }
         serviceScope.launch {
             callManager.uiState.collect { state ->
@@ -849,7 +849,6 @@ class CoreServerService : Service() {
                     runCatching { pumpMirrorFiles() }
                         .onFailure { Log.w(TAG, "file bytes pump failed: ${it.message}") }
                 }
-                multicastGate?.sync(DeliveryCadence.isForeground())
                 sincePump++
                 kotlinx.coroutines.delay(30_000L)
             }

@@ -1,5 +1,8 @@
 package com.vladimir.messenger.service
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
 /**
  * Ритм доставки: как часто приложение забирает события ядра и досылает очередь.
  *
@@ -36,8 +39,8 @@ object DeliveryCadence {
     @Volatile
     private var lastActivityAtMs = 0L
 
-    @Volatile
-    private var foreground = false
+    private val foreground = MutableStateFlow(false)
+    internal val foregroundChanges = foreground.asStateFlow()
 
     /** Монотонные миллисекунды: смена часов телефона ритм не меняет. */
     fun now(): Long = System.nanoTime() / 1_000_000L
@@ -49,11 +52,11 @@ object DeliveryCadence {
 
     /** Приложение на экране или ушло в фон. */
     fun setForeground(onScreen: Boolean) {
-        foreground = onScreen
+        foreground.value = onScreen
         if (onScreen) touch()
     }
 
-    fun isForeground(): Boolean = foreground
+    fun isForeground(): Boolean = foreground.value
 
     /** Сколько монотонных миллисекунд длится тишина. */
     fun idleMs(): Long = (now() - lastActivityAtMs).coerceAtLeast(0L)

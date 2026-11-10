@@ -69,6 +69,60 @@ class DefaultNetworkActionsTest {
     }
 
     @Test
+    fun `policy updates cannot erase a queued route transition`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val finished = CompletableDeferred<Unit>()
+        val seen = CopyOnWriteArrayList<Action>()
+        val worker = DefaultNetworkActions(scope, { action ->
+            seen.add(action)
+            if (seen.size == 1) {
+                entered.complete(Unit)
+                release.await()
+            } else finished.complete(Unit)
+        }, { throw it })
+        try {
+            worker.submit(Action.POLICY)
+            withTimeout(3_000) { entered.await() }
+            worker.submit(Action.LOST)
+            worker.submit(Action.AVAILABLE)
+            worker.submit(Action.POLICY) // latest metering is read by AVAILABLE
+            release.complete(Unit)
+            withTimeout(3_000) { finished.await() }
+            assertEquals(listOf(Action.POLICY, Action.AVAILABLE), seen.toList())
+        } finally {
+            worker.stop()
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun `a real loss overrides pending policy`() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val finished = CompletableDeferred<Unit>()
+        val seen = CopyOnWriteArrayList<Action>()
+        val worker = DefaultNetworkActions(scope, { action ->
+            seen.add(action)
+            if (seen.size == 1) { entered.complete(Unit); release.await() } else finished.complete(Unit)
+        }, { throw it })
+        try {
+            worker.submit(Action.AVAILABLE)
+            withTimeout(3_000) { entered.await() }
+            worker.submit(Action.POLICY)
+            worker.submit(Action.LOST)
+            release.complete(Unit)
+            withTimeout(3_000) { finished.await() }
+            assertEquals(listOf(Action.AVAILABLE, Action.LOST), seen.toList())
+        } finally {
+            worker.stop()
+            scope.cancel()
+        }
+    }
+
+    @Test
     fun `stopping cancels the current worker and discards pending changes`() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val entered = CompletableDeferred<Unit>()

@@ -1,5 +1,6 @@
 //! # MQTT Transport — децентрализованный bootstrap + presence + relay
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex as StdMutex;
@@ -7,6 +8,14 @@ use std::time::{Duration, Instant};
 
 use rumqttc::{AsyncClient, Event, EventLoop, LastWill, MqttOptions, Packet, QoS};
 use tokio::sync::{mpsc, oneshot, Mutex, OwnedSemaphorePermit};
+
+#[path = "mqtt_connection.rs"]
+mod mqtt_connection;
+#[path = "mqtt_initial.rs"]
+mod mqtt_initial;
+#[path = "mqtt_reconnect.rs"]
+mod mqtt_reconnect;
+use mqtt_connection::BrokerConnection;
 
 use crate::network::mqtt_backpressure::{await_mqtt_request, MqttRequestError};
 use crate::network::multi_broker::{probe_broker, MultiBroker};
@@ -207,14 +216,8 @@ pub fn mqtt_link_summary() -> String {
     out
 }
 
-/// «Сеть сменилась: переподключайся сейчас».
-///
-/// Цикл MQTT сам переподключается с паузой до
-/// [`MQTT_RECONNECT_BACKOFF_MAX_SECS`] секунд. Без этого флага переход
-/// Wi-Fi → мобильная сеть означал бы до 30 секунд молчания даже при живом
-/// интернете. Флаг ставит ядро (`on_network_available`), читает и снимает
-/// [`wait_before_reconnect`].
-static RECONNECT_NOW: AtomicBool = AtomicBool::new(false);
+/// A generation is observed independently by each broker reconnect loop.
+static RECONNECT_WAKE: mqtt_reconnect::ReconnectWake = mqtt_reconnect::ReconnectWake::new();
 
 /// Поколение настроек брокера. Меняется, когда человек вписал (или убрал)
 /// СВОЙ брокер в настройках: список брокеров читается при создании сессии, и
@@ -241,14 +244,9 @@ pub fn note_broker_settings_changed() {
 /// Разбудить цикл переподключения: сеть могла появиться раньше, чем кончилась
 /// пауза. Безопасно звать сколько угодно раз.
 pub fn wake_reconnect() {
-    RECONNECT_NOW.store(true, Ordering::Release);
+    RECONNECT_WAKE.signal();
 }
 
-/// Пауза перед переподключением, которую можно прервать сменой сети.
-///
-/// Разбита на короткие шаги намеренно: `select!` с каналом потребовал бы
-/// держать вторую половину канала во всех четырёх циклах (основной брокер,
-/// вторичный, WSS-мост, арендатор), а флаг читается из любого места.
 /// Следующая пауза переподключения по единой политике (`network::timing`).
 fn next_reconnect_backoff(current_secs: u64) -> u64 {
     use crate::network::timing::BackoffPolicy;
@@ -262,23 +260,6 @@ fn next_reconnect_backoff(current_secs: u64) -> u64 {
         .delay(attempt.saturating_add(1))
         .as_secs()
         .clamp(1, MQTT_RECONNECT_BACKOFF_MAX_SECS)
-}
-
-async fn wait_before_reconnect(seconds: u64) {
-    let step = Duration::from_millis(250);
-    let mut waited = Duration::ZERO;
-    let total = Duration::from_secs(seconds);
-    while waited < total {
-        if RECONNECT_NOW.swap(false, Ordering::AcqRel) {
-            tracing::info!("MQTT: network changed, reconnecting without waiting for backoff");
-            return;
-        }
-        tokio::time::sleep(step).await;
-        waited += step;
-    }
-    // Пауза кончилась сама: старый сигнал больше не нужен, иначе следующая
-    // пауза закончится мгновенно без причины.
-    RECONNECT_NOW.store(false, Ordering::Release);
 }
 
 const PRESENCE_INTERVAL: Duration = Duration::from_secs(120);
@@ -312,11 +293,12 @@ const MQTT_LIVENESS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(120);
 const MAX_MESH_TOPIC_SEGMENT_BYTES: usize = 128;
 const MAX_MESH_MESSAGE_ID_BYTES: usize = 256;
 
+#[derive(Debug)]
 enum MqttNotification {
     Message(MqttEvent),
-    ConnectionAcknowledged,
+    ConnectionAcknowledged(u64),
     #[cfg(feature = "mqtt-dual-broker")]
-    SecondaryConnectionAcknowledged,
+    SecondaryConnectionAcknowledged(u64),
 }
 
 pub(crate) type MqttLossIntolerantInbox = LossIntolerantInbox<MqttEvent>;
@@ -453,15 +435,16 @@ pub struct MqttTransport {
     eventloop: Option<EventLoop>,
     event_tx: Option<mpsc::Sender<MqttNotification>>,
     event_rx: mpsc::Receiver<MqttNotification>,
+    initial_messages: VecDeque<MqttEvent>,
     shared_state: Arc<MqttSharedRuntimeState>,
     eventloop_task: Option<tokio::task::JoinHandle<()>>,
     eventloop_watchdog_task: Option<tokio::task::JoinHandle<()>>,
     liveness: Arc<MqttLivenessProbe>,
     shutdown_requested: Arc<AtomicBool>,
     notification_channel_closed: bool,
-    has_connected_once: bool,
+    primary_connection: Arc<BrokerConnection>,
     #[cfg(feature = "mqtt-dual-broker")]
-    primary_ready: Arc<AtomicBool>,
+    primary_rebuild_requested: Arc<AtomicBool>,
     #[cfg(feature = "mqtt-dual-broker")]
     secondary_client: AsyncClient,
     #[cfg(feature = "mqtt-dual-broker")]
@@ -471,7 +454,7 @@ pub struct MqttTransport {
     #[cfg(feature = "mqtt-dual-broker")]
     secondary_liveness: Arc<MqttLivenessProbe>,
     #[cfg(feature = "mqtt-dual-broker")]
-    secondary_ready: Arc<AtomicBool>,
+    secondary_connection: Arc<BrokerConnection>,
     #[cfg(feature = "mqtt-dual-broker")]
     last_presence: StdMutex<Option<CachedPresence>>,
     /// Поколение настроек брокера, с которым эта сессия создана (см.
@@ -886,7 +869,7 @@ impl MqttTransport {
         liveness.set_loss_intolerant_pending(shared_state.loss_intolerant_inbox.len());
 
         #[cfg(feature = "mqtt-dual-broker")]
-        let (secondary_client, secondary_eventloop, secondary_liveness, secondary_ready) = {
+        let (secondary_client, secondary_eventloop, secondary_liveness, secondary_connection) = {
             let suffix = &node_id[..16.min(node_id.len())];
             let secondary_client_id = if ephemeral_client_id {
                 client_id.clone()
@@ -948,7 +931,7 @@ impl MqttTransport {
                 secondary_client,
                 secondary_eventloop,
                 Arc::new(MqttLivenessProbe::new()),
-                Arc::new(AtomicBool::new(false)),
+                Arc::new(BrokerConnection::new()),
             )
         };
 
@@ -958,6 +941,7 @@ impl MqttTransport {
             eventloop: Some(eventloop),
             event_tx: Some(event_tx),
             event_rx,
+            initial_messages: VecDeque::new(),
             shared_state,
             eventloop_task: None,
             eventloop_watchdog_task: None,
@@ -965,9 +949,9 @@ impl MqttTransport {
             broker_generation: broker_settings_generation(),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             notification_channel_closed: false,
-            has_connected_once: false,
+            primary_connection: Arc::new(BrokerConnection::new()),
             #[cfg(feature = "mqtt-dual-broker")]
-            primary_ready: Arc::new(AtomicBool::new(false)),
+            primary_rebuild_requested: Arc::new(AtomicBool::new(false)),
             #[cfg(feature = "mqtt-dual-broker")]
             secondary_client,
             #[cfg(feature = "mqtt-dual-broker")]
@@ -977,7 +961,7 @@ impl MqttTransport {
             #[cfg(feature = "mqtt-dual-broker")]
             secondary_liveness,
             #[cfg(feature = "mqtt-dual-broker")]
-            secondary_ready,
+            secondary_connection,
             #[cfg(feature = "mqtt-dual-broker")]
             last_presence: StdMutex::new(None),
             ephemeral: ephemeral_client_id,
@@ -1035,11 +1019,20 @@ impl MqttTransport {
     }
 
     #[cfg(feature = "mqtt-dual-broker")]
+    fn primary_active(&self) -> bool {
+        self.primary_connection.is_ready()
+            && self.eventloop_task.as_ref().map(|task| !task.is_finished()).unwrap_or(false)
+    }
+
+    #[cfg(feature = "mqtt-dual-broker")]
+    fn secondary_active(&self) -> bool {
+        self.secondary_connection.is_ready()
+            && self.secondary_eventloop_task.as_ref().map(|task| !task.is_finished()).unwrap_or(false)
+    }
+
+    #[cfg(feature = "mqtt-dual-broker")]
     fn active_brokers(&self) -> MqttBrokerSet {
-        MqttBrokerSet::from_active_sessions(
-            self.primary_ready.load(Ordering::Acquire),
-            self.secondary_ready.load(Ordering::Acquire),
-        )
+        MqttBrokerSet::from_active_sessions(self.primary_active(), self.secondary_active())
     }
 
     #[cfg(feature = "mqtt-dual-broker")]
@@ -1061,7 +1054,7 @@ impl MqttTransport {
         }
         let primary_requested = targets.contains(MqttBrokerId::Primary);
         let secondary_requested = targets.contains(MqttBrokerId::Secondary);
-        let secondary_available = self.secondary_ready.load(Ordering::Acquire);
+        let secondary_available = self.secondary_active();
 
         let primary_result = if primary_requested {
             Some(
@@ -1249,12 +1242,12 @@ impl MqttTransport {
             .event_tx
             .take()
             .ok_or_else(|| "MQTT event channel unavailable".to_string())?;
-        let (initial_connack_tx, initial_connack_rx) = oneshot::channel::<()>();
         let (eventloop_exit_tx, mut eventloop_exit_rx) = oneshot::channel::<String>();
         let eventloop_liveness = Arc::clone(&self.liveness);
         let eventloop_shared_state = Arc::clone(&self.shared_state);
+        let eventloop_primary_connection = Arc::clone(&self.primary_connection);
         #[cfg(feature = "mqtt-dual-broker")]
-        let eventloop_primary_ready = Arc::clone(&self.primary_ready);
+        let eventloop_rebuild_requested = Arc::clone(&self.primary_rebuild_requested);
         let watchdog_liveness = Arc::clone(&self.liveness);
         let watchdog_shutdown_requested = Arc::clone(&self.shutdown_requested);
 
@@ -1265,7 +1258,7 @@ impl MqttTransport {
         #[cfg(feature = "mqtt-dual-broker")]
         let secondary_liveness = Arc::clone(&self.secondary_liveness);
         #[cfg(feature = "mqtt-dual-broker")]
-        let secondary_ready = Arc::clone(&self.secondary_ready);
+        let secondary_connection = Arc::clone(&self.secondary_connection);
         #[cfg(feature = "mqtt-dual-broker")]
         let mut secondary_eventloop = self
             .secondary_eventloop
@@ -1276,6 +1269,7 @@ impl MqttTransport {
         {
             self.secondary_eventloop_task = Some(tokio::spawn(async move {
                 let mut reconnect_backoff_secs = 1u64;
+                let mut reconnect_generation = RECONNECT_WAKE.generation();
                 let mut has_connected_once = false;
                 loop {
                     let inbox_permit = if has_connected_once {
@@ -1324,7 +1318,7 @@ impl MqttTransport {
                             )
                             .await
                             {
-                                secondary_ready.store(false, Ordering::Release);
+                                secondary_connection.disconnected();
                                 tracing::error!(
                                     "MQTT SECONDARY STATUS: broker=secondary state=stopped reason={}",
                                     reason
@@ -1335,12 +1329,12 @@ impl MqttTransport {
                         Ok(Event::Incoming(Packet::ConnAck(_))) => {
                             reconnect_backoff_secs = 1;
                             has_connected_once = true;
-                            secondary_ready.store(false, Ordering::Release);
+                            let connection_token = secondary_connection.connected();
                             secondary_liveness.mark_connack();
                             mqtt_link_mark_connack();
                             secondary_liveness.mark_forwarding();
                             if secondary_event_tx
-                                .send(MqttNotification::SecondaryConnectionAcknowledged)
+                                .send(MqttNotification::SecondaryConnectionAcknowledged(connection_token))
                                 .await
                                 .is_err()
                             {
@@ -1363,7 +1357,7 @@ impl MqttTransport {
                             reconnect_backoff_secs = 1;
                         }
                         Err(error) => {
-                            secondary_ready.store(false, Ordering::Release);
+                            secondary_connection.disconnected();
                             mqtt_link_set_error(format!("вторичный: {}", error));
                             secondary_liveness.mark_poll_error();
                             secondary_liveness.mark_backoff();
@@ -1372,19 +1366,20 @@ impl MqttTransport {
                                 reconnect_backoff_secs,
                                 error
                             );
-                            wait_before_reconnect(reconnect_backoff_secs).await;
+                            RECONNECT_WAKE.wait(reconnect_backoff_secs, &mut reconnect_generation).await;
                             reconnect_backoff_secs = next_reconnect_backoff(reconnect_backoff_secs);
                         }
                     }
                 }
-                secondary_ready.store(false, Ordering::Release);
+                secondary_connection.disconnected();
                 secondary_liveness.mark_stopped();
             }));
         }
 
         self.eventloop_task = Some(tokio::spawn(async move {
             let mut reconnect_backoff_secs = 1u64;
-            let mut initial_connack_tx = Some(initial_connack_tx);
+            let mut reconnect_generation = RECONNECT_WAKE.generation();
+            let mut has_connected_once = false;
             let exit_reason = loop {
                 // Стабильный мост - сеть могла смениться (Wi-Fi). Раз в минуту
                 // пробяем прямой TCP настоящим рукопожатием: ответил -
@@ -1409,10 +1404,16 @@ impl MqttTransport {
                                 MQTT_PREFER_WSS.store(false, Ordering::Relaxed);
                                 MQTT_WSS_STABLE_SINCE_MS.store(0, Ordering::Relaxed);
                                 tracing::info!(
-                                    "MQTT FAILOVER REVIEW: прямой {}:{} отвечает на CONNACK - возвращаюсь с моста",
+                                    "MQTT FAILOVER REVIEW: прямой {}:{} отвечает на CONNACK - запрошен переход с моста",
                                     probe_host,
                                     probe_port
                                 );
+                                // With two brokers, don't kill a functioning path just
+                                // to change modes. Retry the current primary, and only
+                                // rebuild the session if no broker remains usable.
+                                #[cfg(feature = "mqtt-dual-broker")]
+                                eventloop_rebuild_requested.store(true, Ordering::Release);
+                                #[cfg(not(feature = "mqtt-dual-broker"))]
                                 break "direct TCP answering again after WSS failover; retrying direct"
                                     .to_string();
                             }
@@ -1425,16 +1426,19 @@ impl MqttTransport {
                         MQTT_WSS_STABLE_SINCE_MS.store(0, Ordering::Relaxed);
                         MQTT_PREFER_WSS.store(false, Ordering::Relaxed);
                         tracing::info!(
-                            "MQTT FAILOVER REVIEW: wss стабилен {} мин - перезапускаю сессию на прямом TCP",
+                            "MQTT FAILOVER REVIEW: wss стабилен {} мин - запрошен переход на прямой TCP",
                             MQTT_WSS_REVIEW_AFTER_MS / 60000
                         );
+                        #[cfg(feature = "mqtt-dual-broker")]
+                        eventloop_rebuild_requested.store(true, Ordering::Release);
+                        #[cfg(not(feature = "mqtt-dual-broker"))]
                         break "WSS stable for review interval; retrying direct TCP".to_string();
                     }
                 }
                 // The first ConnAck remains pollable even with inherited pending events. After it,
                 // reserve one core-owned slot before each poll. A critical packet transfers that
                 // permit into the queue; all other packet types release it at the end of the arm.
-                let inbox_permit = if initial_connack_tx.is_none() {
+                let inbox_permit = if has_connected_once {
                     let waited = eventloop_shared_state.loss_intolerant_inbox.is_full();
                     if waited {
                         let pending = eventloop_shared_state.loss_intolerant_inbox.len();
@@ -1503,13 +1507,18 @@ impl MqttTransport {
                                 Ordering::Relaxed,
                             );
                         }
+                        let connection_token = eventloop_primary_connection.connected();
                         #[cfg(feature = "mqtt-dual-broker")]
-                        eventloop_primary_ready.store(false, Ordering::Release);
+                        if eventloop_rebuild_requested.swap(false, Ordering::AcqRel) {
+                            // The existing primary path recovered before a full
+                            // rebuild. Keep its actual mode as the preference.
+                            MQTT_PREFER_WSS.store(MQTT_WSS_ACTIVE.load(Ordering::Relaxed), Ordering::Relaxed);
+                        }
                         eventloop_liveness.mark_connack();
                         mqtt_link_mark_connack();
                         eventloop_liveness.mark_forwarding();
                         if event_tx
-                            .send(MqttNotification::ConnectionAcknowledged)
+                            .send(MqttNotification::ConnectionAcknowledged(connection_token))
                             .await
                             .is_err()
                         {
@@ -1517,9 +1526,7 @@ impl MqttTransport {
                                 .to_string();
                         }
                         eventloop_liveness.mark_notification_forwarded();
-                        if let Some(sender) = initial_connack_tx.take() {
-                            let _ = sender.send(());
-                        }
+                        has_connected_once = true;
                     }
                     Ok(_) => {
                         reconnect_backoff_secs = 1;
@@ -1534,8 +1541,7 @@ impl MqttTransport {
                         }
                     }
                     Err(e) => {
-                        #[cfg(feature = "mqtt-dual-broker")]
-                        eventloop_primary_ready.store(false, Ordering::Release);
+                        eventloop_primary_connection.disconnected();
                         eventloop_liveness.mark_poll_error();
                         eventloop_liveness.mark_backoff();
                         mqtt_link_set_error(e.to_string());
@@ -1544,24 +1550,31 @@ impl MqttTransport {
                         // может проходить - так делают белые списки/DPI).
                         let streak = MQTT_POLL_ERROR_STREAK.fetch_add(1, Ordering::Relaxed) + 1;
                         let wss_now = MQTT_WSS_ACTIVE.load(Ordering::Relaxed);
-                        if !wss_now && streak >= MQTT_FAILOVER_TCP_ERRORS && !MQTT_PREFER_WSS.load(Ordering::Relaxed) {
+                        if !wss_now && streak >= MQTT_FAILOVER_TCP_ERRORS &&
+                            (cfg!(feature = "mqtt-dual-broker") || !MQTT_PREFER_WSS.load(Ordering::Relaxed)) {
                             MQTT_PREFER_WSS.store(true, Ordering::Relaxed);
                             mqtt_link_set_mode(
                                 "wss-мост relay-домена (сеть режет прямой TCP - переход)".to_string(),
                             );
                             tracing::error!(
-                                "MQTT FAILOVER: {} ошибок poll подряд на прямом TCP - перезапускаю сессию через wss-мост",
+                                "MQTT FAILOVER: {} ошибок poll подряд на прямом TCP - запрошен переход на wss-мост",
                                 streak
                             );
+                            #[cfg(feature = "mqtt-dual-broker")]
+                            eventloop_rebuild_requested.store(true, Ordering::Release);
+                            #[cfg(not(feature = "mqtt-dual-broker"))]
                             break "TCP path cut by network (consecutive poll errors); failing over to WSS bridge".to_string();
                         }
                         if wss_now && streak >= MQTT_FAILOVER_WSS_ERRORS {
                             MQTT_PREFER_WSS.store(false, Ordering::Relaxed);
                             MQTT_WSS_STABLE_SINCE_MS.store(0, Ordering::Relaxed);
                             tracing::error!(
-                                "MQTT FAILOVER: {} ошибок poll подряд на WSS-мосте - пробую прямой TCP снова",
+                                "MQTT FAILOVER: {} ошибок poll подряд на WSS-мосте - запрошен переход на прямой TCP",
                                 streak
                             );
+                            #[cfg(feature = "mqtt-dual-broker")]
+                            eventloop_rebuild_requested.store(true, Ordering::Release);
+                            #[cfg(not(feature = "mqtt-dual-broker"))]
                             break "WSS bridge path failing (consecutive poll errors); retrying direct TCP".to_string();
                         }
                         tracing::warn!(
@@ -1571,14 +1584,13 @@ impl MqttTransport {
                             reconnect_backoff_secs,
                             streak
                         );
-                        wait_before_reconnect(reconnect_backoff_secs).await;
+                        RECONNECT_WAKE.wait(reconnect_backoff_secs, &mut reconnect_generation).await;
                         reconnect_backoff_secs = next_reconnect_backoff(reconnect_backoff_secs);
                     }
                 }
             };
 
-            #[cfg(feature = "mqtt-dual-broker")]
-            eventloop_primary_ready.store(false, Ordering::Release);
+            eventloop_primary_connection.disconnected();
             eventloop_liveness.mark_stopped();
             tracing::error!("MQTT: event loop stopped: {}", exit_reason);
             let _ = eventloop_exit_tx.send(exit_reason);
@@ -1703,46 +1715,8 @@ impl MqttTransport {
             }
         }));
 
-        tracing::info!("MQTT: event loop started; awaiting initial broker ConnAck");
-        match tokio::time::timeout(MQTT_START_CONNACK_TIMEOUT, initial_connack_rx).await {
-            Ok(Ok(())) => {
-                if MQTT_CHOSEN_OWN.swap(false, Ordering::Relaxed) {
-                    MQTT_OWN_FAILED_AT_MS.store(0, Ordering::Relaxed);
-                }
-            }
-            Ok(Err(_)) => {
-                MQTT_CHOSEN_OWN.store(false, Ordering::Relaxed);
-                return Err("MQTT event loop stopped before initial ConnAck".to_string());
-            }
-            Err(_) => {
-                // Висящий старт лечится перезапуском сессии (движок сам);
-                // если это был наш брокер - помечаем отказ, следующая
-                // попытка идёт на публичных.
-                if MQTT_CHOSEN_OWN.swap(false, Ordering::Relaxed) {
-                    MQTT_OWN_FAILED_AT_MS.store(unix_ms(), Ordering::Relaxed);
-                    return Err(
-                        "наш брокер не ответил ConnAck за 20 с - пробуем публичных"
-                            .to_string(),
-                    );
-                }
-                return Err("MQTT initial ConnAck timed out".to_string());
-            }
-        }
-
-        // Queue the wildcard subscription only after the broker has acknowledged
-        // the connection. The EventLoop task continues polling and sends it.
-        self.enqueue_subscribe(
-            "initial wildcard subscribe",
-            "p2pm2/#",
-            QoS::AtLeastOnce,
-        )
-        .await?;
-        #[cfg(feature = "mqtt-dual-broker")]
-        self.primary_ready.store(true, Ordering::Release);
-        tracing::info!(
-            "MQTT: subscription requested after ConnAck for p2pm2/# (node={})",
-            self.node_id
-        );
+        tracing::info!("MQTT: event loops started; awaiting any subscribed broker");
+        self.await_initial_subscription().await?;
 
         // Clear any old retained presence before run_mqtt_transport publishes the
         // current presence. Ephemeral pairing sessions must not touch that topic: their
@@ -2001,12 +1975,30 @@ impl MqttTransport {
             .as_ref()
             .map(|task| task.is_finished())
             .unwrap_or(true);
-        mqtt_restart_reason(
+        let reason = mqtt_restart_reason(
             self.notification_channel_closed,
             eventloop_task_finished,
             self.liveness.snapshot(),
             MQTT_LIVENESS_STALL_AFTER,
-        )
+        );
+        // A primary failure must not destroy a healthy secondary. Broker
+        // changes and a closed shared notification channel still require a
+        // full replacement; primary recovery resumes if the secondary fails.
+        #[cfg(feature = "mqtt-dual-broker")]
+        if matches!(reason, Some(MqttRestartReason::EventLoopTaskFinished |
+            MqttRestartReason::Stalled { .. } | MqttRestartReason::ProbeStopped)) &&
+            self.has_healthy_secondary()
+        {
+            return None;
+        }
+        #[cfg(feature = "mqtt-dual-broker")]
+        if reason.is_none() && self.primary_rebuild_requested.load(Ordering::Acquire)
+            && !self.primary_connection.is_ready()
+            && !self.has_healthy_secondary()
+        {
+            return Some(MqttRestartReason::PrimaryPathRebuild);
+        }
+        reason
     }
 
     pub async fn poll_event(&mut self) -> Option<MqttEvent> {
@@ -2016,63 +2008,38 @@ impl MqttTransport {
             self.liveness.mark_loss_intolerant_drained(remaining);
             return Some(event);
         }
+        if let Some(event) = self.initial_messages.pop_front() { return Some(event); }
 
         match tokio::time::timeout(Duration::from_secs(1), self.event_rx.recv()).await {
             Ok(Some(MqttNotification::Message(event))) => Some(event),
-            Ok(Some(MqttNotification::ConnectionAcknowledged)) => {
-                if self.has_connected_once {
-                    // clean_session=true удаляет подписки на broker при разрыве,
-                    // поэтому после каждого reconnect подписываемся заново.
-                    match self
-                        .enqueue_subscribe(
-                            "reconnect wildcard subscribe",
-                            "p2pm2/#",
-                            QoS::AtLeastOnce,
-                        )
-                        .await
-                    {
-                        Ok(_) => {
+            Ok(Some(MqttNotification::ConnectionAcknowledged(token))) => {
+                // ConnAck can be queued before a disconnect or replacement.
+                if self.primary_connection.is_current(token) {
+                    match self.enqueue_subscribe(
+                        "primary wildcard subscribe", "p2pm2/#", QoS::AtLeastOnce,
+                    ).await {
+                        Ok(()) if self.primary_connection.mark_ready(token) => {
+                            mqtt_initial::primary_connack_seen();
                             #[cfg(feature = "mqtt-dual-broker")]
-                            {
-                                self.primary_ready.store(true, Ordering::Release);
-                                self.refresh_presence(MqttBrokerSet::PRIMARY).await;
-                            }
-                            tracing::info!(
-                                "MQTT: connection restored; subscription requested for p2pm2/# (node={})",
-                                self.node_id
-                            );
+                            self.refresh_presence(MqttBrokerSet::PRIMARY).await;
+                            tracing::info!("MQTT: primary subscription requested (node={})", self.node_id);
                         }
-                        Err(e) => {
-                            #[cfg(feature = "mqtt-dual-broker")]
-                            self.primary_ready.store(false, Ordering::Release);
-                            tracing::warn!(
-                                "MQTT: connection restored but subscription request failed: {}",
-                                e
-                            );
-                        }
+                        Ok(()) => tracing::info!("MQTT: ignored stale primary subscription"),
+                        Err(error) => tracing::warn!("MQTT: primary subscription request failed: {}", error),
                     }
-                } else {
-                    self.has_connected_once = true;
-                    tracing::info!("MQTT: connection acknowledged by broker");
                 }
                 None
             }
             #[cfg(feature = "mqtt-dual-broker")]
-            Ok(Some(MqttNotification::SecondaryConnectionAcknowledged)) => {
-                self.secondary_ready.store(false, Ordering::Release);
-                match self.enqueue_secondary_subscribe().await {
-                    Ok(()) => {
-                        self.secondary_ready.store(true, Ordering::Release);
-                        tracing::info!(
-                            "MQTT SECONDARY READY: broker=secondary ConnAck=true subscription_request=true mode=dual_publish max_fanout=2"
-                        );
-                        self.refresh_presence(MqttBrokerSet::SECONDARY).await;
-                    }
-                    Err(error) => {
-                        tracing::warn!(
-                            "MQTT SECONDARY STATUS: broker=secondary state=degraded subscription_request=false error={}",
-                            error
-                        );
+            Ok(Some(MqttNotification::SecondaryConnectionAcknowledged(token))) => {
+                if self.secondary_connection.is_current(token) {
+                    match self.enqueue_secondary_subscribe().await {
+                        Ok(()) if self.secondary_connection.mark_ready(token) => {
+                            tracing::info!("MQTT SECONDARY READY: ConnAck and subscription request queued");
+                            self.refresh_presence(MqttBrokerSet::SECONDARY).await;
+                        }
+                        Ok(()) => tracing::info!("MQTT: ignored stale secondary subscription"),
+                        Err(error) => tracing::warn!("MQTT: secondary subscription request failed: {}", error),
                     }
                 }
                 None
@@ -2102,10 +2069,10 @@ impl Drop for MqttTransport {
         if let Some(task) = self.eventloop_task.take() {
             task.abort();
         }
+        self.primary_connection.disconnected();
         #[cfg(feature = "mqtt-dual-broker")]
         {
-            self.primary_ready.store(false, Ordering::Release);
-            self.secondary_ready.store(false, Ordering::Release);
+            self.secondary_connection.disconnected();
             if let Some(task) = self.secondary_eventloop_task.take() {
                 task.abort();
             }

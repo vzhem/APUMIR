@@ -263,6 +263,7 @@ interface P2PCoreHandle {
     // Transport fallback after direct search; false until engine has started.
     boolean external_transport_allowed();
     boolean trigger_gossip_discovery();
+    boolean on_foreground_recovery();
     void on_network_available();
     void on_network_lost();
 

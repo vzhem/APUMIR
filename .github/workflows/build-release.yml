@@ -173,6 +173,9 @@ jobs:
           # Presence crossing real engine/FFI and mDNS round boundaries.
           for test in \
             network::mqtt_transport::local_tests \
+            network::mqtt_transport::mqtt_connection::tests \
+            network::mqtt_transport::mqtt_reconnect::tests \
+            engine::core::foreground_recovery::tests \
             network::mdns::tests::browse_round_never_replays_an_old_node_without_a_resolution \
             engine::core::tests::direct_personal_presence_emits_each_fresh_observation_but_not_stale_or_future \
             engine::core::tests::invite_is_only_an_address_hint_not_online_presence \
@@ -181,9 +184,36 @@ jobs:
             LOG="$RUNNER_TEMP/presence-${test//::/-}.log"
             if ! RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --features mqtt-dual-broker --lib "$test" > "$LOG" 2>&1; then
               tail -150 "$LOG"
+              python3 - "$LOG" <<'PY'
+          from pathlib import Path
+          import sys
+          text = "\n".join(Path(sys.argv[1]).read_text(errors="replace").splitlines()[-100:])
+          text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          for i in range(0, len(text), 3000):
+              print(f"::error title=Presence recovery tests part {i // 3000 + 1}::{text[i:i + 3000]}")
+          PY
               exit 1
             fi
             tail -25 "$LOG"
+            grep -Eq '^test result: ok\. [1-9][0-9]* passed' "$LOG" || { echo "::error::No tests ran for $test"; exit 1; }
+            grep '^test result:' "$LOG" >> "$GITHUB_STEP_SUMMARY"
+          done
+          # The single-broker build has a distinct ConnAck path. Compile and
+          # exercise it too; neither a compile error nor a zero-test run passes.
+          for test in network::mqtt_transport::mqtt_connection::tests network::mqtt_transport::mqtt_reconnect::tests engine::core::foreground_recovery::tests; do
+            LOG="$RUNNER_TEMP/single-${test//::/-}.log"
+            if ! RUST_LOG=warn CARGO_TERM_COLOR=never cargo test --release --lib "$test" > "$LOG" 2>&1; then
+              tail -150 "$LOG"
+              python3 - "$LOG" <<'PY'
+          from pathlib import Path
+          import sys
+          text = "\n".join(Path(sys.argv[1]).read_text(errors="replace").splitlines()[-100:])
+          text = text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          for i in range(0, len(text), 3000):
+              print(f"::error title=Single broker tests part {i // 3000 + 1}::{text[i:i + 3000]}")
+          PY
+              exit 1
+            fi
             grep -Eq '^test result: ok\. [1-9][0-9]* passed' "$LOG" || { echo "::error::No tests ran for $test"; exit 1; }
             grep '^test result:' "$LOG" >> "$GITHUB_STEP_SUMMARY"
           done

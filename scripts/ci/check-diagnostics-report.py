@@ -28,7 +28,6 @@ HOOK_FILES = (
     "data/file/OutgoingFilePreparationService.kt",
     "service/CoreServerService.kt",
     "service/NetworkMonitor.kt",
-    "service/NetworkChangeReceiver.kt",
     "MessengerApplication.kt",
 )
 

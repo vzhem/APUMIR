@@ -66,6 +66,9 @@ use crate::network::adaptive_polling::AdaptivePolling;
 use crate::network::swarm_first::SwarmFirstPolicy;
 use crate::resilience::AddressBook;
 
+#[path = "foreground_recovery.rs"]
+mod foreground_recovery;
+
 const MQTT_OUTBOUND_COMMAND_CAPACITY: usize = 256;
 
 /// Give a newly discovered *own* public endpoint to directly authenticated
@@ -108,6 +111,8 @@ enum MqttOutboundCommand {
     /// Немедленно объявить себя и запросить presence остальных (кнопка
     /// «Собрать данные об абонентах»). Обычный цикл делает это раз в минуту.
     AnnounceNow,
+    /// Automatic foreground recovery: obey beacon budget, do not claim an old address is fresh.
+    AnnounceAfterIdle,
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -3209,8 +3214,12 @@ impl P2PCore {
                             ),
                         }
                     }
-                    Ok(MqttOutboundCommand::AnnounceNow) => {
-                        let current_addr = {
+                    Ok(command @ (MqttOutboundCommand::AnnounceNow | MqttOutboundCommand::AnnounceAfterIdle)) => {
+                        let resume = matches!(command, MqttOutboundCommand::AnnounceAfterIdle);
+                        if resume && !foreground_recovery::allow_resume_beacon(
+                            known_peers.len(), &presence_scope, crate::storage::models::now_ms(),
+                        ) { continue; }
+                        let current_addr = if resume { None } else {
                             let pa = public_addr.lock().unwrap();
                             pa.map(|a| a.to_string())
                         };
@@ -4965,7 +4974,7 @@ impl P2PCore {
     pub fn on_network_available(&self) {
         self.swarm_first.reset(crate::storage::models::now_ms());
         self.peer_exchange.reset_session();
-        *self.public_addr.lock().unwrap() = None;
+        self.invalidate_own_addresses();
         // Часть 2 задачи IPv6: смена сети (Wi-Fi → LTE, VPN, авиарежим).
         // Старые прямые соединения открыты с прежнего адреса источника и по
         // прежнему маршруту — закрываем пул, иначе каждая отправка упирается
@@ -4998,7 +5007,7 @@ impl P2PCore {
     pub fn on_network_lost(&self) {
         self.swarm_first.reset(crate::storage::models::now_ms());
         self.peer_exchange.reset_session();
-        *self.public_addr.lock().unwrap() = None;
+        self.invalidate_own_addresses();
         self.network.set_status(NetworkStatus::Offline);
         self.events.emit(CoreEvent::NetworkStatusChanged {
             status: "offline".into(),
@@ -5166,32 +5175,7 @@ impl P2PCore {
     /// Кнопка «Собрать данные об абонентах» раньше была заглушкой: она писала
     /// строку в лог и возвращала true, ничего не отправляя.
     pub fn trigger_gossip_discovery(&self) -> bool {
-        if !self.state.is_running() {
-            tracing::warn!("Gossip: manual trigger ignored, engine is not running");
-            return false;
-        }
-        self.peer_exchange.wake();
-        let direct_available = self.direct.lock().unwrap().is_some();
-        if !self.swarm_first.transport_fallback_allowed(crate::storage::models::now_ms()) {
-            tracing::info!("Discovery: direct swarm first; MQTT announce deferred");
-            return direct_available;
-        }
-        match self.mqtt_outbound_tx.as_ref() {
-            Some(sender) => match sender.try_send(MqttOutboundCommand::AnnounceNow) {
-                Ok(()) => {
-                    tracing::info!("Gossip: manual announce command accepted");
-                    true
-                }
-                Err(error) => {
-                    tracing::warn!("Gossip: manual announce command rejected: {}", error);
-                    direct_available
-                }
-            },
-            None => {
-                tracing::info!("Discovery: direct exchange requested; MQTT channel unavailable");
-                direct_available
-            }
-        }
+        self.schedule_discovery(MqttOutboundCommand::AnnounceNow)
     }
 
     /// Параллельный QUIC-поток для файлов: отправка НАПРЯМУЮ получателю по QUIC,

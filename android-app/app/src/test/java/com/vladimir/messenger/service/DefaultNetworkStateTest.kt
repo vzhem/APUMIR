@@ -50,7 +50,9 @@ class DefaultNetworkStateTest {
         assertEquals(Action.NONE, state.capabilities("vpn", true, 1 or 4, true))
         assertEquals(Action.AVAILABLE, state.capabilities("vpn", true, 1 or 2, false))
         assertEquals(Action.NONE, state.capabilities("vpn", true, 1 or 2, false))
-        assertEquals(Action.AVAILABLE, state.capabilities("vpn", true, 1 or 2, true))
+        // Metering on the same route updates the user's traffic policy but
+        // does not pretend the network changed and reset live sessions.
+        assertEquals(Action.POLICY, state.capabilities("vpn", true, 1 or 2, true))
         assertEquals(Action.NONE, state.capabilities("vpn", true, 1 or 2, true))
     }
 

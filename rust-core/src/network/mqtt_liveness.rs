@@ -92,6 +92,8 @@ pub enum MqttRestartReason {
     /// адресу (не сбой, а осознанное изменение).
     BrokerChanged,
     EventLoopTaskFinished,
+    /// Primary requested a transport switch while no subscribed reserve remains.
+    PrimaryPathRebuild,
     Stalled {
         phase: MqttLoopPhase,
         stalled_for_ms: u64,
@@ -105,6 +107,7 @@ impl MqttRestartReason {
             Self::NotificationChannelClosed => "notification_channel_closed",
             Self::BrokerChanged => "broker_settings_changed",
             Self::EventLoopTaskFinished => "eventloop_task_finished",
+            Self::PrimaryPathRebuild => "primary_path_rebuild",
             Self::Stalled { .. } => "eventloop_stalled",
             Self::ProbeStopped => "liveness_probe_stopped",
         }

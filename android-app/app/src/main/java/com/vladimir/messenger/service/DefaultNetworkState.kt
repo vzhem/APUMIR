@@ -7,7 +7,7 @@ package com.vladimir.messenger.service
  * reported only once that network's capabilities are known.
  */
 internal class DefaultNetworkState<K : Any> {
-    enum class Action { IGNORE, NONE, AVAILABLE, LOST }
+    enum class Action { IGNORE, NONE, AVAILABLE, LOST, POLICY }
 
     private var current: K? = null
     private var usable = false
@@ -28,10 +28,14 @@ internal class DefaultNetworkState<K : Any> {
     @Synchronized
     fun capabilities(network: K, internet: Boolean, route: Int, isMetered: Boolean): Action {
         if (network != current) return Action.IGNORE
-        val pathChanged = networkChanged || routeMask != route || metered != isMetered
+        // A tariff/data-saver change affects policy, not necessarily the route.
+        // Treating it as a new path destroyed otherwise healthy QUIC sessions
+        // and paused the broker for another direct-search window.
+        val pathChanged = networkChanged || routeMask != route
         val action = when {
             internet && (!usable || pathChanged) -> Action.AVAILABLE
             !internet && usable -> Action.LOST
+            internet && metered != isMetered -> Action.POLICY
             else -> Action.NONE
         }
         usable = internet

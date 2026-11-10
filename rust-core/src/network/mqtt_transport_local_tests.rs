@@ -32,6 +32,10 @@ impl Drop for TestBroker {
 
 impl TestBroker {
     async fn start() -> Self {
+        Self::start_gated(Arc::new(AtomicBool::new(true))).await
+    }
+
+    async fn start_gated(connack_allowed: Arc<AtomicBool>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let listeners: Listeners = Arc::new(StdMutex::new(Vec::new()));
@@ -45,6 +49,7 @@ impl TestBroker {
                 let listeners = Arc::clone(&task_listeners);
                 let subscriptions = Arc::clone(&subscription_counter);
                 let publications = publications_tx.clone();
+                let connack_allowed = Arc::clone(&connack_allowed);
                 tokio::spawn(async move {
                     let (mut reader, mut writer) = stream.into_split();
                     let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
@@ -60,7 +65,12 @@ impl TestBroker {
                     });
                     while let Ok((header, body)) = read_packet(&mut reader).await {
                         match header & 0xf0 {
-                            0x10 => { let _ = tx.send(vec![0x20, 2, 0, 0]); }
+                            0x10 => {
+                                while !connack_allowed.load(Ordering::Acquire) {
+                                    tokio::time::sleep(Duration::from_millis(10)).await;
+                                }
+                                let _ = tx.send(vec![0x20, 2, 0, 0]);
+                            }
                             0x80 if body.len() >= 2 => {
                                 subscribed.store(true, Ordering::Release);
                                 subscriptions.fetch_add(1, Ordering::AcqRel);
@@ -184,19 +194,20 @@ fn local_transport(node: &str, primary: SocketAddr, secondary: SocketAddr) -> Mq
         eventloop: Some(eventloop),
         event_tx: Some(event_tx),
         event_rx,
+        initial_messages: VecDeque::new(),
         shared_state,
         eventloop_task: None,
         eventloop_watchdog_task: None,
         liveness: Arc::new(MqttLivenessProbe::new()),
         shutdown_requested: Arc::new(AtomicBool::new(false)),
         notification_channel_closed: false,
-        has_connected_once: false,
-        primary_ready: Arc::new(AtomicBool::new(false)),
+        primary_connection: Arc::new(BrokerConnection::new()),
+        primary_rebuild_requested: Arc::new(AtomicBool::new(false)),
         secondary_client,
         secondary_eventloop: Some(secondary_eventloop),
         secondary_eventloop_task: None,
         secondary_liveness: Arc::new(MqttLivenessProbe::new()),
-        secondary_ready: Arc::new(AtomicBool::new(false)),
+        secondary_connection: Arc::new(BrokerConnection::new()),
         last_presence: StdMutex::new(None),
         broker_generation: broker_settings_generation(),
         ephemeral: false,
@@ -208,10 +219,20 @@ fn local_transport(node: &str, primary: SocketAddr, secondary: SocketAddr) -> Mq
 
 async fn wait_for_secondary(transport: &mut MqttTransport) {
     timeout(Duration::from_secs(10), async {
-        while !transport.secondary_ready.load(Ordering::Acquire) {
+        while !transport.secondary_connection.is_ready() {
             transport.poll_event().await;
         }
     }).await.expect("secondary subscription request was not queued");
+}
+
+async fn wait_for_both(transport: &mut MqttTransport) {
+    timeout(Duration::from_secs(10), async {
+        while !transport.primary_connection.is_ready() ||
+            !transport.secondary_connection.is_ready()
+        {
+            transport.poll_event().await;
+        }
+    }).await.expect("both subscription requests were not queued");
 }
 
 async fn receive(transport: &mut MqttTransport, topic: &str, payload: &str) {
@@ -242,13 +263,15 @@ fn cached_presence_never_makes_old_or_future_addresses_fresh() {
 
 #[tokio::test]
 async fn local_sessions_replay_current_presence_on_late_secondary_and_reconnect() {
-    let mut wss_identity = TestBroker::start().await;
+    let secondary_gate = Arc::new(AtomicBool::new(false));
+    let mut wss_identity = TestBroker::start_gated(Arc::clone(&secondary_gate)).await;
     let mut public_identity = TestBroker::start().await;
     // Local TCP sockets model the distinct broker identities; this test does
     // not exercise WSS, TLS, a real VPN or Android.
     let mut sender = local_transport("pk_sender", public_identity.addr, wss_identity.addr);
     sender.subscribe().await.unwrap();
     sender.publish_presence("Sender", Some("203.0.113.7:7777"), true).await.unwrap();
+    secondary_gate.store(true, Ordering::Release);
     wait_for_secondary(&mut sender).await;
     wss_identity.wait_for_subscriptions(1).await;
 
@@ -292,15 +315,125 @@ async fn local_sessions_replay_current_presence_on_late_secondary_and_reconnect(
 
     let mut recipient = local_transport("pk_recipient", wss_identity.addr, wss_identity.addr);
     recipient.subscribe().await.unwrap();
-    wait_for_secondary(&mut recipient).await;
+    wait_for_both(&mut recipient).await;
     wss_identity.wait_for_subscriptions(5).await;
 
     // Only the sender's WSS-identity path remains active; it still reaches
     // the peer whose primary uses that same broker identity.
-    sender.primary_ready.store(false, Ordering::Release);
+    sender.primary_connection.disconnected();
     sender.send_mesh_relay("pk_recipient", "wire-one").await.unwrap();
     wss_identity.next_publication("p2pm2/msg/pk_recipient", b"wire-one").await;
     receive(&mut recipient, "p2pm2/msg/pk_recipient", "wire-one").await;
+}
+
+#[tokio::test]
+async fn a_silent_primary_does_not_block_a_ready_secondary_or_destroy_inherited_delivery() {
+    let primary_gate = Arc::new(AtomicBool::new(false));
+    let mut primary = TestBroker::start_gated(Arc::clone(&primary_gate)).await;
+    let mut secondary = TestBroker::start().await;
+    let mut sender = local_transport("pk_sender", primary.addr, secondary.addr);
+    sender.shared_state.loss_intolerant_inbox.push_owned(MqttEvent {
+        topic: "p2pm2/msg/pk_sender".into(), payload: "inherited".into(),
+    });
+    timeout(Duration::from_secs(3), sender.subscribe()).await
+        .expect("ready secondary must not wait for the silent primary").unwrap();
+    assert!(!sender.primary_connection.is_ready());
+    assert!(sender.secondary_connection.is_ready());
+    let inherited = sender.poll_event().await.expect("accepted delivery must survive startup");
+    assert_eq!(inherited.payload, "inherited");
+
+    sender.publish_presence("Sender", Some("203.0.113.7:7777"), true).await.unwrap();
+    let topic = "p2pm2/presence/pk_sender";
+    let original = secondary.next_nonempty_publication(topic).await;
+    let mut recipient = local_transport("pk_recipient", secondary.addr, secondary.addr);
+    recipient.subscribe().await.unwrap();
+    secondary.wait_for_subscriptions(2).await;
+    sender.send_mesh_relay("pk_recipient", "secondary-delivery").await.unwrap();
+    secondary.next_publication("p2pm2/msg/pk_recipient", b"secondary-delivery").await;
+    receive(&mut recipient, "p2pm2/msg/pk_recipient", "secondary-delivery").await;
+
+    // The primary can become ready later without replacing the healthy
+    // secondary; it re-subscribes and receives the current presence.
+    primary_gate.store(true, Ordering::Release);
+    timeout(Duration::from_secs(10), async {
+        while !sender.primary_connection.is_ready() { sender.poll_event().await; }
+    }).await.expect("late primary did not become ready");
+    primary.wait_for_subscriptions(1).await;
+    assert_eq!(primary.next_nonempty_publication(topic).await, original);
+    assert!(sender.secondary_connection.is_ready());
+
+    // A failed primary task must not tear down the working secondary. Once
+    // no healthy secondary remains, a full session restart is necessary.
+    sender.eventloop_task.as_ref().unwrap().abort();
+    timeout(Duration::from_secs(2), async {
+        while !sender.eventloop_task.as_ref().unwrap().is_finished() { tokio::task::yield_now().await; }
+    }).await.unwrap();
+    assert!(sender.restart_reason().is_none());
+    assert!(!sender.active_brokers().contains(MqttBrokerId::Primary));
+    assert!(sender.active_brokers().contains(MqttBrokerId::Secondary));
+    sender.secondary_connection.disconnected();
+    assert!(sender.restart_reason().is_some());
+}
+
+#[tokio::test]
+async fn startup_ignores_stale_control_and_keeps_both_kinds_of_pending_event() {
+    let unused = "127.0.0.1:9".parse().unwrap();
+    let mut transport = local_transport("pk_sender", unused, unused);
+    let notifications = transport.event_tx.as_ref().unwrap().clone();
+    transport.shared_state.loss_intolerant_inbox.push_owned(MqttEvent {
+        topic: "p2pm2/msg/pk_sender".into(), payload: "durable".into(),
+    });
+    let stale = transport.primary_connection.connected();
+    transport.primary_connection.disconnected();
+    notifications.send(MqttNotification::Message(MqttEvent {
+        topic: "p2pm2/presence/pk_peer".into(), payload: "refreshable".into(),
+    })).await.unwrap();
+    notifications.send(MqttNotification::ConnectionAcknowledged(stale)).await.unwrap();
+    let current = transport.secondary_connection.connected();
+    notifications.send(MqttNotification::SecondaryConnectionAcknowledged(current)).await.unwrap();
+    transport.await_initial_subscription().await.unwrap();
+    assert!(!transport.primary_connection.is_ready());
+    assert!(transport.secondary_connection.is_ready());
+    assert_eq!(transport.poll_event().await.unwrap().payload, "durable");
+    assert_eq!(transport.poll_event().await.unwrap().payload, "refreshable");
+}
+
+#[tokio::test]
+async fn delayed_connack_for_a_disconnected_socket_cannot_become_ready() {
+    let primary_gate = Arc::new(AtomicBool::new(false));
+    let primary = TestBroker::start_gated(Arc::clone(&primary_gate)).await;
+    let secondary = TestBroker::start().await;
+    let mut sender = local_transport("pk_sender", primary.addr, secondary.addr);
+    let notifications = sender.event_tx.as_ref().unwrap().clone();
+    sender.subscribe().await.unwrap();
+
+    let stale = sender.primary_connection.connected();
+    sender.primary_connection.disconnected();
+    notifications.send(MqttNotification::ConnectionAcknowledged(stale)).await.unwrap();
+    notifications.send(MqttNotification::Message(MqttEvent {
+        topic: "test/sentinel".into(), payload: "after-stale-connack".into(),
+    })).await.unwrap();
+    receive(&mut sender, "test/sentinel", "after-stale-connack").await;
+    assert!(!sender.primary_connection.is_ready());
+    assert_eq!(primary.subscriptions.load(Ordering::Acquire), 0);
+    assert!(sender.secondary_connection.is_ready());
+    // A requested primary transport switch is deferred, rather than tearing
+    // down a working reserve. The existing primary can still recover.
+    sender.primary_rebuild_requested.store(true, Ordering::Release);
+    assert!(sender.restart_reason().is_none());
+
+    primary_gate.store(true, Ordering::Release);
+    timeout(Duration::from_secs(10), async {
+        while !sender.primary_connection.is_ready() { sender.poll_event().await; }
+    }).await.expect("a later real ConnAck should still subscribe");
+    primary.wait_for_subscriptions(1).await;
+    assert!(sender.secondary_connection.is_ready());
+    assert!(!sender.primary_rebuild_requested.load(Ordering::Acquire));
+    // If neither path remains usable, the pending switch becomes actionable.
+    sender.primary_connection.disconnected();
+    sender.secondary_connection.disconnected();
+    sender.primary_rebuild_requested.store(true, Ordering::Release);
+    assert_eq!(sender.restart_reason(), Some(MqttRestartReason::PrimaryPathRebuild));
 }
 
 #[tokio::test]
@@ -310,9 +443,9 @@ async fn copies_arriving_from_two_independent_local_brokers_are_deduplicated() {
     let mut sender = local_transport("pk_sender", first.addr, second.addr);
     let mut recipient = local_transport("pk_recipient", first.addr, second.addr);
     sender.subscribe().await.unwrap();
-    wait_for_secondary(&mut sender).await;
+    wait_for_both(&mut sender).await;
     recipient.subscribe().await.unwrap();
-    wait_for_secondary(&mut recipient).await;
+    wait_for_both(&mut recipient).await;
     first.wait_for_subscriptions(2).await;
     second.wait_for_subscriptions(2).await;
 

@@ -250,14 +250,6 @@
             android:exported="false" />
 
 
-        <receiver
-            android:name=".service.NetworkChangeReceiver"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.net.conn.CONNECTIVITY_CHANGE" />
-            </intent-filter>
-        </receiver>
-
         <!-- Каркас доставки «как в Telegram»: будильник поднимает службу, если
              её убили, а приёмник возвращает цепочку после перезагрузки и
              обновления приложения. exported=true обязателен: системные
