@@ -2639,6 +2639,7 @@ impl P2PCore {
                                 addr,
                                 offer_payload(&envelope).into_bytes(),
                             );
+                            if !sent { offers.note_send_failed(&msg_id, &peer); }
                             tracing::info!(
                                 "CUSTODY K5: offer {} to {} sent: {}",
                                 msg_id,

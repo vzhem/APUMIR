@@ -416,9 +416,11 @@ pub struct OfferTask {
     pub envelope: String,
     /// Кому уже предложили (их не спрашиваем второй раз).
     pub offered_to: Vec<String>,
-    /// Сколько хранителей подтвердили.
+    /// Number of anonymous legacy acknowledgments, not verified distinct holders.
     pub accepted: usize,
     pub expires_at_ms: i64,
+    /// Rotate candidate selection so failed peers cannot monopolize a sweep.
+    next_candidate: usize,
 }
 
 /// Short bounded history survives completion of an offer task so the origin
@@ -462,6 +464,7 @@ impl CustodyOffers {
             offered_to: Vec::new(),
             accepted: 0,
             expires_at_ms: item.expires_at_ms,
+            next_candidate: 0,
         });
         true
     }
@@ -470,49 +473,65 @@ impl CustodyOffers {
         self.tasks.lock().unwrap().len()
     }
 
-    /// Кому предложить копию в этом круге: список `(msg_id, envelope, сосед)`.
-    ///
-    /// Соседей даёт вызывающий (ядро знает, кто сейчас в сети и кто «свой»);
-    /// модуль только решает, кого ещё не спрашивали и хватает ли копий.
+    /// Plan a bounded, round-robin batch `(message id, envelope, peer)`.
+    /// A peer is reserved before the network call; callers must report a
+    /// failed stream with `note_send_failed` so it can be tried next sweep.
+    /// The production sweep runs at most once a minute. One plan per task per
+    /// pass and rotating task/peer cursors prevent failing sends from starving
+    /// later messages or other candidates.
     pub fn next_offers(&self, candidates: &[String]) -> Vec<(String, String, String)> {
         let mut tasks = self.tasks.lock().unwrap();
         let mut history = self.history.lock().unwrap();
         let mut planned: Vec<(String, String, String)> = Vec::new();
-        for task in tasks.iter_mut() {
-            if task.accepted >= MAX_CUSTODY_PEERS || planned.len() >= MAX_OFFERS_PER_TICK {
-                continue;
+        if tasks.is_empty() || candidates.is_empty() { return planned; }
+        let max_visits = tasks.len().saturating_mul(MAX_OFFERS_PER_TICK);
+        for _ in 0..max_visits {
+            if planned.len() >= MAX_OFFERS_PER_TICK { break; }
+            let mut task = tasks.pop_front().expect("nonempty offer queue");
+            if task.accepted < MAX_CUSTODY_PEERS {
+                let start = task.next_candidate % candidates.len();
+                let chosen = (0..candidates.len())
+                    .map(|offset| (start + offset) % candidates.len())
+                    .find(|&index| !task.offered_to.contains(&candidates[index]));
+                if let Some(index) = chosen {
+                    let peer = &candidates[index];
+                    task.next_candidate = (index + 1) % candidates.len();
+                    task.offered_to.push(peer.clone());
+                    // Even a failed write might have reached the holder; keep
+                    // its bounded drop-hint history until Room confirms delivery.
+                    if !history.iter().any(|item| item.msg_id == task.msg_id && item.peer == *peer) {
+                        if history.len() >= MAX_OFFER_HISTORY { history.pop_front(); }
+                        history.push_back(OfferedPeer {
+                            msg_id: task.msg_id.clone(), peer: peer.clone(), expires_at_ms: task.expires_at_ms,
+                        });
+                    }
+                    planned.push((task.msg_id.clone(), task.envelope.clone(), peer.clone()));
+                }
             }
-            for peer in candidates.iter() {
-                if planned.len() >= MAX_OFFERS_PER_TICK {
-                    break;
-                }
-                if task.accepted >= MAX_CUSTODY_PEERS {
-                    break;
-                }
-                if task.offered_to.iter().any(|known| known == peer) {
-                    continue;
-                }
-                task.offered_to.push(peer.clone());
-                // A planned peer may refuse or be unreachable; a later drop is
-                // harmless. Bound history even across completed tasks.
-                if !history.iter().any(|item| item.msg_id == task.msg_id && item.peer == *peer) {
-                    if history.len() >= MAX_OFFER_HISTORY { history.pop_front(); }
-                    history.push_back(OfferedPeer {
-                        msg_id: task.msg_id.clone(), peer: peer.clone(), expires_at_ms: task.expires_at_ms,
-                    });
-                }
-                planned.push((task.msg_id.clone(), task.envelope.clone(), peer.clone()));
-            }
+            tasks.push_back(task);
         }
         planned
     }
 
-    /// Хранитель ответил. `true` - копий достаточно, задачу можно закрыть.
+    /// A failed stream can be ambiguous: the holder might still have received
+    /// it. Re-arm the same candidate, without discarding its drop-hint history.
+    /// An ACK that already finished or removed the task wins over this callback.
+    pub fn note_send_failed(&self, msg_id: &str, peer: &str) {
+        let mut tasks = self.tasks.lock().unwrap();
+        if let Some(task) = tasks.iter_mut().find(|task| task.msg_id == msg_id) {
+            task.offered_to.retain(|known| known != peer);
+        }
+    }
+
+    /// Legacy ACKs have no source identity: this is only a bounded estimate,
+    /// never proof of distinct durable copies. Do not count more acknowledgments
+    /// than currently planned peers; this prevents a lone peer's duplicate ACK
+    /// from pretending to be two peers, but cannot deduplicate across two offers.
     pub fn note_ack(&self, msg_id: &str, ack: CustodyAck) -> bool {
         let mut tasks = self.tasks.lock().unwrap();
         let mut done = false;
         if let Some(task) = tasks.iter_mut().find(|task| task.msg_id == msg_id) {
-            if ack == CustodyAck::Accepted {
+            if ack == CustodyAck::Accepted && task.accepted < task.offered_to.len().min(MAX_CUSTODY_PEERS) {
                 task.accepted += 1;
             }
             if task.accepted >= MAX_CUSTODY_PEERS {
@@ -806,6 +825,57 @@ mod tests {
         assert!(!offers.note_ack("m1", CustodyAck::Accepted));
         assert!(offers.note_ack("m1", CustodyAck::Accepted), "двое взяли - хватит");
         assert_eq!(offers.pending_len(), 0);
+    }
+
+    #[test]
+    fn failed_offer_is_retried_without_discarding_drop_history() {
+        let offers = CustodyOffers::new();
+        let item = held_from_envelope(&envelope("m1", "pk_recv", "pk_orig", 3600), 1_000).unwrap();
+        assert!(offers.enqueue(item));
+        let peers = vec!["pk_a".to_string(), "pk_b".to_string()];
+        assert_eq!(offers.next_offers(&peers).len(), 2);
+        // Even when the stream reports failure, the holder might have read it.
+        offers.note_send_failed("m1", "pk_a");
+        let retry = offers.next_offers(&peers);
+        assert_eq!(retry.len(), 1);
+        assert_eq!(retry[0].2, "pk_a");
+        assert!(offers.next_offers(&peers).is_empty());
+        assert_eq!(offers.take_offered_peers("m1"), peers);
+    }
+
+    #[test]
+    fn failed_offers_cannot_starve_other_messages() {
+        let offers = CustodyOffers::new();
+        for id in 0..10 {
+            assert!(offers.enqueue(held_from_envelope(
+                &envelope(&format!("m{id}"), "pk_recv", "pk_orig", 3600), 1_000,
+            ).unwrap()));
+        }
+        let peers = vec!["pk_a".to_string()];
+        let first = offers.next_offers(&peers);
+        assert_eq!(first.iter().map(|item| item.0.as_str()).collect::<Vec<_>>(), vec!["m0", "m1", "m2", "m3"]);
+        for (id, _, peer) in &first { offers.note_send_failed(id, peer); }
+        let second = offers.next_offers(&peers);
+        assert_eq!(second.iter().map(|item| item.0.as_str()).collect::<Vec<_>>(), vec!["m4", "m5", "m6", "m7"]);
+        for (id, _, peer) in &second { offers.note_send_failed(id, peer); }
+        let third = offers.next_offers(&peers);
+        assert_eq!(third.iter().map(|item| item.0.as_str()).collect::<Vec<_>>(), vec!["m8", "m9", "m0", "m1"]);
+    }
+
+    #[test]
+    fn anonymous_ack_cannot_count_twice_with_only_one_candidate() {
+        let offers = CustodyOffers::new();
+        let item = held_from_envelope(&envelope("m1", "pk_recv", "pk_orig", 3600), 1_000).unwrap();
+        assert!(offers.enqueue(item));
+        assert!(!offers.note_ack("m1", CustodyAck::Accepted), "unoffered ACK must not count");
+        assert_eq!(offers.accepted_for("m1"), 0);
+        assert_eq!(offers.next_offers(&["pk_a".to_string()]).len(), 1);
+        assert!(!offers.note_ack("m1", CustodyAck::Accepted));
+        assert!(!offers.note_ack("m1", CustodyAck::Accepted));
+        assert_eq!(offers.accepted_for("m1"), 1);
+        assert_eq!(offers.pending_len(), 1);
+        // Two distinct offers still cannot prove two distinct senders without
+        // authenticating the legacy ACK; do not infer such a guarantee here.
     }
 
     #[test]

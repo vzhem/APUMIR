@@ -84,6 +84,17 @@ class DeliveryCadenceContractTest(unittest.TestCase):
         self.assertIn("lane.tx.try_send(interactive, job)", transport)
         self.assertIn("while let Some(job) = rx.recv().await", transport)
 
+    def test_failed_neighbor_offer_is_rearmed_on_a_bounded_fair_sweep(self):
+        core = read(ROOT / "rust-core/src/engine/core.rs")
+        custody = read(ROOT / "rust-core/src/network/custody_relay.rs")
+        self.assertIn("if !sent { offers.note_send_failed(&msg_id, &peer); }", core)
+        self.assertIn("const OWN_LOOKUP_TICKS: u64 = 12", core)
+        self.assertIn("task.offered_to.retain(|known| known != peer)", custody)
+        self.assertIn("tasks.pop_front()", custody)
+        self.assertIn("tasks.push_back(task)", custody)
+        self.assertIn("task.accepted < task.offered_to.len().min(MAX_CUSTODY_PEERS)", custody)
+        self.assertIn("network::custody_relay::tests", read(ROOT / ".github/workflows/build-release.yml"))
+
     def test_mqtt_wake_does_not_cancel_taken_connack_or_accelerate_presence(self):
         core = read(ROOT / "rust-core/src/engine/core.rs")
         transport = read(ROOT / "rust-core/src/network/mqtt_transport.rs")

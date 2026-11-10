@@ -48,6 +48,8 @@ __pycache__/
 .env
 *.jks
 release-key.jks
+# Client configuration is provided via protected CI settings, not committed.
+android-app/**/google-services.json
 
 # Cloudflare worker node_modules
 cloudflare-worker/node_modules/
