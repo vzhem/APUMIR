@@ -9,6 +9,7 @@ internal object InitialDiagnosticsSnapshot {
             appendLine("[предварительный отчёт: сбор ещё идёт]")
             appendLine("Это только локальный срез стадий и журнала. Состояние сети, БД и ядра ещё не проверено.")
             appendLine("build=${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+            append(ApplicationStartupDiagnostics.report())
             append(ServiceStartupDiagnostics.report())
             append(OperationalDiagnostics.journalReport())
             appendLine("[журнал] (последние события этой сессии)")

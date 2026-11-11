@@ -30,7 +30,7 @@ internal class PushWakeInbox(
     context: Context,
     private val databaseFile: File = File(context.applicationContext.noBackupFilesDir, "push_wake_inbox_v1.sqlite"),
     private val maxRoutes: Int = 128,
-) {
+) : PushWakeQueue {
     private val app = context.applicationContext
     private var helper: SQLiteOpenHelper? = null
 
@@ -125,7 +125,7 @@ internal class PushWakeInbox(
      * Lease one due route/recovery marker. The caller must complete it or let
      * the lease expire; an abandoned claim is available again after [LEASE_MS].
      */
-    fun claim(nowMs: Long): ClaimResult = synchronized(LOCK) {
+    override fun claim(nowMs: Long): ClaimResult = synchronized(LOCK) {
         if (!validNow(nowMs)) return@synchronized ClaimResult.Unavailable
         try {
             val db = db()
@@ -164,7 +164,7 @@ internal class PushWakeInbox(
      * for the same route survives. A failed attempt is delayed, never hot-looped.
      * Completion of an expired/replaced lease cannot alter the current lease.
      */
-    fun complete(claim: Claim, success: Boolean, nowMs: Long): Completion = synchronized(LOCK) {
+    override fun complete(claim: Claim, success: Boolean, nowMs: Long): Completion = synchronized(LOCK) {
         val route = claim.route ?: RECOVERY
         if (!validNow(nowMs) || (route != RECOVERY && !ROUTE.matches(route)) ||
             claim.revision <= 0 || claim.lease <= 0
@@ -205,7 +205,7 @@ internal class PushWakeInbox(
     }
 
     /** Allows startup/worker recovery to distinguish an empty inbox from a delayed lease. */
-    fun pending(nowMs: Long): PendingResult = synchronized(LOCK) {
+    override fun pending(nowMs: Long): PendingResult = synchronized(LOCK) {
         if (!validNow(nowMs)) return@synchronized PendingResult.Unavailable
         try {
             val db = db()

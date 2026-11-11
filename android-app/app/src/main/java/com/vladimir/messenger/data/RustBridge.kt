@@ -205,14 +205,15 @@ object RustBridge {
         existingPublicKey: String? = null,
         existingPrivateKey: String? = null,
         relayDbPath: String? = null,
-        recordServiceStartup: Boolean = false,
+        serviceStartupToken: Any? = null, startupAllowed: (() -> Boolean)? = null,
     ): Boolean {
         if (rejectMainThreadCall("initialize")) return false
         // Signal before joining the serialized queue. Never interrupt native lifecycle calls.
         requestRelayWakeYield()
-        val ticket = if (recordServiceStartup) com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.lifecycleQueued() else null
+        val ticket = serviceStartupToken?.let { com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.lifecycleQueued(it) }
         return try {
             onLifecycleThread {
+                if (startupAllowed?.invoke() == false) return@onLifecycleThread false
                 com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.lifecycleEntered(ticket)
                 initializeLocked(displayName, existingPublicKey, existingPrivateKey, relayDbPath)
             }
@@ -445,15 +446,15 @@ object RustBridge {
                     RelayWakeResult(false, false, "disabled", 0L)
                 } else {
                     try {
+                        if (relayWakeYield.requestedSince(yieldToken)) return@onLifecycleThread RelayWakeResult(true, false, "yielded", 0L)
                         val gossipTriggered = triggerGossipDiscovery()
-                        if (relayWakeYield.await(yieldToken, activeWindowMillis)) {
-                            Log.i(TAG, "Relay wake yielded its wait to a lifecycle request")
-                        }
+                        val yielded = relayWakeYield.await(yieldToken, activeWindowMillis)
+                        if (yielded) Log.i(TAG, "Relay wake yielded its wait to a lifecycle request")
                         RelayWakeResult(
                             engineStartedByWorker = true,
                             gossipTriggered = gossipTriggered,
-                            custodyMode = relayCustodyMode(),
-                            quarantineCount = relayQuarantineCount(),
+                            custodyMode = if (yielded) "yielded" else relayCustodyMode(),
+                            quarantineCount = if (yielded) 0L else relayQuarantineCount(),
                         )
                     } finally {
                         shutdownLocked()
@@ -461,6 +462,7 @@ object RustBridge {
                 }
             }
         } catch (ex: Exception) {
+            if (ex is InterruptedException) throw ex
             Log.e(TAG, "Bounded relay wake failed", ex)
             RelayWakeResult(false, false, "disabled", 0L)
         }

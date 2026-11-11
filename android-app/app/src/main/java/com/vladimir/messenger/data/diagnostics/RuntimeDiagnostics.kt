@@ -60,7 +60,9 @@ object RuntimeDiagnostics {
             if (started.isEmpty()) { stop(); return }
             if (scheduled != null) return
             OperationalDiagnostics.tracker.visible(true)
-            if (com.vladimir.messenger.service.CoreStatus.ready.value) OperationalDiagnostics.tracker.coreReady()
+            if (com.vladimir.messenger.service.CoreStatus.engineStarted.value && com.vladimir.messenger.data.RustBridge.isRunningCached()) {
+                OperationalDiagnostics.tracker.coreReady()
+            }
             OperationalDiagnostics.phase(DiagnosticPhase.FOREGROUND)
             val epoch = generation.incrementAndGet()
             scheduled = timer.scheduleWithFixedDelay({

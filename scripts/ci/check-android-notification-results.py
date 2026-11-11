@@ -68,6 +68,7 @@ EXPECTED = {CLASS: EXPECTED_NOTIFICATION, OUTBOX_CLASS: {
     "mixedSignalsAreInspectedAndAllowedRoutesShareOneGenericSync",
     "wakesArrivingWhileSyncRunsSurviveAndAreRedriven",
     "inspectAndSyncFailuresRetryWithoutBlockingOtherRoutes",
+    "startingWithoutACompletedReceiveWindowDoesNotConsumeTheWake",
     "cancellationKeepsLeaseAndRecoveryCanRetryAfterDeadline",
     "eachPassIsBoundedAndUnprocessedRoutesRemainPending",
 }, FIREBASE_CLASS: {

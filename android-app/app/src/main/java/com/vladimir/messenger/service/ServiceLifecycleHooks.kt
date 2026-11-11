@@ -24,9 +24,19 @@ import android.content.Context
  */
 internal object ServiceLifecycleHooks {
 
+    /** Retire the owner before native shutdown is enqueued; never wait for native here. */
+    fun onDestroying(owner: Context) {
+        CoreStartupCoordinator.serviceDestroyed(owner)
+        com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.tracker.count(
+            com.vladimir.messenger.data.diagnostics.OperationalCounter.SERVICE_DESTROYED,
+        )
+        com.vladimir.messenger.data.diagnostics.OperationalDiagnostics.phase(
+            com.vladimir.messenger.data.diagnostics.DiagnosticPhase.SERVICE_STOP,
+        )
+    }
+
     /** Служба уничтожена: [planned] — остановилась сама, а не её убили. */
     fun onDestroyed(context: Context, planned: Boolean) {
-        com.vladimir.messenger.data.diagnostics.ServiceStartupDiagnostics.progress.stopped()
         runCatching { EmergencyKeepAlive.onServiceStopped(context, intentional = planned) }
     }
 

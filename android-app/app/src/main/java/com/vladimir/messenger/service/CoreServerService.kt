@@ -605,7 +605,7 @@ class CoreServerService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        CoreStartupCoordinator.serviceCreated()
+        CoreStartupCoordinator.serviceCreated(this)
         Log.i(TAG, "CoreServerService created")
         TransferDiagnostics.record("core", "служба ядра запускается")
         // CPU бодрствует только на время работы (события/файлы/звонок), а не
@@ -759,8 +759,8 @@ class CoreServerService : Service() {
             com.vladimir.messenger.data.security.DeviceIdentityMarker.isPresent(applicationContext)
         if (!identityReady) {
             Log.i(TAG, "CoreServerService deferred: local identity is not ready")
-            CoreStatus.report("Ожидание создания identity")
-            CoreStatus.markReady()
+            CoreStartupCoordinator.report(this@CoreServerService, "Ожидание создания identity")
+            CoreStartupCoordinator.markReady(this@CoreServerService)
             stopServiceSafely()
             return START_NOT_STICKY
         }
@@ -771,8 +771,8 @@ class CoreServerService : Service() {
         if (routing == null) {
             Log.e(TAG, "Existing routing identity is missing or inconsistent; refusing to replace it")
             TransferDiagnostics.recordWarning("core", "сохранённый адрес личности отсутствует или не совпадает; новый не создаётся")
-            CoreStatus.report("Ядро в ограниченном режиме")
-            CoreStatus.markReady()
+            CoreStartupCoordinator.report(this@CoreServerService, "Ядро в ограниченном режиме")
+            CoreStartupCoordinator.markReady(this@CoreServerService)
             stopServiceSafely()
             return START_NOT_STICKY
         }
@@ -915,7 +915,7 @@ class CoreServerService : Service() {
 
         serviceScope.launch {
             // Раунд 263: честный статус для сплэша - этап подготовки ключей.
-            CoreStatus.report("Готовим ключи безопасности…")
+            CoreStartupCoordinator.report(this@CoreServerService, "Готовим ключи безопасности…")
             // R0.5/S3: legacy routing ID остаётся неизменным; реальный Ed25519
             // signing sidecar устанавливается до engine start и пока используется
             // только diagnostics/future signed features.
@@ -1029,8 +1029,8 @@ class CoreServerService : Service() {
                 startAsMirrorShadow(legacyRoutingId)
                 // Раунд 263: зеркало живёт на событиях партнёра - для
                 // интерфейса это тоже «готово», заставка не нужна.
-                CoreStatus.report("Зеркальный режим: сеть ведёт партнёр")
-                CoreStatus.markReady()
+                CoreStartupCoordinator.report(this@CoreServerService, "Зеркальный режим: сеть ведёт партнёр")
+                CoreStartupCoordinator.markReady(this@CoreServerService)
                 return@launch
             }
 
@@ -1043,11 +1043,11 @@ class CoreServerService : Service() {
             bookDeferred.await()
 
             // Собственный SQLite-файл relay custody (app-private, WAL).
-            CoreStatus.report("Поднимаем ядро и сеть…")
+            CoreStartupCoordinator.report(this@CoreServerService, "Поднимаем ядро и сеть…")
             val relayDbPath = File(filesDir, "apu_relay.sqlite").absolutePath
-            val ok = RustBridge.initialize(displayName, existingPubKey, existingPrivKey, relayDbPath, recordServiceStartup = true)
+            val ok = CoreStartupCoordinator.initialize(this@CoreServerService, displayName, existingPubKey, existingPrivKey, relayDbPath)
             if (ok) {
-                val nodeId = RustBridge.nodeId()
+                val nodeId = CoreStartupCoordinator.nodeId(this@CoreServerService)
                 Log.i(TAG, "Engine OK. NodeId=$nodeId")
                 if (signing != null) {
                     val matchesCoreRouting = nodeId != null && legacyRoutingId == nodeId
@@ -1077,7 +1077,7 @@ class CoreServerService : Service() {
                     }
                 }
                 // Раунд 263: ядро поднято - сплэш может отпустить человека.
-                CoreStatus.markReady()
+                CoreStartupCoordinator.markReady(this@CoreServerService, engineStarted = true)
 
                 PresenceAudienceObserver.start(
                     serviceScope, contactRepository.observeContacts(),
@@ -1382,8 +1382,8 @@ class CoreServerService : Service() {
                 TransferDiagnostics.recordFailure("core", "ядро не поднялось — ограниченный режим")
                 // Раунд 263: движок не поднялся - не держим человека на
                 // заставке: честный ограниченный режим, сплэш отпускаем.
-                CoreStatus.report("Ядро в ограниченном режиме")
-                CoreStatus.markReady()
+                CoreStartupCoordinator.report(this@CoreServerService, "Ядро в ограниченном режиме")
+                CoreStartupCoordinator.markReady(this@CoreServerService)
                 stopServiceSafely()
             }
         }
@@ -2066,8 +2066,7 @@ class CoreServerService : Service() {
     }
 
     override fun onDestroy() {
-        OperationalDiagnostics.tracker.count(OperationalCounter.SERVICE_DESTROYED)
-        OperationalDiagnostics.phase(DiagnosticPhase.SERVICE_STOP)
+        ServiceLifecycleHooks.onDestroying(this)
         // Снимаем foreground-статус первым делом, чтобы система не считала
         // сервис зависшим, пока мы закрываем реле и Rust-ядро.
         try {

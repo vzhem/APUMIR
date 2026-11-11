@@ -54,6 +54,27 @@ class ServiceStartupProgressTest {
         assertFalse(progress.snapshot().phase == ServiceStartupProgress.Phase.FINISHED)
     }
 
+    @Test fun staleQueueTicketCannotAdvanceTheReplacementTrace() {
+        var now = 1L
+        val progress = ServiceStartupProgress { now }
+        progress.start()
+        progress.coreRequested()
+        val old = progress.currentToken()
+        progress.stopped()
+        now = 5L
+        progress.start()
+        progress.coreRequested()
+        val current = progress.currentToken()
+        assertTrue(old !== current)
+        assertNull(progress.lifecycleQueued(old))
+        assertEquals(ServiceStartupProgress.Phase.CORE_REQUESTED, progress.snapshot().phase)
+        assertTrue(progress.lifecycleQueued(current) === current)
+        progress.lifecycleEntered(old)
+        assertEquals(ServiceStartupProgress.Phase.WAITING_LIFECYCLE, progress.snapshot().phase)
+        progress.lifecycleEntered(current)
+        assertEquals(ServiceStartupProgress.Phase.INITIALIZING_ENGINE, progress.snapshot().phase)
+    }
+
     @Test fun nonServiceOrOutOfOrderNativeCallDoesNotHijackTheTrace() {
         var now = 1L
         val progress = ServiceStartupProgress { now }

@@ -32,6 +32,7 @@ class PushWakeDrainInstrumentedTest {
     private val c = "56".repeat(32)
     private val clock = AtomicLong(1_700_000_000_000L)
     private var failures = 0
+    private val completed = PushWakeDrain.SyncOutcome.COMPLETED_WINDOW
 
     @Before fun setUp() {
         context = ApplicationProvider.getApplicationContext()
@@ -45,7 +46,7 @@ class PushWakeDrainInstrumentedTest {
         listOf("-wal", "-shm", "-journal").forEach { File(dbFile.absolutePath + it).delete() }
     }
 
-    private fun drain(inspect: suspend (String?) -> PushWakeDrain.Inspection, sync: suspend () -> Boolean) =
+    private fun drain(inspect: suspend (String?) -> PushWakeDrain.Inspection, sync: suspend () -> PushWakeDrain.SyncOutcome) =
         PushWakeDrain(inbox, clock::get, inspect, sync) { failures++ }
 
     @Test fun mixedSignalsAreInspectedAndAllowedRoutesShareOneGenericSync() = runBlocking {
@@ -63,14 +64,14 @@ class PushWakeDrainInstrumentedTest {
                 c -> PushWakeDrain.Inspection.RETRY
                 else -> PushWakeDrain.Inspection.ALLOW
             }
-        }, { syncs++; true })
+        }, { syncs++; completed })
         val result = worker.run() as PushWakeDrain.Result.Pending
         assertEquals(now + PushWakeInbox.RETRY_MS, result.readyAtMs)
         assertEquals(listOf(null, a, b, c), inspected)
         assertEquals(1, syncs)
         assertEquals(0, failures)
         clock.set(result.readyAtMs)
-        assertEquals(PushWakeDrain.Result.Empty, drain({ PushWakeDrain.Inspection.ALLOW }, { syncs++; true }).run())
+        assertEquals(PushWakeDrain.Result.Empty, drain({ PushWakeDrain.Inspection.ALLOW }, { syncs++; completed }).run())
         assertEquals(2, syncs)
     }
 
@@ -85,7 +86,7 @@ class PushWakeDrainInstrumentedTest {
                 syncs++
                 entered.complete(Unit)
                 release.await()
-                true
+                completed
             })
             val running = async(Dispatchers.IO) { first.run() }
             try {
@@ -96,7 +97,7 @@ class PushWakeDrainInstrumentedTest {
                 release.complete(Unit)
                 val pending = running.await() as PushWakeDrain.Result.Pending
                 assertEquals(now + 2, pending.readyAtMs)
-                assertEquals(PushWakeDrain.Result.Empty, drain({ PushWakeDrain.Inspection.ALLOW }, { syncs++; true }).run())
+                assertEquals(PushWakeDrain.Result.Empty, drain({ PushWakeDrain.Inspection.ALLOW }, { syncs++; completed }).run())
                 assertEquals(2, syncs)
             } finally { release.complete(Unit) }
         }
@@ -115,8 +116,25 @@ class PushWakeDrainInstrumentedTest {
         assertEquals(2, failures)
         assertEquals(now + PushWakeInbox.RETRY_MS, result.readyAtMs)
         clock.set(result.readyAtMs)
-        assertEquals(PushWakeDrain.Result.Empty, drain({ PushWakeDrain.Inspection.ALLOW }, { syncs++; true }).run())
+        assertEquals(PushWakeDrain.Result.Empty, drain({ PushWakeDrain.Inspection.ALLOW }, { syncs++; completed }).run())
         assertEquals(2, syncs)
+    }
+
+    @Test fun startingWithoutACompletedReceiveWindowDoesNotConsumeTheWake() = runBlocking {
+        val now = clock.get()
+        inbox.enqueueRoute(a, now)
+        var attempts = 0
+        val worker = drain({ PushWakeDrain.Inspection.ALLOW }, {
+            attempts++
+            // A successfully scheduled/started service is not a completed receive window.
+            PushWakeDrain.SyncOutcome.RETRY
+        })
+        val pending = worker.run() as PushWakeDrain.Result.Pending
+        assertEquals(now + PushWakeInbox.RETRY_MS, pending.readyAtMs)
+        assertEquals(1, attempts)
+        clock.set(pending.readyAtMs)
+        assertEquals(PushWakeDrain.Result.Empty,
+            drain({ PushWakeDrain.Inspection.ALLOW }, { completed }).run())
     }
 
     @Test fun cancellationKeepsLeaseAndRecoveryCanRetryAfterDeadline() = runBlocking {
@@ -130,7 +148,7 @@ class PushWakeDrainInstrumentedTest {
             job.cancelAndJoin()
             assertEquals(now + PushWakeInbox.LEASE_MS, (inbox.pending(now) as PushWakeInbox.PendingResult.Pending).readyAtMs)
             clock.set(now + PushWakeInbox.LEASE_MS)
-            assertEquals(PushWakeDrain.Result.Empty, drain({ PushWakeDrain.Inspection.ALLOW }, { true }).run())
+            assertEquals(PushWakeDrain.Result.Empty, drain({ PushWakeDrain.Inspection.ALLOW }, { completed }).run())
             assertEquals(0, failures)
         }
     }
@@ -143,7 +161,7 @@ class PushWakeDrainInstrumentedTest {
         }
         var inspections = 0
         var syncs = 0
-        val worker = drain({ inspections++; PushWakeDrain.Inspection.ALLOW }, { syncs++; true })
+        val worker = drain({ inspections++; PushWakeDrain.Inspection.ALLOW }, { syncs++; completed })
         assertTrue(worker.run() is PushWakeDrain.Result.Pending)
         assertEquals(PushWakeDrain.MAX_BATCH, inspections)
         assertEquals(1, syncs)

@@ -13,17 +13,23 @@ import java.util.concurrent.CancellationException
  *
  * The scheduler must redrive a pending inbox at [Result.Pending.readyAtMs],
  * including after process death, and close the enqueue/worker-exit race. A
- * successful [sync] only means that an attempt was started; it does not prove
- * that any message arrived or that a notification was shown.
+ * A service start, scheduled work, or provider acceptance is not a completed
+ * sync. The caller may return [SyncOutcome.COMPLETED_WINDOW] only after a
+ * bounded receive window actually ran, its events were consumed and any
+ * accepted messages were durably processed. Failure, inability to start, or an
+ * unfinished window must return RETRY. Even a completed window does not prove
+ * that a message existed, arrived, or produced a notification. No production
+ * implementation of that callback is connected yet.
  */
 internal class PushWakeDrain(
-    private val inbox: PushWakeInbox,
+    private val inbox: PushWakeQueue,
     private val nowMs: () -> Long,
     private val inspect: suspend (String?) -> Inspection,
-    private val sync: suspend () -> Boolean,
+    private val sync: suspend () -> SyncOutcome,
     private val recordFailure: () -> Unit,
 ) {
     enum class Inspection { ALLOW, DROP, RETRY }
+    enum class SyncOutcome { COMPLETED_WINDOW, RETRY }
 
     sealed interface Result {
         object Empty : Result
@@ -50,9 +56,9 @@ internal class PushWakeDrain(
             }
         }
         if (accepted.isNotEmpty()) {
-            val started = syncSafely()
+            val completedWindow = syncSafely() == SyncOutcome.COMPLETED_WINDOW
             for (claim in accepted) {
-                if (!completed(inbox.complete(claim, started, nowMs()))) storageUnavailable = true
+                if (!completed(inbox.complete(claim, completedWindow, nowMs()))) storageUnavailable = true
             }
         }
         if (storageUnavailable) return Result.Unavailable
@@ -79,13 +85,13 @@ internal class PushWakeDrain(
         Inspection.RETRY
     }
 
-    private suspend fun syncSafely(): Boolean = try {
+    private suspend fun syncSafely(): SyncOutcome = try {
         sync()
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (_: Exception) {
         recordFailure()
-        false
+        SyncOutcome.RETRY
     }
 
     companion object { const val MAX_BATCH = 16 }

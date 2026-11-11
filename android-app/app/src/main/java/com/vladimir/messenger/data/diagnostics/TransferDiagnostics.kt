@@ -355,7 +355,7 @@ object TransferDiagnostics {
             gatherFacts(context.applicationContext, createdAtMs, journalSnapshot.second, LogcatScan.EMPTY)
         }
         onPartial?.invoke(
-            snapshotOf(quickFacts.copy(operationalDetails = ServiceStartupDiagnostics.report()), journalSnapshot.first, listOf(LOGCAT_PENDING_LINE), createdAtMs),
+            snapshotOf(quickFacts.copy(operationalDetails = ApplicationStartupDiagnostics.report() + ServiceStartupDiagnostics.report()), journalSnapshot.first, listOf(LOGCAT_PENDING_LINE), createdAtMs),
         )
         onStage?.invoke(STAGE_LOGCAT)
         val logcat = RuntimeDiagnostics.measure(DiagnosticOperation.LOGCAT_READ) { scanLogcat() }
@@ -393,7 +393,7 @@ object TransferDiagnostics {
             .getOrDefault(RelayStorageDiagnostics(status = "unavailable"))
         val health = runCatching { RuntimeDiagnostics.snapshot(context.applicationContext) }
             .getOrDefault(RuntimeHealthSnapshot())
-        val details = ServiceStartupDiagnostics.report() + OperationalDiagnostics.storageTrend(storage) + OperationalDiagnostics.journalReport() + OperationalDiagnostics.wakeReport() + logcat.relayCleanup.render() +
+        val details = ApplicationStartupDiagnostics.report() + ServiceStartupDiagnostics.report() + OperationalDiagnostics.storageTrend(storage) + OperationalDiagnostics.journalReport() + OperationalDiagnostics.wakeReport() + logcat.relayCleanup.render() +
             com.vladimir.messenger.data.story.DurableStorySender.report(context.applicationContext) +
             com.vladimir.messenger.data.avatavideo.PeerVideoAvatarStore.report(context.applicationContext) +
             com.vladimir.messenger.data.story.StoryFeedbackStore.report(context.applicationContext) +

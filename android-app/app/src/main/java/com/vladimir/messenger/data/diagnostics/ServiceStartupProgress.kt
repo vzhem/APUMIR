@@ -26,8 +26,12 @@ internal class ServiceStartupProgress(private val clock: () -> Long) {
     @Synchronized fun coreRequested() = advanceIfActive(Phase.CORE_REQUESTED)
 
     /** Token prevents a late native task from changing a newer service's trace. */
-    @Synchronized fun lifecycleQueued(): Any? {
-        if (phase != Phase.CORE_REQUESTED || finishedAt != null) return null
+    @Synchronized fun currentToken(): Any? = if (started != null && finishedAt == null) token else null
+
+    @Synchronized fun lifecycleQueued(): Any? = lifecycleQueued(token)
+
+    @Synchronized fun lifecycleQueued(expected: Any?): Any? {
+        if (expected == null || expected !== token || phase != Phase.CORE_REQUESTED || finishedAt != null) return null
         advance(Phase.WAITING_LIFECYCLE, clock())
         return token
     }
