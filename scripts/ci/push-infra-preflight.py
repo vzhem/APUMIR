@@ -259,11 +259,13 @@ def main(argv):
             print("Read-only check: no Worker deployment, FCM authentication or message delivery was tested.")
         return 0
     except PreflightError as error:
-        print(MESSAGES.get(error.code, MESSAGES["unavailable"]), file=sys.stderr)
+        # GitHub exposes annotations through the API even where redirected logs
+        # cannot be downloaded. Only predefined text, never input/exception text.
+        print("::error title=Push infrastructure preflight::" + MESSAGES.get(error.code, MESSAGES["unavailable"]))
         return 1
     except Exception:
         # Never print exception text: malformed input and transport failures can contain secrets.
-        print(MESSAGES["unavailable"], file=sys.stderr)
+        print("::error title=Push infrastructure preflight::" + MESSAGES["unavailable"])
         return 1
 
 

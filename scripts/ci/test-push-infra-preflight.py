@@ -279,6 +279,20 @@ class RedactionAndTransportTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertNotIn(sentinel, stdout.getvalue() + stderr.getvalue())
 
+    def test_failure_annotations_are_fixed_and_never_include_exception_contents(self):
+        sentinel = "SECRET_SENTINEL_MUST_NOT_APPEAR"
+        values = {"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": preflight.REPO,
+                  "GITHUB_REF": "refs/heads/" + preflight.BRANCH, "GH_TOKEN": sentinel}
+        for code in [*preflight.MESSAGES, sentinel]:
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with self.subTest(code=code), mock.patch.dict(os.environ, values, clear=True), \
+                 mock.patch.object(preflight, "check_environment", side_effect=preflight.PreflightError(code)), \
+                 contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                self.assertEqual(1, preflight.main(["--check-protection"]))
+            message = preflight.MESSAGES.get(code, preflight.MESSAGES["unavailable"])
+            self.assertEqual(f"::error title=Push infrastructure preflight::{message}\n", stdout.getvalue())
+            self.assertNotIn(sentinel, stdout.getvalue() + stderr.getvalue())
+
     def test_secret_variables_popped_before_network(self):
         values = {"GITHUB_ACTIONS": "true", "GITHUB_REPOSITORY": preflight.REPO, "GITHUB_REF": "refs/heads/" + preflight.BRANCH,
                   preflight.CF_TOKEN_NAME: "secret", preflight.CF_ACCOUNT_NAME: "account", preflight.FCM_ACCOUNT_NAME: "private", preflight.CLIENT_CONFIG_NAME: "client"}
